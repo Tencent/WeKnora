@@ -148,7 +148,7 @@ func (h *WikiPageHandler) ListCategories(c *gin.Context) {
 		return
 	}
 
-	pageTypes := parseWikiPageTypes(c.Query("page_type"))
+	pageTypes := types.SplitWikiPageTypes(c.Query("page_type"))
 	if len(pageTypes) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "page_type is required"})
 		return
@@ -184,28 +184,6 @@ func (h *WikiPageHandler) ListCategories(c *gin.Context) {
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	})
-}
-
-// parseWikiPageTypes splits a comma-separated page_type query value (e.g.
-// "entity,concept") into a deduplicated slice, dropping blanks.
-func parseWikiPageTypes(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	out := make([]string, 0, 4)
-	for _, part := range strings.Split(raw, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if _, ok := seen[part]; ok {
-			continue
-		}
-		seen[part] = struct{}{}
-		out = append(out, part)
-	}
-	return out
 }
 
 func parseWikiCategoryPath(raw string) []string {

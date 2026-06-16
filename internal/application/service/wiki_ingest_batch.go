@@ -357,28 +357,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		ExtractionGranularity: granularity,
 	}
 
-	var taxonomyOnce sync.Once
-	var taxonomyText string
-	batchCtx.ExistingTaxonomy = func(ctx context.Context) string {
-		taxonomyOnce.Do(func() {
-			if s.wikiService == nil {
-				return
-			}
-			paths, err := s.wikiService.ListDistinctCategoryPaths(ctx, payload.KnowledgeBaseID, wikiTaxonomyPromptMaxPaths)
-			if err != nil {
-				logger.Warnf(ctx, "wiki ingest: ListDistinctCategoryPaths failed: %v", err)
-				return
-			}
-			taxonomyText = formatExistingTaxonomyForPrompt(paths)
-		})
-		return taxonomyText
-	}
-
-	// Snapshot the KB's category folders before this batch runs so we can tell
-	// afterwards whether new (possibly synonymous) folders were introduced and
-	// a taxonomy reconcile pass is worth running.
-	startCategoryKeys := s.snapshotCategoryKeys(ctx, payload.KnowledgeBaseID)
-
 	// 1. MAP PHASE (Parallel extraction and generation of updates)
 	var mapMu sync.Mutex
 	var failedOps []WikiPendingOp
@@ -506,6 +484,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		})
 	}
 	_ = eg.Wait()
+
+	// Plan the directory once for the whole batch BEFORE reduce. Reduce writes
+	// pages in parallel, so it can't converge on shared folders on its own; this
+	// single pass assigns every new entity/concept slug a coherent category_path
+	// that reuses existing folders. Reduce then only applies the plan to pages
+	// that don't already have a category (user-curated pages are never churned).
+	batchCtx.PlannedCategory = s.planBatchTaxonomy(ctx, chatModel, kb, slugUpdates, lang)
 
 	// 2. REDUCE PHASE (Parallel upserting grouped by Slug)
 	egReduce, reduceCtx := errgroup.WithContext(ctx)
@@ -648,14 +633,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			indexRebuildSucceeded = true
 			docPreview = append(docPreview, fmt.Sprintf("index_change=%s", previewText(changeDesc.String(), 160)))
 		}
-	}
-
-	// Collapse synonymous category folders introduced by this batch (cold
-	// start, intra-batch races, long-term drift). Runs only when a genuinely
-	// new folder appeared vs the pre-batch snapshot; re-points pages' category
-	// without touching slugs, then refreshes the index.
-	if len(ingestPagesAffected) > 0 {
-		s.maybeReconcileTaxonomy(ctx, chatModel, payload.KnowledgeBaseID, lang, startCategoryKeys)
 	}
 
 	// Clean dead [[slug]] references whenever ANY page was touched this
@@ -1615,11 +1592,6 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 		pageAliases := strings.Join(page.Aliases, ", ")
 
-		currentCategory := strings.Join(page.CategoryPath, " / ")
-		if strings.TrimSpace(currentCategory) == "" {
-			currentCategory = "(none yet)"
-		}
-
 		var updatedContent string
 		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyPrompt, map[string]string{
 			"HasAdditions":            hasAdditionsStr,
@@ -1633,22 +1605,16 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"DeletedContent":          deletedContent.String(),
 			"RemainingSourcesContent": remainingSourcesContent.String(),
 			"AvailableSlugs":          relatedSlugs.String(),
-			"CurrentCategory":         currentCategory,
-			"ExistingTaxonomy":        resolveExistingTaxonomyForPrompt(ctx, batchCtx),
 			"Language":                language,
 		})
 
 		if err == nil && updatedContent != "" {
 			updatedSummary, updatedBody := splitSummaryLine(updatedContent)
-			// CATEGORY is the page-level intrinsic classification produced by
-			// the editor model. Only overwrite when the model actually emitted
-			// a non-empty path so a lazy/empty line never wipes a good category.
-			category, bodyAfterCategory := splitCategoryLine(updatedBody)
+			// Category now comes from the batch taxonomy plan, not this prompt.
+			// Defensively strip any stray leading CATEGORY line the model may
+			// still emit so it never leaks into the page body; discard the value.
+			_, bodyAfterCategory := splitCategoryLine(updatedBody)
 			updatedBody = bodyAfterCategory
-			if len(category) > 0 {
-				page.CategoryPath = types.StringArray(category)
-				page.WikiPath = ""
-			}
 			if updatedBody != "" {
 				page.Content = updatedBody
 			} else {
@@ -1673,6 +1639,16 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// already been logged, and the eg.Go caller would otherwise
 			// log it a second time as "reduce failed for slug".
 			err = nil
+		}
+	}
+
+	// Apply the batch taxonomy plan, but only to pages that don't already have a
+	// category — so brand-new pages get filed coherently while previously-filed
+	// or user-curated categories are preserved (manual edits are authoritative).
+	if len(page.CategoryPath) == 0 && batchCtx != nil {
+		if planned := types.CleanWikiCategoryPath(batchCtx.PlannedCategory[slug]); len(planned) > 0 {
+			page.CategoryPath = types.StringArray(planned)
+			page.WikiPath = ""
 		}
 	}
 

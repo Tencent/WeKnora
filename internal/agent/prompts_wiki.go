@@ -1,24 +1,45 @@
 package agent
 
-// wikiExistingTaxonomyXML is injected into the page-modify prompt so each page's
-// CATEGORY line can reuse folder labels already present in the knowledge base
-// instead of inventing synonyms. Category assignment happens at page-write
-// (reduce) time, where the LLM sees the whole entity — not per source document.
-const wikiExistingTaxonomyXML = `
-<existing_taxonomy>
-{{.ExistingTaxonomy}}
-</existing_taxonomy>
-`
+// WikiTaxonomyPlanPrompt assigns a directory path (category) to every entity /
+// concept page produced by ONE ingest batch in a single call, so the whole set
+// lands on one coherent tree that reuses existing folders — instead of each page
+// inventing its own folders in parallel (which diverges worst on the founding
+// batch, when the KB still has no folders to anchor on). The result is applied
+// in reduce only to pages that don't already have a category, so user edits and
+// previously-filed pages are never churned.
+const WikiTaxonomyPlanPrompt = `You are organizing a wiki knowledge base into a navigation directory. Assign each item below to a directory path (category) so the whole set lands on ONE coherent tree that reuses existing folders.
 
-// wikiExistingTaxonomyContinuityRules extends Directory Taxonomy Rules with
-// cross-document folder reuse requirements.
-const wikiExistingTaxonomyContinuityRules = `
-- If <existing_taxonomy> above lists folders already used in this knowledge base, you MUST reuse those **exact folder labels** (character-for-character) when the new item belongs under the same domain. Do NOT invent synonym folders (e.g. do NOT create "春节习俗" when "春节" already has a "传统习俗" subfolder and that path fits semantically).
-- Prefer nesting under an existing parent folder over creating a new top-level folder with a similar name.
-- When multiple existing paths could fit, pick the most specific existing path whose labels match the document's section hierarchy.
-- Only introduce a new folder label when no existing folder is a reasonable match.
-- You may extend an existing path with one new trailing folder only when the document clearly introduces a genuinely new sub-section.
-`
+<existing_folders>
+{{.ExistingTaxonomy}}
+</existing_folders>
+
+<items>
+{{.Items}}
+</items>
+
+<instructions>
+For every item, output a category path: an array of folder labels from broad to narrow (at most 2 levels). The category classifies WHAT the item fundamentally IS (the stable library "shelf" it always sits on), never the role it plays in one document.
+
+Rules:
+- Reuse the EXACT folder labels listed in <existing_folders> (character-for-character) whenever an item belongs under the same domain. Do NOT invent synonym folders (e.g. do NOT create "春节习俗" when "春节 / 传统习俗" already fits).
+- Group items of the SAME kind under the SAME folder at the SAME depth. Do not file one equivalent item a level deeper than its siblings (e.g. avoid "地点 / 地址 / Address1" next to "地点 / Address2" — pick one consistent depth for equivalent items).
+- Prefer a single broad top-level folder; add a second level only for a genuinely durable sub-domain shared by several items.
+- Do NOT use the item type ("entity"/"concept") as a folder. Do NOT put slashes inside a single label.
+- Every item slug in <items> MUST appear exactly once in the output. If an item truly cannot be classified under any durable folder, give it an empty path [].
+- Write ALL folder labels in {{.Language}}.
+
+### JSON Formatting Rules
+- Output ONLY valid JSON, no preamble.
+- Do NOT use literal newlines inside JSON string values.
+</instructions>
+
+Output format:
+{
+  "assignments": [
+    {"slug": "entity/zhang-san", "path": ["人物"]},
+    {"slug": "concept/spring-festival", "path": ["节日", "传统节日"]}
+  ]
+}`
 
 // Wiki ingest prompt templates for LLM-powered wiki page generation.
 // These prompts are used by the wiki ingest pipeline to extract structured
@@ -326,22 +347,8 @@ The <new_information> block above is assembled from VERBATIM source chunks that 
 {{.AvailableSlugs}}
 </valid_wiki_links>
 
-<current_category>
-{{.CurrentCategory}}
-</current_category>
-` + wikiExistingTaxonomyXML + `
 <instructions>
 1. The FIRST line of your output MUST be: SUMMARY: {one sentence, 15-40 words, describing what this page is about after the update — for wiki index listing}
-1b. The SECOND line of your output MUST be: CATEGORY: {a navigation taxonomy path for this page, folders from broad to narrow separated by " / ", e.g. "CATEGORY: 人物" or "CATEGORY: 组织 / 企业"}. Follow the Directory Taxonomy Rules below. Almost every page can be filed under at least one broad top-level folder, so leaving it empty should be rare.
-
-### Directory Taxonomy Rules (for the CATEGORY line)
-The CATEGORY classifies WHAT this {{.PageType}} fundamentally IS — a label that stays true across the whole knowledge base — never the role it happens to play in one document.
-- Litmus test: keep a label only if it would still fit when this same {{.PageType}} shows up in a completely unrelated document. If a label only describes how it relates to THIS document's topic (who organized, sponsored, acknowledged, authored, or took part in something), that is a ROLE, not a category — leave it out and let the page body and [[wiki-links]] carry the relationship.
-- Always assign at least the single broadest top-level folder that fits (think "which shelf would this always sit on in a library"). A coarse one-level category is expected for most pages; reserve a second level for a genuinely durable sub-domain.
-- Do NOT use the item type itself as a folder (e.g. "实体", "概念", "摘要").
-- Do NOT put slashes inside a single label. Use at most 2 levels.
-- Treat <current_category> as the default and keep it unless new evidence clearly points to a better stable classification.
-- Only output an empty "CATEGORY:" in the rare case where the page genuinely cannot be classified under any broad, durable folder.` + wikiExistingTaxonomyContinuityRules + `
 {{if .HasRetractions}}
 2. REMOVE facts/claims that were ONLY sourced from the <deleted_documents> and are NOT present in any <remaining_source_documents> or <new_information>.
 {{end}}
@@ -359,51 +366,12 @@ The CATEGORY classifies WHAT this {{.PageType}} fundamentally IS — a label tha
 6. Maintain the existing page structure and formatting style. Use "# {{.PageTitle}}" as the top-level heading if the page does not already have one. Do NOT introduce new heading levels beyond what the source or existing page justifies.
 7. **Image rule**: Include relevant images using Markdown syntax: ![caption](url) from new information if applicable. The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 {{if .HasRetractions}}
-8. If after removing deleted content the page becomes nearly empty and there is no new information to add, output just: "SUMMARY: (empty page)\nCATEGORY:\n# {{.PageTitle}}\n\n*This page's primary source document was removed.*"
+8. If after removing deleted content the page becomes nearly empty and there is no new information to add, output just: "SUMMARY: (empty page)\n# {{.PageTitle}}\n\n*This page's primary source document was removed.*"
 {{end}}
 9. Write in {{.Language}}.
 </instructions>
 
-Output the SUMMARY line first, then the CATEGORY line, then the updated Markdown content. Do not include any other preamble.`
-
-// WikiTaxonomyReconcilePrompt is a per-knowledge-base maintenance prompt. It is
-// given the full set of distinct category_path folders currently in use and asks
-// the LLM to collapse synonymous folders onto a single canonical path. The
-// result is applied in Go by re-pointing matching pages' category_path — slugs
-// never change. This runs occasionally (after a batch introduces new folders, or
-// on manual trigger), NOT per page, so its cost is O(folder count).
-const WikiTaxonomyReconcilePrompt = `You are a taxonomy curator for a wiki knowledge base. Below is the complete list of directory paths (category_path) currently used to file wiki pages. Some of them are synonyms or near-duplicates that should share ONE canonical path.
-
-<current_taxonomy>
-{{.CurrentTaxonomy}}
-</current_taxonomy>
-
-<instructions>
-Identify groups of paths that mean the SAME thing and pick the single best canonical path for each group, then output a remap from every non-canonical path to its canonical path.
-
-Rules:
-- Only merge paths that are genuinely synonymous or where one is clearly a less-canonical spelling/wording of another (e.g. "春节习俗" → "春节 / 传统习俗"; "AI厂商" and "AI行业 / 厂商" → one of them).
-- Prefer the more standard, concise, and reusable label as the canonical target. Prefer an existing path over inventing a new one.
-- Do NOT merge paths that refer to DIFFERENT things, even if they look similar.
-- Do NOT merge across clearly different domains.
-- Do NOT output an entry whose "from" equals its "to".
-- A canonical "to" path may itself be one of the listed paths; never map a path onto a synonym chain (every "to" must be a final canonical path, not another "from").
-- Keep canonical paths to at most 2 levels.
-- Each path is an array of folder labels from broad to narrow. Write ALL labels in {{.Language}}.
-- If nothing should be merged, return {"remap": []}.
-
-### JSON Formatting Rules
-- Output ONLY valid JSON, no preamble.
-- Do NOT use literal newlines inside JSON string values.
-</instructions>
-
-Output format:
-{
-  "remap": [
-    {"from": ["春节习俗"], "to": ["春节", "传统习俗"]},
-    {"from": ["AI厂商"], "to": ["AI行业", "厂商"]}
-  ]
-}`
+Output the SUMMARY line first, then the updated Markdown content. Do not include any other preamble.`
 
 // WikiIndexIntroPrompt generates the introduction for a NEW index page (first time only).
 const WikiIndexIntroPrompt = `You are a wiki editor. Write a brief introduction for a wiki knowledge base index page.

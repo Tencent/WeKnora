@@ -1,9 +1,10 @@
 package service
 
 import (
-	"context"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func TestSplitCategoryLine(t *testing.T) {
@@ -82,104 +83,99 @@ func TestFormatExistingTaxonomyForPromptEmpty(t *testing.T) {
 	}
 }
 
-func TestDedupeWikiCategoryPaths(t *testing.T) {
-	got := dedupeWikiCategoryPaths([][]string{
-		{"春节", "传统习俗"},
-		{" 春节 ", "传统习俗"},
-		{"春节", "文化习俗"},
-		{"", "空"},
-		{},
-	}, 10)
+func TestParseTaxonomyAssignments(t *testing.T) {
+	raw := "```json\n{\"assignments\":[" +
+		"{\"slug\":\"entity/zhang-san\",\"path\":[\"人物\"]}," +
+		"{\"slug\":\"concept/spring\",\"path\":[\"节日\",\"传统节日\"]}," +
+		"{\"slug\":\"  \",\"path\":[\"X\"]}," +
+		"{\"slug\":\"entity/unclassified\",\"path\":[]}" +
+		"]}\n```"
+
+	got := parseTaxonomyAssignments(raw)
 	if len(got) != 3 {
-		t.Fatalf("dedupeWikiCategoryPaths() len = %d, want 3: %v", len(got), got)
+		t.Fatalf("parseTaxonomyAssignments() returned %d entries, want 3 (blank slug dropped): %v", len(got), got)
 	}
-	if got[0][0] != "春节" || got[0][1] != "传统习俗" {
-		t.Fatalf("dedupeWikiCategoryPaths()[0] = %v", got[0])
+	if strings.Join(got["entity/zhang-san"], "/") != "人物" {
+		t.Fatalf("zhang-san path = %v, want [人物]", got["entity/zhang-san"])
 	}
-	if got[1][1] != "文化习俗" {
-		t.Fatalf("dedupeWikiCategoryPaths()[1] = %v", got[1])
+	if strings.Join(got["concept/spring"], "/") != "节日/传统节日" {
+		t.Fatalf("spring path = %v, want [节日 传统节日]", got["concept/spring"])
+	}
+	if p, ok := got["entity/unclassified"]; !ok || len(p) != 0 {
+		t.Fatalf("unclassified path = %v (ok=%v), want empty slice present", p, ok)
 	}
 }
 
-func TestResolveExistingTaxonomyForPrompt(t *testing.T) {
-	t.Run("nil batch context", func(t *testing.T) {
-		got := resolveExistingTaxonomyForPrompt(t.Context(), nil)
-		if got == "" {
-			t.Fatal("expected fallback text for nil batch context")
-		}
-	})
-	t.Run("batch context with taxonomy", func(t *testing.T) {
-		batchCtx := &WikiBatchContext{
-			ExistingTaxonomy: func(ctx context.Context) string {
-				return "春节\n  传统习俗"
-			},
-		}
-		got := resolveExistingTaxonomyForPrompt(t.Context(), batchCtx)
-		if got != "春节\n  传统习俗" {
-			t.Fatalf("resolveExistingTaxonomyForPrompt() = %q", got)
-		}
-	})
+func TestParseTaxonomyAssignmentsMalformed(t *testing.T) {
+	if got := parseTaxonomyAssignments("not json at all"); got != nil {
+		t.Fatalf("parseTaxonomyAssignments(garbage) = %v, want nil", got)
+	}
 }
 
-func TestRemapCategoryPath(t *testing.T) {
-	remap := map[string][]string{
-		categoryPathKey([]string{"春节习俗"}):         {"春节", "传统习俗"},
-		categoryPathKey([]string{"组织单位", "致谢人员"}): {"组织"},
+func TestCosineSimilarity(t *testing.T) {
+	if got := cosineSimilarity([]float32{1, 0}, []float32{1, 0}); got < 0.999 {
+		t.Fatalf("identical vectors sim = %v, want ~1", got)
 	}
-
-	tests := []struct {
-		name    string
-		current []string
-		want    []string
-		wantHit bool
-	}{
-		{
-			name:    "single-label synonym remapped",
-			current: []string{"春节习俗"},
-			want:    []string{"春节", "传统习俗"},
-			wantHit: true,
-		},
-		{
-			name:    "document-role path collapsed to coarse folder",
-			current: []string{"组织单位", "致谢人员"},
-			want:    []string{"组织"},
-			wantHit: true,
-		},
-		{
-			name:    "noise normalized before matching",
-			current: []string{"实体/春节习俗"},
-			want:    []string{"春节", "传统习俗"},
-			wantHit: true,
-		},
-		{
-			name:    "unrelated path untouched",
-			current: []string{"人物"},
-			wantHit: false,
-		},
-		{
-			name:    "empty path untouched",
-			current: nil,
-			wantHit: false,
-		},
+	if got := cosineSimilarity([]float32{1, 0}, []float32{0, 1}); got != 0 {
+		t.Fatalf("orthogonal vectors sim = %v, want 0", got)
 	}
+	if got := cosineSimilarity([]float32{1, 0}, nil); got != 0 {
+		t.Fatalf("mismatched length sim = %v, want 0", got)
+	}
+	if got := cosineSimilarity([]float32{0, 0}, []float32{1, 1}); got != 0 {
+		t.Fatalf("zero-norm sim = %v, want 0", got)
+	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, hit := remapCategoryPath(tt.current, remap)
-			if hit != tt.wantHit {
-				t.Fatalf("remapCategoryPath() hit = %v, want %v", hit, tt.wantHit)
-			}
-			if !hit {
-				return
-			}
-			if len(got) != len(tt.want) {
-				t.Fatalf("remapCategoryPath() = %v, want %v", got, tt.want)
-			}
-			for i := range tt.want {
-				if got[i] != tt.want[i] {
-					t.Fatalf("remapCategoryPath()[%d] = %q, want %q (full=%v)", i, got[i], tt.want[i], got)
-				}
-			}
-		})
+func TestSelectFoldersByVectors(t *testing.T) {
+	deeper := [][]string{
+		{"AI", "厂商"},   // 0
+		{"AI", "模型"},   // 1
+		{"地理", "城市"}, // 2
+	}
+	folderVecs := [][]float32{
+		{1, 0, 0},
+		{0.9, 0.1, 0},
+		{0, 0, 1},
+	}
+	// Item closest to folder 0 (and 1 as runner-up); far from 2.
+	itemVecs := [][]float32{{1, 0, 0}}
+
+	got := selectFoldersByVectors(deeper, folderVecs, itemVecs, 2)
+	if len(got) != 2 {
+		t.Fatalf("selectFoldersByVectors() returned %d folders, want 2: %v", len(got), got)
+	}
+	// Input order preserved: folders 0 and 1, not the orthogonal 2.
+	if strings.Join(got[0], "/") != "AI/厂商" || strings.Join(got[1], "/") != "AI/模型" {
+		t.Fatalf("selectFoldersByVectors() = %v, want [[AI 厂商] [AI 模型]]", got)
+	}
+}
+
+func TestSelectFoldersByVectorsGuards(t *testing.T) {
+	if got := selectFoldersByVectors([][]string{{"a"}}, [][]float32{{1}, {2}}, [][]float32{{1}}, 1); got != nil {
+		t.Fatalf("mismatched lengths should return nil, got %v", got)
+	}
+	if got := selectFoldersByVectors([][]string{{"a"}}, [][]float32{{1}}, nil, 1); got != nil {
+		t.Fatalf("no items should return nil, got %v", got)
+	}
+}
+
+func TestCollectTaxonomyItems(t *testing.T) {
+	slugUpdates := map[string][]SlugUpdate{
+		"entity/b": {{Type: types.WikiPageTypeEntity, Item: extractedItem{Name: "B", Description: "about B"}}},
+		"entity/a": {{Type: types.WikiPageTypeConcept, Item: extractedItem{Name: "A"}}},
+		"sum/x":    {{Type: "summary"}},
+		"ret/y":    {{Type: "retract"}},
+	}
+	items := collectTaxonomyItems(slugUpdates)
+	if len(items) != 2 {
+		t.Fatalf("collectTaxonomyItems() = %d items, want 2 (summary/retract skipped): %+v", len(items), items)
+	}
+	// Deterministic slug order so chunk boundaries are stable.
+	if items[0].slug != "entity/a" || items[1].slug != "entity/b" {
+		t.Fatalf("collectTaxonomyItems() order = [%s, %s], want [entity/a, entity/b]", items[0].slug, items[1].slug)
+	}
+	if items[1].about != "about B" {
+		t.Fatalf("items[1].about = %q, want %q", items[1].about, "about B")
 	}
 }

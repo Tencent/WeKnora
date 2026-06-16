@@ -659,11 +659,12 @@ type WikiBatchContext struct {
 	// three valid values.
 	ExtractionGranularity types.WikiExtractionGranularity
 
-	// ExistingTaxonomy returns a formatted directory tree of category_path
-	// folders already used in this KB. Loaded once per batch and injected
-	// into entity/concept extraction prompts so new pages reuse established
-	// folder labels instead of inventing synonyms.
-	ExistingTaxonomy func(ctx context.Context) string
+	// PlannedCategory holds the per-slug directory path assigned by the batch
+	// taxonomy planning pass (planBatchTaxonomy), keyed by page slug. Reduce
+	// applies it only to pages that don't already have a category, so the whole
+	// batch lands on one coherent tree without churning user-curated pages.
+	// Populated before the reduce phase and read-only during it.
+	PlannedCategory map[string][]string
 }
 
 // SlugUpdate represents a single update operation for a specific slug
@@ -1203,25 +1204,32 @@ func collectLinkRefs(pages []*types.WikiPage) []linkRef {
 	return refs
 }
 
-// wikiTaxonomyScanRowLimit caps how many wiki_pages rows we scan when
-// building the existing-taxonomy prompt block. Distinct paths are deduped
-// in Go; this bound keeps the query cheap on large KBs.
-const wikiTaxonomyScanRowLimit = 2000
-
-// wikiTaxonomyPromptMaxPaths caps how many unique category_path prefixes
-// are rendered into the LLM prompt to control token usage.
+// wikiTaxonomyPromptMaxPaths caps how many existing folders are rendered into a
+// planning prompt as the set to reuse. Reached only for pathologically large
+// taxonomies; the similarity preprocessing keeps the fed set well under it.
 const wikiTaxonomyPromptMaxPaths = 150
 
-func resolveExistingTaxonomyForPrompt(ctx context.Context, batchCtx *WikiBatchContext) string {
-	if batchCtx == nil || batchCtx.ExistingTaxonomy == nil {
-		return "(none — this knowledge base has no established folders yet)"
-	}
-	text := strings.TrimSpace(batchCtx.ExistingTaxonomy(ctx))
-	if text == "" {
-		return "(none — this knowledge base has no established folders yet)"
-	}
-	return text
-}
+// wikiTaxonomyFolderPoolMax bounds the existing folders pulled from the DB as the
+// candidate pool for similarity selection. Distinct folders are few even for
+// large KBs, so this only guards against a degenerate taxonomy.
+const wikiTaxonomyFolderPoolMax = 400
+
+// wikiTaxonomyFeedAllMaxFolders is the folder count at or below which the whole
+// folder set is fed to the planner as-is: a healthy navigation directory is
+// small, so feeding everything gives perfect reuse recall with no embedding cost
+// (similarity preprocessing only earns its keep once folders are numerous).
+const wikiTaxonomyFeedAllMaxFolders = 60
+
+// wikiTaxonomyRelevantTopK is how many nearest existing deeper folders each item
+// contributes to the reuse set when similarity preprocessing kicks in.
+const wikiTaxonomyRelevantTopK = 3
+
+// wikiTaxonomyPlanChunkSize caps how many items go into a single planning call.
+// Larger batches are split into chunks; folders assigned by earlier chunks are
+// fed forward as "existing folders" so later chunks converge onto the same tree.
+const wikiTaxonomyPlanChunkSize = 60
+
+const wikiTaxonomyEmptyTreeHint = "(none yet — this knowledge base has no folders, design a fresh directory)"
 
 type wikiTaxonomyNode struct {
 	children map[string]*wikiTaxonomyNode
@@ -1290,39 +1298,6 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 	}
 	return strings.TrimSpace(buf.String())
 }
-
-// dedupeWikiCategoryPaths returns unique non-empty category_path slices,
-// preserving first-seen order up to maxPaths.
-func dedupeWikiCategoryPaths(paths [][]string, maxPaths int) [][]string {
-	if maxPaths <= 0 {
-		maxPaths = wikiTaxonomyPromptMaxPaths
-	}
-	seen := make(map[string]struct{}, len(paths))
-	out := make([][]string, 0, len(paths))
-	for _, raw := range paths {
-		clean := make([]string, 0, len(raw))
-		for _, part := range raw {
-			part = strings.TrimSpace(part)
-			if part != "" {
-				clean = append(clean, part)
-			}
-		}
-		if len(clean) == 0 {
-			continue
-		}
-		key := strings.Join(clean, "\x00")
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, clean)
-		if len(out) >= maxPaths {
-			break
-		}
-	}
-	return out
-}
-
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs

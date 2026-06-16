@@ -63,6 +63,31 @@ func CleanWikiCategoryPath(parts []string) []string {
 	return cleaned
 }
 
+// SplitWikiPageTypes parses a page_type value that may carry several
+// comma-separated types (e.g. "entity,concept") into a deduplicated slice,
+// dropping blanks. An empty/whitespace-only input yields nil ("no filter").
+// Shared by the handler (query parsing) and repository (List filter) so the
+// two layers split identically.
+func SplitWikiPageTypes(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	return out
+}
+
 // WikiCategoryLevels flattens a (already cleaned) category path into the three
 // fixed level columns used for SQL grouping. Missing levels yield "".
 func WikiCategoryLevels(path []string) (l1, l2, l3 string) {

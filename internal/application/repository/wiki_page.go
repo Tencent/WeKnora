@@ -153,35 +153,12 @@ func (r *wikiPageRepository) GetBySlug(ctx context.Context, kbID string, slug st
 	return &page, nil
 }
 
-// splitWikiPageTypes parses a page_type filter that may carry several
-// comma-separated types (e.g. "entity,concept") into a deduplicated slice.
-// An empty/whitespace-only input yields nil, meaning "no type filter".
-func splitWikiPageTypes(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	out := make([]string, 0, 4)
-	for _, part := range strings.Split(raw, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if _, ok := seen[part]; ok {
-			continue
-		}
-		seen[part] = struct{}{}
-		out = append(out, part)
-	}
-	return out
-}
-
 // List retrieves wiki pages with filtering and pagination
 func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRequest) ([]*types.WikiPage, int64, error) {
 	query := r.db.WithContext(ctx).Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", req.KnowledgeBaseID)
 
-	if pageTypes := splitWikiPageTypes(req.PageType); len(pageTypes) == 1 {
+	if pageTypes := types.SplitWikiPageTypes(req.PageType); len(pageTypes) == 1 {
 		query = query.Where("page_type = ?", pageTypes[0])
 	} else if len(pageTypes) > 1 {
 		query = query.Where("page_type IN ?", pageTypes)
@@ -437,9 +414,13 @@ func (r *wikiPageRepository) ListBySlugs(
 	return out, nil
 }
 
-// ListDistinctCategoryPaths scans entity/concept pages and returns unique
-// non-empty category_path values. Rows are read in wiki_path order so the
-// prompt tree is stable; deduplication happens in Go with a maxPaths cap.
+// ListDistinctCategoryPaths returns the distinct non-empty category paths used
+// by entity/concept pages. The distinctness is pushed entirely to SQL over the
+// flat category_l1/l2/l3 columns (indexed by idx_wiki_pages_category_levels),
+// so the cost scales with the number of distinct folders — not the page count —
+// and there is no full-table scan to bound. maxPaths caps the returned folder
+// count. Used by the batch taxonomy planner as the candidate pool of existing
+// folders to reuse (similarity preprocessing then narrows it per batch).
 func (r *wikiPageRepository) ListDistinctCategoryPaths(
 	ctx context.Context,
 	kbID string,
@@ -450,41 +431,39 @@ func (r *wikiPageRepository) ListDistinctCategoryPaths(
 	}
 
 	type row struct {
-		CategoryPath types.StringArray `gorm:"column:category_path"`
+		L1 string `gorm:"column:category_l1"`
+		L2 string `gorm:"column:category_l2"`
+		L3 string `gorm:"column:category_l3"`
 	}
 	var rows []row
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Select("category_path").
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+		Distinct("category_l1", "category_l2", "category_l3").
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND category_l1 <> ?",
 			kbID,
 			[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
 			types.WikiPageStatusArchived,
+			"",
 		).
-		Order(r.wikiCategoryRankOrder()).
-		Order("wiki_path ASC").
+		Order("category_l1 ASC").
+		Order("category_l2 ASC").
+		Order("category_l3 ASC").
+		Limit(maxPaths).
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 
-	seen := make(map[string]struct{}, len(rows))
 	out := make([][]string, 0, len(rows))
-	for _, row := range rows {
-		if len(row.CategoryPath) == 0 {
-			continue
+	for _, rw := range rows {
+		path := make([]string, 0, 3)
+		for _, label := range []string{rw.L1, rw.L2, rw.L3} {
+			if label == "" {
+				break // levels are contiguous; an empty level ends the path
+			}
+			path = append(path, label)
 		}
-		clean := types.CleanWikiCategoryPath(row.CategoryPath)
-		if len(clean) == 0 {
-			continue
-		}
-		key := strings.Join(clean, "\x00")
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, clean)
-		if len(out) >= maxPaths {
-			break
+		if len(path) > 0 {
+			out = append(out, path)
 		}
 	}
 	return out, nil

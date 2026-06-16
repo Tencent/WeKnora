@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
@@ -12,239 +14,269 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// wikiTaxonomyReconcileMaxPages caps how many pages a single reconcile pass
-// will rewrite, so an over-eager remap cannot fan out into an unbounded write
-// storm on a very large KB. Pages beyond the cap are picked up by the next run.
-const wikiTaxonomyReconcileMaxPages = 5000
-
-// wikiTaxonomyReconcilePageSize is the cursor page size used when scanning the
-// KB to apply a category remap.
-const wikiTaxonomyReconcilePageSize = 500
-
-type wikiTaxonomyRemapEntry struct {
-	From []string `json:"from"`
-	To   []string `json:"to"`
+// wikiTaxonomyItem is one entity/concept page to be filed into the directory.
+type wikiTaxonomyItem struct {
+	slug     string
+	title    string
+	pageType string
+	about    string
 }
 
-type wikiTaxonomyRemapResult struct {
-	Remap []wikiTaxonomyRemapEntry `json:"remap"`
-}
-
-// ReconcileTaxonomy is the manual entry point for collapsing synonymous
-// category folders across a wiki knowledge base. It resolves the KB's synthesis
-// chat model itself so it can be invoked outside an ingest batch (e.g. from a
-// future maintenance handler).
-func (s *wikiIngestService) ReconcileTaxonomy(ctx context.Context, kbID string) error {
-	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
-	if err != nil {
-		return fmt.Errorf("wiki taxonomy reconcile: get KB: %w", err)
-	}
-	if !kb.IsWikiEnabled() {
-		return fmt.Errorf("wiki taxonomy reconcile: KB %s is not wiki type", kbID)
-	}
-
-	synthesisModelID := ""
-	if kb.WikiConfig != nil {
-		synthesisModelID = kb.WikiConfig.SynthesisModelID
-	}
-	if synthesisModelID == "" {
-		synthesisModelID = kb.SummaryModelID
-	}
-	if synthesisModelID == "" {
-		return fmt.Errorf("wiki taxonomy reconcile: no synthesis model configured for KB %s", kbID)
-	}
-	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
-	if err != nil {
-		return fmt.Errorf("wiki taxonomy reconcile: get chat model: %w", err)
-	}
-
-	return s.reconcileTaxonomy(ctx, chatModel, kbID, types.LanguageNameFromContext(ctx))
-}
-
-// reconcileTaxonomy collapses synonymous category_path folders across the KB
-// onto a single canonical path. It is per-KB (cost O(folder count), not page
-// count): one LLM call clusters the distinct folders, then matching pages are
-// re-pointed in Go. Slugs are NEVER touched — only the navigation category.
-func (s *wikiIngestService) reconcileTaxonomy(ctx context.Context, chatModel chat.Chat, kbID, lang string) error {
-	if s.wikiService == nil || chatModel == nil {
-		return nil
-	}
-	paths, err := s.wikiService.ListDistinctCategoryPaths(ctx, kbID, wikiTaxonomyPromptMaxPaths)
-	if err != nil {
-		return fmt.Errorf("list distinct category paths: %w", err)
-	}
-	if len(paths) < 2 {
-		return nil // nothing to merge
-	}
-
-	remap := s.buildTaxonomyRemap(ctx, chatModel, paths, lang)
-	if len(remap) == 0 {
-		return nil
-	}
-
-	updated := s.applyTaxonomyRemap(ctx, kbID, remap)
-	if updated > 0 {
-		logger.Infof(ctx, "wiki taxonomy reconcile: re-pointed %d pages via %d rules (kb=%s)", updated, len(remap), kbID)
-		if err := s.wikiService.RebuildIndexPage(ctx, kbID); err != nil {
-			logger.Warnf(ctx, "wiki taxonomy reconcile: rebuild index failed: %v", err)
-		}
-	}
-	return nil
-}
-
-// maybeReconcileTaxonomy runs a reconcile pass only when this batch introduced
-// at least one category folder that was not present in startKeys (the snapshot
-// taken before the batch ran). This keeps the extra LLM call off the hot path
-// for batches that only reuse established folders.
-func (s *wikiIngestService) maybeReconcileTaxonomy(
-	ctx context.Context, chatModel chat.Chat, kbID, lang string, startKeys map[string]bool,
-) {
-	if s.wikiService == nil {
-		return
-	}
-	paths, err := s.wikiService.ListDistinctCategoryPaths(ctx, kbID, wikiTaxonomyPromptMaxPaths)
-	if err != nil || len(paths) < 2 {
-		return
-	}
-	introducedNewFolder := false
-	for _, p := range paths {
-		if !startKeys[categoryPathKey(cleanCategoryPathParts(p))] {
-			introducedNewFolder = true
-			break
-		}
-	}
-	if !introducedNewFolder {
-		return
-	}
-	if err := s.reconcileTaxonomy(ctx, chatModel, kbID, lang); err != nil {
-		logger.Warnf(ctx, "wiki taxonomy reconcile failed: %v", err)
-	}
-}
-
-// snapshotCategoryKeys returns the set of canonical category keys currently in
-// use, used as the "before" baseline for maybeReconcileTaxonomy.
-func (s *wikiIngestService) snapshotCategoryKeys(ctx context.Context, kbID string) map[string]bool {
-	out := map[string]bool{}
-	if s.wikiService == nil {
-		return out
-	}
-	paths, err := s.wikiService.ListDistinctCategoryPaths(ctx, kbID, wikiTaxonomyPromptMaxPaths)
-	if err != nil {
-		return out
-	}
-	for _, p := range paths {
-		out[categoryPathKey(cleanCategoryPathParts(p))] = true
-	}
-	return out
-}
-
-// buildTaxonomyRemap asks the LLM to cluster synonymous folders and returns a
-// map keyed by the canonical key of each non-canonical path to its replacement.
-func (s *wikiIngestService) buildTaxonomyRemap(
-	ctx context.Context, chatModel chat.Chat, paths [][]string, lang string,
+// planBatchTaxonomy assigns a directory path to every entity/concept slug in the
+// batch in ONE planning pass (chunked for large batches), so the whole set lands
+// on a single coherent tree that reuses existing folders. This replaces per-page,
+// parallel CATEGORY invention — which couldn't converge, worst of all on the
+// founding batch when the KB has no folders to anchor on. The returned map is
+// keyed by slug; an entry may be an empty slice when the item is unclassifiable.
+// Reduce applies these only to pages that don't already have a category.
+func (s *wikiIngestService) planBatchTaxonomy(
+	ctx context.Context,
+	chatModel chat.Chat,
+	kb *types.KnowledgeBase,
+	slugUpdates map[string][]SlugUpdate,
+	lang string,
 ) map[string][]string {
-	taxonomyText := formatExistingTaxonomyForPrompt(paths)
-	if strings.TrimSpace(taxonomyText) == "" {
+	if kb == nil {
 		return nil
 	}
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiTaxonomyReconcilePrompt, map[string]string{
-		"CurrentTaxonomy": taxonomyText,
-		"Language":        lang,
-	})
-	if err != nil {
-		logger.Warnf(ctx, "wiki taxonomy reconcile: LLM call failed: %v", err)
-		return nil
-	}
-	raw = cleanLLMJSON(raw)
-	var parsed wikiTaxonomyRemapResult
-	if jerr := json.Unmarshal([]byte(raw), &parsed); jerr != nil {
-		logger.Warnf(ctx, "wiki taxonomy reconcile: parse failed: %v\nRaw: %s", jerr, raw)
+	items := collectTaxonomyItems(slugUpdates)
+	if len(items) == 0 {
 		return nil
 	}
 
-	out := make(map[string][]string, len(parsed.Remap))
-	for _, e := range parsed.Remap {
-		from := cleanCategoryPathParts(e.From)
-		to := cleanCategoryPathParts(e.To)
-		if len(from) == 0 || len(to) == 0 {
+	// Existing folders anchor reuse. Errors (e.g. a dialect without the query)
+	// just mean the plan designs a fresh tree — no fatal dependency.
+	var pool [][]string
+	if s.wikiService != nil {
+		paths, err := s.wikiService.ListDistinctCategoryPaths(ctx, kb.ID, wikiTaxonomyFolderPoolMax)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: list category paths for plan failed: %v", err)
+		} else {
+			pool = paths
+		}
+	}
+
+	// Preprocess the pool down to the folders relevant to THIS batch, so the
+	// planner reuses established folders without every prompt carrying the whole
+	// directory. Small/healthy taxonomies are fed whole (best recall, no cost).
+	existing := s.selectRelevantFolders(ctx, kb, items, pool)
+
+	result := make(map[string][]string, len(items))
+	for start := 0; start < len(items); start += wikiTaxonomyPlanChunkSize {
+		end := start + wikiTaxonomyPlanChunkSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[start:end]
+
+		tree := formatExistingTaxonomyForPrompt(existing)
+		if strings.TrimSpace(tree) == "" {
+			tree = wikiTaxonomyEmptyTreeHint
+		}
+
+		var itemsBlock strings.Builder
+		for _, it := range chunk {
+			fmt.Fprintf(&itemsBlock, "- slug: %s | title: %s | type: %s | about: %s\n",
+				it.slug, it.title, it.pageType, previewText(it.about, 120))
+		}
+
+		raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiTaxonomyPlanPrompt, map[string]string{
+			"ExistingTaxonomy": tree,
+			"Items":            itemsBlock.String(),
+			"Language":         lang,
+		})
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: taxonomy plan call failed (%d items): %v", len(chunk), err)
 			continue
 		}
-		fromKey := categoryPathKey(from)
-		if fromKey == categoryPathKey(to) {
-			continue // no-op rule
+
+		for slug, path := range parseTaxonomyAssignments(raw) {
+			clean := types.CleanWikiCategoryPath(path)
+			result[slug] = clean
+			if len(clean) > 0 {
+				existing = append(existing, clean) // feed forward so later chunks converge
+			}
 		}
-		out[fromKey] = to
+	}
+	return result
+}
+
+// selectRelevantFolders narrows the existing folder pool to the subset worth
+// showing the planner for THIS batch. A healthy navigation directory is small,
+// so it is fed whole (perfect reuse recall, no embedding cost). Only once folders
+// are numerous does similarity preprocessing kick in: all level-1 folders are
+// always kept as coarse anchors, and each item pulls in its nearest deeper
+// folders by embedding similarity. KBs without an embedding model (wiki-only)
+// fall back to a capped feed-all.
+func (s *wikiIngestService) selectRelevantFolders(
+	ctx context.Context, kb *types.KnowledgeBase, items []wikiTaxonomyItem, pool [][]string,
+) [][]string {
+	if len(pool) <= wikiTaxonomyFeedAllMaxFolders {
+		return pool
+	}
+
+	// Split into always-kept level-1 anchors and the deeper candidate folders
+	// that similarity selects among.
+	l1Seen := make(map[string]struct{})
+	var l1Paths, deeper [][]string
+	for _, p := range pool {
+		if len(p) == 0 {
+			continue
+		}
+		if _, ok := l1Seen[p[0]]; !ok {
+			l1Seen[p[0]] = struct{}{}
+			l1Paths = append(l1Paths, []string{p[0]})
+		}
+		if len(p) >= 2 {
+			deeper = append(deeper, p)
+		}
+	}
+
+	if !kb.NeedsEmbeddingModel() || strings.TrimSpace(kb.EmbeddingModelID) == "" || len(deeper) == 0 {
+		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
+	}
+
+	embedder, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: taxonomy plan embed model unavailable, feeding all folders: %v", err)
+		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
+	}
+
+	folderTexts := make([]string, len(deeper))
+	for i, p := range deeper {
+		folderTexts[i] = strings.Join(p, " / ")
+	}
+	itemTexts := make([]string, len(items))
+	for i, it := range items {
+		itemTexts[i] = strings.TrimSpace(it.title + " " + previewText(it.about, 120))
+	}
+
+	folderVecs, err := embedder.BatchEmbed(ctx, folderTexts)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: taxonomy plan folder embed failed, feeding all folders: %v", err)
+		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
+	}
+	itemVecs, err := embedder.BatchEmbed(ctx, itemTexts)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: taxonomy plan item embed failed, feeding all folders: %v", err)
+		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
+	}
+
+	selected := append(l1Paths, selectFoldersByVectors(deeper, folderVecs, itemVecs, wikiTaxonomyRelevantTopK)...)
+	return capFolders(selected, wikiTaxonomyPromptMaxPaths)
+}
+
+// selectFoldersByVectors returns the deeper folders that rank in any item's
+// top-K by cosine similarity, preserving the input order for determinism.
+func selectFoldersByVectors(deeper [][]string, folderVecs, itemVecs [][]float32, topK int) [][]string {
+	if len(deeper) != len(folderVecs) || len(itemVecs) == 0 || topK <= 0 {
+		return nil
+	}
+	chosen := make(map[int]struct{})
+	for _, iv := range itemVecs {
+		type scored struct {
+			idx int
+			sim float64
+		}
+		ranking := make([]scored, 0, len(folderVecs))
+		for fi, fv := range folderVecs {
+			ranking = append(ranking, scored{fi, cosineSimilarity(iv, fv)})
+		}
+		sort.SliceStable(ranking, func(a, b int) bool { return ranking[a].sim > ranking[b].sim })
+		for k := 0; k < topK && k < len(ranking); k++ {
+			chosen[ranking[k].idx] = struct{}{}
+		}
+	}
+	out := make([][]string, 0, len(chosen))
+	for i := range deeper {
+		if _, ok := chosen[i]; ok {
+			out = append(out, deeper[i])
+		}
 	}
 	return out
 }
 
-// applyTaxonomyRemap scans entity/concept pages and re-points any whose
-// category matches a remap rule. Returns the number of pages updated.
-func (s *wikiIngestService) applyTaxonomyRemap(ctx context.Context, kbID string, remap map[string][]string) int {
-	var cursor string
-	var updated int
-	for updated < wikiTaxonomyReconcileMaxPages {
-		pages, next, err := s.wikiService.ListPagesCursor(ctx, kbID, cursor, wikiTaxonomyReconcilePageSize)
-		if err != nil {
-			logger.Warnf(ctx, "wiki taxonomy reconcile: list pages failed: %v", err)
-			break
-		}
-		if len(pages) == 0 {
-			break
-		}
-		for _, p := range pages {
-			if p.PageType != types.WikiPageTypeEntity && p.PageType != types.WikiPageTypeConcept {
-				continue
-			}
-			newPath, ok := remapCategoryPath([]string(p.CategoryPath), remap)
-			if !ok {
-				continue
-			}
-			p.CategoryPath = types.StringArray(newPath)
-			p.WikiPath = "" // force recompute in normalizeWikiHierarchy
-			if err := s.wikiService.UpdatePageMeta(ctx, p); err != nil {
-				logger.Warnf(ctx, "wiki taxonomy reconcile: update %s failed: %v", p.Slug, err)
-				continue
-			}
-			updated++
-			if updated >= wikiTaxonomyReconcileMaxPages {
-				break
-			}
-		}
-		if next == "" {
-			break
-		}
-		cursor = next
+// cosineSimilarity returns the cosine of two equal-length vectors, or 0 for empty
+// / mismatched / zero-norm inputs.
+func cosineSimilarity(a, b []float32) float64 {
+	if len(a) == 0 || len(a) != len(b) {
+		return 0
 	}
-	return updated
+	var dot, na, nb float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		na += float64(a[i]) * float64(a[i])
+		nb += float64(b[i]) * float64(b[i])
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
 
-// remapCategoryPath returns the canonical category for current when it matches
-// a remap "from" key, plus whether a change is needed. Pure (no DB) so it can
-// be unit-tested in isolation.
-func remapCategoryPath(current []string, remap map[string][]string) ([]string, bool) {
-	cleaned := cleanCategoryPathParts(current)
-	if len(cleaned) == 0 {
-		return nil, false
+// capFolders truncates a folder list to at most max entries (max <= 0 = no cap).
+func capFolders(paths [][]string, max int) [][]string {
+	if max > 0 && len(paths) > max {
+		return paths[:max]
 	}
-	to, ok := remap[categoryPathKey(cleaned)]
-	if !ok {
-		return nil, false
-	}
-	if categoryPathKey(cleaned) == categoryPathKey(cleanCategoryPathParts(to)) {
-		return nil, false
-	}
-	return append([]string(nil), to...), true
+	return paths
 }
 
-// cleanCategoryPathParts normalizes a category path the same way the page
-// hierarchy normalizer does (separator/quote cleanup, type-label stripping,
-// depth cap) so remap keys match what is stored on pages.
-func cleanCategoryPathParts(parts []string) []string {
-	return types.CleanWikiCategoryPath(parts)
+// collectTaxonomyItems extracts the entity/concept pages from a batch's slug
+// updates, in deterministic slug order so chunk boundaries are stable. Summary
+// and retract-only slugs are skipped (they carry no directory category).
+func collectTaxonomyItems(slugUpdates map[string][]SlugUpdate) []wikiTaxonomyItem {
+	slugs := make([]string, 0, len(slugUpdates))
+	for slug := range slugUpdates {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
+
+	items := make([]wikiTaxonomyItem, 0, len(slugs))
+	for _, slug := range slugs {
+		for _, u := range slugUpdates[slug] {
+			if u.Type != types.WikiPageTypeEntity && u.Type != types.WikiPageTypeConcept {
+				continue
+			}
+			title := strings.TrimSpace(u.Item.Name)
+			if title == "" {
+				title = slug
+			}
+			items = append(items, wikiTaxonomyItem{
+				slug:     slug,
+				title:    title,
+				pageType: u.Type,
+				about:    strings.TrimSpace(u.Item.Description),
+			})
+			break // one entry per slug is enough for classification
+		}
+	}
+	return items
 }
 
-// categoryPathKey builds a stable comparison key for a cleaned category path.
-func categoryPathKey(parts []string) string {
-	return strings.Join(parts, "\u0000")
+// parseTaxonomyAssignments parses the planning LLM's JSON into a slug → path map.
+// Malformed output yields nil; individual entries with a blank slug are dropped.
+func parseTaxonomyAssignments(raw string) map[string][]string {
+	raw = cleanLLMJSON(raw)
+	if raw == "" {
+		return nil
+	}
+	var parsed struct {
+		Assignments []struct {
+			Slug string   `json:"slug"`
+			Path []string `json:"path"`
+		} `json:"assignments"`
+	}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil
+	}
+	out := make(map[string][]string, len(parsed.Assignments))
+	for _, a := range parsed.Assignments {
+		slug := strings.TrimSpace(a.Slug)
+		if slug == "" {
+			continue
+		}
+		out[slug] = a.Path
+	}
+	return out
 }
