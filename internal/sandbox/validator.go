@@ -217,15 +217,18 @@ func (v *ScriptValidator) hasShellOperators(s string) bool {
 	return false
 }
 
+// Command-substitution patterns, compiled once. hasCommandSubstitution runs
+// per argument in ValidateArgs, so recompiling these on every call wasted work
+// proportional to the argument count.
+var commandSubstitutionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\$\([^)]+\)`),   // $(command)
+	regexp.MustCompile("`[^`]+`"),       // `command`
+	regexp.MustCompile(`\$\{[^}]*\$\(`), // ${...$(command)
+}
+
 // hasCommandSubstitution checks for command substitution patterns
 func (v *ScriptValidator) hasCommandSubstitution(s string) bool {
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`\$\([^)]+\)`),   // $(command)
-		regexp.MustCompile("`[^`]+`"),       // `command`
-		regexp.MustCompile(`\$\{[^}]*\$\(`), // ${...$(command)
-	}
-
-	for _, p := range patterns {
+	for _, p := range commandSubstitutionPatterns {
 		if p.MatchString(s) {
 			return true
 		}
