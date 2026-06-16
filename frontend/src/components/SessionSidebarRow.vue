@@ -23,6 +23,7 @@
     </span>
     <div v-if="!batchMode" class="session-row-menu-wrap" @click.stop>
       <button
+        ref="triggerRef"
         type="button"
         class="menu-more-wrap"
         aria-haspopup="menu"
@@ -31,30 +32,38 @@
       >
         <t-icon name="ellipsis" class="menu-more" />
       </button>
-      <div v-if="menuOpen" class="session-row-menu" role="menu">
-        <button
-          v-for="option in menuOptions"
-          :key="option.value"
-          type="button"
-          class="session-row-menu__item"
-          :class="{ 'session-row-menu__item--error': option.theme === 'error' }"
-          role="menuitem"
-          @click="handleMenuClick(option)"
+      <Teleport to="body">
+        <div
+          v-if="menuOpen"
+          class="session-row-menu"
+          role="menu"
+          :style="menuStyle"
+          @click.stop
         >
-          <component
-            :is="option.prefixIcon"
-            v-if="option.prefixIcon"
-            class="session-row-menu__icon"
-          />
-          <span class="session-row-menu__text">{{ option.content }}</span>
-        </button>
-      </div>
+          <button
+            v-for="option in menuOptions"
+            :key="option.value"
+            type="button"
+            class="session-row-menu__item"
+            :class="{ 'session-row-menu__item--error': option.theme === 'error' }"
+            role="menuitem"
+            @click="handleMenuClick(option)"
+          >
+            <component
+              :is="option.prefixIcon"
+              v-if="option.prefixIcon"
+              class="session-row-menu__icon"
+            />
+            <span class="session-row-menu__text">{{ option.content }}</span>
+          </button>
+        </div>
+      </Teleport>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, nextTick, ref } from 'vue'
 
 interface SessionMenuOption {
   content: string
@@ -81,20 +90,52 @@ const emit = defineEmits<{
   (e: 'hover-out'): void
 }>()
 
+const MENU_WIDTH = 132
+const MENU_GAP = 4
+const VIEWPORT_MARGIN = 8
+
 const menuOpen = ref(false)
+const triggerRef = ref<HTMLButtonElement | null>(null)
+const menuStyle = ref<Record<string, string>>({})
+
+const updateMenuPosition = (): void => {
+  const trigger = triggerRef.value
+  if (!trigger) return
+  const rect = trigger.getBoundingClientRect()
+  const left = Math.max(
+    VIEWPORT_MARGIN,
+    Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN),
+  )
+  menuStyle.value = {
+    top: `${rect.bottom + MENU_GAP}px`,
+    left: `${left}px`,
+  }
+}
+
+const removeListeners = (): void => {
+  document.removeEventListener('click', closeMenu)
+  window.removeEventListener('resize', closeMenu)
+  window.removeEventListener('scroll', closeMenu, true)
+}
 
 const closeMenu = (): void => {
   menuOpen.value = false
-  document.removeEventListener('click', closeMenu)
+  removeListeners()
 }
 
 const toggleMenu = (): void => {
-  menuOpen.value = !menuOpen.value
   if (menuOpen.value) {
-    document.addEventListener('click', closeMenu)
-  } else {
-    document.removeEventListener('click', closeMenu)
+    closeMenu()
+    return
   }
+  updateMenuPosition()
+  menuOpen.value = true
+  nextTick(() => {
+    document.addEventListener('click', closeMenu)
+    window.addEventListener('resize', closeMenu)
+    // 捕获阶段监听任意滚动容器，滚动时关闭以避免菜单与触发点错位
+    window.addEventListener('scroll', closeMenu, true)
+  })
 }
 
 const handleMenuClick = (option: SessionMenuOption): void => {
@@ -103,7 +144,7 @@ const handleMenuClick = (option: SessionMenuOption): void => {
 }
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', closeMenu)
+  removeListeners()
 })
 </script>
 
@@ -132,10 +173,8 @@ onBeforeUnmount(() => {
 }
 
 .session-row-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 3000;
   min-width: 132px;
   padding: 4px;
   border: 1px solid var(--td-component-stroke);
