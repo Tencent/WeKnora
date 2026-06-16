@@ -650,7 +650,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 // height (title + 2-line summary + meta + padding) which keeps recycle
 // mode cheap — no measurement overhead per item.
 import { RecycleScroller } from 'vue-virtual-scroller'
-import { hydrateProtectedFileImages } from '@/utils/security'
+import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
@@ -1263,8 +1263,10 @@ function renderMarkdown(content: string): string {
     return `<a href="#" class="wiki-content-link" data-slug="${slug}">${display}</a>`
   })
 
-  // Use marked to render the markdown to HTML
-  return marked.parse(preprocessed, { breaks: true, async: false }) as string
+  // Use the shared markdown sanitizer before v-html inserts the content, so
+  // provider-backed images start as placeholders and hydrate into blob URLs.
+  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string
+  return sanitizeMarkdownHTML(html)
 }
 
 async function openGraphDrawer(slug: string) {

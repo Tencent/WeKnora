@@ -8,7 +8,10 @@ import {
   domPurifySecurityHooks,
   domPurifySecurityOptions,
   markdownDomPurifyConfig,
-} from '@/utils/markdownDomPurify';
+} from './markdownDomPurify.ts';
+
+const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+const PROVIDER_FILE_SCHEME_RE = /^(local|minio|cos|tos|s3|oss|ks3|obs):\/\/\S+$/i;
 
 // 配置 DOMPurify 的安全策略
 const DOMPurifyConfig = {
@@ -91,21 +94,67 @@ export function sanitizeMarkdownHTML(html: string): string {
 
 export function protectProviderImageSrcInHTML(html: string): string {
   if (!html) return html;
-  const decodeProviderURL = (raw: string): string =>
-    raw
-      .replace(/&#x2f;/gi, '/')
-      .replace(/&#47;/g, '/')
-      .replace(/&amp;/g, '&')
-      .replace(/&quot;/g, '"');
   return html.replace(
     /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos|s3|oss|ks3|obs):(?:\/\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\2([^>]*)>/gi,
     (_m, before, quote, provider, restPathRaw, after) => {
       const restPath = decodeProviderURL(restPathRaw);
       const protectedSrc = `${provider}://${restPath}`;
-      const fileProxyURL = `/files?${new URLSearchParams({ file_path: protectedSrc }).toString()}`;
-      return `<img${before} src=${quote}${fileProxyURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
+      return `<img${before} src=${quote}${PROVIDER_IMAGE_PLACEHOLDER}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
     },
   );
+}
+
+function decodeProviderURL(raw: string): string {
+  return raw
+    .trim()
+    .replace(/&#x2f;/gi, '/')
+    .replace(/&#47;/g, '/')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"');
+}
+
+function isProviderFileURL(url: string): boolean {
+  return PROVIDER_FILE_SCHEME_RE.test(url.trim());
+}
+
+function providerSourceFromImageSrc(src: string): string | null {
+  const decodedSrc = decodeProviderURL(src);
+  if (isProviderFileURL(decodedSrc)) {
+    return decodedSrc;
+  }
+
+  try {
+    const baseURL = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const url = new URL(decodedSrc, baseURL);
+    const isFileProxy =
+      url.pathname === '/files' ||
+      /^\/api\/v1\/embed\/[^/]+\/files$/.test(url.pathname);
+    if (!isFileProxy) {
+      return null;
+    }
+
+    const filePath = (url.searchParams.get('file_path') || '').trim();
+    return isProviderFileURL(filePath) ? filePath : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeProtectedImageElement(img: HTMLImageElement): string | null {
+  const protectedSrc = providerSourceFromImageSrc(
+    img.getAttribute('data-protected-src') || '',
+  );
+  const src = img.getAttribute('src') || '';
+  const sourceURL = protectedSrc || providerSourceFromImageSrc(src);
+  if (!sourceURL) {
+    return null;
+  }
+
+  img.setAttribute('data-protected-src', sourceURL);
+  if (!src.trim().startsWith('blob:')) {
+    img.setAttribute('src', PROVIDER_IMAGE_PLACEHOLDER);
+  }
+  return sourceURL;
 }
 
 /**
@@ -152,7 +201,7 @@ export function isValidURL(url: string): boolean {
   }
 
   // 允许 provider:// 形式，由前端后续鉴权拉取并替换为 blob URL
-  if (/^(local|minio|cos|tos|s3|oss|ks3|obs):\/\/\S+$/i.test(trimmed)) {
+  if (isProviderFileURL(trimmed)) {
     return true;
   }
   
@@ -308,9 +357,10 @@ export async function hydrateProtectedFileImages(
     : getProtectedFileRequestHeaders();
 
   await Promise.all(Array.from(images).map(async (img) => {
+    const normalizedSourceURL = normalizeProtectedImageElement(img);
     const protectedSrc = (img.getAttribute('data-protected-src') || '').trim();
     const src = (img.getAttribute('src') || '').trim();
-    const sourceURL = protectedSrc || src;
+    const sourceURL = normalizedSourceURL || protectedSrc || src;
     if (!sourceURL) {
       return;
     }
@@ -319,7 +369,7 @@ export async function hydrateProtectedFileImages(
     }
     img.dataset.authHydrated = '1';
 
-    const isProviderScheme = /^(local|minio|cos|tos|s3|oss|ks3|obs):\/\//.test(sourceURL);
+    const isProviderScheme = isProviderFileURL(sourceURL);
     const fileProxyBase = embed
       ? `/api/v1/embed/${embed.channelId}/files`
       : '/files';
