@@ -199,7 +199,42 @@
         </div>
       </aside>
 
+      <aside v-if="showDeleteDangerZone" class="leave-space-panel delete-space-panel"
+        :aria-label="$t('tenant.deleteDangerZone.title')">
+        <div class="leave-space-panel-inner">
+          <div class="leave-space-panel-text">
+            <div class="leave-space-panel-title">{{ $t('tenant.deleteDangerZone.title') }}</div>
+            <p class="leave-space-panel-desc">{{ $t('tenant.deleteDangerZone.desc') }}</p>
+          </div>
+          <div class="leave-space-panel-action">
+            <t-button theme="danger" size="medium" @click="confirmDeleteTenant">
+              {{ $t('tenant.deleteDangerZone.button') }}
+            </t-button>
+          </div>
+        </div>
+      </aside>
+
     </div>
+
+    <t-dialog v-model:visible="deleteTenantVisible" :header="$t('tenant.deleteDangerZone.confirmTitle')"
+      :confirm-btn="{
+        content: $t('tenant.deleteDangerZone.confirm'),
+        theme: 'danger',
+        disabled: deleteConfirmName.trim() !== (tenantInfo?.name || ''),
+        loading: deletingTenant,
+      }" :cancel-btn="$t('common.cancel')" :close-on-overlay-click="!deletingTenant"
+      :close-btn="!deletingTenant" @confirm="deleteCurrentTenant">
+      <div class="delete-tenant-confirm">
+        <p class="delete-tenant-confirm-body">
+          {{ $t('tenant.deleteDangerZone.confirmBody', { name: tenantInfo?.name || '' }) }}
+        </p>
+        <p class="delete-tenant-confirm-hint">
+          {{ $t('tenant.deleteDangerZone.confirmHint', { name: tenantInfo?.name || '' }) }}
+        </p>
+        <t-input v-model="deleteConfirmName" :placeholder="tenantInfo?.name || ''" :disabled="deletingTenant"
+          clearable />
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -207,7 +242,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { getCurrentUser, type TenantInfo } from '@/api/auth'
-import { updateTenant as updateTenantApi } from '@/api/tenant'
+import { deleteTenant as deleteTenantApi, updateTenant as updateTenantApi } from '@/api/tenant'
 import {
   leaveTenant,
   fetchAllTenantMembers,
@@ -252,6 +287,12 @@ const showLeaveDangerZone = computed(() => {
   if (!currentTenantRole.value) return false
   if (Number(tenantInfo.value.id) !== activeTenantNumericId.value) return false
   return canLeaveSpace.value
+})
+
+const showDeleteDangerZone = computed(() => {
+  if (loading.value || error.value || !tenantInfo.value) return false
+  if (Number(tenantInfo.value.id) !== activeTenantNumericId.value) return false
+  return authStore.hasRole('owner')
 })
 
 async function evaluateLeaveGate(): Promise<void> {
@@ -318,6 +359,41 @@ function confirmLeaveTenant() {
   })
 }
 
+function confirmDeleteTenant() {
+  const tid = Number(tenantInfo.value?.id ?? 0)
+  const tenantName = tenantInfo.value?.name || ''
+  if (!tid || !tenantName) return
+  deleteConfirmName.value = ''
+  deleteTenantVisible.value = true
+}
+
+async function deleteCurrentTenant() {
+  const tid = Number(tenantInfo.value?.id ?? 0)
+  const tenantName = tenantInfo.value?.name || ''
+  if (!tid || !tenantName) return
+  if (deleteConfirmName.value.trim() !== tenantName) {
+    MessagePlugin.warning(t('tenant.deleteDangerZone.nameMismatch'))
+    return
+  }
+  try {
+    deletingTenant.value = true
+    const resp = await deleteTenantApi(tid)
+    if (resp.success) {
+      MessagePlugin.success(t('tenant.deleteDangerZone.success'))
+      authStore.logout()
+      window.location.href = '/login'
+    } else {
+      MessagePlugin.error(resp.message || t('tenant.deleteDangerZone.failed'))
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('tenant.deleteDangerZone.failed'))
+  } finally {
+    deletingTenant.value = false
+    deleteConfirmName.value = ''
+    deleteTenantVisible.value = false
+  }
+}
+
 watch(
   [() => tenantInfo.value?.id, () => authStore.currentTenantId, () => authStore.currentTenantRole],
   () => {
@@ -332,6 +408,9 @@ watch(
 const editing = ref(false)
 const editName = ref('')
 const saving = ref(false)
+const deleteConfirmName = ref('')
+const deleteTenantVisible = ref(false)
+const deletingTenant = ref(false)
 const editNameTrimmed = computed(() => editName.value.trim())
 // 保存按钮可点条件：非空、改了内容、不在保存中。
 // 后端 name 字段没有 uniqueIndex 也没有重名校验，所以这里不做"是否已存在"的判断；
@@ -723,6 +802,10 @@ onMounted(() => {
   margin-top: 4px;
 }
 
+.delete-space-panel {
+  margin-top: 12px;
+}
+
 .leave-space-panel-inner {
   display: flex;
   flex-direction: row;
@@ -792,5 +875,17 @@ onMounted(() => {
     min-width: 50px;
     text-align: right;
   }
+}
+
+.delete-tenant-confirm-body {
+  margin: 0 0 10px;
+  color: var(--td-text-color-primary);
+  line-height: 1.6;
+}
+
+.delete-tenant-confirm-hint {
+  margin: 0 0 12px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
 }
 </style>

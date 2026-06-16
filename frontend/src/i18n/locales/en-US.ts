@@ -3209,6 +3209,18 @@ export default {
       desc: 'Ends your membership in this workspace. You will lose access to its knowledge bases and agents. You can be invited again later.',
       button: 'Leave workspace',
     },
+    deleteDangerZone: {
+      title: 'Delete this workspace',
+      desc: 'Delete the whole workspace and its configuration. Members will no longer be able to access its knowledge bases, agents, or API key.',
+      button: 'Delete workspace',
+      confirmTitle: 'Delete this workspace?',
+      confirmBody: 'This will delete "{name}" and make its knowledge bases, agents, members, and API key unavailable. This action cannot be undone.',
+      confirmHint: 'Type the workspace name "{name}" to confirm deletion.',
+      confirm: 'Delete workspace',
+      nameMismatch: 'Workspace name does not match',
+      success: 'Workspace deleted',
+      failed: 'Failed to delete workspace',
+    },
     messages: {
       fetchFailed: 'Failed to fetch tenant information',
       networkError: 'Network error, please try again later'
@@ -3519,6 +3531,7 @@ export default {
       searchFailed: 'Failed to search tenants',
       resetApiKeyFailed: 'Failed to reset API Key',
       updateFailed: 'Failed to update tenant information',
+      deleteFailed: 'Failed to delete tenant',
     },
     initialization: {
       checkFailed: 'Check failed',

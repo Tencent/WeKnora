@@ -2269,6 +2269,18 @@ export default {
       desc: "终止您在本空间的成员身份。退出后将无法访问本空间的知识库与智能体，之后可被再次邀请加入。",
       button: "退出空间",
     },
+    deleteDangerZone: {
+      title: "删除当前空间",
+      desc: "删除整个空间及其配置。删除后，空间成员将无法继续访问其中的知识库、智能体与 API Key。",
+      button: "删除空间",
+      confirmTitle: "删除当前空间？",
+      confirmBody: "此操作将删除空间「{name}」，并使其中的知识库、智能体、成员与 API Key 不再可用。此操作不可撤销。",
+      confirmHint: "请输入空间名称「{name}」以确认删除。",
+      confirm: "确认删除",
+      nameMismatch: "空间名称不匹配",
+      success: "空间已删除",
+      failed: "删除空间失败",
+    },
     messages: {
       fetchFailed: "获取空间信息失败",
       networkError: "网络错误，请稍后重试",
@@ -2578,6 +2590,7 @@ export default {
       searchFailed: "搜索空间失败",
       resetApiKeyFailed: "重置 API Key 失败",
       updateFailed: "更新空间信息失败",
+      deleteFailed: "删除空间失败",
     },
     initialization: {
       checkFailed: "检查失败",
