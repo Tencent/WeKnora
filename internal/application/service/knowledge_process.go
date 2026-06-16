@@ -99,6 +99,12 @@ func (s *knowledgeService) cloneKnowledge(
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge create knowledge failed")
 		return
 	}
+	if err = s.CloneChunk(ctx, src, dst); err != nil {
+		logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).
+			WithField("error", err).Errorf("MoveKnowledge move chunks failed")
+		return
+	}
+	
 	tenantInfo.StorageUsed += dst.StorageSize
 	if err = s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, dst.StorageSize); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge update tenant storage used failed")
@@ -109,11 +115,6 @@ func (s *knowledgeService) cloneKnowledge(
 		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, userID, tenantInfo.ID, dst.StorageSize); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update user storage used failed")
 		}
-	}
-	if err = s.CloneChunk(ctx, src, dst); err != nil {
-		logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).
-			WithField("error", err).Errorf("MoveKnowledge move chunks failed")
-		return
 	}
 	return
 }
@@ -576,7 +577,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			member, err := s.tenantMemberRepo.Get(ctx, userID, tenantInfo.ID)
 			if err == nil && member != nil && member.StorageQuota > 0 && member.StorageUsed >= member.StorageQuota {
 				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = "存储空间不足"
+				knowledge.ErrorMessage = "User storage quota exceeded"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
 				return

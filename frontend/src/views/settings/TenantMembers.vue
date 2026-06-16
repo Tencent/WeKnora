@@ -531,6 +531,7 @@
               <t-input-number 
                 v-model="quotaForm.quotaGB" 
                 :min="0" 
+                :max="1048576"
                 :step="1" 
                 auto-width
               />
@@ -787,6 +788,10 @@ async function submitQuotaUpdate() {
   updatingQuota.value = true
   try {
     const quotaBytes = quotaForm.quotaGB * 1024 * 1024 * 1024
+    if (!Number.isSafeInteger(quotaBytes)) {
+      MessagePlugin.error('输入的额度过大，超出系统安全计算范围')
+      return
+    }
     const resp = await updateMemberQuota(activeTenantId.value, currentQuotaMember.value.user_id, quotaBytes)
     if (resp.success) {
       MessagePlugin.success('配额更新成功')

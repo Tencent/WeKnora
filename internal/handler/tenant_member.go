@@ -447,6 +447,8 @@ func (h *TenantMemberHandler) UpdateMemberQuota(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("membership not found"))
+		case errors.Is(err, service.ErrInvalidStorageQuota):
+			c.Error(apperrors.NewValidationError(err.Error()))
 		default:
 			logger.Errorf(ctx, "UpdateMemberQuota failed: user=%s tenant=%d err=%v",
 				userID, tenantID, err)
