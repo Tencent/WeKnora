@@ -156,6 +156,16 @@ type WikiPageService interface {
 	// merge targets server-side.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
+	// ListDistinctCategoryPaths returns unique non-empty category_path
+	// values from entity/concept pages. Used by wiki ingest to inject
+	// established folder taxonomy into extraction prompts.
+	ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error)
+
+	// ListDistinctCategoryPathsByType returns unique non-empty category_path
+	// values across the given page types. Used by the wiki browser to render a
+	// stable directory skeleton independently of page pagination.
+	ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, maxPaths int) ([]types.WikiCategoryPath, error)
+
 	// CountByType returns page counts grouped by type for a knowledge
 	// base. Re-exposed at the service layer so the index intro
 	// generation path can frame the LLM prompt with "showing N of M"
@@ -263,6 +273,14 @@ type WikiPageRepository interface {
 	// defaults to entity+concept. Used by the dedup pre-filter to
 	// surface candidate merge targets server-side.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
+
+	// ListDistinctCategoryPaths scans entity/concept pages and returns
+	// unique non-empty category_path values for wiki ingest prompts.
+	ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error)
+
+	// ListDistinctCategoryPathsByType returns unique non-empty category_path
+	// values across the given page types.
+	ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, maxPaths int) ([]types.WikiCategoryPath, error)
 
 	// ListAll retrieves all wiki pages in a knowledge base (for link rebuilding, graph generation).
 	ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error)

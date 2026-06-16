@@ -658,6 +658,12 @@ type WikiBatchContext struct {
 	// Already Normalize()'d — consumers can assume it is one of the
 	// three valid values.
 	ExtractionGranularity types.WikiExtractionGranularity
+
+	// ExistingTaxonomy returns a formatted directory tree of category_path
+	// folders already used in this KB. Loaded once per batch and injected
+	// into entity/concept extraction prompts so new pages reuse established
+	// folder labels instead of inventing synonyms.
+	ExistingTaxonomy func(ctx context.Context) string
 }
 
 // SlugUpdate represents a single update operation for a specific slug
@@ -1197,6 +1203,126 @@ func collectLinkRefs(pages []*types.WikiPage) []linkRef {
 	return refs
 }
 
+// wikiTaxonomyScanRowLimit caps how many wiki_pages rows we scan when
+// building the existing-taxonomy prompt block. Distinct paths are deduped
+// in Go; this bound keeps the query cheap on large KBs.
+const wikiTaxonomyScanRowLimit = 2000
+
+// wikiTaxonomyPromptMaxPaths caps how many unique category_path prefixes
+// are rendered into the LLM prompt to control token usage.
+const wikiTaxonomyPromptMaxPaths = 150
+
+func resolveExistingTaxonomyForPrompt(ctx context.Context, batchCtx *WikiBatchContext) string {
+	if batchCtx == nil || batchCtx.ExistingTaxonomy == nil {
+		return "(none — this knowledge base has no established folders yet)"
+	}
+	text := strings.TrimSpace(batchCtx.ExistingTaxonomy(ctx))
+	if text == "" {
+		return "(none — this knowledge base has no established folders yet)"
+	}
+	return text
+}
+
+type wikiTaxonomyNode struct {
+	children map[string]*wikiTaxonomyNode
+}
+
+func insertWikiTaxonomyPath(root *wikiTaxonomyNode, path []string) {
+	if root == nil || len(path) == 0 {
+		return
+	}
+	cur := root
+	for _, part := range path {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if cur.children == nil {
+			cur.children = make(map[string]*wikiTaxonomyNode)
+		}
+		child := cur.children[part]
+		if child == nil {
+			child = &wikiTaxonomyNode{}
+			cur.children[part] = child
+		}
+		cur = child
+	}
+}
+
+func appendWikiTaxonomyNode(buf *strings.Builder, label string, node *wikiTaxonomyNode, depth int) {
+	if label != "" {
+		fmt.Fprintf(buf, "%s%s\n", strings.Repeat("  ", depth), label)
+	}
+	if node == nil || len(node.children) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(node.children))
+	for k := range node.children {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		appendWikiTaxonomyNode(buf, k, node.children[k], depth+1)
+	}
+}
+
+// formatExistingTaxonomyForPrompt renders distinct category_path values as an
+// indented folder tree for LLM extraction prompts.
+func formatExistingTaxonomyForPrompt(paths [][]string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	root := &wikiTaxonomyNode{}
+	for _, path := range paths {
+		insertWikiTaxonomyPath(root, path)
+	}
+	if len(root.children) == 0 {
+		return ""
+	}
+	var buf strings.Builder
+	keys := make([]string, 0, len(root.children))
+	for k := range root.children {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		appendWikiTaxonomyNode(&buf, k, root.children[k], 0)
+	}
+	return strings.TrimSpace(buf.String())
+}
+
+// dedupeWikiCategoryPaths returns unique non-empty category_path slices,
+// preserving first-seen order up to maxPaths.
+func dedupeWikiCategoryPaths(paths [][]string, maxPaths int) [][]string {
+	if maxPaths <= 0 {
+		maxPaths = wikiTaxonomyPromptMaxPaths
+	}
+	seen := make(map[string]struct{}, len(paths))
+	out := make([][]string, 0, len(paths))
+	for _, raw := range paths {
+		clean := make([]string, 0, len(raw))
+		for _, part := range raw {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				clean = append(clean, part)
+			}
+		}
+		if len(clean) == 0 {
+			continue
+		}
+		key := strings.Join(clean, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, clean)
+		if len(out) >= maxPaths {
+			break
+		}
+	}
+	return out
+}
+
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs
@@ -1433,6 +1559,50 @@ func splitSummaryLine(raw string) (summary string, content string) {
 		return strings.TrimSpace(summaryLine), strings.TrimSpace(raw[idx+1:])
 	}
 	return "", raw
+}
+
+// splitCategoryLine extracts a leading "CATEGORY: a / b" line from content
+// (the page body AFTER the SUMMARY line has been stripped) and returns the
+// parsed folder labels plus the remaining content with that line removed.
+//
+// Category assignment lives in the page-modify output (reduce time) rather
+// than per-document extraction so it reflects WHAT the whole entity IS, not
+// the role it played in one source document. An empty/absent CATEGORY line
+// yields nil so callers keep the page's existing category instead of wiping it.
+func splitCategoryLine(content string) (category []string, rest string) {
+	trimmed := strings.TrimLeft(content, " \t\r\n")
+	if !strings.HasPrefix(trimmed, "CATEGORY:") && !strings.HasPrefix(trimmed, "CATEGORY：") {
+		return nil, content
+	}
+	var line, remainder string
+	if idx := strings.IndexByte(trimmed, '\n'); idx < 0 {
+		line = trimmed
+	} else {
+		line = trimmed[:idx]
+		remainder = trimmed[idx+1:]
+	}
+	line = strings.TrimPrefix(line, "CATEGORY:")
+	line = strings.TrimPrefix(line, "CATEGORY：")
+	return parseCategoryPath(line), strings.TrimSpace(remainder)
+}
+
+// parseCategoryPath splits a "a / b" breadcrumb string into clean folder
+// labels. Separator variants and wrapping quotes/brackets are normalized; the
+// deeper structural cleaning (type-label stripping, depth cap, wiki_path) is
+// left to normalizeWikiHierarchy on the page.
+func parseCategoryPath(line string) []string {
+	line = strings.NewReplacer("／", "/", "｜", "/", "|", "/", "›", "/", "»", "/", ">", "/").Replace(line)
+	parts := strings.Split(line, "/")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		label := strings.TrimSpace(p)
+		label = strings.Trim(label, `"'“”‘’[]（）()`)
+		label = strings.TrimSpace(label)
+		if label != "" {
+			out = append(out, label)
+		}
+	}
+	return out
 }
 
 // buildLogEntry builds a WikiLogEntry struct for the current batch. It is

@@ -28,6 +28,13 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 	return &wikiPageRepository{db: db}
 }
 
+func (r *wikiPageRepository) wikiCategoryRankOrder() string {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	}
+	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+}
+
 // Create inserts a new wiki page record
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
 	return r.db.WithContext(ctx).Create(page).Error
@@ -101,6 +108,11 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 			"source_refs":   page.SourceRefs,
 			"chunk_refs":    page.ChunkRefs,
 			"page_metadata": page.PageMetadata,
+			"parent_slug":   page.ParentSlug,
+			"category_path": page.CategoryPath,
+			"wiki_path":     page.WikiPath,
+			"depth":         page.Depth,
+			"sort_order":    page.SortOrder,
 			"updated_at":    page.UpdatedAt,
 		})
 	if result.Error != nil {
@@ -138,13 +150,38 @@ func (r *wikiPageRepository) GetBySlug(ctx context.Context, kbID string, slug st
 	return &page, nil
 }
 
+// splitWikiPageTypes parses a page_type filter that may carry several
+// comma-separated types (e.g. "entity,concept") into a deduplicated slice.
+// An empty/whitespace-only input yields nil, meaning "no type filter".
+func splitWikiPageTypes(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	return out
+}
+
 // List retrieves wiki pages with filtering and pagination
 func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRequest) ([]*types.WikiPage, int64, error) {
 	query := r.db.WithContext(ctx).Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", req.KnowledgeBaseID)
 
-	if req.PageType != "" {
-		query = query.Where("page_type = ?", req.PageType)
+	if pageTypes := splitWikiPageTypes(req.PageType); len(pageTypes) == 1 {
+		query = query.Where("page_type = ?", pageTypes[0])
+	} else if len(pageTypes) > 1 {
+		query = query.Where("page_type IN ?", pageTypes)
 	}
 	if req.Status != "" {
 		query = query.Where("status = ?", req.Status)
@@ -157,6 +194,24 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 			"%"+req.Query+"%",
 		)
 	}
+	// Directory filters are pushed to SQL so the DB does the counting and
+	// pagination instead of loading every page of the type into memory. `depth`
+	// is a cached column (= len(category_path)); `category_path` is a JSON column
+	// whose stored text is json.Marshal of the cleaned path, so we compare
+	// against the same encoding. Postgres needs an explicit jsonb cast for array
+	// equality; SQLite stores JSON as TEXT and compares directly.
+	if req.CategoryDepth != nil {
+		query = query.Where("depth = ?", *req.CategoryDepth)
+	}
+	if wantPath := cleanWikiRepositoryCategoryPath(req.CategoryPath); len(wantPath) > 0 {
+		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
+			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
+			} else {
+				query = query.Where("category_path = ?", string(encoded))
+			}
+		}
+	}
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -167,7 +222,7 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	sortBy := "updated_at"
 	if req.SortBy != "" {
 		switch req.SortBy {
-		case "title", "created_at", "updated_at", "page_type":
+		case "title", "created_at", "updated_at", "page_type", "wiki_path", "sort_order", "depth":
 			sortBy = req.SortBy
 		}
 	}
@@ -175,9 +230,15 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	if req.SortOrder == "asc" {
 		sortOrder = "ASC"
 	}
-	query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder))
+	if sortBy == "wiki_path" {
+		query = query.Order(r.wikiCategoryRankOrder()).
+			Order(fmt.Sprintf("wiki_path %s", sortOrder)).
+			Order("sort_order ASC").
+			Order("title ASC")
+	} else {
+		query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder))
+	}
 
-	// Pagination
 	page := req.Page
 	if page < 1 {
 		page = 1
@@ -187,6 +248,8 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		pageSize = 20
 	}
 	offset := (page - 1) * pageSize
+
+	// Pagination
 	query = query.Offset(offset).Limit(pageSize)
 
 	var pages []*types.WikiPage
@@ -249,7 +312,10 @@ func (r *wikiPageRepository) ListByTypeLight(
 
 	var entries []types.WikiIndexEntry
 	if err := base.
-		Select("slug", "title", "summary").
+		Select("slug", "title", "summary", "parent_slug", "category_path", "wiki_path", "depth", "sort_order").
+		Order(r.wikiCategoryRankOrder()).
+		Order("wiki_path ASC").
+		Order("sort_order ASC").
 		Order("title ASC").
 		Limit(limit).
 		Offset(offset).
@@ -366,6 +432,199 @@ func (r *wikiPageRepository) ListBySlugs(
 		out[r.Slug] = &r
 	}
 	return out, nil
+}
+
+// ListDistinctCategoryPaths scans entity/concept pages and returns unique
+// non-empty category_path values. Rows are read in wiki_path order so the
+// prompt tree is stable; deduplication happens in Go with a maxPaths cap.
+func (r *wikiPageRepository) ListDistinctCategoryPaths(
+	ctx context.Context,
+	kbID string,
+	maxPaths int,
+) ([][]string, error) {
+	if maxPaths <= 0 {
+		maxPaths = 150
+	}
+
+	type row struct {
+		CategoryPath types.StringArray `gorm:"column:category_path"`
+	}
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("category_path").
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+			kbID,
+			[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
+			types.WikiPageStatusArchived,
+		).
+		Order(r.wikiCategoryRankOrder()).
+		Order("wiki_path ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{}, len(rows))
+	out := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		if len(row.CategoryPath) == 0 {
+			continue
+		}
+		clean := cleanWikiRepositoryCategoryPath(row.CategoryPath)
+		if len(clean) == 0 {
+			continue
+		}
+		key := strings.Join(clean, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, clean)
+		if len(out) >= maxPaths {
+			break
+		}
+	}
+	return out, nil
+}
+
+// ListDistinctCategoryPathsByType scans one page type and returns unique
+// non-empty category_path values. Unlike ListDistinctCategoryPaths, this is
+// used by the UI and must work for every visible page_type bucket.
+func (r *wikiPageRepository) ListDistinctCategoryPathsByType(
+	ctx context.Context,
+	kbID string,
+	pageTypes []string,
+	parentPath []string,
+	maxPaths int,
+) ([]types.WikiCategoryPath, error) {
+	if maxPaths <= 0 {
+		maxPaths = 2000
+	}
+	if len(pageTypes) == 0 {
+		return nil, nil
+	}
+
+	type row struct {
+		CategoryPath types.StringArray `gorm:"column:category_path"`
+	}
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("category_path").
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+			kbID,
+			pageTypes,
+			types.WikiPageStatusArchived,
+		).
+		Order(r.wikiCategoryRankOrder()).
+		Order("wiki_path ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	parent := cleanWikiRepositoryCategoryPath(parentPath)
+
+	counts := make(map[string]int64, len(rows))
+	pathsByKey := make(map[string][]string, len(rows))
+	order := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if len(row.CategoryPath) == 0 {
+			continue
+		}
+		clean := cleanWikiRepositoryCategoryPath(row.CategoryPath)
+		if len(clean) == 0 {
+			continue
+		}
+		if len(clean) <= len(parent) || !wikiPathHasPrefix(clean, parent) {
+			continue
+		}
+		path := clean[:len(parent)+1]
+		key := strings.Join(path, "\x00")
+		if _, ok := pathsByKey[key]; !ok {
+			cp := append([]string(nil), path...)
+			pathsByKey[key] = cp
+			order = append(order, key)
+		}
+		counts[key]++
+	}
+
+	out := make([]types.WikiCategoryPath, 0, len(order))
+	for _, key := range order {
+		out = append(out, types.WikiCategoryPath{
+			Path:  pathsByKey[key],
+			Count: counts[key],
+		})
+	}
+	return out, nil
+}
+
+func cleanWikiRepositoryCategoryPath(parts []string) []string {
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		for _, label := range cleanWikiRepositoryCategoryPart(part) {
+			if containsWikiRepositoryString(cleaned, label) {
+				continue
+			}
+			cleaned = append(cleaned, label)
+		}
+	}
+	return cleaned
+}
+
+func cleanWikiRepositoryCategoryPart(part string) []string {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return nil
+	}
+
+	part = strings.NewReplacer("／", "/", "｜", "/", "|", "/").Replace(part)
+	rawParts := strings.Split(part, "/")
+	cleaned := make([]string, 0, len(rawParts))
+	for _, raw := range rawParts {
+		label := strings.TrimSpace(raw)
+		label = strings.Trim(label, `"'“”‘’[]（）()`)
+		label = strings.TrimSpace(label)
+		if label == "" || isWikiRepositoryTypeCategoryLabel(label) {
+			continue
+		}
+		cleaned = append(cleaned, label)
+	}
+	return cleaned
+}
+
+func isWikiRepositoryTypeCategoryLabel(label string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	normalized = strings.TrimSuffix(normalized, "s")
+	switch normalized {
+	case "entity", "实体", "實體", "concept", "概念", "summary", "摘要", "wiki", "页面", "頁面":
+		return true
+	default:
+		return false
+	}
+}
+
+func containsWikiRepositoryString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func wikiPathHasPrefix(path []string, prefix []string) bool {
+	if len(prefix) == 0 {
+		return true
+	}
+	if len(path) < len(prefix) {
+		return false
+	}
+	for i, part := range prefix {
+		if path[i] != part {
+			return false
+		}
+	}
+	return true
 }
 
 // ListSummariesByKnowledgeIDs returns summary-page content keyed by the

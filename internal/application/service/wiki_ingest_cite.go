@@ -279,6 +279,7 @@ func (s *wikiIngestService) classifyChunkCitations(
 	candidatesXML string,
 	chunks []*types.Chunk,
 	lang string,
+	batchCtx *WikiBatchContext,
 ) (map[string][]string, []newSlugFromCitation, int) {
 	batches := splitChunksIntoCitationBatches(chunks)
 	if len(batches) == 0 || strings.TrimSpace(candidatesXML) == "" {

@@ -77,7 +77,7 @@ func getSlugParam(c *gin.Context) string {
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id      path      string  true   "Knowledge base ID"
-// @Param        page_type  query     string  false  "Filter by page type"
+// @Param        page_type  query     string  false  "Filter by page type; comma-separated for multiple (e.g. entity,concept)"
 // @Param        status     query     string  false  "Filter by status"
 // @Param        query      query     string  false  "Full-text search"
 // @Param        page       query     int     false  "Page number"
@@ -97,12 +97,21 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	categoryPath := parseWikiCategoryPath(c.Query("category_path"))
+	var categoryDepth *int
+	if raw := c.Query("category_depth"); raw != "" {
+		if depth, parseErr := strconv.Atoi(raw); parseErr == nil && depth >= 0 {
+			categoryDepth = &depth
+		}
+	}
 
 	req := &types.WikiPageListRequest{
 		KnowledgeBaseID: kbID,
 		PageType:        c.Query("page_type"),
 		Status:          c.Query("status"),
 		Query:           c.Query("query"),
+		CategoryPath:    types.StringArray(categoryPath),
+		CategoryDepth:   categoryDepth,
 		Page:            page,
 		PageSize:        pageSize,
 		SortBy:          c.DefaultQuery("sort_by", "updated_at"),
@@ -116,6 +125,106 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// ListCategories godoc
+// @Summary      List wiki category paths
+// @Description  Retrieve direct child directories for a wiki page type and optional parent_path
+// @Tags         Wiki
+// @Produce      json
+// @Param        kb_id     path   string  true   "Knowledge base ID"
+// @Param        page_type query  string  true   "Wiki page type; comma-separated for multiple (e.g. entity,concept)"
+// @Param        parent_path query string  false  "Parent category path, slash-separated"
+// @Param        page      query  int     false  "Page number (1-based)"
+// @Param        page_size query  int     false  "Page size"
+// @Success      200  {object}  types.WikiCategoryPathListResponse
+// @Failure      400  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/categories [get]
+func (h *WikiPageHandler) ListCategories(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	pageTypes := parseWikiPageTypes(c.Query("page_type"))
+	if len(pageTypes) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page_type is required"})
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "2000"))
+	if pageSize <= 0 {
+		pageSize = 2000
+	}
+	parentPath := parseWikiCategoryPath(c.Query("parent_path"))
+	paths, err := h.wikiService.ListDistinctCategoryPathsByType(c.Request.Context(), kbID, pageTypes, parentPath, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	total := len(paths)
+	offset := (page - 1) * pageSize
+	if offset > total {
+		offset = total
+	}
+	end := offset + pageSize
+	if end > total {
+		end = total
+	}
+	totalPages := 0
+	if pageSize > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+
+	c.JSON(http.StatusOK, types.WikiCategoryPathListResponse{
+		Paths:      paths[offset:end],
+		Total:      total,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+	})
+}
+
+// parseWikiPageTypes splits a comma-separated page_type query value (e.g.
+// "entity,concept") into a deduplicated slice, dropping blanks.
+func parseWikiPageTypes(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	return out
+}
+
+func parseWikiCategoryPath(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, "/")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 // CreatePage godoc

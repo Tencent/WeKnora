@@ -1748,6 +1748,7 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 	{
 		// Page CRUD
 		wiki.GET("/pages", g.Viewer(), wikiHandler.ListPages)
+		wiki.GET("/categories", g.Viewer(), wikiHandler.ListCategories)
 		wiki.POST("/pages", g.OwnedWikiKBOrAdmin(), wikiHandler.CreatePage)
 		wiki.GET("/pages/*slug", g.Viewer(), wikiHandler.GetPage)
 		wiki.PUT("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdatePage)

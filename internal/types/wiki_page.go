@@ -65,6 +65,22 @@ type WikiPage struct {
 	Summary string `json:"summary" gorm:"type:text"`
 	// Alternate names, abbreviations, acronyms or translated names
 	Aliases StringArray `json:"aliases" gorm:"type:json"`
+	// ParentSlug optionally points at the wiki page that should act as this
+	// page's semantic parent in the directory tree. The parent may be empty
+	// when the page is grouped only by CategoryPath.
+	ParentSlug string `json:"parent_slug,omitempty" gorm:"type:varchar(255);index"`
+	// CategoryPath is the directory breadcrumb that groups this page in the
+	// wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. It is intentionally
+	// label-based so intermediate directory nodes do not need to be real pages.
+	CategoryPath StringArray `json:"category_path,omitempty" gorm:"type:json"`
+	// WikiPath is a normalized, sortable path derived from page_type,
+	// category_path, and title. It keeps large directory listings cheap to sort.
+	WikiPath string `json:"wiki_path,omitempty" gorm:"type:varchar(1024);index"`
+	// Depth is len(CategoryPath), cached for filtering / display.
+	Depth int `json:"depth,omitempty" gorm:"default:0;index"`
+	// SortOrder allows generated or manually edited pages to control sibling
+	// ordering before falling back to title.
+	SortOrder int `json:"sort_order,omitempty" gorm:"default:0;index"`
 	// References to source knowledge IDs that contributed to this page.
 	// Format matches the legacy "<knowledge_id>|<doc_title>" convention used
 	// across the ingest pipeline, so retract / display code can split on `|`
@@ -226,14 +242,16 @@ func (c *WikiConfig) Scan(value interface{}) error {
 
 // WikiPageListRequest represents a request to list wiki pages with filtering
 type WikiPageListRequest struct {
-	KnowledgeBaseID string `json:"knowledge_base_id"`
-	PageType        string `json:"page_type,omitempty"`  // filter by type
-	Status          string `json:"status,omitempty"`     // filter by status
-	Query           string `json:"query,omitempty"`      // full-text search
-	Page            int    `json:"page,omitempty"`       // pagination page (1-based)
-	PageSize        int    `json:"page_size,omitempty"`  // pagination size
-	SortBy          string `json:"sort_by,omitempty"`    // "updated_at", "created_at", "title"
-	SortOrder       string `json:"sort_order,omitempty"` // "asc" or "desc"
+	KnowledgeBaseID string      `json:"knowledge_base_id"`
+	PageType        string      `json:"page_type,omitempty"`      // filter by type
+	Status          string      `json:"status,omitempty"`         // filter by status
+	Query           string      `json:"query,omitempty"`          // full-text search
+	CategoryPath    StringArray `json:"category_path,omitempty"`  // exact directory path
+	CategoryDepth   *int        `json:"category_depth,omitempty"` // exact directory depth, including 0 for root
+	Page            int         `json:"page,omitempty"`           // pagination page (1-based)
+	PageSize        int         `json:"page_size,omitempty"`      // pagination size
+	SortBy          string      `json:"sort_by,omitempty"`        // "updated_at", "created_at", "title"
+	SortOrder       string      `json:"sort_order,omitempty"`     // "asc" or "desc"
 }
 
 // WikiPageListResponse represents a paginated list of wiki pages
@@ -243,6 +261,21 @@ type WikiPageListResponse struct {
 	Page       int         `json:"page"`
 	PageSize   int         `json:"page_size"`
 	TotalPages int         `json:"total_pages"`
+}
+
+// WikiCategoryPathListResponse returns the directory skeleton for wiki pages.
+type WikiCategoryPathListResponse struct {
+	Paths      []WikiCategoryPath `json:"paths"`
+	Total      int                `json:"total"`
+	Page       int                `json:"page"`
+	PageSize   int                `json:"page_size"`
+	TotalPages int                `json:"total_pages"`
+}
+
+// WikiCategoryPath is one directory node in the wiki sidebar skeleton.
+type WikiCategoryPath struct {
+	Path  []string `json:"path"`
+	Count int64    `json:"count"`
 }
 
 // WikiGraphMode enumerates the graph query modes exposed to the API.
@@ -345,9 +378,14 @@ func (WikiPageIssue) TableName() string {
 // carried — the backend projects SELECT slug, title, summary so a 40k-
 // page KB does not pay for TEXT content transport on every index open.
 type WikiIndexEntry struct {
-	Slug    string `json:"slug"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
+	Slug         string      `json:"slug"`
+	Title        string      `json:"title"`
+	Summary      string      `json:"summary"`
+	ParentSlug   string      `json:"parent_slug,omitempty"`
+	CategoryPath StringArray `json:"category_path,omitempty"`
+	WikiPath     string      `json:"wiki_path,omitempty"`
+	Depth        int         `json:"depth,omitempty"`
+	SortOrder    int         `json:"sort_order,omitempty"`
 }
 
 // WikiIndexGroup bundles the entries for one page_type into a page-sized
@@ -397,4 +435,3 @@ type WikiPageLite struct {
 	Aliases  StringArray `json:"aliases,omitempty"`
 	OutLinks StringArray `json:"out_links,omitempty"`
 }
-

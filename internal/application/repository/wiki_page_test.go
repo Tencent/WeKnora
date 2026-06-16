@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     status            VARCHAR(32) NOT NULL DEFAULT 'published',
     content           TEXT NOT NULL DEFAULT '',
     summary           TEXT NOT NULL DEFAULT '',
+    parent_slug       VARCHAR(255) NOT NULL DEFAULT '',
+    category_path     TEXT DEFAULT '[]',
+    wiki_path         VARCHAR(1024) NOT NULL DEFAULT '',
+    depth             INTEGER NOT NULL DEFAULT 0,
+    sort_order        INTEGER NOT NULL DEFAULT 0,
     source_refs       TEXT DEFAULT '[]',
     chunk_refs        TEXT DEFAULT '[]',
     in_links          TEXT DEFAULT '[]',
@@ -68,10 +73,55 @@ func makeWikiPage(kbID, slug, pageType, status string) *types.WikiPage {
 		Status:          status,
 		Content:         "body of " + slug,
 		Summary:         "summary of " + slug,
+		WikiPath:        pageType + "/" + title,
 		Version:         1,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
+}
+
+func makeCategorizedWikiPage(kbID, slug, pageType, status string, categoryPath ...string) *types.WikiPage {
+	page := makeWikiPage(kbID, slug, pageType, status)
+	page.CategoryPath = types.StringArray(categoryPath)
+	if len(categoryPath) > 0 {
+		page.WikiPath = pageType + "/" + strings.Join(categoryPath, "/") + "/" + page.Title
+		page.Depth = len(categoryPath)
+	}
+	return page
+}
+
+// TestList_WikiPathSortReturnsCategorizedPagesFirst protects the sidebar's
+// IDE-like tree contract. Pagination happens in the repository, so the DB
+// must return pages with category_path before loose root pages; otherwise the
+// frontend cannot know about directories hiding on later pages.
+func TestList_WikiPathSortReturnsCategorizedPagesFirst(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	pages := []*types.WikiPage{
+		makeWikiPage("kb-a", "entity/000-root", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeCategorizedWikiPage("kb-a", "entity/999-child", types.WikiPageTypeEntity, types.WikiPageStatusPublished, "zzz-folder"),
+		makeWikiPage("kb-a", "entity/001-root", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+	}
+	for _, p := range pages {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	got, total, err := repo.List(ctx, &types.WikiPageListRequest{
+		KnowledgeBaseID: "kb-a",
+		PageType:        types.WikiPageTypeEntity,
+		Page:            1,
+		PageSize:        10,
+		SortBy:          "wiki_path",
+		SortOrder:       "asc",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	require.Len(t, got, 3)
+	assert.Equal(t, "entity/999-child", got[0].Slug)
+	assert.Equal(t, "entity/000-root", got[1].Slug)
+	assert.Equal(t, "entity/001-root", got[2].Slug)
 }
 
 // TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived verifies

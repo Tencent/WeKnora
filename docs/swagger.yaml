@@ -850,6 +850,8 @@ definitions:
     properties:
       dimension:
         type: integer
+      supports_dimension_override:
+        type: boolean
       truncate_prompt_tokens:
         type: integer
     type: object
@@ -3345,6 +3347,30 @@ definitions:
     - WebSearchProviderTypeOllama
     - WebSearchProviderTypeBaidu
     - WebSearchProviderTypeSearxng
+  github_com_Tencent_WeKnora_internal_types.WikiCategoryPath:
+    properties:
+      count:
+        type: integer
+      path:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiCategoryPathListResponse:
+    properties:
+      page:
+        type: integer
+      page_size:
+        type: integer
+      paths:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiCategoryPath'
+        type: array
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       extraction_granularity:
@@ -3450,11 +3476,23 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiIndexEntry:
     properties:
+      category_path:
+        items:
+          type: string
+        type: array
+      depth:
+        type: integer
+      parent_slug:
+        type: string
       slug:
         type: string
+      sort_order:
+        type: integer
       summary:
         type: string
       title:
+        type: string
+      wiki_path:
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiIndexGroup:
@@ -3549,6 +3587,14 @@ definitions:
         items:
           type: string
         type: array
+      category_path:
+        description: |-
+          CategoryPath is the directory breadcrumb that groups this page in the
+          wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. It is intentionally
+          label-based so intermediate directory nodes do not need to be real pages.
+        items:
+          type: string
+        type: array
       chunk_refs:
         description: |-
           ChunkRefs records the specific source-document chunks this page was
@@ -3571,6 +3617,9 @@ definitions:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
         description: Soft delete
+      depth:
+        description: Depth is len(CategoryPath), cached for filtering / display.
+        type: integer
       id:
         description: Unique identifier (UUID)
         type: string
@@ -3596,11 +3645,22 @@ definitions:
         description: 'Page type: summary, entity, concept, index, log, synthesis,
           comparison'
         type: string
+      parent_slug:
+        description: |-
+          ParentSlug optionally points at the wiki page that should act as this
+          page's semantic parent in the directory tree. The parent may be empty
+          when the page is grouped only by CategoryPath.
+        type: string
       slug:
         description: |-
           URL-friendly slug for addressing, e.g. "entity/acme-corp", "concept/rag"
           Unique within a knowledge base
         type: string
+      sort_order:
+        description: |-
+          SortOrder allows generated or manually edited pages to control sibling
+          ordering before falling back to title.
+        type: integer
       source_refs:
         description: |-
           References to source knowledge IDs that contributed to this page.
@@ -3633,6 +3693,11 @@ definitions:
           sync from background jobs) leave it untouched so it can be used as a
           real "the page was edited" signal.
         type: integer
+      wiki_path:
+        description: |-
+          WikiPath is a normalized, sortable path derived from page_type,
+          category_path, and title. It keeps large directory listings cheap to sort.
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiPageIssue:
     properties:
@@ -4159,6 +4224,8 @@ definitions:
       source:
         description: 为空时按需默认为 "remote"
         type: string
+      supportsDimensionOverride:
+        type: boolean
     required:
     - modelName
     type: object
@@ -4325,6 +4392,8 @@ definitions:
       source:
         description: 为空时按需默认为 "remote"
         type: string
+      supportsDimensionOverride:
+        type: boolean
     required:
     - modelName
     type: object
@@ -8834,6 +8903,49 @@ paths:
       summary: Auto-fix wiki issues
       tags:
       - Wiki
+  /knowledgebase/{kb_id}/wiki/categories:
+    get:
+      description: Retrieve direct child directories for a wiki page type and optional
+        parent_path
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Wiki page type; comma-separated for multiple (e.g. entity,concept)
+        in: query
+        name: page_type
+        required: true
+        type: string
+      - description: Parent category path, slash-separated
+        in: query
+        name: parent_path
+        type: string
+      - description: Page number (1-based)
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiCategoryPathListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: List wiki category paths
+      tags:
+      - Wiki
   /knowledgebase/{kb_id}/wiki/graph:
     get:
       description: |-
@@ -9050,7 +9162,7 @@ paths:
         name: kb_id
         required: true
         type: string
-      - description: Filter by page type
+      - description: Filter by page type; comma-separated for multiple (e.g. entity,concept)
         in: query
         name: page_type
         type: string

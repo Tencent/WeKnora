@@ -67,6 +67,7 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 
 	// Parse outbound links from content
 	page.OutLinks = s.parseOutLinks(page.Content)
+	normalizeWikiHierarchy(page)
 
 	now := time.Now()
 	page.CreatedAt = now
@@ -115,6 +116,11 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	existing.SourceRefs = page.SourceRefs
 	existing.ChunkRefs = page.ChunkRefs
 	existing.PageMetadata = page.PageMetadata
+	existing.ParentSlug = page.ParentSlug
+	existing.CategoryPath = page.CategoryPath
+	existing.WikiPath = page.WikiPath
+	existing.Depth = page.Depth
+	existing.SortOrder = page.SortOrder
 	existing.Status = page.Status
 	existing.UpdatedAt = time.Now()
 
@@ -122,10 +128,17 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	// when content shifts. Re-parse unconditionally to stay consistent with
 	// the stored body.
 	existing.OutLinks = s.parseOutLinks(existing.Content)
+	normalizeWikiHierarchy(existing)
 
 	if contentChanged {
 		if err := s.repo.Update(ctx, existing); err != nil {
 			return nil, fmt.Errorf("update wiki page: %w", err)
+		}
+		// GORM's struct Updates path skips zero values, so persist hierarchy
+		// metadata through the explicit map path as well. This keeps clearing
+		// parent/category fields deterministic without changing version again.
+		if err := s.repo.UpdateMeta(ctx, existing); err != nil {
+			return nil, fmt.Errorf("update wiki page hierarchy meta: %w", err)
 		}
 	} else {
 		// No user-visible change — persist bookkeeping fields but preserve
@@ -145,6 +158,7 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 
 // UpdatePageMeta updates only metadata (status, source_refs) without version bump or link re-parse.
 func (s *wikiPageService) UpdatePageMeta(ctx context.Context, page *types.WikiPage) error {
+	normalizeWikiHierarchy(page)
 	page.UpdatedAt = time.Now()
 	return s.repo.UpdateMeta(ctx, page)
 }
@@ -191,6 +205,9 @@ func (s *wikiPageService) ListPages(ctx context.Context, req *types.WikiPageList
 	pages, total, err := s.repo.List(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	for _, page := range pages {
+		normalizeWikiHierarchy(page)
 	}
 
 	pageSize := req.PageSize
@@ -322,6 +339,9 @@ func (s *wikiPageService) GetIndexView(
 		}
 		if entries == nil {
 			entries = []types.WikiIndexEntry{}
+		}
+		for i := range entries {
+			normalizeWikiIndexEntryHierarchy(&entries[i], pt)
 		}
 		next := ""
 		// Only emit a cursor when a full page was returned AND more rows
@@ -811,6 +831,20 @@ func (s *wikiPageService) FindSimilarPages(ctx context.Context, kbID string, que
 	return s.repo.FindSimilarPages(ctx, kbID, query, pageTypes, limit)
 }
 
+// ListDistinctCategoryPaths returns unique category_path folders already used
+// by entity/concept pages. Used by wiki ingest to ground extraction prompts.
+func (s *wikiPageService) ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error) {
+	return s.repo.ListDistinctCategoryPaths(ctx, kbID, maxPaths)
+}
+
+// ListDistinctCategoryPathsByType returns unique category_path folders across
+// the given page types. The browser uses this to render directory nodes before
+// article pages are paged in; passing several types lets one tab (e.g. the
+// merged knowledge tab) build a single directory skeleton server-side.
+func (s *wikiPageService) ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, maxPaths int) ([]types.WikiCategoryPath, error) {
+	return s.repo.ListDistinctCategoryPathsByType(ctx, kbID, pageTypes, parentPath, maxPaths)
+}
+
 // CountByType is a service-layer pass-through over the repo. Used by
 // the index intro path to frame the LLM prompt's "showing N of M" hint.
 func (s *wikiPageService) CountByType(ctx context.Context, kbID string) (map[string]int64, error) {
@@ -917,11 +951,121 @@ func (s *wikiPageService) createDefaultPage(ctx context.Context, kbID string, sl
 		Summary:         title,
 		Version:         1,
 	}
+	normalizeWikiHierarchy(page)
 
 	if err := s.repo.Create(ctx, page); err != nil {
 		return nil, fmt.Errorf("create default %s page: %w", slug, err)
 	}
 	return page, nil
+}
+
+func normalizeWikiHierarchy(page *types.WikiPage) {
+	if page == nil {
+		return
+	}
+	page.ParentSlug = strings.TrimSpace(page.ParentSlug)
+
+	cleanPath := make(types.StringArray, 0, len(page.CategoryPath))
+	for _, part := range page.CategoryPath {
+		for _, cleanPart := range cleanWikiCategoryPart(part) {
+			if !containsString(cleanPath, cleanPart) {
+				cleanPath = append(cleanPath, cleanPart)
+			}
+			if len(cleanPath) >= 3 {
+				break
+			}
+		}
+		if len(cleanPath) >= 3 {
+			break
+		}
+	}
+	page.CategoryPath = cleanPath
+	page.Depth = len(cleanPath)
+
+	parts := make([]string, 0, len(cleanPath)+2)
+	if page.PageType != "" {
+		parts = append(parts, page.PageType)
+	}
+	for _, part := range cleanPath {
+		parts = append(parts, part)
+	}
+	display := strings.TrimSpace(page.Title)
+	if display == "" {
+		display = strings.TrimSpace(page.Slug)
+	}
+	if display != "" {
+		parts = append(parts, display)
+	}
+	page.WikiPath = strings.Join(parts, "/")
+}
+
+func normalizeWikiIndexEntryHierarchy(entry *types.WikiIndexEntry, pageType string) {
+	if entry == nil {
+		return
+	}
+
+	cleanPath := make(types.StringArray, 0, len(entry.CategoryPath))
+	for _, part := range entry.CategoryPath {
+		for _, cleanPart := range cleanWikiCategoryPart(part) {
+			if !containsString(cleanPath, cleanPart) {
+				cleanPath = append(cleanPath, cleanPart)
+			}
+			if len(cleanPath) >= 3 {
+				break
+			}
+		}
+		if len(cleanPath) >= 3 {
+			break
+		}
+	}
+	entry.CategoryPath = cleanPath
+	entry.Depth = len(cleanPath)
+
+	parts := make([]string, 0, len(cleanPath)+2)
+	if strings.TrimSpace(pageType) != "" {
+		parts = append(parts, strings.TrimSpace(pageType))
+	}
+	parts = append(parts, cleanPath...)
+	display := strings.TrimSpace(entry.Title)
+	if display == "" {
+		display = strings.TrimSpace(entry.Slug)
+	}
+	if display != "" {
+		parts = append(parts, display)
+	}
+	entry.WikiPath = strings.Join(parts, "/")
+}
+
+func cleanWikiCategoryPart(part string) []string {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return nil
+	}
+
+	part = strings.NewReplacer("／", "/", "｜", "/", "|", "/").Replace(part)
+	rawParts := strings.Split(part, "/")
+	cleaned := make([]string, 0, len(rawParts))
+	for _, raw := range rawParts {
+		label := strings.TrimSpace(raw)
+		label = strings.Trim(label, `"'“”‘’[]（）()`)
+		label = strings.TrimSpace(label)
+		if label == "" || isWikiTypeCategoryLabel(label) {
+			continue
+		}
+		cleaned = append(cleaned, label)
+	}
+	return cleaned
+}
+
+func isWikiTypeCategoryLabel(label string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	normalized = strings.TrimSuffix(normalized, "s")
+	switch normalized {
+	case "entity", "实体", "實體", "concept", "概念", "summary", "摘要", "wiki", "页面", "頁面":
+		return true
+	default:
+		return false
+	}
 }
 
 // containsString checks if a string slice contains a given string
