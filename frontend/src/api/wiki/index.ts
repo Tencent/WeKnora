@@ -20,6 +20,11 @@ export interface WikiPage {
   content: string;
   summary: string;
   aliases: string[];
+  parent_slug?: string;
+  category_path?: string[];
+  wiki_path?: string;
+  depth?: number;
+  sort_order?: number;
   source_refs: string[];
   in_links: string[];
   out_links: string[];
@@ -31,6 +36,14 @@ export interface WikiPage {
 
 export interface WikiPageListResponse {
   pages: WikiPage[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface WikiCategoryPathListResponse {
+  paths: { path: string[]; count: number }[];
   total: number;
   page: number;
   page_size: number;
@@ -82,6 +95,8 @@ export function listWikiPages(kbId: string, params?: {
   page_type?: string;
   status?: string;
   query?: string;
+  category_path?: string;
+  category_depth?: number;
   page?: number;
   page_size?: number;
   sort_by?: string;
@@ -97,6 +112,20 @@ export function listWikiPages(kbId: string, params?: {
   }
   const qs = query.toString();
   return get(`/api/v1/knowledgebase/${kbId}/wiki/pages${qs ? '?' + qs : ''}`);
+}
+
+export function listWikiCategories(kbId: string, params: {
+  page_type: string;
+  parent_path?: string;
+  page?: number;
+  page_size?: number;
+}) {
+  const query = new URLSearchParams();
+  query.set('page_type', params.page_type);
+  if (params.parent_path) query.set('parent_path', params.parent_path);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.page_size !== undefined) query.set('page_size', String(params.page_size));
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/categories?${query.toString()}`);
 }
 
 export function createWikiPage(kbId: string, data: Partial<WikiPage>) {
@@ -119,6 +148,11 @@ export interface WikiIndexEntryDTO {
   slug: string;
   title: string;
   summary: string;
+  parent_slug?: string;
+  category_path?: string[];
+  wiki_path?: string;
+  depth?: number;
+  sort_order?: number;
 }
 
 export interface WikiIndexGroup {

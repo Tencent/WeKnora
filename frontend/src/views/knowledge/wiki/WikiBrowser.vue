@@ -290,32 +290,64 @@
 
             <!-- Active-tab list -->
             <template v-if="activeGroup">
-              <RecycleScroller
-                ref="groupScrollerRef"
-                class="wiki-group-scroller"
-                :items="activeGroup.pages"
-                :item-size="WIKI_PAGE_ITEM_HEIGHT"
-                key-field="id"
-                :buffer="400"
-                page-mode
-                v-slot="{ item }"
-              >
-                <div
-                  :class="['wiki-page-item', { active: selectedPage?.id === item.id }]"
-                  @click="selectPage(item)"
+              <div ref="treeListRef" class="wiki-tree-list">
+                <template
+                  v-for="item in activeTreeRows"
+                  :key="item.rowKey"
                 >
-                  <div class="wiki-page-item-title">{{ item.title }}</div>
-                  <div class="wiki-page-item-summary">{{ item.summary }}</div>
-                  <div class="wiki-page-item-meta">
-                    <span>{{ formatDate(item.updated_at) }}</span>
+                  <div
+                    v-if="item.kind === 'directory'"
+                    class="wiki-directory-item"
+                    :style="{ paddingLeft: `${6 + item.depth * 14}px` }"
+                    @click="toggleDirectory(item.pathKey)"
+                  >
+                    <t-icon :name="item.collapsed ? 'chevron-right' : 'chevron-down'" class="wiki-directory-toggle" />
+                    <t-icon name="folder" class="wiki-directory-icon" />
+                    <span class="wiki-directory-title">{{ item.label }}</span>
+                    <span class="wiki-directory-count">{{ item.count }}</span>
                   </div>
-                </div>
-              </RecycleScroller>
+                  <div
+                    v-else-if="item.kind === 'load-more'"
+                    class="wiki-directory-load-more"
+                    :data-loadmore-key="item.rowKey"
+                    :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
+                    @click="loadPagesForType(item.type, { categoryPath: item.path })"
+                  >
+                    <t-loading v-if="item.loading" size="small" />
+                    <template v-else>
+                      <t-icon name="chevron-down" />
+                      <span>{{ $t('knowledgeEditor.wikiBrowser.logLoadMore') }}</span>
+                    </template>
+                  </div>
+                  <div
+                    v-else-if="item.kind === 'load-more-dirs'"
+                    class="wiki-directory-load-more"
+                    :data-loadmore-key="item.rowKey"
+                    :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
+                    @click="loadCategoriesForType(item.type, { parentPath: item.path })"
+                  >
+                    <t-loading v-if="item.loading" size="small" />
+                    <template v-else>
+                      <t-icon name="folder-open" />
+                      <span>{{ $t('knowledgeEditor.wikiBrowser.loadMoreFolders') }}</span>
+                    </template>
+                  </div>
+                  <div
+                    v-else
+                    :class="['wiki-page-item', 'wiki-page-item--tree', { active: selectedPage?.id === item.page.id }]"
+                    :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
+                    :title="item.page.title"
+                    @click="selectPage(item.page)"
+                  >
+                    <t-icon :name="getPageIcon(item.page)" :class="['wiki-page-file-icon', `wiki-page-file-icon--${item.page.page_type}`]" />
+                    <span class="wiki-page-item-title">{{ item.page.title }}</span>
+                  </div>
+                </template>
+              </div>
               <!-- Sentinel: when this hits the viewport, fetch the next
-                   page. Page-mode RecycleScroller delegates scrolling to
-                   `.wiki-page-list`, so scroll-end events don't fire on
-                   the scroller itself; IntersectionObserver is the right
-                   primitive here and degrades gracefully while loading. -->
+                   page. The tree list itself is intentionally plain DOM:
+                   rows are already paged, and avoiding dynamic row
+                   measurement keeps expand/collapse visually stable. -->
               <div
                 v-if="activeGroup.hasMore"
                 ref="groupSentinelRef"
@@ -645,17 +677,13 @@ import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
-// RecycleScroller virtualizes the sidebar page lists so expanding a
-// 40k-item group no longer commits 40k DOM nodes. Each item has a fixed
-// height (title + 2-line summary + meta + padding) which keeps recycle
-// mode cheap — no measurement overhead per item.
-import { RecycleScroller } from 'vue-virtual-scroller'
-import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
+import { hydrateProtectedFileImages } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
 import {
   listWikiPages,
+  listWikiCategories,
   getWikiPage,
   getWikiIndex,
   getWikiLog,
@@ -719,8 +747,42 @@ interface PageTypeBucket {
   total: number      // KB-wide count reported by the backend for this type
   loading: boolean
   initialized: boolean // true once the first page has been fetched
+  categoryPaths: Array<{ path: string[]; count: number }>
+  categoriesLoading: boolean
+  categoriesInitialized: boolean
+  // categoryPages tracks the directory-skeleton pagination per parent level,
+  // keyed by directoryPathKey(type, parentPath). Each level is paged in on
+  // demand so a folder with thousands of siblings doesn't arrive in one shot.
+  categoryPages: Record<string, DirectoryCategoryState>
+  directoryPages: Record<string, DirectoryPageState>
+}
+interface DirectoryPageState {
+  nextPage: number
+  total: number
+  loading: boolean
+  initialized: boolean
+}
+interface DirectoryCategoryState {
+  nextPage: number   // next directory page to fetch, 1-based
+  totalPages: number
+  loading: boolean
+  initialized: boolean
+}
+type WikiTreeRow =
+  | { kind: 'directory'; rowKey: string; pathKey: string; label: string; depth: number; count: number; collapsed: boolean }
+  | { kind: 'load-more'; rowKey: string; type: string; path: string[]; depth: number; loading: boolean }
+  | { kind: 'load-more-dirs'; rowKey: string; type: string; path: string[]; depth: number; loading: boolean }
+  | { kind: 'page'; rowKey: string; page: WikiPage; depth: number }
+interface WikiTreeDirectory {
+  label: string
+  path: string[]
+  dirs: Map<string, WikiTreeDirectory>
+  pages: WikiPage[]
+  count: number
 }
 const pagesByType = ref<Record<string, PageTypeBucket>>({})
+const collapsedDirectories = ref<Set<string>>(new Set())
+const touchedDirectories = ref<Set<string>>(new Set())
 // Index view state. The reader renders an incrementally-built markdown
 // string rather than a structured list — opening the view loads intro
 // only, and "Load more" appends one directory section at a time in a
@@ -960,42 +1022,70 @@ const navFromSystemView = ref<'' | 'index' | 'log'>('')
 // the "other" bucket at the bottom of groupedPages.
 const typeOrder = ['summary', 'entity', 'concept', 'synthesis', 'comparison']
 
+// Entity and concept pages look and behave alike, so the sidebar merges all
+// non-summary content types under a single "knowledge" tab and distinguishes
+// the individual page types by icon instead. Summary keeps its own tab and is
+// shown after the knowledge tab.
+const KNOWLEDGE_TAB = 'knowledge'
+const KNOWLEDGE_TYPES = ['entity', 'concept', 'synthesis', 'comparison']
+// CONTENT_TABS are the sidebar tabs in display order: the merged knowledge tab
+// first, then summary. Each tab maps to its own bucket keyed by the tab id.
+const CONTENT_TABS = [KNOWLEDGE_TAB, 'summary']
+
+// tabPageTypes maps a sidebar tab onto the comma-separated page_type filter the
+// backend expects. The knowledge tab folds every non-summary content type into
+// one request so the server returns a single merged list and directory
+// skeleton — no per-type fan-out on the client.
+function tabPageTypes(tab: string): string {
+  return tab === KNOWLEDGE_TAB ? KNOWLEDGE_TYPES.join(',') : tab
+}
+
 // groupedPages projects the bucketed state into the shape the sidebar
 // template expects: one {type, label, items, total, loading, hasMore}
 // per displayed group. Groups with zero total are hidden (nothing to
 // show) but groups with total > 0 but items.length === 0 still render
 // so the collapse header can trigger a lazy fetch.
 const groupedPages = computed(() => {
-  const out: {
+  type Group = {
     type: string
     label: string
     pages: WikiPage[]
     total: number
     loading: boolean
     hasMore: boolean
-  }[] = []
-  const seen = new Set<string>()
-  const push = (type: string) => {
-    const bucket = pagesByType.value[type]
-    if (!bucket) return
-    if (bucket.total === 0) return
-    out.push({
-      type,
-      label: getTypeLabel(type),
-      pages: bucket.items,
-      total: bucket.total,
-      loading: bucket.loading,
-      hasMore: bucket.items.length < bucket.total,
-    })
-    seen.add(type)
   }
-  for (const type of typeOrder) push(type)
-  // Any types present in the buckets but not in typeOrder go last in
-  // insertion order so the sidebar doesn't suddenly hide a future type.
-  for (const type of Object.keys(pagesByType.value)) {
-    if (seen.has(type)) continue
-    if (type === 'index' || type === 'log') continue
-    push(type)
+  const out: Group[] = []
+  const seen = new Set<string>()
+  // Stats are reported per real page_type; the knowledge tab sums its members
+  // so the count is available before the first page request completes.
+  const statTotal = (tab: string) => {
+    const byType = stats.value?.pages_by_type
+    if (!byType) return 0
+    if (tab === KNOWLEDGE_TAB) return KNOWLEDGE_TYPES.reduce((sum, t) => sum + (byType[t] || 0), 0)
+    return byType[tab] || 0
+  }
+  const push = (tab: string) => {
+    const bucket = pagesByType.value[tab]
+    if (!bucket) return
+    const total = bucket.total || statTotal(tab) || bucket.categoryPaths.length
+    if (total === 0) return
+    out.push({
+      type: tab,
+      label: getTypeLabel(tab),
+      pages: bucket.items,
+      total,
+      loading: bucket.loading,
+      hasMore: bucket.total > 0 && bucket.items.length < bucket.total,
+    })
+    seen.add(tab)
+  }
+  for (const tab of CONTENT_TABS) push(tab)
+  // Any tabs present in the buckets but not handled above go last in insertion
+  // order so the sidebar doesn't suddenly hide a future tab.
+  for (const tab of Object.keys(pagesByType.value)) {
+    if (seen.has(tab)) continue
+    if (tab === 'index' || tab === 'log') continue
+    push(tab)
   }
   return out
 })
@@ -1006,7 +1096,7 @@ const groupedPages = computed(() => {
 // reported by the backend — zero everywhere means no content pages.
 const hasContentPages = computed(() => {
   for (const bucket of Object.values(pagesByType.value)) {
-    if (bucket.total > 0) return true
+    if (bucket.total > 0 || bucket.categoryPaths.length > 0) return true
   }
   return false
 })
@@ -1263,10 +1353,8 @@ function renderMarkdown(content: string): string {
     return `<a href="#" class="wiki-content-link" data-slug="${slug}">${display}</a>`
   })
 
-  // Use the shared markdown sanitizer before v-html inserts the content, so
-  // provider-backed images start as placeholders and hydrate into blob URLs.
-  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string
-  return sanitizeMarkdownHTML(html)
+  // Use marked to render the markdown to HTML
+  return marked.parse(preprocessed, { breaks: true, async: false }) as string
 }
 
 async function openGraphDrawer(slug: string) {
@@ -1296,24 +1384,14 @@ function handleGraphDrawerClick(e: MouseEvent) {
 
 // activeTab drives which page_type's list is visible in the sidebar.
 // Pre-tabbed UX stacked collapsible groups, but on a 40k-page KB the
-// expanded groups nest RecycleScroller viewports and scroll events get
+// expanded groups left multiple virtualized viewports and scroll events got
 // ambiguous — "which list am I scrolling?" The tabbed version removes
 // that ambiguity by mounting exactly one scroller at a time.
 const activeTab = ref<string>('')
-// The outer scroll container — the RecycleScroller runs in page-mode and
-// delegates scrolling here, so we need a handle to reset scrollTop on
-// tab switches. Otherwise the retained scroll position from the old tab
-// re-triggers the sentinel on the new tab's (shorter) list and cascades
-// load-more calls until the new bucket catches up.
+// The outer scroll container. We reset it on tab switches so the retained
+// scroll position from the old tab doesn't immediately expose the new
+// tab's sentinel and cascade load-more calls.
 const pageListRef = ref<HTMLElement | null>(null)
-// Handle on the active RecycleScroller. In page-mode the scroller only
-// recomputes its visible window on scroll events; when we extend `items`
-// in place the previously-rendered tail remains mounted at its old
-// offsets, so newly appended rows appear out of order at the bottom
-// until the user jiggles the scroll. Calling `updateVisibleItems` after
-// a batch arrives forces the recompute and avoids that "ghost last page"
-// artifact.
-const groupScrollerRef = ref<{ updateVisibleItems?: (force: boolean) => void } | null>(null)
 
 function setActiveTab(type: string) {
   if (activeTab.value === type) return
@@ -1322,6 +1400,9 @@ function setActiveTab(type: string) {
   // has to be scrolled to, not simply appear at a retained scroll depth.
   if (pageListRef.value) pageListRef.value.scrollTop = 0
   const bucket = pagesByType.value[type]
+  if (bucket && !bucket.categoriesInitialized && !bucket.categoriesLoading) {
+    loadCategoriesForType(type)
+  }
   if (bucket && !bucket.initialized && !bucket.loading) {
     loadPagesForType(type)
   }
@@ -1342,6 +1423,201 @@ const activeGroup = computed(() => {
   return groupedPages.value.find(g => g.type === activeTab.value) || null
 })
 
+function pageCategoryPath(page: WikiPage): string[] {
+  const raw = Array.isArray(page.category_path) ? page.category_path : []
+  return raw.map(part => String(part || '').trim()).filter(Boolean)
+}
+
+function directoryPathKey(type: string, parts: string[]): string {
+  return `${type}:${parts.join('/')}`
+}
+
+function toggleDirectory(pathKey: string) {
+  const next = new Set(collapsedDirectories.value)
+  if (next.has(pathKey)) {
+    next.delete(pathKey)
+    const parsed = parseDirectoryPathKey(pathKey)
+    if (parsed) {
+      loadCategoriesForType(parsed.type, { parentPath: parsed.path })
+      loadPagesForType(parsed.type, { categoryPath: parsed.path })
+    }
+  } else {
+    next.add(pathKey)
+  }
+  collapsedDirectories.value = next
+
+  const touched = new Set(touchedDirectories.value)
+  touched.add(pathKey)
+  touchedDirectories.value = touched
+}
+
+function parseDirectoryPathKey(pathKey: string): { type: string; path: string[] } | null {
+  const idx = pathKey.indexOf(':')
+  if (idx < 0) return null
+  const type = pathKey.slice(0, idx)
+  const path = pathKey.slice(idx + 1).split('/').map(part => part.trim()).filter(Boolean)
+  return { type, path }
+}
+
+function clearDirectoryStateForType(type: string) {
+  const prefix = `${type}:`
+  collapsedDirectories.value = new Set([...collapsedDirectories.value].filter(key => !key.startsWith(prefix)))
+  touchedDirectories.value = new Set([...touchedDirectories.value].filter(key => !key.startsWith(prefix)))
+}
+
+function initializeDefaultCollapsedDirectories(type: string, pagesToInspect: WikiPage[]) {
+  if (pagesToInspect.length === 0) return
+
+  const next = new Set(collapsedDirectories.value)
+  const touched = touchedDirectories.value
+  let changed = false
+
+  for (const page of pagesToInspect) {
+    const path = pageCategoryPath(page)
+    for (let i = 0; i < path.length; i++) {
+      const key = directoryPathKey(type, path.slice(0, i + 1))
+      if (touched.has(key) || next.has(key)) continue
+      next.add(key)
+      changed = true
+    }
+  }
+
+  if (changed) {
+    collapsedDirectories.value = next
+  }
+}
+
+const activeTreeRows = computed<WikiTreeRow[]>(() => {
+  const group = activeGroup.value
+  if (!group) return []
+  const groupType = group.type
+
+  const rows: WikiTreeRow[] = []
+  const root: WikiTreeDirectory = {
+    label: '',
+    path: [],
+    dirs: new Map(),
+    pages: [],
+    count: 0,
+  }
+
+  function ensureDirectory(parent: WikiTreeDirectory, label: string): WikiTreeDirectory {
+    const existing = parent.dirs.get(label)
+    if (existing) return existing
+
+    const dir: WikiTreeDirectory = {
+      label,
+      path: [...parent.path, label],
+      dirs: new Map(),
+      pages: [],
+      count: 0,
+    }
+    parent.dirs.set(label, dir)
+    return dir
+  }
+
+  // Each tab maps to a single bucket; the knowledge tab's bucket already holds
+  // the server-merged pages and directory skeleton (page_type=entity,concept,…).
+  const bucket = pagesByType.value[groupType]
+  const hasCategorySkeleton = (bucket?.categoryPaths.length || 0) > 0
+  for (const category of bucket?.categoryPaths || []) {
+    const categoryPath = category.path
+    let cursor = root
+    for (let i = 0; i < categoryPath.length; i++) {
+      const part = categoryPath[i]
+      cursor = ensureDirectory(cursor, part)
+      if (i === categoryPath.length - 1) {
+        cursor.count = category.count
+      }
+    }
+  }
+
+  for (const page of group.pages) {
+    const path = pageCategoryPath(page)
+    let cursor = root
+    if (!hasCategorySkeleton) cursor.count += 1
+
+    for (const part of path) {
+      cursor = ensureDirectory(cursor, part)
+      if (!hasCategorySkeleton) cursor.count += 1
+    }
+
+    cursor.pages.push(page)
+  }
+
+  // appendDirLoadMore renders a "load more folders" row when the directory
+  // skeleton for `parentPath` has more pages to pull.
+  function appendDirLoadMore(parentPath: string[], depth: number) {
+    const catKey = directoryPathKey(groupType, parentPath)
+    const catState = bucket?.categoryPages[catKey]
+    if (!catState) return
+    const hasMore = catState.initialized && catState.nextPage <= catState.totalPages
+    if (!catState.loading && !hasMore) return
+    rows.push({
+      kind: 'load-more-dirs',
+      rowKey: `load-more-dirs:${catKey}`,
+      type: groupType,
+      path: parentPath,
+      depth,
+      loading: !!catState.loading,
+    })
+  }
+
+  function appendDirectory(dir: WikiTreeDirectory, depth: number) {
+    const key = directoryPathKey(groupType, dir.path)
+    const collapsed = collapsedDirectories.value.has(key)
+    rows.push({
+      kind: 'directory',
+      rowKey: `dir:${key}`,
+      pathKey: key,
+      label: dir.label,
+      depth,
+      count: dir.count,
+      collapsed,
+    })
+    if (collapsed) return
+
+    for (const child of dir.dirs.values()) {
+      appendDirectory(child, depth + 1)
+    }
+    appendDirLoadMore(dir.path, depth + 1)
+    for (const page of dir.pages) {
+      rows.push({
+        kind: 'page',
+        rowKey: `page:${page.id}`,
+        page,
+        depth: depth + 1,
+      })
+    }
+    const state = bucket?.directoryPages[key]
+    const hasMore = state && state.total > 0 && (state.nextPage - 1) * WIKI_SIDEBAR_PAGE_SIZE < state.total
+    if (state?.loading || hasMore) {
+      rows.push({
+        kind: 'load-more',
+        rowKey: `load-more:${key}`,
+        type: groupType,
+        path: dir.path,
+        depth: depth + 1,
+        loading: !!state?.loading,
+      })
+    }
+  }
+
+  for (const dir of root.dirs.values()) {
+    appendDirectory(dir, 0)
+  }
+  appendDirLoadMore([], 0)
+  for (const page of root.pages) {
+    rows.push({
+      kind: 'page',
+      rowKey: `page:${page.id}`,
+      page,
+      depth: 0,
+    })
+  }
+  return rows
+})
+
 // Keep activeTab in sync with what's available. When loadPages first
 // populates buckets, pick the first non-empty tab. When a user deletes
 // the last page of the active type we transparently switch to the next
@@ -1356,12 +1632,10 @@ watch(visibleTabs, (tabs) => {
   }
 })
 
-// IntersectionObserver-driven infinite scroll for the active tab.
-// In page-mode the RecycleScroller doesn't emit scroll-end, so we
-// observe a 1px sentinel placed after the list. When it enters the
-// viewport we pull the next page for the active bucket; guards in
-// loadPagesForType prevent double-fetching. We re-bind whenever the
-// sentinel element changes (tab switch, empty/has-more transitions).
+// IntersectionObserver-driven infinite scroll for the active tab. We
+// observe a 1px sentinel placed after the list; when it enters the
+// viewport we pull the next page for the active bucket. Guards in
+// loadPagesForType prevent double-fetching.
 const groupSentinelRef = ref<HTMLElement | null>(null)
 let groupSentinelObserver: IntersectionObserver | null = null
 watch(groupSentinelRef, (el) => {
@@ -1380,13 +1654,47 @@ watch(groupSentinelRef, (el) => {
   groupSentinelObserver.observe(el)
 }, { flush: 'post' })
 
-// WIKI_PAGE_ITEM_HEIGHT must match the rendered height of .wiki-page-item
-// INCLUDING its bottom margin. RecycleScroller absolutely positions
-// items at multiples of this value; if the CSS renders at a different
-// height, siblings overlap. Measured height with 1-line title + 2-line
-// 12/1.5 summary + meta + 10/10 padding = ~95px; we lock the item to
-// exactly 100px below so the math is independent of summary text length.
-const WIKI_PAGE_ITEM_HEIGHT = 100
+// Auto-load for the "load more" rows that live INSIDE the tree (more
+// pages within an expanded directory, or more sub-folders at a level).
+// The bottom group sentinel only covers the root page list; these rows
+// can sit in the MIDDLE of the list, so we observe each of them. When a
+// row scrolls into view it fires its loader instead of waiting for a
+// manual click. Re-attaching on every activeTreeRows change also drains
+// the case the user asked about — "current page loaded but more remain,
+// and the row never reached the bottom": observe() re-fires for any row
+// still intersecting after the previous batch rendered, and the loader
+// guards stop the cascade once the directory is exhausted or the row is
+// pushed out of view.
+const treeListRef = ref<HTMLElement | null>(null)
+let loadMoreObserver: IntersectionObserver | null = null
+
+function dispatchLoadMore(rowKey: string) {
+  const row = activeTreeRows.value.find(r => r.rowKey === rowKey)
+  if (!row) return
+  if (row.kind === 'load-more') {
+    loadPagesForType(row.type, { categoryPath: row.path })
+  } else if (row.kind === 'load-more-dirs') {
+    loadCategoriesForType(row.type, { parentPath: row.path })
+  }
+}
+
+watch([activeTreeRows, treeListRef], () => {
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect()
+    loadMoreObserver = null
+  }
+  const container = treeListRef.value
+  if (!container) return
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue
+      const key = (entry.target as HTMLElement).dataset.loadmoreKey
+      if (key) dispatchLoadMore(key)
+    }
+  }, { rootMargin: '200px' })
+  container.querySelectorAll<HTMLElement>('[data-loadmore-key]')
+    .forEach(el => loadMoreObserver!.observe(el))
+}, { flush: 'post' })
 
 function getTypeTheme(type: string): string {
   const map: Record<string, string> = {
@@ -1398,6 +1706,7 @@ function getTypeTheme(type: string): string {
 
 function getTypeLabel(type: string): string {
   const map: Record<string, string> = {
+    knowledge: t('knowledgeEditor.wikiBrowser.filterKnowledge'),
     summary: t('knowledgeEditor.wikiBrowser.filterSummary'),
     entity: t('knowledgeEditor.wikiBrowser.filterEntity'),
     concept: t('knowledgeEditor.wikiBrowser.filterConcept'),
@@ -1407,6 +1716,19 @@ function getTypeLabel(type: string): string {
     log: 'Log',
   }
   return map[type] || type
+}
+
+// getPageIcon picks a distinct icon per page_type so the merged knowledge
+// tab can still tell entities, concepts, etc. apart at a glance.
+function getPageIcon(page: WikiPage): string {
+  const map: Record<string, string> = {
+    entity: 'tag',
+    concept: 'lightbulb',
+    synthesis: 'relativity',
+    comparison: 'view-module',
+    summary: 'file',
+  }
+  return map[page.page_type] || 'file'
 }
 
 const renderedContent = computed(() => {
@@ -1483,17 +1805,26 @@ function handleContentClick(e: MouseEvent) {
 // the initial paint is snappy even on a big KB, large enough that the
 // virtualized scroller normally gets everything it needs in one request
 // for common wikis. Later pages are pulled on scroll.
-const WIKI_SIDEBAR_PAGE_SIZE = 50
+const WIKI_SIDEBAR_PAGE_SIZE = 100
 
-// CONTENT_PAGE_TYPES is the list of page_type buckets the sidebar
-// renders as collapsible groups. We initialize all of them up-front so
-// the sidebar scaffolding renders immediately with "loading" markers —
-// if a bucket truly has 0 pages server-side, the total field comes back
-// as 0 and groupedPages hides it.
-const CONTENT_PAGE_TYPES = ['summary', 'entity', 'concept', 'synthesis', 'comparison']
+// WIKI_CATEGORY_PAGE_SIZE is the directory-skeleton fetch batch per level. A
+// level is paged in on demand; when more siblings remain a "load more folders"
+// row is rendered to pull the next page.
+const WIKI_CATEGORY_PAGE_SIZE = 100
 
 function emptyBucket(): PageTypeBucket {
-  return { items: [], nextPage: 1, total: 0, loading: false, initialized: false }
+  return {
+    items: [],
+    nextPage: 1,
+    total: 0,
+    loading: false,
+    initialized: false,
+    categoryPaths: [],
+    categoriesLoading: false,
+    categoriesInitialized: false,
+    categoryPages: {},
+    directoryPages: {},
+  }
 }
 
 function ensureBucket(type: string): PageTypeBucket {
@@ -1503,37 +1834,152 @@ function ensureBucket(type: string): PageTypeBucket {
   return pagesByType.value[type]
 }
 
+// loadCategoriesForType pages the directory skeleton one level at a time. Each
+// call fetches the next unloaded page of `parentPath`'s direct children;
+// deeper levels are pulled lazily when their folder is expanded (see
+// toggleDirectory), and a "load more folders" row pulls the next page within a
+// level. Re-expanding an already-loaded level does not refetch.
+async function loadCategoriesForType(type: string, opts: { reset?: boolean; parentPath?: string[] } = {}) {
+  const bucket = ensureBucket(type)
+  const parentPath = opts.parentPath || []
+  const parentKey = directoryPathKey(type, parentPath)
+  const isRoot = parentPath.length === 0
+  if (opts.reset) {
+    bucket.categoryPaths = []
+    bucket.categoriesInitialized = false
+    bucket.categoryPages = {}
+  }
+
+  let state = bucket.categoryPages[parentKey]
+  if (state?.loading) return
+  if (state && state.initialized && state.nextPage > state.totalPages) return
+  if (!state) {
+    state = { nextPage: 1, totalPages: 1, loading: false, initialized: false }
+  }
+
+  const setState = (next: DirectoryCategoryState) => {
+    bucket.categoryPages = { ...bucket.categoryPages, [parentKey]: next }
+  }
+  setState({ ...state, loading: true })
+  if (isRoot) bucket.categoriesLoading = true
+  try {
+    const res = await listWikiCategories(props.knowledgeBaseId, {
+      page_type: tabPageTypes(type),
+      parent_path: parentPath.join('/'),
+      page: state.nextPage,
+      page_size: WIKI_CATEGORY_PAGE_SIZE,
+    })
+    const body: any = (res as any).data || res
+    const paths = Array.isArray(body?.paths) ? body.paths : []
+    const incoming: Array<{ path: string[]; count: number }> = paths
+      .map((entry: any) => ({
+        path: Array.isArray(entry?.path)
+          ? entry.path.map((part: unknown) => String(part || '').trim()).filter(Boolean)
+          : [],
+        count: Number(entry?.count) || 0,
+      }))
+      .filter((entry: { path: string[]; count: number }) => entry.path.length > 0)
+
+    const existing = new Map(bucket.categoryPaths.map(entry => [directoryPathKey(type, entry.path), entry]))
+    for (const entry of incoming) {
+      existing.set(directoryPathKey(type, entry.path), entry)
+    }
+    bucket.categoryPaths = Array.from(existing.values())
+    setState({
+      nextPage: state.nextPage + 1,
+      totalPages: Number(body?.total_pages) || 1,
+      loading: false,
+      initialized: true,
+    })
+    if (isRoot) bucket.categoriesInitialized = true
+    initializeDefaultCollapsedDirectories(type, incoming.map((entry: { path: string[]; count: number }) => ({
+      category_path: entry.path,
+    } as WikiPage)))
+  } catch (e) {
+    console.error(`Failed to load wiki categories of type ${type}:`, e)
+    setState({ ...state, loading: false })
+  } finally {
+    if (isRoot) bucket.categoriesLoading = false
+  }
+}
+
 // loadPagesForType fetches the next page for a single type bucket. The
 // first call seeds `total` from the backend so subsequent `hasMore`
 // checks work without another round-trip. Guard against concurrent
 // invocations for the same type (e.g. scroll event fires rapidly while
 // a network request is still in flight).
-async function loadPagesForType(type: string, opts: { reset?: boolean } = {}) {
+async function loadPagesForType(type: string, opts: { reset?: boolean; categoryPath?: string[] } = {}) {
   const bucket = ensureBucket(type)
-  if (bucket.loading) return
+  const categoryPath = opts.categoryPath || []
+  const scopedToCategory = categoryPath.length > 0
+  const scopedPathKey = scopedToCategory ? directoryPathKey(type, categoryPath) : ''
+  if (scopedToCategory && !bucket.directoryPages[scopedPathKey]) {
+    bucket.directoryPages = {
+      ...bucket.directoryPages,
+      [scopedPathKey]: { nextPage: 1, total: 0, loading: false, initialized: false },
+    }
+  }
+  const scopedState = scopedToCategory ? bucket.directoryPages[scopedPathKey] : null
+  if (scopedState?.loading || (!scopedToCategory && bucket.loading)) return
   if (opts.reset) {
     bucket.items = []
     bucket.nextPage = 1
     bucket.total = 0
     bucket.initialized = false
+    bucket.directoryPages = {}
+    clearDirectoryStateForType(type)
   }
-  if (bucket.initialized && bucket.items.length >= bucket.total) return
+  if (scopedToCategory) {
+    const state = scopedState
+    if (!state) return
+    if (state.initialized && state.total > 0 && (state.nextPage - 1) * WIKI_SIDEBAR_PAGE_SIZE >= state.total) return
+  } else if (bucket.initialized && bucket.items.length >= bucket.total) {
+    return
+  }
 
-  bucket.loading = true
+  if (scopedState) {
+    bucket.directoryPages = {
+      ...bucket.directoryPages,
+      [scopedPathKey]: { ...scopedState, loading: true },
+    }
+  }
+  else bucket.loading = true
   try {
+    const currentScopedState = scopedToCategory ? bucket.directoryPages[scopedPathKey] : null
     const res = await listWikiPages(props.knowledgeBaseId, {
-      page_type: type,
-      page: bucket.nextPage,
+      page_type: tabPageTypes(type),
+      page: currentScopedState ? currentScopedState.nextPage : bucket.nextPage,
       page_size: WIKI_SIDEBAR_PAGE_SIZE,
+      sort_by: 'wiki_path',
+      sort_order: 'asc',
+      category_path: categoryPath.join('/'),
+      category_depth: categoryPath.length,
     })
     const body: any = (res as any).data || res
     const batch: WikiPage[] = body?.pages || []
     const reportedTotal = Number(body?.total) || 0
 
-    bucket.items.push(...batch)
-    bucket.total = reportedTotal
-    bucket.nextPage += 1
-    bucket.initialized = true
+    const seenItems = new Set(bucket.items.map(p => p.id))
+    for (const p of batch) {
+      if (!seenItems.has(p.id)) bucket.items.push(p)
+    }
+    if (!scopedToCategory) {
+      bucket.total = reportedTotal
+      bucket.nextPage += 1
+      bucket.initialized = true
+    } else if (currentScopedState) {
+      bucket.directoryPages = {
+        ...bucket.directoryPages,
+        [scopedPathKey]: {
+          ...currentScopedState,
+          total: reportedTotal,
+          nextPage: currentScopedState.nextPage + 1,
+          initialized: true,
+          loading: false,
+        },
+      }
+    }
+    initializeDefaultCollapsedDirectories(type, batch)
 
     // Mirror the newly arrived rows into the flat pages list so
     // slugDisplayName and friends keep working.
@@ -1546,14 +1992,19 @@ async function loadPagesForType(type: string, opts: { reset?: boolean } = {}) {
   } catch (e) {
     console.error(`Failed to load wiki pages of type ${type}:`, e)
   } finally {
-    bucket.loading = false
+    if (scopedState) {
+      const latest = bucket.directoryPages[scopedPathKey]
+      if (latest?.loading) {
+        bucket.directoryPages = {
+          ...bucket.directoryPages,
+          [scopedPathKey]: { ...latest, loading: false, initialized: true },
+        }
+      }
+    }
+    else bucket.loading = false
   }
 
-  // Kick the RecycleScroller into recomputing its visible window now
-  // that `items` has grown. Without this, new rows appear in the wrong
-  // order at the bottom until the user scrolls to trigger a recompute.
   await nextTick()
-  groupScrollerRef.value?.updateVisibleItems?.(true)
 }
 
 // loadIndexAndLog probes the wiki index so the sidebar knows to show
@@ -1622,6 +2073,31 @@ async function openIndexView() {
   // the view is a render-time concern.
 }
 
+function appendIndexDirectoryLines(items: WikiIndexEntryDTO[]): string {
+  let out = ''
+  const emittedDirs = new Set<string>()
+  for (const entry of items) {
+    const path = (Array.isArray(entry.category_path) ? entry.category_path : [])
+      .map(part => String(part || '').trim())
+      .filter(Boolean)
+    for (let i = 0; i < path.length; i++) {
+      const parts = path.slice(0, i + 1)
+      const key = parts.join('/')
+      if (emittedDirs.has(key)) continue
+      emittedDirs.add(key)
+      out += `${'  '.repeat(i)}**${path[i]}**\n`
+    }
+    const display = entry.title || entry.slug
+    const indent = '  '.repeat(path.length)
+    if (entry.summary) {
+      out += `${indent}[[${entry.slug}|${display}]] — ${entry.summary}\n`
+    } else {
+      out += `${indent}[[${entry.slug}|${display}]]\n`
+    }
+  }
+  return out
+}
+
 // loadMoreIndexSection advances the directory one step forward. The
 // order is fixed (Summary → Entity → Concept → …); within a section we
 // paginate with the backend's cursor, and only move to the next section
@@ -1663,27 +2139,7 @@ async function loadMoreIndexSection() {
       const label = getTypeLabel(type)
       appended += `\n## ${label} (${total})\n\n`
     }
-    for (const entry of items) {
-      // Plain lines rather than `- [[slug]]`: marked renders the latter
-      // as <ul><li>, which adds a disc bullet before every slug. Each
-      // entry occupies one line thanks to `breaks: true` in renderMarkdown.
-      //
-      // Use the `[[slug|display]]` form so the anchor text shows the
-      // human-readable title (e.g. "东城区") instead of the URL-safe slug
-      // ("entity/dongcheng-qu"). The [[ ]] preprocessor in renderMarkdown
-      // splits on the pipe and uses the right-hand side for display text
-      // while the left-hand side drives navigation via handleContentClick.
-      //
-      // Fall back to the slug when the page has no title — the backend
-      // guarantees title is non-empty for published pages, but drafts
-      // or partially-indexed pages can slip through.
-      const display = entry.title || entry.slug
-      if (entry.summary) {
-        appended += `[[${entry.slug}|${display}]] — ${entry.summary}\n`
-      } else {
-        appended += `[[${entry.slug}|${display}]]\n`
-      }
-    }
+    appended += appendIndexDirectoryLines(items)
     if (appended) {
       indexMarkdown.value = indexMarkdown.value + appended
     }
@@ -1817,22 +2273,20 @@ async function loadPages() {
   loading.value = true
   try {
     searchResults.value = null
-    for (const type of CONTENT_PAGE_TYPES) ensureBucket(type)
+    for (const tab of CONTENT_TABS) ensureBucket(tab)
     await loadIndexAndLog()
-    await Promise.all(CONTENT_PAGE_TYPES.map(type => loadPagesForType(type, { reset: true })))
+    await Promise.all(CONTENT_TABS.map(async tab => {
+      await loadPagesForType(tab, { reset: true })
+      await loadCategoriesForType(tab, { reset: true })
+    }))
 
     // Pick the first non-empty bucket as the default active tab.
     // Keeping `activeTab` unset while buckets are still loading would
     // momentarily render no list at all, so we only overwrite it when
     // the current selection is empty or missing.
-    if (!activeTab.value || !pagesByType.value[activeTab.value] || pagesByType.value[activeTab.value].total === 0) {
-      for (const type of CONTENT_PAGE_TYPES) {
-        const bucket = pagesByType.value[type]
-        if (bucket && bucket.total > 0) {
-          activeTab.value = type
-          break
-        }
-      }
+    const tabValid = activeTab.value && visibleTabs.value.some(tab => tab.type === activeTab.value)
+    if (!tabValid) {
+      activeTab.value = groupedPages.value[0]?.type || ''
     }
 
     // Auto-select based on query string or default to the index
@@ -2530,6 +2984,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     container.innerHTML = ''
     return
   }
+  const graph = data
 
   // Stop any previous animation
   if (graphAnimFrame) { cancelAnimationFrame(graphAnimFrame); graphAnimFrame = 0 }
@@ -2572,7 +3027,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Build adjacency for highlight
   const adjacency = new Map<string, Set<string>>()
-  for (const edge of data.edges) {
+  for (const edge of graph.edges) {
     if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set())
     if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set())
     adjacency.get(edge.source)!.add(edge.target)
@@ -2588,7 +3043,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Build nodes
   const nodeMap = new Map<string, GNode>()
-  graphNodes = data.nodes.map((n, i) => {
+  graphNodes = graph.nodes.map((n, i) => {
     const prior = opts.preserveLayout ? priorCoords.get(n.slug) : undefined
     let x: number
     let y: number
@@ -2616,7 +3071,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       pinned = false
     } else {
       // Full repaint — classic circular layout.
-      const angle = (2 * Math.PI * i) / data.nodes.length
+      const angle = (2 * Math.PI * i) / graph.nodes.length
       const r = Math.min(width, height) * 0.35
       x = width / 2 + r * Math.cos(angle) + (Math.random() - 0.5) * 50
       y = height / 2 + r * Math.sin(angle) + (Math.random() - 0.5) * 50
@@ -2702,7 +3157,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Detect bidirectional edges (A→B and B→A both exist)
   const edgePairSet = new Set<string>()
-  for (const edge of data.edges) {
+  for (const edge of graph.edges) {
     edgePairSet.add(`${edge.source}→${edge.target}`)
   }
 
@@ -2711,7 +3166,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   const edgeEls: EdgeEl[] = []
   const processedPairs = new Set<string>()
 
-  for (const edge of data.edges) {
+  for (const edge of graph.edges) {
     const pairKey = [edge.source, edge.target].sort().join('↔')
     if (processedPairs.has(pairKey)) continue
     processedPairs.add(pairKey)
@@ -2745,7 +3200,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     // still hiding 80 more connections just out of view, so they either
     // click "bloom" on everything (wasteful) or on nothing (miss the
     // interesting pages). adjacency here is the undirected neighbor set
-    // we've already built from data.edges; link_count is the KB-wide
+    // we've already built from graph.edges; link_count is the KB-wide
     // in+out degree reported by the backend. Diff > 0 means there's
     // more to fetch.
     //
@@ -2756,7 +3211,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     // thinking there's something to click.
     const visibleNeighbors = adjacency.get(n.slug)?.size ?? 0
     const hiddenNeighbors = Math.max(0, n.linkCount - visibleNeighbors)
-    const isEgoCenter = data.meta?.mode === 'ego' && data.meta.center === n.slug
+    const isEgoCenter = graph.meta?.mode === 'ego' && graph.meta.center === n.slug
     const showExpansionRing = hiddenNeighbors > 0 && !isEgoCenter
     const expansionRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
     expansionRing.setAttribute('r', String(r + 3))
@@ -2815,7 +3270,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     // painter's algorithm draws it on top; the node-shadow filter and
     // the drawer cover it otherwise.
     let bloomBtn: SVGGElement | null = null
-    const bloomBtnEligible = !isEgoCenter && data.meta?.mode === 'ego' && hiddenNeighbors > 0
+    const bloomBtnEligible = !isEgoCenter && graph.meta?.mode === 'ego' && hiddenNeighbors > 0
     if (bloomBtnEligible) {
       bloomBtn = document.createElementNS('http://www.w3.org/2000/svg', 'g')
       bloomBtn.classList.add('node-bloom-btn')
@@ -3022,7 +3477,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     }
 
     // Attraction along edges
-    for (const edge of data.edges) {
+    for (const edge of graph.edges) {
       const s = nodeMap.get(edge.source)
       const t = nodeMap.get(edge.target)
       if (!s || !t) continue
@@ -3618,6 +4073,10 @@ onUnmounted(() => {
     groupSentinelObserver.disconnect()
     groupSentinelObserver = null
   }
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect()
+    loadMoreObserver = null
+  }
 })
 </script>
 
@@ -3690,13 +4149,8 @@ onUnmounted(() => {
   padding: 0 12px 12px;
 }
 
-// In page-mode the RecycleScroller delegates scrolling to the nearest
-// scrollable ancestor (`.wiki-page-list`), so the scroller itself
-// must not constrain height or introduce its own overflow. We only
-// reserve a minimum to keep the empty-state loader from collapsing.
-.wiki-group-scroller {
-  min-height: 60px;
-  margin-bottom: 4px;
+.wiki-tree-list {
+  padding: 2px 0 4px;
 }
 
 .wiki-group-sentinel {
@@ -3810,11 +4264,7 @@ onUnmounted(() => {
 }
 
 .wiki-page-item {
-  // Lock the rendered height so it matches WIKI_PAGE_ITEM_HEIGHT (100)
-  // minus margin-bottom (2). RecycleScroller absolute-positions rows
-  // at multiples of itemSize, so any variance between actual rendered
-  // height and the constant causes neighbors to overlap.
-  height: 98px;
+  min-height: 64px;
   box-sizing: border-box;
   overflow: hidden;
   padding: 10px 12px;
@@ -3832,33 +4282,94 @@ onUnmounted(() => {
   }
 }
 
+.wiki-directory-item {
+  height: 34px;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 1px 0;
+  color: var(--td-text-color-secondary);
+  background: transparent;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+}
+
+.wiki-directory-toggle,
+.wiki-directory-icon,
+.wiki-page-file-icon {
+  flex: 0 0 auto;
+  color: var(--td-text-color-placeholder);
+  font-size: 15px;
+}
+
+.wiki-directory-title,
 .wiki-page-item-title {
+  min-width: 0;
+  flex: 1;
   font-size: 13px;
-  font-weight: 500;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-bottom: 4px;
 }
 
-.wiki-page-item-summary {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin-bottom: 6px;
+.wiki-directory-title {
+  font-weight: 600;
 }
 
-.wiki-page-item-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.wiki-directory-count {
+  flex: 0 0 auto;
+  min-width: 22px;
+  text-align: center;
   font-size: 11px;
+  line-height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
   color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.wiki-directory-load-more {
+  height: 30px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 1px 0;
+  color: var(--td-brand-color);
+  font-size: 12px;
+
+  &:hover {
+    background: var(--td-brand-color-light);
+  }
+}
+
+.wiki-page-item--tree {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  min-height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-radius: 6px;
+  margin: 1px 0;
+}
+
+.wiki-page-item--tree .wiki-page-item-title {
+  font-weight: 500;
 }
 
 // ── Right Content ──

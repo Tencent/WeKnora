@@ -3379,7 +3379,9 @@ export default {
       searchNoResults: "일치하는 페이지가 없습니다",
       loadMore: "더 불러오기 ({remaining}개 남음)",
       filterAll: "전체 유형",
+      loadMoreFolders: "더 많은 디렉터리 불러오기",
       filterSummary: "요약",
+      filterKnowledge: "지식",
       filterEntity: "엔티티",
       filterConcept: "개념",
       filterSynthesis: "종합",
@@ -4817,8 +4819,6 @@ export default {
       fileTypeText: '일반 텍스트',
       fileTypeJson: 'JSON 파일',
       fileTypeImage: '이미지',
-      fileTypeEbook: '전자책',
-      fileTypeWebArchive: '웹 아카이브',
       fileTypeAudiovisual: '오디오',
       engines: {
         builtin: {

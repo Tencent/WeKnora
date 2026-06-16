@@ -2520,7 +2520,9 @@ export default {
       searchNoResults: 'No matching pages found',
       loadMore: 'Load more ({remaining} remaining)',
       filterAll: 'All Types',
+      loadMoreFolders: 'Load more folders',
       filterSummary: 'Summaries',
+      filterKnowledge: 'Knowledge',
       filterEntity: 'Entities',
       filterConcept: 'Concepts',
       filterSynthesis: 'Synthesis',
@@ -4786,8 +4788,6 @@ export default {
       fileTypeText: 'Plain Text',
       fileTypeJson: 'JSON Files',
       fileTypeImage: 'Images',
-      fileTypeEbook: 'E-books',
-      fileTypeWebArchive: 'Web Archives',
       fileTypeAudiovisual: 'Audio',
       engines: {
         builtin: {

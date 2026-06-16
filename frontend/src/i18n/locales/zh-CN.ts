@@ -3384,7 +3384,9 @@ export default {
       searchNoResults: "没有找到匹配的页面",
       loadMore: "加载更多（还剩 {remaining} 条）",
       filterAll: "全部类型",
+      loadMoreFolders: "加载更多目录",
       filterSummary: "摘要",
+      filterKnowledge: "知识",
       filterEntity: "实体",
       filterConcept: "概念",
       filterSynthesis: "综合",
@@ -4780,8 +4782,6 @@ export default {
       fileTypeText: "纯文本",
       fileTypeJson: "JSON 文件",
       fileTypeImage: "图片",
-      fileTypeEbook: "电子书",
-      fileTypeWebArchive: "网页存档",
       fileTypeAudiovisual: "音频",
       engines: {
         builtin: {

@@ -2884,7 +2884,9 @@ export default {
       searchNoResults: 'Страницы не найдены',
       loadMore: 'Загрузить ещё (осталось {remaining})',
       filterAll: 'Все типы',
+      loadMoreFolders: 'Загрузить ещё каталоги',
       filterSummary: 'Резюме',
+      filterKnowledge: 'Знания',
       filterEntity: 'Сущности',
       filterConcept: 'Концепции',
       filterSynthesis: 'Синтез',
@@ -4317,8 +4319,6 @@ export default {
       fileTypeText: 'Текстовые файлы',
       fileTypeJson: 'Файлы JSON',
       fileTypeImage: 'Изображения',
-      fileTypeEbook: 'Электронные книги',
-      fileTypeWebArchive: 'Веб-архивы',
       fileTypeAudiovisual: 'Аудио',
       engines: {
         builtin: {
