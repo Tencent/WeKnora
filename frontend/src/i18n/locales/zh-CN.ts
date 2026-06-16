@@ -4780,6 +4780,8 @@ export default {
       fileTypeText: "纯文本",
       fileTypeJson: "JSON 文件",
       fileTypeImage: "图片",
+      fileTypeEbook: "电子书",
+      fileTypeWebArchive: "网页存档",
       fileTypeAudiovisual: "音频",
       engines: {
         builtin: {

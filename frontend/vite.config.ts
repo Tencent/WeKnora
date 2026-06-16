@@ -112,17 +112,6 @@ export default defineConfig({
           if (id.includes('highlight.js')) {
             return 'vendor-highlight'
           }
-          if (id.includes('tdesign-vue-next')) {
-            return 'vendor-tdesign'
-          }
-          if (
-            id.includes('/vue/') ||
-            id.includes('/vue-router/') ||
-            id.includes('/pinia/') ||
-            id.includes('/vue-i18n/')
-          ) {
-            return 'vendor-vue'
-          }
         },
       },
     },

@@ -4317,6 +4317,8 @@ export default {
       fileTypeText: 'Текстовые файлы',
       fileTypeJson: 'Файлы JSON',
       fileTypeImage: 'Изображения',
+      fileTypeEbook: 'Электронные книги',
+      fileTypeWebArchive: 'Веб-архивы',
       fileTypeAudiovisual: 'Аудио',
       engines: {
         builtin: {

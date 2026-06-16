@@ -436,6 +436,8 @@ const fileTypeOptions = computed(() => [
   { label: 'DOC', value: 'doc' },
   { label: 'PPTX', value: 'pptx' },
   { label: 'PPT', value: 'ppt' },
+  { label: 'EPUB', value: 'epub' },
+  { label: 'MHTML', value: 'mhtml' },
   { label: 'TXT', value: 'txt' },
   { label: 'MD', value: 'md' },
   { label: 'URL', value: 'url' },

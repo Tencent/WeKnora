@@ -4817,6 +4817,8 @@ export default {
       fileTypeText: '일반 텍스트',
       fileTypeJson: 'JSON 파일',
       fileTypeImage: '이미지',
+      fileTypeEbook: '전자책',
+      fileTypeWebArchive: '웹 아카이브',
       fileTypeAudiovisual: '오디오',
       engines: {
         builtin: {

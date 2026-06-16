@@ -4786,6 +4786,8 @@ export default {
       fileTypeText: 'Plain Text',
       fileTypeJson: 'JSON Files',
       fileTypeImage: 'Images',
+      fileTypeEbook: 'E-books',
+      fileTypeWebArchive: 'Web Archives',
       fileTypeAudiovisual: 'Audio',
       engines: {
         builtin: {
