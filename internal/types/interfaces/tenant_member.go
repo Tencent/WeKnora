@@ -68,4 +68,13 @@ type TenantMemberRepository interface {
 	// RemoveOwnerAtomically soft-deletes an Owner row under the same
 	// lock as DemoteOwnerAtomically.
 	RemoveOwnerAtomically(ctx context.Context, userID string, tenantID uint64) error
+
+	// AdjustUserStorageUsed atomically adjusts storage_used for the given
+	// (userID, tenantID) membership. Negative delta reclaims space on delete.
+	// Clamps to 0 if the result would go negative.
+	AdjustUserStorageUsed(ctx context.Context, userID string, tenantID uint64, delta int64) error
+
+	// UpdateStorageQuota sets the personal storage quota for the given
+	// (userID, tenantID) membership. quotaBytes=0 means "no individual limit".
+	UpdateStorageQuota(ctx context.Context, userID string, tenantID uint64, quotaBytes int64) error
 }

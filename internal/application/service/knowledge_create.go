@@ -106,6 +106,14 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, types.NewStorageQuotaExceededError()
 	}
 
+	// check user storage quota
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		member, err := s.tenantMemberRepo.Get(ctx, userID, tenantID)
+		if err == nil && member != nil && member.StorageQuota > 0 && member.StorageUsed >= member.StorageQuota {
+			return nil, types.NewUserStorageQuotaExceededError()
+		}
+	}
+
 	// Convert metadata to JSON format if provided
 	var metadataJSON types.JSON
 	if metadata != nil {
@@ -379,6 +387,14 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, types.NewStorageQuotaExceededError()
 	}
 
+	// check user storage quota
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		member, err := s.tenantMemberRepo.Get(ctx, userID, tenantID)
+		if err == nil && member != nil && member.StorageQuota > 0 && member.StorageUsed >= member.StorageQuota {
+			return nil, types.NewUserStorageQuotaExceededError()
+		}
+	}
+
 	// Create knowledge record
 	logger.Info(ctx, "Creating knowledge record")
 	knowledge := &types.Knowledge{
@@ -599,6 +615,14 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed >= tenantInfo.StorageQuota {
 		logger.Error(ctx, "Storage quota exceeded")
 		return nil, types.NewStorageQuotaExceededError()
+	}
+
+	// check user storage quota
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		member, err := s.tenantMemberRepo.Get(ctx, userID, tenantID)
+		if err == nil && member != nil && member.StorageQuota > 0 && member.StorageUsed >= member.StorageQuota {
+			return nil, types.NewUserStorageQuotaExceededError()
+		}
 	}
 
 	// Create knowledge record

@@ -104,6 +104,12 @@ func (s *knowledgeService) cloneKnowledge(
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge update tenant storage used failed")
 		return
 	}
+	//update user's storage usage
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, userID, tenantInfo.ID, dst.StorageSize); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update user storage used failed")
+		}
+	}
 	if err = s.CloneChunk(ctx, src, dst); err != nil {
 		logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).
 			WithField("error", err).Errorf("MoveKnowledge move chunks failed")
@@ -565,6 +571,18 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			}
 		}
 
+		// check user storage quota
+		if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+			member, err := s.tenantMemberRepo.Get(ctx, userID, tenantInfo.ID)
+			if err == nil && member != nil && member.StorageQuota > 0 && member.StorageUsed >= member.StorageQuota {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = "存储空间不足"
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+				return
+			}
+		}
+
 		// Check again before batch indexing (heavy operation).
 		// deleting → row is going away anyway, drop the chunks we just wrote.
 		// cancelled → user wants to keep what was already persisted, just stop.
@@ -691,6 +709,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
 	}
 	logger.GetLogger(ctx).Infof("processChunks successfully")
+
+	//update user's storage usage
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, userID, tenantInfo.ID, totalStorageSize); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update user storage used failed")
+		}
+	}
 }
 
 // defaultMaxInputChars is the default maximum characters used as input for summary generation.

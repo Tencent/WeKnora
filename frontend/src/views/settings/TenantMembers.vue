@@ -146,6 +146,7 @@
                      Icon-only with tooltip so two actions ("copy" +
                      "revoke") fit inside the actions column without
                      clipping; the full label was too wide. -->
+
                 <t-tooltip v-if="row.status === 'pending' && row.invite_url"
                   :content="$t('tenantInvitation.copyLink')" placement="top">
                   <t-button shape="square" variant="text" size="small"
@@ -351,6 +352,11 @@
               </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
               <template #actions="{ row }">
+                <t-tooltip v-if="canManage" content="修改空间限额" placement="top">
+                  <t-button theme="primary" shape="square" variant="text" size="small" @click.stop="openQuotaDialog(row)">
+                    <template #icon><t-icon name="server" /></template>
+                  </t-button>
+                </t-tooltip>
                 <t-popconfirm
                   v-if="canManage && row.user_id !== currentUserId"
                   :content="$t('tenantMember.remove.confirmBody', { name: row.username || row.email })"
@@ -364,6 +370,11 @@
                     </t-button>
                   </t-tooltip>
                 </t-popconfirm>
+              </template>
+              <template #storage="{row}">
+                <span class = "member-storage">
+                 {{ formatBytes(row.storage_used) }}/{{ (!row.storage_quota || row.storage_quota === 0 ) ? '无限制' : formatBytes(row.storage_quota)}}
+                 </span>
               </template>
             </t-table>
           </div>
@@ -507,6 +518,29 @@
         </div>
       </div>
     </t-drawer>
+    <t-dialog
+        v-model:visible="quotaDialogVisible"
+        header="修改空间限额"
+        :confirm-btn="{ content: '确定', theme: 'primary', loading: updatingQuota }"
+        :cancel-btn="'取消'"
+        @confirm="submitQuotaUpdate"
+      >
+        <div style="padding: 16px 0;">
+          <t-form :data="quotaForm" :label-width="100">
+            <t-form-item label="空间配额 (GB)" name="quotaGB">
+              <t-input-number 
+                v-model="quotaForm.quotaGB" 
+                :min="0" 
+                :step="1" 
+                auto-width
+              />
+              <div style="margin-left: 12px; color: var(--td-text-color-secondary); font-size: 12px;">
+                填 0 代表不限制
+              </div>
+            </t-form-item>
+          </t-form>
+        </div>
+      </t-dialog>
   </div>
 </template>
 
@@ -519,6 +553,7 @@ import {
   listMembers,
   updateMemberRole,
   removeMember,
+  updateMemberQuota,
   type TenantMember,
   type TenantRole,
 } from '@/api/tenant/members'
@@ -712,6 +747,13 @@ const roleMatrix: Record<TenantRole, RolePerm[]> = {
   ],
 }
 
+const quotaDialogVisible = ref(false)
+const updatingQuota = ref(false)
+const currentQuotaMember = ref<TenantMember | null>(null)
+const quotaForm = reactive({quotaGB:0})
+
+
+
 function roleMatrixIcon(role: TenantRole): string {
   switch (role) {
     case 'owner':
@@ -725,9 +767,45 @@ function roleMatrixIcon(role: TenantRole): string {
   }
 }
 
+function formatBytes(bytes?: number): string {
+  if (bytes === undefined || bytes === null || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+function openQuotaDialog(row: TenantMember) {
+  currentQuotaMember.value = row
+  quotaForm.quotaGB = row.storage_quota ? Math.floor(row.storage_quota / 1024 / 1024 / 1024) : 0
+  quotaDialogVisible.value = true
+}
+
+async function submitQuotaUpdate() {
+  if (!currentQuotaMember.value) return
+
+  updatingQuota.value = true
+  try {
+    const quotaBytes = quotaForm.quotaGB * 1024 * 1024 * 1024
+    const resp = await updateMemberQuota(activeTenantId.value, currentQuotaMember.value.user_id, quotaBytes)
+    if (resp.success) {
+      MessagePlugin.success('配额更新成功')
+      quotaDialogVisible.value = false
+      await loadMembers()
+    } else {
+      MessagePlugin.error(resp.message || '配额更新失败')
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || '请求失败')
+  } finally {
+    updatingQuota.value = false
+  }
+}
+
 const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 132 },
   { colKey: 'role', title: t('tenantMember.columns.role'), width: 128 },
+  { colKey: 'storage', title: '已用/配额', width: 150 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
   { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
 ])

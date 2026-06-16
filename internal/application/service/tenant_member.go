@@ -392,3 +392,29 @@ func (s *tenantMemberService) emitRemovalAudit(
 		Outcome:      types.AuditOutcomeSuccess,
 	})
 }
+
+// UpdateMemberStorageQuota sets the personal storage quota for a user
+// within the given tenant. quotaBytes=0 means "no individual limit".
+// Validates: quotaBytes >= 0, and if quotaBytes > 0 it must be >= the
+// user's current StorageUsed.
+func (s *tenantMemberService) UpdateMemberStorageQuota(
+	ctx context.Context,
+	userID string,
+	tenantID uint64,
+	quotaBytes int64,
+) error {
+	if quotaBytes < 0 {
+		return ErrInvalidTenantRole // reuse validation error; could define a dedicated one
+	}
+	member, err := s.repo.Get(ctx, userID, tenantID)
+	if err != nil {
+		return err
+	}
+	if member == nil {
+		return ErrMembershipNotFound
+	}
+	if quotaBytes > 0 && quotaBytes < member.StorageUsed {
+		return errors.New("storage quota cannot be less than current usage")
+	}
+	return s.repo.UpdateStorageQuota(ctx, userID, tenantID, quotaBytes)
+}
