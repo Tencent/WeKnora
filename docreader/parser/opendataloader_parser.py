@@ -98,8 +98,15 @@ def _ping_hybrid(
 
 def opendataloader_available(
     overrides: Optional[Mapping[str, Any]] = None,
+    quick: bool = False,
 ) -> Tuple[bool, str]:
-    """Registry / ListEngines availability probe."""
+    """Registry / ListEngines availability probe.
+
+    When ``quick`` is set the hybrid health check uses a single short-timeout
+    attempt with no retries, so it can be used for fast status listing without
+    blocking on long retry/backoff loops. Parsing keeps the patient retry
+    behavior to tolerate a hybrid service that is still starting up.
+    """
     ok, msg = _java_available()
     if not ok:
         return False, msg
@@ -111,6 +118,8 @@ def opendataloader_available(
     if hybrid and hybrid.lower() not in ("off", ""):
         url = _resolve_hybrid_url(overrides)
         if url:
+            if quick:
+                return _ping_hybrid(url, retries=1, timeout_sec=2.0)
             return _ping_hybrid(url, retries=6, retry_delay_sec=5.0, timeout_sec=5.0)
     return True, ""
 
