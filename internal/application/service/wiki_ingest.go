@@ -1536,50 +1536,6 @@ func splitSummaryLine(raw string) (summary string, content string) {
 	return "", raw
 }
 
-// splitCategoryLine extracts a leading "CATEGORY: a / b" line from content
-// (the page body AFTER the SUMMARY line has been stripped) and returns the
-// parsed folder labels plus the remaining content with that line removed.
-//
-// Category assignment lives in the page-modify output (reduce time) rather
-// than per-document extraction so it reflects WHAT the whole entity IS, not
-// the role it played in one source document. An empty/absent CATEGORY line
-// yields nil so callers keep the page's existing category instead of wiping it.
-func splitCategoryLine(content string) (category []string, rest string) {
-	trimmed := strings.TrimLeft(content, " \t\r\n")
-	if !strings.HasPrefix(trimmed, "CATEGORY:") && !strings.HasPrefix(trimmed, "CATEGORY：") {
-		return nil, content
-	}
-	var line, remainder string
-	if idx := strings.IndexByte(trimmed, '\n'); idx < 0 {
-		line = trimmed
-	} else {
-		line = trimmed[:idx]
-		remainder = trimmed[idx+1:]
-	}
-	line = strings.TrimPrefix(line, "CATEGORY:")
-	line = strings.TrimPrefix(line, "CATEGORY：")
-	return parseCategoryPath(line), strings.TrimSpace(remainder)
-}
-
-// parseCategoryPath splits a "a / b" breadcrumb string into clean folder
-// labels. Separator variants and wrapping quotes/brackets are normalized; the
-// deeper structural cleaning (type-label stripping, depth cap, wiki_path) is
-// left to normalizeWikiHierarchy on the page.
-func parseCategoryPath(line string) []string {
-	line = strings.NewReplacer("／", "/", "｜", "/", "|", "/", "›", "/", "»", "/", ">", "/").Replace(line)
-	parts := strings.Split(line, "/")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		label := strings.TrimSpace(p)
-		label = strings.Trim(label, `"'“”‘’[]（）()`)
-		label = strings.TrimSpace(label)
-		if label != "" {
-			out = append(out, label)
-		}
-	}
-	return out
-}
-
 // buildLogEntry builds a WikiLogEntry struct for the current batch. It is
 // pure (no DB access) so callers can accumulate entries cheaply under their
 // lock and flush them in a single AppendBatch call at the end of the batch.

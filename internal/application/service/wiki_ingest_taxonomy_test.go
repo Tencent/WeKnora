@@ -7,58 +7,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-func TestSplitCategoryLine(t *testing.T) {
-	tests := []struct {
-		name     string
-		content  string
-		wantCat  []string
-		wantRest string
-	}{
-		{
-			name:     "two level category",
-			content:  "CATEGORY: 组织 / 企业\n# 标题\n正文",
-			wantCat:  []string{"组织", "企业"},
-			wantRest: "# 标题\n正文",
-		},
-		{
-			name:     "single level category",
-			content:  "CATEGORY: 人物\n# 陈洋",
-			wantCat:  []string{"人物"},
-			wantRest: "# 陈洋",
-		},
-		{
-			name:     "empty category keeps existing (nil) and strips line",
-			content:  "CATEGORY:\n# 标题",
-			wantCat:  nil,
-			wantRest: "# 标题",
-		},
-		{
-			name:     "no category line left untouched",
-			content:  "# 标题\n正文",
-			wantCat:  nil,
-			wantRest: "# 标题\n正文",
-		},
-		{
-			name:     "fullwidth colon and separators",
-			content:  "CATEGORY：组织｜企业\n正文",
-			wantCat:  []string{"组织", "企业"},
-			wantRest: "正文",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cat, rest := splitCategoryLine(tt.content)
-			if strings.Join(cat, "/") != strings.Join(tt.wantCat, "/") {
-				t.Fatalf("splitCategoryLine() cat = %v, want %v", cat, tt.wantCat)
-			}
-			if rest != tt.wantRest {
-				t.Fatalf("splitCategoryLine() rest = %q, want %q", rest, tt.wantRest)
-			}
-		})
-	}
-}
-
 func TestFormatExistingTaxonomyForPrompt(t *testing.T) {
 	got := formatExistingTaxonomyForPrompt([][]string{
 		{"春节", "传统习俗"},

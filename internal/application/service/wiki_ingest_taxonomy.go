@@ -132,7 +132,10 @@ func (s *wikiIngestService) selectRelevantFolders(
 		}
 	}
 
-	if !kb.NeedsEmbeddingModel() || strings.TrimSpace(kb.EmbeddingModelID) == "" || len(deeper) == 0 {
+	// Gate purely on whether an embedding model is configured — NOT on
+	// NeedsEmbeddingModel(), which is false for wiki-only KBs that may still
+	// opt into an embedding model purely for directory/taxonomy similarity.
+	if strings.TrimSpace(kb.EmbeddingModelID) == "" || len(deeper) == 0 {
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
 	}
 

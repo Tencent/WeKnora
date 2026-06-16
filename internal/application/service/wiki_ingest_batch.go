@@ -1610,11 +1610,6 @@ func (s *wikiIngestService) reduceSlugUpdates(
 
 		if err == nil && updatedContent != "" {
 			updatedSummary, updatedBody := splitSummaryLine(updatedContent)
-			// Category now comes from the batch taxonomy plan, not this prompt.
-			// Defensively strip any stray leading CATEGORY line the model may
-			// still emit so it never leaks into the page body; discard the value.
-			_, bodyAfterCategory := splitCategoryLine(updatedBody)
-			updatedBody = bodyAfterCategory
 			if updatedBody != "" {
 				page.Content = updatedBody
 			} else {

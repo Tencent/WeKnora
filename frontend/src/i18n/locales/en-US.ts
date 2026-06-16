@@ -2760,6 +2760,8 @@ export default {
       embeddingDesc: 'Embedding model used for text vectorization',
       embeddingPlaceholder: 'Select an embedding model',
       embeddingLocked: 'Knowledge base already has files. Embedding model cannot be modified',
+      embeddingOptional: '(Optional)',
+      embeddingWikiOptionalDesc: 'Optional. When set, it powers similarity matching for Wiki directory classification so new pages reuse existing folders better; otherwise the full directory tree is used.',
       rerankLabel: 'ReRank Model',
       rerankDesc: 'Model for re-ranking search results (optional)',
       rerankPlaceholder: 'Select a ReRank model (optional)'

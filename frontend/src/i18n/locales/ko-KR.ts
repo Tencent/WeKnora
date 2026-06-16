@@ -3631,6 +3631,8 @@ export default {
       embeddingDesc: "텍스트 벡터화를 위한 임베딩 모델",
       embeddingPlaceholder: "Embedding 모델을 선택해주세요",
       embeddingLocked: "지식베이스에 이미 파일이 있어 Embedding 모델을 변경할 수 없습니다",
+      embeddingOptional: "(선택)",
+      embeddingWikiOptionalDesc: "선택 사항입니다. 설정하면 Wiki 디렉터리 분류의 유사도 매칭에 사용되어 새 페이지가 기존 폴더를 더 잘 재사용합니다. 설정하지 않으면 전체 디렉터리 트리를 기준으로 분류합니다.",
       rerankLabel: "ReRank 재정렬 모델",
       rerankDesc: "검색 결과 재정렬을 위한 모델 (선택)",
       rerankPlaceholder: "ReRank 모델을 선택해주세요 (선택)",
