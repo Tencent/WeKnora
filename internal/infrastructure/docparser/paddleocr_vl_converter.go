@@ -27,6 +27,7 @@ const paddleOCRVLTimeout = 1000 * time.Second // large scanned PDFs can take a w
 // response containing per-page markdown + inline base64 images.
 type PaddleOCRVLReader struct {
 	endpoint string
+	apiKey   string
 	useSeal  bool
 	useChart bool
 }
@@ -35,6 +36,7 @@ type PaddleOCRVLReader struct {
 func NewPaddleOCRVLReader(overrides map[string]string) *PaddleOCRVLReader {
 	return &PaddleOCRVLReader{
 		endpoint: strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
+		apiKey:   strings.TrimSpace(overrides["paddleocr_vl_api_key"]),
 		useSeal:  parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
 		useChart: parseBoolOr(overrides["paddleocr_vl_use_chart_recognition"], false),
 	}
@@ -150,6 +152,7 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 		return "", nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	setPaddleOCRVLAuthHeader(httpReq, c.apiKey)
 
 	client := &http.Client{Timeout: paddleOCRVLTimeout}
 	resp, err := client.Do(httpReq)
@@ -254,7 +257,7 @@ func (c *PaddleOCRVLReader) processImages(
 }
 
 // PingPaddleOCRVL checks whether a self-hosted PaddleOCR-VL service is reachable.
-func PingPaddleOCRVL(endpoint string) (bool, string) {
+func PingPaddleOCRVL(endpoint, apiKey string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
 		return false, "未配置 PaddleOCR-VL 端点"
@@ -265,7 +268,12 @@ func PingPaddleOCRVL(endpoint string) (bool, string) {
 	})
 	// The pipeline only exposes POST /layout-parsing; an empty GET should still
 	// produce a routed HTTP response (e.g. 404/405) when the service is up.
-	resp, err := client.Get(endpoint + "/layout-parsing")
+	req, err := http.NewRequest(http.MethodGet, endpoint+"/layout-parsing", nil)
+	if err != nil {
+		return false, fmt.Sprintf("PaddleOCR-VL 检测请求创建失败: %v", err)
+	}
+	setPaddleOCRVLAuthHeader(req, strings.TrimSpace(apiKey))
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, fmt.Sprintf("PaddleOCR-VL 服务不可达: %v", err)
 	}
@@ -274,4 +282,11 @@ func PingPaddleOCRVL(endpoint string) (bool, string) {
 		return false, fmt.Sprintf("PaddleOCR-VL 服务返回状态 %d", resp.StatusCode)
 	}
 	return true, ""
+}
+
+func setPaddleOCRVLAuthHeader(req *http.Request, apiKey string) {
+	if apiKey == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 }

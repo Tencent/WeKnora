@@ -1165,6 +1165,8 @@ export default {
       vlmServerUrlHint: 'Backend가 vlm-http-client 또는 hybrid-http-client인 경우 필요',
       paddleocrVlEndpointPlaceholder: '예: http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'PaddleOCR-VL 전체 서비스(pipeline) 주소를 입력하세요. /layout-parsing 접미사는 불필요합니다',
+      paddleocrVlApiKeyPlaceholder: '자체 호스팅 서비스 API Key (선택 사항)',
+      paddleocrVlApiKeyHint: '입력하면 요청에 Authorization: Bearer <API Key>가 포함됩니다',
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token',
     },
     storage: {
