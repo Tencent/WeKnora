@@ -12,6 +12,7 @@ import {
   deleteDataSource,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
+  authorizeDataSourceOAuth,
   type DataSource,
   type Resource,
 } from '@/api/datasource'
@@ -106,6 +107,8 @@ function cancelReplaceCredentials() {
 }
 
 function needsConnectionTest(): boolean {
+  // Feishu user mode is verified by the OAuth consent flow, not a token test.
+  if (isUserModeAuthorized.value) return false
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
@@ -115,6 +118,15 @@ function enterReplaceCredentials() {
   testResult.value = ''
   testErrorMsg.value = ''
 }
+
+// --- Feishu user-identity (个人身份) OAuth ---
+// app mode  = tenant_access_token (the default app identity)
+// user mode = user_access_token established via the OAuth2 consent flow, so the
+// connector can read everything the authorizing user sees. Only Feishu exposes
+// this today; the toggle is shown for type === 'feishu'.
+const feishuAuthMode = ref<'app' | 'user'>('app')
+const authorizing = ref(false)
+const oauthErrorMsg = ref('')
 
 // Form data
 const form = ref({
@@ -136,6 +148,44 @@ const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
 const selectedResourceIds = ref<string[]>([])
 const expandedResourceIds = ref(new Set<string>())
+const loadedResourceParentIds = ref(new Set<string>())
+const loadingResourceParentIds = ref(new Set<string>())
+
+const usesLazyResourceTree = computed(() => form.value.type === 'feishu')
+
+function resourceParentKey(parentId = ''): string {
+  return parentId
+}
+
+function markResourceParentLoaded(parentId = '') {
+  const next = new Set(loadedResourceParentIds.value)
+  next.add(resourceParentKey(parentId))
+  loadedResourceParentIds.value = next
+}
+
+function isResourceParentLoaded(parentId = ''): boolean {
+  return loadedResourceParentIds.value.has(resourceParentKey(parentId))
+}
+
+function setResourceParentLoading(parentId: string, loading: boolean) {
+  const next = new Set(loadingResourceParentIds.value)
+  const key = resourceParentKey(parentId)
+  if (loading) next.add(key)
+  else next.delete(key)
+  loadingResourceParentIds.value = next
+}
+
+function isResourceChildrenLoading(id: string): boolean {
+  return loadingResourceParentIds.value.has(resourceParentKey(id))
+}
+
+function mergeResources(incoming: Resource[]) {
+  const byID = new Map(resources.value.map(r => [r.external_id, r]))
+  for (const resource of incoming) {
+    byID.set(resource.external_id, resource)
+  }
+  resources.value = Array.from(byID.values())
+}
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
@@ -186,11 +236,15 @@ const checkStates = computed(() => {
   return states
 })
 
-function toggleExpand(id: string) {
+async function toggleExpand(id: string) {
   const next = new Set(expandedResourceIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
+  const opening = !next.has(id)
+  if (opening) next.add(id)
+  else next.delete(id)
   expandedResourceIds.value = next
+  if (opening && usesLazyResourceTree.value && !isResourceParentLoaded(id)) {
+    await loadResources(id)
+  }
 }
 
 const visibleTree = computed(() => {
@@ -310,6 +364,9 @@ watch(visible, async (v) => {
   pendingRemoveCredentials.value = false
   resources.value = []
   selectedResourceIds.value = []
+  expandedResourceIds.value = new Set()
+  loadedResourceParentIds.value = new Set()
+  loadingResourceParentIds.value = new Set()
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -334,9 +391,14 @@ watch(visible, async (v) => {
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
     tempDsId.value = props.dataSource.id
+    // Restore the Feishu auth mode from the (non-secret) settings discriminator.
+    feishuAuthMode.value =
+      props.dataSource.config?.settings?.auth_mode === 'user' ? 'user' : 'app'
   } else {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
+    feishuAuthMode.value = 'app'
+    oauthErrorMsg.value = ''
     form.value = {
       name: '',
       type: '',
@@ -369,7 +431,7 @@ function selectType(def: ConnectorDef) {
 
 // --- Test connection (stateless, no DB write) ---
 async function testConnection() {
-  if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
+  if (!isUserModeAuthorized.value && (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value)) {
     const fields = currentDef.value?.fields || []
     for (const f of fields) {
       if (f.optional) continue
@@ -403,34 +465,55 @@ async function testConnection() {
   testing.value = false
 }
 
-// --- Load resources ---
-async function loadResources() {
-  loadingResources.value = true
-  try {
-    if (!tempDsId.value) {
-      const res = await createDataSource({
-        ...form.value,
-        knowledge_base_id: props.kbId,
-        status: 'paused',
-      } as any)
-      const created = res?.data || res
-      tempDsId.value = created.id
-    } else if (!isEdit.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-    }
+async function ensureDataSourceForResourceListing(): Promise<void> {
+  if (!tempDsId.value) {
+    const res = await createDataSource({
+      ...form.value,
+      knowledge_base_id: props.kbId,
+      status: 'paused',
+    } as any)
+    const created = res?.data || res
+    tempDsId.value = created.id
+  } else if (!isEdit.value) {
+    await updateDataSource(tempDsId.value, {
+      ...form.value,
+      knowledge_base_id: props.kbId,
+    } as any)
+  }
+}
 
-    const res = await listResources(tempDsId.value)
-    resources.value = res?.data || res || []
-    expandedResourceIds.value = new Set(
-      resources.value.filter(r => !r.parent_id && r.has_children).map(r => r.external_id),
+// --- Load resources ---
+async function loadResources(parentId = '') {
+  const lazy = usesLazyResourceTree.value
+  const isRootLoad = parentId === ''
+  if (lazy && isResourceParentLoaded(parentId)) return
+  if (lazy && loadingResourceParentIds.value.has(resourceParentKey(parentId))) return
+
+  if (!lazy || isRootLoad) loadingResources.value = true
+  if (lazy) setResourceParentLoading(parentId, true)
+  try {
+    await ensureDataSourceForResourceListing()
+
+    const res = await listResources(
+      tempDsId.value,
+      lazy ? { parentId } : undefined,
     )
+    const loaded = res?.data || res || []
+    if (lazy) {
+      mergeResources(loaded)
+      markResourceParentLoaded(parentId)
+    } else {
+      resources.value = loaded
+      expandedResourceIds.value = new Set(
+        resources.value.filter(r => !r.parent_id && r.has_children).map(r => r.external_id),
+      )
+    }
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  } finally {
+    if (lazy) setResourceParentLoading(parentId, false)
+    if (!lazy || isRootLoad) loadingResources.value = false
   }
-  loadingResources.value = false
 }
 
 function getDescendantIds(id: string): string[] {
@@ -504,6 +587,9 @@ function toggleResource(id: string) {
 }
 
 function validateStep1Fields(): boolean {
+  if (isUserModeAuthorized.value) {
+    return true
+  }
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
@@ -519,17 +605,21 @@ function validateStep1Fields(): boolean {
   return true
 }
 
+function isConnectionTestSuccessful(): boolean {
+  return testResult.value === 'success'
+}
+
 async function nextStep() {
   if (step.value === 1) {
     if (!validateStep1Fields()) return
-    if (needsConnectionTest() && testResult.value !== 'success') {
+    if (needsConnectionTest() && !isConnectionTestSuccessful()) {
       await testConnection()
-      if (testResult.value !== 'success') return
+      if (!isConnectionTestSuccessful()) return
     }
   }
   step.value++
   if (step.value === 2) {
-    loadResources()
+    await loadResources()
   }
 }
 
@@ -578,6 +668,15 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
 // --- Final submit ---
 async function handleSubmit() {
   form.value.config.resource_ids = selectedResourceIds.value
+  // Persist the Feishu auth-mode discriminator (non-secret) so the connector
+  // and the UI agree on app vs user identity. The OAuth callback also sets it
+  // server-side; sending it here keeps it from being wiped by the main PUT.
+  if (form.value.type === 'feishu') {
+    form.value.config.settings = {
+      ...(form.value.config.settings || {}),
+      auth_mode: feishuAuthMode.value,
+    }
+  }
   submitting.value = true
   try {
     let dataSourceId = tempDsId.value
@@ -633,6 +732,7 @@ function handleClose() {
 }
 
 async function handleDrawerConfirm() {
+  if (step.value === 2 && loadingResources.value) return
   if (step.value === 1 || step.value === 2) {
     await nextStep()
   } else if (step.value === 3) {
@@ -641,6 +741,9 @@ async function handleDrawerConfirm() {
 }
 
 const selectedResourceCount = computed(() => {
+  if (usesLazyResourceTree.value) {
+    return selectedResourceIds.value.length
+  }
   let count = 0
   for (const state of checkStates.value.values()) {
     if (state === 'checked') count++
@@ -664,10 +767,16 @@ function resourceIconName(r: Resource): string {
   }
 }
 
-function expandAllNodes() {
-  expandedResourceIds.value = new Set(
-    resources.value.filter(r => r.has_children).map(r => r.external_id),
-  )
+async function expandAllNodes() {
+  const expandableIds = resources.value.filter(r => r.has_children).map(r => r.external_id)
+  expandedResourceIds.value = new Set(expandableIds)
+  if (usesLazyResourceTree.value) {
+    for (const id of expandableIds) {
+      if (!isResourceParentLoaded(id)) {
+        await loadResources(id)
+      }
+    }
+  }
 }
 
 function collapseAllNodes() {
@@ -714,6 +823,120 @@ const drawerConfirmText = computed(() => {
   if (step.value >= 1) return t('datasource.next')
   return t('common.save')
 })
+
+// --- Feishu OAuth flow ---
+
+// In user mode a completed authorization stands in for the credential inputs:
+// the user tokens live server-side and credentialsConfigured flips true.
+const isUserModeAuthorized = computed(
+  () => form.value.type === 'feishu' && feishuAuthMode.value === 'user' && credentialsConfigured.value,
+)
+
+function onAuthModeChange() {
+  // Switching identity invalidates any prior "tested/authorized" state.
+  testResult.value = ''
+  testErrorMsg.value = ''
+  oauthErrorMsg.value = ''
+}
+
+// Ensures a persisted data source carrying the app credentials exists, so the
+// backend can read app_id/app_secret to drive the OAuth token exchange. Returns
+// the data source id, or null if required app credentials are missing.
+async function ensureFeishuDataSource(): Promise<string | null> {
+  const creds = { ...form.value.config.credentials }
+  const inputsVisible = credentialsInputVisible.value
+  if (inputsVisible && (!creds.app_id || !creds.app_secret)) {
+    MessagePlugin.warning(t('datasource.feishu.appCredsRequired'))
+    return null
+  }
+
+  if (!tempDsId.value) {
+    // Create a paused row carrying the app credentials (app mode for now; the
+    // callback upgrades it to user mode once consent completes).
+    const res: any = await createDataSource({
+      ...form.value,
+      config: { credentials: creds, resource_ids: [], settings: {} },
+      knowledge_base_id: props.kbId,
+      status: 'paused',
+    } as any)
+    const created = res?.data || res
+    tempDsId.value = created.id
+    return created.id
+  }
+
+  // Row exists — push freshly typed app credentials if the user re-entered them.
+  if (inputsVisible && creds.app_id && creds.app_secret) {
+    await putDataSourceCredentials(tempDsId.value, creds)
+  }
+  return tempDsId.value
+}
+
+// Opens the consent page in a popup and resolves once the callback posts back
+// (or the popup is closed). The callback page is same-origin, so we accept its
+// message; the payload carries no secrets.
+function openOAuthPopup(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const popup = window.open(url, 'weknora-feishu-oauth', 'width=720,height=820')
+    if (!popup) {
+      MessagePlugin.error(t('datasource.feishu.popupBlocked'))
+      resolve(false)
+      return
+    }
+    let settled = false
+    const finish = (ok: boolean) => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('message', onMessage)
+      clearInterval(timer)
+      resolve(ok)
+    }
+    const onMessage = (ev: MessageEvent) => {
+      const d = ev.data
+      if (d && d.type === 'weknora-datasource-oauth') {
+        if (!d.success && d.message) oauthErrorMsg.value = String(d.message)
+        finish(!!d.success)
+      }
+    }
+    window.addEventListener('message', onMessage)
+    // Fallback: the user closed the popup without completing consent.
+    const timer = window.setInterval(() => {
+      if (popup.closed) finish(false)
+    }, 600)
+  })
+}
+
+async function startFeishuAuth() {
+  oauthErrorMsg.value = ''
+  authorizing.value = true
+  try {
+    const dsId = await ensureFeishuDataSource()
+    if (!dsId) {
+      authorizing.value = false
+      return
+    }
+    const redirectUri = `${window.location.origin}/api/v1/datasource/oauth/callback`
+    const { authorize_url } = await authorizeDataSourceOAuth(dsId, redirectUri)
+    if (!authorize_url) throw new Error('missing authorize_url')
+
+    const ok = await openOAuthPopup(authorize_url)
+    if (ok) {
+      credentialsConfigured.value = true
+      replaceCredentialsMode.value = false
+      testResult.value = 'success'
+      form.value.config.settings = {
+        ...(form.value.config.settings || {}),
+        auth_mode: 'user',
+      }
+      MessagePlugin.success(t('datasource.feishu.authSuccess'))
+    } else {
+      testResult.value = ''
+      MessagePlugin.error(oauthErrorMsg.value || t('datasource.feishu.authFailed'))
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.feishu.authFailed'))
+  }
+  authorizing.value = false
+}
 </script>
 
 <template>
@@ -723,7 +946,7 @@ const drawerConfirmText = computed(() => {
     :description="drawerDescription"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
-    :confirm-loading="submitting || (step === 1 && testing)"
+    :confirm-loading="submitting || (step === 1 && testing) || (step === 2 && loadingResources)"
     storage-key="setting-drawer:width:datasource-editor"
     width="640px"
     @confirm="handleDrawerConfirm"
@@ -891,6 +1114,22 @@ const drawerConfirmText = computed(() => {
       <div class="form-item">
         <label class="form-label">{{ t('datasource.credentialsLabel') }}</label>
 
+        <!-- Feishu: choose app identity (default) vs user identity (个人身份) -->
+        <div v-if="form.type === 'feishu'" class="ds-authmode">
+          <t-radio-group
+            v-model="feishuAuthMode"
+            variant="default-filled"
+            size="small"
+            @change="onAuthModeChange"
+          >
+            <t-radio-button value="app">{{ t('datasource.feishu.authModeApp') }}</t-radio-button>
+            <t-radio-button value="user">{{ t('datasource.feishu.authModeUser') }}</t-radio-button>
+          </t-radio-group>
+          <p class="form-desc">
+            {{ t(feishuAuthMode === 'user' ? 'datasource.feishu.authModeUserHint' : 'datasource.feishu.authModeAppHint') }}
+          </p>
+        </div>
+
         <template v-if="isEdit && credentialsConfigured && !replaceCredentialsMode">
           <div
             class="credential-faux-input"
@@ -976,6 +1215,27 @@ const drawerConfirmText = computed(() => {
             </t-button>
           </div>
         </div>
+
+        <!-- Feishu user identity: OAuth consent button + status -->
+        <div v-if="form.type === 'feishu' && feishuAuthMode === 'user'" class="ds-feishu-auth">
+          <div v-if="isUserModeAuthorized" class="ds-feishu-auth__status">
+            <t-icon name="check-circle-filled" class="credential-status-icon success" />
+            <span class="credential-faux-text">{{ t('datasource.feishu.authorized') }}</span>
+            <t-button size="small" variant="text" theme="primary" :loading="authorizing" @click="startFeishuAuth">
+              {{ t('datasource.feishu.reauthorize') }}
+            </t-button>
+          </div>
+          <t-button
+            v-else
+            theme="primary"
+            variant="outline"
+            :loading="authorizing"
+            @click="startFeishuAuth"
+          >
+            {{ t('datasource.feishu.authorize') }}
+          </t-button>
+          <p class="form-desc">{{ t('datasource.feishu.authorizeHint') }}</p>
+        </div>
       </div>
     </section>
 
@@ -1020,13 +1280,17 @@ const drawerConfirmText = computed(() => {
               :aria-label="expandedResourceIds.has(r.external_id)
                 ? t('knowledgeStages.collapseBranch')
                 : t('knowledgeStages.expandBranch')"
+              :aria-busy="isResourceChildrenLoading(r.external_id)"
               @click.stop="toggleExpand(r.external_id)"
             >
               <t-icon
-                :name="expandedResourceIds.has(r.external_id) ? 'chevron-down' : 'chevron-right'"
+                :name="isResourceChildrenLoading(r.external_id)
+                  ? 'loading'
+                  : (expandedResourceIds.has(r.external_id) ? 'chevron-down' : 'chevron-right')"
+                :class="{ 'resource-picker__expand-icon-spin': isResourceChildrenLoading(r.external_id) }"
                 size="12px"
               />
-            </button>
+	            </button>
             <span v-else class="resource-picker__expand-spacer" aria-hidden="true" />
             <span
               class="resource-picker__check"
@@ -1086,7 +1350,7 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
         <div class="ds-empty-actions">
-          <button type="button" class="ds-empty-retry" @click="loadResources">
+          <button type="button" class="ds-empty-retry" @click="loadResources()">
             {{ t('datasource.retryLoadResources') }}
           </button>
           <a
@@ -1707,6 +1971,15 @@ const drawerConfirmText = computed(() => {
   background: color-mix(in srgb, var(--td-text-color-placeholder) 12%, transparent);
   color: var(--td-text-color-secondary);
   outline: none;
+}
+
+.resource-picker__expand-icon-spin {
+  animation: resource-expand-spin 1s linear infinite;
+}
+
+@keyframes resource-expand-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .resource-picker__check {

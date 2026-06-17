@@ -17,13 +17,20 @@ import (
 
 // Client wraps the Feishu Open Platform API for document/wiki operations.
 type Client struct {
-	baseURL   string
-	appID     string
-	appSecret string
+	baseURL         string
+	accountsBaseURL string
+	appID           string
+	appSecret       string
+
+	// userMode selects user_access_token over tenant_access_token for API
+	// calls. When set, userAccessToken must already be valid — the service
+	// layer refreshes it before building the client (see CredentialRefresher).
+	userMode        bool
+	userAccessToken string
 
 	httpClient *http.Client
 
-	// Token cache (thread-safe)
+	// Token cache (thread-safe) — only used for tenant_access_token.
 	tokenMu    sync.Mutex
 	tokenCache string
 	tokenExpAt time.Time
@@ -52,11 +59,28 @@ func (e *partialWikiNodeListError) Error() string {
 // NewClient creates a new Feishu API client.
 func NewClient(config *Config) *Client {
 	return &Client{
-		baseURL:    config.GetBaseURL(),
-		appID:      config.AppID,
-		appSecret:  config.AppSecret,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:         config.GetBaseURL(),
+		accountsBaseURL: config.AccountsBaseURL(),
+		appID:           config.AppID,
+		appSecret:       config.AppSecret,
+		userMode:        config.IsUserMode(),
+		userAccessToken: config.UserAccessToken,
+		httpClient:      &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// getAccessToken returns the bearer token to use for API calls, dispatching on
+// the configured auth mode. In user mode the user_access_token is used as-is
+// (the service layer keeps it fresh); in app mode the cached tenant token is
+// fetched/renewed.
+func (c *Client) getAccessToken(ctx context.Context) (string, error) {
+	if c.userMode {
+		if c.userAccessToken == "" {
+			return "", fmt.Errorf("feishu user_access_token not set — complete authorization first")
+		}
+		return c.userAccessToken, nil
+	}
+	return c.getTenantAccessToken(ctx)
 }
 
 // getTenantAccessToken retrieves (or returns cached) tenant access token.
@@ -116,9 +140,102 @@ func (c *Client) getTenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// User-identity OAuth2 (个人身份): authorization-code flow + refresh
+//
+//   1. BuildAuthorizeURL → redirect user to Feishu consent page
+//   2. ExchangeUserToken  → swap the returned code for user_access_token +
+//                           refresh_token
+//   3. RefreshUserToken   → renew before expiry (refresh_token is rotated)
+// ──────────────────────────────────────────────────────────────────────
+
+// BuildAuthorizeURL builds the Feishu consent URL for the OAuth2
+// authorization-code flow. redirectURI must be registered in the app's
+// security settings; state is an opaque CSRF/correlation token verified on
+// callback.
+func (c *Client) BuildAuthorizeURL(redirectURI, state string) string {
+	q := url.Values{}
+	q.Set("client_id", c.appID)
+	q.Set("response_type", "code")
+	q.Set("redirect_uri", redirectURI)
+	q.Set("scope", UserOAuthScopes)
+	q.Set("state", state)
+	return c.accountsBaseURL + "/open-apis/authen/v1/authorize?" + q.Encode()
+}
+
+// requestOAuthToken posts to the v2 oauth/token endpoint (used for both the
+// authorization-code exchange and refresh_token renewal). The endpoint
+// authenticates via client_id/client_secret in the body, so no bearer token
+// is attached.
+func (c *Client) requestOAuthToken(ctx context.Context, body map[string]string) (*userTokenResponse, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal oauth token request: %w", err)
+	}
+
+	endpoint := c.baseURL + "/open-apis/authen/v2/oauth/token"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create oauth token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request oauth token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read oauth token response: %w", err)
+	}
+
+	var result userTokenResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("decode oauth token response: %w", err)
+	}
+	if result.Code != 0 || result.AccessToken == "" {
+		msg := result.Error
+		if result.ErrorDescription != "" {
+			msg = strings.TrimSpace(result.Error + ": " + result.ErrorDescription)
+		}
+		if msg == "" {
+			msg = truncate(string(respBody), 300)
+		}
+		return nil, fmt.Errorf("feishu oauth token error: code=%d %s", result.Code, msg)
+	}
+	return &result, nil
+}
+
+// ExchangeUserToken swaps an authorization code for a user_access_token (plus a
+// refresh_token when offline_access was granted). redirectURI must match the
+// one used to obtain the code.
+func (c *Client) ExchangeUserToken(ctx context.Context, code, redirectURI string) (*userTokenResponse, error) {
+	return c.requestOAuthToken(ctx, map[string]string{
+		"grant_type":    "authorization_code",
+		"client_id":     c.appID,
+		"client_secret": c.appSecret,
+		"code":          code,
+		"redirect_uri":  redirectURI,
+	})
+}
+
+// RefreshUserToken renews a user_access_token using a refresh_token. Feishu
+// rotates the refresh_token on every call and invalidates the previous one, so
+// the returned refresh_token MUST be persisted immediately.
+func (c *Client) RefreshUserToken(ctx context.Context, refreshToken string) (*userTokenResponse, error) {
+	return c.requestOAuthToken(ctx, map[string]string{
+		"grant_type":    "refresh_token",
+		"client_id":     c.appID,
+		"client_secret": c.appSecret,
+		"refresh_token": refreshToken,
+	})
+}
+
 // doRequest executes an authenticated API request and decodes the JSON response.
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
-	token, err := c.getTenantAccessToken(ctx)
+	token, err := c.getAccessToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -405,8 +522,23 @@ func (c *Client) GetDocumentRawContent(ctx context.Context, documentID string) (
 	return resp.Data.Content, nil
 }
 
-// Ping verifies the credentials by attempting to get a tenant access token.
+// Ping verifies the credentials. In app mode it fetches a tenant access token;
+// in user mode it confirms a user_access_token is present and works by calling
+// the authenticated user_info endpoint.
 func (c *Client) Ping(ctx context.Context) error {
+	if c.userMode {
+		if c.userAccessToken == "" {
+			return fmt.Errorf("feishu authorization incomplete — no user_access_token; click \"authorize\" to grant access")
+		}
+		var resp apiResponse
+		if err := c.doRequest(ctx, http.MethodGet, "/open-apis/authen/v1/user_info", nil, &resp); err != nil {
+			return fmt.Errorf("verify feishu user identity: %w", err)
+		}
+		if resp.Code != 0 {
+			return fmt.Errorf("feishu user identity invalid: code=%d msg=%s", resp.Code, resp.Msg)
+		}
+		return nil
+	}
 	_, err := c.getTenantAccessToken(ctx)
 	return err
 }
@@ -547,7 +679,7 @@ func (c *Client) DownloadDriveFile(ctx context.Context, fileToken string) ([]byt
 
 // downloadRawBytes performs an authenticated GET and returns the raw response body.
 func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
-	token, err := c.getTenantAccessToken(ctx)
+	token, err := c.getAccessToken(ctx)
 	if err != nil {
 		return nil, err
 	}

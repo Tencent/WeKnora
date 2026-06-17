@@ -352,7 +352,12 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 		return
 	}
 
-	resources, err := h.service.ListAvailableResources(ctx, id)
+	var opts *types.ResourceListOptions
+	if parentID, ok := c.GetQuery("parent_id"); ok {
+		opts = &types.ResourceListOptions{ParentID: &parentID}
+	}
+
+	resources, err := h.service.ListAvailableResources(ctx, id, opts)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

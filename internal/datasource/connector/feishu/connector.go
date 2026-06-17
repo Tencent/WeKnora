@@ -58,18 +58,7 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 
 	resources := make([]types.Resource, 0, len(spaces))
 	for _, space := range spaces {
-		resources = append(resources, types.Resource{
-			ExternalID:  space.SpaceID,
-			Name:        space.Name,
-			Type:        "wiki_space",
-			Description: space.Description,
-			URL:         fmt.Sprintf("https://feishu.cn/wiki/%s", space.SpaceID),
-			HasChildren: true,
-			Metadata: map[string]interface{}{
-				"visibility": space.Visibility,
-				"space_id":   space.SpaceID,
-			},
-		})
+		resources = append(resources, wikiSpaceToResource(space))
 
 		nodes, err := client.ListAllWikiNodesRecursive(ctx, space.SpaceID)
 		if err != nil {
@@ -83,6 +72,54 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 		}
 	}
 
+	return resources, nil
+}
+
+// ListResourcesWithOptions lists one resource-tree level for lazy UI loading.
+// ParentID == nil delegates to the legacy full recursive listing. ParentID == ""
+// returns only accessible wiki spaces; otherwise it returns the direct children
+// of the selected space or wiki node.
+func (c *Connector) ListResourcesWithOptions(
+	ctx context.Context,
+	config *types.DataSourceConfig,
+	opts types.ResourceListOptions,
+) ([]types.Resource, error) {
+	if opts.ParentID == nil {
+		return c.ListResources(ctx, config)
+	}
+
+	feishuConfig, err := parseFeishuConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	client := NewClient(feishuConfig)
+	parentID := strings.TrimSpace(*opts.ParentID)
+	if parentID == "" {
+		spaces, err := client.ListWikiSpaces(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list feishu wiki spaces: %w", err)
+		}
+		resources := make([]types.Resource, 0, len(spaces))
+		for _, space := range spaces {
+			resources = append(resources, wikiSpaceToResource(space))
+		}
+		return resources, nil
+	}
+
+	spaceID, nodeToken := parseWikiResourceID(parentID)
+	if spaceID == "" {
+		return nil, fmt.Errorf("invalid feishu resource parent id: %s", parentID)
+	}
+
+	nodes, err := client.ListWikiNodes(ctx, spaceID, nodeToken)
+	if err != nil {
+		return nil, fmt.Errorf("list feishu wiki nodes under %s: %w", parentID, err)
+	}
+	resources := make([]types.Resource, 0, len(nodes))
+	for _, node := range nodes {
+		resources = append(resources, wikiNodeToResource(spaceID, node))
+	}
 	return resources, nil
 }
 
@@ -365,6 +402,86 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 	}
 }
 
+// --- User-identity OAuth2 (个人身份) ---
+// These implement datasource.OAuthConnector and datasource.CredentialRefresher.
+
+// refreshMarginSeconds is how long before expiry a user_access_token is
+// proactively refreshed, so an in-flight sync never races the 2h expiry.
+const refreshMarginSeconds = 10 * 60
+
+// AuthorizeURL builds the Feishu consent URL for the user-identity OAuth flow.
+func (c *Connector) AuthorizeURL(config *types.DataSourceConfig, redirectURI, state string) (string, error) {
+	feishuConfig, err := parseFeishuConfig(config)
+	if err != nil {
+		return "", err
+	}
+	return NewClient(feishuConfig).BuildAuthorizeURL(redirectURI, state), nil
+}
+
+// ExchangeCode swaps an authorization code for user tokens. It returns the full
+// credential map (app credentials + user tokens) and a settings patch that
+// switches auth_mode to "user".
+func (c *Connector) ExchangeCode(
+	ctx context.Context, config *types.DataSourceConfig, code, redirectURI string,
+) (map[string]interface{}, map[string]interface{}, error) {
+	feishuConfig, err := parseFeishuConfig(config)
+	if err != nil {
+		return nil, nil, err
+	}
+	tok, err := NewClient(feishuConfig).ExchangeUserToken(ctx, code, redirectURI)
+	if err != nil {
+		return nil, nil, fmt.Errorf("exchange feishu authorization code: %w", err)
+	}
+	creds := mergeUserToken(config.Credentials, tok)
+	settings := map[string]interface{}{"auth_mode": AuthModeUser}
+	return creds, settings, nil
+}
+
+// RefreshCredentials renews the user_access_token when it is missing or close to
+// expiry. Returns nil (no-op) for app mode, or when the current token is still
+// valid. The rotated refresh_token is included so the caller persists it.
+func (c *Connector) RefreshCredentials(
+	ctx context.Context, config *types.DataSourceConfig,
+) (map[string]interface{}, error) {
+	feishuConfig, err := parseFeishuConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	if !feishuConfig.IsUserMode() || feishuConfig.RefreshToken == "" {
+		return nil, nil // app mode, or not yet authorized — nothing to refresh
+	}
+	stillValid := feishuConfig.UserAccessToken != "" &&
+		feishuConfig.TokenExpiresAt > time.Now().Unix()+refreshMarginSeconds
+	if stillValid {
+		return nil, nil
+	}
+	tok, err := NewClient(feishuConfig).RefreshUserToken(ctx, feishuConfig.RefreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("refresh feishu user token: %w", err)
+	}
+	return mergeUserToken(config.Credentials, tok), nil
+}
+
+// mergeUserToken returns a copy of the existing credential map with the
+// user-identity tokens from a token response applied. The app credentials
+// (app_id/app_secret/base_url) are preserved so the merged map stays a
+// complete, self-contained credential set. The auth_mode discriminator lives in
+// Settings, not here, so it is set by the service layer (CompleteOAuth).
+func mergeUserToken(existing map[string]interface{}, tok *userTokenResponse) map[string]interface{} {
+	merged := make(map[string]interface{}, len(existing)+4)
+	for k, v := range existing {
+		merged[k] = v
+	}
+	now := time.Now().Unix()
+	merged["user_access_token"] = tok.AccessToken
+	merged["token_expires_at"] = now + int64(tok.ExpiresIn)
+	if tok.RefreshToken != "" {
+		merged["refresh_token"] = tok.RefreshToken
+		merged["refresh_expires_at"] = now + int64(tok.RefreshExpiresIn)
+	}
+	return merged
+}
+
 // --- Helper functions ---
 
 func makeWikiNodeResourceID(spaceID, nodeToken string) string {
@@ -374,6 +491,21 @@ func makeWikiNodeResourceID(spaceID, nodeToken string) string {
 func parseWikiResourceID(resourceID string) (spaceID string, nodeToken string) {
 	spaceID, nodeToken, _ = strings.Cut(resourceID, feishuWikiNodeResourceSeparator)
 	return spaceID, nodeToken
+}
+
+func wikiSpaceToResource(space wikiSpace) types.Resource {
+	return types.Resource{
+		ExternalID:  space.SpaceID,
+		Name:        space.Name,
+		Type:        "wiki_space",
+		Description: space.Description,
+		URL:         fmt.Sprintf("https://feishu.cn/wiki/%s", space.SpaceID),
+		HasChildren: true,
+		Metadata: map[string]interface{}{
+			"visibility": space.Visibility,
+			"space_id":   space.SpaceID,
+		},
+	}
 }
 
 func wikiNodeToResource(spaceID string, node wikiNode) types.Resource {
@@ -427,6 +559,14 @@ func parseFeishuConfig(config *types.DataSourceConfig) (*Config, error) {
 
 	if feishuConfig.AppID == "" || feishuConfig.AppSecret == "" {
 		return nil, fmt.Errorf("feishu app_id and app_secret are required")
+	}
+
+	// auth_mode is a non-secret discriminator kept in Settings (not Credentials)
+	// so it survives API-response redaction and the UI can read it back.
+	if config.Settings != nil {
+		if mode, ok := config.Settings["auth_mode"].(string); ok && mode != "" {
+			feishuConfig.AuthMode = mode
+		}
 	}
 
 	return &feishuConfig, nil

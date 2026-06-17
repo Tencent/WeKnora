@@ -41,6 +41,10 @@ var noAuthAPI = map[string][]string{
 	// before GET to validate Content-Type / Content-Length when rendering
 	// image previews — both verbs must be allowed for image links to work.
 	"/api/v1/files/presigned": {"GET", "HEAD"},
+	// Data source OAuth callback: reached by the external provider's browser
+	// redirect without a WeKnora session. Authorization is established by the
+	// HMAC-signed state, not by JWT (see handler/datasource_oauth.go).
+	"/api/v1/datasource/oauth/callback": {"GET"},
 }
 
 // 检查请求是否在无需认证的API列表中
