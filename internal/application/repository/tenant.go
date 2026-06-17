@@ -141,7 +141,12 @@ func (r *tenantRepository) UpdateTenant(ctx context.Context, tenant *types.Tenan
 
 // DeleteTenant deletes tenant
 func (r *tenantRepository) DeleteTenant(ctx context.Context, id uint64) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.Tenant{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("tenant_id = ?", id).Delete(&types.TenantMember{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&types.Tenant{}).Error
+	})
 }
 
 func (r *tenantRepository) AdjustStorageUsed(ctx context.Context, tenantID uint64, delta int64) error {

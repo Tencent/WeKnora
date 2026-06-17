@@ -240,6 +240,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { getCurrentUser, type TenantInfo } from '@/api/auth'
 import { deleteTenant as deleteTenantApi, updateTenant as updateTenantApi } from '@/api/tenant'
@@ -250,10 +251,14 @@ import {
   type TenantRole,
 } from '@/api/tenant/members'
 import { useAuthStore } from '@/stores/auth'
+import { useUIStore } from '@/stores/ui'
 import { useI18n } from 'vue-i18n'
+import { persistLastActiveTenantPreference } from '@/utils/tenantSwitch'
 
 const { t, locale } = useI18n()
+const router = useRouter()
 const authStore = useAuthStore()
+const uiStore = useUIStore()
 
 // Reactive state
 const tenantInfo = ref<TenantInfo | null>(null)
@@ -380,8 +385,7 @@ async function deleteCurrentTenant() {
     const resp = await deleteTenantApi(tid)
     if (resp.success) {
       MessagePlugin.success(t('tenant.deleteDangerZone.success'))
-      authStore.logout()
-      window.location.href = '/login'
+      await switchToHomeTenantAfterDelete()
     } else {
       MessagePlugin.error(resp.message || t('tenant.deleteDangerZone.failed'))
     }
@@ -392,6 +396,14 @@ async function deleteCurrentTenant() {
     deleteConfirmName.value = ''
     deleteTenantVisible.value = false
   }
+}
+
+async function switchToHomeTenantAfterDelete() {
+  authStore.setSelectedTenant(null, null)
+  await persistLastActiveTenantPreference(null)
+  await authStore.refreshFromAuthMe()
+  uiStore.closeSettings()
+  await router.replace('/platform/knowledge-bases')
 }
 
 watch(

@@ -120,7 +120,7 @@ instance.interceptors.response.use(
     }
   },
   async (error: any) => {
-    const originalRequest = error.config;
+    const originalRequest = error.config || {};
     
     if (!error.response) {
       return Promise.reject({ message: t('error.networkError') });
@@ -237,6 +237,15 @@ instance.interceptors.response.use(
       }
     } else if (typeof data === 'string') {
       errorMessage = data;
+    }
+    if (status === 400 && errorMessage === 'Invalid target tenant ID' && !originalRequest._tenantRetry) {
+      originalRequest._tenantRetry = true;
+      localStorage.removeItem('weknora_selected_tenant_id');
+      localStorage.removeItem('weknora_selected_tenant_name');
+      if (originalRequest.headers) {
+        delete originalRequest.headers['X-Tenant-ID'];
+      }
+      return instance(originalRequest);
     }
     return Promise.reject({ 
       status, 

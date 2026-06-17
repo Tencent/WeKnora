@@ -20,7 +20,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Tenant{}))
+	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.TenantMember{}))
 	return db
 }
 
@@ -161,6 +161,43 @@ func TestUpdateTenant_NoEncryptionWithoutAESKey(t *testing.T) {
 	// Without SYSTEM_AES_KEY, api_key should remain as-is (no guard needed).
 	rawAfter := readAPIKeyRaw(t, db, 3)
 	assert.Equal(t, "sk-no-encryption", rawAfter)
+}
+
+func TestDeleteTenantSoftDeletesMemberships(t *testing.T) {
+	db := setupTestDB(t)
+	now := time.Now()
+	tenant := &types.Tenant{
+		ID:        10001,
+		Name:      "tenant-to-delete",
+		Status:    "active",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	require.NoError(t, db.Create(tenant).Error)
+	require.NoError(t, db.Create(&types.TenantMember{
+		UserID:    "user-1",
+		TenantID:  tenant.ID,
+		Role:      types.TenantRoleOwner,
+		Status:    types.TenantMemberStatusActive,
+		JoinedAt:  now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}).Error)
+
+	repo := NewTenantRepository(db)
+	require.NoError(t, repo.DeleteTenant(context.Background(), tenant.ID))
+
+	var activeTenantCount int64
+	require.NoError(t, db.Model(&types.Tenant{}).Where("id = ?", tenant.ID).Count(&activeTenantCount).Error)
+	assert.Equal(t, int64(0), activeTenantCount)
+
+	var activeMemberCount int64
+	require.NoError(t, db.Model(&types.TenantMember{}).Where("tenant_id = ?", tenant.ID).Count(&activeMemberCount).Error)
+	assert.Equal(t, int64(0), activeMemberCount)
+
+	var allMemberCount int64
+	require.NoError(t, db.Unscoped().Model(&types.TenantMember{}).Where("tenant_id = ?", tenant.ID).Count(&allMemberCount).Error)
+	assert.Equal(t, int64(1), allMemberCount)
 }
 
 func isEncrypted(s string) bool {

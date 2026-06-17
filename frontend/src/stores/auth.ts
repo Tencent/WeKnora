@@ -469,19 +469,6 @@ export const useAuthStore = defineStore('auth', () => {
       }
     }
 
-    if (storedSelectedTenantId) {
-      try {
-        selectedTenantId.value = Number(storedSelectedTenantId)
-        if (storedSelectedTenantName) {
-          selectedTenantName.value = storedSelectedTenantName
-        }
-      } catch (e) {
-        console.error('Failed to parse selected tenant ID', e)
-        selectedTenantId.value = null
-        selectedTenantName.value = null
-      }
-    }
-
     const storedMemberships = localStorage.getItem('weknora_memberships')
     if (storedMemberships) {
       try {
@@ -490,6 +477,28 @@ export const useAuthStore = defineStore('auth', () => {
       } catch (e) {
         console.error('Failed to parse memberships', e)
         memberships.value = []
+      }
+    }
+
+    if (storedSelectedTenantId) {
+      try {
+        const parsedTenantId = Number(storedSelectedTenantId)
+        const hasMembership = memberships.value.some((m) => Number(m.tenant_id) === parsedTenantId)
+        if (Number.isFinite(parsedTenantId) && hasMembership) {
+          selectedTenantId.value = parsedTenantId
+          if (storedSelectedTenantName) {
+            selectedTenantName.value = storedSelectedTenantName
+          }
+        } else {
+          localStorage.removeItem('weknora_selected_tenant_id')
+          localStorage.removeItem('weknora_selected_tenant_name')
+          selectedTenantId.value = null
+          selectedTenantName.value = null
+        }
+      } catch (e) {
+        console.error('Failed to parse selected tenant ID', e)
+        selectedTenantId.value = null
+        selectedTenantName.value = null
       }
     }
 

@@ -302,6 +302,10 @@ func (s *userService) buildMembershipsForUser(
 			name = activeTenant.Name
 		} else if t, ok := tenantByID[m.TenantID]; ok && t != nil {
 			name = t.Name
+		} else {
+			// Membership rows can outlive a tenant when older builds deleted
+			// only the tenant row. Do not expose those dangling rows to the UI.
+			continue
 		}
 		out = append(out, types.Membership{
 			TenantID:   m.TenantID,
