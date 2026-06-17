@@ -26,7 +26,7 @@
                     <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0"
                         class="suggested-questions-inner">
                         <div class="suggested-questions-title"><t-skeleton animation="gradient"
-                                :row-col="[{ width: '120px', height: '18px' }]" /></div>
+                                :row-col="[{ width: '120px', height: '14px' }]" /></div>
                         <div class="suggested-questions-grid">
                             <div v-for="n in 6" :key="'sq-skel-' + n" class="suggested-question-card sq-card-skeleton">
                                 <t-skeleton animation="gradient"
@@ -37,12 +37,17 @@
                     <transition v-else appear name="sq-fade">
                         <div v-if="suggestedQuestions.length > 0" class="suggested-questions-inner">
                             <div class="suggested-questions-title-row">
-                                <div class="suggested-questions-title">{{ t('chat.suggestedQuestions') }}</div>
-                                <t-button variant="text" shape="square" size="small" class="suggested-questions-refresh"
-                                    :loading="suggestedQuestionsLoading" :title="t('chat.refreshSuggestedQuestions')"
-                                    @click="fetchSuggestedQuestions">
-                                    <template #icon><t-icon name="refresh" /></template>
-                                </t-button>
+                                <p class="suggested-questions-caption">
+                                    <span class="suggested-questions-title">{{ t('chat.suggestedQuestions') }}</span>
+                                    <button type="button" class="suggested-questions-refresh"
+                                        :disabled="suggestedQuestionsLoading"
+                                        :title="t('chat.refreshSuggestedQuestions')"
+                                        :aria-label="t('chat.refreshSuggestedQuestions')"
+                                        @click="fetchSuggestedQuestions">
+                                        <t-icon :name="suggestedQuestionsLoading ? 'loading' : 'refresh'"
+                                            :class="{ 'sq-refresh-spin': suggestedQuestionsLoading }" />
+                                    </button>
+                                </p>
                             </div>
                             <div class="suggested-questions-grid">
                                 <div v-for="(item, index) in suggestedQuestions" :key="item.question"
@@ -1078,152 +1083,23 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
-.suggested-questions-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 32px 16px 16px;
-    max-width: 800px;
-    margin: 0 auto;
-    width: 100%;
-    min-height: 0;
-    transition: min-height 0.3s ease;
+@import '../../components/css/suggested-questions.less';
 
-    &.has-questions {
-        min-height: 80px;
-    }
+.suggested-questions-container {
+    transition: min-height 0.3s @suggested-ease;
 }
 
 .suggested-questions-inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 100%;
     animation: contentFadeIn 0.3s ease-out;
 }
 
 .sq-fade-enter-active,
 .sq-fade-leave-active {
-    transition: opacity 0.25s ease;
+    transition: opacity 0.25s @suggested-ease;
 }
 
 .sq-fade-enter-from,
 .sq-fade-leave-to {
     opacity: 0;
-}
-
-.suggested-questions-title-row {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    margin-bottom: 16px;
-}
-
-.suggested-questions-title {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin-bottom: 0;
-    font-weight: 500;
-}
-
-.suggested-questions-refresh {
-    flex-shrink: 0;
-    color: var(--td-text-color-secondary);
-
-    &:hover:not(.t-is-disabled) {
-        color: var(--td-text-color-primary);
-    }
-}
-
-.suggested-questions-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-    width: 100%;
-}
-
-.suggested-question-card {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 16px;
-    border-radius: 20px;
-    border: 1px solid var(--td-component-stroke);
-    background: var(--td-bg-color-container);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    max-width: 100%;
-
-    &.sq-card-skeleton {
-        pointer-events: none;
-        flex-shrink: 0;
-        border-color: transparent;
-        background: var(--td-bg-color-secondarycontainer);
-
-        :deep(.t-skeleton) {
-            width: 100%;
-        }
-
-        :deep(.t-skeleton__row) {
-            margin: 0;
-        }
-
-        :deep(.t-skeleton__col) {
-            border-radius: 4px;
-        }
-
-        &:nth-child(1) {
-            width: 132px;
-        }
-
-        &:nth-child(2) {
-            width: 168px;
-        }
-
-        &:nth-child(3) {
-            width: 116px;
-        }
-
-        &:nth-child(4) {
-            width: 152px;
-        }
-
-        &:nth-child(5) {
-            width: 124px;
-        }
-
-        &:nth-child(6) {
-            width: 144px;
-        }
-    }
-
-    &:not(.sq-card-skeleton):hover {
-        border-color: var(--td-brand-color);
-        background: var(--td-brand-color-light);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-    }
-}
-
-.suggested-question-text {
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.suggested-question-badge {
-    font-size: 10px;
-    padding: 1px 5px;
-    border-radius: 4px;
-    flex-shrink: 0;
-    font-weight: 500;
-
-    &.faq {
-        background: var(--td-success-color-1);
-        color: var(--td-success-color);
-    }
 }
 </style>

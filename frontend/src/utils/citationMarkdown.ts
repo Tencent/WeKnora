@@ -224,16 +224,15 @@ export function joinCitationTagsToPreviousLine(content: string): string {
     )
   }
 
-  // Blank lines before citations: join to previous prose, but keep a break after lists
-  // or fenced-code delimiters (``` / ~~~ must stay on their own line).
+  // Blank lines before citations: join to the previous content. Fenced-code
+  // delimiters are the only exception because ``` / ~~~ must stay on their own line.
   result = result.replace(/\n[ \t]*\n+([ \t]*<(?:kb|web)\b)/gi, (match, kbStart, offset, full) => {
     const before = full.slice(0, offset)
-    const lastLine = before.split('\n').filter((line) => line.trim()).pop() || ''
-    const isListItem = /^\s*(\d+\.|[-*+])\s+\S/.test(lastLine)
-    if (isListItem || isFencedCodeDelimiterLine(lastLine)) {
+    const lastLine = before.split('\n').filter((line: string) => line.trim()).pop() || ''
+    if (isFencedCodeDelimiterLine(lastLine)) {
       return `\n\n${kbStart}`
     }
-    return ` ${kbStart}`
+    return ` ${kbStart.trimStart()}`
   })
 
   // Single newline before citation when it follows text or another citation (not after a blank line)
@@ -243,7 +242,7 @@ export function joinCitationTagsToPreviousLine(content: string): string {
       if (isFencedCodeDelimiterLine(beforePart)) {
         return match
       }
-      return `${beforePart} ${kbStart}`
+      return `${beforePart} ${kbStart.trimStart()}`
     },
   )
 

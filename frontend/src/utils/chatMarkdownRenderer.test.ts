@@ -167,10 +167,37 @@ test('renderChatMarkdown inlines consecutive citation tags across newlines', () 
   assert.doesNotMatch(html, /<\/p>\s*<p>\s*<span class="citation citation-kb"/)
 })
 
-test('joinCitationTagsToPreviousLine keeps citations on a new line after a list', () => {
-  const tag = '<kb doc="doc.pdf" chunk_id="1" />'
-  const input = `1. first\n2. second\n\n${tag}`
-  assert.equal(joinCitationTagsToPreviousLine(input), `1. first\n2. second\n\n${tag}`)
+test('joinCitationTagsToPreviousLine appends an indented citation to the preceding list item', () => {
+  const tag = '<kb doc="阅读之星全国青少年阅读风采展示活动.pdf" chunk_id="chunk-1" />'
+  const input = [
+    '#### 5️⃣ 阅读之星培养基地',
+    '- 每个组别冠亚季军及前十强所在的学校，将获得 **"阅读之星培养基地"** 奖牌',
+    '',
+    `  ${tag}`,
+  ].join('\n')
+  assert.equal(
+    joinCitationTagsToPreviousLine(input),
+    [
+      '#### 5️⃣ 阅读之星培养基地',
+      `- 每个组别冠亚季军及前十强所在的学校，将获得 **"阅读之星培养基地"** 奖牌 ${tag}`,
+    ].join('\n'),
+  )
+})
+
+test('renderChatMarkdown renders a citation after a list item inline in that item', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: () => true,
+  })
+  const tag = '<kb doc="阅读之星全国青少年阅读风采展示活动.pdf" chunk_id="chunk-1" />'
+  const html = renderChatMarkdown(`- 培养基地奖牌\n\n  ${tag}`, {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+  })
+
+  assert.match(html, /<li>培养基地奖牌 <span class="citation citation-kb"/)
+  assert.doesNotMatch(html, /<\/ul>\s*<p>\s*<span class="citation citation-kb"/)
 })
 
 test('joinCitationTagsToPreviousLine does not merge citations onto fenced code closing delimiter', () => {

@@ -9,7 +9,7 @@
                 <!-- 骨架屏占位 -->
                 <div v-if="sqLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
                     <div class="suggested-questions-title"><t-skeleton animation="gradient"
-                            :row-col="[{ width: '120px', height: '18px' }]" /></div>
+                            :row-col="[{ width: '120px', height: '14px' }]" /></div>
                     <div class="suggested-questions-grid">
                         <div v-for="n in 6" :key="'sq-skel-' + n" class="suggested-question-card sq-card-skeleton">
                             <t-skeleton animation="gradient"
@@ -21,12 +21,15 @@
                     @after-leave="onAfterLeave" @enter="onEnter" @after-enter="onQuestionsEntered">
                     <div v-if="suggestedQuestions.length > 0" :key="sqRenderKey" class="suggested-questions-inner">
                         <div class="suggested-questions-title-row">
-                            <div class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</div>
-                            <t-button variant="text" shape="square" size="small" class="suggested-questions-refresh"
-                                :loading="sqLoading" :title="$t('chat.refreshSuggestedQuestions')"
-                                @click="fetchSuggestedQuestions">
-                                <template #icon><t-icon name="refresh" /></template>
-                            </t-button>
+                            <p class="suggested-questions-caption">
+                                <span class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</span>
+                                <button type="button" class="suggested-questions-refresh" :disabled="sqLoading"
+                                    :title="$t('chat.refreshSuggestedQuestions')"
+                                    :aria-label="$t('chat.refreshSuggestedQuestions')" @click="fetchSuggestedQuestions">
+                                    <t-icon :name="sqLoading ? 'loading' : 'refresh'"
+                                        :class="{ 'sq-refresh-spin': sqLoading }" />
+                                </button>
+                            </p>
                         </div>
                         <div class="suggested-questions-grid">
                             <div v-for="(item, index) in suggestedQuestions" :key="item.question"
@@ -251,6 +254,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     align-items: center;
     width: 100%;
     max-width: 800px;
+    gap: 24px;
 
     :deep(.answers-input) {
         position: static;
@@ -265,7 +269,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     font-size: 28px;
     font-weight: 600;
     align-items: center;
-    margin-bottom: 30px;
+    margin-bottom: 0;
 
     .icon {
         display: flex;
@@ -285,15 +289,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-.suggested-questions-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-bottom: 24px;
-    width: 100%;
-    max-width: 800px;
-    transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-}
+@import '../../components/css/suggested-questions.less';
 
 @keyframes skeletonFadeIn {
     from {
@@ -305,18 +301,19 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
+.suggested-questions-container {
+    max-width: 800px;
+    margin: 0;
+    padding: 0 16px;
+    transition: height 0.35s @suggested-ease;
+}
+
 .suggested-questions-inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 100%;
     animation: skeletonFadeIn 0.3s ease-out;
 }
 
-// 容器整体过渡：淡入 + 轻微上滑
 .sq-slide-fade-enter-active {
-    transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-        transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.35s @suggested-ease, transform 0.35s @suggested-ease;
 }
 
 .sq-slide-fade-leave-active {
@@ -334,99 +331,18 @@ const handleKBEditorSuccess = (kbId: string) => {
     transform: translateY(-4px);
 }
 
-.suggested-questions-title-row {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    margin-bottom: 12px;
-}
-
-.suggested-questions-title {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin-bottom: 0;
-    font-weight: 500;
-}
-
-.suggested-questions-refresh {
-    flex-shrink: 0;
-    color: var(--td-text-color-secondary);
-
-    &:hover:not(.t-is-disabled) {
-        color: var(--td-text-color-primary);
-    }
-}
-
-.suggested-questions-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-    width: 100%;
-}
-
 .suggested-question-card {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 16px;
-    border-radius: 20px;
-    border: 1px solid var(--td-component-stroke);
-    background: var(--td-bg-color-container);
-    cursor: pointer;
-    max-width: 100%;
     opacity: 0;
     transform: translateY(8px) scale(0.97);
-    transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-        transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-        border-color 0.2s ease,
-        background 0.2s ease,
-        box-shadow 0.2s ease;
+    transition:
+        opacity 0.35s @suggested-ease,
+        transform 0.35s @suggested-ease,
+        background 0.2s @suggested-ease,
+        border-color 0.2s @suggested-ease;
 
     &.sq-card-skeleton {
         opacity: 1;
         transform: none;
-        cursor: default;
-        pointer-events: none;
-        flex-shrink: 0;
-        border-color: transparent;
-        background: var(--td-bg-color-secondarycontainer);
-
-        :deep(.t-skeleton) {
-            width: 100%;
-        }
-
-        :deep(.t-skeleton__row) {
-            margin: 0;
-        }
-
-        :deep(.t-skeleton__col) {
-            border-radius: 4px;
-        }
-
-        &:nth-child(1) {
-            width: 132px;
-        }
-
-        &:nth-child(2) {
-            width: 168px;
-        }
-
-        &:nth-child(3) {
-            width: 116px;
-        }
-
-        &:nth-child(4) {
-            width: 152px;
-        }
-
-        &:nth-child(5) {
-            width: 124px;
-        }
-
-        &:nth-child(6) {
-            width: 144px;
-        }
     }
 
     &.sq-card-visible {
@@ -434,32 +350,12 @@ const handleKBEditorSuccess = (kbId: string) => {
         transform: translateY(0) scale(1);
     }
 
-    &:not(.sq-card-skeleton):hover {
-        border-color: var(--td-brand-color);
-        background: var(--td-brand-color-light);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    &:not(.sq-card-skeleton):active {
+        transform: scale(0.98);
     }
-}
 
-.suggested-question-text {
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.suggested-question-badge {
-    font-size: 10px;
-    padding: 1px 5px;
-    border-radius: 4px;
-    flex-shrink: 0;
-    font-weight: 500;
-
-    &.faq {
-        background: var(--td-success-color-1);
-        color: var(--td-success-color);
+    &.sq-card-visible:active {
+        transform: scale(0.98);
     }
 }
 

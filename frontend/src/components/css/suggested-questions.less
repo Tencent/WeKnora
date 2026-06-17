@@ -1,0 +1,197 @@
+@suggested-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+.suggested-questions-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 16px 12px;
+    max-width: 720px;
+    margin: 0 auto;
+    width: 100%;
+    min-height: 0;
+
+    &.has-questions {
+        min-height: 64px;
+    }
+}
+
+.suggested-questions-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+
+.suggested-questions-title-row {
+    margin-bottom: 8px;
+}
+
+.suggested-questions-caption {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    line-height: 1;
+}
+
+.suggested-questions-title {
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+}
+
+.suggested-questions-refresh {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    transition: color 0.2s @suggested-ease, background 0.2s @suggested-ease;
+
+    :deep(.t-icon) {
+        font-size: 12px;
+    }
+
+    &:hover:not(:disabled) {
+        color: var(--td-text-color-secondary);
+        background: var(--td-bg-color-secondarycontainer);
+    }
+
+    &:active:not(:disabled) {
+        transform: scale(0.94);
+    }
+
+    &:disabled {
+        cursor: default;
+        opacity: 0.7;
+    }
+}
+
+.sq-refresh-spin {
+    animation: sq-refresh-rotate 0.8s linear infinite;
+}
+
+@keyframes sq-refresh-rotate {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.suggested-questions-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    width: 100%;
+}
+
+.suggested-question-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--td-component-stroke);
+    background: transparent;
+    cursor: pointer;
+    transition:
+        background 0.2s @suggested-ease,
+        border-color 0.2s @suggested-ease,
+        transform 0.15s @suggested-ease;
+
+    &:not(.sq-card-skeleton):hover {
+        background: var(--td-bg-color-secondarycontainer);
+        border-color: var(--td-component-border);
+    }
+
+    &:not(.sq-card-skeleton):active {
+        transform: scale(0.98);
+        background: var(--td-bg-color-secondarycontainer-active);
+    }
+
+    &.sq-card-skeleton {
+        pointer-events: none;
+        cursor: default;
+        flex-shrink: 0;
+        border-color: transparent;
+        background: var(--td-bg-color-secondarycontainer);
+
+        :deep(.t-skeleton) {
+            width: 100%;
+        }
+
+        :deep(.t-skeleton__row) {
+            margin: 0;
+        }
+
+        :deep(.t-skeleton__col) {
+            border-radius: 3px;
+        }
+
+        &:nth-child(1) {
+            width: 132px;
+        }
+
+        &:nth-child(2) {
+            width: 168px;
+        }
+
+        &:nth-child(3) {
+            width: 116px;
+        }
+
+        &:nth-child(4) {
+            width: 152px;
+        }
+
+        &:nth-child(5) {
+            width: 124px;
+        }
+
+        &:nth-child(6) {
+            width: 144px;
+        }
+    }
+}
+
+.suggested-question-text {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.2s @suggested-ease;
+}
+
+.suggested-question-card:not(.sq-card-skeleton):hover .suggested-question-text {
+    color: var(--td-text-color-primary);
+}
+
+.suggested-question-badge {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border-radius: 3px;
+    border: 1px solid var(--td-component-stroke);
+    background: transparent;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.6;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--td-text-color-placeholder);
+}

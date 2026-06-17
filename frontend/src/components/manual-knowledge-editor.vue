@@ -150,7 +150,11 @@ const setSelectionRange = (start: number, end: number) => {
     if (!textarea || activeTab.value !== 'edit') {
       return
     }
-    textarea.focus()
+    // Initialization can finish while the drawer is still sliding in. A plain
+    // focus() makes the browser scroll the transformed textarea into view,
+    // which intermittently shifts the drawer away from the right edge for a
+    // frame. Keep keyboard focus without letting it move the viewport.
+    textarea.focus({ preventScroll: true })
     textarea.setSelectionRange(start, end)
   })
 }
@@ -735,7 +739,6 @@ onBeforeUnmount(() => {
     :min-width="560"
     :max-width="1280"
     storage-key="setting-drawer:width:manual-markdown-editor"
-    :destroy-on-close="false"
     :hide-footer="!initialLoaded"
     :confirm-loading="saving && savingAction === 'publish'"
     :confirm-text="$t('manualEditor.actions.publish')"
@@ -1111,5 +1114,3 @@ onBeforeUnmount(() => {
   color: var(--td-text-color-placeholder);
 }
 </style>
-
-
