@@ -745,6 +745,9 @@ async function handleSubmit() {
       tempDsId.value = created.id
     }
 
+    // 保存成功后这个 ID 已经不是临时数据源，关闭弹窗时不能再走清理删除。
+    tempDsId.value = ''
+
     if (isEdit.value) {
       MessagePlugin.warning(t('datasource.updateSuccessSyncHint'))
     } else {
