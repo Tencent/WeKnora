@@ -125,8 +125,14 @@ function enterReplaceCredentials() {
 // connector can read everything the authorizing user sees. Only Feishu exposes
 // this today; the toggle is shown for type === 'feishu'.
 const feishuAuthMode = ref<'app' | 'user'>('app')
+const feishuUserAuthorized = ref(false)
+const persistedFeishuAuthMode = ref<'app' | 'user'>('app')
 const authorizing = ref(false)
 const oauthErrorMsg = ref('')
+const feishuOAuthCallbackURL = computed(() => {
+  const path = '/api/v1/datasource/oauth/callback'
+  return typeof window === 'undefined' ? path : `${window.location.origin}${path}`
+})
 
 // Form data
 const form = ref({
@@ -152,6 +158,26 @@ const loadedResourceParentIds = ref(new Set<string>())
 const loadingResourceParentIds = ref(new Set<string>())
 
 const usesLazyResourceTree = computed(() => form.value.type === 'feishu')
+
+function resetResourcePickerState(clearSelection = true) {
+  resources.value = []
+  expandedResourceIds.value = new Set()
+  loadedResourceParentIds.value = new Set()
+  loadingResourceParentIds.value = new Set()
+  loadingResources.value = false
+  if (clearSelection) {
+    selectedResourceIds.value = []
+    form.value.config.resource_ids = []
+  }
+}
+
+function syncFeishuAuthModeToForm() {
+  if (form.value.type !== 'feishu') return
+  form.value.config.settings = {
+    ...(form.value.config.settings || {}),
+    auth_mode: feishuAuthMode.value,
+  }
+}
 
 function resourceParentKey(parentId = ''): string {
   return parentId
@@ -362,11 +388,7 @@ watch(visible, async (v) => {
   tempDsId.value = ''
   prereqExpanded.value = false
   pendingRemoveCredentials.value = false
-  resources.value = []
-  selectedResourceIds.value = []
-  expandedResourceIds.value = new Set()
-  loadedResourceParentIds.value = new Set()
-  loadingResourceParentIds.value = new Set()
+  resetResourcePickerState()
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -394,10 +416,15 @@ watch(visible, async (v) => {
     // Restore the Feishu auth mode from the (non-secret) settings discriminator.
     feishuAuthMode.value =
       props.dataSource.config?.settings?.auth_mode === 'user' ? 'user' : 'app'
+    persistedFeishuAuthMode.value = feishuAuthMode.value
+    feishuUserAuthorized.value =
+      form.value.type === 'feishu' && feishuAuthMode.value === 'user' && credentialsConfigured.value
   } else {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
     feishuAuthMode.value = 'app'
+    persistedFeishuAuthMode.value = 'app'
+    feishuUserAuthorized.value = false
     oauthErrorMsg.value = ''
     form.value = {
       name: '',
@@ -466,6 +493,7 @@ async function testConnection() {
 }
 
 async function ensureDataSourceForResourceListing(): Promise<void> {
+  syncFeishuAuthModeToForm()
   if (!tempDsId.value) {
     const res = await createDataSource({
       ...form.value,
@@ -474,11 +502,18 @@ async function ensureDataSourceForResourceListing(): Promise<void> {
     } as any)
     const created = res?.data || res
     tempDsId.value = created.id
-  } else if (!isEdit.value) {
+    if (form.value.type === 'feishu') {
+      persistedFeishuAuthMode.value = feishuAuthMode.value
+    }
+  } else if (!isEdit.value || (form.value.type === 'feishu' && persistedFeishuAuthMode.value !== feishuAuthMode.value)) {
     await updateDataSource(tempDsId.value, {
       ...form.value,
+      config: buildConfigPayload(),
       knowledge_base_id: props.kbId,
     } as any)
+    if (form.value.type === 'feishu') {
+      persistedFeishuAuthMode.value = feishuAuthMode.value
+    }
   }
 }
 
@@ -587,6 +622,11 @@ function toggleResource(id: string) {
 }
 
 function validateStep1Fields(): boolean {
+  if (form.value.type === 'feishu' && feishuAuthMode.value === 'user') {
+    if (isUserModeAuthorized.value) return true
+    MessagePlugin.warning(t('datasource.feishu.authRequired'))
+    return false
+  }
   if (isUserModeAuthorized.value) {
     return true
   }
@@ -672,10 +712,7 @@ async function handleSubmit() {
   // and the UI agree on app vs user identity. The OAuth callback also sets it
   // server-side; sending it here keeps it from being wiped by the main PUT.
   if (form.value.type === 'feishu') {
-    form.value.config.settings = {
-      ...(form.value.config.settings || {}),
-      auth_mode: feishuAuthMode.value,
-    }
+    syncFeishuAuthModeToForm()
   }
   submitting.value = true
   try {
@@ -829,14 +866,20 @@ const drawerConfirmText = computed(() => {
 // In user mode a completed authorization stands in for the credential inputs:
 // the user tokens live server-side and credentialsConfigured flips true.
 const isUserModeAuthorized = computed(
-  () => form.value.type === 'feishu' && feishuAuthMode.value === 'user' && credentialsConfigured.value,
+  () => form.value.type === 'feishu' && feishuAuthMode.value === 'user' && feishuUserAuthorized.value,
 )
 
 function onAuthModeChange() {
-  // Switching identity invalidates any prior "tested/authorized" state.
+  // 身份边界变化后，旧资源树和旧选择都不能复用。
+  syncFeishuAuthModeToForm()
+  feishuUserAuthorized.value =
+    feishuAuthMode.value === 'user' &&
+    persistedFeishuAuthMode.value === 'user' &&
+    credentialsConfigured.value
   testResult.value = ''
   testErrorMsg.value = ''
   oauthErrorMsg.value = ''
+  resetResourcePickerState()
 }
 
 // Ensures a persisted data source carrying the app credentials exists, so the
@@ -861,6 +904,7 @@ async function ensureFeishuDataSource(): Promise<string | null> {
     } as any)
     const created = res?.data || res
     tempDsId.value = created.id
+    persistedFeishuAuthMode.value = 'app'
     return created.id
   }
 
@@ -914,19 +958,22 @@ async function startFeishuAuth() {
       authorizing.value = false
       return
     }
-    const redirectUri = `${window.location.origin}/api/v1/datasource/oauth/callback`
+    const redirectUri = feishuOAuthCallbackURL.value
     const { authorize_url } = await authorizeDataSourceOAuth(dsId, redirectUri)
     if (!authorize_url) throw new Error('missing authorize_url')
 
     const ok = await openOAuthPopup(authorize_url)
     if (ok) {
       credentialsConfigured.value = true
+      feishuUserAuthorized.value = true
+      persistedFeishuAuthMode.value = 'user'
       replaceCredentialsMode.value = false
       testResult.value = 'success'
       form.value.config.settings = {
         ...(form.value.config.settings || {}),
         auth_mode: 'user',
       }
+      resetResourcePickerState()
       MessagePlugin.success(t('datasource.feishu.authSuccess'))
     } else {
       testResult.value = ''
@@ -1077,6 +1124,13 @@ async function startFeishuAuth() {
                 t('datasource.prereqMemberBrief')) }}</span>
               <span class="ds-setup-step__desc">{{ t(`datasource.prereqStep3Desc_${form.type}`,
                 t('datasource.prereqMemberDesc')) }}</span>
+            </li>
+            <li v-if="form.type === 'feishu'" class="ds-setup-step">
+              <span class="ds-setup-step__title">{{ t('datasource.prereqOAuthCallbackBrief_feishu') }}</span>
+              <span class="ds-setup-step__desc">
+                {{ t('datasource.prereqOAuthCallbackDesc_feishu') }}
+                <code class="ds-callback-url">{{ feishuOAuthCallbackURL }}</code>
+              </span>
             </li>
           </ol>
           <a
@@ -1661,6 +1715,19 @@ async function startFeishuAuth() {
   font-family: var(--app-font-family-mono, ui-monospace, monospace);
 }
 
+.ds-callback-url {
+  display: block;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .ds-setup-guide__link {
   display: inline-flex;
   align-items: center;
@@ -1783,6 +1850,26 @@ async function startFeishuAuth() {
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
+}
+
+.ds-authmode {
+  margin-bottom: 10px;
+}
+
+.ds-feishu-auth {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ds-feishu-auth__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
 }
 
 .form-item {
