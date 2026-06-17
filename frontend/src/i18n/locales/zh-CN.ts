@@ -2996,6 +2996,11 @@ export default {
       edit: "编辑 Markdown 知识",
       create: "在线编辑 Markdown 知识",
     },
+    description: "使用 Markdown 编写知识内容，支持实时预览",
+    section: {
+      basic: "基本信息",
+      content: "知识内容",
+    },
     labels: {
       currentKnowledgeBase: "当前知识库",
     },

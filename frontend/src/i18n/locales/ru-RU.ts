@@ -4065,6 +4065,11 @@ export default {
       edit: 'Редактировать Markdown-знание',
       create: 'Создать Markdown-знание'
     },
+    description: 'Пишите знания в Markdown с предпросмотром в реальном времени',
+    section: {
+      basic: 'Основная информация',
+      content: 'Содержимое'
+    },
     labels: {
       currentKnowledgeBase: 'Текущая база знаний'
     },

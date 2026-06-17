@@ -1843,13 +1843,27 @@ const {
   },
 });
 
-const onCardClick = (item: any) => {
+const isManualDraftKnowledge = (item: KnowledgeCard) =>
+  item.type === 'manual' && item.parse_status === 'draft';
+
+const openKnowledgeItem = (item: KnowledgeCard) => {
   if (shouldSuppressDocClick()) return;
+  if (canEdit.value && isManualDraftKnowledge(item)) {
+    const index = cardList.value.findIndex((c) => c.id === item.id);
+    if (index >= 0) {
+      handleManualEdit(index, item);
+      return;
+    }
+  }
+  openCardDetails(item);
+};
+
+const onCardClick = (item: KnowledgeCard) => {
   if (batchMode.value) {
     onCardGridCheckboxChange(item.id, !selectedIds.value.has(item.id));
-  } else {
-    openCardDetails(item);
+    return;
   }
+  openKnowledgeItem(item);
 };
 
 const confirmBatchDelete = async () => {
@@ -2582,7 +2596,7 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
                 <template v-else-if="cardList.length && viewMode === 'list'">
                   <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
-                    :can-edit="canEdit" @open="(item: any) => { if (!shouldSuppressDocClick()) openCardDetails(item); }" @toggle-row="toggleSelectRow"
+                    :can-edit="canEdit" @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll"
                     @action="(action: any, item: any) => handleListAction(action, item)" />
                 </template>

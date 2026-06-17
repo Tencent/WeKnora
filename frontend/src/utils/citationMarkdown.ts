@@ -201,6 +201,13 @@ export function restoreCitationHtmlPlaceholders(html: string, htmlSnippets: stri
   return html.replace(HTML_PLACEHOLDER_RE, (_match, idx) => htmlSnippets[Number(idx)] || '')
 }
 
+/** Opening/closing fence for GFM fenced code blocks (up to 3 spaces indent). */
+const FENCED_CODE_DELIMITER_RE = /^ {0,3}(`{3,}|~{3,})(\s*\S.*)?\s*$/
+
+function isFencedCodeDelimiterLine(line: string): boolean {
+  return FENCED_CODE_DELIMITER_RE.test(line)
+}
+
 /** Collapse newlines around <kb/> / <web/> so marked keeps citations inline. */
 export function joinCitationTagsToPreviousLine(content: string): string {
   if (!content) return content
@@ -218,17 +225,26 @@ export function joinCitationTagsToPreviousLine(content: string): string {
   }
 
   // Blank lines before citations: join to previous prose, but keep a break after lists
+  // or fenced-code delimiters (``` / ~~~ must stay on their own line).
   result = result.replace(/\n[ \t]*\n+([ \t]*<(?:kb|web)\b)/gi, (match, kbStart, offset, full) => {
     const before = full.slice(0, offset)
     const lastLine = before.split('\n').filter((line) => line.trim()).pop() || ''
     const isListItem = /^\s*(\d+\.|[-*+])\s+\S/.test(lastLine)
-    return isListItem ? `\n\n${kbStart}` : ` ${kbStart}`
+    if (isListItem || isFencedCodeDelimiterLine(lastLine)) {
+      return `\n\n${kbStart}`
+    }
+    return ` ${kbStart}`
   })
 
   // Single newline before citation when it follows text or another citation (not after a blank line)
   result = result.replace(
     /(?<!\n)(<(?:kb|web)\b[^>]*?\s*\/?>|[ \t]*\S[^\n]*?)\n([ \t]*<(?:kb|web)\b)/g,
-    '$1 $2',
+    (match, beforePart: string, kbStart: string) => {
+      if (isFencedCodeDelimiterLine(beforePart)) {
+        return match
+      }
+      return `${beforePart} ${kbStart}`
+    },
   )
 
   return result

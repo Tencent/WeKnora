@@ -2979,6 +2979,11 @@ export default {
       edit: "Markdown 지식 편집",
       create: "온라인 Markdown 지식 편집",
     },
+    description: "Markdown으로 지식을 작성하고 실시간 미리보기 지원",
+    section: {
+      basic: "기본 정보",
+      content: "지식 내용",
+    },
     labels: {
       currentKnowledgeBase: "현재 지식베이스",
     },
