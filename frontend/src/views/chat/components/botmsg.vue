@@ -50,7 +50,7 @@
                 </t-button>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
                     :title="$t('agent.addToKnowledgeBase')">
-                    <t-icon name="add" />
+                    <t-icon name="bookmark-add" />
                 </t-button>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">

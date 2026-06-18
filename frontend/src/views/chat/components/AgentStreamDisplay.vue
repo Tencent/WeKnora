@@ -269,7 +269,7 @@
                 </t-button>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
-                  <t-icon name="add" />
+                  <t-icon name="bookmark-add" />
                 </t-button>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">

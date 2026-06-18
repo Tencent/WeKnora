@@ -2052,6 +2052,11 @@ export default {
       edit: 'Edit Markdown Knowledge',
       create: 'Create Markdown Knowledge'
     },
+    description: 'Write knowledge in Markdown with live preview',
+    section: {
+      basic: 'Basic Info',
+      content: 'Content'
+    },
     labels: {
       currentKnowledgeBase: 'Current knowledge base'
     },

@@ -14,7 +14,7 @@
       shape="round"
       :title="$t('chat.requestInfoTitle')"
     >
-      <t-icon name="bug" />
+      <t-icon name="info-circle" />
     </t-button>
     <template #content>
       <div class="chat-request-card" @click.stop>

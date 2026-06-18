@@ -6,7 +6,9 @@
       <div class="setting-drawer-resize-line" />
     </div>
   </teleport>
-  <t-drawer v-model:visible="drawerVisible" :size="effectiveWidth" :z-index="2500" placement="right" destroy-on-close
+  <t-drawer v-model:visible="drawerVisible" :size="effectiveWidth" :z-index="2500" placement="right"
+    :attach="attach"
+    :destroy-on-close="destroyOnClose"
     :class="['setting-drawer', { 'setting-drawer--resizing': drawerResizing }]">
     <!--
       Custom header. We replace TDesign's default header so we can put a leading
@@ -86,6 +88,23 @@ interface Props {
   confirmText?: string
   cancelText?: string
   hideFooter?: boolean
+  /**
+   * Whether to destroy the drawer body content on close. Defaults to true to
+   * match historical behavior. Heavy editors (e.g. the markdown knowledge
+   * editor) pass false so the drawer panel persists across opens — this avoids
+   * the panel being removed/re-inserted on every open, which can cause a
+   * one-frame layout flicker as it slides in.
+   */
+  destroyOnClose?: boolean
+  /**
+   * Where to render the drawer. Defaults to 'body' so the drawer escapes the
+   * app root, which carries `transform: translateZ(0)` for GPU compositing.
+   * A transformed ancestor becomes the containing block for `position: fixed`,
+   * which mis-anchors the overlay (it briefly appears mid-screen then snaps to
+   * the edge). Teleporting to <body> keeps it fixed to the viewport, matching
+   * the resize handle that is already teleported to body.
+   */
+  attach?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -100,7 +119,9 @@ const props = withDefaults(defineProps<Props>(), {
   confirmDisabled: false,
   confirmText: '',
   cancelText: '',
-  hideFooter: false
+  hideFooter: false,
+  destroyOnClose: true,
+  attach: 'body'
 })
 
 const emit = defineEmits<{

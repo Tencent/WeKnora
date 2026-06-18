@@ -173,6 +173,32 @@ test('joinCitationTagsToPreviousLine keeps citations on a new line after a list'
   assert.equal(joinCitationTagsToPreviousLine(input), `1. first\n2. second\n\n${tag}`)
 })
 
+test('joinCitationTagsToPreviousLine does not merge citations onto fenced code closing delimiter', () => {
+  const tag = '<kb doc="guide.pdf" chunk_id="1" />'
+  const input = '```bash\nunzip setup.zip\n```\n\n' + tag
+  assert.equal(joinCitationTagsToPreviousLine(input), '```bash\nunzip setup.zip\n```\n\n' + tag)
+})
+
+test('renderChatMarkdown keeps fenced code blocks closed when citations follow', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: () => true,
+  })
+  const tag = '<kb doc="guide.pdf" chunk_id="1" />'
+  const html = renderChatMarkdown(
+    ['```bash', 'unzip setup.zip', '```', '', tag, '', '#### Next step'].join('\n'),
+    {
+      renderer,
+      escapeMarkdown: (text) => text,
+      sanitizeHtml: (html) => html,
+    },
+  )
+
+  assert.doesNotMatch(html, /#### Next step/)
+  assert.match(html, /<h4>Next step<\/h4>/)
+  assert.equal((html.match(/<pre>/g) || []).length, 1)
+})
+
 test('collapseStandaloneCitationParagraphs merges citations across empty paragraphs', () => {
   const html = '<p>Steps:</p><p></p><p><span class="citation citation-kb" data-chunk-id="x">doc</span></p>'
   const out = collapseStandaloneCitationParagraphs(html)

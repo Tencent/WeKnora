@@ -155,7 +155,11 @@
                                     </div>
                                 </div>
                                 <div v-for="subitem in bucket.items" :key="subitem.id"
-                                    class="submenu_item_p session-chat-row session-folder-item">
+                                    class="submenu_item_p session-chat-row session-folder-item"
+                                    :class="{
+                                        'session-chat-row--active': !batchMode && subitem.path === currentSecondpath,
+                                        'session-chat-row--selected': batchMode && batchSelectedIds.includes(subitem.id),
+                                    }">
                                     <div class="session-list-row session-list-row--flat">
                                         <div class="session-list-row__body">
                                             <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
@@ -187,7 +191,11 @@
                                 </span>
                             </div>
                             <div v-for="subitem in group.items" :key="subitem.id"
-                                class="submenu_item_p session-chat-row">
+                                class="submenu_item_p session-chat-row"
+                                :class="{
+                                    'session-chat-row--active': !batchMode && subitem.path === currentSecondpath,
+                                    'session-chat-row--selected': batchMode && batchSelectedIds.includes(subitem.id),
+                                }">
                                 <div class="session-list-row session-list-row--flat">
                                     <div class="session-list-row__body">
                                         <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
@@ -1691,15 +1699,15 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             }
         }
 
-        &.session-chat-row:has(:deep(.submenu_item_active)) .session-list-row {
-            background: var(--td-brand-color-light);
+        &.session-chat-row--active .session-list-row {
+            background: var(--td-bg-color-container-hover);
 
             :deep(.submenu_item) {
                 color: var(--td-brand-color);
             }
 
             :deep(.menu-more) {
-                color: var(--td-brand-color);
+                color: var(--td-text-color-primary);
             }
 
             :deep(.menu-more-wrap) {
@@ -1707,7 +1715,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             }
         }
 
-        &.session-chat-row:has(:deep(.submenu_item_selected)) .session-list-row {
+        &.session-chat-row--selected .session-list-row {
             background: rgba(7, 192, 95, 0.05);
         }
     }
