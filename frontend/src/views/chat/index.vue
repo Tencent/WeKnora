@@ -448,6 +448,8 @@ const {
     shouldShowGlobalTypingIndicator,
     handleMsgList,
     processStreamChunk,
+    prepareForNewOutgoingMessage,
+    markInFlightAssistantStopped,
 } = useChatStreamHandler({
     messagesList,
     loading,
@@ -488,10 +490,6 @@ const {
     },
     onAgentQuery: (data, existingMessage) => {
         pendingStreamDebug.value = buildStreamDebugPayload();
-        if (data.id) {
-            const earlyMsg = findLastMessage((item) => item.role === 'assistant' && !item.is_completed);
-            if (earlyMsg) attachStreamDebugToMessage(earlyMsg);
-        }
         if (existingMessage) attachStreamDebugToMessage(existingMessage);
     },
     onMessageCreated: (message) => attachStreamDebugToMessage(message),
@@ -557,13 +555,17 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
 // 处理停止生成事件 - 立即清除 loading 状态
 const handleStopGeneration = () => {
     console.log('[Stop Generation] Immediately clearing loading state');
+    stopStream();
     loading.value = false;
     isReplying.value = false;
-    // 注意：不在这里清空 currentAssistantMessageId，因为需要它来调用 API
-    // API 调用成功后，后端的 stop 事件会清空它
+    // 标记当前 assistant 为已结束，避免下一条 query 复用该消息行
+    markInFlightAssistantStopped(currentAssistantMessageId.value);
+    // 保留 currentAssistantMessageId，Input-field 仍需用它调用 stop API
 };
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+    stopStream();
+    prepareForNewOutgoingMessage();
     isReplying.value = true;
     loading.value = true;
 

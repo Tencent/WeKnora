@@ -29,6 +29,7 @@ export function useStream() {
   const error = ref<string | null>(null)// 错误信息
   const lastStreamRequest = ref<StreamRequestMeta | null>(null)
   let controller = new AbortController()
+  let streamGeneration = 0
 
   // 流式渲染缓冲
   let buffer: string[] = []
@@ -36,6 +37,7 @@ export function useStream() {
 
   // 启动流式请求
   const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; enable_memory?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; method: string; url: string; embed_token?: string; embed_session_sig?: string }) => {
+    const myGeneration = ++streamGeneration
     // 重置状态
     output.value = '';
     error.value = null;
@@ -159,6 +161,7 @@ export function useStream() {
         },
 
         onmessage: (ev) => {
+          if (myGeneration !== streamGeneration) return
           const parsed = JSON.parse(ev.data);
           // Log first answer chunk for end-to-end TTFB measurement.
           // Filter by event type so non-answer events (references, tool
@@ -197,6 +200,7 @@ export function useStream() {
 
   // 停止流
   const stopStream = () => {
+    streamGeneration++
     controller.abort();
     controller = new AbortController(); // 重置控制器（如需重新发起）
     isStreaming.value = false;

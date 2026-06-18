@@ -67,6 +67,53 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return undefined
   }
 
+  /** Incomplete assistant row for the current turn (must be the list tail). */
+  const getTrailingIncompleteAssistant = () => {
+    const last = messagesList[messagesList.length - 1]
+    if (last?.role === 'assistant' && !last.is_completed) return last
+    return undefined
+  }
+
+  const markAssistantStopped = (message: ChatMessage) => {
+    if (!message || message.is_completed) return
+    message.is_completed = true
+    if (message.isAgentMode) {
+      if (!message.agentEventStream) message.agentEventStream = []
+      const stream = message.agentEventStream as ChatMessage[]
+      if (!stream.some((e) => e.type === 'stop')) {
+        stream.push({
+          type: 'stop',
+          timestamp: Date.now(),
+          reason: 'user_requested',
+        })
+      }
+    }
+  }
+
+  /** Finalize any in-flight assistant rows before a new user query is sent. */
+  const prepareForNewOutgoingMessage = () => {
+    for (const msg of messagesList) {
+      if (msg.role === 'assistant' && !msg.is_completed) {
+        markAssistantStopped(msg)
+      }
+    }
+    fullContent.value = ''
+    currentAssistantMessageId.value = ''
+  }
+
+  /** Mark the assistant row being stopped without clearing its id (stop API still needs it). */
+  const markInFlightAssistantStopped = (messageId?: string) => {
+    let target: ChatMessage | undefined
+    if (messageId) {
+      target = messagesList.find(
+        (m) => m.id === messageId || m.request_id === messageId,
+      )
+    }
+    if (!target) target = getTrailingIncompleteAssistant()
+    if (target) markAssistantStopped(target)
+    fullContent.value = ''
+  }
+
   const extractKnowledgeReferences = (data: ChatMessage) => {
     const dataPayload = data.data as ChatMessage | undefined
     const refs =
@@ -93,7 +140,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     })
     if (matched) return matched
 
-    return findLastMessage((item) => item.role === 'assistant' && !item.is_completed)
+    return getTrailingIncompleteAssistant()
   }
 
   const applyKnowledgeReferences = (data: ChatMessage) => {
@@ -744,8 +791,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           timestamp: Date.now(),
           reason: dataPayload?.reason || 'user_requested',
         })
+        message.is_completed = true
+        loading.value = false
         isReplying.value = false
         fullContent.value = ''
+        currentAssistantMessageId.value = ''
         break
       }
     }
@@ -767,9 +817,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     if (data.response_type === 'agent_query') {
       if (data.id) {
-        const earlyMsg = findLastMessage(
-          (item) => item.role === 'assistant' && !item.is_completed,
-        )
+        const earlyMsg = getTrailingIncompleteAssistant()
         if (earlyMsg) earlyMsg.request_id = data.id
       }
       if (data.assistant_message_id) {
@@ -788,8 +836,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       )
       const created = !existingMessage
       if (!existingMessage) {
+        const assistantId = data.assistant_message_id as string | undefined
         existingMessage = {
-          id: data.id,
+          id: assistantId || data.id,
           request_id: data.id,
           role: 'assistant',
           content: '',
@@ -849,6 +898,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       handleAgentChunk(data)
       if (data.response_type === 'stop') {
         log('[Stop Event] Generation stopped')
+        const stoppedMessage = resolveActiveAssistantMessage(data)
+        if (stoppedMessage) markAssistantStopped(stoppedMessage)
         loading.value = false
         isReplying.value = false
         currentAssistantMessageId.value = ''
@@ -924,5 +975,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     shouldShowGlobalTypingIndicator,
     handleMsgList,
     processStreamChunk,
+    prepareForNewOutgoingMessage,
+    markInFlightAssistantStopped,
   }
 }

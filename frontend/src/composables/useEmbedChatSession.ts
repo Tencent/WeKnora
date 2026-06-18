@@ -118,6 +118,8 @@ export function useEmbedChatSession(options: {
     shouldShowGlobalTypingIndicator,
     handleMsgList,
     processStreamChunk,
+    prepareForNewOutgoingMessage,
+    markInFlightAssistantStopped,
   } = useChatStreamHandler({
     messagesList,
     loading,
@@ -220,6 +222,7 @@ export function useEmbedChatSession(options: {
 
   const handleStopGeneration = () => {
     stopStream()
+    markInFlightAssistantStopped(currentAssistantMessageId.value)
     const messageId = currentAssistantMessageId.value
     if (messageId) {
       stopEmbedSession(
@@ -238,6 +241,8 @@ export function useEmbedChatSession(options: {
     value: string,
     opts: { webSearchEnabled?: boolean; imageFiles?: File[]; attachmentFiles?: File[] } = {},
   ) => {
+    stopStream()
+    prepareForNewOutgoingMessage()
     const outboundQuery = buildQueryWithHostContext(value, options.hostContext?.value)
     const visitorWebSearchEnabled = opts.webSearchEnabled ?? false
     const imageFiles = (options.allowFileUpload ? opts.imageFiles : undefined) || []
