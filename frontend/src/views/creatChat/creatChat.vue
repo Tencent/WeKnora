@@ -338,7 +338,8 @@ const handleKBEditorSuccess = (kbId: string) => {
         opacity 0.35s @suggested-ease,
         transform 0.35s @suggested-ease,
         background 0.2s @suggested-ease,
-        border-color 0.2s @suggested-ease;
+        border-color 0.25s @suggested-ease,
+        box-shadow 0.25s @suggested-ease;
 
     &.sq-card-skeleton {
         opacity: 1;

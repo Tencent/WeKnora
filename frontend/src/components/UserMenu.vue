@@ -1006,7 +1006,7 @@ onUnmounted(() => {
       background: var(--td-bg-color-container-hover);
 
       .dropdown-tenant-panel-trail {
-        color: var(--td-brand-color);
+        color: var(--td-text-color-secondary);
       }
     }
   }
@@ -1324,12 +1324,12 @@ onUnmounted(() => {
     }
 
     &.is-current {
-      background: rgba(7, 192, 95, 0.08);
+      background: var(--td-bg-color-secondarycontainer);
       cursor: default;
 
       .tenant-submenu-item-name {
-        color: var(--td-brand-color);
-        font-weight: 500;
+        color: var(--td-text-color-primary);
+        font-weight: 600;
       }
     }
   }
@@ -1400,8 +1400,8 @@ onUnmounted(() => {
     line-height: 1.2;
     padding: 2px 6px;
     border-radius: 4px;
-    background: var(--td-brand-color-light);
-    color: var(--td-brand-color);
+    background: var(--td-bg-color-component);
+    color: var(--td-text-color-secondary);
   }
 
   // Home 标识改为叠在 avatar 右下角的小 dot，不在 meta 行额外占位，让
@@ -1419,7 +1419,7 @@ onUnmounted(() => {
     height: 14px;
     border-radius: 50%;
     background: var(--td-bg-color-container);
-    color: var(--td-brand-color);
+    color: var(--td-text-color-secondary);
     border: 1.5px solid var(--td-bg-color-container);
     display: flex;
     align-items: center;

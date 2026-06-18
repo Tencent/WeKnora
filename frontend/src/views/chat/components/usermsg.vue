@@ -221,21 +221,23 @@ const closePreImg = () => {
 
 .user_msg {
     width: max-content;
-    max-width: 776px;
+    max-width: min(76%, 680px);
     display: flex;
-    padding: 10px 12px;
+    padding: 8px 12px;
     flex-direction: column;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     gap: 4px;
     flex: 1 0 0;
-    border-radius: 4px;
-    background: #8CE97F;
+    border-radius: 8px;
+    background: var(--td-bg-color-secondarycontainer);
     margin-left: auto;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-size: 16px;
-    text-align: justify;
-    word-break: break-all;
+    line-height: 1.6;
+    text-align: left;
+    word-break: break-word;
+    overflow-wrap: anywhere;
     box-sizing: border-box;
     white-space: pre-wrap;
 }
@@ -348,8 +350,8 @@ const closePreImg = () => {
 
 html[theme-mode="dark"] {
     .user_msg {
-        background: var(--td-brand-color-3);
-        color: rgba(255, 255, 255, 0.9);
+        background: var(--td-bg-color-secondarycontainer);
+        color: var(--td-text-color-primary);
     }
 }
 </style>

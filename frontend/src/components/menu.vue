@@ -1385,7 +1385,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
     .menu_item_active {
         border-radius: 4px;
-        background: var(--td-brand-color-light) !important;
+        background: var(--td-bg-color-secondarycontainer) !important;
 
         .menu_icon,
         .menu_title {
