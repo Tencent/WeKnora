@@ -152,8 +152,22 @@ export function useEmbedChatSession(options: {
 
   const debouncedScrollTop = debounce(onChatScrollTop, 500)
 
+  let lastScrollTop = 0
   const handleScroll = () => {
-    userHasScrolledUp.value = !isNearBottom()
+    const el = scrollContainer.value
+    if (el) {
+      const currentTop = el.scrollTop
+      // Only an actual upward scroll detaches from the live edge. Content that
+      // grows after a chunk (images, diagrams) keeps scrollTop fixed and would
+      // otherwise fire a stale scroll event that falsely marks the user as
+      // scrolled up, killing the auto-follow during streaming.
+      if (currentTop < lastScrollTop - 1) {
+        userHasScrolledUp.value = !isNearBottom()
+      } else if (isNearBottom()) {
+        userHasScrolledUp.value = false
+      }
+      lastScrollTop = currentTop
+    }
     debouncedScrollTop()
   }
 
