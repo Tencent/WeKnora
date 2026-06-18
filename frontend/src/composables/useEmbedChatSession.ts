@@ -20,6 +20,7 @@ import { buildQueryWithHostContext } from '@/utils/embedContext'
 import { fileToDataURI } from '@/utils/embedFile'
 import { useI18n } from 'vue-i18n'
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler'
+import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize'
 
 export function useEmbedChatSession(options: {
   sessionId: Ref<string>
@@ -89,6 +90,8 @@ export function useEmbedChatSession(options: {
     userHasScrolledUp.value = false
     scrollToBottom(true)
   }
+
+  useStickyBottomOnResize(scrollContainer, userHasScrolledUp, scrollToBottom)
 
   const debounce = <T extends (...args: never[]) => void>(fn: T, delay: number) => {
     let timer: ReturnType<typeof setTimeout>

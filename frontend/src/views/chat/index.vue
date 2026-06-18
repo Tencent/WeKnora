@@ -126,6 +126,7 @@ import { useUIStore } from '@/stores/ui';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler';
+import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 
 const props = defineProps({
@@ -392,6 +393,12 @@ const onClickScrollToBottom = () => {
     userHasScrolledUp.value = false;
     scrollToBottom(true);
 }
+
+// Images and other rich Markdown content can grow after the SSE chunk that
+// introduced them. Follow those delayed height changes while the user remains
+// at the live edge; preserve position when they intentionally scroll upward.
+useStickyBottomOnResize(scrollContainer, userHasScrolledUp, scrollToBottom);
+
 const debounce = (fn, delay) => {
     let timer
     return (...args) => {

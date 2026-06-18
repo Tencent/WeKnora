@@ -9,6 +9,7 @@ import {
   preserveCitationTags,
   restoreCitationHtmlPlaceholders,
   restoreCitationTags,
+  stripIncompleteCitationTag,
   type CitationKnowledgeRef,
 } from './citationMarkdown.ts'
 
@@ -34,6 +35,8 @@ export type RenderChatMarkdownOptions = {
   renderer: Renderer
   escapeMarkdown: (markdown: string) => string
   sanitizeHtml: (html: string) => string
+  /** The source is still growing and may end in ambiguous partial Markdown. */
+  streaming?: boolean
   collapseStandaloneCitations?: boolean
   knowledgeReferences?: CitationKnowledgeRef[] | null
   cachedMermaidSvgHtml?: string | null
@@ -75,6 +78,22 @@ export function replaceIncompleteImageWithPlaceholder(content: string): string {
   return content
 }
 
+/**
+ * Hide a trailing Markdown horizontal-rule candidate while content is streaming.
+ *
+ * A model often emits `---` as the beginning of a table delimiter or another
+ * structure. At that exact typewriter frame, marked renders it as `<hr>`, then
+ * removes it when more characters arrive. A real completed horizontal rule is
+ * still rendered because this guard is enabled only for an active stream.
+ */
+export function stripTrailingStreamingHorizontalRule(content: string): string {
+  if (!content) return content
+  return content.replace(
+    /(^|\n)[ \t]{0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/,
+    '$1',
+  )
+}
+
 export function createChatMarkdownRenderer(options: ChatMarkdownRendererOptions = {}): Renderer {
   const renderer = new marked.Renderer()
 
@@ -113,7 +132,11 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
 
   configureMarkedForChatMarkdown()
 
-  const { text: tagSafe, tags } = preserveCitationTags(rawText)
+  const streamingSafeText = options.streaming
+    ? stripTrailingStreamingHorizontalRule(rawText)
+    : rawText
+  const citationSafeText = stripIncompleteCitationTag(streamingSafeText)
+  const { text: tagSafe, tags } = preserveCitationTags(citationSafeText)
   const imageSafe = replaceIncompleteImageWithPlaceholder(tagSafe)
   const mathSafe = preprocessMathDelimiters(imageSafe)
   const restoredTags = restoreCitationTags(mathSafe, tags)

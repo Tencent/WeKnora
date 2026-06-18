@@ -6,8 +6,14 @@ import {
   preprocessMathDelimiters,
   renderChatMarkdown,
   replaceIncompleteImageWithPlaceholder,
+  stripTrailingStreamingHorizontalRule,
 } from './chatMarkdownRenderer.ts'
-import { resolveCitationChunkId, joinCitationTagsToPreviousLine, collapseStandaloneCitationParagraphs } from './citationMarkdown.ts'
+import {
+  collapseStandaloneCitationParagraphs,
+  joinCitationTagsToPreviousLine,
+  resolveCitationChunkId,
+  stripIncompleteCitationTag,
+} from './citationMarkdown.ts'
 
 const SAMPLE_DOC = 'example-report.docx'
 const SAMPLE_CHUNK_A = '00000001-0000-4000-8000-000000000001'
@@ -27,6 +33,35 @@ test('replaceIncompleteImageWithPlaceholder hides an unfinished streaming image'
     replaceIncompleteImageWithPlaceholder('before ![chart](local://bucket/path'),
     'before <span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>',
   )
+})
+
+test('stripIncompleteCitationTag hides only an unfinished streaming citation tail', () => {
+  const prefix = 'Source '
+  const complete = '<kb doc="2.jpg" chunk_id="3c67efd5-f2ff-4e26-9032-9e44e6861178" />'
+
+  for (const partial of ['<', '<k', '<kb', '<kb ', '<kb doc="2.jpg"', '<w', '<we', '<web url="https://example.com"']) {
+    assert.equal(stripIncompleteCitationTag(prefix + partial), prefix)
+  }
+
+  assert.equal(stripIncompleteCitationTag(prefix + complete), prefix + complete)
+  assert.equal(stripIncompleteCitationTag('Value < 5'), 'Value < 5')
+})
+
+test('stripTrailingStreamingHorizontalRule hides an ambiguous trailing rule only mid-stream', () => {
+  for (const rule of ['---', '* * *', '___']) {
+    assert.equal(stripTrailingStreamingHorizontalRule(`- item\n\n${rule}`), '- item\n\n')
+  }
+  assert.equal(stripTrailingStreamingHorizontalRule('- item\n\n---\nnext'), '- item\n\n---\nnext')
+
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+  }
+  const source = '- item\n\n---'
+  assert.doesNotMatch(renderChatMarkdown(source, { ...options, streaming: true }), /<hr>/)
+  assert.match(renderChatMarkdown(source, { ...options, streaming: false }), /<hr>/)
 })
 
 test('renderChatMarkdown preserves citations, math, and sanitized output through one shared pipeline', () => {

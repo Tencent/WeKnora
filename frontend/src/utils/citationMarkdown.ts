@@ -8,6 +8,29 @@ const WEB_TAG_ATTR_RE = /<web\b([^>]*?)\s*\/?>/g
 const ATTRIBUTE_REGEX = /([\w-]+)\s*=\s*"([^"]*)"/g
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Hide a citation tag while the typewriter has only emitted part of it.
+ *
+ * Without this guard, Markdown renders the leading `<` as ordinary text until
+ * the closing `>` arrives. Only the unfinished tail is removed; a complete tag
+ * continues through the normal citation pipeline.
+ */
+export function stripIncompleteCitationTag(content: string): string {
+  if (!content) return content
+
+  const start = content.lastIndexOf('<')
+  if (start < 0) return content
+
+  const tail = content.slice(start)
+  if (tail.includes('>')) return content
+
+  const isCitationPrefix = tail === '<'
+    || /^<k(?:b(?:\s[\s\S]*)?)?$/i.test(tail)
+    || /^<w(?:e(?:b(?:\s[\s\S]*)?)?)?$/i.test(tail)
+
+  return isCitationPrefix ? content.slice(0, start) : content
+}
+
 export type CitationKnowledgeRef = {
   id?: string
   knowledge_id?: string

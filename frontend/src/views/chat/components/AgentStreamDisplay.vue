@@ -260,7 +260,7 @@
             <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))"
               class="answer-event">
               <div v-if="event.content && event.content.trim()" class="answer-content markdown-content">
-                <div :key="event.content" v-html="renderAnswerContent(event.content)"></div>
+                <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)"></div>
               </div>
               <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
@@ -456,6 +456,8 @@ import {
   renderMermaidToSvg,
 } from '@/utils/mermaidShared';
 import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
+import { useTypewriter } from '@/composables/useTypewriter';
+import { vStableHtml } from '@/directives/stableHtml';
 
 const getToolIconName = getAgentToolIconName;
 
@@ -884,6 +886,23 @@ const activeAnswerMarkdown = computed(() => {
   return typeof active?.content === 'string' ? active.content : '';
 });
 
+// The answer event whose text is currently streaming. The template renders the
+// smoothed typewriter text for this event and the raw content for any others.
+const activeAnswerEventRef = computed(() => {
+  const stream = eventStream.value;
+  if (!stream?.length) return null;
+  const answers = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
+  return answers.find((e: any) => !e.done) ?? answers[answers.length - 1] ?? null;
+});
+
+// Smooth the streamed answer into a steady typewriter cadence (shared with the
+// non-Agent markdown path). History reloads arrive already complete and snap to
+// full instead of replaying.
+const { displayed: typedAnswer } = useTypewriter(
+  () => activeAnswerMarkdown.value,
+  () => isConversationDone.value,
+);
+
 const cacheStreamingMermaidSvg = async () => {
   if (streamingMermaidSvgCache.value) return;
   const code = extractFirstMermaidCode(activeAnswerMarkdown.value);
@@ -921,10 +940,21 @@ watch(activeAnswerMarkdown, () => {
 // Files referenced mid-stream (e.g. exported images) may only become available
 // at completion; throttling stops the chunk-by-chunk 404 spam during streaming,
 // and this final pass guarantees they load without waiting out the cooldown.
-watch(isConversationDone, (done) => {
-  if (!done) return;
+//
+// Gate this on the typewriter having fully revealed the answer: when done flips,
+// the smoothed text may still be catching up, so the <img> tag is not in the DOM
+// yet. Hydrating too early would find nothing and leave a permanent placeholder
+// (until a manual reload). Waiting for full reveal guarantees the image exists.
+const answerFullyRendered = computed(
+  () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
+);
+watch(answerFullyRendered, (ready) => {
+  if (!ready) return;
+  // Clear before this reactive update renders, so a source that returned 404
+  // mid-stream gets one real final-attempt <img> node instead of remaining
+  // suppressed by the missing-source cache.
+  clearProtectedFileFailureCache();
   nextTick(async () => {
-    clearProtectedFileFailureCache();
     await hydrateProtectedFileImages(rootElement.value);
   });
 });
@@ -1649,8 +1679,15 @@ onBeforeUnmount(() => {
 });
 
 onUpdated(() => {
-  nextTick(() => {
+  nextTick(async () => {
     rebindCitations();
+    // Hydrate protected-file images (e.g. local:// exports) as soon as the
+    // typewriter reveals their <img> into the DOM, so they show in real time
+    // mid-stream instead of waiting for the turn to finish. Hydration is cheap
+    // and idempotent: blob results are cached per URL, in-flight fetches are
+    // de-duped, and failures back off for a cooldown — so a not-yet-ready file
+    // simply retries later (and the answerFullyRendered pass is the backstop).
+    await hydrateProtectedFileImages(rootElement.value);
   });
 });
 
@@ -1676,6 +1713,7 @@ const renderAgentMarkdown = (
     renderer: agentRenderer,
     escapeMarkdown,
     sanitizeHtml: sanitizeMarkdownHTML,
+    streaming: !isConversationDone.value,
     knowledgeReferences: props.session?.knowledge_references,
     cachedMermaidSvgHtml: streamingMermaidSvgCache.value,
     prepareMarkdown: prepareAgentMarkdown,
@@ -2316,8 +2354,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
       .chat-citation-pills();
 
       :deep(img) {
-        min-height: 100px;
-        /* 防止流式输出时图片高度塌陷导致抖动 */
         background-color: var(--td-bg-color-secondarycontainer);
         /* 加载时的占位背景色 */
       }

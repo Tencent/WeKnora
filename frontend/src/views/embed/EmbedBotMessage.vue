@@ -13,7 +13,7 @@
     <DeepThink v-if="session?.showThink && !session?.isAgentMode" :deep-session="session" />
     <div v-if="!session?.hideContent && !session?.isAgentMode" ref="parentMd">
       <div v-if="hasActualContent" class="content-wrapper">
-        <div class="ai-markdown-template markdown-content" v-html="renderedHTML" />
+        <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML" />
       </div>
       <div v-if="hasActualContent && !session?.is_completed" class="loading-indicator">
         <div class="loading-typing">
@@ -63,6 +63,8 @@ import {
   enhanceMarkdownContainer,
 } from '@/utils/mermaidShared'
 import { useEmbedCitationPopover } from '@/composables/useEmbedCitationPopover'
+import { useTypewriter } from '@/composables/useTypewriter'
+import { vStableHtml } from '@/directives/stableHtml'
 
 const RagPipelineProgress = defineAsyncComponent(
   () => import('@/views/chat/components/RagPipelineProgress.vue'),
@@ -142,13 +144,22 @@ const scheduleCitationClose = () => {
   }, 120)
 }
 
+// Smooth the streamed answer into a steady typewriter cadence (shared with the
+// Agent path). History reloads arrive complete and snap to full.
+const answerText = computed(() => String(props.content || props.session?.content || ''))
+const { displayed: typedAnswer } = useTypewriter(
+  () => answerText.value,
+  () => Boolean(props.session?.is_completed),
+)
+
 const renderedHTML = computed(() => {
-  const text = String(props.content || props.session?.content || '')
+  const text = typedAnswer.value
   if (!text.trim()) return ''
   return renderChatMarkdown(text, {
     renderer: markdownRenderer,
     escapeMarkdown: safeMarkdownToHTML,
     sanitizeHtml: sanitizeMarkdownHTML,
+    streaming: !props.session?.is_completed,
   })
 })
 

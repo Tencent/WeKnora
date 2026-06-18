@@ -574,6 +574,38 @@
     transition: transform 0.2s ease;
   }
 
+  // Protected images not yet hydrated still carry the 1x1 placeholder gif.
+  // Without a fixed size width:auto/height:auto collapse it to a ~1px line that
+  // jumps to full size on load (reads as flicker during streaming). Give it a
+  // stable skeleton box so the later swap to the real image is a calm fade-in.
+  // Match both the explicit loading marker and the transparent GIF itself.
+  // During a streaming DOM patch the marker can briefly be absent while src is
+  // already the 1x1 placeholder; matching src prevents that frame becoming a
+  // tall, one-pixel vertical line in Chromium.
+  :deep(img[data-img-loading]),
+  :deep(img[data-protected-src][src^='data:image/gif;base64']) {
+    width: 260px;
+    height: 180px;
+    min-width: min(260px, 80%);
+    min-height: 180px;
+    max-width: 80%;
+    object-fit: cover;
+    cursor: default;
+    background: linear-gradient(
+      100deg,
+      var(--td-bg-color-secondarycontainer, #f3f3f3) 30%,
+      var(--td-bg-color-container-hover, #eaeaea) 50%,
+      var(--td-bg-color-secondarycontainer, #f3f3f3) 70%
+    );
+    background-size: 200% 100%;
+    animation: chat-img-skeleton 1.2s ease-in-out infinite;
+  }
+
+  @keyframes chat-img-skeleton {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+
   :deep(p:has(> img:only-child)) {
     margin: 1.25em 0;
     line-height: 0;
