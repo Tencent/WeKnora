@@ -68,13 +68,10 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div
-                class="content-wrapper"
-                :class="{
-                  'content-wrapper--wide': currentSection === 'members',
-                  'content-wrapper--full': currentSection === 'system-global',
-                }"
-              >
+              <div class="content-wrapper" :class="{
+                'content-wrapper--wide': currentSection === 'members',
+                'content-wrapper--full': currentSection === 'system-global',
+              }">
                 <!-- 角色不允许访问当前 section（deep-link 进来 / 跨租户切换后角色降级）—— 优先于具体 section 渲染。
                      正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
                      的瞬间触发；这一段做兜底兼容旧 URL。 -->
@@ -491,6 +488,7 @@ onUnmounted(() => {
   // and the modal shrinks to fit minus the 20px padding.
   max-width: 1080px;
   height: 780px;
+  max-height: calc(100vh - 40px);
   background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
