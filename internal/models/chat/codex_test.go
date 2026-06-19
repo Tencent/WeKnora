@@ -90,6 +90,37 @@ func TestCodexTokenRefreshRotatesAndPersists(t *testing.T) {
 	assert.Equal(t, os.FileMode(codexOAuthFilePermission), info.Mode().Perm())
 }
 
+func TestCodexTokenRefreshDecodesObjectError(t *testing.T) {
+	now := time.Now()
+	authFile := filepath.Join(t.TempDir(), "codex_auth.json")
+	old := &codexTokenFile{
+		Tokens: codexTokens{
+			IDToken:      makeTestJWT(map[string]any{"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct_old"}}),
+			AccessToken:  makeTestJWT(map[string]any{"exp": now.Add(time.Minute).Unix()}),
+			RefreshToken: "refresh-old",
+			AccountID:    "acct_old",
+		},
+		LastRefresh: now.Add(-time.Hour),
+	}
+	require.NoError(t, writeCodexTokenFile(authFile, old))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"refresh token expired","type":"invalid_request_error"}}`))
+	}))
+	defer server.Close()
+
+	oldEndpoint := codexTokenEndpoint
+	codexTokenEndpoint = server.URL
+	t.Cleanup(func() { codexTokenEndpoint = oldEndpoint })
+
+	source := &codexTokenSource{authFile: authFile, client: server.Client()}
+	_, _, err := source.bearer(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refresh token expired")
+}
+
 func TestShouldRefreshCodexTokens(t *testing.T) {
 	now := time.Now()
 	file := &codexTokenFile{

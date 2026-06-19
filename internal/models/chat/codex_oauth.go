@@ -44,12 +44,46 @@ type codexTokens struct {
 }
 
 type codexTokenResponse struct {
-	IDToken      string `json:"id_token"`
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in,omitempty"`
-	Error        string `json:"error,omitempty"`
-	ErrorDesc    string `json:"error_description,omitempty"`
+	IDToken      string               `json:"id_token"`
+	AccessToken  string               `json:"access_token"`
+	RefreshToken string               `json:"refresh_token"`
+	ExpiresIn    int                  `json:"expires_in,omitempty"`
+	Error        codexOAuthErrorField `json:"error,omitempty"`
+	ErrorDesc    codexOAuthErrorField `json:"error_description,omitempty"`
+}
+
+type codexOAuthErrorField struct {
+	Message string
+}
+
+func (e *codexOAuthErrorField) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		e.Message = text
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		e.Message = string(data)
+		return nil
+	}
+	for _, key := range []string{"message", "error", "description", "type", "code"} {
+		if value, ok := obj[key].(string); ok && value != "" {
+			e.Message = value
+			return nil
+		}
+	}
+	if b, err := json.Marshal(obj); err == nil {
+		e.Message = string(b)
+	}
+	return nil
+}
+
+func (e codexOAuthErrorField) String() string {
+	return e.Message
 }
 
 type codexTokenSource struct {
@@ -326,11 +360,11 @@ func decodeJWTPayload(token string) (map[string]any, bool) {
 }
 
 func (r codexTokenResponse) messageOrBody(body []byte) string {
-	if r.ErrorDesc != "" {
-		return r.ErrorDesc
+	if msg := r.ErrorDesc.String(); msg != "" {
+		return msg
 	}
-	if r.Error != "" {
-		return r.Error
+	if msg := r.Error.String(); msg != "" {
+		return msg
 	}
 	return string(body)
 }
