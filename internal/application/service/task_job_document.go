@@ -66,6 +66,14 @@ func (s *knowledgeService) dispatchDocumentRootTask(
 			"knowledge_id":      knowledge.ID,
 			"knowledge_base_id": knowledge.KnowledgeBaseID,
 		},
+		"process_config": map[string]any{
+			"file_name":                  payload.FileName,
+			"file_type":                  payload.FileType,
+			"enable_multimodel":          payload.EnableMultimodel,
+			"enable_question_generation": payload.EnableQuestionGeneration,
+			"question_count":             payload.QuestionCount,
+			"language":                   payload.Language,
+		},
 	})
 
 	createdBy := ""

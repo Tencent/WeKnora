@@ -27,6 +27,18 @@ func newSyncLedgerStub() *syncLedgerStub {
 func (s *syncLedgerStub) CreateJobAndExecution(context.Context, *types.TaskJob, *types.TaskExecution) error {
 	return nil
 }
+func (s *syncLedgerStub) Summary(context.Context, interfaces.TaskJobQuery) (*interfaces.TaskJobSummary, error) {
+	return nil, nil
+}
+func (s *syncLedgerStub) ListJobs(context.Context, interfaces.TaskJobQuery) ([]*types.TaskJob, int64, error) {
+	return nil, 0, nil
+}
+func (s *syncLedgerStub) GetJob(context.Context, uint64, string) (*types.TaskJob, error) {
+	return nil, nil
+}
+func (s *syncLedgerStub) ListExecutions(context.Context, uint64, string) ([]*types.TaskExecution, error) {
+	return nil, nil
+}
 func (s *syncLedgerStub) MarkJobProcessingIfCurrentAttempt(context.Context, interfaces.TaskJobAttemptSelector) (bool, error) {
 	return false, nil
 }

@@ -75,6 +75,7 @@ type RouterParams struct {
 	TagHandler                   *handler.TagHandler
 	CustomAgentHandler           *handler.CustomAgentHandler
 	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
+	TaskCenterHandler            *handler.TaskCenterHandler
 	SkillHandler                 *handler.SkillHandler
 	OrganizationHandler          *handler.OrganizationHandler
 	IMHandler                    *handler.IMHandler
@@ -222,6 +223,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
+		RegisterTaskCenterRoutes(v1, params.TaskCenterHandler, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
@@ -979,6 +981,20 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 		favs.GET("", g.Viewer(), h.ListFavorites)
 		favs.POST("", g.Viewer(), h.AddFavorite)
 		favs.DELETE("/:type/:id", g.Viewer(), h.RemoveFavorite)
+	}
+}
+
+func RegisterTaskCenterRoutes(r *gin.RouterGroup, h *handler.TaskCenterHandler, g *rbacGuards) {
+	tasks := r.Group("/tasks", g.Viewer())
+	{
+		tasks.GET("/summary", h.Summary)
+		tasks.GET("", h.List)
+		tasks.POST("/retry", h.RetryAll)
+		tasks.GET("/:job_id", h.Detail)
+		tasks.GET("/:job_id/executions", h.Executions)
+		tasks.POST("/:job_id/retry", h.Retry)
+		tasks.POST("/:job_id/cancel", h.Cancel)
+		tasks.DELETE("", h.DeleteRecords)
 	}
 }
 

@@ -236,6 +236,53 @@ func TestTaskJobRepository_ManualRetryCreatesNewAttemptAndKeepsHistory(t *testin
 	assert.False(t, changed, "queued retry attempt cannot be retried again")
 }
 
+func TestTaskJobRepository_ListJobsScopesSearchToTenantAndCreator(t *testing.T) {
+	db := setupTaskLedgerTestDB(t)
+	repo := NewTaskJobRepository(db)
+	ctx := context.Background()
+
+	own := makeTaskJob("job-own", 0)
+	own.DisplayName = "needle report"
+	own.State = types.TaskJobStateFinalizing
+	require.NoError(t, repo.CreateJobAndExecution(ctx, own, makeTaskExecution("job-own", "exec-own", 0)))
+
+	otherUser := makeTaskJob("job-other-user", 0)
+	otherUser.CreatedBy = "user-2"
+	otherUser.ScopeID = "needle-other-user"
+	require.NoError(t, repo.CreateJobAndExecution(ctx, otherUser, makeTaskExecution("job-other-user", "exec-other-user", 0)))
+
+	otherTenant := makeTaskJob("job-other-tenant", 0)
+	otherTenant.TenantID = 8
+	otherTenant.ScopeID = "needle-other-tenant"
+	require.NoError(t, repo.CreateJobAndExecution(ctx, otherTenant, makeTaskExecution("job-other-tenant", "exec-other-tenant", 0)))
+
+	internalJob := makeTaskJob("job-internal", 0)
+	internalJob.Origin = types.TaskJobOriginInternal
+	internalJob.DisplayName = "needle internal"
+	require.NoError(t, repo.CreateJobAndExecution(ctx, internalJob, makeTaskExecution("job-internal", "exec-internal", 0)))
+
+	rows, total, err := repo.ListJobs(ctx, interfaces.TaskJobQuery{
+		TenantID: 7,
+		UserID:   "user-1",
+		Q:        "needle",
+		Page:     1,
+		PageSize: 20,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "job-own", rows[0].JobID)
+
+	summary, err := repo.Summary(ctx, interfaces.TaskJobQuery{
+		TenantID: 7,
+		UserID:   "user-1",
+		Q:        "needle",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), summary.Processing, "finalizing should roll up into the processing bucket")
+	assert.Zero(t, summary.Queued)
+}
+
 func TestTaskJobRepository_StaleDispatchAndTerminalRetention(t *testing.T) {
 	db := setupTaskLedgerTestDB(t)
 	repo := NewTaskJobRepository(db)

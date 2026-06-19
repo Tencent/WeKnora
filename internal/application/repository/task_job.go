@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -14,6 +15,76 @@ import (
 
 type taskJobRepository struct {
 	db *gorm.DB
+}
+
+func (r *taskJobRepository) Summary(ctx context.Context, q interfaces.TaskJobQuery) (*interfaces.TaskJobSummary, error) {
+	var rows []struct {
+		State string
+		Count int64
+	}
+	err := r.baseJobQuery(ctx, q).
+		Select("state, COUNT(*) AS count").
+		Group("state").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := &interfaces.TaskJobSummary{}
+	for _, row := range rows {
+		switch types.TaskJobState(row.State) {
+		case types.TaskJobStateQueued:
+			out.Queued = row.Count
+		case types.TaskJobStateProcessing, types.TaskJobStateFinalizing:
+			out.Processing += row.Count
+		case types.TaskJobStateSucceeded:
+			out.Succeeded = row.Count
+		case types.TaskJobStateFailed:
+			out.Failed = row.Count
+		case types.TaskJobStateCanceled:
+			out.Canceled = row.Count
+		}
+	}
+	return out, nil
+}
+
+func (r *taskJobRepository) ListJobs(ctx context.Context, q interfaces.TaskJobQuery) ([]*types.TaskJob, int64, error) {
+	page, pageSize := normalizeTaskJobPage(q.Page, q.PageSize)
+	base := r.baseJobQuery(ctx, q)
+	var total int64
+	if err := base.Model(&types.TaskJob{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []*types.TaskJob
+	err := base.
+		Order(taskJobSort(q.Sort)).
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&rows).Error
+	return rows, total, err
+}
+
+func (r *taskJobRepository) GetJob(ctx context.Context, tenantID uint64, jobID string) (*types.TaskJob, error) {
+	var job types.TaskJob
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND job_id = ?", tenantID, jobID).
+		First(&job).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+func (r *taskJobRepository) ListExecutions(ctx context.Context, tenantID uint64, jobID string) ([]*types.TaskExecution, error) {
+	var rows []*types.TaskExecution
+	err := r.db.WithContext(ctx).
+		Joins("JOIN task_jobs ON task_jobs.job_id = task_executions.job_id").
+		Where("task_jobs.tenant_id = ? AND task_executions.job_id = ?", tenantID, jobID).
+		Order("task_executions.enqueued_at DESC").
+		Find(&rows).Error
+	return rows, err
 }
 
 func NewTaskJobRepository(db *gorm.DB) interfaces.TaskJobRepository {
@@ -393,6 +464,67 @@ func (r *taskJobRepository) baseJobAttemptUpdate(ctx context.Context, sel interf
 		Where("scope = ?", sel.Scope).
 		Where("scope_id = ?", sel.ScopeID).
 		Where("process_attempt = ?", sel.ProcessAttempt)
+}
+
+func (r *taskJobRepository) baseJobQuery(ctx context.Context, q interfaces.TaskJobQuery) *gorm.DB {
+	origin := q.Origin
+	if origin == "" {
+		origin = string(types.TaskJobOriginUser)
+	}
+	tx := r.db.WithContext(ctx).Model(&types.TaskJob{}).
+		Where("tenant_id = ?", q.TenantID).
+		Where("origin = ?", origin)
+	if !q.IsAdmin {
+		tx = tx.Where("created_by = ?", q.UserID)
+	} else if q.CreatedBy != "" {
+		tx = tx.Where("created_by = ?", q.CreatedBy)
+	}
+	if q.State != "" {
+		if q.State == "failed_or_canceled" {
+			tx = tx.Where("state IN ?", []string{string(types.TaskJobStateFailed), string(types.TaskJobStateCanceled)})
+		} else if q.State == "processing" {
+			tx = tx.Where("state IN ?", []string{string(types.TaskJobStateProcessing), string(types.TaskJobStateFinalizing)})
+		} else {
+			tx = tx.Where("state = ?", q.State)
+		}
+	}
+	if q.Kind != "" {
+		tx = tx.Where("kind = ?", q.Kind)
+	}
+	if q.KBID != "" {
+		tx = tx.Where("related_id = ?", q.KBID)
+	}
+	if keyword := strings.TrimSpace(q.Q); keyword != "" {
+		like := "%" + keyword + "%"
+		tx = tx.Where("(display_name LIKE ? OR scope_id LIKE ? OR job_id LIKE ?)", like, like, like)
+	}
+	return tx
+}
+
+func normalizeTaskJobPage(page, pageSize int) (int, int) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+func taskJobSort(sort string) string {
+	switch sort {
+	case "created_at_asc":
+		return "created_at ASC"
+	case "updated_at_desc":
+		return "updated_at DESC"
+	case "updated_at_asc":
+		return "updated_at ASC"
+	default:
+		return "created_at DESC"
+	}
 }
 
 func (r *taskJobRepository) markJobTerminal(

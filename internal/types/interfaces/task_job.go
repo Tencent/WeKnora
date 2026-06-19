@@ -21,8 +21,36 @@ type TaskLedgerFailure struct {
 	FailedTaskID   string
 }
 
+type TaskJobQuery struct {
+	TenantID  uint64
+	UserID    string
+	IsAdmin   bool
+	State     string
+	Kind      string
+	KBID      string
+	CreatedBy string
+	Q         string
+	Page      int
+	PageSize  int
+	Sort      string
+	Origin    string
+}
+
+type TaskJobSummary struct {
+	Queued     int64 `json:"queued"`
+	Processing int64 `json:"processing"`
+	Succeeded  int64 `json:"succeeded"`
+	Failed     int64 `json:"failed"`
+	Canceled   int64 `json:"canceled"`
+}
+
 type TaskJobRepository interface {
 	CreateJobAndExecution(ctx context.Context, job *types.TaskJob, execution *types.TaskExecution) error
+
+	Summary(ctx context.Context, q TaskJobQuery) (*TaskJobSummary, error)
+	ListJobs(ctx context.Context, q TaskJobQuery) ([]*types.TaskJob, int64, error)
+	GetJob(ctx context.Context, tenantID uint64, jobID string) (*types.TaskJob, error)
+	ListExecutions(ctx context.Context, tenantID uint64, jobID string) ([]*types.TaskExecution, error)
 
 	MarkJobProcessingIfCurrentAttempt(ctx context.Context, sel TaskJobAttemptSelector) (bool, error)
 	MarkJobFinalizingIfCurrentAttempt(ctx context.Context, sel TaskJobAttemptSelector) (bool, error)
