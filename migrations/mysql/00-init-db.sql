@@ -5,6 +5,8 @@ DROP TABLE IF EXISTS knowledges;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS chunks;
+DROP TABLE IF EXISTS task_executions;
+DROP TABLE IF EXISTS task_jobs;
 
 CREATE TABLE tenants (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -155,3 +157,55 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+
+CREATE TABLE task_jobs (
+    job_id VARCHAR(64) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    created_by VARCHAR(64) NOT NULL DEFAULT '',
+    kind VARCHAR(32) NOT NULL,
+    origin VARCHAR(8) NOT NULL DEFAULT 'user',
+    display_name VARCHAR(255) NOT NULL DEFAULT '',
+    scope VARCHAR(32) NOT NULL,
+    scope_id VARCHAR(64) NOT NULL,
+    related_id VARCHAR(64) NOT NULL DEFAULT '',
+    process_attempt INT NOT NULL DEFAULT 0,
+    state VARCHAR(16) NOT NULL DEFAULT 'queued',
+    metadata JSON NOT NULL,
+    replay_spec JSON NOT NULL,
+    last_error_class VARCHAR(24) NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL,
+    failed_task_type VARCHAR(64) NOT NULL DEFAULT '',
+    failed_task_id VARCHAR(64) NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP NULL DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_task_jobs_tenant_state_created ON task_jobs(tenant_id, state, created_at);
+CREATE INDEX idx_task_jobs_tenant_kind_state ON task_jobs(tenant_id, kind, state);
+CREATE INDEX idx_task_jobs_tenant_creator_created ON task_jobs(tenant_id, created_by, created_at);
+CREATE INDEX idx_task_jobs_scope_attempt ON task_jobs(tenant_id, scope, scope_id, process_attempt);
+CREATE INDEX idx_task_jobs_related_state ON task_jobs(tenant_id, related_id, state);
+
+CREATE TABLE task_executions (
+    execution_id VARCHAR(64) PRIMARY KEY,
+    job_id VARCHAR(64) NOT NULL,
+    process_attempt INT NOT NULL DEFAULT 0,
+    task_type VARCHAR(64) NOT NULL,
+    queue VARCHAR(32) NOT NULL DEFAULT '',
+    state VARCHAR(16) NOT NULL DEFAULT 'queued',
+    retry_count INT NOT NULL DEFAULT 0,
+    error_class VARCHAR(24) NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL,
+    retry_of VARCHAR(64) NOT NULL DEFAULT '',
+    enqueued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    dispatched_at TIMESTAMP NULL DEFAULT NULL,
+    started_at TIMESTAMP NULL DEFAULT NULL,
+    finished_at TIMESTAMP NULL DEFAULT NULL,
+    CONSTRAINT fk_task_executions_job
+        FOREIGN KEY (job_id) REFERENCES task_jobs(job_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_task_executions_job_attempt_enqueued ON task_executions(job_id, process_attempt, enqueued_at);
+CREATE INDEX idx_task_executions_job_state ON task_executions(job_id, state);
+CREATE INDEX idx_task_executions_state_enqueued ON task_executions(state, enqueued_at);
