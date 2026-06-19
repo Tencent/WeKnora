@@ -130,17 +130,24 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			}
 			if ledger != nil && attempt < maxRetry {
 				_, _ = ledger.MarkExecRetryingIfNonTerminal(context.Background(), taskID, attempt+1, interfaces.TaskLedgerFailure{
-					ErrorClass: types.TaskErrorClassRetryable,
+					ErrorClass: types.ClassifyTaskError(lastErr),
 					LastError:  truncateSyncTaskError(lastErr),
 				})
 			}
 		}
 
 		if ledger != nil {
-			_, _ = ledger.MarkExecFailedIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
-				ErrorClass: types.TaskErrorClassTerminal,
-				LastError:  truncateSyncTaskError(lastErr),
-			}, time.Now())
+			if types.ClassifyTaskError(lastErr) == types.TaskErrorClassCanceled {
+				_, _ = ledger.MarkExecCanceledIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
+					ErrorClass: types.TaskErrorClassCanceled,
+					LastError:  truncateSyncTaskError(lastErr),
+				}, time.Now())
+			} else {
+				_, _ = ledger.MarkExecFailedIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
+					ErrorClass: types.ClassifyTaskError(lastErr),
+					LastError:  truncateSyncTaskError(lastErr),
+				}, time.Now())
+			}
 		}
 		logger.Errorf(ctx, "[SyncTask] Task failed (exhausted retries) type=%s id=%s elapsed=%v err=%v",
 			task.Type(), taskID, time.Since(start), lastErr)

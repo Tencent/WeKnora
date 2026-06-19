@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/observability"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -52,19 +53,24 @@ func (r *TaskLedgerMaintenanceRunner) sweepStaleDispatch(ctx context.Context) {
 	cutoff := time.Now().Add(-r.staleAfter)
 	rows, err := r.repo.FindStaleDispatches(ctx, cutoff, 100)
 	if err != nil {
+		observability.RecordTaskLedgerWriteFailure("maintenance", "stale_dispatch_scan")
 		logger.Warnf(ctx, "task ledger: stale-dispatch scan failed: %v", err)
 		return
 	}
+	marked := int64(0)
 	for _, exec := range rows {
 		if exec == nil {
 			continue
 		}
 		if changed, err := r.repo.MarkStaleDispatchFailed(ctx, exec.ExecutionID, time.Now()); err != nil {
+			observability.RecordTaskLedgerWriteFailure("maintenance", "stale_dispatch_mark")
 			logger.Warnf(ctx, "task ledger: stale-dispatch mark failed exec=%s: %v", exec.ExecutionID, err)
 		} else if changed {
+			marked++
 			logger.Warnf(ctx, "task ledger: marked stale dispatch failed exec=%s job=%s", exec.ExecutionID, exec.JobID)
 		}
 	}
+	observability.RecordStaleDispatch(marked)
 }
 
 func taskLedgerSweepIntervalFromEnv() time.Duration {

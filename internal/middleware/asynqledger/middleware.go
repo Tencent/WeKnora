@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/observability"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -28,6 +29,9 @@ func Middleware(repo interfaces.TaskJobRepository) asynq.MiddlewareFunc {
 
 			updated, err := repo.MarkExecActiveIfExists(ctx, taskID, retryCount, time.Now())
 			if err != nil || !updated {
+				if err != nil {
+					observability.RecordTaskLedgerWriteFailure("asynq", "exec_active")
+				}
 				return next.ProcessTask(ctx, task)
 			}
 
@@ -35,22 +39,30 @@ func Middleware(repo interfaces.TaskJobRepository) asynq.MiddlewareFunc {
 			now := time.Now()
 			switch {
 			case handlerErr == nil:
-				_, _ = repo.MarkExecSucceededIfNonTerminal(context.Background(), taskID, now)
-			case errors.Is(handlerErr, context.Canceled):
-				_, _ = repo.MarkExecCanceledIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
-					ErrorClass: types.TaskErrorClassCanceled,
+				if _, err := repo.MarkExecSucceededIfNonTerminal(context.Background(), taskID, now); err != nil {
+					observability.RecordTaskLedgerWriteFailure("asynq", "exec_succeeded")
+				}
+			case types.ClassifyTaskError(handlerErr) == types.TaskErrorClassCanceled:
+				if _, err := repo.MarkExecCanceledIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
+					ErrorClass: types.ClassifyTaskError(handlerErr),
 					LastError:  truncateLedgerError(handlerErr),
-				}, now)
+				}, now); err != nil {
+					observability.RecordTaskLedgerWriteFailure("asynq", "exec_canceled")
+				}
 			case errors.Is(handlerErr, asynq.SkipRetry) || retryCount >= maxRetry:
-				_, _ = repo.MarkExecFailedIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
-					ErrorClass: types.TaskErrorClassTerminal,
+				if _, err := repo.MarkExecFailedIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
+					ErrorClass: types.ClassifyTaskError(handlerErr),
 					LastError:  truncateLedgerError(handlerErr),
-				}, now)
+				}, now); err != nil {
+					observability.RecordTaskLedgerWriteFailure("asynq", "exec_failed")
+				}
 			default:
-				_, _ = repo.MarkExecRetryingIfNonTerminal(context.Background(), taskID, retryCount+1, interfaces.TaskLedgerFailure{
-					ErrorClass: types.TaskErrorClassRetryable,
+				if _, err := repo.MarkExecRetryingIfNonTerminal(context.Background(), taskID, retryCount+1, interfaces.TaskLedgerFailure{
+					ErrorClass: types.ClassifyTaskError(handlerErr),
 					LastError:  truncateLedgerError(handlerErr),
-				})
+				}); err != nil {
+					observability.RecordTaskLedgerWriteFailure("asynq", "exec_retrying")
+				}
 			}
 			return handlerErr
 		})

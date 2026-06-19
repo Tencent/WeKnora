@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -231,7 +232,7 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
 		logger.GetLogger(ctx).Errorf("OpenAIEmbedder EmbedBatch API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
-		return nil, fmt.Errorf("EmbedBatch API error: Http Status %s, Response: %s", resp.Status, bodyStr)
+		return nil, &types.ProviderHTTPError{Status: resp.StatusCode, Body: bodyStr}
 	}
 
 	// Parse response

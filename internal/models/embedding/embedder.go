@@ -90,6 +90,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if setter, ok := e.(interface{ SetSupportsDimensionOverride(bool) }); ok {
 		setter.SetSupportsDimensionOverride(config.SupportsDimensionOverride)
 	}
+	e = newInstrumentedEmbedder(e, embeddingMetricProvider(config), defaultEmbeddingCallTimeout)
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}
 	}
@@ -97,6 +98,21 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 		e = &langfuseEmbedder{inner: e}
 	}
 	return e, nil
+}
+
+func embeddingMetricProvider(config Config) string {
+	if config.Provider != "" {
+		return config.Provider
+	}
+	if config.Source == types.ModelSourceRemote {
+		if detected := provider.DetectProvider(config.BaseURL); detected != "" {
+			return string(detected)
+		}
+	}
+	if config.Source != "" {
+		return string(config.Source)
+	}
+	return "embedding"
 }
 
 func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {

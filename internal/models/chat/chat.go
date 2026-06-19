@@ -146,8 +146,29 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	default:
 		return nil, fmt.Errorf("unsupported chat model source: %s", config.Source)
 	}
+	if err == nil {
+		c = newInstrumentedChat(c, chatMetricProvider(config))
+	}
 	c, err = wrapChatDebug(c, err)
 	return wrapChatLangfuse(c, err)
+}
+
+func chatMetricProvider(config *ChatConfig) string {
+	if config == nil {
+		return "chat"
+	}
+	if config.Provider != "" {
+		return config.Provider
+	}
+	if config.Source == types.ModelSourceRemote {
+		if detected := provider.DetectProvider(config.BaseURL); detected != "" {
+			return string(detected)
+		}
+	}
+	if config.Source != "" {
+		return string(config.Source)
+	}
+	return "chat"
 }
 
 // NewRemoteChat 根据 provider 创建远程聊天实例。

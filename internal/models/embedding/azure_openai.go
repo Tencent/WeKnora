@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -126,7 +127,7 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 		if len(bodyStr) > 1000 {
 			bodyStr = bodyStr[:1000] + "... (truncated)"
 		}
-		return nil, fmt.Errorf("Azure Embedding API error: Http Status %s, Response: %s", resp.Status, bodyStr)
+		return nil, &types.ProviderHTTPError{Status: resp.StatusCode, Body: bodyStr}
 	}
 
 	var response OpenAIEmbedResponse

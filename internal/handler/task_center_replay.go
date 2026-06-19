@@ -35,6 +35,9 @@ func canRetryJob(job *types.TaskJob, execs []*types.TaskExecution) bool {
 	if job.State != types.TaskJobStateFailed && job.State != types.TaskJobStateCanceled {
 		return false
 	}
+	if !retryableTaskJobErrorClass(job.LastErrorClass) {
+		return false
+	}
 	if _, _, err := replayDocumentPayload(job); err != nil {
 		return false
 	}
@@ -44,6 +47,15 @@ func canRetryJob(job *types.TaskJob, execs []*types.TaskExecution) bool {
 		}
 	}
 	return true
+}
+
+func retryableTaskJobErrorClass(class types.TaskErrorClass) bool {
+	switch class {
+	case "", types.TaskErrorClassRetryable, types.TaskErrorClassCanceled, types.TaskErrorClassEnqueueFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func canCancelJob(job *types.TaskJob) bool {

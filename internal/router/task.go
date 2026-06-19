@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware/asynqdl"
 	"github.com/Tencent/WeKnora/internal/middleware/asynqledger"
+	"github.com/Tencent/WeKnora/internal/observability"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -334,17 +335,20 @@ func newDeadLetterKnowledgeFailer(
 			tenantID = tenantProbe.TenantID
 			if tenantID > 0 {
 				taskID, _ := asynq.GetTaskID(ctx)
-				_, _ = taskJobRepo.MarkJobFailedIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+				_, err := taskJobRepo.MarkJobFailedIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
 					TenantID:       tenantID,
 					Scope:          types.TaskScopeKnowledge,
 					ScopeID:        probe.KnowledgeID,
 					ProcessAttempt: probe.Attempt,
 				}, interfaces.TaskLedgerFailure{
-					ErrorClass:     types.TaskErrorClassTerminal,
+					ErrorClass:     types.ClassifyTaskError(taskErr),
 					LastError:      errMsg,
 					FailedTaskType: t.Type(),
 					FailedTaskID:   taskID,
 				}, time.Now())
+				if err != nil {
+					observability.RecordTaskLedgerWriteFailure("dead_letter", "job_failed")
+				}
 			}
 		}
 		// Close the matching root span so the timeline stops showing
