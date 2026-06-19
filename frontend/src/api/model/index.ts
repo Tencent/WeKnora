@@ -215,3 +215,40 @@ export function getWeKnoraCloudStatus(): Promise<WeKnoraCloudStatusResult> {
       })
   })
 }
+
+export interface CodexOAuthStartResult {
+  authorize_url: string
+  state: string
+  redirect_uri: string
+  auth_file: string
+}
+
+export interface CodexOAuthStatus {
+  configured: boolean
+  account_id?: string
+  expires_at?: string
+  auth_file?: string
+}
+
+export async function startCodexOAuth(authFile?: string): Promise<CodexOAuthStartResult> {
+  const response: any = await post('/api/v1/models/codex/oauth/start', {
+    auth_file: authFile || '',
+  })
+  return (response.data ?? response) as CodexOAuthStartResult
+}
+
+export async function completeCodexOAuth(body: {
+  auth_file?: string
+  callback_url?: string
+  code?: string
+  state?: string
+}): Promise<CodexOAuthStatus> {
+  const response: any = await post('/api/v1/models/codex/oauth/complete', body)
+  return (response.data ?? response) as CodexOAuthStatus
+}
+
+export async function getCodexOAuthStatus(authFile?: string): Promise<CodexOAuthStatus> {
+  const suffix = authFile ? `?auth_file=${encodeURIComponent(authFile)}` : ''
+  const response: any = await get(`/api/v1/models/codex/oauth/status${suffix}`)
+  return (response.data ?? response) as CodexOAuthStatus
+}

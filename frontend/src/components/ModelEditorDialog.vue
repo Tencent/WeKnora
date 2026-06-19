@@ -215,6 +215,62 @@
             </div>
           </template>
 
+          <template v-if="formData.provider === 'openai-codex'">
+            <div class="codex-oauth-panel">
+              <div class="codex-oauth-panel__header">
+                <div class="codex-oauth-panel__status">
+                  <t-icon
+                    :name="codexOAuthStatus?.configured ? 'check-circle-filled' : 'info-circle-filled'"
+                    :class="['codex-oauth-panel__icon', codexOAuthStatus?.configured ? 'is-ok' : 'is-info']"
+                  />
+                  <span>
+                    {{ codexOAuthStatus?.configured
+                      ? $t('model.editor.codexOAuth.configured', { account: codexOAuthStatus.account_id || '-' })
+                      : $t('model.editor.codexOAuth.unconfigured') }}
+                  </span>
+                </div>
+                <t-button variant="text" size="small" :loading="codexOAuthChecking" @click="refreshCodexOAuthStatus">
+                  <template #icon><t-icon name="refresh" /></template>
+                  {{ $t('common.refresh') }}
+                </t-button>
+              </div>
+
+              <div class="form-item">
+                <label class="form-label">{{ $t('model.editor.codexOAuth.authFileLabel') }}</label>
+                <t-input v-model="formData.codexAuthFile" :placeholder="$t('model.editor.codexOAuth.authFilePlaceholder')" />
+                <p class="form-desc">{{ $t('model.editor.codexOAuth.authFileDesc') }}</p>
+              </div>
+
+              <div class="codex-oauth-panel__actions">
+                <t-button theme="primary" variant="outline" :loading="codexOAuthStarting" @click="startCodexLogin">
+                  <template #icon><t-icon name="login" /></template>
+                  {{ $t('model.editor.codexOAuth.start') }}
+                </t-button>
+                <t-button v-if="codexAuthorizeUrl" variant="text" @click="openCodexAuthorizeUrl">
+                  <template #icon><t-icon name="jump" /></template>
+                  {{ $t('model.editor.codexOAuth.open') }}
+                </t-button>
+              </div>
+
+              <div v-if="codexAuthorizeUrl" class="codex-oauth-panel__url">
+                <t-input v-model="codexAuthorizeUrl" readonly />
+              </div>
+
+              <div class="form-item">
+                <label class="form-label">{{ $t('model.editor.codexOAuth.callbackLabel') }}</label>
+                <t-textarea
+                  v-model="codexCallbackUrl"
+                  :autosize="{ minRows: 2, maxRows: 4 }"
+                  :placeholder="$t('model.editor.codexOAuth.callbackPlaceholder')"
+                />
+              </div>
+              <t-button :disabled="!codexCallbackUrl.trim()" :loading="codexOAuthCompleting" @click="completeCodexLogin">
+                <template #icon><t-icon name="check" /></template>
+                {{ $t('model.editor.codexOAuth.complete') }}
+              </t-button>
+            </div>
+          </template>
+
           <!-- 模型名称 -->
           <div class="form-item">
             <label class="form-label required">{{ $t('model.modelName') }}</label>
@@ -228,12 +284,12 @@
             <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
           </div>
 
-          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+          <div v-if="formData.provider !== 'weknoracloud' && formData.provider !== 'openai-codex'" class="form-item">
             <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
             <t-input v-model="formData.baseUrl" :placeholder="getBaseUrlPlaceholder()" />
           </div>
 
-          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+          <div v-if="formData.provider !== 'weknoracloud' && formData.provider !== 'openai-codex'" class="form-item">
             <label class="form-label">{{
               isLkeapRerank ? $t('model.editor.lkeap.secretIdLabel') : $t('model.editor.apiKeyOptional')
             }}</label>
@@ -282,7 +338,7 @@
           </div>
 
           <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
-          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+          <div v-if="formData.provider !== 'weknoracloud' && formData.provider !== 'openai-codex'" class="form-item">
             <div class="custom-headers-header">
               <label class="form-label" style="margin-bottom: 0;">{{ $t('model.editor.customHeadersLabel') }}</label>
               <t-button variant="text" size="small" theme="primary" @click="addCustomHeader">
@@ -388,8 +444,12 @@ import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import {
   getWeKnoraCloudStatus,
+  getCodexOAuthStatus,
+  startCodexOAuth,
+  completeCodexOAuth,
   putModelCredentials,
   deleteModelCredentialField,
+  type CodexOAuthStatus,
   type ModelCredentialField,
 } from '@/api/model'
 import { useI18n } from 'vue-i18n'
@@ -433,6 +493,8 @@ interface ModelFormData {
   appSecret?: string
   /** LKEAP Rerank：地域，如 ap-guangzhou */
   lkeapRegion?: string
+  /** OpenAI Codex OAuth credential file path */
+  codexAuthFile?: string
 }
 
 type EditorModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
@@ -490,6 +552,15 @@ const fallbackProviderOptions = computed(() => [
     },
     description: t('model.editor.providers.openai.description'),
     modelTypes: ['chat', 'embedding', 'vllm', 'asr']
+  },
+  {
+    value: 'openai-codex',
+    label: t('model.editor.providers.openaiCodex.label'),
+    defaultUrls: {
+      chat: 'https://chatgpt.com/backend-api/codex',
+    },
+    description: t('model.editor.providers.openaiCodex.description'),
+    modelTypes: ['chat']
   },
   {
     value: 'azure_openai',
@@ -621,11 +692,11 @@ const providerOptions = computed(() => {
   if (apiProviderOptions.value.length > 0) {
     return apiProviderOptions.value.map(p => ({
       ...p,
-      label: te(`model.editor.providers.${p.value}.label`)
-        ? t(`model.editor.providers.${p.value}.label`)
+      label: te(`model.editor.providers.${providerI18nKey(p.value)}.label`)
+        ? t(`model.editor.providers.${providerI18nKey(p.value)}.label`)
         : p.label,
-      description: te(`model.editor.providers.${p.value}.description`)
-        ? t(`model.editor.providers.${p.value}.description`)
+      description: te(`model.editor.providers.${providerI18nKey(p.value)}.description`)
+        ? t(`model.editor.providers.${providerI18nKey(p.value)}.description`)
         : p.description,
     }))
   }
@@ -634,6 +705,8 @@ const providerOptions = computed(() => {
     p.modelTypes.includes(activeModelType.value)
   )
 })
+
+const providerI18nKey = (id: string) => id === 'openai-codex' ? 'openaiCodex' : id
 
 const dialogVisible = computed({
   get: () => props.visible,
@@ -701,6 +774,10 @@ const modelTypeIcon = computed(() => {
 
 const isLkeapRerank = computed(
   () => activeModelType.value === 'rerank' && formData.value.provider === 'lkeap',
+)
+
+const isOpenAICodex = computed(
+  () => activeModelType.value === 'chat' && formData.value.provider === 'openai-codex',
 )
 
 // Credential resource binding for the shared <CredentialResource> component.
@@ -779,6 +856,18 @@ const checkingOllamaStatus = ref(false)
 
 // WeKnoraCloud 凭证状态
 const wkcCredentialState = ref<'loading' | 'unconfigured' | 'configured' | 'expired'>('loading')
+const codexOAuthStatus = ref<CodexOAuthStatus | null>(null)
+const codexOAuthChecking = ref(false)
+const codexOAuthStarting = ref(false)
+const codexOAuthCompleting = ref(false)
+const codexAuthorizeUrl = ref('')
+const codexCallbackUrl = ref('')
+
+const codexAuthFile = () => (formData.value.codexAuthFile || '/data/weknora/codex_auth.json').trim()
+
+const codexExtraConfig = () => ({
+  codex_auth_file: codexAuthFile(),
+})
 
 const checkWkcCredentialStatus = async () => {
   wkcCredentialState.value = 'loading'
@@ -793,6 +882,54 @@ const checkWkcCredentialStatus = async () => {
     }
   } catch {
     wkcCredentialState.value = 'unconfigured'
+  }
+}
+
+const refreshCodexOAuthStatus = async () => {
+  if (!isOpenAICodex.value) return
+  codexOAuthChecking.value = true
+  try {
+    codexOAuthStatus.value = await getCodexOAuthStatus(codexAuthFile())
+  } catch {
+    codexOAuthStatus.value = { configured: false, auth_file: codexAuthFile() }
+  } finally {
+    codexOAuthChecking.value = false
+  }
+}
+
+const startCodexLogin = async () => {
+  codexOAuthStarting.value = true
+  try {
+    const result = await startCodexOAuth(codexAuthFile())
+    codexAuthorizeUrl.value = result.authorize_url
+    if (result.auth_file) formData.value.codexAuthFile = result.auth_file
+    MessagePlugin.success(t('model.editor.codexOAuth.startSuccess'))
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('model.editor.codexOAuth.startFailed'))
+  } finally {
+    codexOAuthStarting.value = false
+  }
+}
+
+const openCodexAuthorizeUrl = () => {
+  if (!codexAuthorizeUrl.value) return
+  window.open(codexAuthorizeUrl.value, '_blank', 'noopener,noreferrer')
+}
+
+const completeCodexLogin = async () => {
+  if (!codexCallbackUrl.value.trim()) return
+  codexOAuthCompleting.value = true
+  try {
+    codexOAuthStatus.value = await completeCodexOAuth({
+      auth_file: codexAuthFile(),
+      callback_url: codexCallbackUrl.value.trim(),
+    })
+    codexCallbackUrl.value = ''
+    MessagePlugin.success(t('model.editor.codexOAuth.completeSuccess'))
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('model.editor.codexOAuth.completeFailed'))
+  } finally {
+    codexOAuthCompleting.value = false
   }
 }
 
@@ -823,6 +960,7 @@ const formData = ref<ModelFormData>({
   customHeaders: [],
   appSecret: '',
   lkeapRegion: 'ap-guangzhou',
+  codexAuthFile: '/data/weknora/codex_auth.json',
 })
 
 const rules = computed(() => ({
@@ -967,7 +1105,7 @@ const selectModelType = async (type: EditorModelType) => {
     formData.value.provider = 'generic'
     formData.value.baseUrl = ''
   } else {
-    handleProviderChange(formData.value.provider)
+    handleProviderChange(formData.value.provider || 'generic')
   }
   if (showThinkingControlField.value && !isEdit.value) {
     thinkingControlManual.value = false
@@ -1010,6 +1148,7 @@ watch(() => props.visible, (val) => {
           customHeaders: Array.isArray(props.modelData.customHeaders)
             ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
             : [],
+          codexAuthFile: props.modelData.codexAuthFile || '/data/weknora/codex_auth.json',
         }
         applyThinkingControlFromModelData()
       } else if (lastOpenedModelId.value !== null || !formData.value.id) {
@@ -1028,6 +1167,9 @@ watch(() => props.visible, (val) => {
       // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
       if (formData.value.provider === 'weknoracloud') {
         checkWkcCredentialStatus()
+      }
+      if (formData.value.provider === 'openai-codex') {
+        refreshCodexOAuthStatus()
       }
 
       if (showThinkingControlField.value && !isEdit.value) {
@@ -1063,6 +1205,7 @@ const resetForm = () => {
     customHeaders: [],
     appSecret: '',
     lkeapRegion: 'ap-guangzhou',
+    codexAuthFile: '/data/weknora/codex_auth.json',
   }
   modelChecked.value = false
   modelAvailable.value = false
@@ -1095,6 +1238,12 @@ const handleProviderChange = (value: string) => {
   // WeKnoraCloud: 检查凭证状态
   if (value === 'weknoracloud') {
     checkWkcCredentialStatus()
+  }
+  if (value === 'openai-codex') {
+    if (!formData.value.codexAuthFile) {
+      formData.value.codexAuthFile = '/data/weknora/codex_auth.json'
+    }
+    refreshCodexOAuthStatus()
   }
   if (hydratingForm.value) return
   if (activeModelType.value !== 'chat' || formData.value.source !== 'remote') return
@@ -1313,17 +1462,21 @@ const checkRemoteAPI = async () => {
     const idPayload = isEdit.value && props.modelData?.id
       ? { modelId: props.modelData.id as string }
       : {}
+    const extraConfigPayload = isOpenAICodex.value
+      ? { extraConfig: codexExtraConfig() }
+      : {}
 
     switch (activeModelType.value) {
       case 'chat':
         // 对话模型（KnowledgeQA）
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          ...extraConfigPayload,
         })
         break
 
@@ -1332,7 +1485,7 @@ const checkRemoteAPI = async () => {
         result = await testEmbeddingModel({
           source: 'remote',
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           dimension: formData.value.dimension,
           supportsDimensionOverride: formData.value.supportsDimensionOverride ?? false,
@@ -1360,7 +1513,7 @@ const checkRemoteAPI = async () => {
           : {}
         result = await checkRerankModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,
@@ -1375,7 +1528,7 @@ const checkRemoteAPI = async () => {
         // VLLM 使用 checkRemoteModel 进行基础连接测试
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,
@@ -1387,7 +1540,7 @@ const checkRemoteAPI = async () => {
         // ASR 模型（语音识别）— 使用专用的 ASR 测试接口（/v1/audio/transcriptions）
         result = await checkASRModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,
@@ -1940,6 +2093,63 @@ const handleCancel = () => {
     &--loading {
       color: var(--td-text-color-placeholder);
     }
+  }
+}
+
+.codex-oauth-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  .form-item {
+    margin-bottom: 0;
+  }
+}
+
+.codex-oauth-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.codex-oauth-panel__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+}
+
+.codex-oauth-panel__icon {
+  font-size: 16px;
+  flex-shrink: 0;
+
+  &.is-ok {
+    color: var(--td-success-color);
+  }
+
+  &.is-info {
+    color: var(--td-brand-color);
+  }
+}
+
+.codex-oauth-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.codex-oauth-panel__url {
+  :deep(.t-input__inner) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
   }
 }
 

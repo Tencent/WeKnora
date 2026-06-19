@@ -2723,10 +2723,30 @@ export default {
       // 프로바이더 관련 번역
       providerLabel: "프로바이더",
       providerPlaceholder: "모델 프로바이더 선택",
+      codexOAuth: {
+        configured: "ChatGPT 계정 로그인됨: {account}",
+        unconfigured: "ChatGPT/Codex OAuth가 아직 설정되지 않았습니다",
+        authFileLabel: "Codex 자격 증명 파일",
+        authFilePlaceholder: "/data/weknora/codex_auth.json",
+        authFileDesc: "WeKnora 전용 ChatGPT OAuth 토큰을 저장합니다. 비공개 영구 볼륨에 마운트하세요.",
+        start: "로그인 링크 생성",
+        open: "로그인 페이지 열기",
+        callbackLabel: "콜백 URL",
+        callbackPlaceholder: "로그인 후 localhost:1455로 리디렉션된 전체 URL을 여기에 붙여넣으세요",
+        complete: "로그인 완료",
+        startSuccess: "로그인 링크가 생성되었습니다",
+        startFailed: "로그인 링크 생성 실패",
+        completeSuccess: "Codex OAuth 로그인이 저장되었습니다",
+        completeFailed: "Codex OAuth 로그인 완료 실패",
+      },
       providers: {
         openai: {
           label: "OpenAI",
           description: "gpt-5.2, gpt-5-mini 등",
+        },
+        openaiCodex: {
+          label: "OpenAI Codex OAuth",
+          description: "ChatGPT/Codex 구독을 OAuth로 사용하여 대화 모델을 호출합니다",
         },
         azure_openai: {
           label: 'Azure OpenAI',

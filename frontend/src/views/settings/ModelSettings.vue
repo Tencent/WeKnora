@@ -173,6 +173,7 @@ function convertToLegacyFormat(model: ModelConfig) {
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
     lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
+    codexAuthFile: model.parameters.extra_config?.codex_auth_file || '/data/weknora/codex_auth.json',
     // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
     thinkingControl: model.parameters.extra_config?.thinking_control,
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
@@ -230,7 +231,8 @@ const sourceLabel = (type: ModelType) => {
 const providerLabel = (model: any): string => {
   const id = model.provider
   if (!id) return ''
-  const key = `model.editor.providers.${id}.label`
+  const providerKey = id === 'openai-codex' ? 'openaiCodex' : id
+  const key = `model.editor.providers.${providerKey}.label`
   return te(key) ? t(key) : id
 }
 
@@ -388,6 +390,9 @@ const handleModelSave = async (modelData: any) => {
     const extraConfig: Record<string, string> = {}
     if (modelData.provider === 'lkeap' && saveType === 'rerank') {
       extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
+    }
+    if (modelData.provider === 'openai-codex' && saveType === 'chat') {
+      extraConfig.codex_auth_file = (modelData.codexAuthFile || '/data/weknora/codex_auth.json').trim()
     }
     if (
       saveType === 'chat'

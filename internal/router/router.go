@@ -628,6 +628,10 @@ func RegisterModelRoutes(
 	{
 		// 获取模型厂商列表 — Viewer+
 		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		// OpenAI Codex OAuth login flow — Admin+
+		models.POST("/codex/oauth/start", g.Admin(), handler.StartCodexOAuth)
+		models.POST("/codex/oauth/complete", g.Admin(), handler.CompleteCodexOAuth)
+		models.GET("/codex/oauth/status", g.Admin(), handler.CodexOAuthStatus)
 		// 创建模型 — Admin+
 		models.POST("", g.Admin(), handler.CreateModel)
 		// 获取模型列表 — Viewer+

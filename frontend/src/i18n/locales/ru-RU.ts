@@ -2436,10 +2436,30 @@ export default {
       },
       providerLabel: 'Провайдер',
       providerPlaceholder: 'Выберите провайдера модели',
+      codexOAuth: {
+        configured: 'Вход в аккаунт ChatGPT выполнен: {account}',
+        unconfigured: 'ChatGPT/Codex OAuth еще не настроен',
+        authFileLabel: 'Файл учетных данных Codex',
+        authFilePlaceholder: '/data/weknora/codex_auth.json',
+        authFileDesc: 'Хранит OAuth-токены ChatGPT только для WeKnora. Смонтируйте его в приватный постоянный том.',
+        start: 'Создать ссылку входа',
+        open: 'Открыть страницу входа',
+        callbackLabel: 'Callback URL',
+        callbackPlaceholder: 'После входа вставьте сюда полный URL перенаправления localhost:1455',
+        complete: 'Завершить вход',
+        startSuccess: 'Ссылка входа создана',
+        startFailed: 'Не удалось создать ссылку входа',
+        completeSuccess: 'Codex OAuth вход сохранен',
+        completeFailed: 'Не удалось завершить Codex OAuth вход',
+      },
       providers: {
         openai: {
           label: 'OpenAI',
           description: 'gpt-5.2, gpt-5-mini, etc.'
+        },
+        openaiCodex: {
+          label: 'OpenAI Codex OAuth',
+          description: 'ChatGPT/Codex subscription via OAuth for chat models'
         },
         azure_openai: {
           label: 'Azure OpenAI',

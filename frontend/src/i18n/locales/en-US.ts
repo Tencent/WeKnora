@@ -3709,10 +3709,30 @@ export default {
       // Provider related translations
       providerLabel: 'Provider',
       providerPlaceholder: 'Select model provider',
+      codexOAuth: {
+        configured: 'Signed in to ChatGPT account: {account}',
+        unconfigured: 'ChatGPT/Codex OAuth is not configured yet',
+        authFileLabel: 'Codex credential file',
+        authFilePlaceholder: '/data/weknora/codex_auth.json',
+        authFileDesc: 'Stores WeKnora-only ChatGPT OAuth tokens. Mount it on a private persistent volume.',
+        start: 'Generate login link',
+        open: 'Open login page',
+        callbackLabel: 'Callback URL',
+        callbackPlaceholder: 'After login, paste the full localhost:1455 redirect URL here',
+        complete: 'Complete login',
+        startSuccess: 'Login link generated',
+        startFailed: 'Failed to generate login link',
+        completeSuccess: 'Codex OAuth login saved',
+        completeFailed: 'Failed to complete Codex OAuth login',
+      },
       providers: {
         openai: {
           label: 'OpenAI',
           description: 'gpt-5.2, gpt-5-mini, etc.',
+        },
+        openaiCodex: {
+          label: 'OpenAI Codex OAuth',
+          description: 'Use a ChatGPT/Codex subscription via OAuth for chat models',
         },
         anthropic: {
           label: 'Anthropic',

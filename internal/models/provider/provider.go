@@ -15,6 +15,8 @@ type ProviderName string
 const (
 	// OpenAI
 	ProviderOpenAI ProviderName = "openai"
+	// OpenAI Codex OAuth (ChatGPT subscription)
+	ProviderOpenAICodex ProviderName = "openai-codex"
 	// Anthropic Claude
 	ProviderAnthropic ProviderName = "anthropic"
 	// 阿里云 DashScope
@@ -80,6 +82,7 @@ func AllProviders() []ProviderName {
 		ProviderQianfan,
 		ProviderQiniu,
 		ProviderOpenAI,
+		ProviderOpenAICodex,
 		ProviderAnthropic,
 		ProviderGemini,
 		ProviderOpenRouter,
