@@ -94,6 +94,141 @@ export function stripTrailingStreamingHorizontalRule(content: string): string {
   )
 }
 
+function maskMatches(text: string, regex: RegExp): string {
+  return text.replace(regex, (match) => match.replace(/[^\n]/g, '\u0000'))
+}
+
+function isOdd(text: string, marker: RegExp): boolean {
+  const matches = text.match(marker)
+  return matches ? matches.length % 2 === 1 : false
+}
+
+/**
+ * Stabilize dangling inline markers while content is streaming.
+ *
+ * Two distinct mid-stream artifacts are smoothed out:
+ *
+ *  - A marker run with **nothing after it yet** (`… 实验**\n5. *`, or a bare
+ *    trailing `**`) is ambiguous — it might open bold, italic, or be the start
+ *    of the next `**`. Rendering it shows literal `*`/`~` that vanish a frame
+ *    later, so it is hidden until real content follows (like the citation/image
+ *    guards).
+ *  - A marker run **with content after it** but no closer (`**平台地址：…`) is a
+ *    genuinely opened emphasis; its closer is appended so marked renders it as
+ *    emphasis from the first frame instead of showing raw `**` and then snapping
+ *    to bold (and, for a standalone bold line, also gaining the subtitle
+ *    margin) — the jump reported on streamed bold lists/headings.
+ *
+ * Inline/fenced code and leading list bullets are masked so their literal
+ * `*`/`` ` `` are never treated as emphasis, and an open fenced block is left
+ * untouched.
+ */
+export function closeDanglingStreamingEmphasis(text: string): string {
+  if (!text || !/[*~`]/.test(text)) return text
+
+  // Mask code so markers inside it are never counted; \u0000 keeps offsets.
+  let masked = maskMatches(text, /```[\s\S]*?```/g)
+  if (isOdd(masked, /```/g)) {
+    const open = masked.lastIndexOf('```')
+    masked = masked.slice(0, open) + masked.slice(open).replace(/[^\n]/g, '\u0000')
+  }
+  masked = maskMatches(masked, /`[^`\n]*`/g)
+  let appendInlineCode = false
+  if (isOdd(masked, /`/g)) {
+    appendInlineCode = true
+    const open = masked.lastIndexOf('`')
+    masked = masked.slice(0, open) + masked.slice(open).replace(/[^\n]/g, '\u0000')
+  }
+
+  // Drop a trailing emphasis-marker run with no content after it: ambiguous and
+  // not yet renderable. Anchored to the current line so earlier text is intact.
+  let working = text
+  if (!appendInlineCode) {
+    const trailing = masked.match(/[*~]+[ \t]*$/)
+    if (trailing) {
+      working = text.slice(0, text.length - trailing[0].length)
+      masked = masked.slice(0, masked.length - trailing[0].length)
+    }
+  }
+
+  // Leading list/bullet markers are structure, not emphasis.
+  masked = masked.replace(/^(\s*)([*+-])(\s)/gm, (_m, p1, _p2, p3) => `${p1}\u0000${p3}`)
+
+  const needStrike = isOdd(masked, /~~/g)
+  const withoutBold = maskMatches(masked, /\*\*/g)
+  const needBold = isOdd(masked, /\*\*/g)
+  const needItalic = isOdd(withoutBold, /\*/g)
+
+  let closers = ''
+  if (appendInlineCode) closers += '`'
+  if (needItalic) closers += '*'
+  if (needBold) closers += '**'
+  if (needStrike) closers += '~~'
+
+  if (!closers) return working
+
+  // A closing emphasis delimiter must not be preceded by whitespace (CommonMark
+  // flanking rule), so insert the closers before any trailing whitespace. Bold
+  // content with internal spaces (`**XBRL Reporting `) otherwise renders literal
+  // (non-bold) on every frame that pauses on a space, flickering bold on/off.
+  const trailingWs = working.match(/\s+$/)
+  if (!trailingWs) return working + closers
+  const cut = working.length - trailingWs[0].length
+  return working.slice(0, cut) + closers + working.slice(cut)
+}
+
+const FLANKING_BOLD = /(?<!\*)\*\*(?=\S)([^*\n]*?\p{P})\*\*(?=[\p{L}\p{N}])/gu
+const FLANKING_STRIKE = /(?<!~)~~(?=\S)([^~\n]*?\p{P})~~(?=[\p{L}\p{N}])/gu
+const FLANKING_ITALIC = /(?<![*\p{L}\p{N}])\*(?=\S)([^*\n]*?\p{P})\*(?=[\p{L}\p{N}])/gu
+
+function repairFlankingEmphasisSegment(segment: string): string {
+  return segment
+    .replace(FLANKING_BOLD, '<strong>$1</strong>')
+    .replace(FLANKING_STRIKE, '<del>$1</del>')
+    .replace(FLANKING_ITALIC, '<em>$1</em>')
+}
+
+/**
+ * Render emphasis the model clearly intended but CommonMark refuses to parse.
+ *
+ * CommonMark's flanking rule rejects a closing `**`/`*`/`~~` that is preceded by
+ * punctuation and immediately followed by a letter/number, so a very common
+ * model pattern like `**XBRL（…语言）**是一种` (and even ASCII `**a)**b`) renders
+ * as literal asterisks — both mid-stream and when complete. We convert just that
+ * blocked pattern (closing delimiter after punctuation, before an alphanumeric)
+ * into explicit HTML so it bolds reliably. Code spans/fences are skipped so
+ * their literal markers are untouched.
+ */
+export function repairFlankingEmphasis(text: string): string {
+  if (!text || !/[*~]/.test(text)) return text
+  const parts = text.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = repairFlankingEmphasisSegment(parts[i])
+  }
+  return parts.join('')
+}
+
+/**
+ * Hide a trailing list/underline marker that has no content after it yet.
+ *
+ * While streaming, the moment a nested bullet's dash arrives before its text
+ * (`1. **AAAAA**\n   - `), marked reads the lone `-` as a setext underline and
+ * renders the previous line as a giant `<h2>`, which collapses back to bold text
+ * once the bullet content streams in — a large layout swing. An ordered marker
+ * with no content (`text\n1. `) and bare setext underlines (`==`/`--`) cause the
+ * same fl/flicker. Dropping the dangling marker line defers it by a token until
+ * it is unambiguous; a real list/heading still renders once content follows.
+ *
+ * A trailing line that is only a number (`…\n1`) is the start of an ordered
+ * marker before its `.`/`)` arrives; rendering it shows a bare unstyled "1" that
+ * disappears a frame later, so it is hidden too. Because the line must be only
+ * the number, in-sentence numbers (`值是 1`) are unaffected.
+ */
+export function stripTrailingStreamingListMarker(text: string): string {
+  if (!text) return text
+  return text.replace(/(^|\n)[ \t]*(?:[-*+]|[-=]{2,}|\d{1,9}[.)]?)[ \t]*$/, '$1')
+}
+
 export function createChatMarkdownRenderer(options: ChatMarkdownRendererOptions = {}): Renderer {
   const renderer = new marked.Renderer()
 
@@ -126,6 +261,37 @@ export function wrapChatMarkdownTables(html: string): string {
   )
 }
 
+const STANDALONE_STRONG_PARAGRAPH_RE =
+  /<p>\s*<strong>((?:(?!<\/strong>)[\s\S])*?)<\/strong>\s*<\/p>/g
+
+/**
+ * Tag paragraphs whose entire content is a single bold run (e.g. a model that
+ * emits `**小节标题：**` instead of a real heading) so they can be styled as a
+ * subtitle deterministically.
+ *
+ * This replaces the CSS `p:has(> strong:only-child)` heuristic, which was
+ * streaming-unstable: CSS `:only-child` ignores text nodes, so a normal
+ * paragraph that momentarily contained exactly one completed `**bold**` run
+ * (surrounded by plenty of body text) matched it and gained a large top margin,
+ * then lost it once a second bold run finished — a visible spacing jump
+ * mid-stream. Matching the whole paragraph content here only fires when the
+ * bold run truly is the entire paragraph.
+ */
+export function markStandaloneStrongParagraphs(html: string): string {
+  if (!html || !html.includes('<strong>')) return html
+  return html.replace(
+    STANDALONE_STRONG_PARAGRAPH_RE,
+    (match: string, inner: string, offset: number, full: string) => {
+      // A `<p>` that is a list item's content is list text, not a standalone
+      // subtitle. Marking it adds a large margin that shifts sibling items when
+      // a streamed list flips from tight to loose, so leave list paragraphs to
+      // the list's own (zero) margins.
+      if (/<li>\s*$/.test(full.slice(0, offset))) return match
+      return `<p class="md-strong-title"><strong>${inner}</strong></p>`
+    },
+  )
+}
+
 export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMarkdownOptions): string {
   const rawText = typeof rawMarkdown === 'string' ? rawMarkdown : String(rawMarkdown || '')
   if (!rawText.trim()) return ''
@@ -133,7 +299,7 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
   configureMarkedForChatMarkdown()
 
   const streamingSafeText = options.streaming
-    ? stripTrailingStreamingHorizontalRule(rawText)
+    ? stripTrailingStreamingListMarker(stripTrailingStreamingHorizontalRule(rawText))
     : rawText
   const citationSafeText = stripIncompleteCitationTag(streamingSafeText)
   const { text: tagSafe, tags } = preserveCitationTags(citationSafeText)
@@ -141,13 +307,21 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
   const mathSafe = preprocessMathDelimiters(imageSafe)
   const restoredTags = restoreCitationTags(mathSafe, tags)
   const inlineTags = joinCitationTagsToPreviousLine(restoredTags)
-  const preparedMarkdown = options.prepareMarkdown
-    ? options.prepareMarkdown(inlineTags, options.cachedMermaidSvgHtml)
+  // Run the list-marker guard again after emphasis balancing: closing/hiding a
+  // dangling `*`/`**` (the first chars of the next bullet's bold) can re-expose a
+  // bare `   - `, which would otherwise flash an empty nested item under the
+  // previous line right as the next item starts streaming.
+  const balancedInline = options.streaming
+    ? stripTrailingStreamingListMarker(closeDanglingStreamingEmphasis(inlineTags))
     : inlineTags
+  const preparedMarkdown = options.prepareMarkdown
+    ? options.prepareMarkdown(balancedInline, options.cachedMermaidSvgHtml)
+    : balancedInline
+  const flankingSafeMarkdown = repairFlankingEmphasis(preparedMarkdown)
   // Convert <kb>/<web>/wiki tags to HTML placeholders before escapeMarkdown so
   // agent sanitizers (e.g. UUID stripping) cannot damage chunk_id attributes.
   const { content: markdownWithPlaceholders, htmlSnippets } =
-    extractCitationHtmlPlaceholders(preparedMarkdown, options.knowledgeReferences)
+    extractCitationHtmlPlaceholders(flankingSafeMarkdown, options.knowledgeReferences)
   const escapedMarkdown = options.escapeMarkdown(markdownWithPlaceholders)
   const html = marked.parse(markdownWithPlaceholders, {
     renderer: options.renderer,
@@ -159,7 +333,8 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
     ? restoredHtml
     : collapseStandaloneCitationParagraphs(restoredHtml)
   const tableWrappedHtml = wrapChatMarkdownTables(citationHtml)
-  const sanitized = options.sanitizeHtml(tableWrappedHtml)
+  const strongTitleHtml = markStandaloneStrongParagraphs(tableWrappedHtml)
+  const sanitized = options.sanitizeHtml(strongTitleHtml)
   return options.injectCachedMermaidSvg
     ? options.injectCachedMermaidSvg(sanitized, options.cachedMermaidSvgHtml)
     : sanitized

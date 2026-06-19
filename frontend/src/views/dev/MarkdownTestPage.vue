@@ -145,6 +145,9 @@ const renderStreamMarkdown = (raw: string): string => {
     renderer: mermaidRenderer,
     escapeMarkdown: (markdown) => markdown,
     sanitizeHtml: sanitizeMarkdownHTML,
+    // Match production: the live chat marks unfinished answers as streaming so
+    // mid-stream guards (dangling emphasis, trailing rules) are exercised here.
+    streaming: isStreaming.value,
     cachedMermaidSvgHtml: streamMermaidSvgHtml.value,
     prepareMarkdown: prepareStreamingMermaidMarkdown,
     injectCachedMermaidSvg,
@@ -260,7 +263,38 @@ graph TD
 `;
 
 // --- Streaming Simulation ---
-const fullStreamText = `The energy-mass equivalence is $E = mc^2$.
+const fullStreamText = `
+**XBRL（eXtensible Business Reporting Language，可扩展商业报告语言）**是一种基于XML的标准化标记语言，专门用于电子化商业和财务报告的编制、交换和分析
+
+该数据集包含90个文本和方程对，挑战模型提取、解释和推理相互关联的财务术语和公式的能力，例如：
+\`\`\`
+APR = ((Fees + Interest) / Principal) × (365 / Days in Loan Term)
+\`\`\`
+<kb doc="2502.08127v1.pdf" chunk_id="1ecdce8a-f922-4d0c-b124-257ab4634da2" />
+
+### 重要性
+
+
+1. **AAAAA**
+   - **BBBBB**
+   - **CCCCC**
+
+1. **AAA**
+2. **BBB**
+3. **CCC**
+4. **DDD**
+5. **EEE**
+6. **FFF**
+7. **GGG**
+8. **HHH**
+9. **III**
+
+**标题：JJJ**
+
+**标题：KKK**
+
+
+The energy-mass equivalence is $E = mc^2$.
 
 In chemistry, the neutralization reaction:
 
@@ -530,6 +564,8 @@ watch(customInput, () => {
     border-radius: 50%;
     background: var(--td-brand-color, #0052d9);
     animation: typingBounce 1.4s ease-in-out infinite;
+    will-change: transform;
+    backface-visibility: hidden;
 
     &:nth-child(1) {
       animation-delay: 0s;
@@ -550,11 +586,11 @@ watch(customInput, () => {
   0%,
   60%,
   100% {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 
   30% {
-    transform: translateY(-8px);
+    transform: translate3d(0, -6px, 0);
   }
 }
 

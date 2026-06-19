@@ -43,9 +43,9 @@
                         aria-hidden="true" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
                       <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think')
-                        }}</span>
-                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
                       }}</span>
+                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
+                        }}</span>
                     </div>
                   </div>
                   <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
@@ -243,7 +243,7 @@
                     <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
                     <span class="action-name">{{ $t('agent.think') }}</span>
                     <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number
-                      }}/{{ event.tool_data.total_thoughts }}</span>
+                    }}/{{ event.tool_data.total_thoughts }}</span>
                     <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
                       class="action-summary">{{ getThinkingSummary(event) }}</span>
                   </div>
@@ -260,7 +260,8 @@
             <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))"
               class="answer-event">
               <div v-if="event.content && event.content.trim()" class="answer-content markdown-content">
-                <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)"></div>
+                <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
+                </div>
               </div>
               <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
@@ -2621,11 +2622,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
   0%,
   60%,
   100% {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 
   30% {
-    transform: translateY(-8px);
+    transform: translate3d(0, -5px, 0);
   }
 }
 
@@ -2962,6 +2963,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
       border-radius: 50%;
       background: var(--td-text-color-placeholder);
       animation: typingBounce 1.4s ease-in-out infinite;
+      // Composite each dot so the bounce stays smooth and ghost-free while the
+      // streaming answer relayouts every token.
+      will-change: transform;
+      backface-visibility: hidden;
 
       &:nth-child(1) {
         animation-delay: 0s;

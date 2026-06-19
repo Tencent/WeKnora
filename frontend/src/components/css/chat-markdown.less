@@ -46,7 +46,12 @@
   }
 
   // Models often emit standalone **小节标题：** paragraphs instead of headings.
-  :deep(p:has(> strong:only-child)) {
+  // Tagged at render time (markStandaloneStrongParagraphs) rather than via
+  // `p:has(> strong:only-child)`: CSS `:only-child` ignores text nodes, so the
+  // selector matched any paragraph whose only *element* child was a <strong>,
+  // causing a visible top-margin jump mid-stream the instant one **bold** run
+  // closed inside an otherwise text-heavy paragraph.
+  :deep(p.md-strong-title) {
     margin-top: 1.25em;
     margin-bottom: 0.5em;
     line-height: 1.5;

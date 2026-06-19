@@ -459,6 +459,10 @@ onBeforeUnmount(() => {
         border-radius: 50%;
         background: var(--td-brand-color);
         animation: typingBounce 1.4s ease-in-out infinite;
+        // Composite the dots so the bounce stays smooth and ghost-free while the
+        // answer relayouts each streamed token.
+        will-change: transform;
+        backface-visibility: hidden;
 
         &:nth-child(1) {
             animation-delay: 0s;
@@ -479,11 +483,11 @@ onBeforeUnmount(() => {
     0%,
     60%,
     100% {
-        transform: translateY(0);
+        transform: translate3d(0, 0, 0);
     }
 
     30% {
-        transform: translateY(-8px);
+        transform: translate3d(0, -6px, 0);
     }
 }
 

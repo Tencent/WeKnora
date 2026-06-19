@@ -3,11 +3,11 @@
   0%,
   60%,
   100% {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 
   30% {
-    transform: translateY(-8px);
+    transform: translate3d(0, -5px, 0);
   }
 }
 
@@ -52,6 +52,10 @@
       border-radius: 50%;
       background: var(--td-text-color-placeholder);
       animation: chatTimelineTypingBounce 1.4s ease-in-out infinite;
+      // Composite each dot on its own layer so the bounce runs off the main
+      // thread and does not smear/ghost while the answer relayouts every token.
+      will-change: transform;
+      backface-visibility: hidden;
 
       &:nth-child(1) {
         animation-delay: 0s;
