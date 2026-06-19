@@ -255,20 +255,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
-	payloadBytes, err := json.Marshal(taskPayload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal document process task payload: %v", err)
-		// 即使入队失败，也返回knowledge，因为文件已保存
-		return knowledge, nil
-	}
-
-	task := asynq.NewTask(
-		types.TypeDocumentProcess,
-		payloadBytes,
+	info, err := s.dispatchDocumentRootTask(ctx, knowledge, taskPayload, types.TaskJobKindUpload, "object_storage",
 		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 	)
-	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
 		// 即使入队失败，也返回knowledge，因为文件已保存
@@ -432,19 +421,9 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
-	payloadBytes, err := json.Marshal(taskPayload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal URL process task payload: %v", err)
-		return knowledge, nil
-	}
-
-	task := asynq.NewTask(
-		types.TypeDocumentProcess,
-		payloadBytes,
+	info, err := s.dispatchDocumentRootTask(ctx, knowledge, taskPayload, types.TaskJobKindUpload, "url",
 		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 	)
-	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
 		return knowledge, nil
@@ -666,19 +645,9 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
-	payloadBytes, err := json.Marshal(taskPayload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal file URL process task payload: %v", err)
-		return knowledge, nil
-	}
-
-	task := asynq.NewTask(
-		types.TypeDocumentProcess,
-		payloadBytes,
+	info, err := s.dispatchDocumentRootTask(ctx, knowledge, taskPayload, types.TaskJobKindUpload, "file_url",
 		documentProcessTaskOptions(s.config)...,
 	)
-	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
 		return knowledge, nil
@@ -895,20 +864,9 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			Language:                 lang,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal passage process task payload: %v", err)
-			// 即使入队失败，也返回knowledge
-			return knowledge, nil
-		}
-
-		task := asynq.NewTask(
-			types.TypeDocumentProcess,
-			payloadBytes,
+		info, err := s.dispatchDocumentRootTask(ctx, knowledge, taskPayload, types.TaskJobKindUpload, "knowledge_text",
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 		)
-		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
 			return knowledge, nil

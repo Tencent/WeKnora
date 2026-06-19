@@ -161,7 +161,9 @@ const (
 // duplicate the column.
 type WikiPendingOp struct {
 	Op          string `json:"op"`
+	TenantID    uint64 `json:"tenant_id,omitempty"`
 	KnowledgeID string `json:"knowledge_id"`
+	Attempt     int    `json:"attempt,omitempty"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
 	// Retract fields
@@ -201,6 +203,7 @@ type wikiIngestService struct {
 	logEntrySvc    interfaces.WikiLogEntryService
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
+	taskJobRepo    interfaces.TaskJobRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
@@ -226,6 +229,7 @@ func NewWikiIngestService(
 	logEntrySvc interfaces.WikiLogEntryService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
+	taskJobRepo interfaces.TaskJobRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
@@ -240,6 +244,7 @@ func NewWikiIngestService(
 		logEntrySvc:    logEntrySvc,
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
+		taskJobRepo:    taskJobRepo,
 		redisClient:    redisClient,
 		spanTracker:    spanTracker,
 	}
@@ -302,6 +307,7 @@ func EnqueueWikiIngest(
 	kbID, knowledgeID string,
 ) {
 	lang, _ := types.LanguageFromContext(ctx)
+	attempt := attemptFromCtx(ctx)
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
@@ -310,7 +316,9 @@ func EnqueueWikiIngest(
 	// "RPush + reverse-dedupe" semantics.
 	op := WikiPendingOp{
 		Op:          WikiOpIngest,
+		TenantID:    tenantID,
 		KnowledgeID: knowledgeID,
+		Attempt:     attempt,
 		Language:    lang,
 	}
 	payloadBytes, err := json.Marshal(op)
@@ -520,12 +528,20 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) {
 // already zero: FinalizeSubtask guards both the decrement (count > 0) and
 // the promote (parse_status = finalizing AND count = 0), so an op enqueued
 // before this accounting shipped is a harmless no-op.
-func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string) {
+func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, op WikiPendingOp) {
 	// Wiki is only finalized when its op reaches a terminal state, so this is
 	// always an intended drain (retErr=nil, final=true). Detached context: the
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
+	tenantID := op.TenantID
+	if tenantID == 0 {
+		tenantID, _ = types.TenantIDFromContext(ctx)
+	}
+	attempt := op.Attempt
+	if attempt <= 0 {
+		attempt = s.tracker().LatestAttempt(ctx, op.KnowledgeID)
+	}
+	finalizeSubtaskDetached(ctx, s.knowledgeRepo, s.taskJobRepo, tenantID, op.KnowledgeID, "wiki", attempt, nil, false, true)
 }
 
 // requeueFailedOps records in-batch failures.
@@ -572,7 +588,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		// for deleted knowledge that has no counter to drain). The
 		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
 		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
+			s.finalizeWikiSubtask(ctx, op)
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
@@ -599,6 +615,8 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 // docIngestResult captures per-document info for batch post-processing.
 type docIngestResult struct {
 	KnowledgeID string
+	TenantID    uint64
+	Attempt     int
 	DocTitle    string
 	Summary     string // one-line summary of the document (from summary page)
 	// Pages records the wiki pages this document touched, carrying both
@@ -1301,6 +1319,7 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 	}
 	return strings.TrimSpace(buf.String())
 }
+
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs

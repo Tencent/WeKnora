@@ -103,7 +103,7 @@ func safeInvokeCallback(ctx context.Context, t *asynq.Task, taskErr error, cb On
 			logger.Warnf(ctx, "asynq dead-letter callback panicked for %s: %v", t.Type(), r)
 		}
 	}()
-	cb(context.Background(), t, taskErr)
+	cb(context.WithoutCancel(ctx), t, taskErr)
 }
 
 // Middleware preserves the original signature for callers that don't need

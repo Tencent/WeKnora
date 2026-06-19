@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware/asynqdl"
+	"github.com/Tencent/WeKnora/internal/middleware/asynqledger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -34,6 +35,7 @@ type AsynqTaskParams struct {
 	KnowledgePostProcess interfaces.TaskHandler `name:"knowledgePostProcess"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
 	DeadLetterRepo       interfaces.TaskDeadLetterRepository
+	TaskJobRepo          interfaces.TaskJobRepository
 	SpanTracker          service.SpanTracker
 }
 
@@ -166,8 +168,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// a permanently-failing task left its parent knowledge stranded in
 	// "processing" until housekeeping cron caught it minutes later — the
 	// UI signal users actually see.
-	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker)
+	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker, params.TaskJobRepo)
 	mux.Use(asynqdl.MiddlewareWithCallback(params.DeadLetterRepo, knowledgeFailer))
+	mux.Use(asynqledger.Middleware(params.TaskJobRepo))
 
 	// Install Langfuse middleware BEFORE handler registration so every task
 	// type is automatically wrapped. When Langfuse is disabled the middleware
@@ -280,7 +283,11 @@ type deadLetterKnowledgeListDeletePayload struct {
 // errors are logged and swallowed. The dead-letter record is the source of
 // truth — this is purely a UX shortcut so users don't wait for the
 // housekeeping cron's next sweep.
-func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker service.SpanTracker) asynqdl.OnDeadLetter {
+func newDeadLetterKnowledgeFailer(
+	ks interfaces.KnowledgeService,
+	tracker service.SpanTracker,
+	taskJobRepo interfaces.TaskJobRepository,
+) asynqdl.OnDeadLetter {
 	if ks == nil {
 		return nil
 	}
@@ -317,6 +324,28 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 		}); err != nil {
 			logger.Warnf(ctx, "dead-letter callback: failed to mark knowledge %s as failed: %v", probe.KnowledgeID, err)
 			return
+		}
+		if taskJobRepo != nil && probe.Attempt > 0 {
+			tenantID := uint64(0)
+			var tenantProbe struct {
+				TenantID uint64 `json:"tenant_id,omitempty"`
+			}
+			_ = json.Unmarshal(t.Payload(), &tenantProbe)
+			tenantID = tenantProbe.TenantID
+			if tenantID > 0 {
+				taskID, _ := asynq.GetTaskID(ctx)
+				_, _ = taskJobRepo.MarkJobFailedIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+					TenantID:       tenantID,
+					Scope:          types.TaskScopeKnowledge,
+					ScopeID:        probe.KnowledgeID,
+					ProcessAttempt: probe.Attempt,
+				}, interfaces.TaskLedgerFailure{
+					ErrorClass:     types.TaskErrorClassTerminal,
+					LastError:      errMsg,
+					FailedTaskType: t.Type(),
+					FailedTaskID:   taskID,
+				}, time.Now())
+			}
 		}
 		// Close the matching root span so the timeline stops showing
 		// "进行中" after dead-letter exhaustion. Best-effort: nil

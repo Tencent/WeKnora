@@ -904,6 +904,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
+	attemptForLedger := payload.Attempt
+	defer func() {
+		s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger)
+	}()
 
 	// A newer attempt (re-upload / edit / reparse) has superseded this one:
 	// skip before opening the span or registering the FinalizeSubtask defer
@@ -935,7 +939,8 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// summaryErr would skip them and leave the row stuck in
 		// "finalizing". When we DO return an error asynq will retry, so
 		// we only drain on the final attempt.
-		finalizeSubtaskDetached(ctx, s.repo, payload.KnowledgeID, "summary",
+		finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
+			payload.KnowledgeID, "summary", payload.Attempt,
 			retErr, false, isFinalAsynqAttempt(ctx))
 		if span == nil {
 			return
@@ -1252,7 +1257,8 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// final attempt. Runs AFTER the stats-log defer below — defers
 	// unwind LIFO, so this one declared first executes last.
 	defer func() {
-		finalizeSubtaskDetached(ctx, s.repo, payload.KnowledgeID, "question_legacy",
+		finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
+			payload.KnowledgeID, "question_legacy", payload.Attempt,
 			retErr, superseded, isFinalAsynqAttempt(ctx))
 	}()
 	defer func() {
@@ -1608,8 +1614,10 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	// span failure yet `return nil` (terminal, must drain). Declared first
 	// so it runs LAST (after the stats/span defer below).
 	defer func() {
-		finalizeSubtaskDetached(ctx, s.repo, payload.KnowledgeID,
+		finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
+			payload.KnowledgeID,
 			fmt.Sprintf("question_batch[%d]", payload.BatchIndex),
+			payload.Attempt,
 			retErr, superseded, isFinalAsynqAttempt(ctx))
 	}()
 	defer func() {
@@ -2674,6 +2682,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
+	attemptForLedger := payload.Attempt
+	defer func() {
+		s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger)
+	}()
 
 	// 获取任务重试信息，用于判断是否是最后一次重试
 	retryCount, _ := asynq.GetRetryCount(ctx)
@@ -2777,7 +2789,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			attempt = n
 		}
 	}
+	attemptForLedger = attempt
 	ctx = withAttempt(ctx, attempt)
+	s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger)
 
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {

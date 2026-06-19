@@ -162,6 +162,7 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	taskJobRepo       interfaces.TaskJobRepository
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -176,6 +177,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	taskJobRepo interfaces.TaskJobRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -185,6 +187,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		taskJobRepo:       taskJobRepo,
 		spanTracker:       spanTracker,
 	}
 }
@@ -242,8 +245,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		// completed (or terminally-failed) per-chunk extract releases its
 		// slot in pending_subtasks_count. KnowledgeID is the new (post-#? )
 		// payload field; legacy in-flight tasks without it are skipped.
-		finalizeSubtaskDetached(ctx, s.knowledgeRepo, p.KnowledgeID,
+		finalizeSubtaskDetached(ctx, s.knowledgeRepo, s.taskJobRepo, p.TenantID, p.KnowledgeID,
 			fmt.Sprintf("graph_chunk[%d]", p.ChunkIndex),
+			p.Attempt,
 			handleErr, false, isFinalAsynqAttempt(ctx))
 		if gSpan == nil {
 			return

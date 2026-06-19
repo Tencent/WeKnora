@@ -478,7 +478,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// "finalizing" until the housekeeping sweep marks it
 				// failed. The matching +1 was seeded by
 				// KnowledgePostProcess.SetFinalizing.
-				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID)
+				s.finalizeWikiSubtask(mapCtx, op)
 			}
 			return nil
 		})
@@ -699,7 +699,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// the WikiSpan nil-check below so a doc that had no attempt to
 		// attach a span to still drains its counter slot. The matching +1
 		// is seeded by KnowledgePostProcess.SetFinalizing.
-		s.finalizeWikiSubtask(ctx, r.KnowledgeID)
+		s.finalizeWikiSubtask(ctx, WikiPendingOp{
+			Op:          WikiOpIngest,
+			TenantID:    r.TenantID,
+			KnowledgeID: r.KnowledgeID,
+			Attempt:     r.Attempt,
+		})
 		if r.WikiSpan == nil {
 			continue
 		}
@@ -1204,6 +1209,8 @@ func (s *wikiIngestService) mapOneDocument(
 
 	return &docIngestResult{
 		KnowledgeID: knowledgeID,
+		TenantID:    op.TenantID,
+		Attempt:     op.Attempt,
 		DocTitle:    docTitle,
 		Summary:     docSummaryLine,
 		Pages:       extractedPages,

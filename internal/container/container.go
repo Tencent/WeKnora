@@ -264,6 +264,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		must(container.Provide(router.NewAsynqTaskInspector))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
+		must(container.Invoke(func(repo interfaces.TaskJobRepository) {
+			syncExec.SetLedger(repo)
+		}))
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
 		must(container.Provide(func() *router.SyncTaskExecutor { return syncExec }))
 		// Lite mode: no Redis means no asynq inspector. SyncTaskExecutor
@@ -271,6 +274,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// already handles.
 		must(container.Provide(router.NewNoopTaskInspector))
 	}
+	must(container.Provide(service.NewTaskJobDispatcher))
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
@@ -287,6 +291,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
+	must(container.Provide(service.NewTaskLedgerMaintenanceRunner))
+	must(container.Invoke(startTaskLedgerMaintenance))
+	logger.Debugf(ctx, "[Container] Task ledger maintenance runner registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
@@ -1419,6 +1426,20 @@ func startAuditLogRetention(
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
 		runner.Stop()
+		return nil
+	})
+}
+
+func startTaskLedgerMaintenance(
+	runner *service.TaskLedgerMaintenanceRunner, cleaner interfaces.ResourceCleaner,
+) {
+	if runner == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runner.Start(ctx)
+	cleaner.RegisterWithName("TaskLedgerMaintenanceRunner", func() error {
+		cancel()
 		return nil
 	})
 }

@@ -54,6 +54,8 @@ type knowledgeService struct {
 	fileSvc         interfaces.FileService
 	modelService    interfaces.ModelService
 	task            interfaces.TaskEnqueuer
+	taskDispatcher  *TaskJobDispatcher
+	taskJobRepo     interfaces.TaskJobRepository
 	taskInspector   interfaces.TaskInspector
 	graphEngine     interfaces.RetrieveGraphRepository
 	redisClient     *redis.Client
@@ -95,6 +97,8 @@ func NewKnowledgeService(
 	fileSvc interfaces.FileService,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
+	taskDispatcher *TaskJobDispatcher,
+	taskJobRepo interfaces.TaskJobRepository,
 	taskInspector interfaces.TaskInspector,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
@@ -121,6 +125,8 @@ func NewKnowledgeService(
 		fileSvc:         fileSvc,
 		modelService:    modelService,
 		task:            task,
+		taskDispatcher:  taskDispatcher,
+		taskJobRepo:     taskJobRepo,
 		taskInspector:   taskInspector,
 		graphEngine:     graphEngine,
 		retrieveEngine:  retrieveEngine,
@@ -213,7 +219,10 @@ const finalizeSubtaskDetachedTimeout = 10 * time.Second
 func finalizeSubtaskDetached(
 	ctx context.Context,
 	repo interfaces.KnowledgeRepository,
+	taskJobRepo interfaces.TaskJobRepository,
+	tenantID uint64,
 	knowledgeID, source string,
+	attempt int,
 	retErr error,
 	superseded, final bool,
 ) {
@@ -223,9 +232,11 @@ func finalizeSubtaskDetached(
 	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
-	if _, _, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
+	if _, promoted, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
 		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
 			source, knowledgeID, err)
+	} else if promoted {
+		markDocumentJobSucceeded(dctx, taskJobRepo, tenantID, knowledgeID, attempt)
 	}
 }
 

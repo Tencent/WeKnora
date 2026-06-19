@@ -19,12 +19,19 @@ import (
 type SyncTaskExecutor struct {
 	mu       sync.RWMutex
 	handlers map[string]func(context.Context, *asynq.Task) error
+	ledger   interfaces.TaskJobRepository
 }
 
 func NewSyncTaskExecutor() *SyncTaskExecutor {
 	return &SyncTaskExecutor{
 		handlers: make(map[string]func(context.Context, *asynq.Task) error),
 	}
+}
+
+func (e *SyncTaskExecutor) SetLedger(repo interfaces.TaskJobRepository) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.ledger = repo
 }
 
 // RegisterHandler registers a handler for a given task type pattern.
@@ -40,6 +47,7 @@ func (e *SyncTaskExecutor) RegisterHandler(pattern string, handler func(context.
 func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	e.mu.RLock()
 	handler, ok := e.handlers[task.Type()]
+	ledger := e.ledger
 	e.mu.RUnlock()
 
 	if !ok {
@@ -49,6 +57,8 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	var delay time.Duration
 	maxRetry := 25 // asynq default
 	maxRetrySet := false
+	queueName := "sync"
+	taskID := ""
 	for _, opt := range opts {
 		switch opt.Type() {
 		case asynq.ProcessInOpt:
@@ -60,6 +70,14 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 				maxRetry = n
 				maxRetrySet = true
 			}
+		case asynq.QueueOpt:
+			if q, ok := opt.Value().(string); ok && q != "" {
+				queueName = q
+			}
+		case asynq.TaskIDOpt:
+			if id, ok := opt.Value().(string); ok {
+				taskID = id
+			}
 		}
 	}
 	// Callers that explicitly pass MaxRetry(0) want no retries.
@@ -68,10 +86,12 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 		maxRetry = 0
 	}
 
-	taskID := uuid.New().String()
+	if taskID == "" {
+		taskID = uuid.New().String()
+	}
 	info := &asynq.TaskInfo{
 		ID:    taskID,
-		Queue: "sync",
+		Queue: queueName,
 		Type:  task.Type(),
 	}
 
@@ -86,6 +106,9 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 
 		var lastErr error
 		for attempt := 0; attempt <= maxRetry; attempt++ {
+			if ledger != nil {
+				_, _ = ledger.MarkExecActiveIfExists(ctx, taskID, attempt, time.Now())
+			}
 			if attempt > 0 {
 				backoff := time.Duration(attempt) * 5 * time.Second
 				if backoff > 30*time.Second {
@@ -98,17 +121,43 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 
 			lastErr = handler(ctx, task)
 			if lastErr == nil {
+				if ledger != nil {
+					_, _ = ledger.MarkExecSucceededIfNonTerminal(context.Background(), taskID, time.Now())
+				}
 				logger.Infof(ctx, "[SyncTask] Task completed type=%s id=%s elapsed=%v",
 					task.Type(), taskID, time.Since(start))
 				return
 			}
+			if ledger != nil && attempt < maxRetry {
+				_, _ = ledger.MarkExecRetryingIfNonTerminal(context.Background(), taskID, attempt+1, interfaces.TaskLedgerFailure{
+					ErrorClass: types.TaskErrorClassRetryable,
+					LastError:  truncateSyncTaskError(lastErr),
+				})
+			}
 		}
 
+		if ledger != nil {
+			_, _ = ledger.MarkExecFailedIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
+				ErrorClass: types.TaskErrorClassTerminal,
+				LastError:  truncateSyncTaskError(lastErr),
+			}, time.Now())
+		}
 		logger.Errorf(ctx, "[SyncTask] Task failed (exhausted retries) type=%s id=%s elapsed=%v err=%v",
 			task.Type(), taskID, time.Since(start), lastErr)
 	}()
 
 	return info, nil
+}
+
+func truncateSyncTaskError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if len(msg) > 8192 {
+		return msg[:8192]
+	}
+	return msg
 }
 
 type SyncTaskParams struct {

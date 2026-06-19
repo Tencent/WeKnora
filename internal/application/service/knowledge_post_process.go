@@ -23,6 +23,7 @@ type KnowledgePostProcessService struct {
 	chunkService  interfaces.ChunkService
 	taskEnqueuer  interfaces.TaskEnqueuer
 	pendingRepo   interfaces.TaskPendingOpsRepository
+	taskJobRepo   interfaces.TaskJobRepository
 	redisClient   *redis.Client
 	spanTracker   SpanTracker
 }
@@ -33,6 +34,7 @@ func NewKnowledgePostProcessService(
 	chunkService interfaces.ChunkService,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	pendingRepo interfaces.TaskPendingOpsRepository,
+	taskJobRepo interfaces.TaskJobRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
@@ -42,6 +44,7 @@ func NewKnowledgePostProcessService(
 		chunkService:  chunkService,
 		taskEnqueuer:  taskEnqueuer,
 		pendingRepo:   pendingRepo,
+		taskJobRepo:   taskJobRepo,
 		redisClient:   redisClient,
 		spanTracker:   spanTracker,
 	}
@@ -240,6 +243,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		} else {
 			logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s marked completed (no enrichment subtasks).",
 				payload.KnowledgeID)
+			markDocumentJobSucceeded(ctx, s.taskJobRepo, payload.TenantID, payload.KnowledgeID, attempt)
 		}
 	default:
 		// Flip processing → finalizing in one statement so a parallel
@@ -251,6 +255,14 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		}
 		if promoted {
 			enteredFinalizing = true
+			if s.taskJobRepo != nil {
+				_, _ = s.taskJobRepo.MarkJobFinalizingIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+					TenantID:       payload.TenantID,
+					Scope:          types.TaskScopeKnowledge,
+					ScopeID:        payload.KnowledgeID,
+					ProcessAttempt: attempt,
+				})
+			}
 			// Reflect summary status separately so the UI shows the
 			// summary as queued for users who already had it visible.
 			summaryStatus := types.SummaryStatusNone
