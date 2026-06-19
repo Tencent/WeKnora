@@ -1,30 +1,15 @@
-import {
-  createChatMarkdownRenderer,
-  renderChatMarkdown,
-} from './chatMarkdownRenderer.ts'
-import { joinCitationTagsToPreviousLine } from './citationMarkdown.ts'
+import { applyStreamingTailFade } from './chatMarkdownRenderer.ts'
 
-const renderer = createChatMarkdownRenderer()
-const snippet = [
-  '该数据集...例如：',
-  '```',
-  'APR = ((Fees + Interest) / Principal) × (365 / Days in Loan Term)',
-  '```',
-  '<kb doc="2502.08127v1.pdf" chunk_id="1ecdce8a-f922-4d0c-b124-257ab4634da2" />',
+const cases = [
+  '<p>Great, that narrows it down a lot. Two more quick</p>',
+  '<p>Great, that narrows it down a lot. <strong>Two</strong> more quick</p>\n',
+  '<ol>\n<li>第一项</li>\n<li>正在生成的第二项内容</li>\n</ol>',
+  '<p>结尾是引用 <span class="citation">doc</span></p>',
+  '<p></p>',
   '',
-  '### 重要性',
-  '',
-  '1. **AAAAA**',
-].join('\n')
-
-console.log('--- joinCitationTagsToPreviousLine output ---')
-console.log(JSON.stringify(joinCitationTagsToPreviousLine(snippet)))
-
-console.log('\n--- final render ---')
-console.log(renderChatMarkdown(snippet, {
-  renderer,
-  escapeMarkdown: (t) => t,
-  sanitizeHtml: (h) => h,
-  streaming: false,
-  knowledgeReferences: [{ doc: '2502.08127v1.pdf', chunk_id: '1ecdce8a-f922-4d0c-b124-257ab4634da2' }],
-}))
+]
+for (const c of cases) {
+  console.log('IN :', JSON.stringify(c))
+  console.log('OUT:', JSON.stringify(applyStreamingTailFade(c)))
+  console.log('')
+}

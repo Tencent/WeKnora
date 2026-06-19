@@ -30,7 +30,7 @@
               <div class="action-header no-results">
                 <div class="action-title">
                   <t-icon class="action-title-icon" :name="step.iconName" />
-                  <span class="action-name">{{ step.title }}</span>
+                  <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
                 </div>
               </div>
               <div v-if="step.summaryHtml" class="search-results-summary-fixed">
@@ -114,7 +114,7 @@
                 <div class="action-header no-results">
                   <div class="action-title">
                     <t-icon class="action-title-icon" :name="step.iconName" />
-                    <span class="action-name">{{ step.title }}</span>
+                    <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
                   </div>
                 </div>
                 <div v-if="step.summaryHtml" class="search-results-summary-fixed">

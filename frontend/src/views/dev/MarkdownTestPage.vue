@@ -85,6 +85,32 @@
       </div>
     </section>
 
+    <!-- Streaming Shimmer (in-progress step titles) -->
+    <section class="test-section">
+      <h2>Streaming Shimmer</h2>
+      <p class="test-hint">
+        The "light sweep" applied to in-progress step titles in
+        AgentStreamDisplay / RagPipelineProgress. Running steps shimmer; finished ones are static.
+      </p>
+      <div class="test-case shimmer-demo">
+        <div class="action-card action-pending">
+          <div class="action-title">
+            <span class="action-name">正在检索知识库…</span>
+          </div>
+        </div>
+        <div class="action-card action-pending">
+          <div class="action-title">
+            <span class="action-name">正在生成回答…</span>
+          </div>
+        </div>
+        <div class="action-card">
+          <div class="action-title">
+            <span class="action-name is-done">检索完成（静态对照）</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Custom Editor -->
     <section class="test-section">
       <h2>Custom Input</h2>
@@ -441,6 +467,7 @@ watch(customInput, () => {
 @import '../../components/css/chat-markdown.less';
 @import '../../components/css/chat-citations.less';
 @import '../../components/css/chat-message-shared.less';
+@import '../../components/css/chat-timeline-loading.less';
 
 .markdown-test-page {
   max-width: 860px;
@@ -591,6 +618,22 @@ watch(customInput, () => {
 
   30% {
     transform: translate3d(0, -6px, 0);
+  }
+}
+
+.shimmer-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  .action-card {
+    background: transparent;
+  }
+
+  .action-name {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--td-text-color-secondary);
   }
 }
 

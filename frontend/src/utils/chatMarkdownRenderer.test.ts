@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  applyStreamingTailFade,
   closeDanglingStreamingEmphasis,
   createChatMarkdownRenderer,
   markStandaloneStrongParagraphs,
@@ -24,6 +25,11 @@ const SAMPLE_CHUNK_A = '00000001-0000-4000-8000-000000000001'
 const SAMPLE_CHUNK_B = '00000002-0000-4000-8000-000000000002'
 const SAMPLE_CHUNK_C = '00000003-0000-4000-8000-000000000003'
 const SAMPLE_CHUNK_PRESERVE = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+
+/** Remove the streaming tail-fade wrapper so structural assertions stay focused. */
+function stripFadeTail(html: string): string {
+  return html.replace(/<span class="stream-fade-tail">([\s\S]*?)<\/span>/g, '$1')
+}
 
 test('preprocessMathDelimiters converts escaped math delimiters for marked-katex', () => {
   assert.equal(
@@ -103,7 +109,7 @@ test('renderChatMarkdown renders an unfinished bold line as bold immediately whi
   const partial = '**平台访问地址：chatbot.weixin.qq.com'
   // Streaming: optimistically bold so no raw `**` and no late layout jump.
   assert.match(
-    renderChatMarkdown(partial, { ...options, streaming: true }),
+    stripFadeTail(renderChatMarkdown(partial, { ...options, streaming: true })),
     /<p class="md-strong-title"><strong>平台访问地址：chatbot\.weixin\.qq\.com<\/strong><\/p>/,
   )
   // Completed: a genuinely unterminated marker stays literal (we never invent
@@ -141,7 +147,7 @@ test('renderChatMarkdown bolds punctuation-adjacent emphasis both mid-stream and
   const text = '**XBRL（语言）**是一种标准'
   for (const streaming of [true, false]) {
     assert.match(
-      renderChatMarkdown(text, { ...options, streaming }),
+      stripFadeTail(renderChatMarkdown(text, { ...options, streaming })),
       /<strong>XBRL（语言）<\/strong>是一种标准/,
     )
   }
@@ -172,7 +178,7 @@ test('renderChatMarkdown does not flash a setext heading when a nested bullet da
   // must not flash <h2>, and the next bullet's `*`/`**` (before its text) must
   // not flash an empty nested <li> under A.
   for (const partial of ['1. **AAAAA**\n   - ', '1. **AAAAA**\n   - *', '1. **AAAAA**\n   - **']) {
-    const html = renderChatMarkdown(partial, options)
+    const html = stripFadeTail(renderChatMarkdown(partial, options))
     assert.doesNotMatch(html, /<h2/)
     assert.doesNotMatch(html, /<ul>/)
     assert.match(html, /<ol>\s*<li><strong>AAAAA<\/strong><\/li>\s*<\/ol>/)
@@ -188,7 +194,7 @@ test('renderChatMarkdown streams a bold ordered list without literal-marker flic
     streaming: true,
   }
   // Next item's marker has arrived but its content/closing ** has not.
-  const html = renderChatMarkdown('1. **速游**\n2. *', options)
+  const html = stripFadeTail(renderChatMarkdown('1. **速游**\n2. *', options))
   assert.doesNotMatch(html, /<li>\*+<\/li>/)
   assert.match(html, /<li><strong>速游<\/strong><\/li>/)
 })
@@ -415,6 +421,34 @@ test('joinCitationTagsToPreviousLine does not merge citations onto an unlabeled 
   const tag = '<kb doc="guide.pdf" chunk_id="1" />'
   const input = '```\nAPR = principal\n```\n' + tag
   assert.equal(joinCitationTagsToPreviousLine(input), '```\nAPR = principal\n```\n' + tag)
+})
+
+test('applyStreamingTailFade wraps the trailing text run', () => {
+  const out = applyStreamingTailFade('<p>Great, that narrows it down a lot. Two more quick</p>')
+  assert.match(out, /<span class="stream-fade-tail">[^<]*Two more quick<\/span><\/p>$/)
+})
+
+test('applyStreamingTailFade skips whitespace-only runs and fades the last list item', () => {
+  const out = applyStreamingTailFade('<ol>\n<li>第一项</li>\n<li>正在生成的第二项</li>\n</ol>')
+  assert.match(out, /<li><span class="stream-fade-tail">正在生成的第二项<\/span><\/li>/)
+})
+
+test('applyStreamingTailFade is a no-op for empty content', () => {
+  assert.equal(applyStreamingTailFade(''), '')
+  assert.equal(applyStreamingTailFade('<p></p>'), '<p></p>')
+})
+
+test('renderChatMarkdown adds the tail fade only while streaming', () => {
+  const renderer = createChatMarkdownRenderer()
+  const opts = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+  }
+  const streamed = renderChatMarkdown('正在生成中的回答内容', { ...opts, streaming: true })
+  assert.match(streamed, /stream-fade-tail/)
+  const settled = renderChatMarkdown('正在生成中的回答内容', { ...opts, streaming: false })
+  assert.doesNotMatch(settled, /stream-fade-tail/)
 })
 
 test('renderChatMarkdown keeps an unlabeled fenced code block closed when a citation immediately follows', () => {

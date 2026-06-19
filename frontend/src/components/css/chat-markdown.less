@@ -16,6 +16,21 @@
   letter-spacing: normal;
   -webkit-font-smoothing: antialiased;
 
+  // Trailing fade on the newest streamed characters: the tail is wrapped in
+  // this span (see applyStreamingTailFade) so its right edge dissolves, giving
+  // a soft "just typed" reveal that settles once streaming stops and the wrap
+  // is no longer emitted.
+  :deep(.stream-fade-tail) {
+    -webkit-mask-image: linear-gradient(to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 0.7) 30%,
+        rgba(0, 0, 0, 0) 100%);
+    mask-image: linear-gradient(to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 0.7) 30%,
+        rgba(0, 0, 0, 0) 100%);
+  }
+
   :deep(p) {
     margin: 0 0 0.25em;
     line-height: 1.625;
