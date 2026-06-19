@@ -235,6 +235,8 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderAzureOpenAI
 	case containsAny(baseURL, "api.openai.com"):
 		return ProviderOpenAI
+	case containsAny(baseURL, "chatgpt.com/backend-api/codex"):
+		return ProviderOpenAICodex
 	case containsAny(baseURL, "api.anthropic.com"):
 		return ProviderAnthropic
 	case containsAny(baseURL, "api.deepseek.com"):

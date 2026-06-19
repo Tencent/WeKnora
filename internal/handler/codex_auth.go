@@ -5,7 +5,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -26,7 +25,7 @@ func (h *ModelHandler) StartCodexOAuth(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	result, err := chat.StartCodexOAuth(secutils.SanitizeForLog(req.AuthFile))
+	result, err := chat.StartCodexOAuth(req.AuthFile)
 	if err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -41,7 +40,7 @@ func (h *ModelHandler) CompleteCodexOAuth(c *gin.Context) {
 		return
 	}
 	status, err := chat.CompleteCodexOAuth(c.Request.Context(), chat.CodexOAuthCompleteRequest{
-		AuthFile:    secutils.SanitizeForLog(req.AuthFile),
+		AuthFile:    req.AuthFile,
 		CallbackURL: req.CallbackURL,
 		Code:        req.Code,
 		State:       req.State,
@@ -54,7 +53,7 @@ func (h *ModelHandler) CompleteCodexOAuth(c *gin.Context) {
 }
 
 func (h *ModelHandler) CodexOAuthStatus(c *gin.Context) {
-	status, err := chat.GetCodexOAuthStatus(secutils.SanitizeForLog(c.Query("auth_file")))
+	status, err := chat.GetCodexOAuthStatus(c.Query("auth_file"))
 	if err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return

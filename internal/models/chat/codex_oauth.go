@@ -89,7 +89,8 @@ func (e codexOAuthErrorField) String() string {
 type codexTokenSource struct {
 	authFile string
 	client   *http.Client
-	mu       sync.Mutex
+	mu       sync.RWMutex
+	cached   *codexTokenFile
 }
 
 type CodexOAuthStatus struct {
@@ -125,22 +126,43 @@ func getCodexTokenSource(authFile string) *codexTokenSource {
 }
 
 func (s *codexTokenSource) bearer(ctx context.Context) (accessToken, accountID string, err error) {
+	now := time.Now()
+	s.mu.RLock()
+	file := cloneCodexTokenFile(s.cached)
+	if file != nil && !shouldRefreshCodexTokens(file, now) {
+		s.mu.RUnlock()
+		return codexBearerFromFile(file)
+	}
+	s.mu.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	file, err := readCodexTokenFile(s.authFile)
-	if err != nil {
-		return "", "", err
+	file = s.cached
+	if file == nil {
+		file, err = readCodexTokenFile(s.authFile)
+		if err != nil {
+			return "", "", err
+		}
+		s.cached = cloneCodexTokenFile(file)
+	} else {
+		file = cloneCodexTokenFile(file)
 	}
 	if file.Tokens.AccessToken == "" || file.Tokens.RefreshToken == "" {
 		return "", "", fmt.Errorf("codex OAuth credentials are incomplete")
 	}
 
-	if shouldRefreshCodexTokens(file, time.Now()) {
+	if shouldRefreshCodexTokens(file, now) {
 		if err := s.refreshLocked(ctx, file); err != nil {
 			return "", "", err
 		}
+	} else {
+		s.cached = cloneCodexTokenFile(file)
 	}
+	return codexBearerFromFile(file)
+}
+
+func codexBearerFromFile(file *codexTokenFile) (accessToken, accountID string, err error) {
 	accountID = file.Tokens.AccountID
 	if accountID == "" {
 		accountID = accountIDFromIDToken(file.Tokens.IDToken)
@@ -201,7 +223,19 @@ func (s *codexTokenSource) refreshLocked(ctx context.Context, file *codexTokenFi
 		file.Tokens.AccountID = accountID
 	}
 	file.LastRefresh = time.Now().UTC()
-	return writeCodexTokenFile(s.authFile, file)
+	if err := writeCodexTokenFileWithRetry(s.authFile, file); err != nil {
+		return err
+	}
+	s.cached = cloneCodexTokenFile(file)
+	return nil
+}
+
+func cloneCodexTokenFile(file *codexTokenFile) *codexTokenFile {
+	if file == nil {
+		return nil
+	}
+	copy := *file
+	return &copy
 }
 
 func readCodexTokenFile(path string) (*codexTokenFile, error) {
@@ -242,6 +276,19 @@ func writeCodexTokenFile(path string, file *codexTokenFile) error {
 	return nil
 }
 
+func writeCodexTokenFileWithRetry(path string, file *codexTokenFile) error {
+	err := writeCodexTokenFile(path, file)
+	if err == nil {
+		return nil
+	}
+	time.Sleep(100 * time.Millisecond)
+	if retryErr := writeCodexTokenFile(path, file); retryErr == nil {
+		return nil
+	} else {
+		return fmt.Errorf("%w (retry failed: %v)", err, retryErr)
+	}
+}
+
 func saveCodexOAuthTokens(authFile string, tokenResp codexTokenResponse) (*CodexOAuthStatus, error) {
 	if tokenResp.AccessToken == "" || tokenResp.RefreshToken == "" {
 		return nil, fmt.Errorf("codex OAuth token response missing access_token or refresh_token")
@@ -257,8 +304,13 @@ func saveCodexOAuthTokens(authFile string, tokenResp codexTokenResponse) (*Codex
 		LastRefresh: time.Now().UTC(),
 	}
 	path := resolveCodexAuthFile(authFile)
-	if err := writeCodexTokenFile(path, file); err != nil {
+	if err := writeCodexTokenFileWithRetry(path, file); err != nil {
 		return nil, err
+	}
+	if source := getCodexTokenSource(path); source != nil {
+		source.mu.Lock()
+		source.cached = cloneCodexTokenFile(file)
+		source.mu.Unlock()
 	}
 	return codexOAuthStatusFromFile(path, file), nil
 }

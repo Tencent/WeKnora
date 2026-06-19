@@ -36,6 +36,7 @@ func TestDetectProvider(t *testing.T) {
 		expected ProviderName
 	}{
 		{"https://api.openai.com/v1", ProviderOpenAI},
+		{"https://chatgpt.com/backend-api/codex", ProviderOpenAICodex},
 		{"https://api.anthropic.com/v1", ProviderAnthropic},
 		{"https://openrouter.ai/api/v1", ProviderOpenRouter},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -248,10 +249,8 @@ func parseCodexResponsesSSE(reader io.Reader) (*types.ChatResponse, error) {
 			state.apply(streamEvent)
 		case "response.completed":
 			finishReason = "stop"
-			usage = mergeCodexUsage(usage, usageFromCodexEvent(streamEvent))
 		case "response.incomplete":
 			finishReason = "incomplete"
-			usage = mergeCodexUsage(usage, usageFromCodexEvent(streamEvent))
 		}
 		usage = mergeCodexUsage(usage, usageFromCodexEvent(streamEvent))
 	}
@@ -273,7 +272,7 @@ func parseCodexResponsesSSE(reader io.Reader) (*types.ChatResponse, error) {
 	}, nil
 }
 
-func processCodexResponsesStream(model string, reader io.Reader, streamChan chan types.StreamResponse) {
+func processCodexResponsesStream(ctx context.Context, model string, reader io.Reader, streamChan chan types.StreamResponse) {
 	defer close(streamChan)
 	sseReader := NewSSEReader(reader)
 	var usage *types.TokenUsage
@@ -287,6 +286,7 @@ func processCodexResponsesStream(model string, reader io.Reader, streamChan chan
 			if err == io.EOF {
 				thinking.finish(streamChan)
 				toolCalls := state.buildOrderedToolCalls()
+				logUsage(ctx, model, usage)
 				streamChan <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Done: true, ToolCalls: toolCalls, Usage: usage, FinishReason: codexResponsesFinishReason(finishReason, toolCalls)}
 			} else {
 				streamChan <- types.StreamResponse{ResponseType: types.ResponseTypeError, Content: err.Error(), Done: true}
@@ -296,6 +296,7 @@ func processCodexResponsesStream(model string, reader io.Reader, streamChan chan
 		if event.Done {
 			thinking.finish(streamChan)
 			toolCalls := state.buildOrderedToolCalls()
+			logUsage(ctx, model, usage)
 			streamChan <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Done: true, ToolCalls: toolCalls, Usage: usage, FinishReason: codexResponsesFinishReason(finishReason, toolCalls)}
 			return
 		}
@@ -339,19 +340,21 @@ func processCodexResponsesStream(model string, reader io.Reader, streamChan chan
 		case "response.incomplete":
 			finishReason = "incomplete"
 		}
-		_ = model
 	}
 }
 
 type codexResponsesToolState struct {
 	toolCallMap map[int]*types.LLMToolCall
 	notified    map[int]bool
+	nextIndex   int
+	itemIndex   map[string]int
 }
 
 func newCodexResponsesToolState() *codexResponsesToolState {
 	return &codexResponsesToolState{
 		toolCallMap: make(map[int]*types.LLMToolCall),
 		notified:    make(map[int]bool),
+		itemIndex:   make(map[string]int),
 	}
 }
 
@@ -359,14 +362,12 @@ func (s *codexResponsesToolState) apply(event *codexResponsesEvent) (*types.LLMT
 	if event == nil {
 		return nil, false
 	}
-	idx := 0
-	if event.OutputIndex != nil {
-		idx = *event.OutputIndex
-	}
+	idx := s.indexFor(event)
 	item := event.Item
 	if item != nil && item.Type != "function_call" {
 		return nil, false
 	}
+	s.rememberIndex(idx, event, item)
 	tc := s.toolCallMap[idx]
 	if tc == nil {
 		tc = &types.LLMToolCall{Type: "function"}
@@ -406,6 +407,43 @@ func (s *codexResponsesToolState) apply(event *codexResponsesEvent) (*types.LLMT
 		s.notified[idx] = true
 	}
 	return tc, notify
+}
+
+func (s *codexResponsesToolState) indexFor(event *codexResponsesEvent) int {
+	if event.OutputIndex != nil {
+		if *event.OutputIndex >= s.nextIndex {
+			s.nextIndex = *event.OutputIndex + 1
+		}
+		return *event.OutputIndex
+	}
+	for _, key := range []string{event.CallID, event.ItemID} {
+		if key == "" {
+			continue
+		}
+		if idx, ok := s.itemIndex[key]; ok {
+			return idx
+		}
+		idx := s.nextIndex
+		s.nextIndex++
+		s.itemIndex[key] = idx
+		return idx
+	}
+	idx := s.nextIndex
+	s.nextIndex++
+	return idx
+}
+
+func (s *codexResponsesToolState) rememberIndex(idx int, event *codexResponsesEvent, item *codexResponsesOutputItem) {
+	if event != nil {
+		for _, key := range []string{event.CallID, event.ItemID} {
+			if key != "" {
+				s.itemIndex[key] = idx
+			}
+		}
+	}
+	if item != nil && item.CallID != "" {
+		s.itemIndex[item.CallID] = idx
+	}
 }
 
 func (s *codexResponsesToolState) buildOrderedToolCalls() []types.LLMToolCall {

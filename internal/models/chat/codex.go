@@ -90,7 +90,7 @@ func (c *CodexChat) ChatStream(ctx context.Context, messages []Message, opts *Ch
 	go func() {
 		defer cancel()
 		defer resp.Body.Close()
-		processCodexResponsesStream(c.modelName, resp.Body, streamChan)
+		processCodexResponsesStream(ctx, c.modelName, resp.Body, streamChan)
 	}()
 	return streamChan, nil
 }
@@ -129,11 +129,11 @@ func (c *CodexChat) doResponsesRequest(ctx context.Context, reqBody codexRespons
 	if err != nil {
 		return nil, fmt.Errorf("create codex request: %w", err)
 	}
+	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
 	httpReq.Header.Set("Authorization", "Bearer "+accessToken)
 	httpReq.Header.Set("chatgpt-account-id", accountID)
 	httpReq.Header.Set("OpenAI-Beta", "responses=experimental")
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
-	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
 	return rawHTTPClient.Do(httpReq)
 }

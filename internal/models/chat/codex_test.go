@@ -41,6 +41,29 @@ func TestStartCodexOAuthAuthorizeURL(t *testing.T) {
 	assert.NotEmpty(t, q.Get("code_challenge"))
 }
 
+func TestStartCodexOAuthSweepsExpiredPendingStates(t *testing.T) {
+	codexPendingOAuthMu.Lock()
+	codexPendingOAuth = map[string]codexPendingOAuthState{
+		"expired": {CodeVerifier: "old", CreatedAt: time.Now().Add(-codexPendingOAuthTTL - time.Minute)},
+	}
+	codexPendingOAuthMu.Unlock()
+	t.Cleanup(func() {
+		codexPendingOAuthMu.Lock()
+		codexPendingOAuth = map[string]codexPendingOAuthState{}
+		codexPendingOAuthMu.Unlock()
+	})
+
+	_, err := StartCodexOAuth(filepath.Join(t.TempDir(), "codex_auth.json"))
+	require.NoError(t, err)
+
+	codexPendingOAuthMu.Lock()
+	_, expiredExists := codexPendingOAuth["expired"]
+	pendingCount := len(codexPendingOAuth)
+	codexPendingOAuthMu.Unlock()
+	assert.False(t, expiredExists)
+	assert.Equal(t, 1, pendingCount)
+}
+
 func TestCodexTokenRefreshRotatesAndPersists(t *testing.T) {
 	now := time.Now()
 	authFile := filepath.Join(t.TempDir(), "codex_auth.json")
@@ -119,6 +142,33 @@ func TestCodexTokenRefreshDecodesObjectError(t *testing.T) {
 	_, _, err := source.bearer(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "refresh token expired")
+}
+
+func TestCodexTokenSourceUsesCachedCredentials(t *testing.T) {
+	now := time.Now()
+	authFile := filepath.Join(t.TempDir(), "codex_auth.json")
+	file := &codexTokenFile{
+		Tokens: codexTokens{
+			IDToken:      makeTestJWT(map[string]any{"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct_cached"}}),
+			AccessToken:  makeTestJWT(map[string]any{"exp": now.Add(time.Hour).Unix()}),
+			RefreshToken: "refresh-cached",
+			AccountID:    "acct_cached",
+		},
+		LastRefresh: now,
+	}
+	require.NoError(t, writeCodexTokenFile(authFile, file))
+
+	source := &codexTokenSource{authFile: authFile, client: http.DefaultClient}
+	accessToken, accountID, err := source.bearer(context.Background())
+	require.NoError(t, err)
+	require.NotEmpty(t, accessToken)
+	assert.Equal(t, "acct_cached", accountID)
+
+	require.NoError(t, os.Remove(authFile))
+	accessToken, accountID, err = source.bearer(context.Background())
+	require.NoError(t, err)
+	assert.NotEmpty(t, accessToken)
+	assert.Equal(t, "acct_cached", accountID)
 }
 
 func TestShouldRefreshCodexTokens(t *testing.T) {
@@ -268,6 +318,32 @@ func TestParseCodexResponsesSSEToolCallWithNonZeroOutputIndex(t *testing.T) {
 	assert.Equal(t, "call_abc", resp.ToolCalls[0].ID)
 	assert.Equal(t, "wiki_search", resp.ToolCalls[0].Function.Name)
 	assert.JSONEq(t, `{"query":"retention"}`, resp.ToolCalls[0].Function.Arguments)
+	assert.Equal(t, "tool_calls", resp.FinishReason)
+}
+
+func TestParseCodexResponsesSSEToolCallsWithoutOutputIndex(t *testing.T) {
+	sample := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_a","name":"wiki_search","arguments":""}}`,
+		"",
+		`data: {"type":"response.output_item.added","item":{"type":"function_call","call_id":"call_b","name":"wiki_read_page","arguments":""}}`,
+		"",
+		`data: {"type":"response.function_call_arguments.delta","call_id":"call_a","delta":"{\"query\":\"retention\"}"}`,
+		"",
+		`data: {"type":"response.function_call_arguments.delta","call_id":"call_b","delta":"{\"slug\":\"index\"}"}`,
+		"",
+		`data: {"type":"response.completed"}`,
+		"",
+	}, "\n")
+
+	resp, err := parseCodexResponsesSSE(strings.NewReader(sample))
+	require.NoError(t, err)
+	require.Len(t, resp.ToolCalls, 2)
+	assert.Equal(t, "call_a", resp.ToolCalls[0].ID)
+	assert.Equal(t, "wiki_search", resp.ToolCalls[0].Function.Name)
+	assert.JSONEq(t, `{"query":"retention"}`, resp.ToolCalls[0].Function.Arguments)
+	assert.Equal(t, "call_b", resp.ToolCalls[1].ID)
+	assert.Equal(t, "wiki_read_page", resp.ToolCalls[1].Function.Name)
+	assert.JSONEq(t, `{"slug":"index"}`, resp.ToolCalls[1].Function.Arguments)
 	assert.Equal(t, "tool_calls", resp.FinishReason)
 }
 

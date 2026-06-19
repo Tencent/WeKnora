@@ -18,6 +18,7 @@ import (
 )
 
 const codexOAuthRedirectURI = "http://localhost:1455/auth/callback"
+const codexPendingOAuthTTL = 15 * time.Minute
 
 var (
 	codexAuthorizeEndpoint    = "https://auth.openai.com/oauth/authorize"
@@ -87,6 +88,7 @@ func StartCodexOAuth(authFile string) (*CodexOAuthStartResult, error) {
 	}
 
 	codexPendingOAuthMu.Lock()
+	sweepExpiredCodexPendingOAuthLocked(time.Now().UTC())
 	codexPendingOAuth[state] = codexPendingOAuthState{CodeVerifier: verifier, CreatedAt: time.Now().UTC()}
 	codexPendingOAuthMu.Unlock()
 
@@ -148,10 +150,18 @@ func takeCodexPendingVerifier(state string) (string, bool) {
 		return "", false
 	}
 	delete(codexPendingOAuth, state)
-	if time.Since(pending.CreatedAt) > 15*time.Minute {
+	if time.Since(pending.CreatedAt) > codexPendingOAuthTTL {
 		return "", false
 	}
 	return pending.CodeVerifier, true
+}
+
+func sweepExpiredCodexPendingOAuthLocked(now time.Time) {
+	for state, pending := range codexPendingOAuth {
+		if now.Sub(pending.CreatedAt) > codexPendingOAuthTTL {
+			delete(codexPendingOAuth, state)
+		}
+	}
 }
 
 func exchangeCodexOAuthCode(ctx context.Context, code, verifier string) (codexTokenResponse, error) {
