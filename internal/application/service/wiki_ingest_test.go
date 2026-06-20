@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -76,14 +78,62 @@ func (f failingWikiPendingRepo) Enqueue(context.Context, *types.TaskPendingOp) e
 	return f.err
 }
 
+type recordingWikiPendingRepo struct {
+	interfaces.TaskPendingOpsRepository
+	enqueued []*types.TaskPendingOp
+}
+
+func (r *recordingWikiPendingRepo) Enqueue(_ context.Context, op *types.TaskPendingOp) error {
+	r.enqueued = append(r.enqueued, op)
+	return nil
+}
+
 func TestEnqueueWikiIngestPendingFailureDoesNotTrigger(t *testing.T) {
-	ctx := withAttempt(context.Background(), 2)
+	ctx := context.Background()
 	enqueuer := &fakeTaskEnqueuer{}
-	result, err := EnqueueWikiIngest(ctx, enqueuer, failingWikiPendingRepo{err: errors.New("db down")}, 1, "kb-1", "kid-1")
+	result, err := EnqueueWikiIngest(ctx, enqueuer, failingWikiPendingRepo{err: errors.New("db down")}, 1, "kb-1", "kid-1", 2)
 	require.Error(t, err)
 	assert.False(t, result.PendingOpPersisted)
 	assert.False(t, result.TriggerEnqueued)
 	assert.Empty(t, enqueuer.tasks)
+}
+
+func TestEnqueueWikiIngestPersistsAttempt(t *testing.T) {
+	ctx := context.Background()
+	enqueuer := &fakeTaskEnqueuer{}
+	pendingRepo := &recordingWikiPendingRepo{}
+
+	result, err := EnqueueWikiIngest(ctx, enqueuer, pendingRepo, 1, "kb-1", "kid-1", 7)
+	require.NoError(t, err)
+	assert.True(t, result.PendingOpPersisted)
+	assert.True(t, result.TriggerEnqueued)
+	require.Len(t, pendingRepo.enqueued, 1)
+	require.Len(t, enqueuer.tasks, 1)
+
+	var pending WikiPendingOp
+	require.NoError(t, json.Unmarshal(pendingRepo.enqueued[0].Payload, &pending))
+	assert.Equal(t, WikiOpIngest, pending.Op)
+	assert.Equal(t, uint64(1), pending.TenantID)
+	assert.Equal(t, "kid-1", pending.KnowledgeID)
+	assert.Equal(t, 7, pending.Attempt)
+}
+
+func TestEnqueueWikiIngestRejectsMissingAttempt(t *testing.T) {
+	for _, attempt := range []int{0, -1} {
+		t.Run(fmt.Sprintf("attempt_%d", attempt), func(t *testing.T) {
+			ctx := context.Background()
+			enqueuer := &fakeTaskEnqueuer{}
+			pendingRepo := &recordingWikiPendingRepo{}
+
+			result, err := EnqueueWikiIngest(ctx, enqueuer, pendingRepo, 1, "kb-1", "kid-1", attempt)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "wiki ingest missing attempt")
+			assert.False(t, result.PendingOpPersisted)
+			assert.False(t, result.TriggerEnqueued)
+			assert.Empty(t, pendingRepo.enqueued)
+			assert.Empty(t, enqueuer.tasks)
+		})
+	}
 }
 
 func TestAppendUnique(t *testing.T) {

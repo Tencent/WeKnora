@@ -389,7 +389,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	enqueuedWiki := false
 	wikiTriggerEnqueued := false
 	if willSpawnWiki {
-		result, err := EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
+		result, err := EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID, attempt)
 		enqueuedWiki = result.PendingOpPersisted
 		wikiTriggerEnqueued = result.TriggerEnqueued
 		if err != nil && !result.PendingOpPersisted {

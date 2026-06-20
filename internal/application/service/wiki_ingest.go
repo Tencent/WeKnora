@@ -302,10 +302,10 @@ func EnqueueWikiIngest(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	tenantID uint64,
 	kbID, knowledgeID string,
+	attempt int,
 ) (WikiEnqueueResult, error) {
 	var result WikiEnqueueResult
 	lang, _ := types.LanguageFromContext(ctx)
-	attempt := attemptFromCtx(ctx)
 	if attempt <= 0 {
 		logger.Warnf(ctx, "wiki ingest: skip enqueue without attempt for knowledge=%s kb=%s", knowledgeID, kbID)
 		return result, fmt.Errorf("wiki ingest missing attempt for knowledge %s", knowledgeID)
