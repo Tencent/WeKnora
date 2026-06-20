@@ -47,7 +47,7 @@ func answerEvent(content string) *sdk.AgentStreamResponse {
 	return &sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeAnswer, Content: content}
 }
 func doneEvent() *sdk.AgentStreamResponse {
-	return &sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeAnswer, Done: true}
+	return &sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeComplete, Done: true}
 }
 func toolCallEvent(id, name string) *sdk.AgentStreamResponse {
 	return &sdk.AgentStreamResponse{

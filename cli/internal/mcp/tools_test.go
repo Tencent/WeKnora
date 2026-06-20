@@ -477,7 +477,7 @@ func TestMCP_SessionAskToolReturnsToolCalls(t *testing.T) {
 			{ResponseType: sdk.AgentResponseTypeThinking, Content: "agent thinks"},
 			{ResponseType: sdk.AgentResponseTypeToolCall, ID: "tc1", Content: "knowledge_search"},
 			{ResponseType: sdk.AgentResponseTypeAnswer, Content: "agent answer"},
-			{Done: true},
+			{ResponseType: sdk.AgentResponseTypeComplete, Done: true},
 		},
 	}
 	c, _ := newTestServer(t, svc)
@@ -523,7 +523,7 @@ func TestTool_SessionAsk(t *testing.T) {
 		agentEvents: []*sdk.AgentStreamResponse{
 			{ResponseType: sdk.AgentResponseTypeAnswer, Content: "result"},
 			{ResponseType: sdk.AgentResponseTypeToolCall, ID: "c1", Content: "knowledge_search"},
-			{Done: true},
+			{ResponseType: sdk.AgentResponseTypeComplete, Done: true},
 		},
 	}
 	c, _ := newTestServer(t, svc)
