@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -320,15 +321,18 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "processChunks: attempt %d no longer owns knowledge %s, skipping", attempt, knowledge.ID)
 		return
 	}
-	var releaseLease func()
-	var leaseErr error
-	ctx, releaseLease, leaseErr = s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+	lease, leaseErr := s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
 	if leaseErr != nil {
 		logger.Warnf(ctx, "processChunks: failed to acquire process lease for %s attempt=%d: %v",
 			knowledge.ID, attempt, leaseErr)
 		return
 	}
-	defer releaseLease()
+	ctx = lease.Context
+	defer lease.Release()
+	if err := lease.Err(); err != nil {
+		logger.Infof(ctx, "processChunks: process lease lost before work for %s attempt=%d: %v", knowledge.ID, attempt, err)
+		return
+	}
 	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
 		logger.Infof(ctx, "processChunks: attempt %d superseded after lease acquisition for %s", attempt, knowledge.ID)
 		return
@@ -363,6 +367,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// 删除旧的chunks
+	if err := lease.Err(); err != nil {
+		logger.Infof(ctx, "processChunks: process lease lost before chunk cleanup for %s attempt=%d: %v", knowledge.ID, attempt, err)
+		return
+	}
 	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
 		logger.Infof(ctx, "processChunks: attempt %d superseded before chunk cleanup for %s", attempt, knowledge.ID)
 		return
@@ -377,6 +385,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
 	if err == nil && embeddingModel != nil {
+		if err := lease.Err(); err != nil {
+			logger.Infof(ctx, "processChunks: process lease lost before index cleanup for %s attempt=%d: %v", knowledge.ID, attempt, err)
+			return
+		}
 		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
 			logger.Infof(ctx, "processChunks: attempt %d superseded before index cleanup for %s", attempt, knowledge.ID)
 			return
@@ -391,6 +403,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// 删除知识图谱数据（如果存在）
 	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+	if err := lease.Err(); err != nil {
+		logger.Infof(ctx, "processChunks: process lease lost before graph cleanup for %s attempt=%d: %v", knowledge.ID, attempt, err)
+		return
+	}
 	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
 		logger.Infof(ctx, "processChunks: attempt %d superseded before graph cleanup for %s", attempt, knowledge.ID)
 		return
@@ -575,6 +591,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
+	if err := lease.Err(); err != nil {
+		logger.Infof(ctx, "processChunks: process lease lost before chunk write for %s attempt=%d: %v", knowledge.ID, attempt, err)
+		return
+	}
 	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
 		logger.Infof(ctx, "processChunks: attempt %d superseded before chunk write for %s", attempt, knowledge.ID)
 		return
@@ -667,7 +687,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			logger.Infof(ctx, "processChunks: attempt %d superseded before index write for %s", attempt, knowledge.ID)
 			return
 		}
+		if err := lease.Err(); err != nil {
+			logger.Infof(ctx, "processChunks: process lease lost before index write for %s attempt=%d: %v", knowledge.ID, attempt, err)
+			return
+		}
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
+		if err := lease.Err(); err != nil {
+			logger.Infof(ctx, "processChunks: process lease lost after index write for %s attempt=%d: %v", knowledge.ID, attempt, err)
+			return
+		}
 		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
 			logger.Infof(ctx, "processChunks: attempt %d superseded after index write for %s", attempt, knowledge.ID)
 			return
@@ -738,6 +766,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		now,
 	)
 
+	if err := lease.Err(); err != nil {
+		logger.Infof(ctx, "processChunks: process lease lost before final state for %s attempt=%d: %v", knowledge.ID, attempt, err)
+		return
+	}
 	changed, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt),
 		[]string{types.ParseStatusProcessing}, map[string]interface{}{
 			"parse_status":   knowledge.ParseStatus,
@@ -1039,6 +1071,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		})
 	var summaryErr error
 	summaryOut := types.JSONMap{}
+	rescheduled := false
 	defer func() {
 		// Decrement the parent's enrichment counter on terminal exit.
 		// "Terminal" is keyed on the value RETURNED to asynq, not on
@@ -1049,9 +1082,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// summaryErr would skip them and leave the row stuck in
 		// "finalizing". When we DO return an error asynq will retry, so
 		// we only drain on the final attempt.
-		finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
-			payload.KnowledgeID, "summary", payload.Attempt,
-			retErr, false, isFinalAsynqAttempt(ctx))
+		if !rescheduled {
+			finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
+				payload.KnowledgeID, "summary", payload.Attempt,
+				retErr, false, isFinalAsynqAttempt(ctx))
+		}
 		if span == nil {
 			return
 		}
@@ -1185,6 +1220,22 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// since that chunk is typically just a bare markdown image reference
 		// and surfacing it in the description is misleading.
 		if errors.Is(err, errInsufficientSummaryContent) {
+			commitLease, leaseErr := s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+			if leaseErr != nil {
+				if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
+					rescheduled = true
+					summaryOut["rescheduled"] = "lease_busy"
+					return s.rescheduleKnowledgeProcessAfterLeaseBusy(ctx, t, knowledge.ID, payload.Attempt)
+				}
+				summaryErr = leaseErr
+				return leaseErr
+			}
+			ctx = commitLease.Context
+			defer commitLease.Release()
+			if commitLease.Err() != nil || !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+				summaryOut["skipped"] = "attempt_or_lease_lost_before_summary_failed_write"
+				return nil
+			}
 			knowledge.Description = ""
 			knowledge.SummaryStatus = types.SummaryStatusFailed
 			knowledge.UpdatedAt = time.Now()
@@ -1225,6 +1276,28 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// without hopping to the knowledge-detail page. Capped to keep
 	// span rows compact.
 	summaryOut["summary_preview"] = previewText(summary, 240)
+	commitLease, leaseErr := s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+	if leaseErr != nil {
+		if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
+			rescheduled = true
+			summaryOut["rescheduled"] = "lease_busy"
+			return s.rescheduleKnowledgeProcessAfterLeaseBusy(ctx, t, knowledge.ID, payload.Attempt)
+		}
+		summaryErr = leaseErr
+		return leaseErr
+	}
+	ctx = commitLease.Context
+	defer commitLease.Release()
+	if commitLease.Err() != nil {
+		summaryOut["skipped"] = "lease_lost_before_summary_commit"
+		return nil
+	}
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+		logger.Infof(ctx, "Summary generation: attempt %d superseded before commit for %s",
+			payload.Attempt, payload.KnowledgeID)
+		summaryOut["skipped"] = "attempt_superseded_before_commit"
+		return nil
+	}
 	updatedSummary, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt),
 		[]string{types.ParseStatusFinalizing}, map[string]interface{}{
 			"description":    knowledge.Description,
@@ -1275,6 +1348,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		}
 
 		// Save summary chunk
+		if commitLease.Err() != nil || !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+			summaryOut["skipped"] = "attempt_or_lease_lost_before_summary_chunk"
+			return nil
+		}
 		if err := s.chunkService.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
 			logger.Errorf(ctx, "Failed to create summary chunk: %v", err)
 			summaryErr = err
@@ -1315,6 +1392,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			IsEnabled:       true,
 		}}
 
+		if commitLease.Err() != nil || !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+			summaryOut["skipped"] = "attempt_or_lease_lost_before_summary_index"
+			return nil
+		}
 		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
 			logger.Errorf(ctx, "Failed to index summary chunk: %v", err)
 			summaryErr = err
@@ -1386,6 +1467,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// FinalizeSubtask decrement so a stale task can't drain the new
 	// attempt's counter.
 	superseded := false
+	rescheduled := false
 	// Decrement enrichment counter on terminal exit. Keyed on the value
 	// RETURNED to asynq (retErr), not qErr: some branches record a span
 	// failure (qErr != nil) yet `return nil` so asynq won't retry (KB /
@@ -1395,9 +1477,11 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// final attempt. Runs AFTER the stats-log defer below — defers
 	// unwind LIFO, so this one declared first executes last.
 	defer func() {
-		finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
-			payload.KnowledgeID, "question_legacy", payload.Attempt,
-			retErr, superseded, isFinalAsynqAttempt(ctx))
+		if !rescheduled {
+			finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
+				payload.KnowledgeID, "question_legacy", payload.Attempt,
+				retErr, superseded, isFinalAsynqAttempt(ctx))
+		}
 	}()
 	defer func() {
 		logger.Infof(
@@ -1617,6 +1701,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 
 	// Generate questions for each chunk with context
 	var indexInfoList []*types.IndexInfo
+	chunksToUpdate := make([]*types.Chunk, 0)
 	for i, chunk := range textChunks {
 		if strings.TrimSpace(chunk.Content) == "" {
 			emptyContentChunks++
@@ -1668,12 +1753,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			continue
 		}
 
-		// Update chunk in database
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-			chunkUpdateFailed++
-			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
-			continue
-		}
+		chunksToUpdate = append(chunksToUpdate, chunk)
 
 		// Create index entries for generated questions
 		for _, gq := range generatedQuestions {
@@ -1692,9 +1772,58 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	}
 	indexEntriesPrepared = len(indexInfoList)
 
+	if len(chunksToUpdate) > 0 || len(indexInfoList) > 0 {
+		commitLease, leaseErr := s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+		if leaseErr != nil {
+			if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
+				rescheduled = true
+				exitStatus = "rescheduled_lease_busy"
+				return s.rescheduleKnowledgeProcessAfterLeaseBusy(ctx, t, knowledge.ID, payload.Attempt)
+			}
+			qErr = leaseErr
+			return leaseErr
+		}
+		ctx = commitLease.Context
+		defer commitLease.Release()
+		if commitLease.Err() != nil || !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+			superseded = true
+			exitStatus = "commit_skipped_attempt_or_lease_lost"
+			return nil
+		}
+		updatedChunkIDs := make(map[string]bool, len(chunksToUpdate))
+		for _, chunk := range chunksToUpdate {
+			if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+				chunkUpdateFailed++
+				logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
+				continue
+			}
+			updatedChunkIDs[chunk.ID] = true
+		}
+		if len(indexInfoList) > 0 {
+			filtered := indexInfoList[:0]
+			for _, info := range indexInfoList {
+				if updatedChunkIDs[info.ChunkID] {
+					filtered = append(filtered, info)
+				}
+			}
+			indexInfoList = filtered
+			indexEntriesPrepared = len(indexInfoList)
+		}
+	}
+
 	// Index generated questions
 	if len(indexInfoList) > 0 {
 		indexBatchAttempted = true
+		if err := leaseFromCtx(ctx, knowledgeProcessLeaseKey(knowledge.TenantID, knowledge.ID)).Err(); err != nil {
+			superseded = true
+			exitStatus = "commit_skipped_lease_lost"
+			return nil
+		}
+		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+			superseded = true
+			exitStatus = "commit_skipped_attempt_superseded"
+			return nil
+		}
 		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
 			exitStatus = "index_questions_failed"
 			logger.Errorf(ctx, "Failed to index generated questions: %v", err)
@@ -1741,6 +1870,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	// Suppresses the FinalizeSubtask drain when a newer attempt superseded
 	// this run, so a stale task can't decrement the new attempt's counter.
 	superseded := false
+	rescheduled := false
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -1752,11 +1882,13 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	// span failure yet `return nil` (terminal, must drain). Declared first
 	// so it runs LAST (after the stats/span defer below).
 	defer func() {
-		finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
-			payload.KnowledgeID,
-			fmt.Sprintf("question_batch[%d]", payload.BatchIndex),
-			payload.Attempt,
-			retErr, superseded, isFinalAsynqAttempt(ctx))
+		if !rescheduled {
+			finalizeSubtaskDetached(ctx, s.repo, s.taskJobRepo, payload.TenantID,
+				payload.KnowledgeID,
+				fmt.Sprintf("question_batch[%d]", payload.BatchIndex),
+				payload.Attempt,
+				retErr, superseded, isFinalAsynqAttempt(ctx))
+		}
 	}()
 	defer func() {
 		logger.Infof(ctx,
@@ -1954,6 +2086,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}
 
 	var indexInfoList []*types.IndexInfo
+	chunksToUpdate := make([]*types.Chunk, 0)
 	for i, chunk := range batchChunks {
 		if chunk == nil || strings.TrimSpace(chunk.Content) == "" {
 			emptyChunks++
@@ -1988,10 +2121,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
 			continue
 		}
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
-			continue
-		}
+		chunksToUpdate = append(chunksToUpdate, chunk)
 		for _, gq := range generatedQuestions {
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
 				Content:         gq.Question,
@@ -2006,7 +2136,54 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}
 
 	indexEntriesPrepared = len(indexInfoList)
+	if len(chunksToUpdate) > 0 || len(indexInfoList) > 0 {
+		commitLease, leaseErr := s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+		if leaseErr != nil {
+			if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
+				rescheduled = true
+				exitStatus = "rescheduled_lease_busy"
+				return s.rescheduleKnowledgeProcessAfterLeaseBusy(ctx, t, knowledge.ID, payload.Attempt)
+			}
+			qErr = leaseErr
+			return leaseErr
+		}
+		ctx = commitLease.Context
+		defer commitLease.Release()
+		if commitLease.Err() != nil || !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+			superseded = true
+			exitStatus = "commit_skipped_attempt_or_lease_lost"
+			return nil
+		}
+		updatedChunkIDs := make(map[string]bool, len(chunksToUpdate))
+		for _, chunk := range chunksToUpdate {
+			if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+				logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
+				continue
+			}
+			updatedChunkIDs[chunk.ID] = true
+		}
+		if len(indexInfoList) > 0 {
+			filtered := indexInfoList[:0]
+			for _, info := range indexInfoList {
+				if updatedChunkIDs[info.ChunkID] {
+					filtered = append(filtered, info)
+				}
+			}
+			indexInfoList = filtered
+			indexEntriesPrepared = len(indexInfoList)
+		}
+	}
 	if len(indexInfoList) > 0 {
+		if err := leaseFromCtx(ctx, knowledgeProcessLeaseKey(knowledge.TenantID, knowledge.ID)).Err(); err != nil {
+			superseded = true
+			exitStatus = "commit_skipped_lease_lost"
+			return nil
+		}
+		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+			superseded = true
+			exitStatus = "commit_skipped_attempt_superseded"
+			return nil
+		}
 		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
 			exitStatus = "index_questions_failed"
 			qErr = err
@@ -2193,7 +2370,7 @@ func (s *knowledgeService) ReparseKnowledge(
 
 	// For non-manual knowledge, cleanup synchronously then enqueue document processing
 	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-	cleanupCtx, releaseLease, leaseErr := s.acquireKnowledgeProcessLease(ctx, existing.TenantID, existing.ID)
+	cleanupLease, leaseErr := s.acquireKnowledgeProcessLease(ctx, existing.TenantID, existing.ID)
 	if leaseErr != nil {
 		if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
 			logger.Infof(ctx, "Reparse cleanup skipped because process lease is busy for %s attempt=%d; worker will retry cleanup",
@@ -2206,20 +2383,27 @@ func (s *knowledgeService) ReparseKnowledge(
 			return nil, leaseErr
 		}
 	} else {
+		cleanupCtx := cleanupLease.Context
+		if cleanupLease.Err() != nil {
+			cleanupLease.Release()
+			logger.Infof(ctx, "Reparse cleanup skipped because process lease was lost for %s attempt=%d",
+				existing.ID, reparseAttempt)
+			return existing, nil
+		}
 		if !s.attemptOwnsKnowledge(cleanupCtx, existing.TenantID, existing.ID, reparseAttempt) {
-			releaseLease()
+			cleanupLease.Release()
 			logger.Infof(ctx, "Reparse cleanup skipped because attempt=%d was superseded for %s", reparseAttempt, existing.ID)
 			return existing, nil
 		}
 		if err := s.cleanupKnowledgeResources(cleanupCtx, existing); err != nil {
-			releaseLease()
+			cleanupLease.Release()
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"knowledge_id": knowledgeID,
 			})
 			s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
 			return nil, err
 		}
-		releaseLease()
+		cleanupLease.Release()
 	}
 
 	// Step 2: Update knowledge status and metadata
@@ -2953,6 +3137,29 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		return nil
 	}
 
+	lease, err := s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+	if err != nil {
+		if errors.Is(err, ErrKnowledgeProcessLeaseBusy) {
+			logger.Infof(ctx, "ProcessManualUpdate: process lease busy for %s attempt=%d; rescheduling",
+				knowledge.ID, payload.Attempt)
+			return s.rescheduleKnowledgeProcessAfterLeaseBusy(ctx, t, knowledge.ID, payload.Attempt)
+		}
+		logger.Warnf(ctx, "ProcessManualUpdate: failed to acquire process lease for %s: %v", knowledge.ID, err)
+		return err
+	}
+	ctx = lease.Context
+	defer lease.Release()
+	if err := lease.Err(); err != nil {
+		logger.Infof(ctx, "ProcessManualUpdate: process lease lost for %s attempt=%d: %v",
+			knowledge.ID, payload.Attempt, err)
+		return nil
+	}
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+		logger.Infof(ctx, "ProcessManualUpdate: attempt=%d superseded after lease acquisition for %s",
+			payload.Attempt, knowledge.ID)
+		return nil
+	}
+
 	// Re-check abort status right before marking processing — see the same
 	// note in ProcessDocument for the cancel race this guards.
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
@@ -2975,25 +3182,14 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		logger.Warnf(ctx, "ProcessManualUpdate: OpenAttemptN failed for %s attempt=%d: %v",
 			knowledge.ID, payload.Attempt, err)
 	}
-	var releaseLease func()
-	ctx, releaseLease, err = s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
-	if err != nil {
-		if errors.Is(err, ErrKnowledgeProcessLeaseBusy) {
-			logger.Infof(ctx, "ProcessManualUpdate: process lease busy for %s attempt=%d", knowledge.ID, payload.Attempt)
-			return err
-		}
-		logger.Warnf(ctx, "ProcessManualUpdate: failed to acquire process lease for %s: %v", knowledge.ID, err)
-		return err
-	}
-	defer releaseLease()
-	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
-		logger.Infof(ctx, "ProcessManualUpdate: attempt=%d superseded after lease acquisition for %s",
-			payload.Attempt, knowledge.ID)
-		return nil
-	}
 
 	// Cleanup old resources (indexes, chunks, graph) for update operations
 	if payload.NeedCleanup {
+		if err := lease.Err(); err != nil {
+			logger.Infof(ctx, "ProcessManualUpdate: process lease lost before cleanup for %s attempt=%d: %v",
+				knowledge.ID, payload.Attempt, err)
+			return nil
+		}
 		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
 			logger.Infof(ctx, "ProcessManualUpdate: attempt=%d superseded before cleanup for %s",
 				payload.Attempt, knowledge.ID)
@@ -3010,6 +3206,60 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 
 	// Run manual processing (image resolution + chunking + embedding) synchronously within the worker
 	s.triggerManualProcessing(ctx, kb, knowledge, payload.Content, true)
+	return nil
+}
+
+const knowledgeProcessLeaseBusyDelay = 15 * time.Second
+
+func (s *knowledgeService) rescheduleKnowledgeProcessAfterLeaseBusy(
+	ctx context.Context,
+	t *asynq.Task,
+	knowledgeID string,
+	attempt int,
+) error {
+	return rescheduleTaskAfterKnowledgeLeaseBusy(ctx, s.task, s.config, t, knowledgeID, attempt)
+}
+
+func rescheduleTaskAfterKnowledgeLeaseBusy(
+	ctx context.Context,
+	taskEnqueuer interfaces.TaskEnqueuer,
+	cfg *config.Config,
+	t *asynq.Task,
+	knowledgeID string,
+	attempt int,
+) error {
+	if taskEnqueuer == nil || t == nil {
+		return nil
+	}
+	payload := append([]byte(nil), t.Payload()...)
+	task := asynq.NewTask(t.Type(), payload)
+	opts := []asynq.Option{
+		asynq.ProcessIn(knowledgeProcessLeaseBusyDelay),
+		asynq.MaxRetry(0),
+	}
+	switch t.Type() {
+	case types.TypeDocumentProcess, types.TypeManualProcess:
+		opts = documentProcessTaskOptions(cfg, opts...)
+	case types.TypeSummaryGeneration:
+		opts = append(opts, asynq.Queue("low"))
+	case types.TypeQuestionGeneration:
+		opts = append(opts, asynq.Queue(types.QueueQuestion))
+	case types.TypeChunkExtract:
+		opts = append(opts, asynq.Queue(types.QueueGraph))
+	case types.TypeImageMultimodal:
+		opts = append(opts, asynq.Queue(types.QueueMultimodal))
+	case types.TypeKnowledgePostProcess:
+		opts = append(opts, asynq.Queue("default"))
+	default:
+		opts = append(opts, asynq.Queue("default"))
+	}
+	if _, err := taskEnqueuer.Enqueue(task, opts...); err != nil {
+		logger.Warnf(ctx, "failed to reschedule %s after process lease contention for %s attempt=%d: %v",
+			t.Type(), knowledgeID, attempt, err)
+		return fmt.Errorf("reschedule process lease contention: %w", err)
+	}
+	logger.Infof(ctx, "rescheduled %s after process lease contention for %s attempt=%d delay=%s",
+		t.Type(), knowledgeID, attempt, knowledgeProcessLeaseBusyDelay)
 	return nil
 }
 
@@ -3116,6 +3366,30 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
 
+	lease, err := s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+	if err != nil {
+		if errors.Is(err, ErrKnowledgeProcessLeaseBusy) {
+			logger.Infof(ctx, "ProcessDocument: process lease busy for %s attempt=%d; rescheduling",
+				knowledge.ID, payload.Attempt)
+			return s.rescheduleKnowledgeProcessAfterLeaseBusy(ctx, t, knowledge.ID, payload.Attempt)
+		}
+		logger.Warnf(ctx, "ProcessDocument: failed to acquire process lease for %s: %v", knowledge.ID, err)
+		return err
+	}
+	ctx = lease.Context
+	defer lease.Release()
+	if err := lease.Err(); err != nil {
+		logger.Infof(ctx, "ProcessDocument: process lease lost for %s attempt=%d: %v",
+			knowledge.ID, payload.Attempt, err)
+		return nil
+	}
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+		logger.Infof(ctx, "ProcessDocument: attempt=%d superseded after lease acquisition for %s",
+			payload.Attempt, knowledge.ID)
+		s.markDocumentJobSuperseded(ctx, payload.TenantID, payload.KnowledgeID, payload.Attempt, payload.JobID)
+		return nil
+	}
+
 	// Re-check abort status right before flipping to "processing" — closes
 	// the race where the user cancels between the entry guard above and
 	// this write (otherwise the worker would overwrite cancelled→processing
@@ -3141,23 +3415,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			knowledge.ID, payload.Attempt, err)
 	}
 	s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger, payload.JobID)
-	var releaseLease func()
-	ctx, releaseLease, err = s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
-	if err != nil {
-		if errors.Is(err, ErrKnowledgeProcessLeaseBusy) {
-			logger.Infof(ctx, "ProcessDocument: process lease busy for %s attempt=%d", knowledge.ID, payload.Attempt)
-			return err
-		}
-		logger.Warnf(ctx, "ProcessDocument: failed to acquire process lease for %s: %v", knowledge.ID, err)
-		return err
-	}
-	defer releaseLease()
-	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
-		logger.Infof(ctx, "ProcessDocument: attempt=%d superseded after lease acquisition for %s",
-			payload.Attempt, knowledge.ID)
-		s.markDocumentJobSuperseded(ctx, payload.TenantID, payload.KnowledgeID, payload.Attempt, payload.JobID)
-		return nil
-	}
 
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {

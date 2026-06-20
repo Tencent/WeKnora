@@ -416,6 +416,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						RetractDocContent: op.DocSummary,
 						DocTitle:          op.DocTitle,
 						KnowledgeID:       op.KnowledgeID,
+						Attempt:           op.Attempt,
 						Language:          types.LanguageLocaleName(op.Language),
 					})
 				}
@@ -785,6 +786,12 @@ func (s *wikiIngestService) mapOneDocument(
 		"language":          lang,
 		"knowledge_base_id": payload.KnowledgeBaseID,
 	})
+	if attemptSuperseded(ctx, s.knowledgeRepo, payload.TenantID, knowledgeID, op.Attempt) {
+		logger.Infof(ctx, "wiki ingest: attempt %d superseded for %s before map, skipping",
+			op.Attempt, knowledgeID)
+		s.tracker().SkipSpan(ctx, wikiSpan, "attempt_superseded")
+		return nil, nil, nil
+	}
 
 	// Guard against the ingest/delete race: if the user deleted the doc while
 	// this task was queued (wikiIngestDelay = 30s) or while an earlier stage
@@ -1061,6 +1068,7 @@ func (s *wikiIngestService) mapOneDocument(
 		KnowledgeID: knowledgeID,
 		SourceRef:   sourceRef,
 		Language:    lang,
+		Attempt:     op.Attempt,
 		SummaryLine: sumLine,
 		SummaryBody: sumBody,
 	})
@@ -1077,6 +1085,7 @@ func (s *wikiIngestService) mapOneDocument(
 				KnowledgeID:  knowledgeID,
 				SourceRef:    sourceRef,
 				Language:     lang,
+				Attempt:      op.Attempt,
 				SourceChunks: item.SourceChunks,
 				DocSummary:   docSummary,
 			})
@@ -1094,6 +1103,7 @@ func (s *wikiIngestService) mapOneDocument(
 				KnowledgeID:  knowledgeID,
 				SourceRef:    sourceRef,
 				Language:     lang,
+				Attempt:      op.Attempt,
 				SourceChunks: item.SourceChunks,
 				DocSummary:   docSummary,
 			})
@@ -1152,6 +1162,7 @@ func (s *wikiIngestService) mapOneDocument(
 				DocTitle:          docTitle,
 				KnowledgeID:       knowledgeID,
 				Language:          lang,
+				Attempt:           op.Attempt,
 			})
 			continue
 		}
@@ -1163,6 +1174,7 @@ func (s *wikiIngestService) mapOneDocument(
 			DocTitle:          docTitle,
 			KnowledgeID:       knowledgeID,
 			Language:          lang,
+			Attempt:           op.Attempt,
 		})
 	}
 
@@ -1173,6 +1185,12 @@ func (s *wikiIngestService) mapOneDocument(
 		len(updates), reparseOverlap, staleCount, pass0Failed,
 		time.Since(docStartedAt).Round(time.Millisecond),
 	)
+	if attemptSuperseded(ctx, s.knowledgeRepo, payload.TenantID, knowledgeID, op.Attempt) {
+		logger.Infof(ctx, "wiki ingest: attempt %d superseded for %s before reduce updates, dropping map result",
+			op.Attempt, knowledgeID)
+		s.tracker().SkipSpan(ctx, wikiSpan, "attempt_superseded_before_reduce")
+		return nil, nil, nil
+	}
 
 	// Map-phase metrics get attached to the postprocess.wiki span's
 	// output, but we do NOT EndSpan here — the batch driver keeps the

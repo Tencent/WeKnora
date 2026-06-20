@@ -751,6 +751,7 @@ type SlugUpdate struct {
 	KnowledgeID       string
 	SourceRef         string
 	Language          string
+	Attempt           int
 	SummaryBody       string // For summary
 	SummaryLine       string // For summary
 	RetractDocContent string // For retract / retractStale
@@ -2001,15 +2002,17 @@ func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledge
 	return false
 }
 
-// filterLiveUpdates drops additions/summaries whose source knowledge has been
-// deleted since the Map phase finished. Retract updates are preserved so
-// pages still get cleaned up. Caches per-knowledge results to avoid DB
-// hammering when a single reduce slug carries many updates for the same doc.
+// filterLiveUpdates drops updates whose source knowledge has been deleted or
+// whose process attempt was superseded since the Map phase finished. Retracts
+// without an attempt are preserved so explicit delete cleanup still runs; any
+// update carrying an attempt must still own the knowledge before it can touch
+// wiki pages.
 func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, updates []SlugUpdate) []SlugUpdate {
 	if len(updates) == 0 {
 		return updates
 	}
 	goneCache := make(map[string]bool)
+	attemptCache := make(map[string]int64)
 	isGone := func(kid string) bool {
 		if kid == "" {
 			return false
@@ -2021,22 +2024,42 @@ func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, 
 		goneCache[kid] = v
 		return v
 	}
+	currentAttempt := func(kid string) int64 {
+		if kid == "" || s.knowledgeRepo == nil {
+			return 0
+		}
+		if v, ok := attemptCache[kid]; ok {
+			return v
+		}
+		var v int64
+		if k, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, kid); err == nil && k != nil {
+			v = k.CurrentProcessAttempt
+		}
+		attemptCache[kid] = v
+		return v
+	}
 	filtered := make([]SlugUpdate, 0, len(updates))
 	dropped := 0
 	for _, u := range updates {
-		switch u.Type {
-		case "retract", "retractStale":
-			filtered = append(filtered, u)
-		default:
-			if isGone(u.KnowledgeID) {
-				dropped++
-				continue
-			}
-			filtered = append(filtered, u)
+		if u.Attempt > 0 && currentAttempt(u.KnowledgeID) != int64(u.Attempt) {
+			dropped++
+			continue
 		}
+		if isGone(u.KnowledgeID) {
+			if u.Attempt == 0 {
+				switch u.Type {
+				case "retract", "retractStale":
+					filtered = append(filtered, u)
+					continue
+				}
+			}
+			dropped++
+			continue
+		}
+		filtered = append(filtered, u)
 	}
 	if dropped > 0 {
-		logger.Infof(ctx, "wiki ingest: reduce dropped %d updates for deleted knowledge(s)", dropped)
+		logger.Infof(ctx, "wiki ingest: reduce dropped %d updates for deleted/superseded knowledge(s)", dropped)
 	}
 	return filtered
 }

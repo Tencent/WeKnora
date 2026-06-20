@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -162,6 +164,8 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	taskEnqueuer      interfaces.TaskEnqueuer
+	redisClient       *redis.Client
 	taskJobRepo       interfaces.TaskJobRepository
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
@@ -177,6 +181,8 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	taskEnqueuer interfaces.TaskEnqueuer,
+	redisClient *redis.Client,
 	taskJobRepo interfaces.TaskJobRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
@@ -187,6 +193,8 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		taskEnqueuer:      taskEnqueuer,
+		redisClient:       redisClient,
 		taskJobRepo:       taskJobRepo,
 		spanTracker:       spanTracker,
 	}
@@ -239,16 +247,19 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		}
 	}
 	var handleErr error
+	rescheduled := false
 	graphOut := types.JSONMap{}
 	defer func() {
 		// Decrement the parent's enrichment counter on terminal exit so a
 		// completed (or terminally-failed) per-chunk extract releases its
 		// slot in pending_subtasks_count. KnowledgeID is the new (post-#? )
 		// payload field; legacy in-flight tasks without it are skipped.
-		finalizeSubtaskDetached(ctx, s.knowledgeRepo, s.taskJobRepo, p.TenantID, p.KnowledgeID,
-			fmt.Sprintf("graph_chunk[%d]", p.ChunkIndex),
-			p.Attempt,
-			handleErr, false, isFinalAsynqAttempt(ctx))
+		if !rescheduled {
+			finalizeSubtaskDetached(ctx, s.knowledgeRepo, s.taskJobRepo, p.TenantID, p.KnowledgeID,
+				fmt.Sprintf("graph_chunk[%d]", p.ChunkIndex),
+				p.Attempt,
+				handleErr, false, isFinalAsynqAttempt(ctx))
+		}
 		if gSpan == nil {
 			return
 		}
@@ -346,6 +357,28 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
+	}
+	commitLease, leaseErr := acquireKnowledgeProcessLease(ctx, s.redisClient, p.TenantID, chunk.KnowledgeID)
+	if leaseErr != nil {
+		if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
+			rescheduled = true
+			graphOut["rescheduled"] = "lease_busy"
+			return rescheduleTaskAfterKnowledgeLeaseBusy(ctx, s.taskEnqueuer, nil, t, chunk.KnowledgeID, p.Attempt)
+		}
+		handleErr = leaseErr
+		return leaseErr
+	}
+	ctx = commitLease.Context
+	defer commitLease.Release()
+	if commitLease.Err() != nil || attemptSuperseded(ctx, s.knowledgeRepo, p.TenantID, chunk.KnowledgeID, p.Attempt) {
+		graphOut["skipped"] = "attempt_or_lease_lost_before_graph_commit"
+		return nil
+	}
+	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
+	if err != nil {
+		logger.Warnf(ctx, "graph ignore chunk %s before commit: %v", p.ChunkID, err)
+		graphOut["skipped"] = "chunk_disappeared_before_commit"
+		return nil
 	}
 	if err = s.graphEngine.AddGraph(ctx,
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},

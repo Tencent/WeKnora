@@ -41,17 +41,36 @@ WHERE k.id = a.knowledge_id;
 -- the uniqueness invariant this migration introduces.
 WITH ranked AS (
     SELECT job_id,
+           tenant_id,
+           scope,
+           scope_id,
+           process_attempt,
+           created_at,
            ROW_NUMBER() OVER (
                PARTITION BY tenant_id, scope, scope_id, process_attempt
                ORDER BY created_at DESC, job_id DESC
-           ) AS rn
+           ) AS attempt_rn,
+           COALESCE(
+               MIN(CASE WHEN process_attempt < 0 THEN process_attempt END)
+                   OVER (PARTITION BY tenant_id, scope, scope_id),
+               0
+           ) AS min_existing_negative
     FROM task_jobs
+),
+duplicate_jobs AS (
+    SELECT job_id,
+           min_existing_negative,
+           ROW_NUMBER() OVER (
+               PARTITION BY tenant_id, scope, scope_id
+               ORDER BY process_attempt, created_at DESC, job_id DESC
+           ) AS global_rn
+    FROM ranked
+    WHERE attempt_rn > 1
 )
 UPDATE task_jobs j
-SET process_attempt = -ABS(j.process_attempt) - ranked.rn
-FROM ranked
-WHERE j.job_id = ranked.job_id
-  AND ranked.rn > 1;
+SET process_attempt = duplicate_jobs.min_existing_negative - duplicate_jobs.global_rn
+FROM duplicate_jobs
+WHERE j.job_id = duplicate_jobs.job_id;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_task_jobs_scope_attempt
     ON task_jobs (tenant_id, scope, scope_id, process_attempt);

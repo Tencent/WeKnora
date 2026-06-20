@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -189,6 +190,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// cause of "stuck parsing" reports. Intermediate retries skip finalize
 	// so we don't double-count and prematurely trigger post-process.
 	var handleErr error
+	rescheduled := false
 	defer func() {
 		// Finalize the image subspan with the actual outcome — not the
 		// finalize-counter outcome. The counter logic counts a "tried"
@@ -204,7 +206,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 					handleErr)
 			}
 		}
-		if handleErr == nil || isFinalAsynqAttempt(ctx) {
+		if rescheduled {
+			logger.Infof(ctx, "[ImageMultimodal] Skip finalize for rescheduled lease contention on %s", payload.ImageURL)
+		} else if handleErr == nil || isFinalAsynqAttempt(ctx) {
 			s.checkAndFinalizeAllImages(ctx, payload)
 		} else {
 			logger.Infof(ctx,
@@ -329,6 +333,23 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
+	commitLease, leaseErr := acquireKnowledgeProcessLease(ctx, s.redisClient, payload.TenantID, payload.KnowledgeID)
+	if leaseErr != nil {
+		if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
+			rescheduled = true
+			imgOut["rescheduled"] = "lease_busy"
+			return rescheduleTaskAfterKnowledgeLeaseBusy(ctx, s.taskEnqueuer, nil, task, payload.KnowledgeID, payload.Attempt)
+		}
+		handleErr = leaseErr
+		return handleErr
+	}
+	ctx = commitLease.Context
+	defer commitLease.Release()
+	if commitLease.Err() != nil || attemptSuperseded(ctx, s.knowledgeRepo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
+		imgOut["skipped"] = "attempt_or_lease_lost_before_multimodal_commit"
+		return nil
+	}
+
 	// Persist chunks
 	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
 		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
@@ -340,6 +361,10 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Index chunks so they can be retrieved
+	if commitLease.Err() != nil || attemptSuperseded(ctx, s.knowledgeRepo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
+		imgOut["skipped"] = "attempt_or_lease_lost_before_multimodal_index"
+		return nil
+	}
 	s.indexChunks(ctx, payload, newChunks)
 	imgOut["indexed"] = true
 
