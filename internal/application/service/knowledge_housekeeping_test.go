@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     tenant_id       INTEGER NOT NULL DEFAULT 0,
     knowledge_base_id VARCHAR(64),
     parse_status    VARCHAR(32) NOT NULL DEFAULT 'pending',
+    current_process_attempt INTEGER NOT NULL DEFAULT 0,
     summary_status  VARCHAR(32) NOT NULL DEFAULT 'none',
     pending_subtasks_count INTEGER NOT NULL DEFAULT 0,
     error_message   TEXT,
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     type            TEXT NOT NULL DEFAULT 'document',
     embedding_model_id TEXT NOT NULL DEFAULT '',
     storage_size    BIGINT NOT NULL DEFAULT 0,
+    processed_at    DATETIME,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at      DATETIME
@@ -103,7 +105,7 @@ func insertKnowledge(t *testing.T, db *gorm.DB, id, status string, updatedAt tim
 func insertKnowledgeInKB(t *testing.T, db *gorm.DB, id, kbID, status string, updatedAt time.Time) {
 	t.Helper()
 	require.NoError(t, db.Exec(
-		`INSERT INTO knowledges (id, knowledge_base_id, parse_status, updated_at) VALUES (?, ?, ?, ?)`,
+		`INSERT INTO knowledges (id, tenant_id, knowledge_base_id, parse_status, current_process_attempt, updated_at) VALUES (?, 1, ?, ?, 1, ?)`,
 		id, kbID, status, updatedAt,
 	).Error)
 }

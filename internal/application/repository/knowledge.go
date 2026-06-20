@@ -12,6 +12,8 @@ import (
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
+var ErrAttemptSuperseded = errors.New("knowledge attempt superseded")
+var ErrKnowledgeBusy = errors.New("knowledge is busy")
 
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
@@ -36,7 +38,7 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount", "CurrentProcessAttempt"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -185,6 +187,149 @@ func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledg
 	return r.db.Debug().WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
 }
 
+func (r *knowledgeRepository) BeginKnowledgeAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	expectedAttempt int64,
+	mode types.AttemptBeginMode,
+) (int64, error) {
+	if tenantID == 0 || id == "" {
+		return 0, ErrKnowledgeNotFound
+	}
+	if expectedAttempt < 0 {
+		return 0, ErrAttemptSuperseded
+	}
+	var allowedStatuses []string
+	switch mode {
+	case types.AttemptBeginInitial:
+		allowedStatuses = []string{types.ParseStatusPending, types.ManualKnowledgeStatusDraft}
+	case types.AttemptBeginReparse:
+		allowedStatuses = []string{types.ParseStatusFailed, types.ParseStatusCompleted, types.ParseStatusCancelled}
+	default:
+		return 0, ErrKnowledgeBusy
+	}
+	now := time.Now()
+	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ? AND current_process_attempt = ?", tenantID, id, expectedAttempt).
+		Where("parse_status IN ?", allowedStatuses).
+		Updates(map[string]interface{}{
+			"current_process_attempt": gorm.Expr("current_process_attempt + 1"),
+			"parse_status":            types.ParseStatusPending,
+			"pending_subtasks_count":  0,
+			"error_message":           "",
+			"processed_at":            nil,
+			"updated_at":              now,
+		})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return 0, r.classifyBeginAttemptMiss(ctx, tenantID, id, expectedAttempt)
+	}
+	var snap struct {
+		CurrentProcessAttempt int64 `gorm:"column:current_process_attempt"`
+	}
+	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Select("current_process_attempt").
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Take(&snap).Error; err != nil {
+		return 0, err
+	}
+	return snap.CurrentProcessAttempt, nil
+}
+
+func (r *knowledgeRepository) classifyBeginAttemptMiss(ctx context.Context, tenantID uint64, id string, expectedAttempt int64) error {
+	var snap struct {
+		CurrentProcessAttempt int64  `gorm:"column:current_process_attempt"`
+		ParseStatus           string `gorm:"column:parse_status"`
+	}
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Select("current_process_attempt", "parse_status").
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Take(&snap).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrKnowledgeNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if snap.CurrentProcessAttempt != expectedAttempt {
+		return ErrAttemptSuperseded
+	}
+	switch snap.ParseStatus {
+	case types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled:
+		return ErrAttemptSuperseded
+	default:
+		return ErrKnowledgeBusy
+	}
+}
+
+func (r *knowledgeRepository) MarkKnowledgeProcessingIfAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+) (bool, error) {
+	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt, map[string]interface{}{
+		"parse_status": types.ParseStatusProcessing,
+		"updated_at":   time.Now(),
+	})
+}
+
+func (r *knowledgeRepository) MarkKnowledgeFailedIfAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+	reason string,
+) (bool, error) {
+	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt, map[string]interface{}{
+		"parse_status":           types.ParseStatusFailed,
+		"error_message":          reason,
+		"pending_subtasks_count": 0,
+		"summary_status":         types.SummaryStatusFailed,
+		"updated_at":             time.Now(),
+	})
+}
+
+func (r *knowledgeRepository) MarkKnowledgeCanceledIfAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+	reason string,
+) (bool, error) {
+	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt, map[string]interface{}{
+		"parse_status":           types.ParseStatusCancelled,
+		"error_message":          reason,
+		"pending_subtasks_count": 0,
+		"updated_at":             time.Now(),
+	})
+}
+
+func (r *knowledgeRepository) UpdateKnowledgeColumnsIfAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+	values map[string]interface{},
+) (bool, error) {
+	if len(values) == 0 {
+		return false, nil
+	}
+	delete(values, "current_process_attempt")
+	delete(values, "CurrentProcessAttempt")
+	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id = ? AND current_process_attempt = ?", tenantID, id, attempt).
+		Where("parse_status NOT IN ?", []string{types.ParseStatusDeleting}).
+		Updates(values)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
 // DeleteKnowledge deletes knowledge
 func (r *knowledgeRepository) DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Knowledge{}).Error
@@ -303,6 +448,9 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	column string,
 	value interface{},
 ) error {
+	if strings.EqualFold(column, "current_process_attempt") || strings.EqualFold(column, "CurrentProcessAttempt") {
+		return errors.New("current_process_attempt can only be changed by CAS helpers")
+	}
 	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Update(column, value).Error
 	return err
 }
@@ -319,6 +467,8 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	if len(values) == 0 {
 		return nil
 	}
+	delete(values, "current_process_attempt")
+	delete(values, "CurrentProcessAttempt")
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }
 
@@ -377,13 +527,36 @@ func (r *knowledgeRepository) MarkFinalizingKnowledgeFailed(ctx context.Context,
 func (r *knowledgeRepository) FinalizeSubtask(
 	ctx context.Context, id string,
 ) (int, bool, error) {
+	return r.finalizeSubtask(ctx, 0, id, 0, false)
+}
+
+func (r *knowledgeRepository) FinalizeSubtaskIfAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+) (int, bool, error) {
+	return r.finalizeSubtask(ctx, tenantID, id, attempt, true)
+}
+
+func (r *knowledgeRepository) finalizeSubtask(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+	useAttempt bool,
+) (int, bool, error) {
 	now := time.Now()
 	// 1) Atomic decrement, clamped at zero. The `pending_subtasks_count > 0`
 	//    guard is purely a safety net for accounting bugs — under normal
 	//    operation each subtask handler decrements at most once per task,
 	//    so the counter cannot go negative.
-	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("id = ? AND pending_subtasks_count > 0", id).
+	decrement := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ? AND pending_subtasks_count > 0", id)
+	if useAttempt {
+		decrement = decrement.Where("tenant_id = ? AND current_process_attempt = ?", tenantID, attempt)
+	}
+	res := decrement.
 		Updates(map[string]interface{}{
 			"pending_subtasks_count": gorm.Expr("pending_subtasks_count - 1"),
 			"updated_at":             now,
@@ -404,9 +577,13 @@ func (r *knowledgeRepository) FinalizeSubtask(
 	//    the single authoritative, atomic check on the live row: only the
 	//    caller whose decrement actually brought the counter to zero matches,
 	//    and cancel/delete cannot be clobbered by a late promote.
-	promoteRes := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+	promote := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("id = ? AND parse_status = ? AND pending_subtasks_count = 0",
-			id, types.ParseStatusFinalizing).
+			id, types.ParseStatusFinalizing)
+	if useAttempt {
+		promote = promote.Where("tenant_id = ? AND current_process_attempt = ?", tenantID, attempt)
+	}
+	promoteRes := promote.
 		Updates(map[string]interface{}{
 			"parse_status": types.ParseStatusCompleted,
 			"processed_at": now,
@@ -424,9 +601,13 @@ func (r *knowledgeRepository) FinalizeSubtask(
 	var snap struct {
 		PendingSubtasksCount int `gorm:"column:pending_subtasks_count"`
 	}
-	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+	read := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Select("pending_subtasks_count").
-		Where("id = ?", id).Take(&snap).Error; err != nil {
+		Where("id = ?", id)
+	if useAttempt {
+		read = read.Where("tenant_id = ? AND current_process_attempt = ?", tenantID, attempt)
+	}
+	if err := read.Take(&snap).Error; err != nil {
 		return 0, promoted, nil
 	}
 	return snap.PendingSubtasksCount, promoted, nil
@@ -444,12 +625,37 @@ func (r *knowledgeRepository) FinalizeSubtask(
 func (r *knowledgeRepository) SetFinalizing(
 	ctx context.Context, id string, expectedSubtasks int,
 ) (bool, error) {
+	return r.setFinalizing(ctx, 0, id, 0, expectedSubtasks, false)
+}
+
+func (r *knowledgeRepository) SetFinalizingIfAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+	expectedSubtasks int,
+) (bool, error) {
+	return r.setFinalizing(ctx, tenantID, id, attempt, expectedSubtasks, true)
+}
+
+func (r *knowledgeRepository) setFinalizing(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+	expectedSubtasks int,
+	useAttempt bool,
+) (bool, error) {
 	if expectedSubtasks < 0 {
 		expectedSubtasks = 0
 	}
 	now := time.Now()
-	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("id = ? AND parse_status = ?", id, types.ParseStatusProcessing).
+	q := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ? AND parse_status = ?", id, types.ParseStatusProcessing)
+	if useAttempt {
+		q = q.Where("tenant_id = ? AND current_process_attempt = ?", tenantID, attempt)
+	}
+	res := q.
 		Updates(map[string]interface{}{
 			"parse_status":           types.ParseStatusFinalizing,
 			"pending_subtasks_count": expectedSubtasks,

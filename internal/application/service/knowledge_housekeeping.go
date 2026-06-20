@@ -174,23 +174,32 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	stuck, queueSkipped := h.filterOutQueued(ctx, stuck)
 
 	if len(stuck) > 0 {
-		stuckIDs := make([]string, 0, len(stuck))
+		recovered := int64(0)
 		for _, k := range stuck {
-			stuckIDs = append(stuckIDs, k.ID)
+			if k.CurrentProcessAttempt <= 0 {
+				logger.Warnf(ctx, "[Housekeeping] skip stale knowledge %s: missing current_process_attempt", k.ID)
+				continue
+			}
+			res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+				Where("tenant_id = ? AND id = ? AND current_process_attempt = ?",
+					k.TenantID, k.ID, k.CurrentProcessAttempt).
+				Where("parse_status IN ? AND updated_at < ?",
+					[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}, cutoff).
+				Updates(map[string]interface{}{
+					"parse_status":           types.ParseStatusFailed,
+					"error_message":          "orphaned processing/finalizing task recovered by housekeeping after " + threshold.String() + " with no queued dependencies",
+					"pending_subtasks_count": 0,
+					"updated_at":             time.Now(),
+				})
+			if res.Error != nil {
+				logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed for %s: %v", k.ID, res.Error)
+				continue
+			}
+			recovered += res.RowsAffected
 		}
-		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
-			Where("id IN ? AND parse_status IN ?", stuckIDs,
-				[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}).
-			Updates(map[string]interface{}{
-				"parse_status":           types.ParseStatusFailed,
-				"error_message":          "orphaned processing/finalizing task recovered by housekeeping after " + threshold.String() + " with no queued dependencies",
-				"pending_subtasks_count": 0,
-			})
-		if res.Error != nil {
-			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed: %v", res.Error)
-		} else if res.RowsAffected > 0 {
+		if recovered > 0 {
 			logger.Infof(ctx, "[Housekeeping] recovered %d stuck knowledge rows (threshold=%s)",
-				res.RowsAffected, threshold)
+				recovered, threshold)
 		}
 	}
 	if spanSkipped > 0 {

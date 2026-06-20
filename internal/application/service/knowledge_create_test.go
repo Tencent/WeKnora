@@ -39,6 +39,26 @@ func (r *createKnowledgeFileRepoStub) CreateKnowledge(ctx context.Context, knowl
 	return r.createErr
 }
 
+func (r *createKnowledgeFileRepoStub) BeginKnowledgeAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	expectedAttempt int64,
+	mode types.AttemptBeginMode,
+) (int64, error) {
+	return expectedAttempt + 1, nil
+}
+
+func (r *createKnowledgeFileRepoStub) MarkKnowledgeFailedIfAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	attempt int64,
+	reason string,
+) (bool, error) {
+	return true, nil
+}
+
 type createKnowledgeFileKBServiceStub struct {
 	interfaces.KnowledgeBaseService
 

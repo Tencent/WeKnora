@@ -57,6 +57,9 @@ type SpanTracker interface {
 	// nextAttempt) and returns its number plus the root *Span. Call
 	// at the start of a parse / reparse, before any other Begin*.
 	OpenAttempt(ctx context.Context, knowledgeID, langfuseTraceID string) (root *Span, attempt int, err error)
+	// OpenAttemptN opens a root span for a process attempt already allocated
+	// by the durable Knowledge CAS owner. It must be used by business paths.
+	OpenAttemptN(ctx context.Context, knowledgeID, langfuseTraceID string, attempt int) (root *Span, err error)
 
 	// LatestAttempt returns the highest attempt number recorded for
 	// the knowledge, or 0 if it's never been parsed. Used by the API
@@ -221,6 +224,14 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 	if err != nil {
 		return nil, 0, err
 	}
+	root, err := t.OpenAttemptN(ctx, knowledgeID, langfuseTraceID, attempt)
+	return root, attempt, err
+}
+
+func (t *spanTracker) OpenAttemptN(ctx context.Context, knowledgeID, langfuseTraceID string, attempt int) (*Span, error) {
+	if attempt <= 0 {
+		return nil, nil
+	}
 	now := time.Now()
 	rootID := newSpanID()
 	meta := types.JSONMap{}
@@ -240,7 +251,7 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 	}
 	if err := t.repo.Upsert(ctx, row); err != nil {
 		logger.Warnf(ctx, "[SpanTracker] OpenAttempt failed kid=%s: %v", knowledgeID, err)
-		return nil, attempt, err
+		return nil, err
 	}
 	t.recordStart(rootID, now)
 	t.touchKnowledgeHeartbeat(ctx, knowledgeID, types.SpanKindRoot)
@@ -251,7 +262,7 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 		Name:        "knowledge_processing",
 		Kind:        types.SpanKindRoot,
 		StartedAt:   now,
-	}, attempt, nil
+	}, nil
 }
 
 func (t *spanTracker) LatestAttempt(ctx context.Context, knowledgeID string) int {
@@ -821,6 +832,9 @@ type noopSpanTracker struct{}
 
 func (noopSpanTracker) OpenAttempt(_ context.Context, _, _ string) (*Span, int, error) {
 	return nil, 0, nil
+}
+func (noopSpanTracker) OpenAttemptN(_ context.Context, _, _ string, _ int) (*Span, error) {
+	return nil, nil
 }
 func (noopSpanTracker) LatestAttempt(_ context.Context, _ string) int { return 0 }
 func (noopSpanTracker) BeginStage(_ context.Context, _ string, _ int, _ string, _ types.JSONMap) *Span {

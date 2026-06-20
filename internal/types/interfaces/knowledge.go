@@ -216,6 +216,13 @@ type KnowledgeRepository interface {
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
+	BeginKnowledgeAttempt(ctx context.Context, tenantID uint64, id string, expectedAttempt int64, mode types.AttemptBeginMode) (int64, error)
+	MarkKnowledgeProcessingIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64) (bool, error)
+	MarkKnowledgeFailedIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64, reason string) (bool, error)
+	MarkKnowledgeCanceledIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64, reason string) (bool, error)
+	UpdateKnowledgeColumnsIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64, values map[string]interface{}) (bool, error)
+	FinalizeSubtaskIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64) (int, bool, error)
+	SetFinalizingIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64, expectedSubtasks int) (bool, error)
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
 	DeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)

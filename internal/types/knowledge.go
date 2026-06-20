@@ -133,6 +133,9 @@ type Knowledge struct {
 	// (summary + question + graph chunks). Only meaningful while
 	// ParseStatus == "finalizing"; defaults to 0 in any terminal state.
 	PendingSubtasksCount int `json:"pending_subtasks_count" gorm:"type:int;not null;default:0"`
+	// CurrentProcessAttempt is the durable execution ownership epoch for
+	// parsing/reparse attempts. It is advanced only by repository CAS helpers.
+	CurrentProcessAttempt int64 `json:"current_process_attempt" gorm:"not null;default:0"`
 	// Summary status for async summary generation
 	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none"`
 	// Enable status of the knowledge
@@ -168,6 +171,13 @@ type Knowledge struct {
 	// Knowledge base name (not stored in database, populated on query)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
 }
+
+type AttemptBeginMode string
+
+const (
+	AttemptBeginInitial AttemptBeginMode = "initial"
+	AttemptBeginReparse AttemptBeginMode = "reparse"
+)
 
 // GetMetadata returns the metadata as a map[string]string.
 func (k *Knowledge) GetMetadata() map[string]string {

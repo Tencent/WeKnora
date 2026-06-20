@@ -57,6 +57,30 @@ func (s *KnowledgePostProcessService) tracker() SpanTracker {
 	return s.spanTracker
 }
 
+func markPostprocessJobCanceled(
+	ctx context.Context,
+	repo interfaces.TaskJobRepository,
+	tenantID uint64,
+	knowledgeID string,
+	attempt int,
+	reason string,
+) {
+	if repo == nil || attempt <= 0 || knowledgeID == "" {
+		return
+	}
+	_, _ = repo.MarkJobCanceledIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+		JobID:          rootJobIDFromCtx(ctx),
+		TenantID:       tenantID,
+		Scope:          types.TaskScopeKnowledge,
+		ScopeID:        knowledgeID,
+		ProcessAttempt: attempt,
+	}, interfaces.TaskLedgerFailure{
+		ErrorClass:     types.TaskErrorClassCanceled,
+		LastError:      reason,
+		FailedTaskType: types.TypeKnowledgePostProcess,
+	}, time.Now())
+}
+
 // Handle implements asynq handler for TypeKnowledgePostProcess.
 func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Task) error {
 	var payload types.KnowledgePostProcessPayload
@@ -67,16 +91,15 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	logger.Infof(ctx, "[KnowledgePostProcess] Orchestrating post processing for knowledge: %s", payload.KnowledgeID)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = withRootJobID(ctx, payload.JobID)
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
-	// Resolve attempt: payload carries it from the upstream stage, but
-	// fall back to the latest known attempt for compatibility with
-	// in-flight tasks queued before this code shipped.
 	attempt := payload.Attempt
 	if attempt <= 0 {
-		attempt = s.tracker().LatestAttempt(ctx, payload.KnowledgeID)
+		logger.Warnf(ctx, "[KnowledgePostProcess] Missing attempt for knowledge %s, aborting.", payload.KnowledgeID)
+		return nil
 	}
 
 	// Close the multimodal stage span (parent enqueued it as "running"
@@ -101,6 +124,13 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	}
 	if knowledge == nil {
 		logger.Warnf(ctx, "[KnowledgePostProcess] Knowledge %s not found, aborting.", payload.KnowledgeID)
+		return nil
+	}
+	if knowledge.CurrentProcessAttempt != int64(attempt) {
+		logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s attempt=%d superseded by current=%d, aborting.",
+			payload.KnowledgeID, attempt, knowledge.CurrentProcessAttempt)
+		markPostprocessJobCanceled(ctx, s.taskJobRepo, payload.TenantID, payload.KnowledgeID, attempt,
+			"task superseded by a newer attempt")
 		return nil
 	}
 
@@ -237,18 +267,25 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		if len(textChunks) > 0 {
 			updates["summary_status"] = types.SummaryStatusNone
 		}
-		if err := s.knowledgeRepo.UpdateKnowledgeColumns(ctx, payload.KnowledgeID, updates); err != nil {
+		changed, err := s.knowledgeRepo.UpdateKnowledgeColumnsIfAttempt(
+			ctx, payload.TenantID, payload.KnowledgeID, int64(attempt), updates)
+		if err != nil {
 			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to mark %s completed (no subtasks): %v",
 				payload.KnowledgeID, err)
-		} else {
+		} else if changed {
 			logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s marked completed (no enrichment subtasks).",
 				payload.KnowledgeID)
-			markDocumentJobSucceeded(ctx, s.taskJobRepo, payload.TenantID, payload.KnowledgeID, attempt)
+			markDocumentJobSucceededWithJobID(ctx, s.taskJobRepo, payload.TenantID, payload.KnowledgeID, attempt, payload.JobID)
+		} else {
+			logger.Infof(ctx, "[KnowledgePostProcess] Complete skipped for superseded knowledge %s attempt=%d",
+				payload.KnowledgeID, attempt)
+			return nil
 		}
 	default:
 		// Flip processing → finalizing in one statement so a parallel
 		// cancel/delete cannot race us into completed.
-		promoted, err := s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expectedSubtasks)
+		promoted, err := s.knowledgeRepo.SetFinalizingIfAttempt(
+			ctx, payload.TenantID, payload.KnowledgeID, int64(attempt), expectedSubtasks)
 		if err != nil {
 			logger.Warnf(ctx, "[KnowledgePostProcess] SetFinalizing failed for %s: %v",
 				payload.KnowledgeID, err)
@@ -257,6 +294,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			enteredFinalizing = true
 			if s.taskJobRepo != nil {
 				_, _ = s.taskJobRepo.MarkJobFinalizingIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+					JobID:          payload.JobID,
 					TenantID:       payload.TenantID,
 					Scope:          types.TaskScopeKnowledge,
 					ScopeID:        payload.KnowledgeID,
@@ -269,8 +307,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			if willSpawnSummary {
 				summaryStatus = types.SummaryStatusPending
 			}
-			if err := s.knowledgeRepo.UpdateKnowledgeColumn(ctx,
-				payload.KnowledgeID, "summary_status", summaryStatus); err != nil {
+			if _, err := s.knowledgeRepo.UpdateKnowledgeColumnsIfAttempt(ctx,
+				payload.TenantID, payload.KnowledgeID, int64(attempt), map[string]interface{}{
+					"summary_status": summaryStatus,
+					"updated_at":     time.Now(),
+				}); err != nil {
 				logger.Warnf(ctx, "[KnowledgePostProcess] Failed to update summary_status for %s: %v",
 					payload.KnowledgeID, err)
 			}
@@ -392,7 +433,8 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			for i := 0; i < shortfall; i++ {
 				rctx, cancel := context.WithTimeout(
 					context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
-				_, _, err := s.knowledgeRepo.FinalizeSubtask(rctx, payload.KnowledgeID)
+				_, _, err := s.knowledgeRepo.FinalizeSubtaskIfAttempt(
+					rctx, payload.TenantID, payload.KnowledgeID, int64(attempt))
 				cancel()
 				if err != nil {
 					logger.Warnf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",

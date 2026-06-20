@@ -156,6 +156,7 @@ func (s *knowledgeService) tracker() SpanTracker {
 // KnowledgePostProcess so every nested tracker call within the same task
 // can locate the right attempt without threading it through signatures.
 type attemptCtxKey struct{}
+type rootJobIDCtxKey struct{}
 
 // withAttempt returns a child ctx tagged with the given attempt number.
 // Pass through every call site that may invoke the tracker.
@@ -176,6 +177,20 @@ func attemptFromCtx(ctx context.Context) int {
 	return 0
 }
 
+func withRootJobID(ctx context.Context, jobID string) context.Context {
+	if jobID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, rootJobIDCtxKey{}, jobID)
+}
+
+func rootJobIDFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(rootJobIDCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // attemptSuperseded reports whether a newer parse attempt has started for the
 // knowledge since this enrichment subtask was enqueued. Stale subtasks from a
 // previous upload/edit/reparse that is still draining must NOT touch the new
@@ -183,11 +198,18 @@ func attemptFromCtx(ctx context.Context) int {
 // race-promote the row to completed before the new attempt finishes. An attempt
 // of 0 predates attempt tracking (or tracking is disabled) and is never treated
 // as superseded.
-func attemptSuperseded(ctx context.Context, tracker SpanTracker, knowledgeID string, attempt int) bool {
+func attemptSuperseded(ctx context.Context, repo interfaces.KnowledgeRepository, tenantID uint64, knowledgeID string, attempt int) bool {
 	if attempt <= 0 || knowledgeID == "" {
 		return false
 	}
-	return tracker.LatestAttempt(ctx, knowledgeID) > attempt
+	if repo == nil || tenantID == 0 {
+		return false
+	}
+	knowledge, err := repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil || knowledge == nil {
+		return false
+	}
+	return knowledge.CurrentProcessAttempt > int64(attempt)
 }
 
 // finalizeSubtaskDetachedTimeout bounds the detached decrement so a wedged DB
@@ -232,7 +254,7 @@ func finalizeSubtaskDetached(
 	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
-	if _, promoted, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
+	if _, promoted, err := repo.FinalizeSubtaskIfAttempt(dctx, tenantID, knowledgeID, int64(attempt)); err != nil {
 		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
 			source, knowledgeID, err)
 	} else if promoted {

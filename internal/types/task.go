@@ -4,9 +4,9 @@ package types
 // router.NewAsynqServer — a task enqueued to a queue that the server does not
 // list will never be consumed.
 const (
-	QueueCritical   = "critical"
-	QueueDefault    = "default"
-	QueueLow        = "low"
+	QueueCritical = "critical"
+	QueueDefault  = "default"
+	QueueLow      = "low"
 	// QueueMultimodal isolates high-volume, slow VLM image tasks (OCR + caption)
 	// so a single large scanned PDF (hundreds–thousands of page images) cannot
 	// saturate the shared worker pool and block user-facing document parsing in
@@ -84,6 +84,9 @@ type DocumentProcessPayload struct {
 	// retried spans overwrite the previous attempt's row rather than
 	// fan out into a new attempt for every retry.
 	Attempt int `json:"attempt,omitempty"`
+	// JobID is the task center root job id. When present, status callbacks
+	// update this exact root job instead of relying only on scope+attempt.
+	JobID string `json:"job_id,omitempty"`
 }
 
 // FAQImportPayload represents the FAQ import task payload (including dry run mode)
@@ -238,6 +241,7 @@ type ManualProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	Attempt         int    `json:"attempt,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.
@@ -257,6 +261,8 @@ type ImageMultimodalPayload struct {
 	// attempt so the worker can record its image[i] subspan under the
 	// same attempt's multimodal stage span.
 	Attempt int `json:"attempt,omitempty"`
+	// JobID is the parent task center root job id.
+	JobID string `json:"job_id,omitempty"`
 	// ImageIndex is the 0-based ordinal of this image inside the
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
@@ -271,6 +277,7 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
 	Attempt         int    `json:"attempt,omitempty"`
+	JobID           string `json:"job_id,omitempty"`
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

@@ -781,7 +781,7 @@ func (s *wikiIngestService) mapOneDocument(
 	// summary + classification) shows up in the trace tree. Returns
 	// nil when the parent attempt is gone (no panic on missing
 	// lookups — span tracker is best-effort).
-	wikiSpan := s.beginWikiSubspan(ctx, knowledgeID, types.JSONMap{
+	wikiSpan := s.beginWikiSubspan(ctx, knowledgeID, op.Attempt, types.JSONMap{
 		"language":          lang,
 		"knowledge_base_id": payload.KnowledgeBaseID,
 	})

@@ -254,14 +254,19 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		QuestionCount:            questionCount,
 		Language:                 lang,
 	}
+	attempt, err := s.beginKnowledgeAttempt(ctx, knowledge, types.AttemptBeginInitial)
+	if err != nil {
+		return nil, err
+	}
+	taskPayload.Attempt = attempt
 
 	info, err := s.dispatchDocumentRootTask(ctx, knowledge, taskPayload, types.TaskJobKindUpload, "object_storage",
 		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
-		// 即使入队失败，也返回knowledge，因为文件已保存
-		return knowledge, nil
+		s.compensateAttemptFailed(ctx, knowledge, attempt, err)
+		return nil, err
 	}
 	logger.Infof(
 		ctx,
@@ -420,13 +425,19 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		QuestionCount:            questionCount,
 		Language:                 lang,
 	}
+	attempt, err := s.beginKnowledgeAttempt(ctx, knowledge, types.AttemptBeginInitial)
+	if err != nil {
+		return nil, err
+	}
+	taskPayload.Attempt = attempt
 
 	info, err := s.dispatchDocumentRootTask(ctx, knowledge, taskPayload, types.TaskJobKindUpload, "url",
 		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
-		return knowledge, nil
+		s.compensateAttemptFailed(ctx, knowledge, attempt, err)
+		return nil, err
 	}
 	logger.Infof(ctx, "Enqueued URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
 
@@ -644,13 +655,19 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		QuestionCount:            questionCount,
 		Language:                 lang,
 	}
+	attempt, err := s.beginKnowledgeAttempt(ctx, knowledge, types.AttemptBeginInitial)
+	if err != nil {
+		return nil, err
+	}
+	taskPayload.Attempt = attempt
 
 	info, err := s.dispatchDocumentRootTask(ctx, knowledge, taskPayload, types.TaskJobKindUpload, "file_url",
 		documentProcessTaskOptions(s.config)...,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
-		return knowledge, nil
+		s.compensateAttemptFailed(ctx, knowledge, attempt, err)
+		return nil, err
 	}
 	logger.Infof(ctx, "Enqueued file URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
 
@@ -763,12 +780,14 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 
 	if status == types.ManualKnowledgeStatusPublish {
 		logger.Infof(ctx, "Manual knowledge created, enqueuing async processing task, ID: %s", knowledge.ID)
-		if err := s.enqueueManualProcessing(ctx, knowledge, cleanContent, false); err != nil {
+		attempt, err := s.beginKnowledgeAttempt(ctx, knowledge, types.AttemptBeginInitial)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.enqueueManualProcessing(ctx, knowledge, cleanContent, false, attempt); err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual processing task for new knowledge: %v", err)
-			// Non-fatal: mark as failed so user can retry
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "Failed to enqueue processing task"
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.compensateAttemptFailed(ctx, knowledge, attempt, err)
+			return nil, err
 		}
 	}
 
@@ -835,6 +854,11 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 	// Process passages
 	if syncMode {
 		logger.Info(ctx, "Processing passage synchronously")
+		attempt, err := s.beginKnowledgeAttempt(ctx, knowledge, types.AttemptBeginInitial)
+		if err != nil {
+			return nil, err
+		}
+		ctx = withAttempt(ctx, attempt)
 		s.processDocumentFromPassage(ctx, kb, knowledge, safePassages)
 		logger.Infof(ctx, "Knowledge from passage created successfully (sync), ID: %s", knowledge.ID)
 	} else {
@@ -863,13 +887,19 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			QuestionCount:            questionCount,
 			Language:                 lang,
 		}
+		attempt, err := s.beginKnowledgeAttempt(ctx, knowledge, types.AttemptBeginInitial)
+		if err != nil {
+			return nil, err
+		}
+		taskPayload.Attempt = attempt
 
 		info, err := s.dispatchDocumentRootTask(ctx, knowledge, taskPayload, types.TaskJobKindUpload, "knowledge_text",
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
 		)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
-			return knowledge, nil
+			s.compensateAttemptFailed(ctx, knowledge, attempt, err)
+			return nil, err
 		}
 		logger.Infof(ctx, "Enqueued passage process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
 		logger.Infof(ctx, "Knowledge from passage created successfully, ID: %s", knowledge.ID)
@@ -964,7 +994,6 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	}
 
 	// Publish: persist pending status and enqueue async task for cleanup + re-indexing
-	existing.ParseStatus = "pending"
 	existing.Description = ""
 	existing.ProcessedAt = nil
 
@@ -972,18 +1001,25 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return nil, err
 	}
 
+	mode := types.AttemptBeginReparse
+	if existing.CurrentProcessAttempt == 0 {
+		mode = types.AttemptBeginInitial
+	}
+	attempt, err := s.beginKnowledgeAttempt(ctx, existing, mode)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to persist manual knowledge before indexing: %v", err)
+		s.compensateAttemptFailed(ctx, existing, attempt, err)
 		return nil, err
 	}
 
 	logger.Infof(ctx, "Manual knowledge updated, enqueuing async processing task, ID: %s", existing.ID)
-	if err := s.enqueueManualProcessing(ctx, existing, cleanContent, true); err != nil {
+	if err := s.enqueueManualProcessing(ctx, existing, cleanContent, true, attempt); err != nil {
 		logger.Errorf(ctx, "Failed to enqueue manual processing task: %v", err)
-		// Non-fatal: mark as failed so user can retry
-		existing.ParseStatus = "failed"
-		existing.ErrorMessage = "Failed to enqueue processing task"
-		s.repo.UpdateKnowledge(ctx, existing)
+		s.compensateAttemptFailed(ctx, existing, attempt, err)
 		return nil, werrors.NewInternalServerError("Failed to submit processing task")
 	}
 	return existing, nil
@@ -991,8 +1027,11 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 
 // enqueueManualProcessing enqueues a manual:process Asynq task for async cleanup + re-indexing.
 func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
-	knowledge *types.Knowledge, content string, needCleanup bool,
+	knowledge *types.Knowledge, content string, needCleanup bool, attempt int,
 ) error {
+	if attempt <= 0 {
+		return fmt.Errorf("manual process missing attempt for knowledge %s", knowledge.ID)
+	}
 	requestID, _ := types.RequestIDFromContext(ctx)
 	payload := types.ManualProcessPayload{
 		RequestId:       requestID,
@@ -1001,6 +1040,7 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
 		Content:         content,
 		NeedCleanup:     needCleanup,
+		Attempt:         attempt,
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)

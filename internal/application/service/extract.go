@@ -214,7 +214,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	// skip before opening the span or registering the FinalizeSubtask defer.
 	// The chunk this task references was deleted by the new attempt's cleanup,
 	// and decrementing here would drain the new attempt's counter.
-	if attemptSuperseded(ctx, s.tracker(), p.KnowledgeID, p.Attempt) {
+	if attemptSuperseded(ctx, s.knowledgeRepo, p.TenantID, p.KnowledgeID, p.Attempt) {
 		logger.Infof(ctx, "graph extract: attempt %d superseded for %s, skipping stale enrichment",
 			p.Attempt, p.KnowledgeID)
 		return nil

@@ -349,6 +349,9 @@ func TestWikiIngestFinalizeSkipsSupersededAttemptWithCanceledContext(t *testing.
 	require.NoError(t, err)
 	require.Equal(t, 1, attempt1)
 	require.Equal(t, 2, attempt2)
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET current_process_attempt = ? WHERE id = ?`, attempt2, knowledgeID,
+	).Error)
 
 	service := &wikiIngestService{
 		knowledgeRepo: repository.NewKnowledgeRepository(db),
@@ -388,6 +391,9 @@ func TestWikiIngestFailureSkipsSupersededAttempt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, attempt1)
 	require.Equal(t, 2, attempt2)
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET current_process_attempt = ? WHERE id = ?`, attempt2, knowledgeID,
+	).Error)
 
 	service := &wikiIngestService{
 		knowledgeRepo: repository.NewKnowledgeRepository(db),

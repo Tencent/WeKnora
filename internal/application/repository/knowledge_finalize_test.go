@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     description TEXT,
     source VARCHAR(2048) NOT NULL DEFAULT '',
     parse_status VARCHAR(50) NOT NULL DEFAULT 'unprocessed',
+    current_process_attempt INTEGER NOT NULL DEFAULT 0,
     enable_status VARCHAR(50) NOT NULL DEFAULT 'enabled',
     embedding_model_id VARCHAR(64),
     file_name VARCHAR(255),
@@ -115,6 +116,16 @@ func insertKnowledgeForKBWithStatus(t *testing.T, db *gorm.DB, tenantID uint64, 
 	return id
 }
 
+func insertKnowledgeWithAttempt(t *testing.T, db *gorm.DB, status string, attempt int64, pending int) string {
+	t.Helper()
+	id := uuid.New().String()
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, parse_status, current_process_attempt, pending_subtasks_count)
+		VALUES (?, 1, ?, 'document', 'attempt-test', 'manual', ?, ?, ?)
+	`, id, uuid.New().String(), status, attempt, pending).Error)
+	return id
+}
+
 // TestFinalizeSubtask_Concurrent_ExactlyOnePromote spawns N goroutines that
 // each call FinalizeSubtask after SetFinalizing(N), and asserts:
 //   - the counter ends at zero,
@@ -160,6 +171,88 @@ func TestFinalizeSubtask_Concurrent_ExactlyOnePromote(t *testing.T) {
 	status, count := reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	assert.Equal(t, 0, count)
+}
+
+func TestBeginKnowledgeAttemptConcurrentCAS(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	id := insertKnowledgeWithAttempt(t, db, types.ParseStatusCompleted, 3, 0)
+
+	const workers = 8
+	var success atomic.Int64
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			next, err := repo.BeginKnowledgeAttempt(ctx, 1, id, 3, types.AttemptBeginReparse)
+			if err == nil {
+				assert.Equal(t, int64(4), next)
+				success.Add(1)
+			} else {
+				assert.ErrorIs(t, err, ErrAttemptSuperseded)
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, int64(1), success.Load(), "only one caller can advance the durable attempt")
+
+	var attempt int64
+	var status string
+	require.NoError(t, db.Raw(`SELECT current_process_attempt, parse_status FROM knowledges WHERE id = ?`, id).
+		Row().Scan(&attempt, &status))
+	assert.Equal(t, int64(4), attempt)
+	assert.Equal(t, types.ParseStatusPending, status)
+}
+
+func TestUpdateKnowledgeDoesNotOverwriteCurrentProcessAttempt(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	id := insertKnowledgeWithAttempt(t, db, types.ParseStatusCompleted, 7, 0)
+
+	knowledge, err := repo.GetKnowledgeByID(ctx, 1, id)
+	require.NoError(t, err)
+	knowledge.CurrentProcessAttempt = 1
+	knowledge.Title = "saved-with-stale-attempt"
+	require.NoError(t, repo.UpdateKnowledge(ctx, knowledge))
+
+	var attempt int64
+	var title string
+	require.NoError(t, db.Raw(`SELECT current_process_attempt, title FROM knowledges WHERE id = ?`, id).
+		Row().Scan(&attempt, &title))
+	assert.Equal(t, int64(7), attempt)
+	assert.Equal(t, "saved-with-stale-attempt", title)
+}
+
+func TestAttemptCASBlocksLateFinalizeAndFailure(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	id := insertKnowledgeWithAttempt(t, db, types.ParseStatusFinalizing, 2, 1)
+
+	count, promoted, err := repo.FinalizeSubtaskIfAttempt(ctx, 1, id, 1)
+	require.NoError(t, err)
+	assert.False(t, promoted)
+	assert.Zero(t, count)
+
+	changed, err := repo.MarkKnowledgeFailedIfAttempt(ctx, 1, id, 1, "late failure")
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	changed, err = repo.MarkKnowledgeCanceledIfAttempt(ctx, 1, id, 1, "late cancel")
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	var status string
+	var pending int
+	var errMsg *string
+	require.NoError(t, db.Raw(`SELECT parse_status, pending_subtasks_count, error_message FROM knowledges WHERE id = ?`, id).
+		Row().Scan(&status, &pending, &errMsg))
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, pending)
+	assert.Nil(t, errMsg)
 }
 
 // TestFinalizeSubtask_PartialDecrement_StaysFinalizing verifies the row

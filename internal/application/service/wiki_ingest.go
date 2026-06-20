@@ -211,11 +211,9 @@ type wikiIngestService struct {
 	taskJobRepo    interfaces.TaskJobRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
-	// postprocess.wiki subspan in the knowledge trace tree. Async
-	// batch design means we look up the parent attempt by knowledge
-	// id at run-time (LatestAttempt) rather than carrying it in the
-	// asynq payload, which is per-KB and would otherwise be ambiguous
-	// for the 5-docs-per-batch fan-out.
+	// postprocess.wiki subspan in the knowledge trace tree. The per-document
+	// attempt is carried by task_pending_ops; the KB-level trigger never
+	// chooses an attempt.
 	spanTracker SpanTracker
 	// liteLocks provides per-KB mutual exclusion in Lite mode (no Redis).
 	// Keys are kbID strings; values are unused (presence = locked).
@@ -267,20 +265,9 @@ func (s *wikiIngestService) tracker() SpanTracker {
 }
 
 // beginWikiSubspan opens a postprocess.wiki subspan for this document
-// under the knowledge's most recent attempt. Returns nil when there is
-// no parse attempt to attach to (e.g. a wiki ingest fired from a manual
-// reparse path that never went through the tracker) — callers must
-// pair every begin with a tolerant end / fail / skip below.
-//
-// Lookups are by `LatestAttempt(knowledgeID)` because the asynq task
-// payload (WikiIngestPayload) is KB-scoped and carries no per-doc
-// attempt — see the type's comment for the batch architecture.
-func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID string, input types.JSONMap) *Span {
-	if knowledgeID == "" {
-		return nil
-	}
-	attempt := s.tracker().LatestAttempt(ctx, knowledgeID)
-	if attempt <= 0 {
+// under the persisted per-document attempt carried by task_pending_ops.
+func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID string, attempt int, input types.JSONMap) *Span {
+	if knowledgeID == "" || attempt <= 0 {
 		return nil
 	}
 	parent := s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StagePostProcess)
@@ -313,6 +300,10 @@ func EnqueueWikiIngest(
 ) {
 	lang, _ := types.LanguageFromContext(ctx)
 	attempt := attemptFromCtx(ctx)
+	if attempt <= 0 {
+		logger.Warnf(ctx, "wiki ingest: skip enqueue without attempt for knowledge=%s kb=%s", knowledgeID, kbID)
+		return
+	}
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
@@ -550,10 +541,7 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, op WikiPend
 		tenantID, _ = types.TenantIDFromContext(dctx)
 	}
 	attempt := op.Attempt
-	superseded := attemptSuperseded(dctx, s.tracker(), op.KnowledgeID, attempt)
-	if attempt <= 0 {
-		attempt = s.tracker().LatestAttempt(dctx, op.KnowledgeID)
-	}
+	superseded := attemptSuperseded(dctx, s.knowledgeRepo, op.TenantID, op.KnowledgeID, attempt)
 	finalizeSubtaskDetached(dctx, s.knowledgeRepo, s.taskJobRepo, tenantID, op.KnowledgeID, "wiki", attempt, nil, superseded, true)
 }
 
@@ -631,12 +619,17 @@ func (s *wikiIngestService) failWikiSubtask(ctx context.Context, op WikiPendingO
 	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
-	if attemptSuperseded(dctx, s.tracker(), op.KnowledgeID, op.Attempt) {
+	if attemptSuperseded(dctx, s.knowledgeRepo, op.TenantID, op.KnowledgeID, op.Attempt) {
 		logger.Infof(ctx, "wiki ingest: skipped terminal failure for superseded attempt knowledge=%s attempt=%d",
 			op.KnowledgeID, op.Attempt)
 		return
 	}
-	changed, err := s.knowledgeRepo.MarkFinalizingKnowledgeFailed(dctx, op.KnowledgeID, truncateWikiFailureReason(reason))
+	tenantID := op.TenantID
+	if tenantID == 0 {
+		tenantID, _ = types.TenantIDFromContext(ctx)
+	}
+	changed, err := s.knowledgeRepo.MarkKnowledgeFailedIfAttempt(
+		dctx, tenantID, op.KnowledgeID, int64(op.Attempt), truncateWikiFailureReason(reason))
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to mark knowledge %s as failed after wiki failure: %v", op.KnowledgeID, err)
 		return
@@ -644,14 +637,7 @@ func (s *wikiIngestService) failWikiSubtask(ctx context.Context, op WikiPendingO
 	if !changed {
 		return
 	}
-	tenantID := op.TenantID
-	if tenantID == 0 {
-		tenantID, _ = types.TenantIDFromContext(ctx)
-	}
 	attempt := op.Attempt
-	if attempt <= 0 {
-		attempt = s.tracker().LatestAttempt(ctx, op.KnowledgeID)
-	}
 	if s.taskJobRepo != nil && tenantID > 0 && attempt > 0 {
 		if _, err := s.taskJobRepo.MarkJobFailedIfCurrentAttempt(dctx, interfaces.TaskJobAttemptSelector{
 			TenantID:       tenantID,

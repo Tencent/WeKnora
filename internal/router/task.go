@@ -241,6 +241,8 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 // depend on the full payload schema and survive future field churn.
 type deadLetterKnowledgePayload struct {
 	KnowledgeID string `json:"knowledge_id,omitempty"`
+	TenantID    uint64 `json:"tenant_id,omitempty"`
+	JobID       string `json:"job_id,omitempty"`
 	// Attempt threads through DocumentProcess / ManualProcess /
 	// KnowledgePostProcess payloads (added when span tracking shipped)
 	// — extracted here so the dead-letter callback can also close the
@@ -316,39 +318,36 @@ func newDeadLetterKnowledgeFailer(
 		if len(errMsg) > 8192 {
 			errMsg = errMsg[:8192]
 		}
-		// Single UPDATE so we never end up with parse_status=failed but
-		// stale error_message (or vice versa) when the second write
-		// fails.
-		if err := repo.UpdateKnowledgeColumns(ctx, probe.KnowledgeID, map[string]interface{}{
-			"parse_status":  types.ParseStatusFailed,
-			"error_message": errMsg,
-		}); err != nil {
+		if probe.TenantID <= 0 || probe.Attempt <= 0 {
+			logger.Warnf(ctx, "dead-letter callback: skip knowledge failed write for %s task=%s without tenant/attempt",
+				probe.KnowledgeID, t.Type())
+			return
+		}
+		changed, err := repo.MarkKnowledgeFailedIfAttempt(ctx, probe.TenantID, probe.KnowledgeID, int64(probe.Attempt), errMsg)
+		if err != nil {
 			logger.Warnf(ctx, "dead-letter callback: failed to mark knowledge %s as failed: %v", probe.KnowledgeID, err)
 			return
 		}
-		if taskJobRepo != nil && probe.Attempt > 0 {
-			tenantID := uint64(0)
-			var tenantProbe struct {
-				TenantID uint64 `json:"tenant_id,omitempty"`
-			}
-			_ = json.Unmarshal(t.Payload(), &tenantProbe)
-			tenantID = tenantProbe.TenantID
-			if tenantID > 0 {
-				taskID, _ := asynq.GetTaskID(ctx)
-				_, err := taskJobRepo.MarkJobFailedIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
-					TenantID:       tenantID,
-					Scope:          types.TaskScopeKnowledge,
-					ScopeID:        probe.KnowledgeID,
-					ProcessAttempt: probe.Attempt,
-				}, interfaces.TaskLedgerFailure{
-					ErrorClass:     types.ClassifyTaskError(taskErr),
-					LastError:      errMsg,
-					FailedTaskType: t.Type(),
-					FailedTaskID:   taskID,
-				}, time.Now())
-				if err != nil {
-					observability.RecordTaskLedgerWriteFailure("dead_letter", "job_failed")
-				}
+		if !changed {
+			logger.Infof(ctx, "dead-letter callback: skipped failed write for superseded knowledge %s attempt=%d",
+				probe.KnowledgeID, probe.Attempt)
+		}
+		if taskJobRepo != nil {
+			taskID, _ := asynq.GetTaskID(ctx)
+			_, err := taskJobRepo.MarkJobFailedIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+				JobID:          probe.JobID,
+				TenantID:       probe.TenantID,
+				Scope:          types.TaskScopeKnowledge,
+				ScopeID:        probe.KnowledgeID,
+				ProcessAttempt: probe.Attempt,
+			}, interfaces.TaskLedgerFailure{
+				ErrorClass:     types.ClassifyTaskError(taskErr),
+				LastError:      errMsg,
+				FailedTaskType: t.Type(),
+				FailedTaskID:   taskID,
+			}, time.Now())
+			if err != nil {
+				observability.RecordTaskLedgerWriteFailure("dead_letter", "job_failed")
 			}
 		}
 		// Close the matching root span so the timeline stops showing

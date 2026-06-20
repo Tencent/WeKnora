@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
@@ -117,11 +118,17 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, passage []string,
 ) {
 	// Update status to processing
-	knowledge.ParseStatus = "processing"
-	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	attempt := attemptFromCtx(ctx)
+	if attempt <= 0 {
+		logger.Warnf(ctx, "processDocumentFromPassage: missing attempt for knowledge=%s", knowledge.ID)
 		return
 	}
+	changed, err := s.repo.MarkKnowledgeProcessingIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt))
+	if err != nil || !changed {
+		return
+	}
+	knowledge.ParseStatus = types.ParseStatusProcessing
+	knowledge.CurrentProcessAttempt = int64(attempt)
 
 	// Convert passages to chunks
 	chunks := make([]types.ParsedChunk, 0, len(passage))
@@ -149,6 +156,51 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		}
 	}
 	s.processChunks(ctx, kb, knowledge, chunks, opts)
+}
+
+func (s *knowledgeService) attemptOwnsKnowledge(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	attempt int,
+) bool {
+	if attempt <= 0 || knowledgeID == "" {
+		return false
+	}
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil || knowledge == nil {
+		if err != nil {
+			logger.Warnf(ctx, "attempt ownership check failed for %s attempt=%d: %v", knowledgeID, attempt, err)
+		}
+		return false
+	}
+	return knowledge.CurrentProcessAttempt == int64(attempt)
+}
+
+func (s *knowledgeService) markKnowledgeFailedForAttempt(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	reason string,
+) bool {
+	attempt := attemptFromCtx(ctx)
+	if attempt <= 0 || knowledge == nil {
+		return false
+	}
+	changed, err := s.repo.MarkKnowledgeFailedIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt), reason)
+	if err != nil {
+		logger.Warnf(ctx, "failed to mark knowledge %s failed for attempt=%d: %v", knowledge.ID, attempt, err)
+		return false
+	}
+	if !changed {
+		logger.Infof(ctx, "skip failed write for superseded knowledge %s attempt=%d", knowledge.ID, attempt)
+		return false
+	}
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = reason
+	knowledge.PendingSubtasksCount = 0
+	knowledge.SummaryStatus = types.SummaryStatusFailed
+	knowledge.UpdatedAt = time.Now()
+	return true
 }
 
 // ProcessChunksOptions contains options for processing chunks
@@ -254,10 +306,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
 ) {
+	attempt := attemptFromCtx(ctx)
+	if attempt <= 0 {
+		logger.Errorf(ctx, "processChunks: missing attempt for knowledge %s", knowledge.ID)
+		return
+	}
 	// Get options
 	var options ProcessChunksOptions
 	if len(opts) > 0 {
 		options = opts[0]
+	}
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+		logger.Infof(ctx, "processChunks: attempt %d no longer owns knowledge %s, skipping", attempt, knowledge.ID)
+		return
 	}
 
 	// Check if knowledge is being deleted/cancelled before processing.
@@ -283,6 +344,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+		logger.Infof(ctx, "processChunks: attempt %d superseded before cleanup for %s", attempt, knowledge.ID)
+		return
+	}
 
 	// 删除旧的chunks
 	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
@@ -489,10 +554,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		"chunks_planned": len(insertChunks),
 	})
 	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
-		knowledge.ParseStatus = types.ParseStatusFailed
-		knowledge.ErrorMessage = err.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, err.Error())
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return
@@ -549,18 +611,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			// Re-fetch tenant storage information
 			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
 			if err != nil {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.markKnowledgeFailedForAttempt(ctx, knowledge, err.Error())
 				return
 			}
 			// Check if there's enough storage quota available
 			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = "存储空间不足"
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.markKnowledgeFailedForAttempt(ctx, knowledge, "存储空间不足")
 				return
 			}
 		}
@@ -580,10 +636,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
 		if err != nil {
-			knowledge.ParseStatus = types.ParseStatusFailed
-			knowledge.ErrorMessage = err.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailedForAttempt(ctx, knowledge, err.Error())
 
 			// delete failed chunks
 			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
@@ -648,8 +701,21 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		now,
 	)
 
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	changed, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt), map[string]interface{}{
+		"parse_status":   knowledge.ParseStatus,
+		"summary_status": knowledge.SummaryStatus,
+		"enable_status":  knowledge.EnableStatus,
+		"storage_size":   knowledge.StorageSize,
+		"processed_at":   knowledge.ProcessedAt,
+		"updated_at":     knowledge.UpdatedAt,
+	})
+	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
+		return
+	}
+	if !changed {
+		logger.Infof(ctx, "processChunks: final state skipped for superseded knowledge %s attempt=%d", knowledge.ID, attempt)
+		return
 	}
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
@@ -670,6 +736,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
 			Language:        lang,
 			Attempt:         attemptFromCtx(ctx),
+			JobID:           rootJobIDFromCtx(ctx),
 		}
 		langfuse.InjectTracing(ctx, &postProcessPayload)
 		payloadBytes, err := json.Marshal(postProcessPayload)
@@ -904,15 +971,16 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
-	attemptForLedger := payload.Attempt
-	defer func() {
-		s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger)
-	}()
+	if payload.Attempt <= 0 {
+		logger.Warnf(ctx, "ProcessSummaryGeneration: missing attempt for knowledge=%s", payload.KnowledgeID)
+		return nil
+	}
+	ctx = withAttempt(ctx, payload.Attempt)
 
 	// A newer attempt (re-upload / edit / reparse) has superseded this one:
 	// skip before opening the span or registering the FinalizeSubtask defer
 	// so we neither read stale chunks nor decrement the new attempt's counter.
-	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
+	if attemptSuperseded(ctx, s.repo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
 		logger.Infof(ctx, "summary: attempt %d superseded for %s, skipping stale enrichment",
 			payload.Attempt, payload.KnowledgeID)
 		return nil
@@ -992,7 +1060,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// Update summary status to processing
 	knowledge.SummaryStatus = types.SummaryStatusProcessing
 	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
+		"summary_status": knowledge.SummaryStatus,
+		"updated_at":     knowledge.UpdatedAt,
+	}); err != nil {
 		logger.Warnf(ctx, "Failed to update summary status to processing: %v", err)
 	}
 
@@ -1000,7 +1071,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	markSummaryFailed := func() {
 		knowledge.SummaryStatus = types.SummaryStatusFailed
 		knowledge.UpdatedAt = time.Now()
-		if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
+			"summary_status": knowledge.SummaryStatus,
+			"updated_at":     knowledge.UpdatedAt,
+		}); err != nil {
 			logger.Warnf(ctx, "Failed to update summary status to failed: %v", err)
 		}
 	}
@@ -1028,7 +1102,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// Mark as completed since there's nothing to summarize
 		knowledge.SummaryStatus = types.SummaryStatusCompleted
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		_, _ = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
+			"summary_status": knowledge.SummaryStatus,
+			"updated_at":     knowledge.UpdatedAt,
+		})
 		summaryOut["skipped"] = "no_text_chunks"
 		return nil
 	}
@@ -1066,7 +1143,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			knowledge.Description = ""
 			knowledge.SummaryStatus = types.SummaryStatusFailed
 			knowledge.UpdatedAt = time.Now()
-			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+			if _, updateErr := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
+				"description":    knowledge.Description,
+				"summary_status": knowledge.SummaryStatus,
+				"updated_at":     knowledge.UpdatedAt,
+			}); updateErr != nil {
 				logger.Errorf(ctx, "Failed to mark summary as failed: %v", updateErr)
 				summaryErr = updateErr
 				return fmt.Errorf("failed to update knowledge: %w", updateErr)
@@ -1098,10 +1179,20 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// without hopping to the knowledge-detail page. Capped to keep
 	// span rows compact.
 	summaryOut["summary_preview"] = previewText(summary, 240)
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	updatedSummary, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
+		"description":    knowledge.Description,
+		"summary_status": knowledge.SummaryStatus,
+		"updated_at":     knowledge.UpdatedAt,
+	})
+	if err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge description: %v", err)
 		summaryErr = err
 		return fmt.Errorf("failed to update knowledge: %w", err)
+	}
+	if !updatedSummary {
+		logger.Infof(ctx, "Summary generation: attempt %d superseded before summary write for %s",
+			payload.Attempt, payload.KnowledgeID)
+		return nil
 	}
 
 	// Create summary chunk and index it — only when RAG indexing is enabled.
@@ -1335,7 +1426,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// A newer attempt has superseded this one: skip before opening the span
 	// so we don't read stale chunks. superseded suppresses the counter
 	// decrement in the defer above; qSpan stays nil so the stats defer no-ops.
-	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
+	if attemptSuperseded(ctx, s.repo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
 		superseded = true
 		exitStatus = "superseded"
 		logger.Infof(ctx, "question: attempt %d superseded for %s, skipping stale enrichment",
@@ -1669,7 +1760,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 	// A newer attempt has superseded this one: skip before opening the span
 	// so we don't read stale chunks and don't drain the new attempt.
-	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
+	if attemptSuperseded(ctx, s.repo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
 		superseded = true
 		exitStatus = "superseded"
 		logger.Infof(ctx, "question: attempt %d superseded for %s, skipping stale enrichment",
@@ -1969,19 +2060,6 @@ func (s *knowledgeService) ReparseKnowledge(
 		return nil, err
 	}
 
-	// Allocate a fresh span tree attempt up front. Doing this BEFORE
-	// the cleanup + enqueue means: (a) the UI immediately sees a new
-	// attempt with all five stages back to "pending" instead of the
-	// previous run's "failed" badge lingering; (b) the worker's
-	// fallback path won't double-allocate when payload.Attempt is
-	// already set on the queued task.
-	reparseAttempt := 0
-	if root, n, err := s.tracker().OpenAttempt(ctx, existing.ID, ""); err == nil && root != nil {
-		reparseAttempt = n
-	} else if err != nil {
-		logger.Warnf(ctx, "[Reparse] OpenAttempt failed for %s: %v (will fall back in worker)", existing.ID, err)
-	}
-
 	// Get knowledge base configuration
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
 	if err != nil {
@@ -2009,6 +2087,13 @@ func (s *knowledgeService) ReparseKnowledge(
 
 	processOverrides, _ = existing.ProcessOverrides()
 	reparseEff := ResolveProcessConfig(kb, processOverrides)
+	reparseAttempt, err := s.beginKnowledgeAttempt(ctx, existing, types.AttemptBeginReparse)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.tracker().OpenAttemptN(ctx, existing.ID, "", reparseAttempt); err != nil {
+		logger.Warnf(ctx, "[Reparse] OpenAttemptN failed for %s attempt=%d: %v", existing.ID, reparseAttempt, err)
+	}
 
 	// Keep wiki's pending queue consistent across both manual and non-manual
 	// paths. The destructive work (swapping old wiki contributions for new)
@@ -2025,10 +2110,14 @@ func (s *knowledgeService) ReparseKnowledge(
 		meta, metaErr := existing.ManualMetadata()
 		if metaErr != nil || meta == nil {
 			logger.Errorf(ctx, "Failed to get manual metadata for reparse: %v", metaErr)
+			reason := "manual metadata unavailable"
+			if metaErr != nil {
+				reason = fmt.Sprintf("manual metadata unavailable: %v", metaErr)
+			}
+			s.compensateAttemptFailed(ctx, existing, reparseAttempt, errors.New(reason))
 			return nil, werrors.NewBadRequestError("无法获取手工知识内容")
 		}
 
-		existing.ParseStatus = "pending"
 		existing.EnableStatus = "disabled"
 		existing.Description = ""
 		existing.ProcessedAt = nil
@@ -2043,18 +2132,14 @@ func (s *knowledgeService) ReparseKnowledge(
 
 		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 			logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
-			return nil, err
-		}
-		if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "pending_subtasks_count", 0); err != nil {
-			logger.Errorf(ctx, "Failed to reset pending_subtasks_count before reparse: %v", err)
+			s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
 			return nil, err
 		}
 
-		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, true); err != nil {
+		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, true, reparseAttempt); err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual reparse task: %v", err)
-			existing.ParseStatus = "failed"
-			existing.ErrorMessage = "Failed to enqueue processing task"
-			s.repo.UpdateKnowledge(ctx, existing)
+			s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
+			return nil, err
 		}
 		return existing, nil
 	}
@@ -2065,11 +2150,11 @@ func (s *knowledgeService) ReparseKnowledge(
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_id": knowledgeID,
 		})
+		s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
 		return nil, err
 	}
 
 	// Step 2: Update knowledge status and metadata
-	existing.ParseStatus = "pending"
 	existing.EnableStatus = "disabled"
 	existing.Description = ""
 	existing.ProcessedAt = nil
@@ -2083,10 +2168,7 @@ func (s *knowledgeService) ReparseKnowledge(
 
 	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
-		return nil, err
-	}
-	if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "pending_subtasks_count", 0); err != nil {
-		logger.Errorf(ctx, "Failed to reset pending_subtasks_count before reparse: %v", err)
+		s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
 		return nil, err
 	}
 
@@ -2123,7 +2205,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
-			return existing, nil
+			s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
+			return nil, err
 		}
 		logger.Infof(ctx, "Enqueued reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
 
@@ -2165,7 +2248,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			documentProcessTaskOptions(s.config)...)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
-			return existing, nil
+			s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
+			return nil, err
 		}
 		logger.Infof(ctx, "Enqueued file URL reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
 
@@ -2200,7 +2284,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
-			return existing, nil
+			s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
+			return nil, err
 		}
 		logger.Infof(ctx, "Enqueued URL reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
 
@@ -2208,7 +2293,49 @@ func (s *knowledgeService) ReparseKnowledge(
 	}
 
 	logger.Warnf(ctx, "Knowledge %s has no parseable content (no file, URL, or manual content)", knowledgeID)
-	return existing, nil
+	err = werrors.NewBadRequestError("knowledge has no parseable content")
+	s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
+	return nil, err
+}
+
+func (s *knowledgeService) beginKnowledgeAttempt(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	mode types.AttemptBeginMode,
+) (int, error) {
+	if knowledge == nil {
+		return 0, werrors.NewNotFoundError("knowledge not found")
+	}
+	next, err := s.repo.BeginKnowledgeAttempt(ctx, knowledge.TenantID, knowledge.ID, knowledge.CurrentProcessAttempt, mode)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrAttemptSuperseded):
+			return 0, werrors.NewConflictError("task attempt has been superseded")
+		case errors.Is(err, repository.ErrKnowledgeBusy):
+			return 0, werrors.NewConflictError("knowledge is currently processing")
+		case errors.Is(err, repository.ErrKnowledgeNotFound):
+			return 0, werrors.NewNotFoundError("knowledge not found")
+		default:
+			return 0, err
+		}
+	}
+	knowledge.CurrentProcessAttempt = next
+	knowledge.ParseStatus = types.ParseStatusPending
+	knowledge.PendingSubtasksCount = 0
+	knowledge.ErrorMessage = ""
+	knowledge.ProcessedAt = nil
+	return int(next), nil
+}
+
+func (s *knowledgeService) compensateAttemptFailed(ctx context.Context, knowledge *types.Knowledge, attempt int, err error) {
+	if knowledge == nil || attempt <= 0 || err == nil {
+		return
+	}
+	_, markErr := s.repo.MarkKnowledgeFailedIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt), err.Error())
+	if markErr != nil {
+		logger.Warnf(ctx, "failed to compensate knowledge attempt failure knowledge=%s attempt=%d: %v",
+			knowledge.ID, attempt, markErr)
+	}
 }
 
 func (s *knowledgeService) RetryKnowledgeTask(
@@ -2245,16 +2372,21 @@ func (s *knowledgeService) RetryKnowledgeTask(
 			return nil, nil, werrors.NewBadRequestError("task cannot be retried while an execution is still running")
 		}
 	}
-	if latest := s.tracker().LatestAttempt(ctx, job.ScopeID); latest > 0 && latest != job.ProcessAttempt {
-		return nil, nil, werrors.NewBadRequestError("task attempt has been superseded; retry the current task")
-	}
-	if _, err := s.ReparseKnowledge(ctx, job.ScopeID, nil); err != nil {
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, job.ScopeID)
+	if err != nil {
 		return nil, nil, err
 	}
-	newAttempt := s.tracker().LatestAttempt(ctx, job.ScopeID)
-	if newAttempt <= job.ProcessAttempt {
-		newAttempt = job.ProcessAttempt + 1
+	if knowledge == nil {
+		return nil, nil, werrors.NewNotFoundError("knowledge not found")
 	}
+	if knowledge.CurrentProcessAttempt != int64(job.ProcessAttempt) {
+		return nil, nil, werrors.NewBadRequestError("task attempt has been superseded; retry the current task")
+	}
+	reparsed, err := s.ReparseKnowledge(ctx, job.ScopeID, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	newAttempt := int(reparsed.CurrentProcessAttempt)
 	newJob, err := s.taskJobRepo.GetLatestJobForScopeAttempt(ctx, tenantID, types.TaskScopeKnowledge, job.ScopeID, newAttempt)
 	if err != nil {
 		return nil, nil, err
@@ -2334,19 +2466,24 @@ func (s *knowledgeService) CancelKnowledgeParse(
 			existing.ParseStatus, knowledgeID)
 	}
 
+	attempt := int(existing.CurrentProcessAttempt)
+	if attempt <= 0 {
+		return nil, werrors.NewBadRequestError("解析任务缺少有效 attempt，无法取消")
+	}
+
 	// Flip the row to cancelled and zero the enrichment counter in one
 	// update so a late subtask FinalizeSubtask call can't race-promote
 	// the row back to completed. Persisted partial data is left in
 	// place — the user can reuse it on the next reparse attempt.
 	now := time.Now()
-	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, map[string]interface{}{
-		"parse_status":           types.ParseStatusCancelled,
-		"error_message":          "用户已取消解析",
-		"pending_subtasks_count": 0,
-		"updated_at":             now,
-	}); err != nil {
+	changed, err := s.repo.MarkKnowledgeCanceledIfAttempt(
+		ctx, existing.TenantID, existing.ID, int64(attempt), "用户已取消解析")
+	if err != nil {
 		logger.Errorf(ctx, "CancelKnowledgeParse: failed to mark knowledge cancelled: %v", err)
 		return nil, err
+	}
+	if !changed {
+		return nil, werrors.NewBadRequestError("解析任务已被新的 attempt 取代")
 	}
 	existing.ParseStatus = types.ParseStatusCancelled
 	existing.ErrorMessage = "用户已取消解析"
@@ -2362,10 +2499,8 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	// because workers exit via their abort-guard without ever calling
 	// FailSpan on their own subspan. Best-effort: nil tracker / missing
 	// attempt no-ops.
-	if attempt := s.tracker().LatestAttempt(ctx, knowledgeID); attempt > 0 {
-		s.tracker().AbortAttempt(ctx, knowledgeID, attempt,
-			"USER_CANCELLED", "用户已取消解析", "用户已取消解析")
-	}
+	s.tracker().AbortAttempt(ctx, knowledgeID, attempt,
+		"USER_CANCELLED", "用户已取消解析", "用户已取消解析")
 
 	// Best-effort dequeue. Failures here don't block the cancel — the
 	// downstream tasks will still self-abort at their entry guards.
@@ -2405,7 +2540,11 @@ func (s *knowledgeService) CancelKnowledgeAttempt(
 	if job.Scope != types.TaskScopeKnowledge || job.ScopeID != knowledgeID || job.ProcessAttempt != expectedAttempt {
 		return werrors.NewBadRequestError("task attempt has been superseded")
 	}
-	if latest := s.tracker().LatestAttempt(ctx, knowledgeID); latest > 0 && latest != expectedAttempt {
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return err
+	}
+	if knowledge == nil || knowledge.CurrentProcessAttempt != int64(expectedAttempt) {
 		now := time.Now()
 		_, _ = s.taskJobRepo.MarkJobCanceledIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
 			JobID:          job.JobID,
@@ -2423,8 +2562,34 @@ func (s *knowledgeService) CancelKnowledgeAttempt(
 		}, now)
 		return werrors.NewBadRequestError("task attempt has been superseded")
 	}
-	_, err = s.CancelKnowledgeParse(ctx, knowledgeID)
-	return err
+	changed, err := s.repo.MarkKnowledgeCanceledIfAttempt(
+		ctx, tenantID, knowledgeID, int64(expectedAttempt), "用户已取消解析")
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return werrors.NewBadRequestError("task attempt has been superseded")
+	}
+	now := time.Now()
+	_, _ = s.taskJobRepo.MarkJobCanceledIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+		JobID:          job.JobID,
+		TenantID:       job.TenantID,
+		Scope:          job.Scope,
+		ScopeID:        job.ScopeID,
+		ProcessAttempt: job.ProcessAttempt,
+	}, interfaces.TaskLedgerFailure{
+		ErrorClass: types.TaskErrorClassCanceled,
+		LastError:  "用户已取消解析",
+	}, now)
+	_, _ = s.taskJobRepo.MarkExecutionsCanceledForJob(ctx, job.TenantID, job.JobID, interfaces.TaskLedgerFailure{
+		ErrorClass: types.TaskErrorClassCanceled,
+		LastError:  "用户已取消解析",
+	}, now)
+	s.tracker().AbortAttempt(ctx, knowledgeID, expectedAttempt,
+		"USER_CANCELLED", "用户已取消解析", "用户已取消解析")
+	s.dequeueKnowledgeTasks(ctx, knowledgeID)
+	s.scrubWikiPendingIngest(ctx, knowledge.KnowledgeBaseID, knowledgeID, "cancel")
+	return nil
 }
 
 // dequeueKnowledgeTasks asks the task inspector to remove any queued
@@ -2644,8 +2809,13 @@ func (s *knowledgeService) UpdateImageInfo(
 	}
 	fileHash := calculateStr(knowledgeID, knowledge.FileHash, imageInfo)
 	knowledge.FileHash = fileHash
-	err = s.repo.UpdateKnowledge(ctx, knowledge)
-	if err != nil {
+	attempt := attemptFromCtx(ctx)
+	if attempt <= 0 {
+		logger.Warnf(ctx, "Skip updating knowledge file hash without attempt: %s", knowledgeID)
+	} else if _, err = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt), map[string]interface{}{
+		"file_hash":  fileHash,
+		"updated_at": time.Now(),
+	}); err != nil {
 		logger.Warnf(ctx, "Failed to update knowledge file hash: %v", err)
 	}
 
@@ -2665,6 +2835,11 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	ctx = logger.WithRequestID(ctx, payload.RequestId)
 	ctx = logger.WithField(ctx, "manual_process", payload.KnowledgeID)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	if payload.Attempt <= 0 {
+		logger.Warnf(ctx, "ProcessManualUpdate: missing attempt for knowledge=%s", payload.KnowledgeID)
+		return nil
+	}
+	ctx = withAttempt(ctx, payload.Attempt)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -2680,6 +2855,11 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	}
 	if knowledge == nil {
 		logger.Warnf(ctx, "ProcessManualUpdate: knowledge not found: %s", payload.KnowledgeID)
+		return nil
+	}
+	if knowledge.CurrentProcessAttempt != int64(payload.Attempt) {
+		logger.Infof(ctx, "ProcessManualUpdate: superseded attempt=%d current=%d knowledge=%s",
+			payload.Attempt, knowledge.CurrentProcessAttempt, payload.KnowledgeID)
 		return nil
 	}
 
@@ -2700,10 +2880,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to get knowledge base: %v", err)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, fmt.Sprintf("failed to get knowledge base: %v", err))
 		return nil
 	}
 
@@ -2714,35 +2891,34 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		return nil
 	}
 	// Update status to processing
-	knowledge.ParseStatus = "processing"
-	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	changed, err := s.repo.MarkKnowledgeProcessingIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt))
+	if err != nil {
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to update status to processing: %v", err)
 		return nil
 	}
-
-	// Allocate a fresh span-tracking attempt for this manual (re)index.
-	// Without it attemptFromCtx stays 0, so processChunks drops all stage
-	// spans and KnowledgePostProcess falls back to LatestAttempt — piling
-	// this run's summary/wiki subspans onto the previous attempt's trace.
-	attempt := 0
-	if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
-		attempt = n
-	} else if err != nil {
-		logger.Warnf(ctx, "ProcessManualUpdate: OpenAttempt failed for %s: %v", knowledge.ID, err)
+	if !changed {
+		logger.Infof(ctx, "ProcessManualUpdate: attempt=%d no longer owns knowledge=%s", payload.Attempt, knowledge.ID)
+		return nil
 	}
-	ctx = withAttempt(ctx, attempt)
+	knowledge.ParseStatus = types.ParseStatusProcessing
+	knowledge.UpdatedAt = time.Now()
+	if _, err := s.tracker().OpenAttemptN(ctx, knowledge.ID, payload.LangfuseTraceID, payload.Attempt); err != nil {
+		logger.Warnf(ctx, "ProcessManualUpdate: OpenAttemptN failed for %s attempt=%d: %v",
+			knowledge.ID, payload.Attempt, err)
+	}
 
 	// Cleanup old resources (indexes, chunks, graph) for update operations
 	if payload.NeedCleanup {
+		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+			logger.Infof(ctx, "ProcessManualUpdate: attempt=%d superseded before cleanup for %s",
+				payload.Attempt, knowledge.ID)
+			return nil
+		}
 		if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"knowledge_id": payload.KnowledgeID,
 			})
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to cleanup old resources: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailedForAttempt(ctx, knowledge, fmt.Sprintf("failed to cleanup old resources: %v", err))
 			return nil
 		}
 	}
@@ -2768,8 +2944,14 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 	attemptForLedger := payload.Attempt
 	defer func() {
-		s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger)
+		s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger, payload.JobID)
 	}()
+	if payload.Attempt <= 0 {
+		logger.Warnf(ctx, "ProcessDocument: missing attempt for knowledge=%s", payload.KnowledgeID)
+		return nil
+	}
+	ctx = withAttempt(ctx, payload.Attempt)
+	ctx = withRootJobID(ctx, payload.JobID)
 
 	// 获取任务重试信息，用于判断是否是最后一次重试
 	retryCount, _ := asynq.GetRetryCount(ctx)
@@ -2794,6 +2976,12 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	if knowledge == nil {
+		return nil
+	}
+	if knowledge.CurrentProcessAttempt != int64(payload.Attempt) {
+		logger.Infof(ctx, "ProcessDocument: superseded attempt=%d current=%d knowledge=%s",
+			payload.Attempt, knowledge.CurrentProcessAttempt, payload.KnowledgeID)
+		s.markDocumentJobSuperseded(ctx, payload.TenantID, payload.KnowledgeID, payload.Attempt, payload.JobID)
 		return nil
 	}
 
@@ -2836,10 +3024,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, fmt.Sprintf("failed to get knowledge base: %v", err))
 		return nil
 	}
 
@@ -2854,37 +3039,29 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Knowledge aborted (%s) before marking processing: %s", status, knowledge.ID)
 		return nil
 	}
-	knowledge.ParseStatus = "processing"
-	knowledge.UpdatedAt = time.Now()
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	changed, err := s.repo.MarkKnowledgeProcessingIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt))
+	if err != nil {
 		logger.Errorf(ctx, "failed to update knowledge status to processing: %v", err)
 		return nil
 	}
-
-	// Resolve the attempt for span tracking. The enqueue site sets
-	// payload.Attempt to a fresh number for the initial parse and to
-	// max+1 for each user-initiated reparse. Asynq retries within a
-	// single user action keep the same payload (so retries record
-	// onto the same attempt). For payloads predating this code we
-	// fall back to OpenAttempt.
-	attempt := payload.Attempt
-	if attempt <= 0 {
-		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
-			attempt = n
-		}
+	if !changed {
+		logger.Infof(ctx, "ProcessDocument: attempt=%d no longer owns knowledge=%s", payload.Attempt, knowledge.ID)
+		s.markDocumentJobSuperseded(ctx, payload.TenantID, payload.KnowledgeID, payload.Attempt, payload.JobID)
+		return nil
 	}
-	attemptForLedger = attempt
-	ctx = withAttempt(ctx, attempt)
-	s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger)
+	knowledge.ParseStatus = types.ParseStatusProcessing
+	knowledge.UpdatedAt = time.Now()
+	if _, err := s.tracker().OpenAttemptN(ctx, knowledge.ID, payload.LangfuseTraceID, payload.Attempt); err != nil {
+		logger.Warnf(ctx, "ProcessDocument: OpenAttemptN failed for %s attempt=%d: %v",
+			knowledge.ID, payload.Attempt, err)
+	}
+	s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger, payload.JobID)
 
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			WithField("error", ErrImageNotParse).Errorf("processDocument image without enable multimodel")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = ErrImageNotParse.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, ErrImageNotParse.Error())
 		return nil
 	}
 
@@ -2892,10 +3069,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if payload.FilePath != "" && IsAudioType(payload.FileType) && !eff.ASRConfig.IsASREnabled() {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			Errorf("processDocument audio without ASR model configured")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = "上传音频文件需要设置ASR语音识别模型"
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, "上传音频文件需要设置ASR语音识别模型")
 		return nil
 	}
 
@@ -2903,10 +3077,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if payload.FilePath != "" && IsVideoType(payload.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			Errorf("processDocument video not supported")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = "暂不支持视频文件"
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, "暂不支持视频文件")
 		return nil
 	}
 
@@ -2918,10 +3089,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		// file_url import: SSRF re-check (防 DNS 重绑定), download, persist, then delegate to convert()
 		if err := secutils.ValidateURLForSSRF(payload.FileURL); err != nil {
 			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, err: %v", payload.FileURL, err)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailedForAttempt(ctx, knowledge, "File URL is not allowed for security reasons")
 			return nil
 		}
 
@@ -2931,20 +3099,14 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		if err != nil {
 			logger.Errorf(ctx, "Failed to download file from URL: %s, error: %v", payload.FileURL, err)
 			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.markKnowledgeFailedForAttempt(ctx, knowledge, err.Error())
 			}
 			return fmt.Errorf("failed to download file from URL: %w", err)
 		}
 
 		if resolvedFileType != "" && !allowedFileURLExtensions[strings.ToLower(resolvedFileType)] {
 			logger.Errorf(ctx, "Unsupported file type resolved from file URL: %s", resolvedFileType)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("unsupported file type: %s", resolvedFileType)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailedForAttempt(ctx, knowledge, fmt.Sprintf("unsupported file type: %s", resolvedFileType))
 			return nil
 		}
 
@@ -2953,17 +3115,17 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		if resolvedFileType != "" && knowledge.FileType == "" {
 			knowledge.FileType = resolvedFileType
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			_, _ = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
+				"file_type":  resolvedFileType,
+				"updated_at": time.Now(),
+			})
 		}
 
 		fileSvc := s.resolveFileService(ctx, kb)
 		filePath, err := fileSvc.SaveBytes(ctx, contentBytes, payload.TenantID, resolvedFileName, true)
 		if err != nil {
 			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.markKnowledgeFailedForAttempt(ctx, knowledge, err.Error())
 			}
 			return fmt.Errorf("failed to save downloaded file: %w", err)
 		}
@@ -2992,7 +3154,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			if extractedTitle := convertResult.Metadata["title"]; extractedTitle != "" {
 				knowledge.Title = extractedTitle
 				knowledge.UpdatedAt = time.Now()
-				if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+				if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
+					"title":      extractedTitle,
+					"updated_at": knowledge.UpdatedAt,
+				}); err != nil {
 					logger.Warnf(ctx, "Failed to update knowledge title from extracted page title: %v", err)
 				} else {
 					logger.Infof(ctx, "Updated knowledge title to extracted page title: %s", extractedTitle)
@@ -3037,10 +3202,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if convertResult != nil && convertResult.IsAudio && len(convertResult.AudioData) > 0 {
 		if !eff.ASRConfig.IsASREnabled() {
 			logger.Error(ctx, "Audio file detected but ASR is not configured")
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailedForAttempt(ctx, knowledge, "ASR model is not configured for audio transcription")
 			return nil
 		}
 
@@ -3050,10 +3212,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		asrModel, err := s.modelService.GetASRModel(ctx, eff.ASRConfig.ModelID)
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to get ASR model: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailedForAttempt(ctx, knowledge, fmt.Sprintf("failed to get ASR model: %v", err))
 			return nil
 		}
 
@@ -3061,10 +3220,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Transcription failed: %v", err)
 			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = fmt.Sprintf("audio transcription failed: %v", err)
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.markKnowledgeFailedForAttempt(ctx, knowledge, fmt.Sprintf("audio transcription failed: %v", err))
 			}
 			return fmt.Errorf("audio transcription failed: %w", err)
 		}
@@ -3202,10 +3358,7 @@ func (s *knowledgeService) convert(
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {
 			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, err: %v", payload.URL, err)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "URL is not allowed for security reasons"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.markKnowledgeFailedForAttempt(ctx, knowledge, "URL is not allowed for security reasons")
 			s.failStage(ctx, knowledge.ID, types.StageDocReader,
 				werrors.ErrCodeDocReaderParseFailed, "URL rejected for security reasons", err)
 			return nil, nil
@@ -3224,10 +3377,7 @@ func (s *knowledgeService) convert(
 	if reader == nil {
 		logger.Errorf(ctx, "[convert] no doc reader for kb=%s knowledge=%s fileType=%s engine=%q isURL=%v",
 			kb.ID, knowledge.ID, fileType, parserEngine, isURL)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR.")
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderUnavailable, knowledge.ErrorMessage, nil)
 		return nil, nil
@@ -3276,10 +3426,7 @@ func (s *knowledgeService) convert(
 	if result.Error != "" {
 		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
 			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = result.Error
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, result.Error)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
@@ -3397,10 +3544,7 @@ func (s *knowledgeService) failKnowledge(
 ) (*types.ReadResult, error) {
 	errMsg := fmt.Sprintf(format, args...)
 	if isLastRetry {
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = errMsg
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.markKnowledgeFailedForAttempt(ctx, knowledge, errMsg)
 	}
 	return nil, fmt.Errorf(format, args...)
 }
@@ -3452,6 +3596,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			Language:        lang,
 			ImageSourceType: metadata["image_source_type"],
 			Attempt:         attempt,
+			JobID:           rootJobIDFromCtx(ctx),
 			ImageIndex:      idx,
 		}
 

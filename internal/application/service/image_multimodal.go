@@ -129,11 +129,23 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
+	if payload.Attempt <= 0 {
+		logger.Warnf(ctx, "[ImageMultimodal] Missing attempt for knowledge %s, skipping image %s",
+			payload.KnowledgeID, payload.ImageURL)
+		return nil
+	}
+	ctx = withAttempt(ctx, payload.Attempt)
+	ctx = withRootJobID(ctx, payload.JobID)
 
 	// Short-circuit when the parent knowledge has been cancelled by the user
 	// or marked for deletion. Skip the VLM call entirely so we don't burn
 	// model quota on already-aborted work.
 	if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID); kerr == nil && k != nil {
+		if k.CurrentProcessAttempt != int64(payload.Attempt) {
+			logger.Infof(ctx, "[ImageMultimodal] Knowledge %s attempt=%d superseded by current=%d, skipping image %s",
+				payload.KnowledgeID, payload.Attempt, k.CurrentProcessAttempt, payload.ImageURL)
+			return nil
+		}
 		switch k.ParseStatus {
 		case types.ParseStatusCancelled, types.ParseStatusDeleting:
 			logger.Infof(ctx, "[ImageMultimodal] Knowledge %s aborted (%s), skipping image %s",
@@ -566,6 +578,14 @@ func downloadImageFromURL(imageURL string) ([]byte, error) {
 }
 
 func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, payload types.ImageMultimodalPayload) {
+	if s.knowledgeRepo != nil {
+		if k, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID); err == nil && k != nil &&
+			k.CurrentProcessAttempt != int64(payload.Attempt) {
+			logger.Infof(ctx, "[ImageMultimodal] Skip post-process enqueue for superseded knowledge %s attempt=%d current=%d",
+				payload.KnowledgeID, payload.Attempt, k.CurrentProcessAttempt)
+			return
+		}
+	}
 	if s.redisClient == nil {
 		s.enqueueKnowledgePostProcessTask(ctx, payload)
 		return
@@ -606,6 +626,8 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 		KnowledgeID:     payload.KnowledgeID,
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		Language:        payload.Language,
+		Attempt:         payload.Attempt,
+		JobID:           payload.JobID,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)

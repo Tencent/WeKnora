@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -22,32 +23,31 @@ func (s *knowledgeService) dispatchDocumentRootTask(
 	opts ...asynq.Option,
 ) (*asynq.TaskInfo, error) {
 	if payload.Attempt <= 0 {
-		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
-			payload.Attempt = n
-		} else if err != nil {
-			logger.Warnf(ctx, "task ledger: OpenAttempt failed for %s: %v", knowledge.ID, err)
-		}
+		return nil, fmt.Errorf("task ledger dispatcher: missing process attempt for knowledge %s", knowledge.ID)
 	}
-	if payload.Attempt <= 0 {
-		payload.Attempt = s.tracker().LatestAttempt(ctx, knowledge.ID) + 1
-		if payload.Attempt <= 0 {
-			payload.Attempt = 1
-		}
+	if _, err := s.tracker().OpenAttemptN(ctx, knowledge.ID, payload.LangfuseTraceID, payload.Attempt); err != nil {
+		logger.Warnf(ctx, "task ledger: OpenAttemptN failed for %s attempt=%d: %v", knowledge.ID, payload.Attempt, err)
 	}
 
+	if s.taskDispatcher == nil {
+		langfuse.InjectTracing(ctx, &payload)
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes)
+		return s.task.Enqueue(task, opts...)
+	}
+
+	jobID := uuid.NewString()
+	executionID := uuid.NewString()
+	payload.JobID = jobID
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes)
-
-	if s.taskDispatcher == nil {
-		return s.task.Enqueue(task, opts...)
-	}
-
-	jobID := uuid.NewString()
-	executionID := uuid.NewString()
 	metadata := taskJobJSON(map[string]any{
 		"file_name":         payload.FileName,
 		"file_type":         payload.FileType,
@@ -136,10 +136,15 @@ func documentReplaySourceID(payload types.DocumentProcessPayload, knowledge *typ
 }
 
 func markDocumentJobSucceeded(ctx context.Context, repo interfaces.TaskJobRepository, tenantID uint64, knowledgeID string, attempt int) {
+	markDocumentJobSucceededWithJobID(ctx, repo, tenantID, knowledgeID, attempt, "")
+}
+
+func markDocumentJobSucceededWithJobID(ctx context.Context, repo interfaces.TaskJobRepository, tenantID uint64, knowledgeID string, attempt int, jobID string) {
 	if repo == nil || attempt <= 0 {
 		return
 	}
 	_, _ = repo.MarkJobSucceededIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+		JobID:          jobID,
 		TenantID:       tenantID,
 		Scope:          types.TaskScopeKnowledge,
 		ScopeID:        knowledgeID,
@@ -147,7 +152,7 @@ func markDocumentJobSucceeded(ctx context.Context, repo interfaces.TaskJobReposi
 	}, time.Now())
 }
 
-func (s *knowledgeService) syncDocumentJobFromKnowledgeStatus(ctx context.Context, tenantID uint64, knowledgeID string, attempt int) {
+func (s *knowledgeService) syncDocumentJobFromKnowledgeStatus(ctx context.Context, tenantID uint64, knowledgeID string, attempt int, jobID string) {
 	if s == nil || s.taskJobRepo == nil || s.repo == nil || attempt <= 0 || knowledgeID == "" {
 		return
 	}
@@ -158,6 +163,7 @@ func (s *knowledgeService) syncDocumentJobFromKnowledgeStatus(ctx context.Contex
 		return
 	}
 	sel := interfaces.TaskJobAttemptSelector{
+		JobID:          jobID,
 		TenantID:       tenantID,
 		Scope:          types.TaskScopeKnowledge,
 		ScopeID:        knowledgeID,
@@ -184,4 +190,22 @@ func (s *knowledgeService) syncDocumentJobFromKnowledgeStatus(ctx context.Contex
 			FailedTaskType: types.TypeDocumentProcess,
 		}, now)
 	}
+}
+
+func (s *knowledgeService) markDocumentJobSuperseded(ctx context.Context, tenantID uint64, knowledgeID string, attempt int, jobID string) {
+	if s == nil || s.taskJobRepo == nil || attempt <= 0 || knowledgeID == "" {
+		return
+	}
+	now := time.Now()
+	_, _ = s.taskJobRepo.MarkJobCanceledIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+		JobID:          jobID,
+		TenantID:       tenantID,
+		Scope:          types.TaskScopeKnowledge,
+		ScopeID:        knowledgeID,
+		ProcessAttempt: attempt,
+	}, interfaces.TaskLedgerFailure{
+		ErrorClass:     types.TaskErrorClassCanceled,
+		LastError:      "task superseded by a newer attempt",
+		FailedTaskType: types.TypeDocumentProcess,
+	}, now)
 }
