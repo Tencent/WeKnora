@@ -910,7 +910,7 @@ const handleConfirm = () => {
 .upload-confirm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2500;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
