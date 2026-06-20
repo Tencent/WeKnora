@@ -115,7 +115,11 @@ func (r *ImageResolver) ResolveAndStore(
 	// Process in reverse order to preserve positions when replacing
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
-		refPath := markdown[m[4]:m[5]] // group 2: the URL/path
+		rawTarget := markdown[m[4]:m[5]] // group 2: the URL/path plus optional title
+		refPath, pathStart, pathEnd, ok := splitMarkdownImageTarget(rawTarget, refMap)
+		if !ok {
+			continue
+		}
 
 		// Skip already-resolved URLs (http/https, unified /files/, or provider:// scheme)
 		if strings.HasPrefix(refPath, "http://") || strings.HasPrefix(refPath, "https://") ||
@@ -131,7 +135,9 @@ func (r *ImageResolver) ResolveAndStore(
 		images = appendStoredImage(images, stored)
 
 		// Replace in markdown
-		markdown = markdown[:m[4]] + stored.ServingURL + markdown[m[5]:]
+		absolutePathStart := m[4] + pathStart
+		absolutePathEnd := m[4] + pathEnd
+		markdown = markdown[:absolutePathStart] + stored.ServingURL + markdown[absolutePathEnd:]
 	}
 
 	md5, imgRelativeHTML, _ := r.ResolveRelativeHTMLImages(ctx, markdown, fileSvc, tenantID, refMap, savedRefs)
@@ -139,6 +145,82 @@ func (r *ImageResolver) ResolveAndStore(
 	images = append(images, imgRelativeHTML...)
 
 	return markdown, images, nil
+}
+
+func splitMarkdownImageTarget(
+	raw string,
+	refMap map[string]types.ImageRef,
+) (path string, pathStart int, pathEnd int, ok bool) {
+	if _, found := refMap[raw]; found {
+		return raw, 0, len(raw), true
+	}
+
+	titleStart, found := markdownImageTitleStart(raw)
+	if !found {
+		return "", 0, 0, false
+	}
+
+	pathEnd = titleStart
+	for pathEnd > 0 && isMarkdownSpace(raw[pathEnd-1]) {
+		pathEnd--
+	}
+	if pathEnd == 0 {
+		return "", 0, 0, false
+	}
+
+	path = raw[:pathEnd]
+	if _, found := refMap[path]; !found {
+		return "", 0, 0, false
+	}
+	return path, 0, pathEnd, true
+}
+
+func markdownImageTitleStart(raw string) (int, bool) {
+	end := len(raw)
+	for end > 0 && isMarkdownSpace(raw[end-1]) {
+		end--
+	}
+	if end == 0 {
+		return 0, false
+	}
+
+	switch raw[end-1] {
+	case '"', '\'':
+		quote := raw[end-1]
+		for i := end - 2; i >= 0; i-- {
+			if raw[i] != quote || isEscaped(raw, i) {
+				continue
+			}
+			if i == 0 || !isMarkdownSpace(raw[i-1]) {
+				return 0, false
+			}
+			return i, true
+		}
+	case ')':
+		for i := end - 2; i >= 0; i-- {
+			if raw[i] != '(' || isEscaped(raw, i) {
+				continue
+			}
+			if i == 0 || !isMarkdownSpace(raw[i-1]) {
+				return 0, false
+			}
+			return i, true
+		}
+	}
+
+	return 0, false
+}
+
+func isMarkdownSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+func isEscaped(s string, pos int) bool {
+	backslashes := 0
+	for i := pos - 1; i >= 0 && s[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 func appendStoredImage(images []StoredImage, stored StoredImage) []StoredImage {

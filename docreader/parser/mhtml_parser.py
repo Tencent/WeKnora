@@ -171,9 +171,10 @@ class MHTMLParser(BaseParser):
                 self._rewrite_image_sources(soup, image_aliases, base_location)
             text_fallback = soup.get_text(separator="\n", strip=True)
             markdown_text = md(str(soup), heading_style="ATX")
+            markdown_text = markdown_text.replace("\r\n", "\n").replace("\r", "\n")
             result = "\n".join(
-                line.strip() for line in markdown_text.split("\n") if line.strip()
-            )
+                line.rstrip() for line in markdown_text.split("\n")
+            ).strip()
             if not result and text_fallback:
                 logger.warning("Markdown empty, falling back to text extraction")
                 return text_fallback

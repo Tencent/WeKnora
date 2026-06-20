@@ -274,3 +274,93 @@ func TestResolveAndStore_MultipleFormats(t *testing.T) {
 		t.Fatalf("data URI still in output after ResolveAndStore")
 	}
 }
+
+func TestResolveAndStoreMarkdownImageWithTitle(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![图片](images/test.gif "图片")`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "test.gif",
+				OriginalRef: "images/test.gif",
+				MimeType:    "image/gif",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image but got %d", len(imgs))
+	}
+	if len(svc.saved) != 1 {
+		t.Fatalf("expected SaveBytes to be called once but got %d", len(svc.saved))
+	}
+	if !strings.Contains(out, `![图片](local://test/`) || !strings.Contains(out, ` "图片")`) {
+		t.Fatalf("markdown image title was not preserved around stored URL: %s", out)
+	}
+	if strings.Contains(out, "images/test.gif") {
+		t.Fatalf("original image path was not replaced: %s", out)
+	}
+}
+
+func TestResolveAndStoreMarkdownImageWithSingleQuotedTitle(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![图片](images/test.gif '图片')`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "test.gif",
+				OriginalRef: "images/test.gif",
+				MimeType:    "image/gif",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 || len(svc.saved) != 1 {
+		t.Fatalf("expected one stored image, got imgs=%d saved=%d", len(imgs), len(svc.saved))
+	}
+	if !strings.Contains(out, `![图片](local://test/`) || !strings.Contains(out, ` '图片')`) {
+		t.Fatalf("markdown image title was not preserved around stored URL: %s", out)
+	}
+}
+
+func TestResolveAndStoreMarkdownImageWithSpacedFilename(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![](images/第 1 页.jpg)`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "第 1 页.jpg",
+				OriginalRef: "images/第 1 页.jpg",
+				MimeType:    "image/jpeg",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 || len(svc.saved) != 1 {
+		t.Fatalf("expected one stored image, got imgs=%d saved=%d", len(imgs), len(svc.saved))
+	}
+	if !strings.Contains(out, `![](local://test/`) {
+		t.Fatalf("spaced filename path was not replaced: %s", out)
+	}
+}
