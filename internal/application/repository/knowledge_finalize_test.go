@@ -255,6 +255,36 @@ func TestAttemptCASBlocksLateFinalizeAndFailure(t *testing.T) {
 	assert.Nil(t, errMsg)
 }
 
+func TestAttemptCASStateSourceGuardsTerminalRows(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+
+	cancelledID := insertKnowledgeWithAttempt(t, db, types.ParseStatusCancelled, 4, 0)
+	changed, err := repo.MarkKnowledgeProcessingIfAttempt(ctx, 1, cancelledID, 4)
+	require.NoError(t, err)
+	assert.False(t, changed, "cancelled must not be revived to processing")
+	changed, err = repo.MarkKnowledgeFailedIfAttempt(ctx, 1, cancelledID, 4, "late failure")
+	require.NoError(t, err)
+	assert.False(t, changed, "cancelled must not be overwritten by late failure")
+
+	completedID := insertKnowledgeWithAttempt(t, db, types.ParseStatusCompleted, 5, 0)
+	changed, err = repo.MarkKnowledgeCanceledIfAttempt(ctx, 1, completedID, 5, "late cancel")
+	require.NoError(t, err)
+	assert.False(t, changed, "completed must not be overwritten by cancel")
+	changed, err = repo.UpdateKnowledgeColumnsIfAttempt(ctx, 1, completedID, 5,
+		[]string{types.ParseStatusProcessing}, map[string]interface{}{
+			"parse_status": types.ParseStatusCompleted,
+		})
+	require.NoError(t, err)
+	assert.False(t, changed, "processing-only completion fast path must not match completed")
+
+	pendingID := insertKnowledgeWithAttempt(t, db, types.ParseStatusPending, 6, 0)
+	changed, err = repo.MarkKnowledgeProcessingIfAttempt(ctx, 1, pendingID, 6)
+	require.NoError(t, err)
+	assert.True(t, changed, "pending may advance to processing")
+}
+
 // TestFinalizeSubtask_PartialDecrement_StaysFinalizing verifies the row
 // remains in "finalizing" with the expected residual count when fewer
 // callers decrement than were seeded — the promote guard must not fire

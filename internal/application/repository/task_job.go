@@ -488,7 +488,8 @@ func (r *taskJobRepository) baseJobQuery(ctx context.Context, q interfaces.TaskJ
 	}
 	tx := r.db.WithContext(ctx).Model(&types.TaskJob{}).
 		Where("tenant_id = ?", q.TenantID).
-		Where("origin = ?", origin)
+		Where("origin = ?", origin).
+		Where("process_attempt >= 0")
 	if !q.IsAdmin {
 		tx = tx.Where("created_by = ?", q.UserID)
 	} else if q.CreatedBy != "" {

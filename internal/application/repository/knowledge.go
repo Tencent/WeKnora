@@ -227,16 +227,7 @@ func (r *knowledgeRepository) BeginKnowledgeAttempt(
 	if res.RowsAffected == 0 {
 		return 0, r.classifyBeginAttemptMiss(ctx, tenantID, id, expectedAttempt)
 	}
-	var snap struct {
-		CurrentProcessAttempt int64 `gorm:"column:current_process_attempt"`
-	}
-	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Select("current_process_attempt").
-		Where("tenant_id = ? AND id = ?", tenantID, id).
-		Take(&snap).Error; err != nil {
-		return 0, err
-	}
-	return snap.CurrentProcessAttempt, nil
+	return expectedAttempt + 1, nil
 }
 
 func (r *knowledgeRepository) classifyBeginAttemptMiss(ctx context.Context, tenantID uint64, id string, expectedAttempt int64) error {
@@ -271,10 +262,12 @@ func (r *knowledgeRepository) MarkKnowledgeProcessingIfAttempt(
 	id string,
 	attempt int64,
 ) (bool, error) {
-	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt, map[string]interface{}{
-		"parse_status": types.ParseStatusProcessing,
-		"updated_at":   time.Now(),
-	})
+	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt,
+		[]string{types.ParseStatusPending, types.ParseStatusProcessing},
+		map[string]interface{}{
+			"parse_status": types.ParseStatusProcessing,
+			"updated_at":   time.Now(),
+		})
 }
 
 func (r *knowledgeRepository) MarkKnowledgeFailedIfAttempt(
@@ -284,13 +277,15 @@ func (r *knowledgeRepository) MarkKnowledgeFailedIfAttempt(
 	attempt int64,
 	reason string,
 ) (bool, error) {
-	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt, map[string]interface{}{
-		"parse_status":           types.ParseStatusFailed,
-		"error_message":          reason,
-		"pending_subtasks_count": 0,
-		"summary_status":         types.SummaryStatusFailed,
-		"updated_at":             time.Now(),
-	})
+	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt,
+		[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing},
+		map[string]interface{}{
+			"parse_status":           types.ParseStatusFailed,
+			"error_message":          reason,
+			"pending_subtasks_count": 0,
+			"summary_status":         types.SummaryStatusFailed,
+			"updated_at":             time.Now(),
+		})
 }
 
 func (r *knowledgeRepository) MarkKnowledgeCanceledIfAttempt(
@@ -300,12 +295,14 @@ func (r *knowledgeRepository) MarkKnowledgeCanceledIfAttempt(
 	attempt int64,
 	reason string,
 ) (bool, error) {
-	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt, map[string]interface{}{
-		"parse_status":           types.ParseStatusCancelled,
-		"error_message":          reason,
-		"pending_subtasks_count": 0,
-		"updated_at":             time.Now(),
-	})
+	return r.UpdateKnowledgeColumnsIfAttempt(ctx, tenantID, id, attempt,
+		[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing},
+		map[string]interface{}{
+			"parse_status":           types.ParseStatusCancelled,
+			"error_message":          reason,
+			"pending_subtasks_count": 0,
+			"updated_at":             time.Now(),
+		})
 }
 
 func (r *knowledgeRepository) UpdateKnowledgeColumnsIfAttempt(
@@ -313,6 +310,7 @@ func (r *knowledgeRepository) UpdateKnowledgeColumnsIfAttempt(
 	tenantID uint64,
 	id string,
 	attempt int64,
+	allowedStatuses []string,
 	values map[string]interface{},
 ) (bool, error) {
 	if len(values) == 0 {
@@ -321,9 +319,13 @@ func (r *knowledgeRepository) UpdateKnowledgeColumnsIfAttempt(
 	delete(values, "current_process_attempt")
 	delete(values, "CurrentProcessAttempt")
 	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND id = ? AND current_process_attempt = ?", tenantID, id, attempt).
-		Where("parse_status NOT IN ?", []string{types.ParseStatusDeleting}).
-		Updates(values)
+		Where("tenant_id = ? AND id = ? AND current_process_attempt = ?", tenantID, id, attempt)
+	if len(allowedStatuses) > 0 {
+		res = res.Where("parse_status IN ?", allowedStatuses)
+	} else {
+		res = res.Where("parse_status NOT IN ?", []string{types.ParseStatusDeleting})
+	}
+	res = res.Updates(values)
 	if res.Error != nil {
 		return false, res.Error
 	}

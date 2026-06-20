@@ -320,6 +320,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "processChunks: attempt %d no longer owns knowledge %s, skipping", attempt, knowledge.ID)
 		return
 	}
+	var releaseLease func()
+	var leaseErr error
+	ctx, releaseLease, leaseErr = s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+	if leaseErr != nil {
+		logger.Warnf(ctx, "processChunks: failed to acquire process lease for %s attempt=%d: %v",
+			knowledge.ID, attempt, leaseErr)
+		return
+	}
+	defer releaseLease()
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+		logger.Infof(ctx, "processChunks: attempt %d superseded after lease acquisition for %s", attempt, knowledge.ID)
+		return
+	}
 
 	// Check if knowledge is being deleted/cancelled before processing.
 	// Both statuses short-circuit identically here — there's nothing to clean
@@ -350,6 +363,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// 删除旧的chunks
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+		logger.Infof(ctx, "processChunks: attempt %d superseded before chunk cleanup for %s", attempt, knowledge.ID)
+		return
+	}
 	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
 		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
 		// 不返回错误，继续处理（可能没有旧数据）
@@ -360,6 +377,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
 	if err == nil && embeddingModel != nil {
+		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+			logger.Infof(ctx, "processChunks: attempt %d superseded before index cleanup for %s", attempt, knowledge.ID)
+			return
+		}
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
 			// 不返回错误，继续处理（可能没有旧数据）
@@ -370,6 +391,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// 删除知识图谱数据（如果存在）
 	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+		logger.Infof(ctx, "processChunks: attempt %d superseded before graph cleanup for %s", attempt, knowledge.ID)
+		return
+	}
 	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
 		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
 		// 不返回错误，继续处理
@@ -550,6 +575,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+		logger.Infof(ctx, "processChunks: attempt %d superseded before chunk write for %s", attempt, knowledge.ID)
+		return
+	}
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
@@ -634,7 +663,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return
 		}
 
+		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+			logger.Infof(ctx, "processChunks: attempt %d superseded before index write for %s", attempt, knowledge.ID)
+			return
+		}
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
+		if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+			logger.Infof(ctx, "processChunks: attempt %d superseded after index write for %s", attempt, knowledge.ID)
+			return
+		}
 		if err != nil {
 			s.markKnowledgeFailedForAttempt(ctx, knowledge, err.Error())
 
@@ -701,20 +738,25 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		now,
 	)
 
-	changed, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt), map[string]interface{}{
-		"parse_status":   knowledge.ParseStatus,
-		"summary_status": knowledge.SummaryStatus,
-		"enable_status":  knowledge.EnableStatus,
-		"storage_size":   knowledge.StorageSize,
-		"processed_at":   knowledge.ProcessedAt,
-		"updated_at":     knowledge.UpdatedAt,
-	})
+	changed, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt),
+		[]string{types.ParseStatusProcessing}, map[string]interface{}{
+			"parse_status":   knowledge.ParseStatus,
+			"summary_status": knowledge.SummaryStatus,
+			"enable_status":  knowledge.EnableStatus,
+			"storage_size":   knowledge.StorageSize,
+			"processed_at":   knowledge.ProcessedAt,
+			"updated_at":     knowledge.UpdatedAt,
+		})
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
 		return
 	}
 	if !changed {
 		logger.Infof(ctx, "processChunks: final state skipped for superseded knowledge %s attempt=%d", knowledge.ID, attempt)
+		return
+	}
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, attempt) {
+		logger.Infof(ctx, "processChunks: attempt %d superseded before async fan-out for %s", attempt, knowledge.ID)
 		return
 	}
 
@@ -1060,10 +1102,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// Update summary status to processing
 	knowledge.SummaryStatus = types.SummaryStatusProcessing
 	knowledge.UpdatedAt = time.Now()
-	if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
-		"summary_status": knowledge.SummaryStatus,
-		"updated_at":     knowledge.UpdatedAt,
-	}); err != nil {
+	if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt),
+		[]string{types.ParseStatusFinalizing}, map[string]interface{}{
+			"summary_status": knowledge.SummaryStatus,
+			"updated_at":     knowledge.UpdatedAt,
+		}); err != nil {
 		logger.Warnf(ctx, "Failed to update summary status to processing: %v", err)
 	}
 
@@ -1071,10 +1114,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	markSummaryFailed := func() {
 		knowledge.SummaryStatus = types.SummaryStatusFailed
 		knowledge.UpdatedAt = time.Now()
-		if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
-			"summary_status": knowledge.SummaryStatus,
-			"updated_at":     knowledge.UpdatedAt,
-		}); err != nil {
+		if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt),
+			[]string{types.ParseStatusFinalizing}, map[string]interface{}{
+				"summary_status": knowledge.SummaryStatus,
+				"updated_at":     knowledge.UpdatedAt,
+			}); err != nil {
 			logger.Warnf(ctx, "Failed to update summary status to failed: %v", err)
 		}
 	}
@@ -1102,10 +1146,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// Mark as completed since there's nothing to summarize
 		knowledge.SummaryStatus = types.SummaryStatusCompleted
 		knowledge.UpdatedAt = time.Now()
-		_, _ = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
-			"summary_status": knowledge.SummaryStatus,
-			"updated_at":     knowledge.UpdatedAt,
-		})
+		_, _ = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt),
+			[]string{types.ParseStatusFinalizing}, map[string]interface{}{
+				"summary_status": knowledge.SummaryStatus,
+				"updated_at":     knowledge.UpdatedAt,
+			})
 		summaryOut["skipped"] = "no_text_chunks"
 		return nil
 	}
@@ -1143,11 +1188,12 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			knowledge.Description = ""
 			knowledge.SummaryStatus = types.SummaryStatusFailed
 			knowledge.UpdatedAt = time.Now()
-			if _, updateErr := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
-				"description":    knowledge.Description,
-				"summary_status": knowledge.SummaryStatus,
-				"updated_at":     knowledge.UpdatedAt,
-			}); updateErr != nil {
+			if _, updateErr := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt),
+				[]string{types.ParseStatusFinalizing}, map[string]interface{}{
+					"description":    knowledge.Description,
+					"summary_status": knowledge.SummaryStatus,
+					"updated_at":     knowledge.UpdatedAt,
+				}); updateErr != nil {
 				logger.Errorf(ctx, "Failed to mark summary as failed: %v", updateErr)
 				summaryErr = updateErr
 				return fmt.Errorf("failed to update knowledge: %w", updateErr)
@@ -1179,11 +1225,12 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// without hopping to the knowledge-detail page. Capped to keep
 	// span rows compact.
 	summaryOut["summary_preview"] = previewText(summary, 240)
-	updatedSummary, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
-		"description":    knowledge.Description,
-		"summary_status": knowledge.SummaryStatus,
-		"updated_at":     knowledge.UpdatedAt,
-	})
+	updatedSummary, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt),
+		[]string{types.ParseStatusFinalizing}, map[string]interface{}{
+			"description":    knowledge.Description,
+			"summary_status": knowledge.SummaryStatus,
+			"updated_at":     knowledge.UpdatedAt,
+		})
 	if err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge description: %v", err)
 		summaryErr = err
@@ -2146,12 +2193,33 @@ func (s *knowledgeService) ReparseKnowledge(
 
 	// For non-manual knowledge, cleanup synchronously then enqueue document processing
 	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
-		s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
-		return nil, err
+	cleanupCtx, releaseLease, leaseErr := s.acquireKnowledgeProcessLease(ctx, existing.TenantID, existing.ID)
+	if leaseErr != nil {
+		if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
+			logger.Infof(ctx, "Reparse cleanup skipped because process lease is busy for %s attempt=%d; worker will retry cleanup",
+				existing.ID, reparseAttempt)
+		} else {
+			logger.ErrorWithFields(ctx, leaseErr, map[string]interface{}{
+				"knowledge_id": knowledgeID,
+			})
+			s.compensateAttemptFailed(ctx, existing, reparseAttempt, leaseErr)
+			return nil, leaseErr
+		}
+	} else {
+		if !s.attemptOwnsKnowledge(cleanupCtx, existing.TenantID, existing.ID, reparseAttempt) {
+			releaseLease()
+			logger.Infof(ctx, "Reparse cleanup skipped because attempt=%d was superseded for %s", reparseAttempt, existing.ID)
+			return existing, nil
+		}
+		if err := s.cleanupKnowledgeResources(cleanupCtx, existing); err != nil {
+			releaseLease()
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_id": knowledgeID,
+			})
+			s.compensateAttemptFailed(ctx, existing, reparseAttempt, err)
+			return nil, err
+		}
+		releaseLease()
 	}
 
 	// Step 2: Update knowledge status and metadata
@@ -2812,10 +2880,11 @@ func (s *knowledgeService) UpdateImageInfo(
 	attempt := attemptFromCtx(ctx)
 	if attempt <= 0 {
 		logger.Warnf(ctx, "Skip updating knowledge file hash without attempt: %s", knowledgeID)
-	} else if _, err = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt), map[string]interface{}{
-		"file_hash":  fileHash,
-		"updated_at": time.Now(),
-	}); err != nil {
+	} else if _, err = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(attempt),
+		[]string{types.ParseStatusProcessing}, map[string]interface{}{
+			"file_hash":  fileHash,
+			"updated_at": time.Now(),
+		}); err != nil {
 		logger.Warnf(ctx, "Failed to update knowledge file hash: %v", err)
 	}
 
@@ -2905,6 +2974,22 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	if _, err := s.tracker().OpenAttemptN(ctx, knowledge.ID, payload.LangfuseTraceID, payload.Attempt); err != nil {
 		logger.Warnf(ctx, "ProcessManualUpdate: OpenAttemptN failed for %s attempt=%d: %v",
 			knowledge.ID, payload.Attempt, err)
+	}
+	var releaseLease func()
+	ctx, releaseLease, err = s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+	if err != nil {
+		if errors.Is(err, ErrKnowledgeProcessLeaseBusy) {
+			logger.Infof(ctx, "ProcessManualUpdate: process lease busy for %s attempt=%d", knowledge.ID, payload.Attempt)
+			return err
+		}
+		logger.Warnf(ctx, "ProcessManualUpdate: failed to acquire process lease for %s: %v", knowledge.ID, err)
+		return err
+	}
+	defer releaseLease()
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+		logger.Infof(ctx, "ProcessManualUpdate: attempt=%d superseded after lease acquisition for %s",
+			payload.Attempt, knowledge.ID)
+		return nil
 	}
 
 	// Cleanup old resources (indexes, chunks, graph) for update operations
@@ -3056,6 +3141,23 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			knowledge.ID, payload.Attempt, err)
 	}
 	s.syncDocumentJobFromKnowledgeStatus(ctx, payload.TenantID, payload.KnowledgeID, attemptForLedger, payload.JobID)
+	var releaseLease func()
+	ctx, releaseLease, err = s.acquireKnowledgeProcessLease(ctx, knowledge.TenantID, knowledge.ID)
+	if err != nil {
+		if errors.Is(err, ErrKnowledgeProcessLeaseBusy) {
+			logger.Infof(ctx, "ProcessDocument: process lease busy for %s attempt=%d", knowledge.ID, payload.Attempt)
+			return err
+		}
+		logger.Warnf(ctx, "ProcessDocument: failed to acquire process lease for %s: %v", knowledge.ID, err)
+		return err
+	}
+	defer releaseLease()
+	if !s.attemptOwnsKnowledge(ctx, knowledge.TenantID, knowledge.ID, payload.Attempt) {
+		logger.Infof(ctx, "ProcessDocument: attempt=%d superseded after lease acquisition for %s",
+			payload.Attempt, knowledge.ID)
+		s.markDocumentJobSuperseded(ctx, payload.TenantID, payload.KnowledgeID, payload.Attempt, payload.JobID)
+		return nil
+	}
 
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {
@@ -3115,10 +3217,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		if resolvedFileType != "" && knowledge.FileType == "" {
 			knowledge.FileType = resolvedFileType
-			_, _ = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
-				"file_type":  resolvedFileType,
-				"updated_at": time.Now(),
-			})
+			_, _ = s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt),
+				[]string{types.ParseStatusProcessing}, map[string]interface{}{
+					"file_type":  resolvedFileType,
+					"updated_at": time.Now(),
+				})
 		}
 
 		fileSvc := s.resolveFileService(ctx, kb)
@@ -3154,10 +3257,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			if extractedTitle := convertResult.Metadata["title"]; extractedTitle != "" {
 				knowledge.Title = extractedTitle
 				knowledge.UpdatedAt = time.Now()
-				if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt), map[string]interface{}{
-					"title":      extractedTitle,
-					"updated_at": knowledge.UpdatedAt,
-				}); err != nil {
+				if _, err := s.repo.UpdateKnowledgeColumnsIfAttempt(ctx, knowledge.TenantID, knowledge.ID, int64(payload.Attempt),
+					[]string{types.ParseStatusProcessing}, map[string]interface{}{
+						"title":      extractedTitle,
+						"updated_at": knowledge.UpdatedAt,
+					}); err != nil {
 					logger.Warnf(ctx, "Failed to update knowledge title from extracted page title: %v", err)
 				} else {
 					logger.Infof(ctx, "Updated knowledge title to extracted page title: %s", extractedTitle)

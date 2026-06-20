@@ -107,7 +107,7 @@ const wikiIngestRetryDelay = 15 * time.Second
 // progress for 7–10 minutes while the orphan lock expires AND the retry
 // schedule catches up.
 func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
-	if errors.Is(e, service.ErrWikiIngestConcurrent) {
+	if errors.Is(e, service.ErrWikiIngestConcurrent) || errors.Is(e, service.ErrKnowledgeProcessLeaseBusy) {
 		return wikiIngestRetryDelay
 	}
 	return asynq.DefaultRetryDelayFunc(n, e, t)

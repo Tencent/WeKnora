@@ -35,7 +35,10 @@ WHERE k.id = a.knowledge_id;
 -- Existing duplicates are not discarded: they are moved to a negative
 -- process_attempt namespace so the live positive attempt key can be enforced
 -- without deleting audit history. Application code only creates positive
--- attempts through BeginKnowledgeAttempt.
+-- attempts through BeginKnowledgeAttempt, and Task Center list queries hide
+-- negative attempts as legacy duplicates. This rewrite is intentionally not
+-- reversible by the down migration; restoring exact duplicates would break
+-- the uniqueness invariant this migration introduces.
 WITH ranked AS (
     SELECT job_id,
            ROW_NUMBER() OVER (

@@ -32,6 +32,9 @@ WHERE EXISTS (
 
 DROP TABLE tmp_knowledge_attempts;
 
+-- Duplicate task_jobs are moved to a negative legacy namespace so the live
+-- positive attempt key can be unique. Task Center list queries hide negative
+-- attempts. This rewrite is intentionally not restored by the down migration.
 WITH ranked AS (
     SELECT job_id,
            ROW_NUMBER() OVER (

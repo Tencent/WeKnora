@@ -268,7 +268,8 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			updates["summary_status"] = types.SummaryStatusNone
 		}
 		changed, err := s.knowledgeRepo.UpdateKnowledgeColumnsIfAttempt(
-			ctx, payload.TenantID, payload.KnowledgeID, int64(attempt), updates)
+			ctx, payload.TenantID, payload.KnowledgeID, int64(attempt),
+			[]string{types.ParseStatusProcessing}, updates)
 		if err != nil {
 			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to mark %s completed (no subtasks): %v",
 				payload.KnowledgeID, err)
@@ -308,7 +309,8 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				summaryStatus = types.SummaryStatusPending
 			}
 			if _, err := s.knowledgeRepo.UpdateKnowledgeColumnsIfAttempt(ctx,
-				payload.TenantID, payload.KnowledgeID, int64(attempt), map[string]interface{}{
+				payload.TenantID, payload.KnowledgeID, int64(attempt),
+				[]string{types.ParseStatusFinalizing}, map[string]interface{}{
 					"summary_status": summaryStatus,
 					"updated_at":     time.Now(),
 				}); err != nil {
