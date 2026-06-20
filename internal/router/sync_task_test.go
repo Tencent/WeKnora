@@ -14,14 +14,23 @@ import (
 )
 
 type syncLedgerStub struct {
-	mu        sync.Mutex
-	activeID  string
-	successID string
-	done      chan struct{}
+	mu             sync.Mutex
+	activeID       string
+	successID      string
+	jobByExecution map[string]*types.TaskJob
+	successJobSel  *interfaces.TaskJobAttemptSelector
+	done           chan struct{}
+	jobDone        chan struct{}
+	doneOnce       sync.Once
+	jobDoneOnce    sync.Once
 }
 
 func newSyncLedgerStub() *syncLedgerStub {
-	return &syncLedgerStub{done: make(chan struct{})}
+	return &syncLedgerStub{
+		jobByExecution: make(map[string]*types.TaskJob),
+		done:           make(chan struct{}),
+		jobDone:        make(chan struct{}),
+	}
 }
 
 func (s *syncLedgerStub) CreateJobAndExecution(context.Context, *types.TaskJob, *types.TaskExecution) error {
@@ -36,6 +45,11 @@ func (s *syncLedgerStub) ListJobs(context.Context, interfaces.TaskJobQuery) ([]*
 func (s *syncLedgerStub) GetJob(context.Context, uint64, string) (*types.TaskJob, error) {
 	return nil, nil
 }
+func (s *syncLedgerStub) GetJobByExecutionID(_ context.Context, executionID string) (*types.TaskJob, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.jobByExecution[executionID], nil
+}
 func (s *syncLedgerStub) ListExecutions(context.Context, uint64, string) ([]*types.TaskExecution, error) {
 	return nil, nil
 }
@@ -45,7 +59,11 @@ func (s *syncLedgerStub) MarkJobProcessingIfCurrentAttempt(context.Context, inte
 func (s *syncLedgerStub) MarkJobFinalizingIfCurrentAttempt(context.Context, interfaces.TaskJobAttemptSelector) (bool, error) {
 	return false, nil
 }
-func (s *syncLedgerStub) MarkJobSucceededIfCurrentAttempt(context.Context, interfaces.TaskJobAttemptSelector, time.Time) (bool, error) {
+func (s *syncLedgerStub) MarkJobSucceededIfCurrentAttempt(_ context.Context, sel interfaces.TaskJobAttemptSelector, _ time.Time) (bool, error) {
+	s.mu.Lock()
+	s.successJobSel = &sel
+	s.mu.Unlock()
+	s.jobDoneOnce.Do(func() { close(s.jobDone) })
 	return false, nil
 }
 func (s *syncLedgerStub) MarkJobFailedIfCurrentAttempt(context.Context, interfaces.TaskJobAttemptSelector, interfaces.TaskLedgerFailure, time.Time) (bool, error) {
@@ -73,7 +91,7 @@ func (s *syncLedgerStub) MarkExecSucceededIfNonTerminal(_ context.Context, execu
 	s.mu.Lock()
 	s.successID = executionID
 	s.mu.Unlock()
-	close(s.done)
+	s.doneOnce.Do(func() { close(s.done) })
 	return true, nil
 }
 func (s *syncLedgerStub) MarkExecFailedIfNonTerminal(context.Context, string, interfaces.TaskLedgerFailure, time.Time) (bool, error) {
@@ -118,4 +136,66 @@ func TestSyncTaskExecutor_RespectsTaskIDAndUpdatesLedger(t *testing.T) {
 	defer ledger.mu.Unlock()
 	assert.Equal(t, "exec-fixed", ledger.activeID)
 	assert.Equal(t, "exec-fixed", ledger.successID)
+}
+
+func TestSyncTaskExecutor_CompletesRootJobForNonDocumentKind(t *testing.T) {
+	exec := NewSyncTaskExecutor()
+	ledger := newSyncLedgerStub()
+	ledger.jobByExecution["exec-delete"] = &types.TaskJob{
+		TenantID:       9,
+		Kind:           types.TaskJobKindDelete,
+		Scope:          types.TaskScopeKnowledge,
+		ScopeID:        "knowledge-1",
+		ProcessAttempt: 4,
+	}
+	exec.SetLedger(ledger)
+	exec.RegisterHandler("knowledge:delete", func(context.Context, *asynq.Task) error {
+		return nil
+	})
+
+	_, err := exec.Enqueue(asynq.NewTask("knowledge:delete", []byte(`{}`)), asynq.TaskID("exec-delete"), asynq.MaxRetry(0))
+	require.NoError(t, err)
+
+	select {
+	case <-ledger.jobDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for root job completion")
+	}
+
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	require.NotNil(t, ledger.successJobSel)
+	assert.Equal(t, uint64(9), ledger.successJobSel.TenantID)
+	assert.Equal(t, types.TaskScopeKnowledge, ledger.successJobSel.Scope)
+	assert.Equal(t, "knowledge-1", ledger.successJobSel.ScopeID)
+	assert.Equal(t, 4, ledger.successJobSel.ProcessAttempt)
+}
+
+func TestSyncTaskExecutor_DoesNotCompleteDocumentJobOnRootExecution(t *testing.T) {
+	exec := NewSyncTaskExecutor()
+	ledger := newSyncLedgerStub()
+	ledger.jobByExecution["exec-document"] = &types.TaskJob{
+		TenantID:       9,
+		Kind:           types.TaskJobKindReparse,
+		Scope:          types.TaskScopeKnowledge,
+		ScopeID:        "knowledge-1",
+		ProcessAttempt: 4,
+	}
+	exec.SetLedger(ledger)
+	exec.RegisterHandler(types.TypeDocumentProcess, func(context.Context, *asynq.Task) error {
+		return nil
+	})
+
+	_, err := exec.Enqueue(asynq.NewTask(types.TypeDocumentProcess, []byte(`{}`)), asynq.TaskID("exec-document"), asynq.MaxRetry(0))
+	require.NoError(t, err)
+
+	select {
+	case <-ledger.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for execution completion")
+	}
+
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	assert.Nil(t, ledger.successJobSel)
 }

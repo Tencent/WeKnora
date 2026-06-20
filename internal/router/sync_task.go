@@ -122,7 +122,9 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			lastErr = handler(ctx, task)
 			if lastErr == nil {
 				if ledger != nil {
-					_, _ = ledger.MarkExecSucceededIfNonTerminal(context.Background(), taskID, time.Now())
+					finishedAt := time.Now()
+					_, _ = ledger.MarkExecSucceededIfNonTerminal(context.Background(), taskID, finishedAt)
+					markSyncRootJobSucceededIfNeeded(ledger, taskID, finishedAt)
 				}
 				logger.Infof(ctx, "[SyncTask] Task completed type=%s id=%s elapsed=%v",
 					task.Type(), taskID, time.Since(start))
@@ -137,16 +139,19 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 		}
 
 		if ledger != nil {
+			finishedAt := time.Now()
 			if types.ClassifyTaskError(lastErr) == types.TaskErrorClassCanceled {
 				_, _ = ledger.MarkExecCanceledIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
 					ErrorClass: types.TaskErrorClassCanceled,
 					LastError:  truncateSyncTaskError(lastErr),
-				}, time.Now())
+				}, finishedAt)
+				markSyncRootJobCanceledIfNeeded(ledger, taskID, task.Type(), lastErr, finishedAt)
 			} else {
 				_, _ = ledger.MarkExecFailedIfNonTerminal(context.Background(), taskID, interfaces.TaskLedgerFailure{
 					ErrorClass: types.ClassifyTaskError(lastErr),
 					LastError:  truncateSyncTaskError(lastErr),
-				}, time.Now())
+				}, finishedAt)
+				markSyncRootJobFailedIfNeeded(ledger, taskID, task.Type(), lastErr, finishedAt)
 			}
 		}
 		logger.Errorf(ctx, "[SyncTask] Task failed (exhausted retries) type=%s id=%s elapsed=%v err=%v",
@@ -154,6 +159,60 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	}()
 
 	return info, nil
+}
+
+func markSyncRootJobSucceededIfNeeded(repo interfaces.TaskJobRepository, executionID string, finishedAt time.Time) {
+	job, ok := syncRootCompletingJob(repo, executionID)
+	if !ok {
+		return
+	}
+	_, _ = repo.MarkJobSucceededIfCurrentAttempt(context.Background(), syncJobAttemptSelector(job), finishedAt)
+}
+
+func markSyncRootJobFailedIfNeeded(repo interfaces.TaskJobRepository, executionID, taskType string, taskErr error, finishedAt time.Time) {
+	job, ok := syncRootCompletingJob(repo, executionID)
+	if !ok {
+		return
+	}
+	_, _ = repo.MarkJobFailedIfCurrentAttempt(context.Background(), syncJobAttemptSelector(job), interfaces.TaskLedgerFailure{
+		ErrorClass:     types.ClassifyTaskError(taskErr),
+		LastError:      truncateSyncTaskError(taskErr),
+		FailedTaskType: taskType,
+		FailedTaskID:   executionID,
+	}, finishedAt)
+}
+
+func markSyncRootJobCanceledIfNeeded(repo interfaces.TaskJobRepository, executionID, taskType string, taskErr error, finishedAt time.Time) {
+	job, ok := syncRootCompletingJob(repo, executionID)
+	if !ok {
+		return
+	}
+	_, _ = repo.MarkJobCanceledIfCurrentAttempt(context.Background(), syncJobAttemptSelector(job), interfaces.TaskLedgerFailure{
+		ErrorClass:     types.TaskErrorClassCanceled,
+		LastError:      truncateSyncTaskError(taskErr),
+		FailedTaskType: taskType,
+		FailedTaskID:   executionID,
+	}, finishedAt)
+}
+
+func syncRootCompletingJob(repo interfaces.TaskJobRepository, executionID string) (*types.TaskJob, bool) {
+	if repo == nil || executionID == "" {
+		return nil, false
+	}
+	job, err := repo.GetJobByExecutionID(context.Background(), executionID)
+	if err != nil || job == nil || !types.TaskJobKindCompletesOnRootExecution(job.Kind) {
+		return nil, false
+	}
+	return job, true
+}
+
+func syncJobAttemptSelector(job *types.TaskJob) interfaces.TaskJobAttemptSelector {
+	return interfaces.TaskJobAttemptSelector{
+		TenantID:       job.TenantID,
+		Scope:          job.Scope,
+		ScopeID:        job.ScopeID,
+		ProcessAttempt: job.ProcessAttempt,
+	}
 }
 
 func truncateSyncTaskError(err error) string {

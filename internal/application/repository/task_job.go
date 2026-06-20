@@ -77,6 +77,21 @@ func (r *taskJobRepository) GetJob(ctx context.Context, tenantID uint64, jobID s
 	return &job, nil
 }
 
+func (r *taskJobRepository) GetJobByExecutionID(ctx context.Context, executionID string) (*types.TaskJob, error) {
+	var job types.TaskJob
+	err := r.db.WithContext(ctx).
+		Joins("JOIN task_executions ON task_executions.job_id = task_jobs.job_id").
+		Where("task_executions.execution_id = ?", executionID).
+		First(&job).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
 func (r *taskJobRepository) ListExecutions(ctx context.Context, tenantID uint64, jobID string) ([]*types.TaskExecution, error) {
 	var rows []*types.TaskExecution
 	err := r.db.WithContext(ctx).

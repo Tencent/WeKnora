@@ -75,3 +75,23 @@ func TaskJobIsTerminal(state TaskJobState) bool {
 		state == TaskJobStateFailed ||
 		state == TaskJobStateCanceled
 }
+
+// TaskJobKindCompletesOnRootExecution reports whether the root execution's
+// terminal state is also the user-visible job terminal state. Document-style
+// jobs are closed by parse_status convergence instead.
+func TaskJobKindCompletesOnRootExecution(kind TaskJobKind) bool {
+	switch kind {
+	case TaskJobKindMove,
+		TaskJobKindDelete,
+		TaskJobKindFAQImport,
+		TaskJobKindKBClone,
+		TaskJobKindDatasourceSync:
+		return true
+	case TaskJobKindUpload,
+		TaskJobKindReparse,
+		TaskJobKindRebuildWiki:
+		return false
+	default:
+		return false
+	}
+}

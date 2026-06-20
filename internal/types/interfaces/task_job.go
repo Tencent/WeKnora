@@ -50,6 +50,7 @@ type TaskJobRepository interface {
 	Summary(ctx context.Context, q TaskJobQuery) (*TaskJobSummary, error)
 	ListJobs(ctx context.Context, q TaskJobQuery) ([]*types.TaskJob, int64, error)
 	GetJob(ctx context.Context, tenantID uint64, jobID string) (*types.TaskJob, error)
+	GetJobByExecutionID(ctx context.Context, executionID string) (*types.TaskJob, error)
 	ListExecutions(ctx context.Context, tenantID uint64, jobID string) ([]*types.TaskExecution, error)
 
 	MarkJobProcessingIfCurrentAttempt(ctx context.Context, sel TaskJobAttemptSelector) (bool, error)

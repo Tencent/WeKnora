@@ -125,6 +125,27 @@ func TestTaskJobRepository_CreateDefaultsAndCascadeDelete(t *testing.T) {
 	assert.Equal(t, int64(0), n, "execution rows should cascade with the job")
 }
 
+func TestTaskJobRepository_GetJobByExecutionID(t *testing.T) {
+	db := setupTaskLedgerTestDB(t)
+	repo := NewTaskJobRepository(db)
+	ctx := context.Background()
+
+	job := makeTaskJob("job-lookup", 2)
+	job.Kind = types.TaskJobKindDelete
+	require.NoError(t, repo.CreateJobAndExecution(ctx, job, makeTaskExecution("job-lookup", "exec-lookup", 2)))
+
+	got, err := repo.GetJobByExecutionID(ctx, "exec-lookup")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "job-lookup", got.JobID)
+	assert.Equal(t, types.TaskJobKindDelete, got.Kind)
+	assert.Equal(t, 2, got.ProcessAttempt)
+
+	missing, err := repo.GetJobByExecutionID(ctx, "missing")
+	require.NoError(t, err)
+	assert.Nil(t, missing)
+}
+
 func TestTaskJobRepository_AttemptIsolationAndTerminalGuard(t *testing.T) {
 	db := setupTaskLedgerTestDB(t)
 	repo := NewTaskJobRepository(db)
