@@ -180,6 +180,31 @@ func TestTaskJobRepository_AttemptIsolationAndTerminalGuard(t *testing.T) {
 	assert.False(t, changed, "failed old attempt should ignore late finalizing events")
 }
 
+func TestTaskJobRepository_JobIDIsolationWithinSameAttempt(t *testing.T) {
+	db := setupTaskLedgerTestDB(t)
+	repo := NewTaskJobRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateJobAndExecution(ctx, makeTaskJob("job-a", 1), makeTaskExecution("job-a", "exec-a", 1)))
+	require.NoError(t, repo.CreateJobAndExecution(ctx, makeTaskJob("job-b", 1), makeTaskExecution("job-b", "exec-b", 1)))
+
+	changed, err := repo.MarkJobFailedIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+		JobID:          "job-a",
+		TenantID:       7,
+		Scope:          types.TaskScopeKnowledge,
+		ScopeID:        "knowledge-1",
+		ProcessAttempt: 1,
+	}, interfaces.TaskLedgerFailure{ErrorClass: types.TaskErrorClassRetryable, LastError: "boom"}, time.Now())
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	var jobA, jobB types.TaskJob
+	require.NoError(t, db.First(&jobA, "job_id = ?", "job-a").Error)
+	require.NoError(t, db.First(&jobB, "job_id = ?", "job-b").Error)
+	assert.Equal(t, types.TaskJobStateFailed, jobA.State)
+	assert.Equal(t, types.TaskJobStateQueued, jobB.State, "job_id selector must not update a sibling job with same scope/attempt")
+}
+
 func TestTaskJobRepository_ExecutionUpdateIfExistsAndTerminalGuard(t *testing.T) {
 	db := setupTaskLedgerTestDB(t)
 	repo := NewTaskJobRepository(db)
@@ -212,49 +237,33 @@ func TestTaskJobRepository_ExecutionUpdateIfExistsAndTerminalGuard(t *testing.T)
 	assert.False(t, changed, "terminal execution must not be overwritten by late failure")
 }
 
-func TestTaskJobRepository_ManualRetryCreatesNewAttemptAndKeepsHistory(t *testing.T) {
+func TestTaskJobRepository_CancelAllNonTerminalExecutionsForJob(t *testing.T) {
 	db := setupTaskLedgerTestDB(t)
 	repo := NewTaskJobRepository(db)
 	ctx := context.Background()
-	now := time.Now()
 
-	require.NoError(t, repo.CreateJobAndExecution(ctx, makeTaskJob("job-1", 0), makeTaskExecution("job-1", "exec-old", 0)))
-	changed, err := repo.MarkJobFailedIfCurrentAttempt(ctx, taskAttempt(0), interfaces.TaskLedgerFailure{
-		ErrorClass: types.TaskErrorClassTerminal,
-		LastError:  "provider auth failed",
-	}, now)
+	require.NoError(t, repo.CreateJobAndExecution(ctx, makeTaskJob("job-cancel", 1), makeTaskExecution("job-cancel", "exec-1", 1)))
+	require.NoError(t, db.Create(makeTaskExecution("job-cancel", "exec-2", 1)).Error)
+	done := makeTaskExecution("job-cancel", "exec-done", 1)
+	done.State = types.TaskExecutionStateSucceeded
+	require.NoError(t, db.Create(done).Error)
+
+	changed, err := repo.MarkExecutionsCanceledForJob(ctx, 7, "job-cancel", interfaces.TaskLedgerFailure{
+		ErrorClass: types.TaskErrorClassCanceled,
+		LastError:  "canceled by user",
+	}, time.Now())
 	require.NoError(t, err)
-	require.True(t, changed)
-	changed, err = repo.MarkExecFailedIfNonTerminal(ctx, "exec-old", interfaces.TaskLedgerFailure{
-		ErrorClass: types.TaskErrorClassTerminal,
-		LastError:  "provider auth failed",
-	}, now)
-	require.NoError(t, err)
-	require.True(t, changed)
+	assert.Equal(t, int64(2), changed)
 
-	newExec, changed, err := repo.PrepareManualRetry(ctx, "job-1", "exec-new", "document:process", "critical", now.Add(time.Second))
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.NotNil(t, newExec)
-	assert.Equal(t, 1, newExec.ProcessAttempt)
-	assert.Equal(t, "exec-old", newExec.RetryOf)
+	var canceled int64
+	require.NoError(t, db.Model(&types.TaskExecution{}).
+		Where("job_id = ? AND state = ?", "job-cancel", types.TaskExecutionStateCanceled).
+		Count(&canceled).Error)
+	assert.Equal(t, int64(2), canceled)
 
-	var job types.TaskJob
-	require.NoError(t, db.First(&job, "job_id = ?", "job-1").Error)
-	assert.Equal(t, 1, job.ProcessAttempt)
-	assert.Equal(t, types.TaskJobStateQueued, job.State)
-	assert.Empty(t, job.LastError)
-	assert.Nil(t, job.FinishedAt)
-
-	var executions []types.TaskExecution
-	require.NoError(t, db.Order("enqueued_at ASC").Find(&executions, "job_id = ?", "job-1").Error)
-	require.Len(t, executions, 2)
-	assert.Equal(t, types.TaskExecutionStateFailed, executions[0].State, "old execution history is preserved")
-	assert.Equal(t, types.TaskExecutionStateQueued, executions[1].State)
-
-	_, changed, err = repo.PrepareManualRetry(ctx, "job-1", "exec-again", "document:process", "critical", now)
-	require.NoError(t, err)
-	assert.False(t, changed, "queued retry attempt cannot be retried again")
+	var succeeded types.TaskExecution
+	require.NoError(t, db.First(&succeeded, "execution_id = ?", "exec-done").Error)
+	assert.Equal(t, types.TaskExecutionStateSucceeded, succeeded.State)
 }
 
 func TestTaskJobRepository_ListJobsScopesSearchToTenantAndCreator(t *testing.T) {

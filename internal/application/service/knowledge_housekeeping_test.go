@@ -132,8 +132,10 @@ func insertSpan(t *testing.T, db *gorm.DB, kid string, attempt int, spanID, stat
 type fakeTaskInspector struct {
 	queued     map[string]bool
 	wikiQueued map[string]bool
+	taskQueued map[string]bool
 	err        error
 	wikiErr    error
+	taskErr    error
 }
 
 func (f fakeTaskInspector) CancelTasksForKnowledge(
@@ -158,6 +160,13 @@ func (f fakeTaskInspector) HasQueuedWikiForKnowledgeBase(
 		return false, f.wikiErr
 	}
 	return f.wikiQueued[kbID], nil
+}
+
+func (f fakeTaskInspector) HasTask(_ context.Context, taskID string) (bool, error) {
+	if f.taskErr != nil {
+		return false, f.taskErr
+	}
+	return f.taskQueued[taskID], nil
 }
 
 type fakeTaskEnqueuer struct {
@@ -404,8 +413,8 @@ func TestHousekeeping_WikiPendingQueryErrorProtectsCandidates(t *testing.T) {
 }
 
 // TestHousekeeping_QueueProbeError_FailsSafe confirms the fail-safe
-// direction: when the queue probe errors we still recover the row rather
-// than leaving it stranded forever.
+// direction: when the queue probe errors we protect the row because
+// housekeeping cannot prove it is orphaned.
 func TestHousekeeping_QueueProbeError_FailsSafe(t *testing.T) {
 	db := setupHousekeepingDB(t)
 	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
@@ -420,8 +429,25 @@ func TestHousekeeping_QueueProbeError_FailsSafe(t *testing.T) {
 	require.NoError(t, db.Raw(
 		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-probeerr",
 	).Row().Scan(&status))
-	assert.Equal(t, types.ParseStatusFailed, status,
-		"queue probe error must fail safe and still recover the stuck row")
+	assert.Equal(t, types.ParseStatusProcessing, status,
+		"queue probe error must protect the candidate")
+}
+
+func TestHousekeeping_HeartbeatQueryErrorProtectsCandidates(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-heartbeat-query-error", types.ParseStatusProcessing, stale)
+	require.NoError(t, db.Migrator().DropTable(&types.KnowledgeProcessingSpan{}))
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-heartbeat-query-error",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusProcessing, status,
+		"heartbeat query error must protect the candidate")
 }
 
 // TestHousekeeping_PreservesRecentlyTouched: any knowledge whose

@@ -208,6 +208,7 @@ func syncRootCompletingJob(repo interfaces.TaskJobRepository, executionID string
 
 func syncJobAttemptSelector(job *types.TaskJob) interfaces.TaskJobAttemptSelector {
 	return interfaces.TaskJobAttemptSelector{
+		JobID:          job.JobID,
 		TenantID:       job.TenantID,
 		Scope:          job.Scope,
 		ScopeID:        job.ScopeID,

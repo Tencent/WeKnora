@@ -86,6 +86,7 @@ func (d *TaskJobDispatcher) DispatchUserRoot(ctx context.Context, req UserRootDi
 			observability.RecordTaskLedgerWriteFailure("dispatcher", "create_job_execution")
 			logger.Warnf(ctx, "task ledger: failed to create job/execution job=%s exec=%s: %v",
 				req.JobID, req.ExecutionID, err)
+			return nil, err
 		}
 	}
 

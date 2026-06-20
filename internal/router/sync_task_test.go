@@ -50,6 +50,9 @@ func (s *syncLedgerStub) GetJobByExecutionID(_ context.Context, executionID stri
 	defer s.mu.Unlock()
 	return s.jobByExecution[executionID], nil
 }
+func (s *syncLedgerStub) GetLatestJobForScopeAttempt(context.Context, uint64, string, string, int) (*types.TaskJob, error) {
+	return nil, nil
+}
 func (s *syncLedgerStub) ListExecutions(context.Context, uint64, string) ([]*types.TaskExecution, error) {
 	return nil, nil
 }
@@ -100,8 +103,8 @@ func (s *syncLedgerStub) MarkExecFailedIfNonTerminal(context.Context, string, in
 func (s *syncLedgerStub) MarkExecCanceledIfNonTerminal(context.Context, string, interfaces.TaskLedgerFailure, time.Time) (bool, error) {
 	return true, nil
 }
-func (s *syncLedgerStub) PrepareManualRetry(context.Context, string, string, string, string, time.Time) (*types.TaskExecution, bool, error) {
-	return nil, false, nil
+func (s *syncLedgerStub) MarkExecutionsCanceledForJob(context.Context, uint64, string, interfaces.TaskLedgerFailure, time.Time) (int64, error) {
+	return 0, nil
 }
 func (s *syncLedgerStub) FindStaleDispatches(context.Context, time.Time, int) ([]*types.TaskExecution, error) {
 	return nil, nil

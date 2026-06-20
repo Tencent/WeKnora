@@ -45,4 +45,11 @@ type TaskInspector interface {
 	// lives in the queue backend. It is only a trigger health check;
 	// document-level wiki ownership lives in task_pending_ops.
 	HasQueuedWikiForKnowledgeBase(ctx context.Context, kbID string) (bool, error)
+
+	// HasTask reports whether a concrete task ID exists in the queue
+	// backend. The task ledger uses execution IDs as asynq TaskIDs, so
+	// stale-dispatch maintenance can reconcile the durable ledger with
+	// pending/scheduled/retry/active queue state before marking anything
+	// failed.
+	HasTask(ctx context.Context, taskID string) (bool, error)
 }

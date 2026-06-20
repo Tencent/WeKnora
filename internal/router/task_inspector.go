@@ -132,9 +132,13 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 	}
 	for _, queue := range queuesScanned {
 		for _, l := range listers {
-			if a.queueStateHasMatch(ctx, queue, l.state, l.list, func(taskType string, payload []byte) bool {
-				return matchesKnowledge(taskType, payload, knowledgeID)
-			}) {
+			matched, err := a.queueStateHasMatch(ctx, queue, l.state, l.list, func(info *asynq.TaskInfo) bool {
+				return info != nil && matchesKnowledge(info.Type, info.Payload, knowledgeID)
+			})
+			if err != nil {
+				return false, err
+			}
+			if matched {
 				return true, nil
 			}
 		}
@@ -159,9 +163,43 @@ func (a *asynqTaskInspector) HasQueuedWikiForKnowledgeBase(
 	}
 	for _, queue := range queuesScanned {
 		for _, l := range listers {
-			if a.queueStateHasMatch(ctx, queue, l.state, l.list, func(taskType string, payload []byte) bool {
-				return matchesWikiKnowledgeBase(taskType, payload, kbID)
-			}) {
+			matched, err := a.queueStateHasMatch(ctx, queue, l.state, l.list, func(info *asynq.TaskInfo) bool {
+				return info != nil && matchesWikiKnowledgeBase(info.Type, info.Payload, kbID)
+			})
+			if err != nil {
+				return false, err
+			}
+			if matched {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (a *asynqTaskInspector) HasTask(ctx context.Context, taskID string) (bool, error) {
+	if a == nil || a.inspector == nil || taskID == "" {
+		return false, nil
+	}
+	listers := []struct {
+		state string
+		list  func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
+	}{
+		{"pending", a.inspector.ListPendingTasks},
+		{"scheduled", a.inspector.ListScheduledTasks},
+		{"retry", a.inspector.ListRetryTasks},
+		{"active", a.inspector.ListActiveTasks},
+		{"archived", a.inspector.ListArchivedTasks},
+	}
+	for _, queue := range queuesScanned {
+		for _, l := range listers {
+			matched, err := a.queueStateHasMatch(ctx, queue, l.state, l.list, func(info *asynq.TaskInfo) bool {
+				return info != nil && info.ID == taskID
+			})
+			if err != nil {
+				return false, err
+			}
+			if matched {
 				return true, nil
 			}
 		}
@@ -172,32 +210,32 @@ func (a *asynqTaskInspector) HasQueuedWikiForKnowledgeBase(
 // queueStateHasMatch pages through one (queue, state) list looking for a
 // task matching the supplied payload predicate. Mirrors the delete* scanners but is
 // strictly read-only and returns early on the first hit. A backend error
-// is logged and treated as "no match" (false); the caller's fail-safe
-// then errs toward recovering the row rather than preserving it forever.
+// is returned to the caller so destructive recovery can fail closed.
 func (a *asynqTaskInspector) queueStateHasMatch(
 	ctx context.Context, queue, state string,
 	list func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error),
-	matches func(taskType string, payload []byte) bool,
-) bool {
+	matches func(*asynq.TaskInfo) bool,
+) (bool, error) {
 	page := 1
 	for {
 		tasks, err := list(queue, asynq.PageSize(listPageSize), asynq.Page(page))
 		if err != nil {
 			if !errors.Is(err, asynq.ErrQueueNotFound) {
 				logger.Warnf(ctx, "[TaskInspector] probe %s queue=%s page=%d: %v", state, queue, page, err)
+				return false, err
 			}
-			return false
+			return false, nil
 		}
 		if len(tasks) == 0 {
-			return false
+			return false, nil
 		}
 		for _, t := range tasks {
-			if matches(t.Type, t.Payload) {
-				return true
+			if matches(t) {
+				return true, nil
 			}
 		}
 		if len(tasks) < listPageSize {
-			return false
+			return false, nil
 		}
 		page++
 	}
@@ -383,5 +421,9 @@ func (noopTaskInspector) HasQueuedTasksForKnowledge(
 func (noopTaskInspector) HasQueuedWikiForKnowledgeBase(
 	ctx context.Context, kbID string,
 ) (bool, error) {
+	return false, nil
+}
+
+func (noopTaskInspector) HasTask(ctx context.Context, taskID string) (bool, error) {
 	return false, nil
 }

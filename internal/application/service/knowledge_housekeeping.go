@@ -230,7 +230,8 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 // recent span row predates `cutoff` — i.e. genuinely stuck. Candidates
 // with no span rows at all also pass through (they're lite-mode or
 // pre-instrumentation tasks; the simple updated_at check already proved
-// them stuck and we have no heartbeat to override that).
+// them stuck and we have no heartbeat to override that). If the heartbeat
+// query itself fails, the whole batch is protected for this sweep.
 func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, candidates []types.Knowledge, cutoff time.Time) []types.Knowledge {
 	if len(candidates) == 0 {
 		return candidates
@@ -259,11 +260,8 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 		Group("knowledge_id").
 		Find(&beats).Error
 	if err != nil {
-		// On query failure, fail safe — assume nothing has a
-		// heartbeat (so all candidates are "stuck"). This matches
-		// the previous-version behaviour and never under-recovers.
-		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (will fail safe and recover all candidates)", err)
-		return candidates
+		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (protecting candidates for this sweep)", err)
+		return candidates[:0]
 	}
 	heartbeat := make(map[string]time.Time, len(beats))
 	for _, b := range beats {
@@ -293,8 +291,8 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 // document-level signal; if that durable query fails, the whole batch is
 // protected for this sweep. When no inspector is wired (nil), the asynq
 // part of the gate is a pass-through so behaviour matches the pre-existing
-// span-only sweep. On per-knowledge asynq probe error we still recover the
-// row, matching the older fail-safe direction for volatile queue probes.
+// span-only sweep. On per-knowledge asynq probe error, the candidate is
+// protected for this sweep because we cannot prove it is orphaned.
 func (h *HousekeepingService) filterOutQueued(
 	ctx context.Context, candidates []types.Knowledge,
 ) (kept []types.Knowledge, skipped int) {
@@ -317,8 +315,8 @@ func (h *HousekeepingService) filterOutQueued(
 			queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
 			if err != nil {
 				logger.Warnf(ctx,
-					"[Housekeeping] queue probe failed for %s: %v (will fail safe and treat as stuck)", k.ID, err)
-				out = append(out, k)
+					"[Housekeeping] queue probe failed for %s: %v (protecting candidate for this sweep)", k.ID, err)
+				skipped++
 				continue
 			}
 			if queued {

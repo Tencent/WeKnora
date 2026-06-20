@@ -129,6 +129,7 @@ func rootCompletingJob(repo interfaces.TaskJobRepository, executionID string) (*
 
 func jobAttemptSelector(job *types.TaskJob) interfaces.TaskJobAttemptSelector {
 	return interfaces.TaskJobAttemptSelector{
+		JobID:          job.JobID,
 		TenantID:       job.TenantID,
 		Scope:          job.Scope,
 		ScopeID:        job.ScopeID,

@@ -8,6 +8,7 @@ import (
 )
 
 type TaskJobAttemptSelector struct {
+	JobID          string
 	TenantID       uint64
 	Scope          string
 	ScopeID        string
@@ -51,6 +52,7 @@ type TaskJobRepository interface {
 	ListJobs(ctx context.Context, q TaskJobQuery) ([]*types.TaskJob, int64, error)
 	GetJob(ctx context.Context, tenantID uint64, jobID string) (*types.TaskJob, error)
 	GetJobByExecutionID(ctx context.Context, executionID string) (*types.TaskJob, error)
+	GetLatestJobForScopeAttempt(ctx context.Context, tenantID uint64, scope, scopeID string, attempt int) (*types.TaskJob, error)
 	ListExecutions(ctx context.Context, tenantID uint64, jobID string) ([]*types.TaskExecution, error)
 
 	MarkJobProcessingIfCurrentAttempt(ctx context.Context, sel TaskJobAttemptSelector) (bool, error)
@@ -66,8 +68,8 @@ type TaskJobRepository interface {
 	MarkExecSucceededIfNonTerminal(ctx context.Context, executionID string, finishedAt time.Time) (bool, error)
 	MarkExecFailedIfNonTerminal(ctx context.Context, executionID string, failure TaskLedgerFailure, finishedAt time.Time) (bool, error)
 	MarkExecCanceledIfNonTerminal(ctx context.Context, executionID string, failure TaskLedgerFailure, finishedAt time.Time) (bool, error)
+	MarkExecutionsCanceledForJob(ctx context.Context, tenantID uint64, jobID string, failure TaskLedgerFailure, finishedAt time.Time) (int64, error)
 
-	PrepareManualRetry(ctx context.Context, jobID, newExecutionID, retryTaskType, queue string, enqueuedAt time.Time) (*types.TaskExecution, bool, error)
 	FindStaleDispatches(ctx context.Context, cutoff time.Time, limit int) ([]*types.TaskExecution, error)
 	MarkStaleDispatchFailed(ctx context.Context, executionID string, finishedAt time.Time) (bool, error)
 	DeleteTerminalJobsFinishedBefore(ctx context.Context, cutoff time.Time, limit int) (int64, error)

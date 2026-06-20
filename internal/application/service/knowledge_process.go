@@ -2211,6 +2211,77 @@ func (s *knowledgeService) ReparseKnowledge(
 	return existing, nil
 }
 
+func (s *knowledgeService) RetryKnowledgeTask(
+	ctx context.Context,
+	jobID string,
+	actorID string,
+) (*types.TaskJob, *types.TaskExecution, error) {
+	if s.taskJobRepo == nil {
+		return nil, nil, werrors.NewBadRequestError("任务台账未启用，无法重试")
+	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	job, err := s.taskJobRepo.GetJob(ctx, tenantID, jobID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if job == nil {
+		return nil, nil, werrors.NewNotFoundError("task not found")
+	}
+	if job.Scope != types.TaskScopeKnowledge || (job.Kind != types.TaskJobKindUpload && job.Kind != types.TaskJobKindReparse) {
+		return nil, nil, werrors.NewBadRequestError("task cannot be retried")
+	}
+	if job.State != types.TaskJobStateFailed && job.State != types.TaskJobStateCanceled {
+		return nil, nil, werrors.NewBadRequestError("task cannot be retried")
+	}
+	if !retryableKnowledgeTaskJobErrorClass(job.LastErrorClass) {
+		return nil, nil, werrors.NewBadRequestError("task cannot be retried")
+	}
+	execs, err := s.taskJobRepo.ListExecutions(ctx, tenantID, job.JobID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, exec := range execs {
+		if exec != nil && !types.TaskExecutionIsTerminal(exec.State) {
+			return nil, nil, werrors.NewBadRequestError("task cannot be retried while an execution is still running")
+		}
+	}
+	if latest := s.tracker().LatestAttempt(ctx, job.ScopeID); latest > 0 && latest != job.ProcessAttempt {
+		return nil, nil, werrors.NewBadRequestError("task attempt has been superseded; retry the current task")
+	}
+	if _, err := s.ReparseKnowledge(ctx, job.ScopeID, nil); err != nil {
+		return nil, nil, err
+	}
+	newAttempt := s.tracker().LatestAttempt(ctx, job.ScopeID)
+	if newAttempt <= job.ProcessAttempt {
+		newAttempt = job.ProcessAttempt + 1
+	}
+	newJob, err := s.taskJobRepo.GetLatestJobForScopeAttempt(ctx, tenantID, types.TaskScopeKnowledge, job.ScopeID, newAttempt)
+	if err != nil {
+		return nil, nil, err
+	}
+	if newJob == nil {
+		return nil, nil, werrors.NewInternalServerError("retry did not create a task job")
+	}
+	newExecs, err := s.taskJobRepo.ListExecutions(ctx, tenantID, newJob.JobID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var newestExec *types.TaskExecution
+	if len(newExecs) > 0 {
+		newestExec = newExecs[0]
+	}
+	return newJob, newestExec, nil
+}
+
+func retryableKnowledgeTaskJobErrorClass(class types.TaskErrorClass) bool {
+	switch class {
+	case "", types.TaskErrorClassRetryable, types.TaskErrorClassCanceled, types.TaskErrorClassEnqueueFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // CancelKnowledgeParse marks an in-progress parse as cancelled by the user.
 //
 // Semantics (kept aligned with the existing deleting path, but partial work
@@ -2308,6 +2379,52 @@ func (s *knowledgeService) CancelKnowledgeParse(
 	// batch in the first place.
 	s.scrubWikiPendingIngest(ctx, existing.KnowledgeBaseID, knowledgeID, "cancel")
 	return existing, nil
+}
+
+func (s *knowledgeService) CancelKnowledgeAttempt(
+	ctx context.Context,
+	knowledgeID string,
+	expectedAttempt int,
+	jobID string,
+) error {
+	if knowledgeID == "" || expectedAttempt <= 0 || jobID == "" {
+		return werrors.NewBadRequestError("invalid cancel request")
+	}
+	if s.taskJobRepo == nil {
+		_, err := s.CancelKnowledgeParse(ctx, knowledgeID)
+		return err
+	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	job, err := s.taskJobRepo.GetJob(ctx, tenantID, jobID)
+	if err != nil {
+		return err
+	}
+	if job == nil {
+		return werrors.NewNotFoundError("task not found")
+	}
+	if job.Scope != types.TaskScopeKnowledge || job.ScopeID != knowledgeID || job.ProcessAttempt != expectedAttempt {
+		return werrors.NewBadRequestError("task attempt has been superseded")
+	}
+	if latest := s.tracker().LatestAttempt(ctx, knowledgeID); latest > 0 && latest != expectedAttempt {
+		now := time.Now()
+		_, _ = s.taskJobRepo.MarkJobCanceledIfCurrentAttempt(ctx, interfaces.TaskJobAttemptSelector{
+			JobID:          job.JobID,
+			TenantID:       job.TenantID,
+			Scope:          job.Scope,
+			ScopeID:        job.ScopeID,
+			ProcessAttempt: job.ProcessAttempt,
+		}, interfaces.TaskLedgerFailure{
+			ErrorClass: types.TaskErrorClassCanceled,
+			LastError:  "task superseded by a newer attempt",
+		}, now)
+		_, _ = s.taskJobRepo.MarkExecutionsCanceledForJob(ctx, job.TenantID, job.JobID, interfaces.TaskLedgerFailure{
+			ErrorClass: types.TaskErrorClassCanceled,
+			LastError:  "task superseded by a newer attempt",
+		}, now)
+		return werrors.NewBadRequestError("task attempt has been superseded")
+	}
+	_, err = s.CancelKnowledgeParse(ctx, knowledgeID)
+	return err
 }
 
 // dequeueKnowledgeTasks asks the task inspector to remove any queued

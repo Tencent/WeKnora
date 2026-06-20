@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,8 +9,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/hibiken/asynq"
 )
 
 type TaskCenterHandler struct {
@@ -132,32 +129,21 @@ func (h *TaskCenterHandler) retryJob(c *gin.Context, job *types.TaskJob) (string
 	if !canRetryJob(job, execs) {
 		return "", apperrors.NewBadRequestError("task cannot be retried")
 	}
-	payload, queue, err := replayDocumentPayload(job)
-	if err != nil {
-		return "", apperrors.NewBadRequestError(err.Error())
-	}
-	executionID := uuid.NewString()
-	exec, changed, err := h.repo.PrepareManualRetry(c.Request.Context(), job.JobID, executionID, types.TypeDocumentProcess, queue, time.Now())
-	if err != nil {
-		return "", apperrors.NewInternalServerError(err.Error())
-	}
-	if !changed || exec == nil {
+	if h.kgService == nil || job.Scope != types.TaskScopeKnowledge {
 		return "", apperrors.NewBadRequestError("task cannot be retried")
 	}
-	payload.Attempt = exec.ProcessAttempt
-	raw, _ := json.Marshal(payload)
-	task := asynq.NewTask(types.TypeDocumentProcess, raw)
-	info, err := h.enqueuer.Enqueue(task, asynq.Queue(queue), asynq.TaskID(executionID), asynq.MaxRetry(3))
+	userID, _ := types.UserIDFromContext(c.Request.Context())
+	_, exec, err := h.kgService.RetryKnowledgeTask(c.Request.Context(), job.JobID, userID)
 	if err != nil {
-		_, _ = h.repo.MarkDispatchFailed(c.Request.Context(), job.JobID, executionID, interfaces.TaskLedgerFailure{
-			ErrorClass: types.TaskErrorClassEnqueueFailed,
-			LastError:  err.Error(),
-		}, time.Now())
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			return "", appErr
+		}
 		return "", apperrors.NewInternalServerError(err.Error())
 	}
-	_, _ = h.repo.MarkDispatched(c.Request.Context(), executionID, time.Now())
-	_ = info
-	return executionID, nil
+	if exec == nil {
+		return "", apperrors.NewInternalServerError("retry did not create an execution")
+	}
+	return exec.ExecutionID, nil
 }
 
 func (h *TaskCenterHandler) Cancel(c *gin.Context) {
@@ -170,7 +156,7 @@ func (h *TaskCenterHandler) Cancel(c *gin.Context) {
 		return
 	}
 	if job.Scope == types.TaskScopeKnowledge && h.kgService != nil {
-		if _, err := h.kgService.CancelKnowledgeParse(c.Request.Context(), job.ScopeID); err != nil {
+		if err := h.kgService.CancelKnowledgeAttempt(c.Request.Context(), job.ScopeID, job.ProcessAttempt, job.JobID); err != nil {
 			if appErr, ok := apperrors.IsAppError(err); ok {
 				c.Error(appErr)
 				return
@@ -179,21 +165,15 @@ func (h *TaskCenterHandler) Cancel(c *gin.Context) {
 			return
 		}
 	}
-	sel := interfaces.TaskJobAttemptSelector{TenantID: job.TenantID, Scope: job.Scope, ScopeID: job.ScopeID, ProcessAttempt: job.ProcessAttempt}
+	sel := interfaces.TaskJobAttemptSelector{JobID: job.JobID, TenantID: job.TenantID, Scope: job.Scope, ScopeID: job.ScopeID, ProcessAttempt: job.ProcessAttempt}
 	_, _ = h.repo.MarkJobCanceledIfCurrentAttempt(c.Request.Context(), sel, interfaces.TaskLedgerFailure{
 		ErrorClass: types.TaskErrorClassCanceled,
 		LastError:  "canceled by user",
 	}, time.Now())
-	execs, _ := h.repo.ListExecutions(c.Request.Context(), job.TenantID, job.JobID)
-	for _, exec := range execs {
-		if !types.TaskExecutionIsTerminal(exec.State) {
-			_, _ = h.repo.MarkExecCanceledIfNonTerminal(c.Request.Context(), exec.ExecutionID, interfaces.TaskLedgerFailure{
-				ErrorClass: types.TaskErrorClassCanceled,
-				LastError:  "canceled by user",
-			}, time.Now())
-			break
-		}
-	}
+	_, _ = h.repo.MarkExecutionsCanceledForJob(c.Request.Context(), job.TenantID, job.JobID, interfaces.TaskLedgerFailure{
+		ErrorClass: types.TaskErrorClassCanceled,
+		LastError:  "canceled by user",
+	}, time.Now())
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 

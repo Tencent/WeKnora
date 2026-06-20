@@ -111,6 +111,12 @@ type KnowledgeService interface {
 	// is already cancelled. Returns an error when the knowledge is in a
 	// terminal state (completed / failed) or being deleted.
 	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// RetryKnowledgeTask retries a user-facing knowledge task through the
+	// normal reparse state machine rather than replaying a raw worker payload.
+	RetryKnowledgeTask(ctx context.Context, jobID string, actorID string) (*types.TaskJob, *types.TaskExecution, error)
+	// CancelKnowledgeAttempt cancels a knowledge parse only when the task job
+	// still represents the current parse attempt.
+	CancelKnowledgeAttempt(ctx context.Context, knowledgeID string, expectedAttempt int, jobID string) error
 	// CloneKnowledgeBase clones knowledge to another knowledge base.
 	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
 	// UpdateImageInfo updates image information for a knowledge chunk.

@@ -10,7 +10,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type taskJobRepository struct {
@@ -82,6 +81,26 @@ func (r *taskJobRepository) GetJobByExecutionID(ctx context.Context, executionID
 	err := r.db.WithContext(ctx).
 		Joins("JOIN task_executions ON task_executions.job_id = task_jobs.job_id").
 		Where("task_executions.execution_id = ?", executionID).
+		First(&job).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+func (r *taskJobRepository) GetLatestJobForScopeAttempt(
+	ctx context.Context,
+	tenantID uint64,
+	scope, scopeID string,
+	attempt int,
+) (*types.TaskJob, error) {
+	var job types.TaskJob
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND scope = ? AND scope_id = ? AND process_attempt = ?", tenantID, scope, scopeID, attempt).
+		Order("created_at DESC").
 		First(&job).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -339,75 +358,25 @@ func (r *taskJobRepository) MarkExecCanceledIfNonTerminal(
 	return rowsChanged(res)
 }
 
-func (r *taskJobRepository) PrepareManualRetry(
+func (r *taskJobRepository) MarkExecutionsCanceledForJob(
 	ctx context.Context,
-	jobID, newExecutionID, retryTaskType, queue string,
-	enqueuedAt time.Time,
-) (*types.TaskExecution, bool, error) {
-	if jobID == "" || newExecutionID == "" || retryTaskType == "" {
-		return nil, false, errors.New("task ledger: job_id, new execution_id, and task_type are required")
+	tenantID uint64,
+	jobID string,
+	failure interfaces.TaskLedgerFailure,
+	finishedAt time.Time,
+) (int64, error) {
+	if failure.ErrorClass == "" {
+		failure.ErrorClass = types.TaskErrorClassCanceled
 	}
-	var created *types.TaskExecution
-	changed := false
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var job types.TaskJob
-		q := tx
-		if tx.Dialector.Name() != "sqlite" {
-			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
-		}
-		if err := q.Where("job_id = ?", jobID).First(&job).Error; err != nil {
-			return err
-		}
-		if job.State != types.TaskJobStateFailed && job.State != types.TaskJobStateCanceled {
-			return nil
-		}
-
-		var previous types.TaskExecution
-		err := tx.Where("job_id = ? AND process_attempt = ?", jobID, job.ProcessAttempt).
-			Order("enqueued_at DESC").
-			First(&previous).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-
-		nextAttempt := job.ProcessAttempt + 1
-		res := tx.Model(&types.TaskJob{}).
-			Where("job_id = ?", jobID).
-			Where("state IN ?", []string{string(types.TaskJobStateFailed), string(types.TaskJobStateCanceled)}).
-			Updates(map[string]any{
-				"process_attempt":  nextAttempt,
-				"state":            types.TaskJobStateQueued,
-				"last_error_class": "",
-				"last_error":       "",
-				"failed_task_type": "",
-				"failed_task_id":   "",
-				"finished_at":      nil,
-			})
-		ok, err := rowsChanged(res)
-		if err != nil || !ok {
-			return err
-		}
-
-		created = &types.TaskExecution{
-			ExecutionID:    newExecutionID,
-			JobID:          jobID,
-			ProcessAttempt: nextAttempt,
-			TaskType:       retryTaskType,
-			Queue:          queue,
-			State:          types.TaskExecutionStateQueued,
-			RetryOf:        previous.ExecutionID,
-			EnqueuedAt:     enqueuedAt,
-		}
-		if created.EnqueuedAt.IsZero() {
-			created.EnqueuedAt = time.Now()
-		}
-		if err := tx.Create(created).Error; err != nil {
-			return err
-		}
-		changed = true
-		return nil
-	})
-	return created, changed, err
+	res := r.db.WithContext(ctx).Model(&types.TaskExecution{}).
+		Where("job_id = ?", jobID).
+		Where("state NOT IN ?", taskExecutionTerminalStates).
+		Where("EXISTS (SELECT 1 FROM task_jobs WHERE task_jobs.job_id = task_executions.job_id AND task_jobs.tenant_id = ?)", tenantID).
+		Updates(execFailureUpdates(types.TaskExecutionStateCanceled, failure, finishedAt))
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
 }
 
 func (r *taskJobRepository) FindStaleDispatches(ctx context.Context, cutoff time.Time, limit int) ([]*types.TaskExecution, error) {
@@ -474,11 +443,15 @@ func (r *taskJobRepository) DeleteTerminalJobsFinishedBefore(ctx context.Context
 }
 
 func (r *taskJobRepository) baseJobAttemptUpdate(ctx context.Context, sel interfaces.TaskJobAttemptSelector) *gorm.DB {
-	return r.db.WithContext(ctx).Model(&types.TaskJob{}).
+	tx := r.db.WithContext(ctx).Model(&types.TaskJob{}).
 		Where("tenant_id = ?", sel.TenantID).
 		Where("scope = ?", sel.Scope).
 		Where("scope_id = ?", sel.ScopeID).
 		Where("process_attempt = ?", sel.ProcessAttempt)
+	if sel.JobID != "" {
+		tx = tx.Where("job_id = ?", sel.JobID)
+	}
+	return tx
 }
 
 func (r *taskJobRepository) baseJobQuery(ctx context.Context, q interfaces.TaskJobQuery) *gorm.DB {
