@@ -151,8 +151,10 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// — no worker has picked them up, so no span has been written since
 	// post-process fanned them out. Killing such a row is the false-
 	// positive users hit under heavy upload bursts. Drop any candidate
-	// that still has a queued/active task referencing it; only rows with
-	// nothing left in the queue are treated as genuinely orphaned.
+	// that still has a queued/active task referencing it. Wiki ingest is
+	// KB-scoped, so wiki-enabled KBs also probe queued wiki:ingest tasks
+	// by knowledge_base_id. Only rows with no queued dependency at all
+	// are treated as genuinely orphaned.
 	stuck, queueSkipped := h.filterOutQueued(ctx, stuck)
 
 	if len(stuck) > 0 {
@@ -165,7 +167,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 				[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}).
 			Updates(map[string]interface{}{
 				"parse_status":           types.ParseStatusFailed,
-				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
+				"error_message":          "orphaned processing/finalizing task recovered by housekeeping after " + threshold.String() + " with no queued dependencies",
 				"pending_subtasks_count": 0,
 			})
 		if res.Error != nil {
@@ -270,16 +272,19 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 // task still references them. A dropped candidate is "backlogged, not
 // orphaned" — its enrichment subtasks are waiting for a worker, so the
 // missing span heartbeat is expected and recovering it would be a false
-// positive. When no inspector is wired (nil) the gate is a pass-through
-// so behaviour matches the pre-existing span-only sweep. On inspector
-// error we fail safe by KEEPING the candidate as stuck (recover it),
-// matching the span heartbeat query's fail-safe direction.
+// positive. Wiki-enabled KBs get one extra KB-scoped probe for wiki:ingest,
+// whose payload does not carry a per-knowledge id. When no inspector is
+// wired (nil) the gate is a pass-through so behaviour matches the
+// pre-existing span-only sweep. On inspector error we fail safe by KEEPING
+// the candidate as stuck (recover it), matching the span heartbeat query's
+// fail-safe direction.
 func (h *HousekeepingService) filterOutQueued(
 	ctx context.Context, candidates []types.Knowledge,
 ) (kept []types.Knowledge, skipped int) {
 	if h.inspector == nil || len(candidates) == 0 {
 		return candidates, 0
 	}
+	wikiEnabledKBs := h.wikiEnabledKnowledgeBases(ctx, candidates)
 	out := candidates[:0]
 	for _, k := range candidates {
 		queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
@@ -293,9 +298,57 @@ func (h *HousekeepingService) filterOutQueued(
 			skipped++
 			continue
 		}
+		if k.KnowledgeBaseID != "" && wikiEnabledKBs[k.KnowledgeBaseID] {
+			queuedWiki, err := h.inspector.HasQueuedWikiForKnowledgeBase(ctx, k.KnowledgeBaseID)
+			if err != nil {
+				logger.Warnf(ctx,
+					"[Housekeeping] wiki queue probe failed for kb=%s knowledge=%s: %v (will fail safe and treat as stuck)",
+					k.KnowledgeBaseID, k.ID, err)
+				out = append(out, k)
+				continue
+			}
+			if queuedWiki {
+				skipped++
+				continue
+			}
+		}
 		out = append(out, k)
 	}
 	return out, skipped
+}
+
+func (h *HousekeepingService) wikiEnabledKnowledgeBases(ctx context.Context, candidates []types.Knowledge) map[string]bool {
+	out := make(map[string]bool)
+	seen := make(map[string]struct{})
+	ids := make([]string, 0)
+	for _, k := range candidates {
+		if k.KnowledgeBaseID == "" {
+			continue
+		}
+		if _, ok := seen[k.KnowledgeBaseID]; ok {
+			continue
+		}
+		seen[k.KnowledgeBaseID] = struct{}{}
+		ids = append(ids, k.KnowledgeBaseID)
+	}
+	if len(ids) == 0 {
+		return out
+	}
+	var rows []types.KnowledgeBase
+	if err := h.db.WithContext(ctx).
+		Model(&types.KnowledgeBase{}).
+		Select("id, indexing_strategy").
+		Where("id IN ?", ids).
+		Find(&rows).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] wiki-enabled KB query failed: %v (wiki queue protection disabled for this sweep)", err)
+		return out
+	}
+	for _, kb := range rows {
+		if kb.IsWikiEnabled() {
+			out[kb.ID] = true
+		}
+	}
+	return out
 }
 
 // parseHeartbeatTime accepts the timestamp formats Postgres and SQLite

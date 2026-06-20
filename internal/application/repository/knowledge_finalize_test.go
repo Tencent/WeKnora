@@ -105,6 +105,16 @@ func insertKnowledgeWithStatus(t *testing.T, db *gorm.DB, status string, deleted
 	return id
 }
 
+func insertKnowledgeForKBWithStatus(t *testing.T, db *gorm.DB, tenantID uint64, kbID, status string, pending int) string {
+	t.Helper()
+	id := uuid.New().String()
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, parse_status, pending_subtasks_count)
+		VALUES (?, ?, ?, 'document', 'wiki-failure-test', 'manual', ?, ?)
+	`, id, tenantID, kbID, status, pending).Error)
+	return id
+}
+
 // TestFinalizeSubtask_Concurrent_ExactlyOnePromote spawns N goroutines that
 // each call FinalizeSubtask after SetFinalizing(N), and asserts:
 //   - the counter ends at zero,
@@ -317,4 +327,52 @@ func TestUpdateActiveDeletingKnowledgeColumns_GuardsStateAndSoftDelete(t *testin
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	status, _ = reloadKnowledgeRow(t, db, deletedDeletingID)
 	assert.Equal(t, types.ParseStatusDeleting, status)
+}
+
+func TestMarkFinalizingKnowledgeFailedGuardsTerminalRows(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	finalizingID := insertKnowledgeForKBWithStatus(t, db, 1, "kb-1", types.ParseStatusFinalizing, 1)
+	completedID := insertKnowledgeForKBWithStatus(t, db, 1, "kb-1", types.ParseStatusCompleted, 0)
+
+	changed, err := repo.MarkFinalizingKnowledgeFailed(ctx, finalizingID, "wiki generation failed")
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	changed, err = repo.MarkFinalizingKnowledgeFailed(ctx, completedID, "late wiki generation failed")
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	status, count := reloadKnowledgeRow(t, db, finalizingID)
+	assert.Equal(t, types.ParseStatusFailed, status)
+	assert.Equal(t, 0, count)
+	status, _ = reloadKnowledgeRow(t, db, completedID)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+}
+
+func TestMarkFinalizingKnowledgeFailedByKBScopesTenantAndState(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	matchID := insertKnowledgeForKBWithStatus(t, db, 1, "kb-1", types.ParseStatusFinalizing, 1)
+	otherTenantID := insertKnowledgeForKBWithStatus(t, db, 2, "kb-1", types.ParseStatusFinalizing, 1)
+	completedID := insertKnowledgeForKBWithStatus(t, db, 1, "kb-1", types.ParseStatusCompleted, 0)
+	otherKBID := insertKnowledgeForKBWithStatus(t, db, 1, "kb-2", types.ParseStatusFinalizing, 1)
+
+	updated, err := repo.MarkFinalizingKnowledgeFailedByKB(ctx, 1, "kb-1", "wiki generation failed")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), updated)
+
+	status, count := reloadKnowledgeRow(t, db, matchID)
+	assert.Equal(t, types.ParseStatusFailed, status)
+	assert.Equal(t, 0, count)
+	status, _ = reloadKnowledgeRow(t, db, otherTenantID)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	status, _ = reloadKnowledgeRow(t, db, completedID)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	status, _ = reloadKnowledgeRow(t, db, otherKBID)
+	assert.Equal(t, types.ParseStatusFinalizing, status)
 }

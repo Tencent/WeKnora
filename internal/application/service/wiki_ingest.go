@@ -583,12 +583,12 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		}
 
 		// Exhausted in-batch retries — archive and remove. This is the
-		// terminal failure point for the op, so release its slot in the
-		// knowledge's finalizing counter (ingest ops only; retracts are
-		// for deleted knowledge that has no counter to drain). The
-		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
+		// terminal failure point for the op. Ingest ops gate the parent
+		// knowledge's completion, so they must surface a real wiki failure
+		// instead of merely draining the counter and allowing a silent
+		// completed state.
 		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op)
+			s.failWikiSubtask(ctx, op, fmt.Sprintf("wiki generation failed: exceeded wikiMaxFailRetries=%d (in-batch retries)", wikiMaxFailRetries))
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
@@ -610,6 +610,56 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			logger.Warnf(ctx, "wiki ingest: failed to drop dead-lettered row id=%d: %v", op.dbID, err)
 		}
 	}
+}
+
+func (s *wikiIngestService) failWikiSubtask(ctx context.Context, op WikiPendingOp, reason string) {
+	if s == nil || s.knowledgeRepo == nil || op.KnowledgeID == "" {
+		return
+	}
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+	defer cancel()
+	changed, err := s.knowledgeRepo.MarkFinalizingKnowledgeFailed(dctx, op.KnowledgeID, truncateWikiFailureReason(reason))
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to mark knowledge %s as failed after wiki failure: %v", op.KnowledgeID, err)
+		return
+	}
+	if !changed {
+		return
+	}
+	tenantID := op.TenantID
+	if tenantID == 0 {
+		tenantID, _ = types.TenantIDFromContext(ctx)
+	}
+	attempt := op.Attempt
+	if attempt <= 0 {
+		attempt = s.tracker().LatestAttempt(ctx, op.KnowledgeID)
+	}
+	if s.taskJobRepo != nil && tenantID > 0 && attempt > 0 {
+		if _, err := s.taskJobRepo.MarkJobFailedIfCurrentAttempt(dctx, interfaces.TaskJobAttemptSelector{
+			TenantID:       tenantID,
+			Scope:          types.TaskScopeKnowledge,
+			ScopeID:        op.KnowledgeID,
+			ProcessAttempt: attempt,
+		}, interfaces.TaskLedgerFailure{
+			ErrorClass:     types.TaskErrorClassTerminal,
+			LastError:      truncateWikiFailureReason(reason),
+			FailedTaskType: types.TypeWikiIngest,
+		}, time.Now()); err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to mark task ledger for %s after wiki failure: %v", op.KnowledgeID, err)
+		}
+	}
+	if attempt > 0 {
+		s.tracker().FinalizeAttempt(dctx, op.KnowledgeID, attempt,
+			types.SpanStatusFailed, nil, "WIKI_FAILED", truncateWikiFailureReason(reason))
+	}
+	logger.Warnf(ctx, "wiki ingest: marked knowledge %s failed after terminal wiki failure", op.KnowledgeID)
+}
+
+func truncateWikiFailureReason(reason string) string {
+	if len(reason) > 8192 {
+		return reason[:8192]
+	}
+	return reason
 }
 
 // docIngestResult captures per-document info for batch post-processing.

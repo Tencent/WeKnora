@@ -64,8 +64,13 @@ func (s *IndexingStrategy) Scan(value interface{}) error {
 		*s = DefaultIndexingStrategy()
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
 		*s = DefaultIndexingStrategy()
 		return nil
 	}

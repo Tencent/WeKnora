@@ -249,6 +249,11 @@ type deadLetterKnowledgePayload struct {
 	Attempt int `json:"attempt,omitempty"`
 }
 
+type deadLetterWikiPayload struct {
+	TenantID        uint64 `json:"tenant_id,omitempty"`
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+}
+
 // taskTypesAffectingKnowledgeStatus enumerates the asynq task types whose
 // dead-letter event should flip the parent Knowledge to "failed". Only
 // terminal task types are listed here:
@@ -302,6 +307,10 @@ func newDeadLetterKnowledgeFailer(
 		}
 		if t.Type() == types.TypeKnowledgeListDelete {
 			markKnowledgeListDeleteFailed(ctx, repo, t, taskErr)
+			return
+		}
+		if t.Type() == types.TypeWikiIngest {
+			markWikiIngestDeadLetterFailed(ctx, repo, t, taskErr)
 			return
 		}
 		if _, ok := taskTypesAffectingKnowledgeStatus[t.Type()]; !ok {
@@ -359,6 +368,35 @@ func newDeadLetterKnowledgeFailer(
 				types.SpanStatusFailed, nil, "TASK_TIMEOUT", errMsg)
 		}
 		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed (task=%s)", probe.KnowledgeID, t.Type())
+	}
+}
+
+func markWikiIngestDeadLetterFailed(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	t *asynq.Task,
+	taskErr error,
+) {
+	var payload deadLetterWikiPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil || payload.KnowledgeBaseID == "" {
+		return
+	}
+	errMsg := "wiki generation failed: wiki:ingest exhausted retries"
+	if taskErr != nil {
+		errMsg += ": " + taskErr.Error()
+	}
+	if len(errMsg) > 8192 {
+		errMsg = errMsg[:8192]
+	}
+	updated, err := repo.MarkFinalizingKnowledgeFailedByKB(ctx, payload.TenantID, payload.KnowledgeBaseID, errMsg)
+	if err != nil {
+		logger.Warnf(ctx, "dead-letter callback: failed to mark KB %s finalizing knowledge as wiki failed: %v",
+			payload.KnowledgeBaseID, err)
+		return
+	}
+	if updated > 0 {
+		logger.Infof(ctx, "dead-letter callback: marked %d finalizing knowledge rows failed after wiki ingest dead-letter (kb=%s)",
+			updated, payload.KnowledgeBaseID)
 	}
 }
 

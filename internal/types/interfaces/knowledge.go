@@ -233,6 +233,13 @@ type KnowledgeRepository interface {
 	// UpdateActiveDeletingKnowledgeColumns updates an active, non-deleted knowledge row
 	// only when it is still in the transient deleting state.
 	UpdateActiveDeletingKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) (bool, error)
+	// MarkFinalizingKnowledgeFailed marks a single finalizing knowledge row as failed.
+	// It is guarded by parse_status=finalizing so late async failures cannot clobber
+	// already-completed, cancelled, or deleting rows.
+	MarkFinalizingKnowledgeFailed(ctx context.Context, id, reason string) (bool, error)
+	// MarkFinalizingKnowledgeFailedByKB marks finalizing knowledge rows under a KB
+	// as failed. tenantID=0 skips tenant scoping for legacy payloads that lack it.
+	MarkFinalizingKnowledgeFailedByKB(ctx context.Context, tenantID uint64, kbID, reason string) (int64, error)
 	// FinalizeSubtask atomically decrements pending_subtasks_count for the
 	// given knowledge and promotes parse_status from "finalizing" to
 	// "completed" when the count reaches zero. Returns the post-decrement

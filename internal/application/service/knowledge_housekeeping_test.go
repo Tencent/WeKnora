@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS knowledges (
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at      DATETIME
 );
+
+CREATE TABLE IF NOT EXISTS knowledge_bases (
+    id              VARCHAR(64) PRIMARY KEY,
+    tenant_id       INTEGER NOT NULL DEFAULT 0,
+    name            TEXT,
+    type            VARCHAR(32) DEFAULT 'document',
+    indexing_strategy TEXT,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at      DATETIME
+);
 `
 
 const housekeepingSpansDDL = `
@@ -81,10 +92,26 @@ func setupHousekeepingDB(t *testing.T) *gorm.DB {
 // can't pass updated_at through GORM defaults since CURRENT_TIMESTAMP
 // would override our test fixture; raw SQL keeps the timestamp.
 func insertKnowledge(t *testing.T, db *gorm.DB, id, status string, updatedAt time.Time) {
+	insertKnowledgeInKB(t, db, id, "", status, updatedAt)
+}
+
+func insertKnowledgeInKB(t *testing.T, db *gorm.DB, id, kbID, status string, updatedAt time.Time) {
 	t.Helper()
 	require.NoError(t, db.Exec(
-		`INSERT INTO knowledges (id, parse_status, updated_at) VALUES (?, ?, ?)`,
-		id, status, updatedAt,
+		`INSERT INTO knowledges (id, knowledge_base_id, parse_status, updated_at) VALUES (?, ?, ?, ?)`,
+		id, kbID, status, updatedAt,
+	).Error)
+}
+
+func insertKnowledgeBase(t *testing.T, db *gorm.DB, id string, wikiEnabled bool) {
+	t.Helper()
+	strategy := `{"vector_enabled":true,"keyword_enabled":true,"wiki_enabled":false,"graph_enabled":false}`
+	if wikiEnabled {
+		strategy = `{"vector_enabled":true,"keyword_enabled":true,"wiki_enabled":true,"graph_enabled":false}`
+	}
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_bases (id, indexing_strategy) VALUES (?, ?)`,
+		id, strategy,
 	).Error)
 }
 
@@ -101,8 +128,9 @@ func insertSpan(t *testing.T, db *gorm.DB, kid string, attempt int, spanID, stat
 // suite. queued maps knowledge_id → "still has a queued task"; err forces
 // the probe to fail so the fail-safe branch can be exercised.
 type fakeTaskInspector struct {
-	queued map[string]bool
-	err    error
+	queued     map[string]bool
+	wikiQueued map[string]bool
+	err        error
 }
 
 func (f fakeTaskInspector) CancelTasksForKnowledge(
@@ -118,6 +146,15 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 		return false, f.err
 	}
 	return f.queued[knowledgeID], nil
+}
+
+func (f fakeTaskInspector) HasQueuedWikiForKnowledgeBase(
+	_ context.Context, kbID string,
+) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.wikiQueued[kbID], nil
 }
 
 func newHousekeepingSvcForTest(db *gorm.DB) *HousekeepingService {
@@ -150,7 +187,7 @@ func TestHousekeeping_RecoversAbandoned(t *testing.T) {
 		`SELECT parse_status, error_message FROM knowledges WHERE id = ?`, "kid-abandoned",
 	).Row().Scan(&status, &errMsg))
 	assert.Equal(t, types.ParseStatusFailed, status)
-	assert.Contains(t, errMsg, "stuck in processing")
+	assert.Contains(t, errMsg, "orphaned processing/finalizing task recovered")
 }
 
 // TestHousekeeping_NoFalseKill_ActiveSpan is the regression test for
@@ -222,6 +259,47 @@ func TestHousekeeping_NoFalseKill_TasksStillQueued(t *testing.T) {
 	).Row().Scan(&status))
 	assert.Equal(t, types.ParseStatusFinalizing, status,
 		"finalizing row with tasks still queued must NOT be flipped to failed")
+}
+
+func TestHousekeeping_NoFalseKill_WikiIngestQueuedForWikiEnabledKB(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	insertKnowledgeBase(t, db, "kb-wiki", true)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		wikiQueued: map[string]bool{"kb-wiki": true},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledgeInKB(t, db, "kid-wiki-wait", "kb-wiki", types.ParseStatusFinalizing, stale)
+	insertSpan(t, db, "kid-wiki-wait", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-wiki-wait",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFinalizing, status,
+		"wiki-enabled finalizing row with KB-scoped wiki:ingest queued must NOT be flipped to failed")
+}
+
+func TestHousekeeping_WikiQueueDoesNotProtectNonWikiKB(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	insertKnowledgeBase(t, db, "kb-plain", false)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		wikiQueued: map[string]bool{"kb-plain": true},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledgeInKB(t, db, "kid-plain", "kb-plain", types.ParseStatusFinalizing, stale)
+	insertSpan(t, db, "kid-plain", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status, errMsg string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, error_message FROM knowledges WHERE id = ?`, "kid-plain",
+	).Row().Scan(&status, &errMsg))
+	assert.Equal(t, types.ParseStatusFailed, status,
+		"KBs without wiki enabled must not be protected by a queued KB-level wiki task")
+	assert.Contains(t, errMsg, "orphaned processing/finalizing task recovered")
 }
 
 // TestHousekeeping_QueueProbeError_FailsSafe confirms the fail-safe
