@@ -1,37 +1,36 @@
 package format
 
-import (
-	"fmt"
-	"io"
+import sdk "github.com/Tencent/WeKnora/client"
 
-	sdk "github.com/Tencent/WeKnora/client"
-)
+// ReferenceIndex is the bounded citation pointer exposed by projected JSON,
+// text, and MCP output. ChunkID is the chunk the model cited; ParentChunkID is
+// retained when callers prefer to fetch the larger self-contained passage.
+// Full chunk text and retrieval metadata remain available only in raw NDJSON.
+type ReferenceIndex struct {
+	KBID          string `json:"kb_id,omitempty"`
+	ChunkID       string `json:"chunk_id"`
+	ParentChunkID string `json:"parent_chunk_id,omitempty"`
+}
 
-// WriteReferences renders the compact references footer used by chat and
-// agent invoke: a horizontal rule, one numbered line per reference,
-// best-available title + optional score. Skipped entirely when refs is
-// empty - agent-friendly silence beats an empty banner.
-func WriteReferences(w io.Writer, refs []*sdk.SearchResult) {
-	if len(refs) == 0 {
-		return
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "──── References ────")
-	for i, r := range refs {
-		if r == nil {
+// IndexReferences projects full SDK search results into stable lookup keys.
+// It never mutates the SDK events, which keeps the raw NDJSON path lossless.
+// fallbackKBID is used by `chat`, whose single KB is known by the CLI even
+// when an older server omits knowledge_base_id from a reference.
+func IndexReferences(refs []*sdk.SearchResult, fallbackKBID string) []ReferenceIndex {
+	indexes := make([]ReferenceIndex, 0, len(refs))
+	for _, r := range refs {
+		if r == nil || r.ID == "" {
 			continue
 		}
-		title := r.KnowledgeTitle
-		if title == "" {
-			title = r.KnowledgeFilename
+		kbID := r.KnowledgeBaseID
+		if kbID == "" {
+			kbID = fallbackKBID
 		}
-		if title == "" {
-			title = r.KnowledgeID
-		}
-		fmt.Fprintf(w, "[%d] %s", i+1, title)
-		if r.Score > 0 {
-			fmt.Fprintf(w, "  score=%.3f", r.Score)
-		}
-		fmt.Fprintln(w)
+		indexes = append(indexes, ReferenceIndex{
+			KBID:          kbID,
+			ChunkID:       r.ID,
+			ParentChunkID: r.ParentChunkID,
+		})
 	}
+	return indexes
 }

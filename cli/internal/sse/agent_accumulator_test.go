@@ -13,6 +13,9 @@ func TestAgentAccumulator_FinalizesOnlyOnComplete(t *testing.T) {
 		{ResponseType: sdk.AgentResponseTypeThinking, Content: "think", Done: true},
 		{ResponseType: sdk.AgentResponseTypeToolCall, ID: "call_1", Content: "search"},
 		{ResponseType: sdk.AgentResponseTypeReflection, Content: "reflect", Done: true},
+		{ResponseType: sdk.AgentResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{
+			{ID: "chunk_1", Content: "bulky passage"},
+		}},
 		{ResponseType: sdk.AgentResponseTypeAnswer, Content: "final answer", Done: true},
 	}
 	for _, event := range preTerminal {
@@ -34,6 +37,9 @@ func TestAgentAccumulator_FinalizesOnlyOnComplete(t *testing.T) {
 	}
 	if len(a.ToolEvents) != 1 {
 		t.Errorf("tool_events=%d, want 1", len(a.ToolEvents))
+	}
+	if len(a.References) != 1 || a.References[0].Content != "bulky passage" {
+		t.Errorf("references were not preserved: %+v", a.References)
 	}
 
 	a.Append(&sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeAnswer, Content: "late"})

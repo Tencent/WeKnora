@@ -252,8 +252,10 @@ is the guard against unintended writes.
 
 ### Other AI-agent ergonomics
 
-- For chat / session ask in AI-agent contexts, pass `--format json` —
-  streaming tokens to stdout makes JSON parsing impossible.
+- For chat / session ask in AI-agent contexts, pass `--format json` for a
+  bounded answer-event envelope. Add `--reference` for indexed citations,
+  `--verbose` for reasoning/tools/lifecycle events, or `--format ndjson` for
+  the unmodified raw stream.
 - `--format json` composes with the global `--profile <name>` for
   single-shot profile overrides without disk writes.
 - `weknora mcp serve` exposes a curated read-only tool surface over

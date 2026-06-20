@@ -1,21 +1,22 @@
 // Package chat implements `weknora chat <text>` - the streaming RAG answer
 // entry point.
 //
-// Two output modes share a single SDK call:
+// Three output modes share a single SDK call:
 //
-//   - Stream mode (TTY + --format text): write each StreamResponse.Content
-//     fragment directly to iostreams.IO.Out as it arrives, then print a
-//     footer with knowledge references. This is the "feels alive" UX a
-//     human typing in a terminal expects.
+//   - JSON mode (--format json, the default): buffer a bounded projection of
+//     the stream into one success envelope. The default projection contains
+//     answer events only; --reference adds indexed citations and --verbose
+//     adds reasoning, tools, and lifecycle frames.
 //
-//   - NDJSON mode (--format json / --format ndjson / pipe): inject a CLI
-//     "init" event at stream head, then pass through every SDK event verbatim
-//     as NDJSON lines. Agents and pipes get a live event stream they can
-//     parse incrementally. --format json routes here too — buffered JSON
-//     envelope makes no sense for a streaming command.
+//   - Text mode (--format text): render the same projection as JSON
+//     directly to iostreams.IO.Out as it arrives.
+//
+//   - NDJSON mode (--format ndjson): inject a CLI "init" event at stream
+//     head, then pass through every SDK event verbatim as NDJSON lines —
+//     the raw protocol trace, for debugging / advanced consumers.
 //
 // The SDK's KnowledgeQAStream callback contract is invoked sequentially on
-// one goroutine, so neither mode needs locking. The runChat core takes a
+// one goroutine, so no mode needs locking. The runChat core takes a
 // ChatService interface so tests inject a fake without standing up a real
 // SSE server.
 package chat
@@ -28,26 +29,31 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/sse"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// chatFields enumerates the NDJSON init-event fields surfaced for
-// `--format json` / `--format ndjson` discovery on `chat`. Reflects the
-// InitEvent head line + the raw SDK event vocabulary.
+// chatFields enumerates the fields surfaced for `--jq` projection discovery
+// on `chat`: the json object's data fields + the raw SDK event vocabulary
+// used by --format ndjson.
 var chatFields = []string{
-	"session_id", "kb_id",
-	// SDK event fields (pass-through): response_type, content, done,
-	// knowledge_references, assistant_message_id, session_id
+	"events", "session_id", "assistant_message_id", "kb_id", "query",
+	// NDJSON init + SDK event fields.
+	"type", "kb_id", "profile", "response_type", "content", "done", "knowledge_references", "data",
 }
 
 type Options struct {
 	Query     string
 	KBID      string
 	SessionID string
+	// Reference adds bounded kb_id/chunk_id reference events to JSON/text.
+	Reference bool
+	// Verbose surfaces the projected execution trace in JSON/text,
+	// including reasoning, tools, and lifecycle events.
+	// NDJSON is always raw and is unaffected by presentation flags.
+	Verbose bool
 }
 
 // ChatService is the narrow SDK surface this command depends on. *sdk.Client
@@ -69,12 +75,14 @@ answer back. By default a fresh session is created on first invocation; pass
 --session to continue an existing conversation.
 
 Modes:
-  --format text:                 live token streaming + reference footer
-  --format json / --format ndjson / pipe (default): NDJSON event stream —
-                                 one init line at head (session_id, kb_id),
-                                 then raw SDK events verbatim. Both json
-                                 and ndjson flags produce the same NDJSON
-                                 stream.`,
+  --format json (default):       one JSON envelope with answer events
+  --format text:                 live human-readable answer stream
+  --format ndjson:               raw NDJSON event stream — init line (session_id,
+                                 kb_id) then SDK events verbatim. Debug / advanced.
+
+Pass --reference to include bounded kb_id/chunk_id reference indexes. Pass
+--verbose to include reasoning, tool activity, and lifecycle frames. Combine
+both flags for the complete projected stream.`,
 		Example: `  weknora chat "What is RRF?" --kb a32a63ff-fb36-4874-bcaa-30f48570a694
   weknora chat "Summarise this design doc" --kb my-kb --format json
   weknora chat "Continue?" --session sess_abc`,
@@ -103,12 +111,17 @@ Modes:
 	}
 	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
+	cmd.Flags().BoolVar(&opts.Reference, "reference", false, "Include indexed references in JSON/text output")
+	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "Include reasoning, tools, and lifecycle events in JSON/text output")
 	cmdutil.AddFormatFlag(cmd, chatFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "Ask a streaming RAG question against a knowledge base. Produces an NDJSON event stream: init line (session_id, kb_id) then raw SDK events. Use --format json or --format ndjson.",
+		UsedFor:       "Ask a RAG question against a knowledge base. Default JSON returns a bounded answer-event projection. --reference adds indexed citations; --verbose adds reasoning, tools, and lifecycle events. --format ndjson streams raw SDK events; --format text renders the selected events live.",
 		RequiredFlags: []string{"--kb"},
-		Examples:      []string{`weknora chat "What is RRF?" --kb kb_abc --format json`},
-		Output:        "NDJSON stream: {type:init, session_id, kb_id} then SDK events (response_type, content, done, knowledge_references, ...)",
+		Examples: []string{
+			`weknora chat "What is RRF?" --kb kb_abc`,
+			`weknora chat "What is RRF?" --kb kb_abc --jq '[.data.events[].content] | join("")'`,
+		},
+		Output: "Default --format json: {ok,data:{events:[answer...],session_id,kb_id,query}}. --reference adds kb_id/chunk_id reference events; --verbose adds execution events. --format ndjson remains raw.",
 	})
 	return cmd
 }
@@ -128,11 +141,8 @@ func runChat(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, s
 		return cmdutil.NewError(cmdutil.CodeServerError, "chat: no SDK client available")
 	}
 
-	// Streaming commands route --format json AND --format ndjson to the
-	// NDJSON event-stream path. A buffered envelope makes no sense for a
-	// streaming command. Only --format text uses the live renderer.
-	ndjsonMode := fopts != nil && (fopts.Mode == cmdutil.FormatJSON || fopts.Mode == cmdutil.FormatNDJSON)
-
+	// --format selects the output shape: json (default) accumulates and
+	// emits one object, ndjson streams raw SDK events, text renders live.
 	sessionID := opts.SessionID
 	autoCreated := false
 	if sessionID == "" {
@@ -156,13 +166,16 @@ func runChat(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, s
 		autoCreated = true
 	}
 
-	if ndjsonMode {
+	if fopts != nil && fopts.Mode == cmdutil.FormatNDJSON {
 		return runChatNDJSON(ctx, opts, sessionID, svc)
+	}
+	if fopts != nil && fopts.Mode == cmdutil.FormatJSON {
+		return runChatJSON(ctx, opts, fopts, sessionID, svc)
 	}
 
 	// Surface the auto-created session ID up-front so a user who hits ^C
 	// mid-stream still has the pointer to resume - no need to scroll back
-	// past tokens. Skipped in NDJSON mode (it appears in the init event).
+	// past tokens. Skipped in json/ndjson mode (session_id is in the output).
 	if autoCreated {
 		fmt.Fprintf(iostreams.IO.Err, "session: %s (use --session to continue)\n", sessionID)
 	}
@@ -170,10 +183,9 @@ func runChat(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, s
 	return runChatText(ctx, opts, sessionID, autoCreated, svc)
 }
 
-// runChatNDJSON handles --format json and --format ndjson paths.
-// Emits a CLI init event at stream head, then passes every SDK event through
-// verbatim as NDJSON lines. No buffering — callers parse the stream
-// incrementally.
+// runChatNDJSON handles the --format ndjson path: emits a CLI init event at
+// stream head, then passes every SDK event through verbatim as NDJSON lines.
+// No buffering — callers parse the stream incrementally.
 func runChatNDJSON(ctx context.Context, opts *Options, sessionID string, svc ChatService) error {
 	w := iostreams.IO.Out
 
@@ -198,6 +210,8 @@ func runChatNDJSON(ctx context.Context, opts *Options, sessionID string, svc Cha
 		Channel:          "api",
 	}
 	cb := func(r *sdk.StreamResponse) error {
+		// NDJSON is the raw protocol/debug surface: do not filter events or
+		// mutate their payloads. JSON/text modes own presentation filtering.
 		return output.EmitSDKEvent(w, r)
 	}
 	if err := svc.KnowledgeQAStream(ctx, sessionID, req, cb); err != nil {
@@ -209,12 +223,9 @@ func runChatNDJSON(ctx context.Context, opts *Options, sessionID string, svc Cha
 	return nil
 }
 
-// runChatText handles the --format text path. Streams content fragments
-// live on TTY; accumulates then renders on non-TTY pipes.
+// runChatText handles the --format text path. It renders the same
+// projection as JSON immediately for both terminals and pipes.
 func runChatText(ctx context.Context, opts *Options, sessionID string, autoCreated bool, svc ChatService) error {
-	// Stream mode requires an interactive stdout.
-	streamMode := iostreams.IO.IsStdoutTTY()
-
 	req := &sdk.KnowledgeQARequest{
 		Query:            opts.Query,
 		KnowledgeBaseIDs: []string{opts.KBID},
@@ -223,16 +234,15 @@ func runChatText(ctx context.Context, opts *Options, sessionID string, autoCreat
 		Channel:          "api",
 	}
 
-	acc := &sse.Accumulator{}
+	projector := sse.NewProjector(opts.Verbose, opts.Reference, opts.KBID)
+	renderer := sse.NewTextRenderer(iostreams.IO.Out, opts.Verbose)
 
 	cb := func(r *sdk.StreamResponse) error {
-		if streamMode && r != nil && r.Content != "" {
-			// Best-effort write; if stdout dies the SDK will surface the
-			// error on the next iteration. No need to bail early.
-			_, _ = iostreams.IO.Out.Write([]byte(r.Content))
+		event, include := projector.Chat(r)
+		if !include {
+			return nil
 		}
-		acc.Append(r)
-		return nil
+		return renderer.Write(event)
 	}
 
 	streamErr := svc.KnowledgeQAStream(ctx, sessionID, req, cb)
@@ -250,7 +260,7 @@ func runChatText(ctx context.Context, opts *Options, sessionID string, autoCreat
 		// Stream began (we observed at least one event) but never reached a
 		// terminal Done frame: typed as sse_stream_aborted so the hint
 		// nudges the user toward a retry.
-		if acc.Result() != "" && !acc.Done() {
+		if projector.Seen() && !projector.Done() {
 			return cmdutil.Wrapf(cmdutil.CodeSSEStreamAborted, streamErr, "stream aborted before completion")
 		}
 		// Pre-stream HTTP / transport failure: route through the canonical
@@ -264,30 +274,84 @@ func runChatText(ctx context.Context, opts *Options, sessionID string, autoCreat
 	// case (Done frame never arrived AND no content): better to surface the
 	// abort than emit ok=true with answer="" - agents can't distinguish the
 	// model genuinely had nothing to say from the stream getting cut.
-	if !acc.Done() {
+	if !projector.Done() {
 		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")
 	}
+	return renderer.Close()
+}
 
-	answer := acc.Result()
-	references := acc.References
-
-	// Streaming mode already wrote the answer body via the callback, so we
-	// only need to render the trailing references (and a closing newline).
-	// Non-TTY accumulate path writes the answer here for the first time.
-	out := iostreams.IO.Out
-	if streamMode {
-		// Ensure the answer line ends cleanly before the references footer.
-		if !strings.HasSuffix(answer, "\n") {
-			fmt.Fprintln(out)
-		}
-	} else {
-		fmt.Fprint(out, answer)
-		if !strings.HasSuffix(answer, "\n") {
-			fmt.Fprintln(out)
-		}
+// runChatJSON handles the --format json path (the default): collect the
+// projection and emit it in one normal success envelope.
+func runChatJSON(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, sessionID string, svc ChatService) error {
+	req := &sdk.KnowledgeQARequest{
+		Query:            opts.Query,
+		KnowledgeBaseIDs: []string{opts.KBID},
+		AgentEnabled:     false,
+		WebSearchEnabled: false,
+		Channel:          "api",
 	}
-	format.WriteReferences(out, references)
-	return nil
+
+	projector := sse.NewProjector(opts.Verbose, opts.Reference, opts.KBID)
+	events := make([]sse.ProjectedEvent, 0)
+	cb := func(r *sdk.StreamResponse) error {
+		if event, include := projector.Chat(r); include {
+			events = append(events, event)
+		}
+		return nil
+	}
+
+	if err := svc.KnowledgeQAStream(ctx, sessionID, req, cb); err != nil {
+		if cmdutil.IsCancelled(ctx, err) {
+			return chatStreamError(cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "chat cancelled"), sessionID, projector.AssistantMessageID())
+		}
+		return chatStreamError(cmdutil.WrapHTTP(err, "knowledge qa stream"), sessionID, projector.AssistantMessageID())
+	}
+	if !projector.Done() {
+		return chatStreamError(
+			cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event"),
+			sessionID,
+			projector.AssistantMessageID(),
+		)
+	}
+
+	sid := projector.SessionID()
+	if sid == "" {
+		sid = sessionID
+	}
+	data := chatResult{
+		Events:             events,
+		SessionID:          sid,
+		AssistantMessageID: projector.AssistantMessageID(),
+		KBID:               opts.KBID,
+		Query:              opts.Query,
+	}
+
+	// Reaching here means fopts.Mode is FormatJSON (the only caller). Route
+	// through FormatOptions.Emit so --jq projection and the success-envelope
+	// contract apply, matching every other non-streaming command. A nil fopts
+	// (direct-test entry) defaults to JSON so the object still emits.
+	if fopts == nil {
+		fopts = &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	}
+	return fopts.Emit(iostreams.IO.Out, data, nil)
+}
+
+func chatStreamError(err *cmdutil.Error, sessionID, assistantMessageID string) *cmdutil.Error {
+	detail := map[string]any{"session_id": sessionID}
+	if assistantMessageID != "" {
+		detail["assistant_message_id"] = assistantMessageID
+	}
+	return err.WithDetail(detail)
+}
+
+// chatResult is the --format json data payload. The projector controls default
+// versus verbose coverage.
+type chatResult struct {
+	Events             []sse.ProjectedEvent `json:"events"`
+	SessionID          string               `json:"session_id"`
+	AssistantMessageID string               `json:"assistant_message_id,omitempty"`
+	KBID               string               `json:"kb_id"`
+	Query              string               `json:"query"`
 }
 
 // compile-time check: the production SDK client implements ChatService.

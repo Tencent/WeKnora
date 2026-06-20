@@ -65,7 +65,12 @@ func (a *Accumulator) Append(r *sdk.StreamResponse) {
 		a.AssistantMessageID = r.AssistantMessageID
 	}
 	// Capture references whenever they arrive - they may land on a
-	// dedicated `references` event before the terminal `complete`.
+	// dedicated `references` event before the terminal `complete`. Strip the
+	// bulky per-chunk Content so the buffered envelope stays small: agents
+	// consume the index (id / parent_chunk_id / title / score / snippet) and
+	// fetch full passages on demand via `chunk view`. This runs after SSE
+	// parsing, so it governs outgoing envelope size — the incoming line-size
+	// limit is the scanner buffer's job, not this one.
 	if r.KnowledgeReferences != nil {
 		a.References = r.KnowledgeReferences
 	}
