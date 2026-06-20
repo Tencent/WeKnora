@@ -2119,19 +2119,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			Attempt:                  reparseAttempt,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal reparse task payload: %v", err)
-			return existing, nil
-		}
-
-		task := asynq.NewTask(
-			types.TypeDocumentProcess,
-			payloadBytes,
-			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
-		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.dispatchDocumentRootTask(ctx, existing, taskPayload, types.TaskJobKindReparse, "object_storage",
+			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
 			return existing, nil
@@ -2172,19 +2161,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			Attempt:                  reparseAttempt,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal file URL reparse task payload: %v", err)
-			return existing, nil
-		}
-
-		task := asynq.NewTask(
-			types.TypeDocumentProcess,
-			payloadBytes,
-			documentProcessTaskOptions(s.config)...,
-		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.dispatchDocumentRootTask(ctx, existing, taskPayload, types.TaskJobKindReparse, "file_url",
+			documentProcessTaskOptions(s.config)...)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
 			return existing, nil
@@ -2218,19 +2196,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			Attempt:                  reparseAttempt,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal URL reparse task payload: %v", err)
-			return existing, nil
-		}
-
-		task := asynq.NewTask(
-			types.TypeDocumentProcess,
-			payloadBytes,
-			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
-		)
-		info, err := s.task.Enqueue(task)
+		info, err := s.dispatchDocumentRootTask(ctx, existing, taskPayload, types.TaskJobKindReparse, "url",
+			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
 			return existing, nil

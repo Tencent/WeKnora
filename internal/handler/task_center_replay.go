@@ -69,7 +69,7 @@ func canCancelJob(job *types.TaskJob) bool {
 }
 
 func replayDocumentPayload(job *types.TaskJob) (types.DocumentProcessPayload, string, error) {
-	if job == nil || job.Kind != types.TaskJobKindUpload {
+	if job == nil || (job.Kind != types.TaskJobKindUpload && job.Kind != types.TaskJobKindReparse) {
 		return types.DocumentProcessPayload{}, "", errors.New("unsupported task kind for retry")
 	}
 	var spec taskReplaySpecV1
