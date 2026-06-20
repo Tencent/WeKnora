@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -385,20 +386,26 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    worker calls FinalizeSubtask once when the per-knowledge op reaches a
 	//    terminal state, so its single counted slot drains on its own path.
 	//
-	//    KNOWN GAP (TODO): EnqueueWikiIngest is fire-and-forget — it logs and
-	//    swallows both pending-op insert failures and trigger-task enqueue
-	//    failures. If BOTH fail (e.g. Postgres down + Redis down) no wiki
-	//    worker will ever run for this knowledge, so its seeded slot strands
-	//    the row in "finalizing". This is the only un-reconciled hole in the
-	//    counter; folding wiki into the shortfall release above will require
-	//    EnqueueWikiIngest to return (enqueued bool, err error) so we can
-	//    distinguish "no worker will ever run" from "worker will run later
-	//    and drain on its own".
 	enqueuedWiki := false
+	wikiTriggerEnqueued := false
 	if willSpawnWiki {
-		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
-		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
-		enqueuedWiki = true
+		result, err := EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
+		enqueuedWiki = result.PendingOpPersisted
+		wikiTriggerEnqueued = result.TriggerEnqueued
+		if err != nil && !result.PendingOpPersisted {
+			reason := fmt.Sprintf("wiki ingest pending op failed: %v", err)
+			logger.Errorf(ctx, "[KnowledgePostProcess] %s", reason)
+			_, _ = s.knowledgeRepo.MarkKnowledgeFailedIfAttempt(ctx, payload.TenantID, payload.KnowledgeID, int64(attempt), reason)
+			s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
+				types.SpanStatusFailed, nil, "WIKI_ENQUEUE_FAILED", reason)
+			return errors.New(reason)
+		}
+		if err != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] Wiki pending op persisted but trigger enqueue failed for %s: %v",
+				payload.KnowledgeID, err)
+		} else {
+			logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
+		}
 	}
 
 	// Reconcile the seeded counter against what was actually enqueued.
@@ -453,6 +460,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		"enqueued_question":       enqueuedQuestionCount > 0,
 		"enqueued_question_count": enqueuedQuestionCount,
 		"enqueued_wiki":           enqueuedWiki,
+		"wiki_trigger_enqueued":   wikiTriggerEnqueued,
 		"enqueued_graph":          enqueuedGraphCount > 0,
 		"enqueued_graph_count":    enqueuedGraphCount,
 	}

@@ -55,26 +55,26 @@ func (s *knowledgeService) dispatchDocumentRootTask(
 		"knowledge_base_id": knowledge.KnowledgeBaseID,
 		"source_type":       sourceType,
 	})
-	replaySpec := taskJobJSON(map[string]any{
-		"version": 1,
-		"kind":    kind,
-		"source_ref": map[string]any{
-			"type": sourceType,
-			"id":   documentReplaySourceID(payload, knowledge),
-		},
-		"scope": map[string]any{
-			"knowledge_id":      knowledge.ID,
-			"knowledge_base_id": knowledge.KnowledgeBaseID,
-		},
-		"process_config": map[string]any{
-			"file_name":                  payload.FileName,
-			"file_type":                  payload.FileType,
-			"enable_multimodel":          payload.EnableMultimodel,
-			"enable_question_generation": payload.EnableQuestionGeneration,
-			"question_count":             payload.QuestionCount,
-			"language":                   payload.Language,
-		},
-	})
+	replaySpec := newTaskReplaySpec(types.TypeDocumentProcess, payloadBytes, jobID, payload.Attempt, opts,
+		func(spec *taskReplaySpecV2) {
+			spec.Kind = kind
+			spec.SourceRef = replaySourceRef{
+				Type: sourceType,
+				ID:   documentReplaySourceID(payload, knowledge),
+			}
+			spec.Scope = replayScope{
+				KnowledgeID:     knowledge.ID,
+				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			}
+			spec.ProcessConfig = replayProcessConfig{
+				FileName:                 payload.FileName,
+				FileType:                 payload.FileType,
+				EnableMultimodel:         payload.EnableMultimodel,
+				EnableQuestionGeneration: payload.EnableQuestionGeneration,
+				QuestionCount:            payload.QuestionCount,
+				Language:                 payload.Language,
+			}
+		})
 
 	createdBy := ""
 	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {

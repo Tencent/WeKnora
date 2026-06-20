@@ -23,6 +23,7 @@ type UserRootDispatchRequest struct {
 	TenantID       uint64
 	CreatedBy      string
 	Kind           types.TaskJobKind
+	Origin         types.TaskJobOrigin
 	Scope          string
 	ScopeID        string
 	RelatedID      string
@@ -54,6 +55,12 @@ func (d *TaskJobDispatcher) DispatchUserRoot(ctx context.Context, req UserRootDi
 	if len(req.ReplaySpec) == 0 {
 		req.ReplaySpec = types.JSON(`{}`)
 	}
+	if req.Origin == "" {
+		req.Origin = types.TaskJobOriginUser
+	}
+	if req.Origin == types.TaskJobOriginUser && req.CreatedBy == "" {
+		req.Origin = types.TaskJobOriginInternal
+	}
 
 	if d.repo != nil {
 		now := time.Now()
@@ -62,7 +69,7 @@ func (d *TaskJobDispatcher) DispatchUserRoot(ctx context.Context, req UserRootDi
 			TenantID:       req.TenantID,
 			CreatedBy:      req.CreatedBy,
 			Kind:           req.Kind,
-			Origin:         types.TaskJobOriginUser,
+			Origin:         req.Origin,
 			DisplayName:    req.DisplayName,
 			Scope:          req.Scope,
 			ScopeID:        req.ScopeID,

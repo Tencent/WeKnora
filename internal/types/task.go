@@ -242,6 +242,7 @@ type ManualProcessPayload struct {
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
 	Attempt         int    `json:"attempt,omitempty"`
+	JobID           string `json:"job_id,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.

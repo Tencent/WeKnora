@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,6 +65,25 @@ func TestTruncateString(t *testing.T) {
 			}
 		})
 	}
+}
+
+type failingWikiPendingRepo struct {
+	interfaces.TaskPendingOpsRepository
+	err error
+}
+
+func (f failingWikiPendingRepo) Enqueue(context.Context, *types.TaskPendingOp) error {
+	return f.err
+}
+
+func TestEnqueueWikiIngestPendingFailureDoesNotTrigger(t *testing.T) {
+	ctx := withAttempt(context.Background(), 2)
+	enqueuer := &fakeTaskEnqueuer{}
+	result, err := EnqueueWikiIngest(ctx, enqueuer, failingWikiPendingRepo{err: errors.New("db down")}, 1, "kb-1", "kid-1")
+	require.Error(t, err)
+	assert.False(t, result.PendingOpPersisted)
+	assert.False(t, result.TriggerEnqueued)
+	assert.Empty(t, enqueuer.tasks)
 }
 
 func TestAppendUnique(t *testing.T) {

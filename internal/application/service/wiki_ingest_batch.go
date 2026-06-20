@@ -119,7 +119,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// the handler is genuinely running.
 	if s.redisClient != nil {
 		activeKey := wikiActiveKeyPrefix + payload.KnowledgeBaseID
-		acquired, err := s.redisClient.SetNX(ctx, activeKey, "1", wikiActiveLockTTL).Result()
+		activeToken := uuid.NewString()
+		acquired, err := s.redisClient.SetNX(ctx, activeKey, activeToken, wikiActiveLockTTL).Result()
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: redis SetNX failed: %v", err)
 		} else if !acquired {
@@ -146,10 +147,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 		lockAcquired = acquired
 
-		lockCtx, cancelLock := context.WithCancel(context.Background())
+		lockedCtx, cancelLock := context.WithCancel(ctx)
+		ctx = lockedCtx
 		defer func() {
 			cancelLock()
-			s.redisClient.Del(context.Background(), activeKey)
+			releaseRedisTokenLease(context.Background(), s.redisClient, activeKey, activeToken)
 		}()
 
 		go func() {
@@ -157,10 +159,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			defer ticker.Stop()
 			for {
 				select {
-				case <-lockCtx.Done():
+				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					s.redisClient.Expire(context.Background(), activeKey, wikiActiveLockTTL)
+					if ok := renewRedisTokenLease(context.Background(), s.redisClient, activeKey, activeToken, wikiActiveLockTTL); !ok {
+						cancelLock()
+						return
+					}
 				}
 			}
 		}()

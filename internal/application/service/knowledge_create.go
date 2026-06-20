@@ -1042,19 +1042,71 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		NeedCleanup:     needCleanup,
 		Attempt:         attempt,
 	}
+	jobID := uuid.NewString()
+	executionID := uuid.NewString()
+	payload.JobID = jobID
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal manual process payload: %w", err)
 	}
 
-	task := asynq.NewTask(types.TypeManualProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-	info, err := s.task.Enqueue(task)
+	opts := []asynq.Option{asynq.Queue(types.QueueDefault), asynq.MaxRetry(3)}
+	task := asynq.NewTask(types.TypeManualProcess, payloadBytes)
+	if s.taskDispatcher == nil {
+		info, err := s.task.Enqueue(task, opts...)
+		if err != nil {
+			return fmt.Errorf("failed to enqueue manual process task: %w", err)
+		}
+		logger.Infof(ctx, "Enqueued manual process task: knowledge_id=%s, asynq_id=%s", knowledge.ID, info.ID)
+		return nil
+	}
+
+	createdBy := ""
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		createdBy = userID
+	}
+	replaySpec := newTaskReplaySpec(types.TypeManualProcess, payloadBytes, jobID, attempt, opts,
+		func(spec *taskReplaySpecV2) {
+			spec.Kind = manualTaskJobKind(needCleanup)
+			spec.Scope = replayScope{
+				KnowledgeID:     knowledge.ID,
+				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			}
+		})
+	info, err := s.taskDispatcher.DispatchUserRoot(ctx, UserRootDispatchRequest{
+		JobID:          jobID,
+		ExecutionID:    executionID,
+		TenantID:       knowledge.TenantID,
+		CreatedBy:      createdBy,
+		Kind:           manualTaskJobKind(needCleanup),
+		Scope:          types.TaskScopeKnowledge,
+		ScopeID:        knowledge.ID,
+		RelatedID:      knowledge.KnowledgeBaseID,
+		ProcessAttempt: attempt,
+		DisplayName:    knowledge.Title,
+		Metadata: taskJobJSON(map[string]any{
+			"knowledge_id":      knowledge.ID,
+			"knowledge_base_id": knowledge.KnowledgeBaseID,
+			"manual":            true,
+			"need_cleanup":      needCleanup,
+		}),
+		ReplaySpec: replaySpec,
+		Task:       task,
+		Options:    opts,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to enqueue manual process task: %w", err)
 	}
 	logger.Infof(ctx, "Enqueued manual process task: knowledge_id=%s, asynq_id=%s", knowledge.ID, info.ID)
 	return nil
+}
+
+func manualTaskJobKind(needCleanup bool) types.TaskJobKind {
+	if needCleanup {
+		return types.TaskJobKindReparse
+	}
+	return types.TaskJobKindUpload
 }
 
 func ensureManualFileName(title string) string {

@@ -135,6 +135,11 @@ type WikiIngestPayload struct {
 	Language        string `json:"language,omitempty"`
 }
 
+type WikiEnqueueResult struct {
+	PendingOpPersisted bool
+	TriggerEnqueued    bool
+}
+
 // WikiRetractPayload is the asynq task payload for wiki content retraction
 type WikiRetractPayload struct {
 	types.TracingContext
@@ -297,12 +302,13 @@ func EnqueueWikiIngest(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	tenantID uint64,
 	kbID, knowledgeID string,
-) {
+) (WikiEnqueueResult, error) {
+	var result WikiEnqueueResult
 	lang, _ := types.LanguageFromContext(ctx)
 	attempt := attemptFromCtx(ctx)
 	if attempt <= 0 {
 		logger.Warnf(ctx, "wiki ingest: skip enqueue without attempt for knowledge=%s kb=%s", knowledgeID, kbID)
-		return
+		return result, fmt.Errorf("wiki ingest missing attempt for knowledge %s", knowledgeID)
 	}
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
@@ -320,23 +326,24 @@ func EnqueueWikiIngest(
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
-		return
+		return result, err
 	}
-	if pendingRepo != nil {
-		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
-			TenantID: tenantID,
-			TaskType: wikiTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  kbID,
-			Op:       WikiOpIngest,
-			DedupKey: knowledgeID,
-			Payload:  payloadBytes,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
-			// Fall through and still schedule the trigger task — the
-			// next upload (or the next retry pass) will catch the gap.
-		}
+	if pendingRepo == nil {
+		return result, errors.New("wiki ingest pending repository is not configured")
 	}
+	if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+		TenantID: tenantID,
+		TaskType: wikiTaskType,
+		Scope:    wikiTaskScope,
+		ScopeID:  kbID,
+		Op:       WikiOpIngest,
+		DedupKey: knowledgeID,
+		Payload:  payloadBytes,
+	}); err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
+		return result, err
+	}
+	result.PendingOpPersisted = true
 
 	trigger := WikiIngestPayload{
 		TenantID:        tenantID,
@@ -345,7 +352,10 @@ func EnqueueWikiIngest(
 	}
 	if err := enqueueWikiIngestTrigger(ctx, task, trigger, wikiIngestDelay); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
+		return result, err
 	}
+	result.TriggerEnqueued = true
+	return result, nil
 }
 
 // EnqueueWikiRetract queues a wiki retraction op (a delete cleanup).

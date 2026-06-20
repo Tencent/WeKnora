@@ -199,6 +199,7 @@ CREATE TABLE task_executions (
     error_class VARCHAR(24) NOT NULL DEFAULT '',
     last_error TEXT NOT NULL,
     retry_of VARCHAR(64) NOT NULL DEFAULT '',
+    rescheduled_to_execution_id VARCHAR(64) NOT NULL DEFAULT '',
     enqueued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     dispatched_at TIMESTAMP NULL DEFAULT NULL,
     started_at TIMESTAMP NULL DEFAULT NULL,
@@ -210,3 +211,4 @@ CREATE TABLE task_executions (
 CREATE INDEX idx_task_executions_job_attempt_enqueued ON task_executions(job_id, process_attempt, enqueued_at);
 CREATE INDEX idx_task_executions_job_state ON task_executions(job_id, state);
 CREATE INDEX idx_task_executions_state_enqueued ON task_executions(state, enqueued_at);
+CREATE INDEX idx_task_executions_rescheduled_to ON task_executions(rescheduled_to_execution_id);

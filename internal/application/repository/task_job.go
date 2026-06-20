@@ -162,6 +162,7 @@ var taskExecutionTerminalStates = []string{
 	string(types.TaskExecutionStateSucceeded),
 	string(types.TaskExecutionStateFailed),
 	string(types.TaskExecutionStateCanceled),
+	string(types.TaskExecutionStateRescheduled),
 }
 
 func (r *taskJobRepository) CreateJobAndExecution(
@@ -211,6 +212,34 @@ func (r *taskJobRepository) CreateJobAndExecution(
 		if err := tx.Create(job).Error; err != nil {
 			return err
 		}
+		return tx.Create(execution).Error
+	})
+}
+
+func (r *taskJobRepository) CreateExecutionForJob(ctx context.Context, execution *types.TaskExecution) error {
+	if execution == nil {
+		return errors.New("task ledger: execution is required")
+	}
+	if execution.ExecutionID == "" || execution.JobID == "" {
+		return errors.New("task ledger: execution_id and job_id are required")
+	}
+	if execution.TaskType == "" {
+		return errors.New("task ledger: execution task_type is required")
+	}
+	if execution.State == "" {
+		execution.State = types.TaskExecutionStateQueued
+	}
+	if execution.EnqueuedAt.IsZero() {
+		execution.EnqueuedAt = time.Now()
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var job types.TaskJob
+		if err := tx.Select("job_id", "process_attempt").
+			Where("job_id = ?", execution.JobID).
+			Take(&job).Error; err != nil {
+			return err
+		}
+		execution.ProcessAttempt = job.ProcessAttempt
 		return tx.Create(execution).Error
 	})
 }
@@ -382,6 +411,27 @@ func (r *taskJobRepository) MarkExecCanceledIfNonTerminal(
 		Where("execution_id = ?", executionID).
 		Where("state NOT IN ?", taskExecutionTerminalStates).
 		Updates(execFailureUpdates(types.TaskExecutionStateCanceled, failure, finishedAt))
+	return rowsChanged(res)
+}
+
+func (r *taskJobRepository) MarkExecRescheduled(
+	ctx context.Context,
+	executionID, toExecutionID string,
+	finishedAt time.Time,
+) (bool, error) {
+	if executionID == "" || toExecutionID == "" {
+		return false, nil
+	}
+	res := r.db.WithContext(ctx).Model(&types.TaskExecution{}).
+		Where("execution_id = ?", executionID).
+		Where("state NOT IN ?", taskExecutionTerminalStates).
+		Updates(map[string]any{
+			"state":                       types.TaskExecutionStateRescheduled,
+			"rescheduled_to_execution_id": toExecutionID,
+			"finished_at":                 finishedAt,
+			"error_class":                 "",
+			"last_error":                  "",
+		})
 	return rowsChanged(res)
 }
 

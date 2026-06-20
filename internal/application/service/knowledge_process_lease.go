@@ -12,7 +12,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var ErrKnowledgeProcessLeaseBusy = errors.New("knowledge process lease busy")
+var (
+	ErrKnowledgeProcessLeaseBusy = errors.New("knowledge process lease busy")
+	ErrKnowledgeProcessLeaseLost = errors.New("knowledge process lease lost")
+)
 
 const (
 	knowledgeProcessLeaseTTL   = 2 * time.Minute
@@ -30,6 +33,7 @@ type KnowledgeProcessLease struct {
 	Cancel  context.CancelFunc
 	Token   string
 	Key     string
+	owned   bool
 	Release func()
 }
 
@@ -76,7 +80,10 @@ func acquireKnowledgeProcessLease(
 	}
 	key := knowledgeProcessLeaseKey(tenantID, knowledgeID)
 	if lease := leaseFromCtx(ctx, key); lease != nil {
-		return lease, nil
+		borrowed := *lease
+		borrowed.owned = false
+		borrowed.Release = func() {}
+		return &borrowed, nil
 	}
 	if redisClient == nil {
 		return acquireMemoryKnowledgeProcessLease(ctx, key)
@@ -96,6 +103,7 @@ func acquireMemoryKnowledgeProcessLease(ctx context.Context, key string) (*Knowl
 		Context: leaseCtx,
 		Cancel:  cancel,
 		Key:     key,
+		owned:   true,
 	}
 	release := func() {
 		once.Do(func() {
@@ -126,6 +134,7 @@ func acquireRedisKnowledgeProcessLease(ctx context.Context, redisClient *redis.C
 		Cancel:  cancel,
 		Token:   token,
 		Key:     key,
+		owned:   true,
 	}
 	go func() {
 		ticker := time.NewTicker(knowledgeProcessLeaseRenew)
@@ -156,6 +165,10 @@ func acquireRedisKnowledgeProcessLease(ctx context.Context, redisClient *redis.C
 }
 
 func renewRedisKnowledgeProcessLease(ctx context.Context, redisClient *redis.Client, key, token string) bool {
+	return renewRedisTokenLease(ctx, redisClient, key, token, knowledgeProcessLeaseTTL)
+}
+
+func renewRedisTokenLease(ctx context.Context, redisClient *redis.Client, key, token string, ttl time.Duration) bool {
 	if redisClient == nil {
 		return false
 	}
@@ -164,15 +177,19 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
   return redis.call("PEXPIRE", KEYS[1], ARGV[2])
 end
 return 0`
-	n, err := redisClient.Eval(ctx, script, []string{key}, token, int64(knowledgeProcessLeaseTTL/time.Millisecond)).Int()
+	n, err := redisClient.Eval(ctx, script, []string{key}, token, int64(ttl/time.Millisecond)).Int()
 	if err != nil {
-		logger.Warnf(ctx, "knowledge process lease renew failed key=%s: %v", key, err)
+		logger.Warnf(ctx, "redis token lease renew failed key=%s: %v", key, err)
 		return false
 	}
 	return n == 1
 }
 
 func releaseRedisKnowledgeProcessLease(ctx context.Context, redisClient *redis.Client, key, token string) {
+	releaseRedisTokenLease(ctx, redisClient, key, token)
+}
+
+func releaseRedisTokenLease(ctx context.Context, redisClient *redis.Client, key, token string) {
 	if redisClient == nil {
 		return
 	}
@@ -182,7 +199,7 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
 end
 return 0`
 	if err := redisClient.Eval(ctx, script, []string{key}, token).Err(); err != nil {
-		logger.Warnf(ctx, "knowledge process lease release failed key=%s: %v", key, err)
+		logger.Warnf(ctx, "redis token lease release failed key=%s: %v", key, err)
 	}
 }
 
@@ -190,7 +207,10 @@ func (l *KnowledgeProcessLease) Err() error {
 	if l == nil || l.Context == nil {
 		return nil
 	}
-	return l.Context.Err()
+	if err := l.Context.Err(); err != nil {
+		return fmt.Errorf("%w: %v", ErrKnowledgeProcessLeaseLost, err)
+	}
+	return nil
 }
 
 func (l *KnowledgeProcessLease) ActiveContext(ctx context.Context) context.Context {

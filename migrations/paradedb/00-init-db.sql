@@ -261,6 +261,7 @@ CREATE TABLE IF NOT EXISTS task_executions (
     error_class     VARCHAR(24) NOT NULL DEFAULT '',
     last_error      TEXT NOT NULL DEFAULT '',
     retry_of        VARCHAR(64) NOT NULL DEFAULT '',
+    rescheduled_to_execution_id VARCHAR(64) NOT NULL DEFAULT '',
     enqueued_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     dispatched_at   TIMESTAMP WITH TIME ZONE,
     started_at      TIMESTAMP WITH TIME ZONE,
@@ -273,3 +274,6 @@ CREATE INDEX IF NOT EXISTS idx_task_executions_job_state
     ON task_executions (job_id, state);
 CREATE INDEX IF NOT EXISTS idx_task_executions_state_enqueued
     ON task_executions (state, enqueued_at);
+CREATE INDEX IF NOT EXISTS idx_task_executions_rescheduled_to
+    ON task_executions (rescheduled_to_execution_id)
+    WHERE rescheduled_to_execution_id <> '';

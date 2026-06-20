@@ -135,6 +135,7 @@ type fakeTaskInspector struct {
 	queued     map[string]bool
 	wikiQueued map[string]bool
 	taskQueued map[string]bool
+	taskState  map[string]interfaces.TaskQueueState
 	err        error
 	wikiErr    error
 	taskErr    error
@@ -171,8 +172,22 @@ func (f fakeTaskInspector) HasTask(_ context.Context, taskID string) (bool, erro
 	return f.taskQueued[taskID], nil
 }
 
+func (f fakeTaskInspector) QueueState(_ context.Context, taskID string) (interfaces.TaskQueueState, error) {
+	if f.taskErr != nil {
+		return interfaces.TaskQueueMissing, f.taskErr
+	}
+	if state := f.taskState[taskID]; state != "" {
+		return state, nil
+	}
+	if f.taskQueued[taskID] {
+		return interfaces.TaskQueuePending, nil
+	}
+	return interfaces.TaskQueueMissing, nil
+}
+
 type fakeTaskEnqueuer struct {
 	tasks []*asynq.Task
+	opts  [][]asynq.Option
 	err   error
 }
 
@@ -181,6 +196,7 @@ func (f *fakeTaskEnqueuer) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 		return nil, f.err
 	}
 	f.tasks = append(f.tasks, task)
+	f.opts = append(f.opts, append([]asynq.Option(nil), opts...))
 	return &asynq.TaskInfo{ID: "fake", Type: task.Type()}, nil
 }
 

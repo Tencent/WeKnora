@@ -49,6 +49,17 @@ func (r *createKnowledgeFileRepoStub) BeginKnowledgeAttempt(
 	return expectedAttempt + 1, nil
 }
 
+func (r *createKnowledgeFileRepoStub) BeginKnowledgeAttemptWithMetadata(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	expectedAttempt int64,
+	mode types.AttemptBeginMode,
+	metadata *types.JSON,
+) (int64, error) {
+	return r.BeginKnowledgeAttempt(ctx, tenantID, id, expectedAttempt, mode)
+}
+
 func (r *createKnowledgeFileRepoStub) MarkKnowledgeFailedIfAttempt(
 	ctx context.Context,
 	tenantID uint64,

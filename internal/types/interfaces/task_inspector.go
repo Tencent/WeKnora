@@ -2,6 +2,17 @@ package interfaces
 
 import "context"
 
+type TaskQueueState string
+
+const (
+	TaskQueueMissing   TaskQueueState = "missing"
+	TaskQueuePending   TaskQueueState = "pending"
+	TaskQueueScheduled TaskQueueState = "scheduled"
+	TaskQueueRetry     TaskQueueState = "retry"
+	TaskQueueActive    TaskQueueState = "active"
+	TaskQueueArchived  TaskQueueState = "archived"
+)
+
 // TaskInspector abstracts queue inspection / cancellation against the
 // task backend. It is best-effort: implementations may scan a finite
 // number of tasks per call and return whatever count they could
@@ -46,10 +57,13 @@ type TaskInspector interface {
 	// document-level wiki ownership lives in task_pending_ops.
 	HasQueuedWikiForKnowledgeBase(ctx context.Context, kbID string) (bool, error)
 
-	// HasTask reports whether a concrete task ID exists in the queue
+	// QueueState reports where a concrete task ID exists in the queue
 	// backend. The task ledger uses execution IDs as asynq TaskIDs, so
-	// stale-dispatch maintenance can reconcile the durable ledger with
-	// pending/scheduled/retry/active queue state before marking anything
-	// failed.
+	// stale-dispatch maintenance can distinguish live, archived, missing,
+	// and probe-error states instead of collapsing them into one boolean.
+	QueueState(ctx context.Context, taskID string) (TaskQueueState, error)
+
+	// HasTask is kept for older call sites. Prefer QueueState for any
+	// destructive reconciliation decision.
 	HasTask(ctx context.Context, taskID string) (bool, error)
 }

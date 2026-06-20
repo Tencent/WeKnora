@@ -36,6 +36,9 @@ func newSyncLedgerStub() *syncLedgerStub {
 func (s *syncLedgerStub) CreateJobAndExecution(context.Context, *types.TaskJob, *types.TaskExecution) error {
 	return nil
 }
+func (s *syncLedgerStub) CreateExecutionForJob(context.Context, *types.TaskExecution) error {
+	return nil
+}
 func (s *syncLedgerStub) Summary(context.Context, interfaces.TaskJobQuery) (*interfaces.TaskJobSummary, error) {
 	return nil, nil
 }
@@ -104,6 +107,9 @@ func (s *syncLedgerStub) MarkExecFailedIfNonTerminal(context.Context, string, in
 	return true, nil
 }
 func (s *syncLedgerStub) MarkExecCanceledIfNonTerminal(context.Context, string, interfaces.TaskLedgerFailure, time.Time) (bool, error) {
+	return true, nil
+}
+func (s *syncLedgerStub) MarkExecRescheduled(context.Context, string, string, time.Time) (bool, error) {
 	return true, nil
 }
 func (s *syncLedgerStub) MarkExecutionsCanceledForJob(context.Context, uint64, string, interfaces.TaskLedgerFailure, time.Time) (int64, error) {

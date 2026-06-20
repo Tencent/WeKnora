@@ -74,18 +74,36 @@ func (r *TaskLedgerMaintenanceRunner) sweepStaleDispatch(ctx context.Context) {
 			continue
 		}
 		if r.inspector != nil {
-			exists, err := r.inspector.HasTask(ctx, exec.ExecutionID)
+			state, err := r.inspector.QueueState(ctx, exec.ExecutionID)
 			if err != nil {
 				logger.Warnf(ctx, "task ledger: stale-dispatch queue probe failed exec=%s: %v", exec.ExecutionID, err)
 				continue
 			}
-			if exists {
+			switch state {
+			case interfaces.TaskQueuePending, interfaces.TaskQueueScheduled, interfaces.TaskQueueRetry, interfaces.TaskQueueActive:
 				if changed, err := r.repo.MarkDispatched(ctx, exec.ExecutionID, time.Now()); err != nil {
 					observability.RecordTaskLedgerWriteFailure("maintenance", "stale_dispatch_repair")
 					logger.Warnf(ctx, "task ledger: stale-dispatch repair failed exec=%s: %v", exec.ExecutionID, err)
 				} else if changed {
-					logger.Infof(ctx, "task ledger: repaired dispatched_at for queued exec=%s job=%s", exec.ExecutionID, exec.JobID)
+					logger.Infof(ctx, "task ledger: repaired dispatched_at for %s queued exec=%s job=%s", state, exec.ExecutionID, exec.JobID)
 				}
+				continue
+			case interfaces.TaskQueueArchived:
+				if changed, err := r.repo.MarkDispatchFailed(ctx, exec.JobID, exec.ExecutionID, interfaces.TaskLedgerFailure{
+					ErrorClass:     types.TaskErrorClassEnqueueFailed,
+					LastError:      "asynq task archived before ledger dispatch confirmation",
+					FailedTaskType: exec.TaskType,
+					FailedTaskID:   exec.ExecutionID,
+				}, time.Now()); err != nil {
+					observability.RecordTaskLedgerWriteFailure("maintenance", "stale_dispatch_archive")
+					logger.Warnf(ctx, "task ledger: stale-dispatch archive mark failed exec=%s: %v", exec.ExecutionID, err)
+				} else if changed {
+					marked++
+					logger.Warnf(ctx, "task ledger: marked archived dispatch failed exec=%s job=%s", exec.ExecutionID, exec.JobID)
+				}
+				continue
+			case interfaces.TaskQueueMissing:
+			default:
 				continue
 			}
 		}
@@ -117,20 +135,61 @@ func (r *TaskLedgerMaintenanceRunner) reenqueueStaleExecution(ctx context.Contex
 	if err != nil || job == nil {
 		return false, err
 	}
-	payload, queue, ok := replayDocumentTaskFromJob(job, exec.ProcessAttempt)
+	task, opts, ok := replayRootTaskFromJob(job, exec.ProcessAttempt)
 	if !ok {
 		return false, nil
 	}
-	task := asynq.NewTask(types.TypeDocumentProcess, payload)
-	if _, err := r.enqueuer.Enqueue(task,
-		asynq.Queue(queue),
-		asynq.TaskID(exec.ExecutionID),
-		asynq.MaxRetry(3),
-	); err != nil {
+	opts = append(opts, asynq.TaskID(exec.ExecutionID))
+	if _, err := r.enqueuer.Enqueue(task, opts...); err != nil {
 		return false, err
 	}
 	_, err = r.repo.MarkDispatched(ctx, exec.ExecutionID, time.Now())
 	return true, err
+}
+
+func replayRootTaskFromJob(job *types.TaskJob, attempt int) (*asynq.Task, []asynq.Option, bool) {
+	if job == nil {
+		return nil, nil, false
+	}
+	var spec taskReplaySpecV2
+	if err := json.Unmarshal(job.ReplaySpec, &spec); err == nil && spec.Version == 2 &&
+		spec.TaskType != "" && len(spec.Payload) > 0 {
+		payload := append([]byte(nil), spec.Payload...)
+		payload = ensureReplayPayloadJobAndAttempt(spec.TaskType, payload, job.JobID, attempt)
+		return asynq.NewTask(spec.TaskType, payload), replayOptionsFromPolicy(spec.Policy), true
+	}
+	payload, queue, ok := replayDocumentTaskFromJob(job, attempt)
+	if !ok {
+		return nil, nil, false
+	}
+	return asynq.NewTask(types.TypeDocumentProcess, payload), []asynq.Option{
+		asynq.Queue(queue),
+		asynq.MaxRetry(3),
+	}, true
+}
+
+func ensureReplayPayloadJobAndAttempt(taskType string, payload []byte, jobID string, attempt int) []byte {
+	switch taskType {
+	case types.TypeDocumentProcess:
+		var p types.DocumentProcessPayload
+		if err := json.Unmarshal(payload, &p); err == nil {
+			p.JobID = jobID
+			p.Attempt = attempt
+			if raw, err := json.Marshal(p); err == nil {
+				return raw
+			}
+		}
+	case types.TypeManualProcess:
+		var p types.ManualProcessPayload
+		if err := json.Unmarshal(payload, &p); err == nil {
+			p.JobID = jobID
+			p.Attempt = attempt
+			if raw, err := json.Marshal(p); err == nil {
+				return raw
+			}
+		}
+	}
+	return payload
 }
 
 func replayDocumentTaskFromJob(job *types.TaskJob, attempt int) ([]byte, string, bool) {
@@ -171,6 +230,7 @@ func replayDocumentTaskFromJob(job *types.TaskJob, attempt int) ([]byte, string,
 		QuestionCount:            spec.ProcessConfig.QuestionCount,
 		Language:                 spec.ProcessConfig.Language,
 		Attempt:                  attempt,
+		JobID:                    job.JobID,
 	}
 	switch spec.SourceRef.Type {
 	case "object_storage":

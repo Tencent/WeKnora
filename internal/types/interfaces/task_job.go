@@ -47,6 +47,7 @@ type TaskJobSummary struct {
 
 type TaskJobRepository interface {
 	CreateJobAndExecution(ctx context.Context, job *types.TaskJob, execution *types.TaskExecution) error
+	CreateExecutionForJob(ctx context.Context, execution *types.TaskExecution) error
 
 	Summary(ctx context.Context, q TaskJobQuery) (*TaskJobSummary, error)
 	ListJobs(ctx context.Context, q TaskJobQuery) ([]*types.TaskJob, int64, error)
@@ -69,6 +70,7 @@ type TaskJobRepository interface {
 	MarkExecSucceededIfNonTerminal(ctx context.Context, executionID string, finishedAt time.Time) (bool, error)
 	MarkExecFailedIfNonTerminal(ctx context.Context, executionID string, failure TaskLedgerFailure, finishedAt time.Time) (bool, error)
 	MarkExecCanceledIfNonTerminal(ctx context.Context, executionID string, failure TaskLedgerFailure, finishedAt time.Time) (bool, error)
+	MarkExecRescheduled(ctx context.Context, executionID, toExecutionID string, finishedAt time.Time) (bool, error)
 	MarkExecutionsCanceledForJob(ctx context.Context, tenantID uint64, jobID string, failure TaskLedgerFailure, finishedAt time.Time) (int64, error)
 
 	FindStaleDispatches(ctx context.Context, cutoff time.Time, limit int) ([]*types.TaskExecution, error)

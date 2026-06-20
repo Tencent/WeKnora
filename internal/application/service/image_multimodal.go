@@ -336,17 +336,28 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	commitLease, leaseErr := acquireKnowledgeProcessLease(ctx, s.redisClient, payload.TenantID, payload.KnowledgeID)
 	if leaseErr != nil {
 		if errors.Is(leaseErr, ErrKnowledgeProcessLeaseBusy) {
+			if err := rescheduleTaskAfterKnowledgeLeaseBusy(ctx, s.taskEnqueuer, nil, task, payload.KnowledgeID, payload.Attempt); err != nil {
+				return err
+			}
 			rescheduled = true
 			imgOut["rescheduled"] = "lease_busy"
-			return rescheduleTaskAfterKnowledgeLeaseBusy(ctx, s.taskEnqueuer, nil, task, payload.KnowledgeID, payload.Attempt)
+			return nil
 		}
 		handleErr = leaseErr
 		return handleErr
 	}
 	ctx = commitLease.Context
 	defer commitLease.Release()
-	if commitLease.Err() != nil || attemptSuperseded(ctx, s.knowledgeRepo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
-		imgOut["skipped"] = "attempt_or_lease_lost_before_multimodal_commit"
+	if err := commitLease.Err(); err != nil {
+		if attemptSuperseded(context.WithoutCancel(ctx), s.knowledgeRepo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
+			imgOut["skipped"] = "attempt_superseded_before_multimodal_commit"
+			return nil
+		}
+		handleErr = err
+		return err
+	}
+	if attemptSuperseded(ctx, s.knowledgeRepo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
+		imgOut["skipped"] = "attempt_superseded_before_multimodal_commit"
 		return nil
 	}
 
@@ -361,8 +372,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Index chunks so they can be retrieved
-	if commitLease.Err() != nil || attemptSuperseded(ctx, s.knowledgeRepo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
-		imgOut["skipped"] = "attempt_or_lease_lost_before_multimodal_index"
+	if err := commitLease.Err(); err != nil {
+		if attemptSuperseded(context.WithoutCancel(ctx), s.knowledgeRepo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
+			imgOut["skipped"] = "attempt_superseded_before_multimodal_index"
+			return nil
+		}
+		handleErr = err
+		return err
+	}
+	if attemptSuperseded(ctx, s.knowledgeRepo, payload.TenantID, payload.KnowledgeID, payload.Attempt) {
+		imgOut["skipped"] = "attempt_superseded_before_multimodal_index"
 		return nil
 	}
 	s.indexChunks(ctx, payload, newChunks)

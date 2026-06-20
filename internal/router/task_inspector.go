@@ -178,33 +178,41 @@ func (a *asynqTaskInspector) HasQueuedWikiForKnowledgeBase(
 }
 
 func (a *asynqTaskInspector) HasTask(ctx context.Context, taskID string) (bool, error) {
+	state, err := a.QueueState(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return state != interfaces.TaskQueueMissing, nil
+}
+
+func (a *asynqTaskInspector) QueueState(ctx context.Context, taskID string) (interfaces.TaskQueueState, error) {
 	if a == nil || a.inspector == nil || taskID == "" {
-		return false, nil
+		return interfaces.TaskQueueMissing, nil
 	}
 	listers := []struct {
-		state string
+		state interfaces.TaskQueueState
 		list  func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
 	}{
-		{"pending", a.inspector.ListPendingTasks},
-		{"scheduled", a.inspector.ListScheduledTasks},
-		{"retry", a.inspector.ListRetryTasks},
-		{"active", a.inspector.ListActiveTasks},
-		{"archived", a.inspector.ListArchivedTasks},
+		{interfaces.TaskQueuePending, a.inspector.ListPendingTasks},
+		{interfaces.TaskQueueScheduled, a.inspector.ListScheduledTasks},
+		{interfaces.TaskQueueRetry, a.inspector.ListRetryTasks},
+		{interfaces.TaskQueueActive, a.inspector.ListActiveTasks},
+		{interfaces.TaskQueueArchived, a.inspector.ListArchivedTasks},
 	}
 	for _, queue := range queuesScanned {
 		for _, l := range listers {
-			matched, err := a.queueStateHasMatch(ctx, queue, l.state, l.list, func(info *asynq.TaskInfo) bool {
+			matched, err := a.queueStateHasMatch(ctx, queue, string(l.state), l.list, func(info *asynq.TaskInfo) bool {
 				return info != nil && info.ID == taskID
 			})
 			if err != nil {
-				return false, err
+				return interfaces.TaskQueueMissing, err
 			}
 			if matched {
-				return true, nil
+				return l.state, nil
 			}
 		}
 	}
-	return false, nil
+	return interfaces.TaskQueueMissing, nil
 }
 
 // queueStateHasMatch pages through one (queue, state) list looking for a
@@ -426,4 +434,8 @@ func (noopTaskInspector) HasQueuedWikiForKnowledgeBase(
 
 func (noopTaskInspector) HasTask(ctx context.Context, taskID string) (bool, error) {
 	return false, nil
+}
+
+func (noopTaskInspector) QueueState(ctx context.Context, taskID string) (interfaces.TaskQueueState, error) {
+	return interfaces.TaskQueueMissing, nil
 }

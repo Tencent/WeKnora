@@ -26,7 +26,13 @@ func TestKnowledgeProcessLeaseLiteSerializesByKnowledge(t *testing.T) {
 
 	reentrant, err := svc.acquireKnowledgeProcessLease(lease.Context, 1, "kid-lease")
 	require.NoError(t, err)
-	assert.Equal(t, lease, reentrant)
+	assert.Equal(t, lease.Key, reentrant.Key)
+	assert.Equal(t, lease.Context, reentrant.Context)
+	reentrant.Release()
+
+	_, err = svc.acquireKnowledgeProcessLease(ctx, 1, "kid-lease")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrKnowledgeProcessLeaseBusy))
 
 	lease.Release()
 	leaseAgain, err := svc.acquireKnowledgeProcessLease(ctx, 1, "kid-lease")

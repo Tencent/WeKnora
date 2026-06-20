@@ -217,6 +217,7 @@ type KnowledgeRepository interface {
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
 	BeginKnowledgeAttempt(ctx context.Context, tenantID uint64, id string, expectedAttempt int64, mode types.AttemptBeginMode) (int64, error)
+	BeginKnowledgeAttemptWithMetadata(ctx context.Context, tenantID uint64, id string, expectedAttempt int64, mode types.AttemptBeginMode, metadata *types.JSON) (int64, error)
 	MarkKnowledgeProcessingIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64) (bool, error)
 	MarkKnowledgeFailedIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64, reason string) (bool, error)
 	MarkKnowledgeCanceledIfAttempt(ctx context.Context, tenantID uint64, id string, attempt int64, reason string) (bool, error)

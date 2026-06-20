@@ -194,6 +194,17 @@ func (r *knowledgeRepository) BeginKnowledgeAttempt(
 	expectedAttempt int64,
 	mode types.AttemptBeginMode,
 ) (int64, error) {
+	return r.BeginKnowledgeAttemptWithMetadata(ctx, tenantID, id, expectedAttempt, mode, nil)
+}
+
+func (r *knowledgeRepository) BeginKnowledgeAttemptWithMetadata(
+	ctx context.Context,
+	tenantID uint64,
+	id string,
+	expectedAttempt int64,
+	mode types.AttemptBeginMode,
+	metadata *types.JSON,
+) (int64, error) {
 	if tenantID == 0 || id == "" {
 		return 0, ErrKnowledgeNotFound
 	}
@@ -210,17 +221,21 @@ func (r *knowledgeRepository) BeginKnowledgeAttempt(
 		return 0, ErrKnowledgeBusy
 	}
 	now := time.Now()
+	updates := map[string]interface{}{
+		"current_process_attempt": gorm.Expr("current_process_attempt + 1"),
+		"parse_status":            types.ParseStatusPending,
+		"pending_subtasks_count":  0,
+		"error_message":           "",
+		"processed_at":            nil,
+		"updated_at":              now,
+	}
+	if metadata != nil {
+		updates["metadata"] = *metadata
+	}
 	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND id = ? AND current_process_attempt = ?", tenantID, id, expectedAttempt).
 		Where("parse_status IN ?", allowedStatuses).
-		Updates(map[string]interface{}{
-			"current_process_attempt": gorm.Expr("current_process_attempt + 1"),
-			"parse_status":            types.ParseStatusPending,
-			"pending_subtasks_count":  0,
-			"error_message":           "",
-			"processed_at":            nil,
-			"updated_at":              now,
-		})
+		Updates(updates)
 	if res.Error != nil {
 		return 0, res.Error
 	}

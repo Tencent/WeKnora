@@ -50,6 +50,7 @@ CREATE TABLE task_executions (
     error_class VARCHAR(24) NOT NULL DEFAULT '',
     last_error TEXT NOT NULL DEFAULT '',
     retry_of VARCHAR(64) NOT NULL DEFAULT '',
+    rescheduled_to_execution_id VARCHAR(64) NOT NULL DEFAULT '',
     enqueued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     dispatched_at DATETIME,
     started_at DATETIME,
@@ -235,6 +236,40 @@ func TestTaskJobRepository_ExecutionUpdateIfExistsAndTerminalGuard(t *testing.T)
 	changed, err = repo.MarkExecFailedIfNonTerminal(ctx, "exec-1", interfaces.TaskLedgerFailure{LastError: "late"}, now)
 	require.NoError(t, err)
 	assert.False(t, changed, "terminal execution must not be overwritten by late failure")
+}
+
+func TestTaskJobRepository_RescheduledExecutionIsTerminal(t *testing.T) {
+	db := setupTaskLedgerTestDB(t)
+	repo := NewTaskJobRepository(db)
+	ctx := context.Background()
+	now := time.Now()
+
+	require.NoError(t, repo.CreateJobAndExecution(ctx, makeTaskJob("job-1", 1), makeTaskExecution("job-1", "exec-1", 1)))
+	require.NoError(t, repo.CreateExecutionForJob(ctx, &types.TaskExecution{
+		ExecutionID: "exec-2",
+		JobID:       "job-1",
+		TaskType:    types.TypeDocumentProcess,
+		Queue:       types.QueueCritical,
+		State:       types.TaskExecutionStateQueued,
+		EnqueuedAt:  now,
+		RetryOf:     "exec-1",
+	}))
+
+	changed, err := repo.MarkExecRescheduled(ctx, "exec-1", "exec-2", now)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	changed, err = repo.MarkExecSucceededIfNonTerminal(ctx, "exec-1", now.Add(time.Second))
+	require.NoError(t, err)
+	assert.False(t, changed)
+	changed, err = repo.MarkExecFailedIfNonTerminal(ctx, "exec-1", interfaces.TaskLedgerFailure{LastError: "late"}, now.Add(time.Second))
+	require.NoError(t, err)
+	assert.False(t, changed)
+
+	var exec types.TaskExecution
+	require.NoError(t, db.First(&exec, "execution_id = ?", "exec-1").Error)
+	assert.Equal(t, types.TaskExecutionStateRescheduled, exec.State)
+	assert.Equal(t, "exec-2", exec.RescheduledToExecutionID)
 }
 
 func TestTaskJobRepository_ListExecutionsForJobs(t *testing.T) {

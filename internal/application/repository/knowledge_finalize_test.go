@@ -206,6 +206,28 @@ func TestBeginKnowledgeAttemptConcurrentCAS(t *testing.T) {
 	assert.Equal(t, types.ParseStatusPending, status)
 }
 
+func TestBeginKnowledgeAttemptWithMetadataCASWritesOnlyWinner(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	id := insertKnowledgeWithAttempt(t, db, types.ParseStatusCompleted, 3, 0)
+
+	winnerMetadata := types.JSON(`{"process_overrides":{"graph_enabled":true},"winner":"first"}`)
+	loserMetadata := types.JSON(`{"process_overrides":{"graph_enabled":false},"winner":"second"}`)
+	next, err := repo.BeginKnowledgeAttemptWithMetadata(ctx, 1, id, 3, types.AttemptBeginReparse, &winnerMetadata)
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), next)
+	_, err = repo.BeginKnowledgeAttemptWithMetadata(ctx, 1, id, 3, types.AttemptBeginReparse, &loserMetadata)
+	require.ErrorIs(t, err, ErrAttemptSuperseded)
+
+	var attempt int64
+	var metadata string
+	require.NoError(t, db.Raw(`SELECT current_process_attempt, metadata FROM knowledges WHERE id = ?`, id).
+		Row().Scan(&attempt, &metadata))
+	assert.Equal(t, int64(4), attempt)
+	assert.JSONEq(t, string(winnerMetadata), metadata)
+}
+
 func TestUpdateKnowledgeDoesNotOverwriteCurrentProcessAttempt(t *testing.T) {
 	db := setupKnowledgeTestDB(t)
 	repo := NewKnowledgeRepository(db)
