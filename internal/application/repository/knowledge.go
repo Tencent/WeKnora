@@ -361,32 +361,6 @@ func (r *knowledgeRepository) MarkFinalizingKnowledgeFailed(ctx context.Context,
 	return res.RowsAffected > 0, nil
 }
 
-func (r *knowledgeRepository) MarkFinalizingKnowledgeFailedByKB(
-	ctx context.Context,
-	tenantID uint64,
-	kbID, reason string,
-) (int64, error) {
-	if kbID == "" {
-		return 0, nil
-	}
-	q := r.db.WithContext(ctx).
-		Model(&types.Knowledge{}).
-		Where("knowledge_base_id = ? AND parse_status = ?", kbID, types.ParseStatusFinalizing)
-	if tenantID > 0 {
-		q = q.Where("tenant_id = ?", tenantID)
-	}
-	res := q.Updates(map[string]interface{}{
-		"parse_status":           types.ParseStatusFailed,
-		"error_message":          reason,
-		"pending_subtasks_count": 0,
-		"updated_at":             time.Now(),
-	})
-	if res.Error != nil {
-		return 0, res.Error
-	}
-	return res.RowsAffected, nil
-}
-
 // FinalizeSubtask atomically decrements pending_subtasks_count and, when
 // the counter reaches zero while parse_status is still 'finalizing',
 // flips the row to 'completed' in the same statement so concurrent

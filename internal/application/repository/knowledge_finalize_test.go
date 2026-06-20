@@ -351,28 +351,3 @@ func TestMarkFinalizingKnowledgeFailedGuardsTerminalRows(t *testing.T) {
 	status, _ = reloadKnowledgeRow(t, db, completedID)
 	assert.Equal(t, types.ParseStatusCompleted, status)
 }
-
-func TestMarkFinalizingKnowledgeFailedByKBScopesTenantAndState(t *testing.T) {
-	db := setupKnowledgeTestDB(t)
-	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
-	ctx := context.Background()
-
-	matchID := insertKnowledgeForKBWithStatus(t, db, 1, "kb-1", types.ParseStatusFinalizing, 1)
-	otherTenantID := insertKnowledgeForKBWithStatus(t, db, 2, "kb-1", types.ParseStatusFinalizing, 1)
-	completedID := insertKnowledgeForKBWithStatus(t, db, 1, "kb-1", types.ParseStatusCompleted, 0)
-	otherKBID := insertKnowledgeForKBWithStatus(t, db, 1, "kb-2", types.ParseStatusFinalizing, 1)
-
-	updated, err := repo.MarkFinalizingKnowledgeFailedByKB(ctx, 1, "kb-1", "wiki generation failed")
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), updated)
-
-	status, count := reloadKnowledgeRow(t, db, matchID)
-	assert.Equal(t, types.ParseStatusFailed, status)
-	assert.Equal(t, 0, count)
-	status, _ = reloadKnowledgeRow(t, db, otherTenantID)
-	assert.Equal(t, types.ParseStatusFinalizing, status)
-	status, _ = reloadKnowledgeRow(t, db, completedID)
-	assert.Equal(t, types.ParseStatusCompleted, status)
-	status, _ = reloadKnowledgeRow(t, db, otherKBID)
-	assert.Equal(t, types.ParseStatusFinalizing, status)
-}

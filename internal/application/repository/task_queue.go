@@ -144,6 +144,55 @@ func (r *taskPendingOpsRepository) DeleteByDedupKey(
 	return q.Delete(&types.TaskPendingOp{}).Error
 }
 
+func (r *taskPendingOpsRepository) FindPendingWikiKnowledgeIDs(
+	ctx context.Context,
+	kbIDs, knowledgeIDs []string,
+) (map[string]bool, error) {
+	out := make(map[string]bool)
+	if len(kbIDs) == 0 || len(knowledgeIDs) == 0 {
+		return out, nil
+	}
+	kbIDs = uniqueStrings(kbIDs)
+	knowledgeIDs = uniqueStrings(knowledgeIDs)
+	if len(kbIDs) == 0 || len(knowledgeIDs) == 0 {
+		return out, nil
+	}
+	var keys []string
+	err := r.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("task_type = ? AND scope = ? AND op = ?",
+			types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "ingest").
+		Where("scope_id IN ? AND dedup_key IN ?", kbIDs, knowledgeIDs).
+		Group("dedup_key").
+		Pluck("dedup_key", &keys).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range keys {
+		out[key] = true
+	}
+	return out, nil
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
 // taskDeadLetterRepository implements interfaces.TaskDeadLetterRepository.
 type taskDeadLetterRepository struct {
 	db *gorm.DB

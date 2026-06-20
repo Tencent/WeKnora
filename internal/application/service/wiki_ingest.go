@@ -538,10 +538,11 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, op WikiPend
 		tenantID, _ = types.TenantIDFromContext(ctx)
 	}
 	attempt := op.Attempt
+	superseded := attemptSuperseded(ctx, s.tracker(), op.KnowledgeID, attempt)
 	if attempt <= 0 {
 		attempt = s.tracker().LatestAttempt(ctx, op.KnowledgeID)
 	}
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, s.taskJobRepo, tenantID, op.KnowledgeID, "wiki", attempt, nil, false, true)
+	finalizeSubtaskDetached(ctx, s.knowledgeRepo, s.taskJobRepo, tenantID, op.KnowledgeID, "wiki", attempt, nil, superseded, true)
 }
 
 // requeueFailedOps records in-batch failures.
@@ -618,6 +619,11 @@ func (s *wikiIngestService) failWikiSubtask(ctx context.Context, op WikiPendingO
 	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
+	if attemptSuperseded(dctx, s.tracker(), op.KnowledgeID, op.Attempt) {
+		logger.Infof(ctx, "wiki ingest: skipped terminal failure for superseded attempt knowledge=%s attempt=%d",
+			op.KnowledgeID, op.Attempt)
+		return
+	}
 	changed, err := s.knowledgeRepo.MarkFinalizingKnowledgeFailed(dctx, op.KnowledgeID, truncateWikiFailureReason(reason))
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to mark knowledge %s as failed after wiki failure: %v", op.KnowledgeID, err)

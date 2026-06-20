@@ -227,6 +227,22 @@ func TestTaskPendingOps_PendingCount_ScopedTuple(t *testing.T) {
 	assert.Equal(t, int64(0), n)
 }
 
+func TestTaskPendingOps_FindPendingWikiKnowledgeIDs(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-A", "ingest", "k1", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-A", "retract", "k2", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-B", "ingest", "k3", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp(types.TypeSummaryGeneration, types.TaskScopeKnowledgeBase, "kb-A", "ingest", "k4", nil)))
+
+	got, err := repo.FindPendingWikiKnowledgeIDs(ctx, []string{"kb-A", "kb-B"}, []string{"k1", "k2", "k3", "k4", "missing"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]bool{"k1": true, "k3": true}, got,
+		"only durable wiki ingest ops should protect a finalizing document")
+}
+
 // TestTaskPendingOps_DeleteByDedupKey_Filters tests the wiki delete-race
 // helper: matching rows go away, others survive, optional op filter
 // narrows the scope, and an empty dedup_key is rejected (so a buggy

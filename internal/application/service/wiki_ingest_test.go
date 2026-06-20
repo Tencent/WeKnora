@@ -4,9 +4,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSlugify(t *testing.T) {
@@ -327,6 +331,82 @@ func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	if !strings.Contains(got, realURL) {
 		t.Fatalf("returned content does not contain restored real URL: %q", got)
 	}
+}
+
+func TestWikiIngestFinalizeSkipsSupersededAttempt(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	ctx := context.Background()
+	knowledgeID := "kid-superseded-finalize"
+	insertKnowledgeInKB(t, db, knowledgeID, "kb-1", types.ParseStatusFinalizing, time.Now())
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET pending_subtasks_count = 1 WHERE id = ?`, knowledgeID,
+	).Error)
+
+	tracker := NewSpanTracker(repository.NewKnowledgeSpanRepository(db), nil)
+	_, attempt1, err := tracker.OpenAttempt(ctx, knowledgeID, "")
+	require.NoError(t, err)
+	_, attempt2, err := tracker.OpenAttempt(ctx, knowledgeID, "")
+	require.NoError(t, err)
+	require.Equal(t, 1, attempt1)
+	require.Equal(t, 2, attempt2)
+
+	service := &wikiIngestService{
+		knowledgeRepo: repository.NewKnowledgeRepository(db),
+		spanTracker:   tracker,
+	}
+	service.finalizeWikiSubtask(ctx, WikiPendingOp{
+		Op:          WikiOpIngest,
+		TenantID:    1,
+		KnowledgeID: knowledgeID,
+		Attempt:     attempt1,
+	})
+
+	var status string
+	var count int
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`, knowledgeID,
+	).Row().Scan(&status, &count))
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count, "superseded wiki op must not drain the current attempt")
+}
+
+func TestWikiIngestFailureSkipsSupersededAttempt(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	ctx := context.Background()
+	knowledgeID := "kid-superseded-failure"
+	insertKnowledgeInKB(t, db, knowledgeID, "kb-1", types.ParseStatusFinalizing, time.Now())
+	require.NoError(t, db.Exec(
+		`UPDATE knowledges SET pending_subtasks_count = 1 WHERE id = ?`, knowledgeID,
+	).Error)
+
+	tracker := NewSpanTracker(repository.NewKnowledgeSpanRepository(db), nil)
+	_, attempt1, err := tracker.OpenAttempt(ctx, knowledgeID, "")
+	require.NoError(t, err)
+	_, attempt2, err := tracker.OpenAttempt(ctx, knowledgeID, "")
+	require.NoError(t, err)
+	require.Equal(t, 1, attempt1)
+	require.Equal(t, 2, attempt2)
+
+	service := &wikiIngestService{
+		knowledgeRepo: repository.NewKnowledgeRepository(db),
+		spanTracker:   tracker,
+	}
+	service.failWikiSubtask(ctx, WikiPendingOp{
+		Op:          WikiOpIngest,
+		TenantID:    1,
+		KnowledgeID: knowledgeID,
+		Attempt:     attempt1,
+	}, "wiki generation failed")
+
+	var status string
+	var count int
+	var errMsg *string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, pending_subtasks_count, error_message FROM knowledges WHERE id = ?`, knowledgeID,
+	).Row().Scan(&status, &count, &errMsg))
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, count)
+	assert.Nil(t, errMsg, "superseded wiki op must not fail the current attempt")
 }
 
 type templateCaptureChatModel struct {

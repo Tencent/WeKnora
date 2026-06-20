@@ -53,6 +53,12 @@ type TaskPendingOpsRepository interface {
 	// deleted). If `op` is empty, every matching row is removed
 	// regardless of op.
 	DeleteByDedupKey(ctx context.Context, taskType, scope, scopeID, dedupKey, op string) error
+
+	// FindPendingWikiKnowledgeIDs returns the subset of knowledgeIDs that
+	// currently have a durable wiki ingest op in task_pending_ops. The
+	// lookup is document-granular: task_type=wiki:ingest,
+	// scope=knowledge_base, op=ingest, dedup_key=knowledge_id.
+	FindPendingWikiKnowledgeIDs(ctx context.Context, kbIDs, knowledgeIDs []string) (map[string]bool, error)
 }
 
 // TaskDeadLetterRepository persists rows for the generic task dead-letter
