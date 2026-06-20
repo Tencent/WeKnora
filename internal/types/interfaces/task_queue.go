@@ -54,11 +54,17 @@ type TaskPendingOpsRepository interface {
 	// regardless of op.
 	DeleteByDedupKey(ctx context.Context, taskType, scope, scopeID, dedupKey, op string) error
 
-	// FindPendingWikiKnowledgeIDs returns the subset of knowledgeIDs that
-	// currently have a durable wiki ingest op in task_pending_ops. The
-	// lookup is document-granular: task_type=wiki:ingest,
-	// scope=knowledge_base, op=ingest, dedup_key=knowledge_id.
-	FindPendingWikiKnowledgeIDs(ctx context.Context, kbIDs, knowledgeIDs []string) (map[string]bool, error)
+	// FindPendingWikiKnowledgeIDs returns the subset of refs whose knowledge
+	// currently has a durable wiki ingest op in task_pending_ops. The lookup
+	// is document-granular and pair-preserving: task_type=wiki:ingest,
+	// scope=knowledge_base, scope_id=KnowledgeBaseID, op=ingest,
+	// dedup_key=KnowledgeID.
+	FindPendingWikiKnowledgeIDs(ctx context.Context, refs []WikiPendingKnowledgeRef) (map[string]bool, error)
+}
+
+type WikiPendingKnowledgeRef struct {
+	KnowledgeBaseID string
+	KnowledgeID     string
 }
 
 // TaskDeadLetterRepository persists rows for the generic task dead-letter

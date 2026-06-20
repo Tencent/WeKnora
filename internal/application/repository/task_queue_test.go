@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -237,10 +238,16 @@ func TestTaskPendingOps_FindPendingWikiKnowledgeIDs(t *testing.T) {
 	require.NoError(t, repo.Enqueue(ctx, makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-B", "ingest", "k3", nil)))
 	require.NoError(t, repo.Enqueue(ctx, makePendingOp(types.TypeSummaryGeneration, types.TaskScopeKnowledgeBase, "kb-A", "ingest", "k4", nil)))
 
-	got, err := repo.FindPendingWikiKnowledgeIDs(ctx, []string{"kb-A", "kb-B"}, []string{"k1", "k2", "k3", "k4", "missing"})
+	got, err := repo.FindPendingWikiKnowledgeIDs(ctx, []interfaces.WikiPendingKnowledgeRef{
+		{KnowledgeBaseID: "kb-A", KnowledgeID: "k1"},
+		{KnowledgeBaseID: "kb-B", KnowledgeID: "k2"},
+		{KnowledgeBaseID: "kb-B", KnowledgeID: "k3"},
+		{KnowledgeBaseID: "kb-A", KnowledgeID: "k4"},
+		{KnowledgeBaseID: "kb-A", KnowledgeID: "missing"},
+	})
 	require.NoError(t, err)
 	assert.Equal(t, map[string]bool{"k1": true, "k3": true}, got,
-		"only durable wiki ingest ops should protect a finalizing document")
+		"only durable wiki ingest ops with the matching KB/document pair should protect a finalizing document")
 }
 
 // TestTaskPendingOps_DeleteByDedupKey_Filters tests the wiki delete-race

@@ -12,7 +12,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -37,15 +36,7 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 
 	logger.Infof(ctx, "wiki ingest: %d more documents pending for KB %s, scheduling follow-up", count, payload.KnowledgeBaseID)
 
-	langfuse.InjectTracing(ctx, &payload)
-	payloadBytes, _ := json.Marshal(payload)
-	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
-		asynq.Queue("low"),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(5*time.Second), // short delay — active flag will be released by then
-	)
-	if _, err := s.task.Enqueue(t); err != nil {
+	if err := enqueueWikiIngestTrigger(ctx, s.task, payload, 5*time.Second); err != nil {
 		logger.Warnf(ctx, "wiki ingest: follow-up enqueue failed: %v", err)
 		return false
 	}

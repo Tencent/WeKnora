@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
@@ -129,8 +130,10 @@ func insertSpan(t *testing.T, db *gorm.DB, kid string, attempt int, spanID, stat
 // suite. queued maps knowledge_id → "still has a queued task"; err forces
 // the probe to fail so the fail-safe branch can be exercised.
 type fakeTaskInspector struct {
-	queued map[string]bool
-	err    error
+	queued     map[string]bool
+	wikiQueued map[string]bool
+	err        error
+	wikiErr    error
 }
 
 func (f fakeTaskInspector) CancelTasksForKnowledge(
@@ -148,18 +151,61 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 	return f.queued[knowledgeID], nil
 }
 
+func (f fakeTaskInspector) HasQueuedWikiForKnowledgeBase(
+	_ context.Context, kbID string,
+) (bool, error) {
+	if f.wikiErr != nil {
+		return false, f.wikiErr
+	}
+	return f.wikiQueued[kbID], nil
+}
+
+type fakeTaskEnqueuer struct {
+	tasks []*asynq.Task
+	err   error
+}
+
+func (f *fakeTaskEnqueuer) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.tasks = append(f.tasks, task)
+	return &asynq.TaskInfo{ID: "fake", Type: task.Type()}, nil
+}
+
+type failingPendingRepo struct {
+	interfaces.TaskPendingOpsRepository
+	err error
+}
+
+func (f failingPendingRepo) FindPendingWikiKnowledgeIDs(
+	context.Context,
+	[]interfaces.WikiPendingKnowledgeRef,
+) (map[string]bool, error) {
+	return nil, f.err
+}
+
 func newHousekeepingSvcForTest(db *gorm.DB) *HousekeepingService {
 	return newHousekeepingSvcWithInspector(db, fakeTaskInspector{})
 }
 
 func newHousekeepingSvcWithInspector(db *gorm.DB, inspector interfaces.TaskInspector) *HousekeepingService {
+	return newHousekeepingSvcWithDeps(db, inspector, repository.NewTaskPendingOpsRepository(db), &fakeTaskEnqueuer{})
+}
+
+func newHousekeepingSvcWithDeps(
+	db *gorm.DB,
+	inspector interfaces.TaskInspector,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	enqueuer interfaces.TaskEnqueuer,
+) *HousekeepingService {
 	cfg := &config.Config{KnowledgeBase: &config.KnowledgeBaseConfig{
 		// 1h floor + 10min buffer = 70min cutoff. Tight enough to keep
 		// the test's relative timestamps in seconds; the production
 		// default of 2h+10min is just a constant scale factor.
 		DocumentProcessTimeout: 1 * time.Hour,
 	}}
-	return NewHousekeepingService(db, cfg, inspector, repository.NewTaskPendingOpsRepository(db))
+	return NewHousekeepingService(db, cfg, inspector, pendingRepo, enqueuer)
 }
 
 // TestHousekeeping_RecoversAbandoned exercises the happy path: a
@@ -254,7 +300,8 @@ func TestHousekeeping_NoFalseKill_TasksStillQueued(t *testing.T) {
 
 func TestHousekeeping_NoFalseKill_WikiPendingOpProtectsDocumentWithoutTrigger(t *testing.T) {
 	db := setupHousekeepingDB(t)
-	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{})
+	enqueuer := &fakeTaskEnqueuer{}
+	svc := newHousekeepingSvcWithDeps(db, fakeTaskInspector{}, repository.NewTaskPendingOpsRepository(db), enqueuer)
 	stale := time.Now().Add(-3 * time.Hour)
 	insertKnowledgeInKB(t, db, "kid-wiki-wait", "kb-1", types.ParseStatusFinalizing, stale)
 	insertSpan(t, db, "kid-wiki-wait", 1, "post-1", types.SpanStatusRunning, stale)
@@ -268,6 +315,29 @@ func TestHousekeeping_NoFalseKill_WikiPendingOpProtectsDocumentWithoutTrigger(t 
 	).Row().Scan(&status))
 	assert.Equal(t, types.ParseStatusFinalizing, status,
 		"finalizing row with its own durable wiki pending op must NOT be flipped to failed")
+	require.Len(t, enqueuer.tasks, 1, "missing KB wiki trigger should be re-enqueued")
+	assert.Equal(t, types.TypeWikiIngest, enqueuer.tasks[0].Type())
+}
+
+func TestHousekeeping_WikiPendingOpWithExistingTriggerDoesNotDuplicateTrigger(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	enqueuer := &fakeTaskEnqueuer{}
+	svc := newHousekeepingSvcWithDeps(db, fakeTaskInspector{
+		wikiQueued: map[string]bool{"kb-1": true},
+	}, repository.NewTaskPendingOpsRepository(db), enqueuer)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledgeInKB(t, db, "kid-wiki-wait", "kb-1", types.ParseStatusFinalizing, stale)
+	insertSpan(t, db, "kid-wiki-wait", 1, "post-1", types.SpanStatusRunning, stale)
+	insertWikiPendingOp(t, db, "kb-1", "kid-wiki-wait")
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-wiki-wait",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Empty(t, enqueuer.tasks, "existing KB wiki trigger should not be duplicated")
 }
 
 func TestHousekeeping_WikiPendingOpOnlyProtectsMatchingDocument(t *testing.T) {
@@ -294,6 +364,43 @@ func TestHousekeeping_WikiPendingOpOnlyProtectsMatchingDocument(t *testing.T) {
 	assert.Equal(t, types.ParseStatusFailed, orphanStatus,
 		"same-KB documents without their own pending op must still be recovered")
 	assert.Contains(t, orphanErr, "orphaned processing/finalizing task recovered")
+}
+
+func TestHousekeeping_WikiTriggerDoesNotProtectWithoutPendingOp(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		wikiQueued: map[string]bool{"kb-1": true},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledgeInKB(t, db, "kid-no-pending", "kb-1", types.ParseStatusFinalizing, stale)
+	insertSpan(t, db, "kid-no-pending", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status, errMsg string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, error_message FROM knowledges WHERE id = ?`, "kid-no-pending",
+	).Row().Scan(&status, &errMsg))
+	assert.Equal(t, types.ParseStatusFailed, status,
+		"KB-level trigger alone must not protect a document without its own pending op")
+	assert.Contains(t, errMsg, "orphaned processing/finalizing task recovered")
+}
+
+func TestHousekeeping_WikiPendingQueryErrorProtectsCandidates(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithDeps(db, fakeTaskInspector{}, failingPendingRepo{err: errors.New("db timeout")}, &fakeTaskEnqueuer{})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledgeInKB(t, db, "kid-pending-query-error", "kb-1", types.ParseStatusFinalizing, stale)
+	insertSpan(t, db, "kid-pending-query-error", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-pending-query-error",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFinalizing, status,
+		"housekeeping must not fail documents when it cannot verify wiki pending ops")
 }
 
 // TestHousekeeping_QueueProbeError_FailsSafe confirms the fail-safe

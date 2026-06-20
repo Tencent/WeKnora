@@ -39,4 +39,10 @@ type TaskInspector interface {
 	// always returns false — inline executors never queue, so the
 	// span/updated_at checks remain authoritative there.
 	HasQueuedTasksForKnowledge(ctx context.Context, knowledgeID string) (bool, error)
+
+	// HasQueuedWikiForKnowledgeBase reports whether any pending /
+	// scheduled / retry / active wiki:ingest trigger for the given KB
+	// lives in the queue backend. It is only a trigger health check;
+	// document-level wiki ownership lives in task_pending_ops.
+	HasQueuedWikiForKnowledgeBase(ctx context.Context, kbID string) (bool, error)
 }

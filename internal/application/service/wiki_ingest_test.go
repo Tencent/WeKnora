@@ -333,7 +333,7 @@ func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
 	}
 }
 
-func TestWikiIngestFinalizeSkipsSupersededAttempt(t *testing.T) {
+func TestWikiIngestFinalizeSkipsSupersededAttemptWithCanceledContext(t *testing.T) {
 	db := setupHousekeepingDB(t)
 	ctx := context.Background()
 	knowledgeID := "kid-superseded-finalize"
@@ -354,7 +354,9 @@ func TestWikiIngestFinalizeSkipsSupersededAttempt(t *testing.T) {
 		knowledgeRepo: repository.NewKnowledgeRepository(db),
 		spanTracker:   tracker,
 	}
-	service.finalizeWikiSubtask(ctx, WikiPendingOp{
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	service.finalizeWikiSubtask(cancelledCtx, WikiPendingOp{
 		Op:          WikiOpIngest,
 		TenantID:    1,
 		KnowledgeID: knowledgeID,

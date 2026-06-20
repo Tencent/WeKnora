@@ -45,6 +45,10 @@ type knowledgeIDProbe struct {
 	KnowledgeID string `json:"knowledge_id,omitempty"`
 }
 
+type wikiKnowledgeBaseProbe struct {
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+}
+
 // queuesScanned is the fixed set of queue names this codebase enqueues
 // into. Kept tight on purpose — we never scan user-defined queues.
 // MUST include every queue any cancelable task type can land in; the
@@ -138,6 +142,33 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 	return false, nil
 }
 
+func (a *asynqTaskInspector) HasQueuedWikiForKnowledgeBase(
+	ctx context.Context, kbID string,
+) (bool, error) {
+	if a == nil || a.inspector == nil || kbID == "" {
+		return false, nil
+	}
+	listers := []struct {
+		state string
+		list  func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
+	}{
+		{"pending", a.inspector.ListPendingTasks},
+		{"scheduled", a.inspector.ListScheduledTasks},
+		{"retry", a.inspector.ListRetryTasks},
+		{"active", a.inspector.ListActiveTasks},
+	}
+	for _, queue := range queuesScanned {
+		for _, l := range listers {
+			if a.queueStateHasMatch(ctx, queue, l.state, l.list, func(taskType string, payload []byte) bool {
+				return matchesWikiKnowledgeBase(taskType, payload, kbID)
+			}) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // queueStateHasMatch pages through one (queue, state) list looking for a
 // task matching the supplied payload predicate. Mirrors the delete* scanners but is
 // strictly read-only and returns early on the first hit. A backend error
@@ -183,6 +214,17 @@ func matchesKnowledge(taskType string, payload []byte, knowledgeID string) bool 
 		return false
 	}
 	return probe.KnowledgeID == knowledgeID
+}
+
+func matchesWikiKnowledgeBase(taskType string, payload []byte, kbID string) bool {
+	if taskType != types.TypeWikiIngest {
+		return false
+	}
+	var probe wikiKnowledgeBaseProbe
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return false
+	}
+	return probe.KnowledgeBaseID == kbID
 }
 
 func (a *asynqTaskInspector) deletePendingMatches(ctx context.Context, queue, knowledgeID string) int {
@@ -334,6 +376,12 @@ func (noopTaskInspector) CancelTasksForKnowledge(
 // the housekeeping sweep's span/updated_at checks stay authoritative.
 func (noopTaskInspector) HasQueuedTasksForKnowledge(
 	ctx context.Context, knowledgeID string,
+) (bool, error) {
+	return false, nil
+}
+
+func (noopTaskInspector) HasQueuedWikiForKnowledgeBase(
+	ctx context.Context, kbID string,
 ) (bool, error) {
 	return false, nil
 }

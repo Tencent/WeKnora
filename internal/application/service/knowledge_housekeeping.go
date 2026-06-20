@@ -51,6 +51,10 @@ type HousekeepingService struct {
 	// task_pending_ops.dedup_key=knowledge_id.
 	pendingRepo interfaces.TaskPendingOpsRepository
 
+	// enqueuer lets housekeeping self-heal a durable wiki pending op whose
+	// KB-scoped asynq trigger was lost before any worker could consume it.
+	enqueuer interfaces.TaskEnqueuer
+
 	mu      sync.Mutex
 	started bool
 }
@@ -63,12 +67,14 @@ func NewHousekeepingService(
 	cfg *config.Config,
 	inspector interfaces.TaskInspector,
 	pendingRepo interfaces.TaskPendingOpsRepository,
+	enqueuer interfaces.TaskEnqueuer,
 ) *HousekeepingService {
 	return &HousekeepingService{
 		db:          db,
 		cfg:         cfg,
 		inspector:   inspector,
 		pendingRepo: pendingRepo,
+		enqueuer:    enqueuer,
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
@@ -284,18 +290,23 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 // missing span heartbeat is expected and recovering it would be a false
 // positive. Wiki ingest is checked against task_pending_ops, not the
 // KB-scoped asynq trigger, because the persistent op is the only durable
-// document-level signal. When no inspector is wired (nil), the asynq part
-// of the gate is a pass-through so behaviour matches the pre-existing
-// span-only sweep. On probe error we fail safe by KEEPING the candidate as
-// stuck (recover it), matching the span heartbeat query's fail-safe
-// direction.
+// document-level signal; if that durable query fails, the whole batch is
+// protected for this sweep. When no inspector is wired (nil), the asynq
+// part of the gate is a pass-through so behaviour matches the pre-existing
+// span-only sweep. On per-knowledge asynq probe error we still recover the
+// row, matching the older fail-safe direction for volatile queue probes.
 func (h *HousekeepingService) filterOutQueued(
 	ctx context.Context, candidates []types.Knowledge,
 ) (kept []types.Knowledge, skipped int) {
 	if len(candidates) == 0 {
 		return candidates, 0
 	}
-	pendingWiki := h.pendingWikiKnowledgeIDs(ctx, candidates)
+	pendingWiki, err := h.pendingWikiKnowledgeIDs(ctx, candidates)
+	if err != nil {
+		logger.Warnf(ctx, "[Housekeeping] wiki pending-op query failed: %v (protecting candidates for this sweep)", err)
+		return candidates[:0], len(candidates)
+	}
+	h.reconcilePendingWikiTriggers(ctx, candidates, pendingWiki)
 	out := candidates[:0]
 	for _, k := range candidates {
 		if pendingWiki[k.ID] {
@@ -320,23 +331,60 @@ func (h *HousekeepingService) filterOutQueued(
 	return out, skipped
 }
 
-func (h *HousekeepingService) pendingWikiKnowledgeIDs(ctx context.Context, candidates []types.Knowledge) map[string]bool {
+func (h *HousekeepingService) pendingWikiKnowledgeIDs(ctx context.Context, candidates []types.Knowledge) (map[string]bool, error) {
 	out := make(map[string]bool)
 	if h.pendingRepo == nil || len(candidates) == 0 {
-		return out
+		return out, nil
 	}
-	kbIDs := make([]string, 0, len(candidates))
-	knowledgeIDs := make([]string, 0, len(candidates))
+	refs := make([]interfaces.WikiPendingKnowledgeRef, 0, len(candidates))
 	for _, k := range candidates {
-		kbIDs = append(kbIDs, k.KnowledgeBaseID)
-		knowledgeIDs = append(knowledgeIDs, k.ID)
+		refs = append(refs, interfaces.WikiPendingKnowledgeRef{
+			KnowledgeBaseID: k.KnowledgeBaseID,
+			KnowledgeID:     k.ID,
+		})
 	}
-	pending, err := h.pendingRepo.FindPendingWikiKnowledgeIDs(ctx, kbIDs, knowledgeIDs)
-	if err != nil {
-		logger.Warnf(ctx, "[Housekeeping] wiki pending-op query failed: %v (wiki pending protection disabled for this sweep)", err)
-		return out
+	return h.pendingRepo.FindPendingWikiKnowledgeIDs(ctx, refs)
+}
+
+func (h *HousekeepingService) reconcilePendingWikiTriggers(
+	ctx context.Context,
+	candidates []types.Knowledge,
+	pendingWiki map[string]bool,
+) {
+	if len(pendingWiki) == 0 || h.enqueuer == nil {
+		return
 	}
-	return pending
+	byKB := make(map[string]types.Knowledge)
+	for _, k := range candidates {
+		if !pendingWiki[k.ID] || k.KnowledgeBaseID == "" {
+			continue
+		}
+		if _, ok := byKB[k.KnowledgeBaseID]; !ok {
+			byKB[k.KnowledgeBaseID] = k
+		}
+	}
+	for kbID, k := range byKB {
+		queued := false
+		if h.inspector != nil {
+			var err error
+			queued, err = h.inspector.HasQueuedWikiForKnowledgeBase(ctx, kbID)
+			if err != nil {
+				logger.Warnf(ctx, "[Housekeeping] wiki trigger probe failed for kb=%s: %v (will retry next sweep)", kbID, err)
+				continue
+			}
+		}
+		if queued {
+			continue
+		}
+		if err := enqueueWikiIngestTrigger(ctx, h.enqueuer, WikiIngestPayload{
+			TenantID:        k.TenantID,
+			KnowledgeBaseID: kbID,
+		}, 5*time.Second); err != nil {
+			logger.Warnf(ctx, "[Housekeeping] failed to re-enqueue wiki ingest trigger for kb=%s: %v", kbID, err)
+			continue
+		}
+		logger.Warnf(ctx, "[Housekeeping] re-enqueued missing wiki ingest trigger for kb=%s", kbID)
+	}
 }
 
 // parseHeartbeatTime accepts the timestamp formats Postgres and SQLite

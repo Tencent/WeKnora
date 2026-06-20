@@ -146,49 +146,66 @@ func (r *taskPendingOpsRepository) DeleteByDedupKey(
 
 func (r *taskPendingOpsRepository) FindPendingWikiKnowledgeIDs(
 	ctx context.Context,
-	kbIDs, knowledgeIDs []string,
+	refs []interfaces.WikiPendingKnowledgeRef,
 ) (map[string]bool, error) {
 	out := make(map[string]bool)
-	if len(kbIDs) == 0 || len(knowledgeIDs) == 0 {
+	refs = uniqueWikiPendingRefs(refs)
+	if len(refs) == 0 {
 		return out, nil
 	}
-	kbIDs = uniqueStrings(kbIDs)
-	knowledgeIDs = uniqueStrings(knowledgeIDs)
-	if len(kbIDs) == 0 || len(knowledgeIDs) == 0 {
-		return out, nil
-	}
-	var keys []string
-	err := r.db.WithContext(ctx).
-		Model(&types.TaskPendingOp{}).
-		Where("task_type = ? AND scope = ? AND op = ?",
-			types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "ingest").
-		Where("scope_id IN ? AND dedup_key IN ?", kbIDs, knowledgeIDs).
-		Group("dedup_key").
-		Pluck("dedup_key", &keys).Error
-	if err != nil {
-		return nil, err
-	}
-	for _, key := range keys {
-		out[key] = true
+	const batchSize = 200
+	for start := 0; start < len(refs); start += batchSize {
+		end := start + batchSize
+		if end > len(refs) {
+			end = len(refs)
+		}
+		q := r.db.WithContext(ctx).
+			Model(&types.TaskPendingOp{}).
+			Where("task_type = ? AND scope = ? AND op = ?",
+				types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "ingest")
+		pairs := refs[start:end]
+		pairQ := r.db.Session(&gorm.Session{NewDB: true})
+		for i, ref := range pairs {
+			cond := r.db.Where("scope_id = ? AND dedup_key = ?", ref.KnowledgeBaseID, ref.KnowledgeID)
+			if i == 0 {
+				pairQ = cond
+			} else {
+				pairQ = pairQ.Or(cond)
+			}
+		}
+		var rows []struct {
+			ScopeID  string `gorm:"column:scope_id"`
+			DedupKey string `gorm:"column:dedup_key"`
+		}
+		if err := q.Where(pairQ).
+			Select("scope_id, dedup_key").
+			Group("scope_id, dedup_key").
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			out[row.DedupKey] = true
+		}
 	}
 	return out, nil
 }
 
-func uniqueStrings(values []string) []string {
-	if len(values) == 0 {
-		return values
+func uniqueWikiPendingRefs(refs []interfaces.WikiPendingKnowledgeRef) []interfaces.WikiPendingKnowledgeRef {
+	if len(refs) == 0 {
+		return refs
 	}
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" {
+	seen := make(map[string]struct{}, len(refs))
+	out := make([]interfaces.WikiPendingKnowledgeRef, 0, len(refs))
+	for _, ref := range refs {
+		if ref.KnowledgeBaseID == "" || ref.KnowledgeID == "" {
 			continue
 		}
-		if _, ok := seen[value]; ok {
+		key := ref.KnowledgeBaseID + "\x00" + ref.KnowledgeID
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[value] = struct{}{}
-		out = append(out, value)
+		seen[key] = struct{}{}
+		out = append(out, ref)
 	}
 	return out
 }

@@ -347,16 +347,7 @@ func EnqueueWikiIngest(
 		KnowledgeBaseID: kbID,
 		Language:        lang,
 	}
-	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
-
-	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
-		asynq.Queue("low"),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(wikiIngestDelay),
-	)
-	if _, err := task.Enqueue(t); err != nil {
+	if err := enqueueWikiIngestTrigger(ctx, task, trigger, wikiIngestDelay); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
 	}
 }
@@ -406,17 +397,30 @@ func EnqueueWikiRetract(
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		Language:        payload.Language,
 	}
-	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
+	if err := enqueueWikiIngestTrigger(ctx, task, trigger, 5*time.Second); err != nil {
+		logger.Warnf(ctx, "wiki retract: failed to enqueue trigger task: %v", err)
+	}
+}
+
+func enqueueWikiIngestTrigger(
+	ctx context.Context,
+	task interfaces.TaskEnqueuer,
+	payload WikiIngestPayload,
+	delay time.Duration,
+) error {
+	if task == nil {
+		return errors.New("wiki ingest: task enqueuer is not configured")
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	triggerBytes, _ := json.Marshal(payload)
 	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
 		asynq.Queue("low"),
 		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(5*time.Second), // Retract can trigger the batch quickly
+		asynq.ProcessIn(delay),
 	)
-	if _, err := task.Enqueue(t); err != nil {
-		logger.Warnf(ctx, "wiki retract: failed to enqueue trigger task: %v", err)
-	}
+	_, err := task.Enqueue(t)
+	return err
 }
 
 // Handle implements interfaces.TaskHandler for asynq task processing.
@@ -533,16 +537,18 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, op WikiPend
 	// always an intended drain (retErr=nil, final=true). Detached context: the
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+	defer cancel()
 	tenantID := op.TenantID
 	if tenantID == 0 {
-		tenantID, _ = types.TenantIDFromContext(ctx)
+		tenantID, _ = types.TenantIDFromContext(dctx)
 	}
 	attempt := op.Attempt
-	superseded := attemptSuperseded(ctx, s.tracker(), op.KnowledgeID, attempt)
+	superseded := attemptSuperseded(dctx, s.tracker(), op.KnowledgeID, attempt)
 	if attempt <= 0 {
-		attempt = s.tracker().LatestAttempt(ctx, op.KnowledgeID)
+		attempt = s.tracker().LatestAttempt(dctx, op.KnowledgeID)
 	}
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, s.taskJobRepo, tenantID, op.KnowledgeID, "wiki", attempt, nil, superseded, true)
+	finalizeSubtaskDetached(dctx, s.knowledgeRepo, s.taskJobRepo, tenantID, op.KnowledgeID, "wiki", attempt, nil, superseded, true)
 }
 
 // requeueFailedOps records in-batch failures.
