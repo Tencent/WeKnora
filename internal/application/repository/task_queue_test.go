@@ -293,6 +293,26 @@ func TestTaskPendingOps_DeleteByDedupKey_Filters(t *testing.T) {
 	assert.Equal(t, "k2", rows[0].DedupKey)
 }
 
+func TestTaskPendingOps_ListPendingWikiKnowledgeBases(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", "ingest", "k1", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1", "retract", "k2", nil)))
+	op := makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-2", "ingest", "k3", nil)
+	op.TenantID = 2
+	require.NoError(t, repo.Enqueue(ctx, op))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("other", types.TaskScopeKnowledgeBase, "kb-ignore", "ingest", "k4", nil)))
+
+	rows, err := repo.ListPendingWikiKnowledgeBases(ctx, 10)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []interfaces.WikiPendingKnowledgeBaseRef{
+		{TenantID: 1, KnowledgeBaseID: "kb-1"},
+		{TenantID: 2, KnowledgeBaseID: "kb-2"},
+	}, rows)
+}
+
 // ---------------- TaskDeadLetterRepository ----------------
 
 func makeDeadLetter(taskType, scope, scopeID, relatedID, lastErr string) *types.TaskDeadLetter {

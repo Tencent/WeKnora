@@ -121,6 +121,33 @@ func (r *taskJobRepository) ListExecutions(ctx context.Context, tenantID uint64,
 	return rows, err
 }
 
+func (r *taskJobRepository) ListExecutionsForJobs(
+	ctx context.Context,
+	tenantID uint64,
+	jobIDs []string,
+) (map[string][]*types.TaskExecution, error) {
+	out := make(map[string][]*types.TaskExecution, len(jobIDs))
+	if len(jobIDs) == 0 {
+		return out, nil
+	}
+	var rows []*types.TaskExecution
+	err := r.db.WithContext(ctx).
+		Joins("JOIN task_jobs ON task_jobs.job_id = task_executions.job_id").
+		Where("task_jobs.tenant_id = ? AND task_executions.job_id IN ?", tenantID, jobIDs).
+		Order("task_executions.job_id ASC, task_executions.enqueued_at DESC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		out[row.JobID] = append(out[row.JobID], row)
+	}
+	return out, nil
+}
+
 func NewTaskJobRepository(db *gorm.DB) interfaces.TaskJobRepository {
 	return &taskJobRepository{db: db}
 }

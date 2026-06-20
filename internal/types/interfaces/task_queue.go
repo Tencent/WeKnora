@@ -60,11 +60,21 @@ type TaskPendingOpsRepository interface {
 	// scope=knowledge_base, scope_id=KnowledgeBaseID, op=ingest,
 	// dedup_key=KnowledgeID.
 	FindPendingWikiKnowledgeIDs(ctx context.Context, refs []WikiPendingKnowledgeRef) (map[string]bool, error)
+
+	// ListPendingWikiKnowledgeBases returns KBs with at least one durable
+	// wiki pending op, grouped by tenant and knowledge base. It is used by
+	// background trigger reconciliation to self-heal missing KB wakeups.
+	ListPendingWikiKnowledgeBases(ctx context.Context, limit int) ([]WikiPendingKnowledgeBaseRef, error)
 }
 
 type WikiPendingKnowledgeRef struct {
 	KnowledgeBaseID string
 	KnowledgeID     string
+}
+
+type WikiPendingKnowledgeBaseRef struct {
+	TenantID        uint64
+	KnowledgeBaseID string
 }
 
 // TaskDeadLetterRepository persists rows for the generic task dead-letter

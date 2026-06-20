@@ -190,6 +190,28 @@ func (r *taskPendingOpsRepository) FindPendingWikiKnowledgeIDs(
 	return out, nil
 }
 
+func (r *taskPendingOpsRepository) ListPendingWikiKnowledgeBases(
+	ctx context.Context,
+	limit int,
+) ([]interfaces.WikiPendingKnowledgeBaseRef, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+	var rows []interfaces.WikiPendingKnowledgeBaseRef
+	err := r.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Select("tenant_id, scope_id AS knowledge_base_id").
+		Where("task_type = ? AND scope = ?", types.TypeWikiIngest, types.TaskScopeKnowledgeBase).
+		Group("tenant_id, scope_id").
+		Order("MIN(id) ASC").
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
+}
+
 func uniqueWikiPendingRefs(refs []interfaces.WikiPendingKnowledgeRef) []interfaces.WikiPendingKnowledgeRef {
 	if len(refs) == 0 {
 		return refs

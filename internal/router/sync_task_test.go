@@ -56,6 +56,9 @@ func (s *syncLedgerStub) GetLatestJobForScopeAttempt(context.Context, uint64, st
 func (s *syncLedgerStub) ListExecutions(context.Context, uint64, string) ([]*types.TaskExecution, error) {
 	return nil, nil
 }
+func (s *syncLedgerStub) ListExecutionsForJobs(context.Context, uint64, []string) (map[string][]*types.TaskExecution, error) {
+	return nil, nil
+}
 func (s *syncLedgerStub) MarkJobProcessingIfCurrentAttempt(context.Context, interfaces.TaskJobAttemptSelector) (bool, error) {
 	return false, nil
 }

@@ -237,6 +237,25 @@ func TestTaskJobRepository_ExecutionUpdateIfExistsAndTerminalGuard(t *testing.T)
 	assert.False(t, changed, "terminal execution must not be overwritten by late failure")
 }
 
+func TestTaskJobRepository_ListExecutionsForJobs(t *testing.T) {
+	db := setupTaskLedgerTestDB(t)
+	repo := NewTaskJobRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.CreateJobAndExecution(ctx, makeTaskJob("job-1", 1), makeTaskExecution("job-1", "exec-1a", 1)))
+	require.NoError(t, db.Create(makeTaskExecution("job-1", "exec-1b", 1)).Error)
+	require.NoError(t, repo.CreateJobAndExecution(ctx, makeTaskJob("job-2", 2), makeTaskExecution("job-2", "exec-2a", 2)))
+	other := makeTaskJob("job-other-tenant", 1)
+	other.TenantID = 8
+	require.NoError(t, repo.CreateJobAndExecution(ctx, other, makeTaskExecution("job-other-tenant", "exec-other", 1)))
+
+	rows, err := repo.ListExecutionsForJobs(ctx, 7, []string{"job-1", "job-2", "job-other-tenant"})
+	require.NoError(t, err)
+	require.Len(t, rows["job-1"], 2)
+	require.Len(t, rows["job-2"], 1)
+	assert.Empty(t, rows["job-other-tenant"], "batch lookup must remain tenant-scoped")
+}
+
 func TestTaskJobRepository_CancelAllNonTerminalExecutionsForJob(t *testing.T) {
 	db := setupTaskLedgerTestDB(t)
 	repo := NewTaskJobRepository(db)

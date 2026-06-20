@@ -294,6 +294,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewTaskLedgerMaintenanceRunner))
 	must(container.Invoke(startTaskLedgerMaintenance))
 	logger.Debugf(ctx, "[Container] Task ledger maintenance runner registered")
+	must(container.Provide(service.NewWikiTriggerMaintenanceRunner))
+	must(container.Invoke(startWikiTriggerMaintenance))
+	logger.Debugf(ctx, "[Container] Wiki trigger maintenance runner registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
@@ -1440,6 +1443,20 @@ func startTaskLedgerMaintenance(
 	ctx, cancel := context.WithCancel(context.Background())
 	runner.Start(ctx)
 	cleaner.RegisterWithName("TaskLedgerMaintenanceRunner", func() error {
+		cancel()
+		return nil
+	})
+}
+
+func startWikiTriggerMaintenance(
+	runner *service.WikiTriggerMaintenanceRunner, cleaner interfaces.ResourceCleaner,
+) {
+	if runner == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runner.Start(ctx)
+	cleaner.RegisterWithName("WikiTriggerMaintenanceRunner", func() error {
 		cancel()
 		return nil
 	})

@@ -48,9 +48,18 @@ func (h *TaskCenterHandler) List(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
 	}
+	jobIDs := make([]string, 0, len(rows))
+	for _, job := range rows {
+		jobIDs = append(jobIDs, job.JobID)
+	}
+	execsByJob, err := h.repo.ListExecutionsForJobs(c.Request.Context(), q.TenantID, jobIDs)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
 	items := make([]gin.H, 0, len(rows))
 	for _, job := range rows {
-		items = append(items, h.presentJob(c, job, nil))
+		items = append(items, h.presentJob(c, job, execsByJob[job.JobID]))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -68,7 +77,11 @@ func (h *TaskCenterHandler) Detail(c *gin.Context) {
 	if !ok {
 		return
 	}
-	execs, _ := h.repo.ListExecutions(c.Request.Context(), job.TenantID, job.JobID)
+	execs, err := h.repo.ListExecutions(c.Request.Context(), job.TenantID, job.JobID)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.presentJob(c, job, execs)})
 }
 
@@ -108,20 +121,40 @@ func (h *TaskCenterHandler) RetryAll(c *gin.Context) {
 		return
 	}
 	q.State = "failed_or_canceled"
-	q.Page = 1
 	q.PageSize = 100
-	rows, _, err := h.repo.ListJobs(c.Request.Context(), q)
-	if err != nil {
-		c.Error(apperrors.NewInternalServerError(err.Error()))
-		return
-	}
-	retried := 0
-	for _, job := range rows {
-		if _, err := h.retryJob(c, job); err == nil {
-			retried++
+	matched, retried, skipped, failed := int64(0), int64(0), int64(0), int64(0)
+	for page := 1; ; page++ {
+		q.Page = page
+		rows, total, err := h.repo.ListJobs(c.Request.Context(), q)
+		if err != nil {
+			c.Error(apperrors.NewInternalServerError(err.Error()))
+			return
+		}
+		if page == 1 {
+			matched = total
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, job := range rows {
+			if _, err := h.retryJob(c, job); err == nil {
+				retried++
+			} else if appErr, ok := apperrors.IsAppError(err); ok && appErr.Code == apperrors.ErrBadRequest {
+				skipped++
+			} else {
+				failed++
+			}
+		}
+		if int64(page*q.PageSize) >= total {
+			break
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"retried": retried}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"matched": matched,
+		"retried": retried,
+		"skipped": skipped,
+		"failed":  failed,
+	}})
 }
 
 func (h *TaskCenterHandler) retryJob(c *gin.Context, job *types.TaskJob) (string, error) {
@@ -243,7 +276,7 @@ func (h *TaskCenterHandler) loadJob(c *gin.Context) (*types.TaskJob, bool) {
 
 func (h *TaskCenterHandler) presentJob(c *gin.Context, job *types.TaskJob, execs []*types.TaskExecution) gin.H {
 	if execs == nil {
-		execs, _ = h.repo.ListExecutions(c.Request.Context(), job.TenantID, job.JobID)
+		execs = []*types.TaskExecution{}
 	}
 	return gin.H{
 		"job_id":           job.JobID,

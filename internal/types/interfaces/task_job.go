@@ -54,6 +54,7 @@ type TaskJobRepository interface {
 	GetJobByExecutionID(ctx context.Context, executionID string) (*types.TaskJob, error)
 	GetLatestJobForScopeAttempt(ctx context.Context, tenantID uint64, scope, scopeID string, attempt int) (*types.TaskJob, error)
 	ListExecutions(ctx context.Context, tenantID uint64, jobID string) ([]*types.TaskExecution, error)
+	ListExecutionsForJobs(ctx context.Context, tenantID uint64, jobIDs []string) (map[string][]*types.TaskExecution, error)
 
 	MarkJobProcessingIfCurrentAttempt(ctx context.Context, sel TaskJobAttemptSelector) (bool, error)
 	MarkJobFinalizingIfCurrentAttempt(ctx context.Context, sel TaskJobAttemptSelector) (bool, error)

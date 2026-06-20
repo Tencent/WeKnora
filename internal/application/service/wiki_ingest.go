@@ -63,6 +63,11 @@ const (
 	// asynqRetryDelayFunc, and follow-up/retract paths fire quickly.
 	wikiIngestMaxRetry = 10
 
+	// wikiTriggerUniqueTTL debounces duplicate KB wakeup triggers. The
+	// per-KB active lock remains the correctness guard for concurrent
+	// workers; Unique only cuts redundant queue noise.
+	wikiTriggerUniqueTTL = 10 * time.Minute
+
 	// wikiDeletedKeyPrefix is the Redis key prefix for "recently deleted
 	// knowledge" tombstones. Key: wiki:deleted:{kbID}:{knowledgeID}. Written
 	// by cleanupWikiOnKnowledgeDelete so that any wiki_ingest task still in
@@ -418,6 +423,7 @@ func enqueueWikiIngestTrigger(
 		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(delay),
+		asynq.Unique(wikiTriggerUniqueTTL),
 	)
 	_, err := task.Enqueue(t)
 	return err
