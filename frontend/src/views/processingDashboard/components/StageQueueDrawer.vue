@@ -15,7 +15,12 @@
 
       <div class="pd-drawer__body">
         <t-loading v-if="loading" />
-        <t-alert v-else-if="error" theme="error" :message="error" class="pd-drawer__error" />
+        <div v-else-if="error && !items.length" class="pd-drawer__error">
+          <t-alert theme="error" :message="error" />
+          <t-button size="small" variant="outline" @click="loadFirstPage">
+            {{ t('processingDashboard.drawer.retry') }}
+          </t-button>
+        </div>
         <template v-else-if="items.length">
           <button
             v-for="item in items"
@@ -36,7 +41,13 @@
               {{ item.failed_children }} {{ t('processingDashboard.drawer.failedChildren') }}
             </t-tag>
           </button>
-          <t-button v-if="nextCursor" block variant="outline" :loading="loadingMore" @click="loadMore">
+          <div v-if="error" class="pd-drawer__load-more-error">
+            <t-alert theme="error" :message="error" />
+            <t-button size="small" variant="outline" :loading="loadingMore" @click="retryLoadMore">
+              {{ t('processingDashboard.drawer.retry') }}
+            </t-button>
+          </div>
+          <t-button v-else-if="nextCursor" block variant="outline" :loading="loadingMore" @click="loadMore">
             {{ t('processingDashboard.drawer.loadMore') }}
           </t-button>
         </template>
@@ -111,7 +122,7 @@ const loadPage = async (cursor = '') => {
     nextCursor.value = res.data.next_cursor || ''
   } catch (e: any) {
     if (requestId !== latestRequestId || e?.name === 'CanceledError' || e?.name === 'AbortError') return
-    error.value = e?.message || 'Failed to load'
+    error.value = e?.message || t('processingDashboard.drawer.loadFailed')
   } finally {
     if (requestId === latestRequestId) {
       loading.value = false
@@ -130,6 +141,11 @@ const loadFirstPage = () => {
 
 const loadMore = () => {
   if (nextCursor.value) void loadPage(nextCursor.value)
+}
+
+const retryLoadMore = () => {
+  if (nextCursor.value) void loadPage(nextCursor.value)
+  else void loadPage('')
 }
 
 const handleStateChange = () => {
@@ -161,8 +177,11 @@ const formatTime = (value: string) => new Date(value).toLocaleString()
   padding-top: 16px;
 }
 
-.pd-drawer__error {
+.pd-drawer__error,
+.pd-drawer__load-more-error {
   margin-bottom: 12px;
+  display: grid;
+  gap: 8px;
 }
 
 .pd-drawer-item {

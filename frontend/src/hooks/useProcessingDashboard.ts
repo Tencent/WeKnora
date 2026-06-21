@@ -1,9 +1,11 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getProcessingDashboard } from '@/api/processing-dashboard'
 import type { ProcessingDashboardResponse } from '@/types/processingDashboard'
 import { autoRefreshDelay } from '@/views/processingDashboard/format'
 
 export function useProcessingDashboard() {
+  const { t } = useI18n()
   const data = ref<ProcessingDashboardResponse | null>(null)
   const loading = ref(false)
   const error = ref('')
@@ -50,7 +52,7 @@ export function useProcessingDashboard() {
     } catch (e: any) {
       if (requestId !== latestRequestId) return
       if (e?.name !== 'CanceledError' && e?.name !== 'AbortError') {
-        error.value = e?.message || 'Failed to load'
+        error.value = e?.message || t('processingDashboard.drawer.loadFailed')
       }
     } finally {
       if (requestId === latestRequestId) {

@@ -438,8 +438,12 @@ func TestProcessingDashboardWikiAndRetryObservability(t *testing.T) {
 			GeneratedAt: now,
 		}
 		got := byStage(buildProcessingStages(input))[types.ProcessingStageWiki]
-		if got.Item.Progress == nil || got.Item.Progress.Completed != 11 || got.Item.Progress.Total != 13 || got.Item.Progress.Failed != 2 {
-			t.Fatalf("progress = %#v, want 11/13 failed=2", got.Item.Progress)
+		if got.Item.State != types.ProcessingStateDoneWithErrors ||
+			got.Item.Progress == nil ||
+			got.Item.Progress.Completed != 11 ||
+			got.Item.Progress.Total != 13 ||
+			got.Item.Progress.Failed != 2 {
+			t.Fatalf("state=%s progress=%#v, want done_with_errors 11/13 failed=2", got.Item.State, got.Item.Progress)
 		}
 	})
 

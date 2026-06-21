@@ -324,6 +324,9 @@ func computeWikiStage(
 			}
 			item.Progress = &types.ProcessingStageProgress{Completed: written, Total: total, Failed: dropped, Unit: "page", Reliable: true}
 			item.FailedChildren = dropped
+			if dropped > 0 && item.State == types.ProcessingStateDone {
+				item.State = types.ProcessingStateDoneWithErrors
+			}
 		}
 	}
 	return item

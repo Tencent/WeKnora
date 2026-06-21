@@ -81,7 +81,7 @@ export default {
       skipped: 'Skipped',
       cancelled: 'Cancelled',
     },
-    drawer: { title: 'Stage queue', empty: 'No items', loadMore: 'Load more', failedChildren: 'failed children' },
+    drawer: { title: 'Stage queue', empty: 'No items', loadMore: 'Load more', retry: 'Retry', loadFailed: 'Failed to load', failedChildren: 'failed children' },
     detail: { title: 'Knowledge processing detail', pendingSubtasks: 'Pending subtasks', rawTrace: 'View raw processing trace', empty: 'Select knowledge' },
   },
   newUserGuide: {

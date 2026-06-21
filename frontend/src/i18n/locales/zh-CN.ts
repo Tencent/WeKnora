@@ -85,6 +85,8 @@ export default {
       title: "阶段队列",
       empty: "暂无条目",
       loadMore: "加载更多",
+      retry: "重试",
+      loadFailed: "加载失败",
       failedChildren: "失败子项",
     },
     detail: {
