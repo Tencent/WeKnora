@@ -186,6 +186,11 @@ class MHTMLParserTest(unittest.TestCase):
 
         self.assertEqual(markdown, "alpha  \nbeta")
 
+    def test_normalize_markdown_preserves_two_space_hard_break(self):
+        markdown = MHTMLParser._normalize_markdown("alpha  \nbeta")
+
+        self.assertEqual(markdown, "alpha  \nbeta")
+
     def test_html_to_markdown_normalizes_crlf(self):
         markdown = MHTMLParser._normalize_markdown("alpha\r\n\r\nbeta\rgamma")
 

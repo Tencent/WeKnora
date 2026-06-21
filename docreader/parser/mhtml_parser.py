@@ -256,8 +256,8 @@ class MHTMLParser(BaseParser):
                 output.append("")
             pending_blank = False
 
-            trailing = len(line) - len(line.rstrip(" \t"))
-            if trailing >= 2:
+            trailing_spaces = len(line) - len(line.rstrip(" "))
+            if trailing_spaces >= 2:
                 line = line.rstrip(" \t") + "  "
             else:
                 line = line.rstrip(" \t")
