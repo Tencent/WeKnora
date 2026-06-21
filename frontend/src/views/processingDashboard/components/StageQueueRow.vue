@@ -167,4 +167,23 @@ const iconName = computed(() => {
     justify-self: start;
   }
 }
+
+@media (max-width: 560px) {
+  .pd-stage-row {
+    padding: 16px;
+  }
+
+  .pd-stage-row__head {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .pd-stage-row__icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .pd-stage-row__metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 </style>

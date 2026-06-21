@@ -67,4 +67,15 @@ const { t } = useI18n()
   justify-items: end;
   font-variant-numeric: tabular-nums;
 }
+
+@media (max-width: 560px) {
+  .pd-timeline__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .pd-timeline__time {
+    justify-items: start;
+  }
+}
 </style>

@@ -2,7 +2,7 @@
   <t-drawer
     :visible="visible"
     :header="detail?.knowledge?.title || selected?.title || t('processingDashboard.detail.title')"
-    size="720px"
+    size="min(720px, 100vw)"
     :footer="false"
     @close="$emit('update:visible', false)"
   >
@@ -95,6 +95,7 @@ const compactTrace = (trace: any[]) => JSON.stringify(trace || [], (key, value) 
 .pd-detail__raw pre {
   max-height: 360px;
   overflow: auto;
+  max-width: 100%;
   background: #f7f9f8;
   border-radius: 8px;
   padding: 12px;

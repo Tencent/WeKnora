@@ -2,7 +2,7 @@
   <t-drawer
     :visible="visible"
     :header="drawerTitle"
-    size="620px"
+    size="min(620px, 100vw)"
     :footer="false"
     @close="$emit('update:visible', false)"
   >
@@ -224,5 +224,16 @@ const formatTime = (value: string) => new Date(value).toLocaleString()
   padding: 48px 0;
   color: #8b99a3;
   text-align: center;
+}
+
+@media (max-width: 560px) {
+  .pd-drawer-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .pd-drawer-item__meta {
+    justify-items: start;
+  }
 }
 </style>

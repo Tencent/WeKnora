@@ -46,4 +46,17 @@ defineEmits<{ open: [item: ProcessingStageItem] }>()
   min-width: 56px;
   text-align: right;
 }
+
+@media (max-width: 560px) {
+  .pd-preview {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+  }
+
+  .pd-preview__time {
+    grid-column: 1 / -1;
+    min-width: 0;
+    text-align: left;
+  }
+}
 </style>

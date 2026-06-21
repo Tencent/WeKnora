@@ -141,6 +141,9 @@ onMounted(() => {
 
 <style scoped>
 .pd-page {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   min-height: 100%;
   padding: 24px;
   background: #f5f7f6;
@@ -148,11 +151,15 @@ onMounted(() => {
 }
 
 .pd-toolbar {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, auto);
   gap: 20px;
   align-items: flex-start;
   margin-bottom: 16px;
+}
+
+.pd-toolbar > div {
+  min-width: 0;
 }
 
 .pd-toolbar h1 {
@@ -168,9 +175,10 @@ onMounted(() => {
 
 .pd-toolbar__controls {
   display: grid;
-  grid-template-columns: 220px 240px 110px auto;
+  grid-template-columns: minmax(180px, 220px) minmax(200px, 240px) 110px auto;
   gap: 10px;
   align-items: center;
+  min-width: 0;
 }
 
 .pd-statusbar {
@@ -216,8 +224,18 @@ onMounted(() => {
 
 @media (max-width: 980px) {
   .pd-toolbar {
-    display: grid;
+    grid-template-columns: minmax(0, 1fr);
   }
+  .pd-toolbar__controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .pd-page {
+    padding: 16px;
+  }
+
   .pd-toolbar__controls {
     grid-template-columns: minmax(0, 1fr);
   }
