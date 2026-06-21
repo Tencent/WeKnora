@@ -83,22 +83,22 @@ const iconName = computed(() => {
 .pd-stage-row {
   display: grid;
   grid-template-columns: minmax(220px, 1.2fr) 280px minmax(260px, 1.5fr) auto;
-  gap: 20px;
+  gap: 18px;
   align-items: center;
-  padding: 18px 24px;
+  padding: 10px 24px;
   border-bottom: 1px solid #e7ece9;
 }
 
 .pd-stage-row__head {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 36px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
 }
 
 .pd-stage-row__icon {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: 8px;
   background: #e9f6ef;
   color: #009966;
@@ -107,8 +107,8 @@ const iconName = computed(() => {
 }
 
 .pd-stage-row__title h3 {
-  margin: 0 0 4px;
-  font-size: 15px;
+  margin: 0 0 3px;
+  font-size: 14px;
   line-height: 1.25;
 }
 
@@ -127,7 +127,7 @@ const iconName = computed(() => {
 
 .pd-stage-row__metrics div {
   min-width: 0;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border: 1px solid #e3eae6;
   border-radius: 8px;
   background: #fbfcfb;
@@ -135,7 +135,7 @@ const iconName = computed(() => {
 
 .pd-stage-row__metrics strong {
   display: block;
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }

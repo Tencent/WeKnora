@@ -142,20 +142,25 @@ onMounted(() => {
 <style scoped>
 .pd-page {
   box-sizing: border-box;
+  flex: 1;
   width: 100%;
   min-width: 0;
-  min-height: 100%;
-  padding: 24px;
+  height: 100%;
+  min-height: 0;
+  padding: 18px 24px;
   background: #f5f7f6;
   color: #1f2d35;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .pd-toolbar {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) minmax(0, auto);
-  gap: 20px;
+  gap: 16px;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .pd-toolbar > div {
@@ -163,8 +168,8 @@ onMounted(() => {
 }
 
 .pd-toolbar h1 {
-  margin: 0 0 6px;
-  font-size: 24px;
+  margin: 0 0 4px;
+  font-size: 22px;
   line-height: 1.2;
 }
 
@@ -187,7 +192,7 @@ onMounted(() => {
   gap: 10px;
   color: #687883;
   font-size: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .pd-statusbar span {
@@ -202,18 +207,24 @@ onMounted(() => {
 }
 
 .pd-board {
+  flex: 1;
+  min-height: 0;
   background: #fff;
   border: 1px solid #dfe8e3;
   border-radius: 8px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 
 .pd-group h2 {
   margin: 0;
-  padding: 14px 24px;
+  padding: 10px 24px;
   background: #f8faf9;
   border-bottom: 1px solid #e3ebe6;
   font-size: 14px;
+  line-height: 20px;
 }
 
 .pd-empty {
