@@ -7,7 +7,7 @@
     @close="$emit('update:visible', false)"
   >
     <div class="pd-drawer">
-      <t-tabs v-model="activeState" @change="loadFirstPage">
+      <t-tabs v-model="activeState" @change="handleStateChange">
         <t-tab-panel value="running" :label="t('processingDashboard.running')" />
         <t-tab-panel value="queued" :label="t('processingDashboard.queued')" />
         <t-tab-panel value="retrying" :label="t('processingDashboard.retrying')" />
@@ -15,6 +15,7 @@
 
       <div class="pd-drawer__body">
         <t-loading v-if="loading" />
+        <t-alert v-else-if="error" theme="error" :message="error" class="pd-drawer__error" />
         <template v-else-if="items.length">
           <button
             v-for="item in items"
@@ -46,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listProcessingStageItems } from '@/api/processing-dashboard'
 import type { ProcessingLogicalStage, ProcessingStageItem } from '@/types/processingDashboard'
@@ -70,32 +71,60 @@ const items = ref<ProcessingStageItem[]>([])
 const nextCursor = ref('')
 const loading = ref(false)
 const loadingMore = ref(false)
+const error = ref('')
+let latestRequestId = 0
+let activeController: AbortController | null = null
 
 const drawerTitle = computed(() => props.stage ? t(`processingDashboard.stage.${props.stage}.title`) : t('processingDashboard.drawer.title'))
 
+const invalidateRequests = () => {
+  latestRequestId++
+  activeController?.abort()
+  activeController = null
+}
+
 const loadPage = async (cursor = '') => {
   if (!props.stage) return
+  const requestId = ++latestRequestId
+  const reqStage = props.stage
+  const reqState = activeState.value
+  const reqKbId = props.kbId
+  const reqKeyword = props.keyword
+  activeController?.abort()
+  const controller = new AbortController()
+  activeController = controller
   if (cursor) loadingMore.value = true
   else loading.value = true
+  error.value = ''
   try {
     const res = await listProcessingStageItems({
-      stage: props.stage,
-      state: activeState.value,
+      stage: reqStage,
+      state: reqState,
       cursor,
       page_size: 20,
-      kb_id: props.kbId,
-      keyword: props.keyword,
-    })
+      kb_id: reqKbId,
+      keyword: reqKeyword,
+    }, controller.signal)
+    if (requestId !== latestRequestId) return
+    if (reqStage !== props.stage || reqState !== activeState.value || reqKbId !== props.kbId || reqKeyword !== props.keyword) return
     items.value = cursor ? [...items.value, ...res.data.items] : res.data.items
     nextCursor.value = res.data.next_cursor || ''
+  } catch (e: any) {
+    if (requestId !== latestRequestId || e?.name === 'CanceledError' || e?.name === 'AbortError') return
+    error.value = e?.message || 'Failed to load'
   } finally {
-    loading.value = false
-    loadingMore.value = false
+    if (requestId === latestRequestId) {
+      loading.value = false
+      loadingMore.value = false
+      if (activeController === controller) activeController = null
+    }
   }
 }
 
 const loadFirstPage = () => {
+  invalidateRequests()
   nextCursor.value = ''
+  items.value = []
   void loadPage('')
 }
 
@@ -103,8 +132,20 @@ const loadMore = () => {
   if (nextCursor.value) void loadPage(nextCursor.value)
 }
 
+const handleStateChange = () => {
+  loadFirstPage()
+}
+
 watch(() => [props.visible, props.stage, props.kbId, props.keyword], () => {
-  if (props.visible && props.stage) loadFirstPage()
+  invalidateRequests()
+  nextCursor.value = ''
+  items.value = []
+  error.value = ''
+  if (props.visible && props.stage) void loadPage('')
+})
+
+onBeforeUnmount(() => {
+  invalidateRequests()
 })
 
 const stateLabel = (state: string) => t(`processingDashboard.state.${state}`)
@@ -118,6 +159,10 @@ const formatTime = (value: string) => new Date(value).toLocaleString()
 
 .pd-drawer__body {
   padding-top: 16px;
+}
+
+.pd-drawer__error {
+  margin-bottom: 12px;
 }
 
 .pd-drawer-item {

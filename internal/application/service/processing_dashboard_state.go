@@ -314,62 +314,17 @@ func computeWikiStage(
 			item.State = types.ProcessingStateRetrying
 		}
 	}
-	children := 0
-	done := 0
-	failed := 0
-	fanout := fanoutAggregateForInput(input, latest, types.ProcessingStageWiki, "postprocess.wiki.")
-	if fanout != nil {
-		children += fanout.TerminalTotalCount
-		done += fanout.TerminalDoneCount
-		if fanout.LatestUpdatedAt != nil {
-			t := *fanout.LatestUpdatedAt
-			item.LastProgressAt = &t
+	if parent != nil && genuineTerminalSpan(*parent) {
+		total, okTotal := jsonMapInt(parent.Output, "pages_total")
+		written, okWritten := jsonMapInt(parent.Output, "pages_written")
+		dropped, okDropped := jsonMapInt(parent.Output, "pages_dropped")
+		if okTotal && okWritten && total > 0 {
+			if !okDropped {
+				dropped = 0
+			}
+			item.Progress = &types.ProcessingStageProgress{Completed: written, Total: total, Failed: dropped, Unit: "page", Reliable: true}
+			item.FailedChildren = dropped
 		}
-		for _, span := range fanout.Details {
-			children++
-			if span.UpdatedAt.After(valueTime(item.LastProgressAt)) {
-				t := span.UpdatedAt
-				item.LastProgressAt = &t
-			}
-			switch stateFromSpan(span) {
-			case types.ProcessingStateDone, types.ProcessingStateSkipped:
-				done++
-			case types.ProcessingStateCancelled:
-				if genuineTerminalSpan(span) {
-					done++
-				}
-			case types.ProcessingStateFailed:
-				done++
-				failed++
-			}
-		}
-	}
-	if fanout == nil {
-		for name, span := range latest {
-			if !strings.HasPrefix(name, "postprocess.wiki.") {
-				continue
-			}
-			children++
-			if span.UpdatedAt.After(valueTime(item.LastProgressAt)) {
-				t := span.UpdatedAt
-				item.LastProgressAt = &t
-			}
-			switch stateFromSpan(span) {
-			case types.ProcessingStateDone, types.ProcessingStateSkipped:
-				done++
-			case types.ProcessingStateCancelled:
-				if genuineTerminalSpan(span) {
-					done++
-				}
-			case types.ProcessingStateFailed:
-				done++
-				failed++
-			}
-		}
-	}
-	if children > 0 {
-		item.Progress = &types.ProcessingStageProgress{Completed: done, Total: children, Failed: failed, Unit: "page", Reliable: true}
-		item.FailedChildren = failed
 	}
 	return item
 }
@@ -398,16 +353,10 @@ func resolveProcessingChild(
 		return stateFromSpan(*span), true
 	}
 	if supersededInFlightSpan(*span) {
-		if queueComplete {
-			return types.ProcessingStateFailed, true
-		}
 		return types.ProcessingStateRunning, false
 	}
 	if span.Status == types.SpanStatusRunning {
-		if queueComplete {
-			return types.ProcessingStateFailed, true
-		}
-		return types.ProcessingStateRunning, !queueObservable
+		return types.ProcessingStateRunning, false
 	}
 	return stateFromSpan(*span), true
 }

@@ -193,7 +193,7 @@ func TestProcessingDashboardFanoutAndQueueReconcile(t *testing.T) {
 		}
 	})
 
-	t.Run("superseded child missing from complete queue becomes failed", func(t *testing.T) {
+	t.Run("superseded child missing from complete queue stays running unreliable", func(t *testing.T) {
 		input := processingKnowledgeStateInput{
 			Knowledge: row,
 			Attempt:   1,
@@ -204,7 +204,39 @@ func TestProcessingDashboardFanoutAndQueueReconcile(t *testing.T) {
 			GeneratedAt: now,
 		}
 		got := byStage(buildProcessingStages(input))[types.ProcessingStageGraph]
-		if got.Item.FailedChildren != 1 || got.Item.State != types.ProcessingStateDoneWithErrors {
+		if got.Item.FailedChildren != 0 || got.Item.State != types.ProcessingStateRunning || got.CompletionReliable {
+			t.Fatalf("state=%s failed=%d reliable=%v, want running unreliable failed=0", got.Item.State, got.Item.FailedChildren, got.CompletionReliable)
+		}
+	})
+
+	t.Run("running child missing from complete queue stays running unreliable", func(t *testing.T) {
+		input := processingKnowledgeStateInput{
+			Knowledge: row,
+			Attempt:   1,
+			Spans: []types.KnowledgeProcessingSpan{
+				pdSpan(1, "postprocess.graph.chunk[7]", types.SpanStatusRunning, now),
+			},
+			QueueStatus: types.ProcessingQueueSnapshotOK,
+			GeneratedAt: now,
+		}
+		got := byStage(buildProcessingStages(input))[types.ProcessingStageGraph]
+		if got.Item.State != types.ProcessingStateRunning || got.CompletionReliable {
+			t.Fatalf("state=%s reliable=%v, want running unreliable", got.Item.State, got.CompletionReliable)
+		}
+	})
+
+	t.Run("real failed span remains failed", func(t *testing.T) {
+		input := processingKnowledgeStateInput{
+			Knowledge: row,
+			Attempt:   1,
+			Spans: []types.KnowledgeProcessingSpan{
+				pdSpan(1, "postprocess.graph.chunk[7]", types.SpanStatusFailed, now),
+			},
+			QueueStatus: types.ProcessingQueueSnapshotOK,
+			GeneratedAt: now,
+		}
+		got := byStage(buildProcessingStages(input))[types.ProcessingStageGraph]
+		if got.Item.State != types.ProcessingStateDoneWithErrors || got.Item.FailedChildren != 1 {
 			t.Fatalf("state=%s failed=%d, want done_with_errors failed=1", got.Item.State, got.Item.FailedChildren)
 		}
 	})
@@ -365,6 +397,68 @@ func TestProcessingDashboardWikiAndRetryObservability(t *testing.T) {
 		got := byStage(buildProcessingStages(input))[types.ProcessingStageWiki]
 		if got.Item.State != types.ProcessingStateRunning {
 			t.Fatalf("state = %s, want running", got.Item.State)
+		}
+	})
+
+	t.Run("wiki progress uses terminal parent output not helper child spans", func(t *testing.T) {
+		input := processingKnowledgeStateInput{
+			Knowledge: row,
+			Attempt:   1,
+			Spans: []types.KnowledgeProcessingSpan{
+				pdSpanWithIO(1, "postprocess.wiki", types.SpanStatusDone, now, nil, types.JSONMap{
+					"pages_total":   13,
+					"pages_written": 13,
+					"pages_dropped": 0,
+				}),
+				pdSpan(2, "postprocess.wiki.extract", types.SpanStatusDone, now),
+				pdSpan(3, "postprocess.wiki.summary", types.SpanStatusDone, now),
+				pdSpan(4, "postprocess.wiki.classify", types.SpanStatusDone, now),
+			},
+			QueueStatus: types.ProcessingQueueSnapshotOK,
+			GeneratedAt: now,
+		}
+		got := byStage(buildProcessingStages(input))[types.ProcessingStageWiki]
+		if got.Item.Progress == nil || got.Item.Progress.Completed != 13 || got.Item.Progress.Total != 13 {
+			t.Fatalf("progress = %#v, want 13/13 from parent output", got.Item.Progress)
+		}
+	})
+
+	t.Run("wiki progress reports dropped pages from terminal parent output", func(t *testing.T) {
+		input := processingKnowledgeStateInput{
+			Knowledge: row,
+			Attempt:   1,
+			Spans: []types.KnowledgeProcessingSpan{
+				pdSpanWithIO(1, "postprocess.wiki", types.SpanStatusDone, now, nil, types.JSONMap{
+					"pages_total":   13,
+					"pages_written": 11,
+					"pages_dropped": 2,
+				}),
+			},
+			QueueStatus: types.ProcessingQueueSnapshotOK,
+			GeneratedAt: now,
+		}
+		got := byStage(buildProcessingStages(input))[types.ProcessingStageWiki]
+		if got.Item.Progress == nil || got.Item.Progress.Completed != 11 || got.Item.Progress.Total != 13 || got.Item.Progress.Failed != 2 {
+			t.Fatalf("progress = %#v, want 11/13 failed=2", got.Item.Progress)
+		}
+	})
+
+	t.Run("wiki running parent does not show page progress", func(t *testing.T) {
+		input := processingKnowledgeStateInput{
+			Knowledge: row,
+			Attempt:   1,
+			Spans: []types.KnowledgeProcessingSpan{
+				pdSpanWithIO(1, "postprocess.wiki", types.SpanStatusRunning, now, nil, types.JSONMap{
+					"pages_total":   13,
+					"pages_written": 3,
+				}),
+			},
+			QueueStatus: types.ProcessingQueueSnapshotOK,
+			GeneratedAt: now,
+		}
+		got := byStage(buildProcessingStages(input))[types.ProcessingStageWiki]
+		if got.Item.Progress != nil {
+			t.Fatalf("progress = %#v, want nil while wiki is running", got.Item.Progress)
 		}
 	})
 

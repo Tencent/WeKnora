@@ -180,7 +180,6 @@ func (r *processingDashboardRepository) AggregateFanoutSpans(
 		{types.ProcessingStageMultimodal, "multimodal.image["},
 		{types.ProcessingStageQuestion, "postprocess.question.batch["},
 		{types.ProcessingStageGraph, "postprocess.graph.chunk["},
-		{types.ProcessingStageWiki, "postprocess.wiki."},
 	}
 	buckets := make([]types.ProcessingFanoutSpanBucket, 0)
 	details := make([]types.KnowledgeProcessingSpan, 0)

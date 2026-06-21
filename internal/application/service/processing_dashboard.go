@@ -593,7 +593,6 @@ func fanoutStageForSpanName(name string) (types.ProcessingLogicalStage, string, 
 		{types.ProcessingStageMultimodal, "multimodal.image["},
 		{types.ProcessingStageQuestion, "postprocess.question.batch["},
 		{types.ProcessingStageGraph, "postprocess.graph.chunk["},
-		{types.ProcessingStageWiki, "postprocess.wiki."},
 	}
 	for _, item := range prefixes {
 		if strings.HasPrefix(name, item.prefix) {
