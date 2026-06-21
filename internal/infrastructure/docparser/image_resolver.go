@@ -104,18 +104,12 @@ func (r *ImageResolver) ResolveAndStore(
 	}
 	savedRefs := make(map[string]StoredImage)
 
-	// Process each image reference found in the markdown.
-	// The URL group supports one level of balanced parentheses so that URLs
-	// like https://example.com/item_(abc)/123 are captured in full.
-	// Allow spaces in URLs (exclude only parens and newlines) to handle
-	// filenames with spaces, e.g. "images/第 1 页.jpg".
-	imgPattern := regexp.MustCompile(`!\[(.*?)\]\(([^()\n]*(?:\([^)]*\)[^()\n]*)*)\)`)
-	matches := imgPattern.FindAllStringSubmatchIndex(markdown, -1)
+	matches := scanMarkdownImageTargets(markdown)
 
 	// Process in reverse order to preserve positions when replacing
 	for i := len(matches) - 1; i >= 0; i-- {
-		m := matches[i]
-		rawTarget := markdown[m[4]:m[5]] // group 2: the URL/path plus optional title
+		match := matches[i]
+		rawTarget := markdown[match.TargetStart:match.TargetEnd]
 		refPath, pathStart, pathEnd, ok := splitMarkdownImageTarget(rawTarget, refMap)
 		if !ok {
 			continue
@@ -135,8 +129,8 @@ func (r *ImageResolver) ResolveAndStore(
 		images = appendStoredImage(images, stored)
 
 		// Replace in markdown
-		absolutePathStart := m[4] + pathStart
-		absolutePathEnd := m[4] + pathEnd
+		absolutePathStart := match.TargetStart + pathStart
+		absolutePathEnd := match.TargetStart + pathEnd
 		markdown = markdown[:absolutePathStart] + stored.ServingURL + markdown[absolutePathEnd:]
 	}
 
@@ -145,82 +139,6 @@ func (r *ImageResolver) ResolveAndStore(
 	images = append(images, imgRelativeHTML...)
 
 	return markdown, images, nil
-}
-
-func splitMarkdownImageTarget(
-	raw string,
-	refMap map[string]types.ImageRef,
-) (path string, pathStart int, pathEnd int, ok bool) {
-	if _, found := refMap[raw]; found {
-		return raw, 0, len(raw), true
-	}
-
-	titleStart, found := markdownImageTitleStart(raw)
-	if !found {
-		return "", 0, 0, false
-	}
-
-	pathEnd = titleStart
-	for pathEnd > 0 && isMarkdownSpace(raw[pathEnd-1]) {
-		pathEnd--
-	}
-	if pathEnd == 0 {
-		return "", 0, 0, false
-	}
-
-	path = raw[:pathEnd]
-	if _, found := refMap[path]; !found {
-		return "", 0, 0, false
-	}
-	return path, 0, pathEnd, true
-}
-
-func markdownImageTitleStart(raw string) (int, bool) {
-	end := len(raw)
-	for end > 0 && isMarkdownSpace(raw[end-1]) {
-		end--
-	}
-	if end == 0 {
-		return 0, false
-	}
-
-	switch raw[end-1] {
-	case '"', '\'':
-		quote := raw[end-1]
-		for i := end - 2; i >= 0; i-- {
-			if raw[i] != quote || isEscaped(raw, i) {
-				continue
-			}
-			if i == 0 || !isMarkdownSpace(raw[i-1]) {
-				return 0, false
-			}
-			return i, true
-		}
-	case ')':
-		for i := end - 2; i >= 0; i-- {
-			if raw[i] != '(' || isEscaped(raw, i) {
-				continue
-			}
-			if i == 0 || !isMarkdownSpace(raw[i-1]) {
-				return 0, false
-			}
-			return i, true
-		}
-	}
-
-	return 0, false
-}
-
-func isMarkdownSpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
-}
-
-func isEscaped(s string, pos int) bool {
-	backslashes := 0
-	for i := pos - 1; i >= 0 && s[i] == '\\'; i-- {
-		backslashes++
-	}
-	return backslashes%2 == 1
 }
 
 func appendStoredImage(images []StoredImage, stored StoredImage) []StoredImage {

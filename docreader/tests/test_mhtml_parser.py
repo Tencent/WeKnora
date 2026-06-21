@@ -1,8 +1,13 @@
+import base64
+import json
 import unittest
 from email.message import EmailMessage
+from pathlib import Path
 
 from docreader.parser.mhtml_parser import MHTMLParser
 from docreader.parser.registry import registry
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _minimal_mhtml_bytes() -> bytes:
@@ -146,6 +151,80 @@ class MHTMLParserTest(unittest.TestCase):
         self.assertIn("* parent\n  + child", markdown)
         self.assertIn("\n\n> quoted\n\n", markdown)
         self.assertIn("```\nline1\n\n  indented\n```", markdown)
+
+    def test_html_to_markdown_preserves_nested_list_indentation(self):
+        markdown = MHTMLParser(
+            file_name="article.mhtml", file_type="mhtml"
+        )._html_to_markdown("<ul><li>parent<ul><li>child</li></ul></li></ul>")
+
+        self.assertIn("* parent\n  + child", markdown)
+
+    def test_html_to_markdown_preserves_blockquote_boundaries(self):
+        markdown = MHTMLParser(
+            file_name="article.mhtml", file_type="mhtml"
+        )._html_to_markdown("<p>before</p><blockquote><p>quoted</p></blockquote><p>after</p>")
+
+        self.assertIn("before\n\n> quoted\n\nafter", markdown)
+
+    def test_html_to_markdown_preserves_fenced_code_blank_lines(self):
+        markdown = MHTMLParser(
+            file_name="article.mhtml", file_type="mhtml"
+        )._html_to_markdown("<pre><code>line1\n\n\nline2\n</code></pre>")
+
+        self.assertIn("```\nline1\n\n\nline2\n```", markdown)
+
+    def test_html_to_markdown_collapses_excess_blank_lines_outside_code(self):
+        markdown = MHTMLParser._normalize_markdown("alpha\n\n  \n\t\n\nbeta")
+
+        self.assertEqual(markdown, "alpha\n\nbeta")
+        self.assertNotIn("\n\n\n", markdown)
+
+    def test_html_to_markdown_preserves_hard_break_spaces(self):
+        markdown = MHTMLParser(
+            file_name="article.mhtml", file_type="mhtml"
+        )._html_to_markdown("<p>alpha<br>beta</p>")
+
+        self.assertEqual(markdown, "alpha  \nbeta")
+
+    def test_html_to_markdown_normalizes_crlf(self):
+        markdown = MHTMLParser._normalize_markdown("alpha\r\n\r\nbeta\rgamma")
+
+        self.assertEqual(markdown, "alpha\n\nbeta\ngamma")
+
+    def test_html_to_markdown_does_not_strip_leading_indentation_at_document_start(self):
+        markdown = MHTMLParser._normalize_markdown("  indented start\n")
+
+        self.assertEqual(markdown, "  indented start")
+
+    def test_mhtml_shared_contract_fixture(self):
+        fixture = REPO_ROOT / "testdata" / "mhtml" / "titled-image.mhtml"
+        contract_path = REPO_ROOT / "testdata" / "mhtml" / "titled-image-contract.json"
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+
+        document = MHTMLParser(
+            file_name="titled-image.mhtml", file_type="mhtml"
+        ).parse_into_text(fixture.read_bytes())
+
+        self.assertEqual(document.content, contract["markdown_content"])
+        self.assertEqual(len(document.images), 1)
+        image_contract = contract["images"][0]
+        self.assertIn(image_contract["original_ref"], document.images)
+        self.assertEqual(
+            base64.b64decode(document.images[image_contract["original_ref"]]),
+            base64.b64decode(image_contract["image_data_base64"]),
+        )
+        self.assertIn(
+            '| 赛季制建立 | BP、Rank |\n\n![图片](images/第 1 页 (测试).gif "阶段 1) 图片")',
+            document.content,
+        )
+        self.assertIn(
+            '![图片](images/第 1 页 (测试).gif "阶段 1) 图片")\n\n高机动性身法与独特枪械反馈',
+            document.content,
+        )
+        self.assertNotIn("\n\n\n", document.content.split("```", 1)[0])
+        self.assertIn("```\nline1\n\n\nline2\n```", document.content)
+        self.assertIn("* parent\n  + child", document.content)
+        self.assertIn("alpha  \nbeta", document.content)
 
     def test_registry_resolves_mhtml(self):
         self.assertIs(registry.get_parser_class("", "mhtml"), MHTMLParser)
