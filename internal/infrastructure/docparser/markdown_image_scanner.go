@@ -144,25 +144,25 @@ func splitAngleMarkdownImageTarget(
 	end int,
 	refMap map[string]types.ImageRef,
 ) (path string, pathStart int, pathEnd int, ok bool) {
-	close := -1
+	closeIdx := -1
 	for i := start + 1; i < end; i++ {
 		if raw[i] == '>' && !isEscaped(raw, i) {
-			close = i
+			closeIdx = i
 			break
 		}
 	}
-	if close == -1 {
+	if closeIdx == -1 {
 		return "", 0, 0, false
 	}
 
-	path = raw[start+1 : close]
+	path = raw[start+1 : closeIdx]
 	if _, found := refMap[path]; !found {
 		return "", 0, 0, false
 	}
-	if !isEmptyOrMarkdownImageTitleSuffix(raw[close+1 : end]) {
+	if !isEmptyOrMarkdownImageTitleSuffix(raw[closeIdx+1 : end]) {
 		return "", 0, 0, false
 	}
-	return path, start + 1, close, true
+	return path, start + 1, closeIdx, true
 }
 
 func parseMarkdownImageTitleSuffix(raw string) (titleStart int, ok bool) {
