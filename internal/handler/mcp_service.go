@@ -298,6 +298,23 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 			}
 			service.AuthConfig.CustomHeaders = headers
 		}
+		// auth_type and scopes are non-secret OAuth configuration; allow them
+		// through the main PUT so a service can be switched to/from OAuth.
+		if authType, ok := authConfig["auth_type"].(string); ok {
+			service.AuthConfig.AuthType = types.MCPAuthType(authType)
+		}
+		if scopes, ok := authConfig["scopes"].([]interface{}); ok {
+			list := make([]string, 0, len(scopes))
+			for _, s := range scopes {
+				if str, ok := s.(string); ok {
+					list = append(list, str)
+				}
+			}
+			service.AuthConfig.Scopes = list
+		}
+		if metaURL, ok := authConfig["auth_server_metadata_url"].(string); ok {
+			service.AuthConfig.AuthServerMetadataURL = metaURL
+		}
 	}
 	if advancedConfig, ok := updateData["advanced_config"].(map[string]interface{}); ok {
 		service.AdvancedConfig = &types.MCPAdvancedConfig{}

@@ -45,9 +45,14 @@ type MCPServiceResponse struct {
 }
 
 // MCPAuthConfigResponse intentionally has no APIKey or Token fields. Their
-// presence is signalled via MCPServiceResponse.Credentials.
+// presence is signalled via MCPServiceResponse.Credentials. AuthType, Scopes
+// and AuthServerMetadataURL are non-secret OAuth configuration and are safe to
+// echo back so the UI can render the current strategy.
 type MCPAuthConfigResponse struct {
-	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+	AuthType              types.MCPAuthType `json:"auth_type,omitempty"`
+	CustomHeaders         map[string]string `json:"custom_headers,omitempty"`
+	Scopes                []string          `json:"scopes,omitempty"`
+	AuthServerMetadataURL string            `json:"auth_server_metadata_url,omitempty"`
 }
 
 // CredentialFieldMetadata reports whether a credential field has a value
@@ -84,7 +89,10 @@ func NewMCPServiceResponse(svc *types.MCPService) *MCPServiceResponse {
 	}
 	if svc.AuthConfig != nil {
 		resp.AuthConfig = &MCPAuthConfigResponse{
-			CustomHeaders: svc.AuthConfig.CustomHeaders,
+			AuthType:              svc.AuthConfig.AuthType,
+			CustomHeaders:         svc.AuthConfig.CustomHeaders,
+			Scopes:                svc.AuthConfig.Scopes,
+			AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		}
 	}
 	if svc.IsBuiltin {

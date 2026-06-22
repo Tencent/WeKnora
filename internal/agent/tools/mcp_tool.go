@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
+	mcpclient "github.com/mark3labs/mcp-go/client"
 )
 
 type MCPInput = map[string]any
@@ -173,12 +174,12 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	}
 
 	// Get or create MCP client
-	client, err := t.mcpManager.GetOrCreateClient(t.service)
+	client, err := t.mcpManager.GetOrCreateClient(ctx, t.service)
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to get MCP client: %v", err)
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("Failed to connect to MCP service: %v", err),
+			Error:   oauthAwareConnectError(t.service, err),
 		}, nil
 	}
 
@@ -200,12 +201,12 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		logger.GetLogger(ctx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
 		_ = client.Disconnect()
 
-		client, err = t.mcpManager.GetOrCreateClient(t.service)
+		client, err = t.mcpManager.GetOrCreateClient(ctx, t.service)
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client: %v", err)
 			return &types.ToolResult{
 				Success: false,
-				Error:   fmt.Sprintf("Failed to reconnect to MCP service: %v", err),
+				Error:   oauthAwareConnectError(t.service, err),
 			}, nil
 		}
 
@@ -215,7 +216,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		logger.GetLogger(ctx).Errorf("MCP tool call failed: %v", err)
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("Tool execution failed: %v", err),
+			Error:   oauthAwareConnectError(t.service, err),
 		}, nil
 	}
 
@@ -374,6 +375,38 @@ func extractContentText(content []mcp.ContentItem) string {
 	return strings.Join(textParts, "\n")
 }
 
+// oauthAwareConnectError turns a low-level MCP connect/call error into a
+// message the agent (and ultimately the user) can act on. For OAuth services
+// that have not been authorized — or whose token expired and could not be
+// refreshed — the underlying library surfaces an authorization-required error;
+// we translate that into an explicit instruction to authorize, instead of an
+// opaque "connection failed".
+func oauthAwareConnectError(service *types.MCPService, err error) string {
+	if service.AuthConfig.IsOAuth() && isAuthorizationRequired(err) {
+		return fmt.Sprintf(
+			"MCP service %q requires OAuth authorization. Please open the service settings "+
+				"and click \"Authorize\" to grant access, then retry.",
+			service.Name,
+		)
+	}
+	return fmt.Sprintf("Failed to connect to MCP service: %v", err)
+}
+
+// isAuthorizationRequired reports whether err indicates the OAuth flow has not
+// been completed (no valid token / 401).
+func isAuthorizationRequired(err error) bool {
+	if err == nil {
+		return false
+	}
+	if mcpclient.IsOAuthAuthorizationRequiredError(err) || mcpclient.IsAuthorizationRequiredError(err) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "authorization required") ||
+		strings.Contains(msg, "no valid token") ||
+		strings.Contains(msg, "401")
+}
+
 // sanitizeName sanitizes a name to create a valid identifier
 func sanitizeName(name string) string {
 	// Replace invalid characters with underscores
@@ -422,7 +455,7 @@ func RegisterMCPTools(
 		}
 
 		// Get or create client (this may take time, but has its own timeout)
-		client, err := mcpManager.GetOrCreateClient(service)
+		client, err := mcpManager.GetOrCreateClient(ctx, service)
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("Failed to create MCP client for service %s: %v", service.Name, err)
 			continue
@@ -448,7 +481,7 @@ func RegisterMCPTools(
 			logger.GetLogger(ctx).Warnf("Failed to list tools from MCP service %s (will retry with fresh connection): %v", service.Name, err)
 			_ = client.Disconnect()
 
-			client, err = mcpManager.GetOrCreateClient(service)
+			client, err = mcpManager.GetOrCreateClient(ctx, service)
 			if err != nil {
 				logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client for service %s: %v", service.Name, err)
 				continue
@@ -504,7 +537,7 @@ func GetMCPToolsInfo(
 			continue
 		}
 
-		client, err := mcpManager.GetOrCreateClient(service)
+		client, err := mcpManager.GetOrCreateClient(ctx, service)
 		if err != nil {
 			continue
 		}

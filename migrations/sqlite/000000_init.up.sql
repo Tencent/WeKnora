@@ -417,6 +417,39 @@ CREATE TABLE IF NOT EXISTS mcp_tool_approvals (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_tool_approvals_tenant_svc_tool ON mcp_tool_approvals(tenant_id, service_id, tool_name);
 CREATE INDEX IF NOT EXISTS idx_mcp_tool_approvals_service_id ON mcp_tool_approvals(service_id);
 
+CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    service_id VARCHAR(36) NOT NULL,
+    client_id VARCHAR(512) NOT NULL,
+    client_secret TEXT,
+    redirect_uri VARCHAR(1024),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_oauth_clients_tenant_svc ON mcp_oauth_clients(tenant_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_clients_service_id ON mcp_oauth_clients(service_id);
+
+CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    service_id VARCHAR(36) NOT NULL,
+    access_token TEXT,
+    refresh_token TEXT,
+    token_type VARCHAR(32),
+    expires_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_tenant_user_svc ON mcp_oauth_tokens(tenant_id, user_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_service_id ON mcp_oauth_tokens(service_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_user_id ON mcp_oauth_tokens(user_id);
+
 CREATE TABLE IF NOT EXISTS custom_agents (
     id VARCHAR(36) NOT NULL,
     name VARCHAR(255) NOT NULL,

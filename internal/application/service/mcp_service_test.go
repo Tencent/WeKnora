@@ -111,7 +111,8 @@ func newTestService() (*mcpServiceService, *fakeMCPRepo) {
 	repo := newFakeMCPRepo()
 	svc := &mcpServiceService{
 		mcpServiceRepo: repo,
-		mcpManager:     mcp.NewMCPManager(),
+		mcpManager:     mcp.NewMCPManager(nil),
+		oauthRepo:      nil,
 	}
 	return svc, repo
 }

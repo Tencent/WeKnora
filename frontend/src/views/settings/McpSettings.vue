@@ -112,15 +112,6 @@
       :service="currentService"
       :mode="dialogMode"
       @success="handleDialogSuccess"
-      @test="handleDrawerTest"
-    />
-
-    <!-- Test Result Dialog -->
-    <McpTestResult
-      v-model:visible="testDialogVisible"
-      :result="testResult"
-      :service-name="testingServiceName"
-      :service-id="testingServiceId"
     />
   </div>
 </template>
@@ -134,11 +125,9 @@ import {
   listMCPServices,
   updateMCPService,
   deleteMCPService,
-  type MCPService,
-  type MCPTestResult
+  type MCPService
 } from '@/api/mcp-service'
 import McpServiceDialog from './components/McpServiceDialog.vue'
-import McpTestResult from './components/McpTestResult.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 
@@ -151,10 +140,6 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogMode = ref<'add' | 'edit'>('add')
 const currentService = ref<MCPService | null>(null)
-const testDialogVisible = ref(false)
-const testResult = ref<MCPTestResult | null>(null)
-const testingServiceName = ref('')
-const testingServiceId = ref('')
 
 // Load MCP services
 const loadServices = async () => {
@@ -264,15 +249,6 @@ const getBuiltinServiceOptions = () => {
   return [
     { content: t('common.edit'), value: 'edit' }
   ]
-}
-
-// Drawer 内点击"测试连接"后，复用现有的 testResult dialog 展示结果。
-// 抽屉只负责调 API + 拿结果，弹窗位置/状态由父组件统一管。
-const handleDrawerTest = ({ service, result }: { service: MCPService; result: MCPTestResult }) => {
-  testingServiceName.value = service.name
-  testingServiceId.value = service.id
-  testResult.value = result
-  testDialogVisible.value = true
 }
 
 // Handle menu action. 'test' has been removed from the menu — testing now

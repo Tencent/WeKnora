@@ -123,43 +123,88 @@
         </div>
       </section>
 
-      <!-- Section 3 — 认证配置（API Key / Bearer Token） -->
+      <!-- Section 3 — 认证配置（无 / API Key / Bearer Token / OAuth） -->
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('mcpServiceDialog.authConfig') }}</h4>
 
+        <div class="form-item">
+          <label class="form-label">{{ t('mcpServiceDialog.authType', '认证方式') }}</label>
+          <t-select v-model="formData.auth_config.auth_type" :options="authTypeOptions" />
+        </div>
+
+        <!-- OAuth 2.0：零配置（自动发现 + 动态客户端注册），按用户授权 -->
+        <template v-if="isOAuth">
+          <div class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthScopes', 'Scopes（可选，空格分隔）') }}</label>
+            <t-input v-model="oauthScopesText" :placeholder="t('mcpServiceDialog.optional')" />
+          </div>
+          <div v-if="mode === 'edit' && props.service?.id" class="form-item">
+            <label class="form-label">{{ t('mcpServiceDialog.oauthAuthorization', '授权状态') }}</label>
+            <div class="oauth-status">
+              <t-tag v-if="oauthAuthorized" theme="success" variant="light">
+                {{ t('mcpServiceDialog.oauthAuthorized', '已授权') }}
+              </t-tag>
+              <t-tag v-else theme="warning" variant="light">
+                {{ t('mcpServiceDialog.oauthUnauthorized', '未授权') }}
+              </t-tag>
+              <t-button
+                size="small"
+                theme="primary"
+                :loading="oauthAuthorizing || oauthChecking"
+                @click="handleAuthorize"
+              >
+                {{ oauthAuthorized ? t('mcpServiceDialog.oauthReauthorize', '重新授权') : t('mcpServiceDialog.oauthAuthorize', '去授权') }}
+              </t-button>
+              <t-button
+                v-if="oauthAuthorized"
+                size="small"
+                theme="danger"
+                variant="outline"
+                @click="handleRevokeOAuth"
+              >
+                {{ t('mcpServiceDialog.oauthRevoke', '撤销授权') }}
+              </t-button>
+            </div>
+          </div>
+          <p v-else class="oauth-hint">
+            {{ t('mcpServiceDialog.oauthSaveFirstHint', '保存服务后，可在编辑页发起首次授权（每个用户独立授权）。') }}
+          </p>
+        </template>
+
         <!--
-          Edit 模式下凭证由 CredentialResource 管理（独立的 /credentials
-          子资源调用），不与本表单 submit 耦合；Create 模式下用 plain
-          password input + lock prefix-icon。两个字段都是 optional —
-          MCP 服务可能完全不需要鉴权（依赖 IP 白名单等）。
+          非 OAuth：Edit 模式下凭证由 CredentialResource 管理（独立的
+          /credentials 子资源调用）；Create 模式下用 plain password input。
+          两个字段都是 optional — MCP 服务可能完全不需要鉴权。
         -->
-        <CredentialResource
-          v-if="mode === 'edit' && props.service?.id"
-          :api="credentialApi"
-          :fields="credentialFields"
-          :meta="credentialMeta"
-        />
         <template v-else>
-          <div class="form-item">
-            <label class="form-label">{{ t('mcpServiceDialog.apiKey') }}</label>
-            <t-input
-              v-model="formData.auth_config.api_key"
-              type="password"
-              :placeholder="t('mcpServiceDialog.optional')"
-            >
-              <template #prefix-icon><t-icon name="lock-on" /></template>
-            </t-input>
-          </div>
-          <div class="form-item">
-            <label class="form-label">{{ t('mcpServiceDialog.bearerToken') }}</label>
-            <t-input
-              v-model="formData.auth_config.token"
-              type="password"
-              :placeholder="t('mcpServiceDialog.optional')"
-            >
-              <template #prefix-icon><t-icon name="lock-on" /></template>
-            </t-input>
-          </div>
+          <CredentialResource
+            v-if="mode === 'edit' && props.service?.id"
+            :api="credentialApi"
+            :fields="credentialFields"
+            :meta="credentialMeta"
+          />
+          <template v-else>
+            <div class="form-item">
+              <label class="form-label">{{ t('mcpServiceDialog.apiKey') }}</label>
+              <t-input
+                v-model="formData.auth_config.api_key"
+                type="password"
+                :placeholder="t('mcpServiceDialog.optional')"
+              >
+                <template #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+            </div>
+            <div class="form-item">
+              <label class="form-label">{{ t('mcpServiceDialog.bearerToken') }}</label>
+              <t-input
+                v-model="formData.auth_config.token"
+                type="password"
+                :placeholder="t('mcpServiceDialog.optional')"
+              >
+                <template #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+            </div>
+          </template>
         </template>
       </section>
 
@@ -217,12 +262,30 @@
           </t-input>
         </div>
       </section>
+
+      <!-- Section 5 — 测试结果（内联，避免在抽屉上再叠一个居中弹窗） -->
+      <section v-if="testResult" ref="testResultSection" class="setting-drawer__section">
+        <div class="test-result-header">
+          <h4 class="setting-drawer__section-title">{{ t('mcpServiceDialog.testResultTitle', '测试结果') }}</h4>
+          <t-button
+            variant="text"
+            theme="default"
+            shape="square"
+            size="small"
+            class="test-result-close"
+            @click="testResult = null"
+          >
+            <template #icon><t-icon name="close" /></template>
+          </t-button>
+        </div>
+        <McpTestResultBody :result="testResult" :service-id="props.service?.id" />
+      </section>
     </t-form>
   </SettingDrawer>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -232,11 +295,16 @@ import {
   putMCPCredentials,
   deleteMCPCredentialField,
   testMCPService,
+  getMCPOAuthAuthorizeURL,
+  getMCPOAuthStatus,
+  revokeMCPOAuthToken,
+  MCP_OAUTH_CALLBACK_PATH,
   type MCPService,
   type McpCredentialField,
   type MCPTestResult,
 } from '@/api/mcp-service'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import McpTestResultBody from './McpTestResultBody.vue'
 import CredentialResource, {
   type CredentialFieldDef,
   type CredentialResourceApi,
@@ -251,11 +319,6 @@ interface Props {
 interface Emits {
   (e: 'update:visible', value: boolean): void
   (e: 'success'): void
-  // Fired after a /test call inside the drawer so the parent can reuse its
-  // existing McpTestResult dialog. We deliberately don't render that dialog
-  // here — the parent owns the test-result dialog state across multiple
-  // entry points (drawer test button, list 行操作菜单 used to call it too).
-  (e: 'test', payload: { service: MCPService; result: MCPTestResult }): void
 }
 
 const props = defineProps<Props>()
@@ -272,9 +335,14 @@ const formData = ref({
   transport_type: 'sse' as 'sse' | 'http-streamable',
   url: '',
   auth_config: {
+    // Authentication strategy: '' (none) | 'api_key' | 'bearer' | 'oauth'.
+    auth_type: '' as '' | 'api_key' | 'bearer' | 'oauth',
     // Only used in add-mode; in edit-mode the CredentialResource owns these.
     api_key: '',
     token: '',
+    // OAuth-only, non-secret config.
+    scopes: [] as string[],
+    auth_server_metadata_url: '',
   },
   advanced_config: {
     timeout: 30,
@@ -282,6 +350,93 @@ const formData = ref({
     retry_delay: 1,
   },
 })
+
+// Comma/space separated text binding for OAuth scopes.
+const oauthScopesText = computed({
+  get: () => (formData.value.auth_config.scopes || []).join(' '),
+  set: (val: string) => {
+    formData.value.auth_config.scopes = val
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+  },
+})
+
+const isOAuth = computed(() => formData.value.auth_config.auth_type === 'oauth')
+
+const authTypeOptions = computed(() => [
+  { value: '', label: t('mcpServiceDialog.authTypeNone', '无 / 自定义 Header') },
+  { value: 'api_key', label: t('mcpServiceDialog.authTypeApiKey', 'API Key') },
+  { value: 'bearer', label: t('mcpServiceDialog.authTypeBearer', 'Bearer Token') },
+  { value: 'oauth', label: t('mcpServiceDialog.authTypeOAuth', 'OAuth 2.0（首次连接授权）') },
+])
+
+// ---- OAuth authorization state (edit mode only) ----
+const oauthAuthorized = ref(false)
+const oauthChecking = ref(false)
+const oauthAuthorizing = ref(false)
+
+async function refreshOAuthStatus() {
+  if (props.mode !== 'edit' || !props.service?.id || !isOAuth.value) return
+  oauthChecking.value = true
+  try {
+    oauthAuthorized.value = await getMCPOAuthStatus(props.service.id)
+  } catch (e) {
+    console.error('Failed to query MCP OAuth status:', e)
+  } finally {
+    oauthChecking.value = false
+  }
+}
+
+async function handleAuthorize() {
+  if (!props.service?.id) return
+  oauthAuthorizing.value = true
+  try {
+    const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
+    // After the backend completes the exchange it bounces the popup here. The
+    // app root is harmless; the popup is closed by the opener below once the
+    // authorization status flips, so this page is only shown briefly.
+    const frontendRedirect = window.location.origin + '/'
+    const authUrl = await getMCPOAuthAuthorizeURL(props.service.id, {
+      redirect_uri: redirectUri,
+      frontend_redirect: frontendRedirect,
+    })
+    if (!authUrl) {
+      MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
+      return
+    }
+    const popup = window.open(authUrl, 'mcp_oauth', 'width=600,height=720')
+    // Poll for completion: either the popup closes or the status flips.
+    const timer = window.setInterval(async () => {
+      const closed = !popup || popup.closed
+      await refreshOAuthStatus()
+      if (oauthAuthorized.value || closed) {
+        window.clearInterval(timer)
+        oauthAuthorizing.value = false
+        if (oauthAuthorized.value) {
+          try { popup?.close() } catch { /* cross-origin close may throw */ }
+          MessagePlugin.success(t('mcpServiceDialog.toasts.authorized', '授权成功') as string)
+        }
+      }
+    }, 1500)
+  } catch (e) {
+    console.error('Failed to start MCP OAuth authorization:', e)
+    MessagePlugin.error(t('mcpServiceDialog.toasts.authorizeFailed', '发起授权失败') as string)
+    oauthAuthorizing.value = false
+  }
+}
+
+async function handleRevokeOAuth() {
+  if (!props.service?.id) return
+  try {
+    await revokeMCPOAuthToken(props.service.id)
+    oauthAuthorized.value = false
+    MessagePlugin.success(t('mcpServiceDialog.toasts.revoked', '已撤销授权') as string)
+  } catch (e) {
+    console.error('Failed to revoke MCP OAuth token:', e)
+    MessagePlugin.error(t('mcpServiceDialog.toasts.revokeFailed', '撤销失败') as string)
+  }
+}
 
 // Header icon name + transport label, mirrored from McpSettings list cards
 // so the list-card → drawer hand-off stays visually continuous.
@@ -356,11 +511,24 @@ const testing = ref(false)
 // false=just failed. Cleared when transport/url change so a stale ✓/✗
 // doesn't sit next to a config the user is now editing.
 const lastTestOk = ref<boolean | null>(null)
+// In-drawer test result, rendered inline (no centered dialog stacked on the
+// drawer). Cleared when the target config changes so a stale result doesn't
+// sit next to edited config.
+const testResult = ref<MCPTestResult | null>(null)
+const testResultSection = ref<HTMLElement | null>(null)
+
+// 结果区在抽屉最底部，测试完成后主动滚动到可见，免得用户以为没反应。
+function scrollToTestResult() {
+  void nextTick(() => {
+    testResultSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
 
 watch(
   () => [formData.value.transport_type, formData.value.url],
   () => {
     lastTestOk.value = null
+    testResult.value = null
   },
 )
 
@@ -380,7 +548,8 @@ async function handleTestConnection() {
       message: t('mcpSettings.toasts.noResponse') as string,
     }
     lastTestOk.value = safe.success === true
-    emit('test', { service: props.service, result: safe })
+    testResult.value = safe
+    scrollToTestResult()
   } catch (error: any) {
     MessagePlugin.closeAll()
     const errorMessage =
@@ -389,10 +558,8 @@ async function handleTestConnection() {
       (t('mcpSettings.toasts.testFailed') as string)
     console.error('Failed to test MCP service:', error)
     lastTestOk.value = false
-    emit('test', {
-      service: props.service,
-      result: { success: false, message: errorMessage },
-    })
+    testResult.value = { success: false, message: errorMessage }
+    scrollToTestResult()
   } finally {
     testing.value = false
   }
@@ -451,7 +618,7 @@ const resetForm = () => {
     enabled: true,
     transport_type: 'sse',
     url: '',
-    auth_config: { api_key: '', token: '' },
+    auth_config: { auth_type: '', api_key: '', token: '', scopes: [], auth_server_metadata_url: '' },
     advanced_config: { timeout: 30, retry_count: 3, retry_delay: 1 },
   }
   formRef.value?.clearValidate()
@@ -462,6 +629,7 @@ watch(
   (service) => {
     // 切到不同服务（或新增）时清空上次测试反馈，避免旧的 ✓/✗ 漂在新表单上
     lastTestOk.value = null
+    testResult.value = null
     if (service) {
       const transportType = service.transport_type === 'stdio' ? 'sse' : (service.transport_type || 'sse')
       formData.value = {
@@ -472,13 +640,21 @@ watch(
         url: service.url || '',
         // Credentials are owned by CredentialResource in edit mode, but reset
         // the local state too so a switch to add-mode starts clean.
-        auth_config: { api_key: '', token: '' },
+        auth_config: {
+          auth_type: (service.auth_config?.auth_type as '' | 'api_key' | 'bearer' | 'oauth') || '',
+          api_key: '',
+          token: '',
+          scopes: service.auth_config?.scopes ? [...service.auth_config.scopes] : [],
+          auth_server_metadata_url: service.auth_config?.auth_server_metadata_url || '',
+        },
         advanced_config: {
           timeout: service.advanced_config?.timeout || 30,
           retry_count: service.advanced_config?.retry_count || 3,
           retry_delay: service.advanced_config?.retry_delay || 1,
         },
       }
+      oauthAuthorized.value = false
+      refreshOAuthStatus()
     } else {
       resetForm()
     }
@@ -501,18 +677,34 @@ const handleSubmit = async () => {
       url: formData.value.url || undefined,
     }
 
+    // Non-secret auth config (strategy + OAuth params) flows through the main
+    // body on both create and update. Secret fields are handled separately:
+    // on create they ride along in the POST; on edit they go through the
+    // /credentials subresource.
+    const auth: NonNullable<MCPService['auth_config']> = {
+      auth_type: formData.value.auth_config.auth_type,
+    }
+    if (isOAuth.value) {
+      auth.scopes = formData.value.auth_config.scopes
+      if (formData.value.auth_config.auth_server_metadata_url) {
+        auth.auth_server_metadata_url = formData.value.auth_config.auth_server_metadata_url
+      }
+    }
+
     if (props.mode === 'add') {
       // Initial credentials go along with the first POST. Subsequent edits
       // route through the /credentials subresource.
-      const initialAuth: NonNullable<MCPService['auth_config']> = {}
-      if (formData.value.auth_config.api_key) initialAuth.api_key = formData.value.auth_config.api_key
-      if (formData.value.auth_config.token) initialAuth.token = formData.value.auth_config.token
-      if (Object.keys(initialAuth).length > 0) data.auth_config = initialAuth
+      if (!isOAuth.value) {
+        if (formData.value.auth_config.api_key) auth.api_key = formData.value.auth_config.api_key
+        if (formData.value.auth_config.token) auth.token = formData.value.auth_config.token
+      }
+      data.auth_config = auth
       await createMCPService(data)
       MessagePlugin.success(t('mcpServiceDialog.toasts.created'))
     } else {
       // Edit-mode: never send credential fields here. CredentialResource
       // already committed any changes through the dedicated endpoint.
+      data.auth_config = auth
       await updateMCPService(props.service!.id, data)
       MessagePlugin.success(t('mcpServiceDialog.toasts.updated'))
     }
@@ -539,6 +731,35 @@ const handleClose = () => {
 // ---- 抽屉内容 — 与 ModelEditorDialog 同款约定 ----
 .form-item {
   margin-bottom: 0;
+}
+
+.oauth-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.test-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  .setting-drawer__section-title {
+    margin-bottom: 0;
+  }
+
+  .test-result-close {
+    flex-shrink: 0;
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.oauth-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
 }
 
 .form-label {
