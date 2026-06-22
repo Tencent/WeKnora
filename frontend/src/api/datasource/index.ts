@@ -103,6 +103,13 @@ export function listResources(id: string, parentId?: string) {
   return get(`/api/v1/datasource/${id}/resources${query}`, { timeout: 120000 })
 }
 
+// resolveResourceAncestors returns the ExternalIDs of every parent that must be
+// expanded to reveal the given (possibly deeply nested) selections in a lazily
+// loaded picker. Used when editing a data source to restore an existing selection.
+export function resolveResourceAncestors(id: string, resourceIds: string[]) {
+  return post(`/api/v1/datasource/${id}/resource-ancestors`, { resource_ids: resourceIds }, { timeout: 120000 })
+}
+
 export function triggerSync(id: string) {
   return post(`/api/v1/datasource/${id}/sync`, {})
 }

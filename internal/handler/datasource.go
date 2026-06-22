@@ -366,6 +366,54 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 	c.JSON(http.StatusOK, resources)
 }
 
+// @Summary Resolve resource ancestors
+// @Description Resolve the ancestor ExternalIDs that must be expanded to reveal the given (possibly deeply nested) resources in a lazily-loaded picker. Used to restore an existing selection when editing a data source.
+// @Tags DataSource
+// @Accept json
+// @Produce json
+// @Param id path string true "Data source ID"
+// @Param request body resolveAncestorsRequest true "Resource IDs to resolve"
+// @Success 200 {object} map[string][]string
+// @Failure 400 {object} map[string]string
+// @Router /datasource/{id}/resource-ancestors [post]
+func (h *DataSourceHandler) ResolveResourceAncestors(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID := h.getTenantID(c)
+	if tenantID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	id := c.Param("id")
+
+	if _, status, msg := h.getOwnedDataSource(ctx, tenantID, id); status != http.StatusOK {
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	var req resolveAncestorsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ancestors, err := h.service.ResolveResourceAncestors(ctx, id, req.ResourceIDs)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if ancestors == nil {
+		ancestors = make([]string, 0)
+	}
+	c.JSON(http.StatusOK, gin.H{"ancestors": ancestors})
+}
+
+// resolveAncestorsRequest is the body for ResolveResourceAncestors.
+type resolveAncestorsRequest struct {
+	ResourceIDs []string `json:"resource_ids"`
+}
+
 // ManualSync godoc
 // @Summary Trigger immediate sync
 // @Description Trigger an immediate sync for a data source

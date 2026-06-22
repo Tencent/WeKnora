@@ -9,6 +9,7 @@ import {
   validateConnection,
   validateCredentials,
   listResources,
+  resolveResourceAncestors,
   deleteDataSource,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
@@ -141,6 +142,10 @@ const expandedResourceIds = ref(new Set<string>())
 // one level at a time instead of traversing the whole tree up front (#1672).
 const loadedChildrenIds = ref(new Set<string>())
 const loadingChildrenIds = ref(new Set<string>())
+// True when the initial listing already returned the whole tree (connectors like
+// Notion populate parent_id on the first call). In that case expanding a node
+// never needs an extra request.
+const treeFullyLoaded = ref(false)
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
@@ -204,12 +209,12 @@ function toggleExpand(id: string) {
 }
 
 // ensureChildrenLoaded fetches the direct children of a node on demand. It is a
-// no-op when the children are already present (e.g. connectors that return the
-// full tree in one call) or have already been fetched.
+// no-op when the connector already delivered the whole tree in one call (e.g.
+// Notion) or when this node's children have already been fetched.
 async function ensureChildrenLoaded(id: string) {
   if (!tempDsId.value) return
   if (loadedChildrenIds.value.has(id) || loadingChildrenIds.value.has(id)) return
-  if ((childrenMap.value.get(id) || []).length > 0) {
+  if (treeFullyLoaded.value) {
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
     return
   }
@@ -360,6 +365,7 @@ watch(visible, async (v) => {
   expandedResourceIds.value = new Set()
   loadedChildrenIds.value = new Set()
   loadingChildrenIds.value = new Set()
+  treeFullyLoaded.value = false
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -482,6 +488,9 @@ async function loadResources() {
     }
     loadedChildrenIds.value = parentsWithChildren
     loadingChildrenIds.value = new Set<string>()
+    // If any resource already has a parent, the connector returned the whole tree
+    // up front, so per-node lazy fetching is unnecessary.
+    treeFullyLoaded.value = parentsWithChildren.size > 0
     // Auto-expand top-level nodes whose children are already loaded; lazy nodes
     // (children not yet fetched) stay collapsed until the user expands them.
     expandedResourceIds.value = new Set(
@@ -489,10 +498,37 @@ async function loadResources() {
         .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
         .map(r => r.external_id),
     )
+    // When editing a lazily-loaded source, reveal pre-existing selections that
+    // live below the (not-yet-loaded) tree so they are visible and checked.
+    if (isEdit.value && !treeFullyLoaded.value) {
+      const loaded = new Set(resources.value.map(r => r.external_id))
+      const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+      if (hidden.length > 0) void revealExistingSelections(hidden)
+    }
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
   loadingResources.value = false
+}
+
+// revealExistingSelections asks the backend which ancestors must be expanded to
+// surface the current (possibly deeply nested) selection, then loads each level
+// so the saved selection becomes visible and correctly checked in the tree.
+async function revealExistingSelections(hiddenIds: string[]) {
+  if (!tempDsId.value || hiddenIds.length === 0) return
+  try {
+    const res = await resolveResourceAncestors(tempDsId.value, hiddenIds)
+    const ancestors: string[] = res?.data?.ancestors || res?.ancestors || []
+    if (ancestors.length === 0) return
+    const expanded = new Set(expandedResourceIds.value)
+    for (const id of ancestors) expanded.add(id)
+    expandedResourceIds.value = expanded
+    // Load each ancestor level (children include the next ancestor / the
+    // selection itself); calls are independent and dedup on merge.
+    await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  }
 }
 
 function getDescendantIds(id: string): string[] {

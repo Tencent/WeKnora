@@ -27,6 +27,20 @@ type Connector interface {
 	// non-empty parentID.
 	ListResources(ctx context.Context, config *types.DataSourceConfig, parentID string) ([]types.Resource, error)
 
+	// ResolveResourceAncestors resolves, for each of the given resource IDs, the
+	// ExternalIDs of every ancestor whose direct children must be loaded so a
+	// lazily-loaded picker can reveal a pre-existing (possibly deeply nested)
+	// selection. The returned set is deduplicated and unordered.
+	//
+	// It exists so connectors that load their tree one level at a time (e.g. the
+	// Feishu wiki) can expose, in O(depth) per selection, the path back to the
+	// root without re-traversing the whole tree. Connectors that already return
+	// the full tree (Notion) or a flat list (Yuque) have nothing to reveal and
+	// return an empty slice.
+	ResolveResourceAncestors(
+		ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+	) ([]string, error)
+
 	// FetchAll performs a full sync of the specified resources.
 	// Returns all items from the given resource IDs.
 	FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error)

@@ -1716,6 +1716,7 @@ func RegisterDataSourceRoutes(
 		// Connection and resource management — Admin+
 		ds.POST("/:id/validate", g.Admin(), handler.ValidateConnection)
 		ds.GET("/:id/resources", g.Admin(), handler.ListAvailableResources)
+		ds.POST("/:id/resource-ancestors", g.Admin(), handler.ResolveResourceAncestors)
 
 		// Sync management — Admin+
 		ds.POST("/:id/sync", g.Admin(), handler.ManualSync)

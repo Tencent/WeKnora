@@ -529,6 +529,69 @@ func TestConnectorListResources_LazyLoadsOneLevel(t *testing.T) {
 	}
 }
 
+// TestConnectorResolveResourceAncestors verifies that the ancestor chain of a
+// deeply nested selection is resolved (so an edit-mode picker can reveal it)
+// without listing the whole tree.
+func TestConnectorResolveResourceAncestors(t *testing.T) {
+	topNodes := []wikiNode{
+		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true},
+	}
+	childNodes := map[string][]wikiNode{
+		"nt-root": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", HasChild: true},
+		},
+		"nt-child": {
+			{NodeToken: "nt-grandchild", ObjToken: "obj-gc", ObjType: "docx", Title: "Grandchild"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
+	defer ts.Close()
+
+	c := NewConnector()
+
+	// A deeply nested node resolves to its space plus every intermediate parent.
+	ancestors, err := c.ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"space1:nt-grandchild"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors error: %v", err)
+	}
+	got := make(map[string]bool)
+	for _, a := range ancestors {
+		got[a] = true
+	}
+	for _, want := range []string{"space1", "space1:nt-root", "space1:nt-child"} {
+		if !got[want] {
+			t.Fatalf("missing ancestor %q, got %+v", want, ancestors)
+		}
+	}
+	if got["space1:nt-grandchild"] {
+		t.Fatalf("selection itself must not be returned as its own ancestor: %+v", ancestors)
+	}
+
+	// A top-level node only needs its space loaded.
+	ancestors, err = c.ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"space1:nt-root"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(top-level) error: %v", err)
+	}
+	if len(ancestors) != 1 || ancestors[0] != "space1" {
+		t.Fatalf("want [space1] for a top-level node, got %+v", ancestors)
+	}
+
+	// A whole-space selection is already top-level: nothing to reveal.
+	ancestors, err = c.ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"space1"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(space) error: %v", err)
+	}
+	if len(ancestors) != 0 {
+		t.Fatalf("want no ancestors for a space selection, got %+v", ancestors)
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // FetchAll: test all supported doc types
 // ──────────────────────────────────────────────────────────────────────

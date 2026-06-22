@@ -47,6 +47,12 @@ type DataSourceService interface {
 	// parentID enables lazy loading: "" lists the top level, a resource ExternalID lists its children.
 	ListAvailableResources(ctx context.Context, dsID string, parentID string) ([]types.Resource, error)
 
+	// ResolveResourceAncestors returns the deduplicated ExternalIDs of every
+	// ancestor that must be expanded to reveal the given (possibly deeply nested)
+	// resources in a lazily-loaded picker. Used to restore an existing selection
+	// when editing a data source.
+	ResolveResourceAncestors(ctx context.Context, dsID string, resourceIDs []string) ([]string, error)
+
 	// ManualSync triggers an immediate sync for a data source
 	ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error)
 

@@ -40,6 +40,14 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	return nil
 }
 
+// ResolveResourceAncestors has nothing to do for Yuque: repositories are a flat
+// list with no nesting, so a selection has no ancestors to reveal.
+func (c *Connector) ResolveResourceAncestors(
+	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+) ([]string, error) {
+	return []string{}, nil
+}
+
 // ListResources returns all repos (personal + team) accessible to the token.
 // Serial fetch for v1 (user groups typically <10). TODO(perf): parallelize if slow.
 func (c *Connector) ListResources(

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -98,6 +99,61 @@ func (c *Connector) ListResources(
 		resources = append(resources, wikiNodeToResource(spaceID, node))
 	}
 	return resources, nil
+}
+
+// ResolveResourceAncestors returns the resource IDs of every parent that has to
+// be expanded so the lazily-loaded picker can reveal each given selection. For a
+// selected node "spaceID:nodeToken" that is its space plus every intermediate
+// node up the tree; the walk uses GetWikiNode (parent_node_token) and is O(depth)
+// per selection, so it never re-traverses the whole wiki.
+func (c *Connector) ResolveResourceAncestors(
+	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+) ([]string, error) {
+	feishuConfig, err := parseFeishuConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	client := NewClient(feishuConfig)
+
+	seen := make(map[string]bool)
+	ancestors := make([]string, 0)
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ancestors = append(ancestors, id)
+		}
+	}
+
+	for _, rid := range resourceIDs {
+		spaceID, nodeToken := parseWikiResourceID(rid)
+		if spaceID == "" || nodeToken == "" {
+			// A space-level selection is already a top-level node in the picker;
+			// there is nothing above it to reveal.
+			continue
+		}
+		// The space's direct children must be loaded to reveal the top-level node.
+		add(spaceID)
+
+		// Walk up from the selection to the top, loading each intermediate
+		// parent so the path down to the selection becomes visible.
+		current := nodeToken
+		for current != "" {
+			node, err := client.GetWikiNode(ctx, spaceID, current)
+			if err != nil {
+				// Best-effort: a broken path just stays collapsed, the rest of
+				// the selections are still revealed.
+				logger.Warnf(ctx, "[Feishu] resolve ancestors: get node %s:%s: %v", spaceID, current, err)
+				break
+			}
+			if node.ParentNodeID == "" {
+				break
+			}
+			add(makeWikiNodeResourceID(spaceID, node.ParentNodeID))
+			current = node.ParentNodeID
+		}
+	}
+
+	return ancestors, nil
 }
 
 // FetchAll performs a full sync of all documents from the specified wiki spaces.

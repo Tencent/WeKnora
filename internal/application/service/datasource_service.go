@@ -381,6 +381,39 @@ func (s *DataSourceService) ListAvailableResources(
 	return resources, nil
 }
 
+// ResolveResourceAncestors resolves the ancestor ExternalIDs needed to reveal the
+// given resources in a lazily-loaded picker (see the connector method for details).
+func (s *DataSourceService) ResolveResourceAncestors(
+	ctx context.Context, dsID string, resourceIDs []string,
+) ([]string, error) {
+	if len(resourceIDs) == 0 {
+		return []string{}, nil
+	}
+
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return nil, err
+	}
+
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return nil, datasource.ErrInvalidConfig
+	}
+
+	ancestors, err := connector.ResolveResourceAncestors(ctx, config, resourceIDs)
+	if err != nil {
+		logger.Errorf(ctx, "failed to resolve resource ancestors: %v", err)
+		return nil, err
+	}
+
+	return ancestors, nil
+}
+
 // ManualSync triggers an immediate sync for a data source
 func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error) {
 	ds, err := s.GetDataSource(ctx, dsID)
