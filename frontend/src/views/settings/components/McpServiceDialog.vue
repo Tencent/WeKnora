@@ -150,6 +150,44 @@
           <label class="form-label required">{{ t('mcpServiceDialog.serviceUrl') }}</label>
           <t-input v-model="formData.url" :placeholder="t('mcpServiceDialog.serviceUrlPlaceholder')" />
         </div>
+
+        <!-- 自定义请求头：附加到每次 MCP 请求的 HTTP header（与模型管理同款交互） -->
+        <div class="form-item">
+          <div class="custom-headers-header">
+            <label class="form-label" style="margin-bottom: 0">
+              {{ t('mcpServiceDialog.customHeaders.label') }}
+            </label>
+            <t-button variant="text" size="small" theme="primary" @click="addCustomHeader">
+              <template #icon><t-icon name="add" /></template>
+              {{ t('mcpServiceDialog.customHeaders.add') }}
+            </t-button>
+          </div>
+          <p class="form-desc custom-headers-desc">{{ t('mcpServiceDialog.customHeaders.desc') }}</p>
+          <div v-if="formData.headers.length > 0" class="custom-headers-list">
+            <div v-for="(item, idx) in formData.headers" :key="idx" class="custom-header-row">
+              <t-input
+                v-model="item.key"
+                :placeholder="t('mcpServiceDialog.customHeaders.keyPlaceholder')"
+                class="custom-header-key"
+              />
+              <t-input
+                v-model="item.value"
+                :placeholder="t('mcpServiceDialog.customHeaders.valuePlaceholder')"
+                class="custom-header-value"
+              />
+              <t-button
+                variant="text"
+                shape="square"
+                size="small"
+                class="custom-header-remove"
+                :aria-label="t('common.delete')"
+                @click="removeCustomHeader(idx)"
+              >
+                <t-icon name="close" />
+              </t-button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- Section 3 — 认证配置（无 / API Key / Bearer Token / OAuth） -->
@@ -366,6 +404,10 @@ const formData = ref({
   enabled: true,
   transport_type: 'sse' as 'sse' | 'http-streamable',
   url: '',
+  // Custom HTTP headers attached to every MCP request — edited as key/value
+  // rows here, serialised to a Record<string,string> on submit (top-level
+  // `headers`). Independent of the auth strategy.
+  headers: [] as { key: string; value: string }[],
   auth_config: {
     // Authentication strategy: '' (none) | 'api_key' | 'bearer' | 'oauth'.
     auth_type: '' as '' | 'api_key' | 'bearer' | 'oauth',
@@ -382,6 +424,14 @@ const formData = ref({
     retry_delay: 1,
   },
 })
+
+// ---- Custom headers (key/value editor, same UX as ModelEditorDialog) ----
+const addCustomHeader = () => {
+  formData.value.headers.push({ key: '', value: '' })
+}
+const removeCustomHeader = (idx: number) => {
+  formData.value.headers.splice(idx, 1)
+}
 
 // ---- Code import (paste standard mcpServers JSON) ----
 const codeImportOpen = ref(false)
@@ -411,12 +461,12 @@ function applyServerConfig(name: string, cfg: Record<string, unknown>) {
     transport = /\/sse\/?($|\?)/i.test(url) ? 'sse' : 'http-streamable'
   }
 
-  // Auth: recognise Bearer / API-key headers; other headers can't be held by
-  // the form, so collect them to warn the user about what was dropped.
+  // Auth: recognise Bearer / API-key headers; every other header lands in the
+  // custom-headers editor so nothing is silently dropped.
   let authType: '' | 'api_key' | 'bearer' = ''
   let token = ''
   let apiKey = ''
-  const ignoredHeaders: string[] = []
+  const customHeaders: { key: string; value: string }[] = []
   const headers = (cfg.headers && typeof cfg.headers === 'object')
     ? (cfg.headers as Record<string, unknown>)
     : {}
@@ -430,7 +480,7 @@ function applyServerConfig(name: string, cfg: Record<string, unknown>) {
       authType = 'api_key'
       apiKey = strVal.trim()
     } else {
-      ignoredHeaders.push(key)
+      customHeaders.push({ key, value: strVal })
     }
   }
 
@@ -438,16 +488,12 @@ function applyServerConfig(name: string, cfg: Record<string, unknown>) {
   formData.value.url = url
   formData.value.transport_type = transport
   if (typeof cfg.description === 'string') formData.value.description = cfg.description
+  formData.value.headers = customHeaders
   formData.value.auth_config.auth_type = authType
   formData.value.auth_config.token = token
   formData.value.auth_config.api_key = apiKey
   formData.value.auth_config.scopes = []
 
-  if (ignoredHeaders.length) {
-    MessagePlugin.warning(
-      t('mcpServiceDialog.codeImport.toasts.ignoredHeaders', { headers: ignoredHeaders.join(', ') }) as string,
-    )
-  }
   return true
 }
 
@@ -778,6 +824,7 @@ const resetForm = () => {
     enabled: true,
     transport_type: 'sse',
     url: '',
+    headers: [],
     auth_config: { auth_type: '', api_key: '', token: '', scopes: [], auth_server_metadata_url: '' },
     advanced_config: { timeout: 30, retry_count: 3, retry_delay: 1 },
   }
@@ -802,6 +849,9 @@ watch(
         enabled: service.enabled ?? true,
         transport_type: transportType as 'sse' | 'http-streamable',
         url: service.url || '',
+        headers: service.headers
+          ? Object.entries(service.headers).map(([key, value]) => ({ key, value: String(value) }))
+          : [],
         // Credentials are owned by CredentialResource in edit mode, but reset
         // the local state too so a switch to add-mode starts clean.
         auth_config: {
@@ -832,6 +882,15 @@ const handleSubmit = async () => {
 
   submitting.value = true
   try {
+    // Custom headers: trim, drop blank rows, collapse to a Record. Always send
+    // the field (even when empty) so removing the last header persists on edit.
+    const headersMap: Record<string, string> = {}
+    for (const item of formData.value.headers) {
+      const key = (item.key ?? '').trim()
+      const value = (item.value ?? '').trim()
+      if (key && value) headersMap[key] = value
+    }
+
     const data: Partial<MCPService> = {
       name: formData.value.name,
       description: formData.value.description,
@@ -839,6 +898,7 @@ const handleSubmit = async () => {
       transport_type: formData.value.transport_type,
       advanced_config: formData.value.advanced_config,
       url: formData.value.url || undefined,
+      headers: headersMap,
     }
 
     // Non-secret auth config (strategy + OAuth params) flows through the main
@@ -899,6 +959,48 @@ const handleClose = () => {
 // ---- 抽屉内容 — 与 ModelEditorDialog 同款约定 ----
 .form-item {
   margin-bottom: 0;
+}
+
+// ---- 自定义请求头（与 ModelEditorDialog 同款 key/value 行） ----
+.custom-headers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.custom-headers-desc {
+  margin: 4px 0 8px;
+}
+
+.custom-headers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-header-key {
+  flex: 0 0 38%;
+}
+
+.custom-header-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.custom-header-remove {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--td-error-color);
+  }
 }
 
 // ---- 从代码导入 ----

@@ -4384,6 +4384,13 @@ export default {
       createFailed: "MCP 서비스 생성 실패",
       updateFailed: "MCP 서비스 업데이트 실패",
     },
+    customHeaders: {
+      label: "사용자 지정 헤더(선택 사항)",
+      desc: "모든 MCP 요청에 추가되는 HTTP 헤더로, 기업 게이트웨이 인증, 추적 등에 자주 사용됩니다.",
+      add: "헤더 추가",
+      keyPlaceholder: "헤더 이름",
+      valuePlaceholder: "헤더 값",
+    },
     codeImport: {
       toggle: "코드에서 가져오기",
       hint: "표준 mcpServers JSON 설정을 붙여넣으면 양식이 자동으로 채워집니다",
@@ -4401,7 +4408,6 @@ export default {
       toasts: {
         filled: "양식이 채워졌습니다. 확인 후 저장해 주세요",
         multipleServers: "여러 서비스가 감지되어 첫 번째 항목을 가져왔습니다: {name}",
-        ignoredHeaders: "다음 헤더는 가져오지 않았습니다: {headers}",
       },
     },
   },

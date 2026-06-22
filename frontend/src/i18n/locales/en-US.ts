@@ -4388,6 +4388,13 @@ export default {
       createFailed: 'Failed to create MCP service',
       updateFailed: 'Failed to update MCP service'
     },
+    customHeaders: {
+      label: 'Custom Headers (optional)',
+      desc: 'HTTP headers attached to every MCP request, commonly used for enterprise gateway auth, tracing, etc.',
+      add: 'Add Header',
+      keyPlaceholder: 'Header name',
+      valuePlaceholder: 'Header value'
+    },
     codeImport: {
       toggle: 'Import from code',
       hint: 'Paste a standard mcpServers JSON config to auto-fill the form',
@@ -4404,8 +4411,7 @@ export default {
       },
       toasts: {
         filled: 'Form filled, please review and save',
-        multipleServers: 'Multiple services detected, imported the first one: {name}',
-        ignoredHeaders: 'The following headers were not imported: {headers}'
+        multipleServers: 'Multiple services detected, imported the first one: {name}'
       }
     }
   },

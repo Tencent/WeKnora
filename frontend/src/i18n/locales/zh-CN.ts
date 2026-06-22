@@ -4406,6 +4406,13 @@ export default {
       revoked: "已撤销授权",
       revokeFailed: "撤销失败",
     },
+    customHeaders: {
+      label: "自定义请求头（可选）",
+      desc: "附加到每次 MCP 请求的 HTTP 请求头，常用于企业网关鉴权、链路追踪等场景。",
+      add: "添加请求头",
+      keyPlaceholder: "Header 名称",
+      valuePlaceholder: "Header 值",
+    },
     codeImport: {
       toggle: "从代码导入",
       hint: "粘贴标准 mcpServers JSON 配置，自动填充表单",
@@ -4423,7 +4430,6 @@ export default {
       toasts: {
         filled: "已填充表单，请检查后保存",
         multipleServers: "检测到多个服务，已导入第一个：{name}",
-        ignoredHeaders: "以下 header 未导入：{headers}",
       },
     },
   },
