@@ -126,7 +126,7 @@
         -->
         <div v-if="authStore.isSystemAdmin" class="menu-item" @click="handleSystemAdmin">
           <t-icon name="server" class="menu-icon" />
-          <span>系统管理</span>
+          <span>{{ $t('settings.system') }}</span>
         </div>
         <!-- 切换租户入口在下拉「当前租户」区块 hover；此处仅为分隔线与菜单项。 -->
         <div class="menu-divider"></div>
