@@ -112,6 +112,7 @@
       :service="currentService"
       :mode="dialogMode"
       @success="handleDialogSuccess"
+      @created="handleDialogCreated"
     />
   </div>
 </template>
@@ -182,10 +183,22 @@ const handleEdit = (service: MCPService) => {
   dialogVisible.value = true
 }
 
-// Handle dialog success
+// Handle dialog success (edit-mode update): close + refresh.
 const handleDialogSuccess = () => {
   dialogVisible.value = false
   loadServices()
+}
+
+// Handle first create: keep the drawer open and flip it to edit mode bound to
+// the newly created service, so OAuth authorization and "test connection"
+// (both of which need a saved service id) are usable right away. The list is
+// refreshed in the background; we prefer the freshly-fetched record so the
+// edit form sees server-side fields (e.g. credential metadata).
+const handleDialogCreated = async (created: MCPService) => {
+  await loadServices()
+  const full = services.value.find((s) => s.id === created.id) || created
+  currentService.value = { ...full }
+  dialogMode.value = 'edit'
 }
 
 // Handle toggle enabled/disabled

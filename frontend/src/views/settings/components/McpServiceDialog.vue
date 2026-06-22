@@ -59,6 +59,35 @@
     </template>
 
     <t-form ref="formRef" :data="formData" :rules="rules" label-align="top">
+      <!--
+        从代码导入：粘贴标准 mcpServers JSON，纯前端解析后填回表单。
+        不自动提交；用户检查后再点保存。
+      -->
+      <section class="setting-drawer__section code-import">
+        <button type="button" class="code-import__toggle" @click="codeImportOpen = !codeImportOpen">
+          <t-icon :name="codeImportOpen ? 'chevron-down' : 'chevron-right'" />
+          <span>{{ t('mcpServiceDialog.codeImport.toggle') }}</span>
+        </button>
+        <div v-if="codeImportOpen" class="code-import__body">
+          <p class="form-desc">{{ t('mcpServiceDialog.codeImport.hint') }}</p>
+          <p v-if="mode === 'edit'" class="form-desc code-import__warn">
+            {{ t('mcpServiceDialog.codeImport.editOverwriteHint') }}
+          </p>
+          <t-textarea
+            v-model="codeImportText"
+            :autosize="{ minRows: 5, maxRows: 14 }"
+            :placeholder="t('mcpServiceDialog.codeImport.placeholder')"
+            class="code-import__textarea"
+          />
+          <p v-if="codeImportError" class="code-import__error">{{ codeImportError }}</p>
+          <div class="code-import__actions">
+            <t-button theme="primary" variant="outline" @click="handleCodeImport">
+              {{ t('mcpServiceDialog.codeImport.parse') }}
+            </t-button>
+          </div>
+        </div>
+      </section>
+
       <!-- Section 1 — 基本信息 -->
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('mcpServiceDialog.basicSection', '基本信息') }}</h4>
@@ -319,6 +348,9 @@ interface Props {
 interface Emits {
   (e: 'update:visible', value: boolean): void
   (e: 'success'): void
+  // Emitted after a successful create; carries the newly created service so
+  // the parent can transition the drawer to edit mode without closing it.
+  (e: 'created', service: MCPService): void
 }
 
 const props = defineProps<Props>()
@@ -350,6 +382,134 @@ const formData = ref({
     retry_delay: 1,
   },
 })
+
+// ---- Code import (paste standard mcpServers JSON) ----
+const codeImportOpen = ref(false)
+const codeImportText = ref('')
+const codeImportError = ref('')
+
+// Map a raw MCP server config object onto the form. Stdio is rejected.
+function applyServerConfig(name: string, cfg: Record<string, unknown>) {
+  if (cfg.command) {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.stdioUnsupported')
+    return false
+  }
+  const url = typeof cfg.url === 'string' ? cfg.url.trim() : ''
+  if (!url) {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.missingUrl')
+    return false
+  }
+
+  // Transport: explicit type/transport wins, else guess from the URL shape.
+  const rawType = String(cfg.type ?? cfg.transport ?? '').toLowerCase()
+  let transport: 'sse' | 'http-streamable'
+  if (rawType === 'sse') {
+    transport = 'sse'
+  } else if (['http', 'http-streamable', 'streamable-http', 'streamablehttp', 'streamable_http'].includes(rawType)) {
+    transport = 'http-streamable'
+  } else {
+    transport = /\/sse\/?($|\?)/i.test(url) ? 'sse' : 'http-streamable'
+  }
+
+  // Auth: recognise Bearer / API-key headers; other headers can't be held by
+  // the form, so collect them to warn the user about what was dropped.
+  let authType: '' | 'api_key' | 'bearer' = ''
+  let token = ''
+  let apiKey = ''
+  const ignoredHeaders: string[] = []
+  const headers = (cfg.headers && typeof cfg.headers === 'object')
+    ? (cfg.headers as Record<string, unknown>)
+    : {}
+  for (const [key, val] of Object.entries(headers)) {
+    const lowerKey = key.toLowerCase()
+    const strVal = typeof val === 'string' ? val : String(val ?? '')
+    if (lowerKey === 'authorization' && /^bearer\s+/i.test(strVal)) {
+      authType = 'bearer'
+      token = strVal.replace(/^bearer\s+/i, '').trim()
+    } else if (['x-api-key', 'api-key', 'apikey'].includes(lowerKey)) {
+      authType = 'api_key'
+      apiKey = strVal.trim()
+    } else {
+      ignoredHeaders.push(key)
+    }
+  }
+
+  formData.value.name = name || formData.value.name
+  formData.value.url = url
+  formData.value.transport_type = transport
+  if (typeof cfg.description === 'string') formData.value.description = cfg.description
+  formData.value.auth_config.auth_type = authType
+  formData.value.auth_config.token = token
+  formData.value.auth_config.api_key = apiKey
+  formData.value.auth_config.scopes = []
+
+  if (ignoredHeaders.length) {
+    MessagePlugin.warning(
+      t('mcpServiceDialog.codeImport.toasts.ignoredHeaders', { headers: ignoredHeaders.join(', ') }) as string,
+    )
+  }
+  return true
+}
+
+const handleCodeImport = () => {
+  codeImportError.value = ''
+  const raw = codeImportText.value.trim()
+  if (!raw) {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.empty')
+    return
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.invalidJson')
+    return
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.noServer')
+    return
+  }
+
+  const obj = parsed as Record<string, unknown>
+  let name = ''
+  let cfg: Record<string, unknown> | null = null
+  let multiple = false
+
+  const servers = obj.mcpServers
+  if (servers && typeof servers === 'object') {
+    const entries = Object.entries(servers as Record<string, unknown>)
+    if (entries.length === 0) {
+      codeImportError.value = t('mcpServiceDialog.codeImport.errors.noServer')
+      return
+    }
+    multiple = entries.length > 1
+    name = entries[0][0]
+    cfg = entries[0][1] as Record<string, unknown>
+  } else if (obj.url || obj.command) {
+    // Bare single-server object (no mcpServers wrapper).
+    cfg = obj
+  } else {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.noServer')
+    return
+  }
+
+  if (!cfg || typeof cfg !== 'object') {
+    codeImportError.value = t('mcpServiceDialog.codeImport.errors.noServer')
+    return
+  }
+
+  if (!applyServerConfig(name, cfg)) return
+
+  formRef.value?.clearValidate()
+  if (multiple) {
+    MessagePlugin.info(
+      t('mcpServiceDialog.codeImport.toasts.multipleServers', { name }) as string,
+    )
+  } else {
+    MessagePlugin.success(t('mcpServiceDialog.codeImport.toasts.filled') as string)
+  }
+}
 
 // Comma/space separated text binding for OAuth scopes.
 const oauthScopesText = computed({
@@ -630,6 +790,10 @@ watch(
     // 切到不同服务（或新增）时清空上次测试反馈，避免旧的 ✓/✗ 漂在新表单上
     lastTestOk.value = null
     testResult.value = null
+    // 同时重置代码导入区域，避免上一个服务残留的粘贴内容/报错漂到新表单
+    codeImportOpen.value = false
+    codeImportText.value = ''
+    codeImportError.value = ''
     if (service) {
       const transportType = service.transport_type === 'stdio' ? 'sse' : (service.transport_type || 'sse')
       formData.value = {
@@ -699,17 +863,21 @@ const handleSubmit = async () => {
         if (formData.value.auth_config.token) auth.token = formData.value.auth_config.token
       }
       data.auth_config = auth
-      await createMCPService(data)
+      const created = await createMCPService(data)
       MessagePlugin.success(t('mcpServiceDialog.toasts.created'))
+      // Keep the drawer open and hand back the new service so the parent can
+      // flip it into edit mode in place — OAuth authorization and "test
+      // connection" both need a saved service id, so transitioning here lets
+      // the user do them immediately instead of save → reopen.
+      emit('created', created)
     } else {
       // Edit-mode: never send credential fields here. CredentialResource
       // already committed any changes through the dedicated endpoint.
       data.auth_config = auth
       await updateMCPService(props.service!.id, data)
       MessagePlugin.success(t('mcpServiceDialog.toasts.updated'))
+      emit('success')
     }
-
-    emit('success')
   } catch (error) {
     MessagePlugin.error(
       props.mode === 'add'
@@ -731,6 +899,53 @@ const handleClose = () => {
 // ---- 抽屉内容 — 与 ModelEditorDialog 同款约定 ----
 .form-item {
   margin-bottom: 0;
+}
+
+// ---- 从代码导入 ----
+.code-import {
+  &__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+  }
+
+  &__body {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  &__warn {
+    color: var(--td-warning-color);
+  }
+
+  &__textarea :deep(textarea) {
+    font-family: var(--td-font-family-mono, monospace);
+    font-size: 12px;
+  }
+
+  &__error {
+    margin: 0;
+    font-size: 12px;
+    color: var(--td-error-color);
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+  }
 }
 
 .oauth-status {

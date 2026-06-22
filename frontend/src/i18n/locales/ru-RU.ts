@@ -4036,6 +4036,26 @@ export default {
       updated: 'Сервис MCP обновлён',
       createFailed: 'Не удалось создать сервис MCP',
       updateFailed: 'Не удалось обновить сервис MCP'
+    },
+    codeImport: {
+      toggle: 'Импорт из кода',
+      hint: 'Вставьте стандартную JSON-конфигурацию mcpServers для автозаполнения формы',
+      placeholder:
+        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
+      parse: 'Разобрать и заполнить',
+      editOverwriteHint: 'Импорт перезапишет текущую форму (сохранённые учётные данные не затрагиваются; нажмите «Сохранить», чтобы применить)',
+      errors: {
+        empty: 'Сначала вставьте конфигурацию',
+        invalidJson: 'Не удалось разобрать, проверьте формат JSON',
+        noServer: 'Конфигурация сервиса MCP не найдена',
+        missingUrl: 'В конфигурации отсутствует url',
+        stdioUnsupported: 'Конфигурации stdio (command/args) не поддерживаются; используйте удалённую конфигурацию с url'
+      },
+      toasts: {
+        filled: 'Форма заполнена, проверьте и сохраните',
+        multipleServers: 'Обнаружено несколько сервисов, импортирован первый: {name}',
+        ignoredHeaders: 'Следующие заголовки не импортированы: {headers}'
+      }
     }
   },
   manualEditor: {

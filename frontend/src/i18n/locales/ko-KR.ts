@@ -4384,6 +4384,26 @@ export default {
       createFailed: "MCP 서비스 생성 실패",
       updateFailed: "MCP 서비스 업데이트 실패",
     },
+    codeImport: {
+      toggle: "코드에서 가져오기",
+      hint: "표준 mcpServers JSON 설정을 붙여넣으면 양식이 자동으로 채워집니다",
+      placeholder:
+        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
+      parse: "파싱 후 채우기",
+      editOverwriteHint: "가져오기는 현재 양식을 덮어씁니다(저장된 자격 증명은 영향받지 않으며, 저장을 눌러야 적용됩니다)",
+      errors: {
+        empty: "먼저 설정을 붙여넣어 주세요",
+        invalidJson: "파싱할 수 없습니다. JSON 형식을 확인해 주세요",
+        noServer: "MCP 서비스 설정을 찾을 수 없습니다",
+        missingUrl: "설정에 url이 없습니다",
+        stdioUnsupported: "stdio(command/args) 설정은 지원되지 않습니다. url이 포함된 원격 설정을 사용해 주세요",
+      },
+      toasts: {
+        filled: "양식이 채워졌습니다. 확인 후 저장해 주세요",
+        multipleServers: "여러 서비스가 감지되어 첫 번째 항목을 가져왔습니다: {name}",
+        ignoredHeaders: "다음 헤더는 가져오지 않았습니다: {headers}",
+      },
+    },
   },
   promptTemplate: {
     noTemplates: "아직 템플릿이 없습니다.",

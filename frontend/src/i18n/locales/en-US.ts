@@ -4387,6 +4387,26 @@ export default {
       updated: 'MCP service updated',
       createFailed: 'Failed to create MCP service',
       updateFailed: 'Failed to update MCP service'
+    },
+    codeImport: {
+      toggle: 'Import from code',
+      hint: 'Paste a standard mcpServers JSON config to auto-fill the form',
+      placeholder:
+        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
+      parse: 'Parse & Fill',
+      editOverwriteHint: 'Importing overwrites the current form (saved credentials are unaffected; click Save to apply)',
+      errors: {
+        empty: 'Please paste the config first',
+        invalidJson: 'Unable to parse, please check the JSON format',
+        noServer: 'No MCP service config found',
+        missingUrl: 'The config is missing a url',
+        stdioUnsupported: 'stdio (command/args) configs are not supported; please use a remote config with a url'
+      },
+      toasts: {
+        filled: 'Form filled, please review and save',
+        multipleServers: 'Multiple services detected, imported the first one: {name}',
+        ignoredHeaders: 'The following headers were not imported: {headers}'
+      }
     }
   },
   promptTemplate: {

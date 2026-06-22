@@ -4406,6 +4406,26 @@ export default {
       revoked: "已撤销授权",
       revokeFailed: "撤销失败",
     },
+    codeImport: {
+      toggle: "从代码导入",
+      hint: "粘贴标准 mcpServers JSON 配置，自动填充表单",
+      placeholder:
+        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
+      parse: "解析并填充",
+      editOverwriteHint: "导入会覆盖当前表单内容（不影响已保存的凭证，需点保存生效）",
+      errors: {
+        empty: "请先粘贴配置内容",
+        invalidJson: "无法解析，请检查 JSON 格式",
+        noServer: "未找到 MCP 服务配置",
+        missingUrl: "配置缺少 url",
+        stdioUnsupported: "暂不支持 stdio（command/args）配置，请使用带 url 的远程配置",
+      },
+      toasts: {
+        filled: "已填充表单，请检查后保存",
+        multipleServers: "检测到多个服务，已导入第一个：{name}",
+        ignoredHeaders: "以下 header 未导入：{headers}",
+      },
+    },
   },
   promptTemplate: {
     noTemplates: "暂无模板",
