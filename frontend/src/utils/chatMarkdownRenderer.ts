@@ -181,10 +181,21 @@ const FLANKING_BOLD = /(?<!\*)\*\*(?=\S)([^*\n]*?\p{P})\*\*(?=[\p{L}\p{N}])/gu
 const FLANKING_STRIKE = /(?<!~)~~(?=\S)([^~\n]*?\p{P})~~(?=[\p{L}\p{N}])/gu
 const FLANKING_ITALIC = /(?<![*\p{L}\p{N}])\*(?=\S)([^*\n]*?\p{P})\*(?=[\p{L}\p{N}])/gu
 
+// Opening-delimiter variant of the rule above. CommonMark also refuses to *open*
+// emphasis when the run is preceded by a letter/number and immediately followed
+// by punctuation, so `知识库中**《手册》**整理` stays literal even though the
+// closing `**` is fine. The `(?=\p{P})` guard keeps exponent/glob/math markers
+// like `x**2`, `2**3**4`, and `**/*.js` untouched (those are followed by a
+// number or slash-as-content, not an emphasis-opening punctuation run).
+const FLANKING_BOLD_OPEN = /(?<=[\p{L}\p{N}])\*\*(?=\p{P})([^*\n]+?)\*\*/gu
+const FLANKING_STRIKE_OPEN = /(?<=[\p{L}\p{N}])~~(?=\p{P})([^~\n]+?)~~/gu
+
 function repairFlankingEmphasisSegment(segment: string): string {
   return segment
     .replace(FLANKING_BOLD, '<strong>$1</strong>')
+    .replace(FLANKING_BOLD_OPEN, '<strong>$1</strong>')
     .replace(FLANKING_STRIKE, '<del>$1</del>')
+    .replace(FLANKING_STRIKE_OPEN, '<del>$1</del>')
     .replace(FLANKING_ITALIC, '<em>$1</em>')
 }
 
@@ -194,10 +205,11 @@ function repairFlankingEmphasisSegment(segment: string): string {
  * CommonMark's flanking rule rejects a closing `**`/`*`/`~~` that is preceded by
  * punctuation and immediately followed by a letter/number, so a very common
  * model pattern like `**XBRL（…语言）**是一种` (and even ASCII `**a)**b`) renders
- * as literal asterisks — both mid-stream and when complete. We convert just that
- * blocked pattern (closing delimiter after punctuation, before an alphanumeric)
- * into explicit HTML so it bolds reliably. Code spans/fences are skipped so
- * their literal markers are untouched.
+ * as literal asterisks — both mid-stream and when complete. The mirror case is
+ * an *opening* `**`/`~~` preceded by a letter/number and immediately followed by
+ * punctuation (`知识库中**《手册》**整理`), which CommonMark also refuses to open.
+ * We convert just those blocked patterns into explicit HTML so they bold
+ * reliably. Code spans/fences are skipped so their literal markers are untouched.
  */
 export function repairFlankingEmphasis(text: string): string {
   if (!text || !/[*~]/.test(text)) return text

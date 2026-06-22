@@ -128,6 +128,15 @@ test('repairFlankingEmphasis bolds punctuation-adjacent emphasis CommonMark woul
   assert.equal(repairFlankingEmphasis('~~删除）~~文字'), '<del>删除）</del>文字')
   assert.equal(repairFlankingEmphasis('*斜体）*文字'), '<em>斜体）</em>文字')
 
+  // Opening delimiter sits between a letter/number and punctuation -> CommonMark
+  // refuses to open emphasis even though the closer is valid; we bold it too.
+  assert.equal(
+    repairFlankingEmphasis('知识库中**《xxx》学程手册**整理'),
+    '知识库中<strong>《xxx》学程手册</strong>整理',
+  )
+  assert.equal(repairFlankingEmphasis('在**《书名》**'), '在<strong>《书名》</strong>')
+  assert.equal(repairFlankingEmphasis('看到~~《删》文字~~后面'), '看到<del>《删》文字</del>后面')
+
   // Cases marked already handles, literal markers, and code must be untouched.
   assert.equal(repairFlankingEmphasis('**中文**后面'), '**中文**后面')
   assert.equal(repairFlankingEmphasis('**中文）** 后面'), '**中文）** 后面')
@@ -135,6 +144,10 @@ test('repairFlankingEmphasis bolds punctuation-adjacent emphasis CommonMark woul
   assert.equal(repairFlankingEmphasis('`**a)**b`'), '`**a)**b`')
   assert.equal(repairFlankingEmphasis('2 ** 3 ** 4'), '2 ** 3 ** 4')
   assert.equal(repairFlankingEmphasis('价格 3 * 5 * 7 元'), '价格 3 * 5 * 7 元')
+  // Exponent / glob markers stay literal: the opener is followed by a number or
+  // path content, not an emphasis-opening punctuation run.
+  assert.equal(repairFlankingEmphasis('x**2 + y**2'), 'x**2 + y**2')
+  assert.equal(repairFlankingEmphasis('2**3**4'), '2**3**4')
 })
 
 test('renderChatMarkdown bolds punctuation-adjacent emphasis both mid-stream and when complete', () => {
