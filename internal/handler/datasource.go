@@ -330,10 +330,11 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 }
 
 // @Summary List available resources in data source
-// @Description List resources available for sync in the external system
+// @Description List resources available for sync in the external system. Pass parent_id to lazily load the direct children of a resource (used for large hierarchical sources such as Feishu wiki).
 // @Tags DataSource
 // @Produce json
 // @Param id path string true "Data source ID"
+// @Param parent_id query string false "Parent resource ExternalID; empty lists the top level"
 // @Success 200 {object} []types.Resource
 // @Failure 400 {object} map[string]string
 // @Router /datasource/{id}/resources [get]
@@ -346,13 +347,14 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 	}
 
 	id := c.Param("id")
+	parentID := c.Query("parent_id")
 
 	if _, status, msg := h.getOwnedDataSource(ctx, tenantID, id); status != http.StatusOK {
 		c.JSON(status, gin.H{"error": msg})
 		return
 	}
 
-	resources, err := h.service.ListAvailableResources(ctx, id)
+	resources, err := h.service.ListAvailableResources(ctx, id, parentID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

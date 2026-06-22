@@ -43,8 +43,9 @@ type DataSourceService interface {
 	// This is used by the frontend "Test Connection" button before creating a data source.
 	ValidateCredentials(ctx context.Context, connectorType string, credentials map[string]interface{}) error
 
-	// ListAvailableResources lists resources available for sync in the external system
-	ListAvailableResources(ctx context.Context, dsID string) ([]types.Resource, error)
+	// ListAvailableResources lists resources available for sync in the external system.
+	// parentID enables lazy loading: "" lists the top level, a resource ExternalID lists its children.
+	ListAvailableResources(ctx context.Context, dsID string, parentID string) ([]types.Resource, error)
 
 	// ManualSync triggers an immediate sync for a data source
 	ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error)

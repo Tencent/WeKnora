@@ -18,7 +18,14 @@ type Connector interface {
 
 	// ListResources lists available resources that can be synced (documents, spaces, folders, etc.)
 	// Returns a list of Resource objects that the user can select for syncing.
-	ListResources(ctx context.Context, config *types.DataSourceConfig) ([]types.Resource, error)
+	//
+	// parentID controls lazy (on-demand) loading of hierarchical resources:
+	//   - parentID == "" → return the top-level resources (e.g. Feishu wiki spaces).
+	//   - parentID != "" → return only the direct children of that resource.
+	// Connectors whose listing is already flat or returns the full tree in a single
+	// call may ignore parentID for the root call and return an empty slice for any
+	// non-empty parentID.
+	ListResources(ctx context.Context, config *types.DataSourceConfig, parentID string) ([]types.Resource, error)
 
 	// FetchAll performs a full sync of the specified resources.
 	// Returns all items from the given resource IDs.

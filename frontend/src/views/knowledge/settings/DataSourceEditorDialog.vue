@@ -136,6 +136,11 @@ const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
 const selectedResourceIds = ref<string[]>([])
 const expandedResourceIds = ref(new Set<string>())
+// Lazy loading: parents whose children have already been fetched, and parents
+// currently being fetched. Used to load hierarchical sources (e.g. Feishu wiki)
+// one level at a time instead of traversing the whole tree up front (#1672).
+const loadedChildrenIds = ref(new Set<string>())
+const loadingChildrenIds = ref(new Set<string>())
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
@@ -188,9 +193,51 @@ const checkStates = computed(() => {
 
 function toggleExpand(id: string) {
   const next = new Set(expandedResourceIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
+  if (next.has(id)) {
+    next.delete(id)
+    expandedResourceIds.value = next
+    return
+  }
+  next.add(id)
   expandedResourceIds.value = next
+  void ensureChildrenLoaded(id)
+}
+
+// ensureChildrenLoaded fetches the direct children of a node on demand. It is a
+// no-op when the children are already present (e.g. connectors that return the
+// full tree in one call) or have already been fetched.
+async function ensureChildrenLoaded(id: string) {
+  if (!tempDsId.value) return
+  if (loadedChildrenIds.value.has(id) || loadingChildrenIds.value.has(id)) return
+  if ((childrenMap.value.get(id) || []).length > 0) {
+    loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
+    return
+  }
+
+  loadingChildrenIds.value = new Set(loadingChildrenIds.value).add(id)
+  try {
+    const res = await listResources(tempDsId.value, id)
+    const children: Resource[] = res?.data || res || []
+    if (children.length > 0) {
+      const existing = new Set(resources.value.map(r => r.external_id))
+      const merged = resources.value.slice()
+      for (const c of children) {
+        if (!existing.has(c.external_id)) merged.push(c)
+      }
+      resources.value = merged
+    }
+    loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+    // Collapse again so the user can retry the expand.
+    const next = new Set(expandedResourceIds.value)
+    next.delete(id)
+    expandedResourceIds.value = next
+  } finally {
+    const s = new Set(loadingChildrenIds.value)
+    s.delete(id)
+    loadingChildrenIds.value = s
+  }
 }
 
 const visibleTree = computed(() => {
@@ -310,6 +357,9 @@ watch(visible, async (v) => {
   pendingRemoveCredentials.value = false
   resources.value = []
   selectedResourceIds.value = []
+  expandedResourceIds.value = new Set()
+  loadedChildrenIds.value = new Set()
+  loadingChildrenIds.value = new Set()
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -424,8 +474,20 @@ async function loadResources() {
 
     const res = await listResources(tempDsId.value)
     resources.value = res?.data || res || []
+    // Any parent that already arrived with children (connectors returning the
+    // full tree, e.g. Notion) needs no further lazy fetch.
+    const parentsWithChildren = new Set<string>()
+    for (const r of resources.value) {
+      if (r.parent_id) parentsWithChildren.add(r.parent_id)
+    }
+    loadedChildrenIds.value = parentsWithChildren
+    loadingChildrenIds.value = new Set<string>()
+    // Auto-expand top-level nodes whose children are already loaded; lazy nodes
+    // (children not yet fetched) stay collapsed until the user expands them.
     expandedResourceIds.value = new Set(
-      resources.value.filter(r => !r.parent_id && r.has_children).map(r => r.external_id),
+      resources.value
+        .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
+        .map(r => r.external_id),
     )
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
@@ -665,9 +727,12 @@ function resourceIconName(r: Resource): string {
 }
 
 function expandAllNodes() {
-  expandedResourceIds.value = new Set(
-    resources.value.filter(r => r.has_children).map(r => r.external_id),
-  )
+  const expandable = resources.value.filter(r => r.has_children)
+  expandedResourceIds.value = new Set(expandable.map(r => r.external_id))
+  // Lazily load children of any expanded node that hasn't been fetched yet.
+  for (const r of expandable) {
+    void ensureChildrenLoaded(r.external_id)
+  }
 }
 
 function collapseAllNodes() {
@@ -1022,7 +1087,9 @@ const drawerConfirmText = computed(() => {
                 : t('knowledgeStages.expandBranch')"
               @click.stop="toggleExpand(r.external_id)"
             >
+              <t-loading v-if="loadingChildrenIds.has(r.external_id)" size="12px" />
               <t-icon
+                v-else
                 :name="expandedResourceIds.has(r.external_id) ? 'chevron-down' : 'chevron-right'"
                 size="12px"
               />

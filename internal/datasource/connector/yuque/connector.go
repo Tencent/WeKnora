@@ -42,7 +42,15 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 
 // ListResources returns all repos (personal + team) accessible to the token.
 // Serial fetch for v1 (user groups typically <10). TODO(perf): parallelize if slow.
-func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceConfig) ([]types.Resource, error) {
+func (c *Connector) ListResources(
+	ctx context.Context, config *types.DataSourceConfig, parentID string,
+) ([]types.Resource, error) {
+	// Yuque resources are a flat list of repositories (no nesting), so a
+	// lazy-load request for a specific parent has nothing extra to return.
+	if parentID != "" {
+		return []types.Resource{}, nil
+	}
+
 	cfg, err := parseYuqueConfig(config)
 	if err != nil {
 		return nil, err

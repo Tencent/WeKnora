@@ -348,8 +348,12 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	return nil
 }
 
-// ListAvailableResources lists resources available for sync in the external system
-func (s *DataSourceService) ListAvailableResources(ctx context.Context, dsID string) ([]types.Resource, error) {
+// ListAvailableResources lists resources available for sync in the external system.
+// parentID enables lazy (on-demand) loading of hierarchical resources: pass "" to
+// list the top level, or a resource's ExternalID to list only its direct children.
+func (s *DataSourceService) ListAvailableResources(
+	ctx context.Context, dsID string, parentID string,
+) ([]types.Resource, error) {
 	ds, err := s.GetDataSource(ctx, dsID)
 	if err != nil {
 		return nil, err
@@ -368,7 +372,7 @@ func (s *DataSourceService) ListAvailableResources(ctx context.Context, dsID str
 	}
 
 	// List resources
-	resources, err := connector.ListResources(ctx, config)
+	resources, err := connector.ListResources(ctx, config, parentID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to list resources: %v", err)
 		return nil, err
