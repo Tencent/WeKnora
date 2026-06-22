@@ -893,7 +893,17 @@
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
 
+                <!-- MCP 服务配置（仅 Agent 模式） -->
+                <div v-show="currentSection === 'mcp' && isAgentMode" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('agentEditor.mcp.label') }}</h2>
+                    <p class="section-description">{{ $t('agentEditor.mcp.desc') }}</p>
+                  </div>
+
+                  <div class="settings-group">
                     <!-- MCP 服务选择 -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -1842,6 +1852,7 @@ const navItems = computed(() => {
   // Agent 模式能力
   if (isAgentMode.value) {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') });
+    items.push({ key: 'mcp', icon: 'server', label: t('agentEditor.mcp.label') });
   }
   if (isAgentMode.value && skillsAvailable.value) {
     items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
@@ -1876,7 +1887,7 @@ const navGroups = computed(() => {
     {
       key: 'capability',
       label: t('agentEditor.navGroups.capability'),
-      items: pickItems(['multimodal', 'tools', 'skills']),
+      items: pickItems(['multimodal', 'tools', 'mcp', 'skills']),
     },
     {
       key: 'integration',
@@ -3910,12 +3921,12 @@ const handleSave = async () => {
   user-select: none;
 
   &:hover {
-    background-color: var(--td-bg-color-secondarycontainer-hover);
+    background-color: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background-color: rgba(7, 192, 95, 0.1);
+    background-color: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
     font-weight: 500;
   }
@@ -4607,7 +4618,7 @@ const handleSave = async () => {
 
   &:hover:not(.tool-card--disabled) {
     border-color: var(--td-brand-color);
-    background: var(--td-brand-color-1, rgba(0, 82, 217, 0.04));
+    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.06));
   }
 
   // checkbox 的勾选框 + label 改造
@@ -4624,7 +4635,7 @@ const handleSave = async () => {
 
   &.t-is-checked {
     border-color: var(--td-brand-color);
-    background: var(--td-brand-color-1, rgba(0, 82, 217, 0.06));
+    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.08));
   }
 
   &--disabled {
@@ -4731,8 +4742,8 @@ const handleSave = async () => {
   font-size: 12px;
   line-height: 18px;
   color: var(--td-brand-color);
-  background: var(--td-brand-color-1, rgba(0, 82, 217, 0.08));
-  border: 1px solid var(--td-brand-color-2, rgba(0, 82, 217, 0.16));
+  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--td-brand-color) 22%, transparent);
   border-radius: 999px;
   max-width: 100%;
 }

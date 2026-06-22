@@ -580,12 +580,12 @@ onUnmounted(() => {
   user-select: none;
 
   &:hover {
-    background-color: var(--td-bg-color-secondarycontainer-hover);
+    background-color: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background-color: rgba(7, 192, 95, 0.1);
+    background-color: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
     font-weight: 500;
   }
@@ -629,12 +629,12 @@ onUnmounted(() => {
   user-select: none;
 
   &:hover {
-    background-color: var(--td-bg-color-secondarycontainer-hover);
+    background-color: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background-color: rgba(7, 192, 95, 0.08);
+    background-color: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
     font-weight: 500;
   }
