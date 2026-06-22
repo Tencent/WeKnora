@@ -2410,6 +2410,33 @@ export default {
           concurrency: "异步任务并发数",
         },
       },
+      keyDescriptions: {
+        auth: {
+          registration_mode:
+            "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
+            "仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
+        },
+        ssrf: {
+          whitelist:
+            "SSRF 防护白名单。可填入 example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1。" +
+            "修改后立即生效。SSRF_WHITELIST_EXTRA 环境变量仍由部署方维护，不在此处覆盖。",
+        },
+        tenant: {
+          max_owned_per_user:
+            "每个非超管用户通过自助创建可拥有的最大租户数。每次创建租户时实时读取，" +
+            "修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。",
+          default_storage_quota_gb:
+            "新建租户时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
+            "仅在创建时读取，修改后只对之后新建的租户生效，不会回写已存在的租户。" +
+            "0 或负数表示使用内置默认值 10GB。",
+        },
+        asynq: {
+          concurrency:
+            "异步任务 worker 并发数（asynq 线程池大小）。" +
+            "文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
+            "修改后需重启服务进程方可生效。",
+        },
+      },
       enumLabels: {
         auth: {
           registration_mode: {
@@ -4824,6 +4851,8 @@ export default {
       fileTypeWord: "Word 文档",
       fileTypePpt: "演示文稿",
       fileTypeExcel: "Excel 表格",
+      fileTypeEbook: "电子书",
+      fileTypeWebArchive: "网页归档",
       fileTypeCsv: "CSV 文件",
       fileTypeText: "纯文本",
       fileTypeJson: "JSON 文件",

@@ -2407,6 +2407,26 @@ export default {
           concurrency: "비동기 작업 워커 동시 처리 수",
         },
       },
+      keyDescriptions: {
+        auth: {
+          registration_mode:
+            "셀프 가입 모드입니다. self_serve = 누구나 계정을 만들 수 있음; invite_only = 공개 가입을 끄고 Owner/Admin만 초대 가능. 저장 즉시 적용되며, self_serve는 스팸 가입이 들어올 수 있으니 신중히 사용하세요.",
+        },
+        ssrf: {
+          whitelist:
+            "SSRF 보호 허용 목록입니다. example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1 형식을 입력할 수 있습니다. 저장 즉시 적용됩니다. SSRF_WHITELIST_EXTRA 환경 변수는 배포자가 관리하며 여기서 덮어쓰지 않습니다.",
+        },
+        tenant: {
+          max_owned_per_user:
+            "슈퍼유저가 아닌 사용자가 셀프 서비스로 소유할 수 있는 최대 테넌트 수입니다. 테넌트 생성 시마다 읽으며 저장 즉시 적용됩니다. 0은 내장 기본값 10을 사용하고, 음수는 제한을 완전히 해제합니다(공개 배포에는 권장하지 않음).",
+          default_storage_quota_gb:
+            "신규 테넌트 생성 시 기본으로 할당되는 저장 용량(GB)으로, 벡터·원본·텍스트·인덱스 등을 포함합니다. 생성 시에만 읽으며, 변경은 이후 생성되는 테넌트에만 적용되고 기존 테넌트에는 소급되지 않습니다. 0 또는 음수는 내장 기본값 10GB를 사용합니다.",
+        },
+        asynq: {
+          concurrency:
+            "비동기 작업 worker 동시 처리 수(asynq 스레드 풀 크기)입니다. 문서 파싱·임베딩 등은 대부분 I/O 대기이므로 값을 올리면 대량 업로드 대기 시간을 줄일 수 있습니다. 적용하려면 서비스 프로세스를 재시작해야 합니다.",
+        },
+      },
       enumLabels: {
         auth: {
           registration_mode: {
@@ -4848,6 +4868,8 @@ export default {
       fileTypeWord: 'Word 문서',
       fileTypePpt: '프레젠테이션',
       fileTypeExcel: 'Excel 스프레드시트',
+      fileTypeEbook: '전자책',
+      fileTypeWebArchive: '웹 아카이브',
       fileTypeCsv: 'CSV 파일',
       fileTypeText: '일반 텍스트',
       fileTypeJson: 'JSON 파일',

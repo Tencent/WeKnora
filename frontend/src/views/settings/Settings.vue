@@ -282,7 +282,7 @@ const navItems = computed(() => {
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
-    { key: 'system-global', icon: 'server', label: '系统设置' },
+    { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
