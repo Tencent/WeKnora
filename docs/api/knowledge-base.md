@@ -18,7 +18,8 @@
 | PUT    | `/knowledge-bases/:id`                    | 更新知识库               |
 | DELETE | `/knowledge-bases/:id`                    | 删除知识库               |
 | PUT    | `/knowledge-bases/:id/pin`                | 置顶/取消置顶知识库      |
-| GET    | `/knowledge-bases/:id/hybrid-search`      | 混合搜索（向量+关键词）  |
+| POST   | `/knowledge-bases/:id/hybrid-search`      | 混合搜索（向量+关键词，推荐）  |
+| GET    | `/knowledge-bases/:id/hybrid-search`      | 混合搜索（兼容旧客户端，需 JSON 请求体）  |
 | POST   | `/knowledge-bases/copy`                   | 拷贝知识库（异步任务）   |
 | GET    | `/knowledge-bases/copy/progress/:task_id` | 获取拷贝进度             |
 | GET    | `/knowledge-bases/:id/move-targets`       | 获取可迁移目标知识库列表 |
@@ -358,11 +359,11 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-0
 
 **响应**: 字段结构同 `POST /knowledge-bases` 响应（包含 Phase 2 的 `vector_store_*` 元数据字段），本接口操作后 `is_pinned` 翻转、`pinned_at` 同步更新。
 
-## GET `/knowledge-bases/:id/hybrid-search` - 混合搜索
+## POST `/knowledge-bases/:id/hybrid-search` - 混合搜索
 
-在指定知识库内执行向量召回 + 关键词召回的混合检索。
+在指定知识库内执行向量召回 + 关键词召回的混合检索。请求参数通过 JSON 请求体传递（`SearchParams`）。
 
-**注意**：此接口使用 `GET` 方法但 **需要 JSON 请求体**（`SearchParams`），并非通过 query string 传参。
+> **兼容说明**：`GET` 方法同样可用（需携带 JSON 请求体），供旧版客户端兼容；新集成请使用 `POST`。
 
 **路径参数**:
 
@@ -389,7 +390,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-0
 **请求**:
 
 ```curl
-curl --location --request GET 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/hybrid-search' \
+curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/hybrid-search' \
 --header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{

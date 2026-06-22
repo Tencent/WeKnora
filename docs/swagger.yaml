@@ -3347,30 +3347,6 @@ definitions:
     - WebSearchProviderTypeOllama
     - WebSearchProviderTypeBaidu
     - WebSearchProviderTypeSearxng
-  github_com_Tencent_WeKnora_internal_types.WikiCategoryPath:
-    properties:
-      count:
-        type: integer
-      path:
-        items:
-          type: string
-        type: array
-    type: object
-  github_com_Tencent_WeKnora_internal_types.WikiCategoryPathListResponse:
-    properties:
-      page:
-        type: integer
-      page_size:
-        type: integer
-      paths:
-        items:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiCategoryPath'
-        type: array
-      total:
-        type: integer
-      total_pages:
-        type: integer
-    type: object
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       extraction_granularity:
@@ -3420,6 +3396,85 @@ definitions:
     - WikiExtractionFocused
     - WikiExtractionStandard
     - WikiExtractionExhaustive
+  github_com_Tencent_WeKnora_internal_types.WikiFolder:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      depth:
+        type: integer
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      name:
+        type: string
+      parent_id:
+        type: string
+      path:
+        type: string
+      sort_order:
+        type: integer
+      tenant_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiFolderCreateRequest:
+    properties:
+      name:
+        type: string
+      parent_id:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiFolderListResponse:
+    properties:
+      folders:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderNode'
+        type: array
+      parent_id:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiFolderNode:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      depth:
+        type: integer
+      has_children:
+        type: boolean
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      name:
+        type: string
+      page_count:
+        type: integer
+      parent_id:
+        type: string
+      path:
+        type: string
+      sort_order:
+        type: integer
+      tenant_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest:
+    properties:
+      move_parent:
+        type: boolean
+      name:
+        type: string
+      parent_id:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.WikiGraphData:
     properties:
       edges:
@@ -3590,8 +3645,8 @@ definitions:
       category_path:
         description: |-
           CategoryPath is the directory breadcrumb that groups this page in the
-          wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. It is intentionally
-          label-based so intermediate directory nodes do not need to be real pages.
+          wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. Derived cache of the
+          folder chain identified by FolderID.
         items:
           type: string
         type: array
@@ -3620,6 +3675,14 @@ definitions:
       depth:
         description: Depth is len(CategoryPath), cached for filtering / display.
         type: integer
+      folder_id:
+        description: |-
+          FolderID is the single source of truth for where this page sits in the
+          directory tree — a reference to wiki_folders.id ("" = wiki root). The
+          CategoryPath / WikiPath / Depth fields below are denormalized caches
+          recomputed from this folder's chain on every write so list/index/search
+          queries don't have to join wiki_folders.
+        type: string
       id:
         description: Unique identifier (UUID)
         type: string
@@ -3649,7 +3712,7 @@ definitions:
         description: |-
           ParentSlug optionally points at the wiki page that should act as this
           page's semantic parent in the directory tree. The parent may be empty
-          when the page is grouped only by CategoryPath.
+          when the page is grouped only by FolderID.
         type: string
       slug:
         description: |-
@@ -3742,6 +3805,15 @@ definitions:
         type: integer
       total_pages:
         type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageMoveRequest:
+    properties:
+      folder_id:
+        type: string
+      slug:
+        type: string
+    required:
+    - slug
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiStats:
     properties:
@@ -7687,7 +7759,41 @@ paths:
     get:
       consumes:
       - application/json
-      description: 在知识库中执行向量和关键词混合搜索
+      description: 在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 搜索参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 搜索结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 混合搜索
+      tags:
+      - 知识库
+    post:
+      consumes:
+      - application/json
+      description: 在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
       parameters:
       - description: 知识库ID
         in: path
@@ -8903,47 +9009,147 @@ paths:
       summary: Auto-fix wiki issues
       tags:
       - Wiki
-  /knowledgebase/{kb_id}/wiki/categories:
+  /knowledgebase/{kb_id}/wiki/folders:
     get:
-      description: Retrieve direct child directories for a wiki page type and optional
-        parent_path
+      description: Retrieve the direct child folders of a parent folder (parent_id
+        empty = root level), each with its page count and a has-children flag for
+        the directory tree.
       parameters:
       - description: Knowledge base ID
         in: path
         name: kb_id
         required: true
         type: string
-      - description: Wiki page type; comma-separated for multiple (e.g. entity,concept)
+      - description: Parent folder id (empty = root)
         in: query
-        name: page_type
-        required: true
+        name: parent_id
         type: string
-      - description: Parent category path, slash-separated
-        in: query
-        name: parent_path
-        type: string
-      - description: Page number (1-based)
-        in: query
-        name: page
-        type: integer
-      - description: Page size
-        in: query
-        name: page_size
-        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiCategoryPathListResponse'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderListResponse'
         "400":
           description: Bad Request
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: List wiki category paths
+      summary: List wiki folders
+      tags:
+      - Wiki
+    post:
+      consumes:
+      - application/json
+      description: Create a new (initially empty) directory node under parent_id
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder data
+        in: body
+        name: folder
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Create a wiki folder
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/folders/{folder_id}:
+    delete:
+      description: Delete a folder that has no pages and no child folders
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete an empty wiki folder
+      tags:
+      - Wiki
+    put:
+      consumes:
+      - application/json
+      description: Rename and/or reparent a folder; the whole subtree's paths and
+        the affected pages' cached paths are recomputed
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      - description: Folder update
+        in: body
+        name: folder
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Rename or move a wiki folder
       tags:
       - Wiki
   /knowledgebase/{kb_id}/wiki/graph:
@@ -9151,6 +9357,40 @@ paths:
       security:
       - Bearer: []
       summary: Get wiki operation log
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/move-page:
+    put:
+      consumes:
+      - application/json
+      description: Relocate a page (identified by slug in the body) into a folder
+        (folder_id empty = root); the page's cached category path is recomputed
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Move target
+        in: body
+        name: move
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageMoveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Move a wiki page into a folder
       tags:
       - Wiki
   /knowledgebase/{kb_id}/wiki/pages:

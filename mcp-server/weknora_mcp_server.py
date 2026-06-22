@@ -193,7 +193,7 @@ class WeKnoraClient:
             **config,  # Include thresholds and match count
         }
         return self._request(
-            "GET", f"/knowledge-bases/{kb_id}/hybrid-search", json=data
+            "POST", f"/knowledge-bases/{kb_id}/hybrid-search", json=data
         )
 
     # Knowledge Management - Methods for creating and managing knowledge entries
