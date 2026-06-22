@@ -45,6 +45,11 @@ type TaskPendingOpsRepository interface {
 	// used by the wiki ingest follow-up scheduler.
 	PendingCount(ctx context.Context, taskType, scope, scopeID string) (int64, error)
 
+	// HasPendingDedupKey reports whether a row exists for the tuple and
+	// dedup key. If op is non-empty, only rows with that exact op match.
+	// Empty dedupKey returns false rather than wildcarding the tuple.
+	HasPendingDedupKey(ctx context.Context, taskType, scope, scopeID, dedupKey, op string) (bool, error)
+
 	// DeleteByDedupKey removes rows for the tuple whose DedupKey
 	// matches. If `op` is non-empty, only rows with that exact op are
 	// removed (this lets wiki ingest scrub queued "ingest" ops while

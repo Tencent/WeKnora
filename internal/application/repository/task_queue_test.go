@@ -227,6 +227,51 @@ func TestTaskPendingOps_PendingCount_ScopedTuple(t *testing.T) {
 	assert.Equal(t, int64(0), n)
 }
 
+// TestTaskPendingOps_HasPendingDedupKey_Filters verifies the precise
+// per-business-object probe used by housekeeping. A tuple-level count is
+// not enough here: one KB can have thousands of pending wiki ops, but only
+// the row keyed by the current knowledge should protect that knowledge from
+// stale recovery.
+func TestTaskPendingOps_HasPendingDedupKey_Filters(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb-A", "ingest", "k-target", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb-A", "retract", "k-retract", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb-B", "ingest", "k-target", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("summary:gen", "knowledge_base", "kb-A", "ingest", "k-target", nil)))
+
+	ok, err := repo.HasPendingDedupKey(ctx, "wiki:ingest", "knowledge_base", "kb-A", "k-target", "ingest")
+	require.NoError(t, err)
+	assert.True(t, ok)
+
+	cases := []struct {
+		name     string
+		taskType string
+		scope    string
+		scopeID  string
+		dedupKey string
+		op       string
+	}{
+		{"different knowledge", "wiki:ingest", "knowledge_base", "kb-A", "k-other", "ingest"},
+		{"different kb", "wiki:ingest", "knowledge_base", "kb-C", "k-target", "ingest"},
+		{"different task type", "chunk:extract", "knowledge_base", "kb-A", "k-target", "ingest"},
+		{"different op", "wiki:ingest", "knowledge_base", "kb-A", "k-retract", "ingest"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ok, err := repo.HasPendingDedupKey(ctx, c.taskType, c.scope, c.scopeID, c.dedupKey, c.op)
+			require.NoError(t, err)
+			assert.False(t, ok)
+		})
+	}
+
+	ok, err = repo.HasPendingDedupKey(ctx, "wiki:ingest", "knowledge_base", "kb-A", "", "ingest")
+	require.NoError(t, err)
+	assert.False(t, ok, "empty dedup_key must not wildcard-match a queue tuple")
+}
+
 // TestTaskPendingOps_DeleteByDedupKey_Filters tests the wiki delete-race
 // helper: matching rows go away, others survive, optional op filter
 // narrows the scope, and an empty dedup_key is rejected (so a buggy

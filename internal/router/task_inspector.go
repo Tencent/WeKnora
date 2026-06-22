@@ -96,6 +96,72 @@ func (a *asynqTaskInspector) CancelTasksForKnowledge(
 	return deleted, cancelled, nil
 }
 
+// HasQueuedTasksForKnowledge reports whether any pending / scheduled /
+// retry / active task referencing knowledgeID still lives in the queue.
+// Read-only counterpart of CancelTasksForKnowledge: the housekeeping
+// sweep uses it to avoid flagging a backlogged-but-not-orphaned row as
+// failed. Short-circuits on the first match and never deletes anything.
+func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
+	ctx context.Context, knowledgeID string,
+) (bool, error) {
+	if a == nil || a.inspector == nil || knowledgeID == "" {
+		return false, nil
+	}
+	listers := []struct {
+		state string
+		list  func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error)
+	}{
+		{"pending", a.inspector.ListPendingTasks},
+		{"scheduled", a.inspector.ListScheduledTasks},
+		{"retry", a.inspector.ListRetryTasks},
+		{"active", a.inspector.ListActiveTasks},
+	}
+	for _, queue := range queuesScanned {
+		for _, l := range listers {
+			found, err := a.queueStateHasMatch(ctx, queue, knowledgeID, l.state, l.list)
+			if err != nil {
+				return false, err
+			}
+			if found {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// queueStateHasMatch pages through one (queue, state) list looking for a
+// task that references knowledgeID. Mirrors the delete* scanners but is
+// strictly read-only and returns early on the first hit.
+func (a *asynqTaskInspector) queueStateHasMatch(
+	ctx context.Context, queue, knowledgeID, state string,
+	list func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error),
+) (bool, error) {
+	page := 1
+	for {
+		tasks, err := list(queue, asynq.PageSize(listPageSize), asynq.Page(page))
+		if err != nil {
+			if errors.Is(err, asynq.ErrQueueNotFound) {
+				return false, nil
+			}
+			logger.Warnf(ctx, "[TaskInspector] list %s queue=%s page=%d: %v", state, queue, page, err)
+			return false, err
+		}
+		if len(tasks) == 0 {
+			return false, nil
+		}
+		for _, t := range tasks {
+			if matchesKnowledge(t.Type, t.Payload, knowledgeID) {
+				return true, nil
+			}
+		}
+		if len(tasks) < listPageSize {
+			return false, nil
+		}
+		page++
+	}
+}
+
 // matchesKnowledge returns true when the task type is one we cancel
 // AND its payload references the target knowledge ID.
 func matchesKnowledge(taskType string, payload []byte, knowledgeID string) bool {
@@ -251,4 +317,13 @@ func (noopTaskInspector) CancelTasksForKnowledge(
 	ctx context.Context, knowledgeID string,
 ) (int, int, error) {
 	return 0, 0, nil
+}
+
+// HasQueuedTasksForKnowledge always reports false in Lite mode: inline
+// executors never enqueue, so there is no backlog to protect against and
+// the housekeeping sweep's span/updated_at checks stay authoritative.
+func (noopTaskInspector) HasQueuedTasksForKnowledge(
+	ctx context.Context, knowledgeID string,
+) (bool, error) {
+	return false, nil
 }
