@@ -44,6 +44,9 @@ type RemoteAPIVLM struct {
 	modelID   string
 	client    *openai.Client
 	baseURL   string
+	// fixedTempOne 标记只接受 temperature=1 的 Moonshot/Kimi 模型
+	// （moonshot-v1-*、kimi-k2.5/k2.6），其它温度值会被网关拒绝返回 HTTP 400。
+	fixedTempOne bool
 }
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
@@ -82,10 +85,11 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 	}
 
 	return &RemoteAPIVLM{
-		modelName: config.ModelName,
-		modelID:   config.ModelID,
-		client:    openai.NewClientWithConfig(apiCfg),
-		baseURL:   config.BaseURL,
+		modelName:    config.ModelName,
+		modelID:      config.ModelID,
+		client:       openai.NewClientWithConfig(apiCfg),
+		baseURL:      config.BaseURL,
+		fixedTempOne: provider.IsMoonshotFixedTempModel(config.ModelName),
 	}, nil
 }
 
@@ -125,6 +129,11 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		},
 		MaxTokens:   defaultMaxToks,
 		Temperature: defaultTemp,
+	}
+	// 视觉模型不经过 chat 的 providerAdapter，Kimi 固定温度模型需在这里单独修正：
+	// moonshot-v1-*/kimi-k2.5/k2.6 只接受 temperature=1，传其它值会报错。
+	if v.fixedTempOne {
+		req.Temperature = 1
 	}
 
 	totalImageSize := 0

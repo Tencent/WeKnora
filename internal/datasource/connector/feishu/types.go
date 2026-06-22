@@ -10,10 +10,19 @@
 //   - Auth:             https://open.feishu.cn/document/server-docs/authentication-management/access-token/tenant_access_token_internal
 package feishu
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Config holds Feishu-specific configuration for the data source connector.
-// Uses the self-built app (企业自建应用) authentication model.
+//
+// Two authentication models are supported (see AuthMode):
+//   - "app" (default): the self-built app identity (企业自建应用) via
+//     tenant_access_token — only reaches wiki/docs explicitly granted to the app.
+//   - "user": the authorizing user's identity (个人身份) via user_access_token,
+//     established through the OAuth2 authorization-code flow — reaches everything
+//     that user can see in Feishu. See client.go and handler/datasource_oauth.go.
 type Config struct {
 	// App ID from Feishu developer console
 	AppID string `json:"app_id"`
@@ -24,7 +33,39 @@ type Config struct {
 	// Base URL for Feishu API (default: https://open.feishu.cn)
 	// Use https://open.larksuite.com for Lark (international) deployments
 	BaseURL string `json:"base_url,omitempty"`
+
+	// AuthMode selects the identity used for API calls:
+	//   ""/"app" → tenant_access_token (self-built app identity, the default)
+	//   "user"   → user_access_token (acts on behalf of the authorizing user)
+	AuthMode string `json:"auth_mode,omitempty"`
+
+	// UserAccessToken is the short-lived (~2h) user-identity token, populated
+	// by the OAuth callback and rotated by RefreshToken. Only used in user mode.
+	UserAccessToken string `json:"user_access_token,omitempty"`
+
+	// RefreshToken renews UserAccessToken. Feishu rotates it on every refresh
+	// and invalidates the previous one, so a refreshed value must be persisted
+	// immediately. Only present in user mode (requires the offline_access scope).
+	RefreshToken string `json:"refresh_token,omitempty"`
+
+	// TokenExpiresAt is the unix timestamp (seconds) when UserAccessToken expires.
+	TokenExpiresAt int64 `json:"token_expires_at,omitempty"`
+
+	// RefreshExpiresAt is the unix timestamp (seconds) when RefreshToken expires.
+	RefreshExpiresAt int64 `json:"refresh_expires_at,omitempty"`
 }
+
+// Authentication mode identifiers for Config.AuthMode.
+const (
+	AuthModeApp  = "app"
+	AuthModeUser = "user"
+)
+
+// UserOAuthScopes are the user-identity scopes requested during authorization.
+// offline_access is required to receive a refresh_token; the remaining scopes
+// mirror the app permissions needed to list wikis and export documents. These
+// must also be enabled in the Feishu app console for consent to succeed.
+const UserOAuthScopes = "offline_access wiki:wiki:readonly drive:drive:readonly drive:export:readonly docx:document:readonly"
 
 // DefaultBaseURL is the default Feishu Open Platform API base URL.
 const DefaultBaseURL = "https://open.feishu.cn"
@@ -38,6 +79,22 @@ func (c *Config) GetBaseURL() string {
 		return c.BaseURL
 	}
 	return DefaultBaseURL
+}
+
+// AccountsBaseURL returns the OAuth consent host that corresponds to the API
+// base URL. The authorization page lives on accounts.feishu.cn (or
+// accounts.larksuite.com for Lark), not on the open-apis host.
+func (c *Config) AccountsBaseURL() string {
+	if strings.Contains(c.GetBaseURL(), "larksuite") {
+		return "https://accounts.larksuite.com"
+	}
+	return "https://accounts.feishu.cn"
+}
+
+// IsUserMode reports whether the connector should act with the authorizing
+// user's identity (user_access_token) instead of the app identity.
+func (c *Config) IsUserMode() bool {
+	return c.AuthMode == AuthModeUser
 }
 
 // --- Export format constants ---
@@ -89,6 +146,20 @@ type tokenResponse struct {
 	apiResponse
 	TenantAccessToken string `json:"tenant_access_token"`
 	Expire            int    `json:"expire"` // seconds
+}
+
+// userTokenResponse is the response for POST /open-apis/authen/v2/oauth/token,
+// used for both authorization-code exchange and refresh_token renewal.
+type userTokenResponse struct {
+	Code             int    `json:"code"` // 0 = success
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+	AccessToken      string `json:"access_token"`
+	ExpiresIn        int    `json:"expires_in"`              // seconds
+	RefreshToken     string `json:"refresh_token"`           // present when offline_access granted
+	RefreshExpiresIn int    `json:"refresh_token_expires_in"` // seconds
+	TokenType        string `json:"token_type"`
+	Scope            string `json:"scope"`
 }
 
 // wikiSpaceListResponse is the response for GET /open-apis/wiki/v2/spaces.

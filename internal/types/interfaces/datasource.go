@@ -36,6 +36,15 @@ type DataSourceService interface {
 	// Idempotent on already-empty credentials.
 	ClearDataSourceCredentials(ctx context.Context, id string) error
 
+	// BuildOAuthAuthorizeURL returns the provider consent URL for a data source
+	// whose connector supports the OAuth2 authorization-code flow (user identity).
+	// state is an opaque token echoed back to the callback for CSRF protection.
+	BuildOAuthAuthorizeURL(ctx context.Context, dsID, redirectURI, state string) (string, error)
+
+	// CompleteOAuth exchanges an authorization code for user credentials and
+	// persists them on the data source (validating the new credentials live).
+	CompleteOAuth(ctx context.Context, dsID, code, redirectURI string) error
+
 	// ValidateConnection tests the connection to an external data source
 	ValidateConnection(ctx context.Context, dsID string) error
 
@@ -43,8 +52,10 @@ type DataSourceService interface {
 	// This is used by the frontend "Test Connection" button before creating a data source.
 	ValidateCredentials(ctx context.Context, connectorType string, credentials map[string]interface{}) error
 
-	// ListAvailableResources lists resources available for sync in the external system
-	ListAvailableResources(ctx context.Context, dsID string) ([]types.Resource, error)
+	// ListAvailableResources lists resources available for sync in the external system.
+	// opts == nil preserves the legacy full-listing behavior; opts.ParentID
+	// requests one tree level for connectors that support lazy listing.
+	ListAvailableResources(ctx context.Context, dsID string, opts *types.ResourceListOptions) ([]types.Resource, error)
 
 	// ManualSync triggers an immediate sync for a data source
 	ManualSync(ctx context.Context, dsID string) (*types.SyncLog, error)

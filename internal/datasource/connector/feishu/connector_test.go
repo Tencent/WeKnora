@@ -503,6 +503,65 @@ func TestConnectorListResources_IncludesWikiNodeTree(t *testing.T) {
 	}
 }
 
+func TestConnectorListResourcesWithOptions_LazyTreeLevels(t *testing.T) {
+	topNodes := []wikiNode{
+		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true, ObjEditTime: "100"},
+		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "docx", Title: "Peer", ObjEditTime: "200"},
+	}
+	childNodes := map[string][]wikiNode{
+		"nt-root": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", ObjEditTime: "300"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
+	defer ts.Close()
+
+	connector := NewConnector()
+	rootParent := ""
+	roots, err := connector.ListResourcesWithOptions(
+		context.Background(),
+		makeConfig(cfg, nil),
+		types.ResourceListOptions{ParentID: &rootParent},
+	)
+	if err != nil {
+		t.Fatalf("ListResourcesWithOptions(root) error: %v", err)
+	}
+	if len(roots) != 1 || roots[0].ExternalID != "space1" || roots[0].ParentID != "" {
+		t.Fatalf("root resources wrong: %+v", roots)
+	}
+
+	spaceParent := "space1"
+	spaceChildren, err := connector.ListResourcesWithOptions(
+		context.Background(),
+		makeConfig(cfg, nil),
+		types.ResourceListOptions{ParentID: &spaceParent},
+	)
+	if err != nil {
+		t.Fatalf("ListResourcesWithOptions(space) error: %v", err)
+	}
+	if len(spaceChildren) != 2 {
+		t.Fatalf("space children should be direct children only, got %d: %+v", len(spaceChildren), spaceChildren)
+	}
+	for _, child := range spaceChildren {
+		if child.ExternalID == "space1:nt-child" {
+			t.Fatalf("lazy space listing must not include grandchild: %+v", spaceChildren)
+		}
+	}
+
+	nodeParent := "space1:nt-root"
+	nodeChildren, err := connector.ListResourcesWithOptions(
+		context.Background(),
+		makeConfig(cfg, nil),
+		types.ResourceListOptions{ParentID: &nodeParent},
+	)
+	if err != nil {
+		t.Fatalf("ListResourcesWithOptions(node) error: %v", err)
+	}
+	if len(nodeChildren) != 1 || nodeChildren[0].ExternalID != "space1:nt-child" || nodeChildren[0].ParentID != nodeParent {
+		t.Fatalf("node children wrong: %+v", nodeChildren)
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // FetchAll: test all supported doc types
 // ──────────────────────────────────────────────────────────────────────

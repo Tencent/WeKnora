@@ -95,8 +95,16 @@ export function validateCredentials(type: string, credentials: Record<string, an
   return post('/api/v1/datasource/validate-credentials', { type, credentials })
 }
 
-export function listResources(id: string) {
-  return get(`/api/v1/datasource/${id}/resources`, { timeout: 120000 })
+export interface ListResourcesOptions {
+  parentId?: string
+}
+
+export function listResources(id: string, options?: ListResourcesOptions) {
+  const config: any = { timeout: 120000 }
+  if (options && Object.prototype.hasOwnProperty.call(options, 'parentId')) {
+    config.params = { parent_id: options.parentId ?? '' }
+  }
+  return get(`/api/v1/datasource/${id}/resources`, config)
 }
 
 export function triggerSync(id: string) {
@@ -137,4 +145,24 @@ export async function putDataSourceCredentials(
 
 export async function deleteDataSourceCredentials(id: string): Promise<void> {
   await del(`/api/v1/datasource/${id}/credentials/credentials`)
+}
+
+// ----------------------------------------------------------------------------
+// User-identity (个人身份) OAuth flow. Returns the provider consent URL the
+// frontend opens in a popup; the backend callback persists the resulting
+// user tokens. See internal/handler/datasource_oauth.go.
+// ----------------------------------------------------------------------------
+
+export interface OAuthAuthorizeResponse {
+  authorize_url: string
+}
+
+export async function authorizeDataSourceOAuth(
+  id: string,
+  redirectUri: string,
+): Promise<OAuthAuthorizeResponse> {
+  const response: any = await get(
+    `/api/v1/datasource/${id}/oauth/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`,
+  )
+  return (response.data ?? response) as OAuthAuthorizeResponse
 }

@@ -30,6 +30,57 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// ResourceListOptionConnector is an optional extension for connectors that can
+// list a resource tree one level at a time. The base Connector.ListResources
+// method stays as the legacy full-listing contract for existing callers.
+type ResourceListOptionConnector interface {
+	ListResourcesWithOptions(
+		ctx context.Context,
+		config *types.DataSourceConfig,
+		opts types.ResourceListOptions,
+	) ([]types.Resource, error)
+}
+
+// OAuthConnector is an optional interface implemented by connectors that
+// support an OAuth2 authorization-code flow to act on behalf of an end user
+// (个人身份) instead of an app/service identity.
+//
+// The flow is driven by the data source OAuth handler: AuthorizeURL produces
+// the consent URL the user is redirected to, and ExchangeCode turns the
+// returned authorization code into persisted user credentials.
+type OAuthConnector interface {
+	Connector
+
+	// AuthorizeURL builds the provider consent URL. redirectURI must match the
+	// URL registered with the provider; state is an opaque token echoed back on
+	// callback for CSRF protection / correlation.
+	AuthorizeURL(config *types.DataSourceConfig, redirectURI, state string) (string, error)
+
+	// ExchangeCode swaps an authorization code for user tokens. It returns:
+	//   - creds: the complete credential map to persist — existing app
+	//     credentials merged with the freshly minted user tokens (the whole map
+	//     is replaced, so a partial map would drop the app credentials);
+	//   - settings: non-secret config settings to merge (e.g. {"auth_mode":
+	//     "user"}), surfaced in API responses so the UI can reflect the mode.
+	ExchangeCode(
+		ctx context.Context, config *types.DataSourceConfig, code, redirectURI string,
+	) (creds map[string]interface{}, settings map[string]interface{}, err error)
+}
+
+// CredentialRefresher is an optional interface implemented by connectors whose
+// credentials embed short-lived tokens that must be refreshed and persisted
+// before use (e.g. Feishu user_access_token).
+//
+// RefreshCredentials returns the full updated credential map to persist, or nil
+// when no refresh was necessary. The service layer persists a non-nil result
+// immediately — providers that rotate refresh tokens invalidate the previous
+// one, so a refreshed token that isn't saved would lock the connector out.
+type CredentialRefresher interface {
+	RefreshCredentials(
+		ctx context.Context, config *types.DataSourceConfig,
+	) (map[string]interface{}, error)
+}
+
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
 	connectors map[string]Connector

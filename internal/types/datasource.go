@@ -253,6 +253,13 @@ type Resource struct {
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
+// ResourceListOptions controls how a connector lists selectable resources.
+// ParentID == nil means legacy full listing. ParentID != nil means the caller
+// wants one tree level under that parent; an empty parent id asks for roots.
+type ResourceListOptions struct {
+	ParentID *string
+}
+
 // FetchedItem represents a single document/content item fetched from external source
 type FetchedItem struct {
 	// Unique ID in the external system

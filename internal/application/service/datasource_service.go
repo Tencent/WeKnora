@@ -285,6 +285,86 @@ func (s *DataSourceService) ClearDataSourceCredentials(ctx context.Context, id s
 	return nil
 }
 
+// BuildOAuthAuthorizeURL returns the provider consent URL for a data source
+// whose connector implements datasource.OAuthConnector (user-identity flow).
+func (s *DataSourceService) BuildOAuthAuthorizeURL(
+	ctx context.Context, dsID, redirectURI, state string,
+) (string, error) {
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return "", err
+	}
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return "", err
+	}
+	oauthConn, ok := connector.(datasource.OAuthConnector)
+	if !ok {
+		return "", datasource.ErrOAuthUnsupported
+	}
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return "", datasource.ErrInvalidConfig
+	}
+	return oauthConn.AuthorizeURL(config, redirectURI, state)
+}
+
+// CompleteOAuth exchanges an authorization code for user credentials, applies
+// the resulting credentials and settings patch, validates the new identity
+// live, and persists. Running validation here surfaces a bad exchange
+// immediately rather than at the next scheduled sync.
+func (s *DataSourceService) CompleteOAuth(ctx context.Context, dsID, code, redirectURI string) error {
+	ds, err := s.GetDataSource(ctx, dsID)
+	if err != nil {
+		return err
+	}
+	connector, err := s.connectorRegistry.Get(ds.Type)
+	if err != nil {
+		return err
+	}
+	oauthConn, ok := connector.(datasource.OAuthConnector)
+	if !ok {
+		return datasource.ErrOAuthUnsupported
+	}
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return datasource.ErrInvalidConfig
+	}
+
+	creds, settings, err := oauthConn.ExchangeCode(ctx, config, code, redirectURI)
+	if err != nil {
+		return err
+	}
+
+	config.Credentials = creds
+	if len(settings) > 0 {
+		if config.Settings == nil {
+			config.Settings = make(map[string]interface{}, len(settings))
+		}
+		for k, v := range settings {
+			config.Settings[k] = v
+		}
+	}
+	blob, err := config.ToJSON()
+	if err != nil {
+		return err
+	}
+	ds.Config = blob
+
+	// Validate the freshly authorized identity (user mode now has a live token)
+	// before persisting, mirroring UpdateDataSourceCredentials' behavior.
+	if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+		return err
+	}
+	if err := s.dsRepo.Update(ctx, ds); err != nil {
+		return err
+	}
+
+	logger.Infof(ctx, "completed OAuth authorization: ds=%s type=%s",
+		secutils.SanitizeForLog(dsID), ds.Type)
+	return nil
+}
+
 // DeleteDataSource deletes a data source (soft delete)
 func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) error {
 	// Verify data source exists
@@ -310,6 +390,50 @@ func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) err
 	return nil
 }
 
+// applyCredentialRefresh proactively refreshes short-lived connector tokens
+// (e.g. Feishu user_access_token) and persists the rotated credentials before
+// they are used.
+//
+// Persisting immediately is critical: providers like Feishu rotate the
+// refresh_token on every refresh and invalidate the previous one, so a
+// refreshed token that isn't saved would lock the connector out. On success the
+// in-memory config is updated so the subsequent connector call uses the fresh
+// token. Unlike UpdateDataSourceCredentials this does NOT run live validation —
+// the token was just minted by the provider.
+//
+// No-op for connectors that don't implement CredentialRefresher, or when the
+// current token is still valid.
+func (s *DataSourceService) applyCredentialRefresh(
+	ctx context.Context,
+	ds *types.DataSource,
+	config *types.DataSourceConfig,
+	connector datasource.Connector,
+) error {
+	refresher, ok := connector.(datasource.CredentialRefresher)
+	if !ok {
+		return nil
+	}
+	newCreds, err := refresher.RefreshCredentials(ctx, config)
+	if err != nil {
+		return err
+	}
+	if newCreds == nil {
+		return nil
+	}
+	config.Credentials = newCreds
+	blob, err := config.ToJSON()
+	if err != nil {
+		return err
+	}
+	ds.Config = blob
+	if err := s.dsRepo.Update(ctx, ds); err != nil {
+		return err
+	}
+	logger.Infof(ctx, "refreshed connector credentials: ds=%s type=%s",
+		secutils.SanitizeForLog(ds.ID), ds.Type)
+	return nil
+}
+
 // ValidateConnection tests the connection to an external data source
 func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string) error {
 	ds, err := s.GetDataSource(ctx, dsID)
@@ -327,6 +451,13 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 	config, err := ds.ParseConfig()
 	if err != nil {
 		return datasource.ErrInvalidConfig
+	}
+
+	if err := s.applyCredentialRefresh(ctx, ds, config, connector); err != nil {
+		ds.Status = types.DataSourceStatusError
+		ds.ErrorMessage = err.Error()
+		_ = s.dsRepo.Update(ctx, ds)
+		return err
 	}
 
 	// Validate connection
@@ -349,7 +480,11 @@ func (s *DataSourceService) ValidateConnection(ctx context.Context, dsID string)
 }
 
 // ListAvailableResources lists resources available for sync in the external system
-func (s *DataSourceService) ListAvailableResources(ctx context.Context, dsID string) ([]types.Resource, error) {
+func (s *DataSourceService) ListAvailableResources(
+	ctx context.Context,
+	dsID string,
+	opts *types.ResourceListOptions,
+) ([]types.Resource, error) {
 	ds, err := s.GetDataSource(ctx, dsID)
 	if err != nil {
 		return nil, err
@@ -367,8 +502,24 @@ func (s *DataSourceService) ListAvailableResources(ctx context.Context, dsID str
 		return nil, datasource.ErrInvalidConfig
 	}
 
-	// List resources
-	resources, err := connector.ListResources(ctx, config)
+	if err := s.applyCredentialRefresh(ctx, ds, config, connector); err != nil {
+		logger.Errorf(ctx, "failed to refresh credentials: %v", err)
+		return nil, err
+	}
+
+	// List resources. opts == nil keeps the legacy full-tree listing; when a
+	// connector supports ResourceListOptionConnector, the UI can request one
+	// level at a time via parent_id to avoid eagerly traversing huge trees.
+	var resources []types.Resource
+	if opts != nil {
+		if optionConnector, ok := connector.(datasource.ResourceListOptionConnector); ok {
+			resources, err = optionConnector.ListResourcesWithOptions(ctx, config, *opts)
+		} else {
+			resources, err = connector.ListResources(ctx, config)
+		}
+	} else {
+		resources, err = connector.ListResources(ctx, config)
+	}
 	if err != nil {
 		logger.Errorf(ctx, "failed to list resources: %v", err)
 		return nil, err
@@ -550,6 +701,23 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Invalid configuration: %v", err)
+		_ = s.syncLogRepo.Update(ctx, syncLog)
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
+		return err
+	}
+
+	// Refresh short-lived user-identity tokens (e.g. Feishu user_access_token)
+	// and persist them before fetching, so the rotated refresh_token is never
+	// lost on a mid-sync failure.
+	if err := s.applyCredentialRefresh(ctx, ds, config, connector); err != nil {
+		logger.Errorf(ctx, "failed to refresh credentials: %v", err)
+		syncLog.Status = types.SyncLogStatusFailed
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
+		syncLog.ErrorMessage = fmt.Sprintf("Credential refresh failed: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
 		if !wasPaused {
 			ds.Status = types.DataSourceStatusError

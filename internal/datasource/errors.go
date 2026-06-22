@@ -18,6 +18,9 @@ var (
 	ErrInvalidConfig      = errors.New("invalid configuration")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 
+	// OAuth errors
+	ErrOAuthUnsupported = errors.New("connector does not support OAuth authorization")
+
 	// Sync errors
 	ErrSyncFailed         = errors.New("sync operation failed")
 	ErrSyncCanceled       = errors.New("sync operation was canceled")
