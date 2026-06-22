@@ -2248,19 +2248,25 @@ type ChannelWithAgent struct {
 // ListChannelsByTenant returns all non-deleted IM channels in the given tenant,
 // joined with custom_agents.name. Built-in agent IDs (whose rows may not exist
 // in custom_agents) produce an empty AgentName — the frontend can substitute a
-// localized "builtin agent" label in that case.
+// localized "builtin agent" label in that case. Channels whose custom agent was
+// soft-deleted are excluded so overview lists stay consistent after agent removal.
 func (s *Service) ListChannelsByTenant(tenantID uint64) ([]ChannelWithAgent, error) {
+	builtinIDs := types.GetBuiltinAgentIDs()
 	var rows []ChannelWithAgent
-	err := s.db.Table("im_channels AS c").
+	q := s.db.Table("im_channels AS c").
 		Select(`c.id, c.tenant_id, c.agent_id,
                 COALESCE(a.name, '') AS agent_name,
                 c.platform, c.name, c.enabled, c.mode, c.output_mode,
                 c.session_mode, c.bot_identity, c.created_at, c.updated_at`).
 		Joins(`LEFT JOIN custom_agents AS a
-               ON a.id = c.agent_id AND a.tenant_id = c.tenant_id`).
-		Where("c.tenant_id = ? AND c.deleted_at IS NULL", tenantID).
-		Order("c.created_at DESC").
-		Scan(&rows).Error
+               ON a.id = c.agent_id AND a.tenant_id = c.tenant_id AND a.deleted_at IS NULL`).
+		Where("c.tenant_id = ? AND c.deleted_at IS NULL", tenantID)
+	if len(builtinIDs) > 0 {
+		q = q.Where("a.id IS NOT NULL OR c.agent_id IN ?", builtinIDs)
+	} else {
+		q = q.Where("a.id IS NOT NULL")
+	}
+	err := q.Order("c.created_at DESC").Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -2301,6 +2307,25 @@ func (s *Service) UpdateChannel(channel *IMChannel) error {
 		}
 	}
 	return nil
+}
+
+// DeleteChannelsByAgent stops and soft-deletes every IM channel bound to the
+// given agent within the tenant. Used when a custom agent is removed so
+// overview lists and running adapters do not outlive the agent.
+func (s *Service) DeleteChannelsByAgent(agentID string, tenantID uint64) error {
+	var channels []IMChannel
+	if err := s.db.Where("agent_id = ? AND tenant_id = ? AND deleted_at IS NULL", agentID, tenantID).
+		Find(&channels).Error; err != nil {
+		return err
+	}
+	for i := range channels {
+		s.StopChannel(channels[i].ID)
+	}
+	if len(channels) == 0 {
+		return nil
+	}
+	return s.db.Where("agent_id = ? AND tenant_id = ? AND deleted_at IS NULL", agentID, tenantID).
+		Delete(&IMChannel{}).Error
 }
 
 // DeleteChannel soft-deletes a channel and stops it. Only deletes if the channel belongs to the given tenant.
