@@ -51,6 +51,8 @@ test('final done row uses an existing common translation key', () => {
 test('tool rows use line icon names instead of legacy asset masks', () => {
   assert.match(source, /getAgentToolIconName/)
   assert.match(source, /:name="getToolIconName\(event\.tool_name\)"/)
+  assert.match(source, /wiki_search: 'agentEditor\.tools\.wikiSearch'/)
+  assert.match(source, /wiki_read_page: 'agentEditor\.tools\.wikiReadPage'/)
   assert.match(source, /wiki_read_source_doc: 'agentStream\.tools\.wikiReadSourceDoc'/)
   assert.match(source, /toolName === 'get_document_content' \|\| toolName === 'wiki_read_source_doc'/)
   assert.doesNotMatch(source, /getToolIcon\(event\.tool_name\)/)

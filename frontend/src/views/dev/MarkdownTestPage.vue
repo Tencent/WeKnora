@@ -290,6 +290,8 @@ graph TD
 
 // --- Streaming Simulation ---
 const fullStreamText = `
+好的，以下是根据知识库中**《xxx》学程手册**整理的有关XXX的介绍：
+
 **XBRL（eXtensible Business Reporting Language，可扩展商业报告语言）**是一种基于XML的标准化标记语言，专门用于电子化商业和财务报告的编制、交换和分析
 
 该数据集包含90个文本和方程对，挑战模型提取、解释和推理相互关联的财务术语和公式的能力，例如：

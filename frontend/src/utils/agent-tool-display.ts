@@ -49,6 +49,28 @@ export function getQueryText(args: unknown): string {
   return Array.from(new Set(queries)).join('，')
 }
 
+export function getWikiPageText(args: unknown): string {
+  if (!args) return ''
+
+  let parsedArgs = args
+  if (typeof parsedArgs === 'string') {
+    try {
+      parsedArgs = JSON.parse(parsedArgs)
+    } catch {
+      return ''
+    }
+  }
+
+  if (!parsedArgs || typeof parsedArgs !== 'object') return ''
+
+  const record = parsedArgs as Record<string, unknown>
+  const slugs = [
+    ...collectQueryStrings(record.slug),
+    ...collectQueryStrings(record.slugs),
+  ]
+  return Array.from(new Set(slugs)).join('、')
+}
+
 export function getKnowledgeSearchSummaryHtml(
   t: ComposerTranslation,
   toolData: Record<string, unknown> | null | undefined,
