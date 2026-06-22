@@ -92,6 +92,7 @@ export interface ParserEngineConfig {
   mineru_cloud_language?: string
   // PaddleOCR-VL 自建参数
   paddleocr_vl_endpoint?: string
+  paddleocr_vl_bearer_token?: string
   paddleocr_vl_api_key?: string
   paddleocr_vl_use_seal_recognition?: boolean | null
   paddleocr_vl_use_chart_recognition?: boolean | null

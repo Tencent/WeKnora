@@ -326,16 +326,16 @@
             <p class="form-desc">{{ $t('settings.parser.paddleocrVlEndpointHint') }}</p>
           </div>
           <div class="form-item">
-            <label class="form-label">API Key</label>
+            <label class="form-label">Bearer Token</label>
             <t-input
-              v-model="config.paddleocr_vl_api_key"
+              v-model="config.paddleocr_vl_bearer_token"
               type="password"
-              :placeholder="$t('settings.parser.paddleocrVlApiKeyPlaceholder')"
+              :placeholder="$t('settings.parser.paddleocrVlBearerTokenPlaceholder')"
               clearable
             >
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
-            <p class="form-desc">{{ $t('settings.parser.paddleocrVlApiKeyHint') }}</p>
+            <p class="form-desc">{{ $t('settings.parser.paddleocrVlBearerTokenHint') }}</p>
           </div>
           <div class="form-item">
             <label class="form-label">{{ $t('settings.parser.featuresLabel', '识别选项') }}</label>
@@ -432,7 +432,7 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   mineru_cloud_enable_ocr: true,
   mineru_cloud_language: 'ch',
   paddleocr_vl_endpoint: '',
-  paddleocr_vl_api_key: '',
+  paddleocr_vl_bearer_token: '',
   paddleocr_vl_use_seal_recognition: true,
   paddleocr_vl_use_chart_recognition: false,
   paddleocr_vl_cloud_token: '',
@@ -570,7 +570,7 @@ async function loadConfig() {
       mineru_cloud_enable_ocr: data?.mineru_cloud_enable_ocr ?? DEFAULT_PARSER_CONFIG.mineru_cloud_enable_ocr ?? true,
       mineru_cloud_language: data?.mineru_cloud_language ?? DEFAULT_PARSER_CONFIG.mineru_cloud_language ?? 'ch',
       paddleocr_vl_endpoint: data?.paddleocr_vl_endpoint ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_endpoint ?? '',
-      paddleocr_vl_api_key: data?.paddleocr_vl_api_key ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_api_key ?? '',
+      paddleocr_vl_bearer_token: data?.paddleocr_vl_bearer_token ?? data?.paddleocr_vl_api_key ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_bearer_token ?? '',
       paddleocr_vl_use_seal_recognition: data?.paddleocr_vl_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_use_seal_recognition ?? true,
       paddleocr_vl_use_chart_recognition: data?.paddleocr_vl_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_use_chart_recognition ?? false,
       paddleocr_vl_cloud_token: data?.paddleocr_vl_cloud_token ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_token ?? '',
@@ -608,7 +608,7 @@ function buildConfigPayload(): ParserEngineConfig {
     mineru_cloud_enable_ocr: config.value.mineru_cloud_enable_ocr,
     mineru_cloud_language: config.value.mineru_cloud_language?.trim() ?? '',
     paddleocr_vl_endpoint: config.value.paddleocr_vl_endpoint?.trim() ?? '',
-    paddleocr_vl_api_key: config.value.paddleocr_vl_api_key?.trim() ?? '',
+    paddleocr_vl_bearer_token: config.value.paddleocr_vl_bearer_token?.trim() ?? '',
     paddleocr_vl_use_seal_recognition: config.value.paddleocr_vl_use_seal_recognition,
     paddleocr_vl_use_chart_recognition: config.value.paddleocr_vl_use_chart_recognition,
     paddleocr_vl_cloud_token: config.value.paddleocr_vl_cloud_token?.trim() ?? '',

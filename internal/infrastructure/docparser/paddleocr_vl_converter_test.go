@@ -23,8 +23,8 @@ func TestPaddleOCRVLReaderAddsBearerToken(t *testing.T) {
 	defer server.Close()
 
 	reader := NewPaddleOCRVLReader(map[string]string{
-		"paddleocr_vl_endpoint": server.URL,
-		"paddleocr_vl_api_key":  token,
+		"paddleocr_vl_endpoint":     server.URL,
+		"paddleocr_vl_bearer_token": token,
 	})
 
 	result, err := reader.Read(context.Background(), &types.ReadRequest{
