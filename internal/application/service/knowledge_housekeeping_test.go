@@ -361,6 +361,38 @@ func TestHousekeeping_WikiPendingProbeErrorPreserves(t *testing.T) {
 		"pending-op probe errors must preserve finalizing rows for the next sweep")
 }
 
+// TestHousekeeping_QueueProbeErrorStillChecksWikiPending covers the
+// mixed-backend failure mode: Redis/asynq inspection can be unavailable
+// while the durable DB queue still proves this finalizing knowledge is
+// merely waiting for wiki ingest. The asynq error must not bypass that
+// durable guard.
+func TestHousekeeping_QueueProbeErrorStillChecksWikiPending(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithDeps(db, fakeTaskInspector{
+		err: errors.New("redis unavailable"),
+	}, fakePendingOpsRepo{
+		queued: map[string]bool{
+			wikiPendingKey("kb-1", "kid-wiki-rediserr", "ingest"): true,
+		},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, knowledge_base_id, parse_status, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		"kid-wiki-rediserr", "kb-1", types.ParseStatusFinalizing, stale,
+	).Error)
+	insertSpan(t, db, "kid-wiki-rediserr", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-wiki-rediserr",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFinalizing, status,
+		"asynq inspector errors must not bypass a matching durable wiki pending op")
+}
+
 // TestHousekeeping_QueueProbeError_FailsSafe confirms the fail-safe
 // direction: when the queue probe errors we still recover the row rather
 // than leaving it stranded forever.

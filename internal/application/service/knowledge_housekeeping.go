@@ -291,11 +291,8 @@ func (h *HousekeepingService) filterOutQueued(
 			queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
 			if err != nil {
 				logger.Warnf(ctx,
-					"[Housekeeping] queue probe failed for %s: %v (will fail safe and treat as stuck)", k.ID, err)
-				out = append(out, k)
-				continue
-			}
-			if queued {
+					"[Housekeeping] queue probe failed for %s: %v (will check durable queues before treating as stuck)", k.ID, err)
+			} else if queued {
 				skipped++
 				continue
 			}
