@@ -346,6 +346,10 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 			c.Error(errors.NewNotFoundError("Model not found"))
 			return
 		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
