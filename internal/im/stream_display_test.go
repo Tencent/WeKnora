@@ -109,18 +109,27 @@ func TestStreamDisplayPipeline_agentScenario_redGreen(t *testing.T) {
 
 func TestStreamDisplayPipeline_quickQA_redGreen(t *testing.T) {
 	during := IMStreamParts{
-		Mode:          IMStreamModeQuickQA,
-		PipelineInner: "⏳ 问题理解\n✅ 问题理解\n⏳ 知识库检索\n",
+		Mode: IMStreamModeQuickQA,
+		PipelineToolSteps: []IMToolStep{
+			{ToolName: "query_understand", Success: true},
+			{ToolName: "knowledge_search", Pending: true, Arguments: map[string]any{"query": "test"}},
+		},
 	}
 	done := IMStreamParts{
-		Mode:          IMStreamModeQuickQA,
-		PipelineInner: "⏳ 问题理解\n✅ 问题理解\n⏳ 知识库检索\n",
-		Answer:        "答案是 B。",
+		Mode: IMStreamModeQuickQA,
+		PipelineToolSteps: []IMToolStep{
+			{ToolName: "query_understand", Success: true},
+			{ToolName: "knowledge_search", Success: true, Arguments: map[string]any{"query": "test"}},
+		},
+		Answer: "答案是 B。",
 	}
 
 	intermediate := FormatIMIntermediateFromParts(during, false)
 	if intermediate == "" {
 		t.Fatal("quick QA should show pipeline progress while streaming")
+	}
+	if !strings.Contains(intermediate, "问题理解") {
+		t.Fatalf("quick QA pipeline should show query_understand step, got: %q", intermediate)
 	}
 	if strings.Contains(intermediate, "思考过程") {
 		t.Fatalf("quick QA pipeline should not use agent think header, got: %q", intermediate)

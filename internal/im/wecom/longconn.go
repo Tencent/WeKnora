@@ -380,7 +380,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		_ = conn.Close()
 		// NOTE: streamBufs is intentionally NOT cleared on reconnect.
 		// Active streams survive reconnections — the WeCom replace-based
-		// protocol means the next SendStreamChunk will resend the full
+		// protocol means the next UpdateStreamContent will resend the full
 		// accumulated content on the new connection. EndStream always
 		// cleans up the buffer, so there is no memory leak.
 	}()

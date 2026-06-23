@@ -196,6 +196,7 @@ func holdbackCutoff(chunk string) int {
 func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenant, defaultFileSvc interfaces.FileService) string {
 	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), tenant, defaultFileSvc)
 }
+
 // cleanIMContent applies all IM-specific content transformations:
 //  1. Collapse <image> XML blocks back to plain markdown
 //  2. Strip <kb/> and <web/> citation tags
@@ -1825,20 +1826,19 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	eventBus := event.NewEventBus()
 
 	var (
-		bufMu          sync.Mutex
-		pipelineInner  strings.Builder // quick QA: RAG pipeline steps
-		reasoningInner strings.Builder // quick QA: model reasoning_content
-		agentInner     strings.Builder // agent: retracted text + thoughts + tools
+		bufMu           sync.Mutex
+		reasoningInner  streamSection   // quick QA: model reasoning_content
+		agentInner      streamSection   // agent: retracted text + thoughts
 		agentLiveAnswer strings.Builder // agent: optimistic answer before tool retract
-		answerOuter    strings.Builder // final answer for display persistence
-		answerBuilder  strings.Builder // answer persisted to DB
-		qaErr          error
-		done           = make(chan struct{})
-		completeDone   = make(chan struct{})
-		closeOnce      sync.Once
-		completeOnce   sync.Once
-		agentDone      bool
-		assistantMsg   *types.Message
+		answerOuter     strings.Builder // final answer for display persistence
+		answerBuilder   strings.Builder // answer persisted to DB
+		qaErr           error
+		done            = make(chan struct{})
+		completeDone    = make(chan struct{})
+		closeOnce       sync.Once
+		completeOnce    sync.Once
+		agentDone       bool
+		assistantMsg    *types.Message
 
 		seenToolCalls = make(map[string]bool)
 		agentToolIdx  = make(map[string]int)
@@ -1847,40 +1847,35 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		agentToolSteps    []IMToolStep
 		pipelineToolSteps []IMToolStep
 
-		sectionLastNewline = true
-		streamedAny        bool
+		streamedAny bool
 	)
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 	closeComplete := func() { completeOnce.Do(func() { close(completeDone) }) }
 
-	sectionWrite := func(b *strings.Builder, s string) {
+	agentWrite := func(s string) {
 		if s == "" {
 			return
 		}
-		b.WriteString(s)
-		sectionLastNewline = s[len(s)-1] == '\n'
+		agentInner.write(s)
 		streamedAny = true
 	}
-
-	sectionEnsureNewlineBefore := func(b *strings.Builder) {
-		if !sectionLastNewline {
-			b.WriteByte('\n')
-			sectionLastNewline = true
+	reasoningWrite := func(s string) {
+		if s == "" {
+			return
 		}
+		reasoningInner.write(s)
+		streamedAny = true
 	}
-
-	agentWrite := func(s string) { sectionWrite(&agentInner, s) }
-	reasoningWrite := func(s string) { sectionWrite(&reasoningInner, s) }
 
 	// retractAgentLiveAnswer moves the optimistic answer into the think block (Web: superseded preamble).
 	retractAgentLiveAnswer := func() {
 		if agentLiveAnswer.Len() == 0 {
 			return
 		}
-		if agentInner.Len() > 0 {
-			sectionEnsureNewlineBefore(&agentInner)
+		if agentInner.text.Len() > 0 {
+			agentInner.ensureNewlineBefore()
 		}
-		sectionWrite(&agentInner, agentLiveAnswer.String())
+		agentInner.write(agentLiveAnswer.String())
 		agentLiveAnswer.Reset()
 	}
 
@@ -1891,10 +1886,9 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 		return IMStreamParts{
 			Mode:              mode,
-			PipelineInner:     pipelineInner.String(),
 			PipelineToolSteps: pipelineToolSteps,
-			ReasoningInner:    reasoningInner.String(),
-			AgentInner:        agentInner.String(),
+			ReasoningInner:    reasoningInner.text.String(),
+			AgentInner:        agentInner.text.String(),
 			AgentToolSteps:    agentToolSteps,
 			LiveAnswer:        agentLiveAnswer.String(),
 			Answer:            answerOuter.String(),
@@ -1910,7 +1904,10 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 
 		bufMu.Lock()
 		if useAgent && !agentDone {
-			sectionWrite(&agentLiveAnswer, data.Content)
+			if data.Content != "" {
+				agentLiveAnswer.WriteString(data.Content)
+				streamedAny = true
+			}
 		} else {
 			answerOuter.WriteString(data.Content)
 			answerBuilder.WriteString(data.Content)
@@ -1960,13 +1957,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		bufMu.Lock()
 		agentDone = true
 		applyIMCompleteDataToMessage(assistantMsg, data)
-		if data.FinalAnswer != "" {
-			answerBuilder.Reset()
-			answerBuilder.WriteString(data.FinalAnswer)
-			answerOuter.Reset()
-			answerOuter.WriteString(data.FinalAnswer)
-			agentLiveAnswer.Reset()
-		} else if answerBuilder.Len() == 0 && agentLiveAnswer.Len() > 0 {
+		if answerBuilder.Len() == 0 && agentLiveAnswer.Len() > 0 {
 			answerBuilder.WriteString(agentLiveAnswer.String())
 			answerOuter.WriteString(agentLiveAnswer.String())
 		} else if answerBuilder.Len() == 0 && answerOuter.Len() > 0 {
@@ -2120,7 +2111,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	ticker := time.NewTicker(streamFlushInterval)
 	defer ticker.Stop()
 
-	flush := func(final bool, phase StreamDisplayPhase) {
+	flush := func() {
 		bufMu.Lock()
 		parts := getStreamParts()
 		agentRunning := useAgent && !agentDone
@@ -2131,10 +2122,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			return
 		}
 
-		if !final {
-			if cut := holdbackCutoff(displaySource); cut < len(displaySource) {
-				displaySource = displaySource[:cut]
-			}
+		if cut := holdbackCutoff(displaySource); cut < len(displaySource) {
+			displaySource = displaySource[:cut]
 		}
 
 		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc)
@@ -2147,7 +2136,7 @@ loop:
 	for {
 		select {
 		case <-ticker.C:
-			flush(false, StreamDisplayIntermediate)
+			flush()
 		case <-done:
 			break loop
 		case <-qaCtx.Done():
@@ -2158,8 +2147,8 @@ loop:
 	if useAgent {
 		select {
 		case <-completeDone:
-		case <-time.After(500 * time.Millisecond):
-			logger.Warnf(ctx, "[IM] Timed out waiting for agent complete event: session=%s", session.ID)
+		case <-qaCtx.Done():
+			logger.Warnf(ctx, "[IM] QA context ended before agent complete event: session=%s", session.ID)
 		}
 	}
 
@@ -2304,9 +2293,6 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		}
 		answerMu.Lock()
 		applyIMCompleteDataToMessage(assistantMsg, data)
-		if answerBuilder.Len() == 0 && data.FinalAnswer != "" {
-			answerBuilder.WriteString(data.FinalAnswer)
-		}
 		answerMu.Unlock()
 		closeComplete()
 		return nil
@@ -2351,8 +2337,8 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		if useAgent {
 			select {
 			case <-completeDone:
-			case <-time.After(500 * time.Millisecond):
-				logger.Warnf(ctx, "[IM] Timed out waiting for agent complete event: session=%s", session.ID)
+			case <-ctx.Done():
+				logger.Warnf(ctx, "[IM] QA context ended before agent complete event: session=%s", session.ID)
 			}
 		}
 	case <-ctx.Done():
@@ -2772,7 +2758,6 @@ func (s *Service) streamSmartReply(ctx context.Context, chatModel chat.Chat, str
 	// Flush loop with batching (same pattern as handleMessageStream)
 	var (
 		bufMu     sync.Mutex
-		buf       strings.Builder
 		streamRaw strings.Builder
 		done      = make(chan struct{})
 	)
@@ -2782,7 +2767,6 @@ func (s *Service) streamSmartReply(ctx context.Context, chatModel chat.Chat, str
 		for resp := range streamCh {
 			if resp.Content != "" {
 				bufMu.Lock()
-				buf.WriteString(resp.Content)
 				streamRaw.WriteString(resp.Content)
 				bufMu.Unlock()
 			}
@@ -2794,7 +2778,6 @@ func (s *Service) streamSmartReply(ctx context.Context, chatModel chat.Chat, str
 
 	pushStream := func(phase StreamDisplayPhase) {
 		bufMu.Lock()
-		buf.Reset()
 		raw := streamRaw.String()
 		bufMu.Unlock()
 		if raw == "" {

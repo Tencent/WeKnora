@@ -55,7 +55,6 @@ type IMStreamParts struct {
 	Mode IMStreamMode
 
 	// Quick-QA (RagPipelineProgress on Web):
-	PipelineInner     string       // non-tool pipeline narrative (if any)
 	PipelineToolSteps []IMToolStep // query_understand / knowledge_search rows
 	ReasoningInner    string       // model reasoning_content — separate "思考" section
 
@@ -73,8 +72,7 @@ func agentThinkContent(parts IMStreamParts) string {
 }
 
 func quickQAPipelineContent(parts IMStreamParts) string {
-	toolLines := renderIMToolSteps(parts.PipelineToolSteps, FormatIMRagPipelineLine)
-	return mergeIMNarrativeAndTools(parts.PipelineInner, toolLines)
+	return renderIMToolSteps(parts.PipelineToolSteps, FormatIMRagPipelineLine)
 }
 
 // RAGThinkingStyle matches Web RagPipelineProgress thinking row (agent.think).
