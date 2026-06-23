@@ -1,6 +1,12 @@
 package im
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/types"
+)
 
 func TestMakeUserKey_UserMode(t *testing.T) {
 	tests := []struct {
@@ -141,5 +147,114 @@ func TestIncomingMessageThreadID(t *testing.T) {
 
 	if msgMM.ThreadID != msgMM.Extra["thread_root_id"] {
 		t.Error("Mattermost ThreadID should match Extra thread_root_id")
+	}
+}
+
+func TestBuildIMLastRequestStateFromAgent(t *testing.T) {
+	agent := &types.CustomAgent{
+		ID: "agent-1",
+		Config: types.CustomAgentConfig{
+			AgentMode:        types.AgentModeSmartReasoning,
+			ModelID:          "model-1",
+			KnowledgeBases:   []string{"kb-agent"},
+			WebSearchEnabled: true,
+		},
+	}
+
+	state := buildIMLastRequestState(agent.ID, agent, nil)
+
+	if state.AgentID != "agent-1" {
+		t.Fatalf("AgentID = %q, want agent-1", state.AgentID)
+	}
+	if !state.AgentEnabled {
+		t.Fatal("AgentEnabled = false, want true")
+	}
+	if state.ModelID != "model-1" {
+		t.Fatalf("ModelID = %q, want model-1", state.ModelID)
+	}
+	if !state.WebSearchEnabled {
+		t.Fatal("WebSearchEnabled = false, want true")
+	}
+	if !reflect.DeepEqual(state.KnowledgeBaseIDs, []string{"kb-agent"}) {
+		t.Fatalf("KnowledgeBaseIDs = %#v, want [kb-agent]", state.KnowledgeBaseIDs)
+	}
+}
+
+func TestBuildIMLastRequestStateKeepsExplicitKBs(t *testing.T) {
+	agent := &types.CustomAgent{
+		ID: "agent-1",
+		Config: types.CustomAgentConfig{
+			AgentMode:      types.AgentModeQuickAnswer,
+			ModelID:        "model-1",
+			KnowledgeBases: []string{"kb-agent"},
+		},
+	}
+
+	state := buildIMLastRequestState(agent.ID, agent, []string{"kb-explicit"})
+
+	if state.AgentEnabled {
+		t.Fatal("AgentEnabled = true, want false for quick-answer agent")
+	}
+	if !reflect.DeepEqual(state.KnowledgeBaseIDs, []string{"kb-explicit"}) {
+		t.Fatalf("KnowledgeBaseIDs = %#v, want [kb-explicit]", state.KnowledgeBaseIDs)
+	}
+}
+
+func TestCreateIMMessagePayloadsShareRequestShape(t *testing.T) {
+	userMsg := createIMUserMessagePayload("session-1", "hello", "request-1")
+	assistantMsg := createIMAssistantMessagePayload("session-1", "request-1")
+
+	if userMsg.SessionID != "session-1" || assistantMsg.SessionID != "session-1" {
+		t.Fatalf("SessionID mismatch: user=%q assistant=%q", userMsg.SessionID, assistantMsg.SessionID)
+	}
+	if userMsg.RequestID != assistantMsg.RequestID || userMsg.RequestID != "request-1" {
+		t.Fatalf("RequestID mismatch: user=%q assistant=%q", userMsg.RequestID, assistantMsg.RequestID)
+	}
+	if userMsg.Role != "user" || assistantMsg.Role != "assistant" {
+		t.Fatalf("Role mismatch: user=%q assistant=%q", userMsg.Role, assistantMsg.Role)
+	}
+	if userMsg.Channel != "im" || assistantMsg.Channel != "im" {
+		t.Fatalf("Channel mismatch: user=%q assistant=%q", userMsg.Channel, assistantMsg.Channel)
+	}
+	if !userMsg.IsCompleted {
+		t.Fatal("user message should be completed")
+	}
+	if assistantMsg.IsCompleted {
+		t.Fatal("assistant placeholder should not be completed")
+	}
+	if userMsg.Content != "hello" {
+		t.Fatalf("user content = %q, want hello", userMsg.Content)
+	}
+	if assistantMsg.Content != "" {
+		t.Fatalf("assistant placeholder content = %q, want empty", assistantMsg.Content)
+	}
+}
+
+func TestApplyIMCompleteDataToMessage(t *testing.T) {
+	msg := &types.Message{ID: "assistant-1", Role: "assistant"}
+	ref := &types.SearchResult{ID: "chunk-1", KnowledgeID: "knowledge-1"}
+	steps := []types.AgentStep{{
+		Iteration:        1,
+		ReasoningContent: "thinking",
+	}}
+
+	applyIMCompleteDataToMessage(msg, event.AgentCompleteData{
+		MessageID:       "assistant-1",
+		TotalDurationMs: 1234,
+		KnowledgeRefs:   []interface{}{ref},
+		AgentSteps:      steps,
+	})
+
+	if !msg.IsCompleted {
+		t.Fatal("message should be marked completed")
+	}
+	if msg.AgentDurationMs != 1234 {
+		t.Fatalf("AgentDurationMs = %d, want 1234", msg.AgentDurationMs)
+	}
+	if len(msg.KnowledgeReferences) != 1 || msg.KnowledgeReferences[0].ID != "chunk-1" {
+		t.Fatalf("KnowledgeReferences = %#v, want chunk-1", msg.KnowledgeReferences)
+	}
+	if len(msg.AgentSteps) != 1 || msg.AgentSteps[0].ReasoningContent != "thinking" {
+		t.Fatalf("AgentSteps = %#v, want one thinking step", msg.AgentSteps)
 	}
 }

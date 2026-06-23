@@ -275,25 +275,33 @@ func (c *LongConnClient) StartStream(ctx context.Context, incoming *im.IncomingM
 	return streamID, nil
 }
 
-// SendStreamChunk accumulates the content and sends the full text so far.
-// WeCom stream protocol is replace-based: each frame replaces the previous display.
-func (c *LongConnClient) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
-	if content == "" {
+// UpdateStreamContent replaces the user-visible stream text (WeCom replace protocol).
+func (c *LongConnClient) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+	if fullContent == "" {
 		return nil
 	}
 
-	// Accumulate
 	c.streamBufsMu.Lock()
 	buf, ok := c.streamBufs[streamID]
 	if !ok {
 		c.streamBufsMu.Unlock()
 		return fmt.Errorf("unknown stream ID: %s", streamID)
 	}
-	buf.WriteString(content)
-	fullContent := buf.String()
+	buf.Reset()
+	buf.WriteString(fullContent)
 	c.streamBufsMu.Unlock()
 
 	return c.sendStreamFrame(incoming, streamID, fullContent, false)
+}
+
+// FinalizeStream replaces the display with answer-only content before the stream ends.
+func (c *LongConnClient) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+	return c.UpdateStreamContent(ctx, incoming, streamID, finalContent)
+}
+
+// SendStreamChunk is deprecated; kept as an alias for UpdateStreamContent.
+func (c *LongConnClient) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+	return c.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
 // EndStream sends the final frame with the full accumulated content and cleans up.

@@ -215,7 +215,7 @@ func resolveChatID(incoming *im.IncomingMessage) string {
 
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	chatID := resolveChatID(incoming)
-	text := transformThinkBlocks(reply.Content)
+	text := im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal)
 
 	body := map[string]interface{}{
 		"chat_id":    chatID,
@@ -391,8 +391,8 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	return streamID, nil
 }
 
-func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
-	if content == "" {
+func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+	if fullContent == "" {
 		return nil
 	}
 
@@ -404,28 +404,53 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	}
 
 	state.mu.Lock()
-	state.content.WriteString(content)
-
-	// Throttle: skip edit if last edit was too recent
 	if time.Since(state.lastEdit) < minEditInterval {
+		state.content.Reset()
+		state.content.WriteString(fullContent)
 		state.mu.Unlock()
 		return nil
 	}
-
-	fullContent := transformThinkBlocks(state.content.String())
+	state.content.Reset()
+	state.content.WriteString(fullContent)
+	chatID := state.chatID
+	msgID := state.msgID
 	state.lastEdit = time.Now()
 	state.mu.Unlock()
 
-	if err := a.editMessage(ctx, state.chatID, state.msgID, fullContent, ""); err != nil {
-		logger.Warnf(ctx, "[Telegram] Failed to update stream chunk: %v", err)
+	if err := a.editMessage(ctx, chatID, msgID, fullContent, ""); err != nil {
+		logger.Warnf(ctx, "[Telegram] Failed to update stream content: %v", err)
+	}
+	return nil
+}
+
+func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+	streamsMu.Lock()
+	state, ok := streams[streamID]
+	streamsMu.Unlock()
+	if !ok {
+		return fmt.Errorf("unknown stream ID: %s", streamID)
 	}
 
+	state.mu.Lock()
+	state.content.Reset()
+	state.content.WriteString(finalContent)
+	chatID := state.chatID
+	msgID := state.msgID
+	state.mu.Unlock()
+
+	if err := a.editMessage(ctx, chatID, msgID, finalContent, "Markdown"); err != nil {
+		logger.Warnf(ctx, "[Telegram] Failed to finalize stream: %v", err)
+	}
 	return nil
+}
+
+func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
 func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
 	streamsMu.Lock()
-	state, ok := streams[streamID]
+	_, ok := streams[streamID]
 	delete(streams, streamID)
 	streamsMu.Unlock()
 
@@ -433,20 +458,8 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 		return nil
 	}
 
-	state.mu.Lock()
-	fullContent := transformThinkBlocks(state.content.String())
-	state.mu.Unlock()
-
-	if err := a.editMessage(ctx, state.chatID, state.msgID, fullContent, "Markdown"); err != nil {
-		logger.Warnf(ctx, "[Telegram] Failed to end stream: %v", err)
-	}
-
 	logger.Infof(ctx, "[Telegram] Streaming ended: stream_id=%s", streamID)
 	return nil
-}
-
-func transformThinkBlocks(content string) string {
-	return im.TransformThinkBlocks(content, im.TelegramThinkStyle)
 }
 
 // ── FileDownloader implementation ──
