@@ -454,7 +454,7 @@ services:
     container_name: WeKnora-qdrant
     ports:
       - "${QDRANT_REST_PORT:-6333}:6333"
-      - "${QDRANT_PORT:-6334}:6334"
+      - "${QDRANT_GRPC_HOST_PORT:-6334}:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
