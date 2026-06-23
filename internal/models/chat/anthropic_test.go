@@ -233,6 +233,64 @@ data: {"type":"message_stop"}
 	assert.Equal(t, 119, chunks[1].Usage.TotalTokens)
 }
 
+func TestAnthropicChat_ToolUse(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+
+	var capturedRequest anthropicRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedRequest))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_123",
+			"type":"message",
+			"role":"assistant",
+			"content":[
+				{"type":"text","text":"I will search."},
+				{"type":"tool_use","id":"toolu_123","name":"knowledge_search","input":{"query":"pricing"}}
+			],
+			"stop_reason":"tool_use",
+			"usage":{"input_tokens":10,"output_tokens":5}
+		}`))
+	}))
+	defer server.Close()
+
+	chat, err := NewAnthropicChat(&ChatConfig{
+		Source:    types.ModelSourceRemote,
+		BaseURL:   server.URL,
+		ModelName: "claude-sonnet-4-5",
+		APIKey:    "test-key",
+		Provider:  string(provider.ProviderAnthropic),
+	})
+	require.NoError(t, err)
+
+	resp, err := chat.Chat(context.Background(), []Message{
+		{Role: "user", Content: "find pricing"},
+	}, &ChatOptions{
+		Tools: []Tool{{
+			Type: "function",
+			Function: FunctionDef{
+				Name:        "knowledge_search",
+				Description: "Search knowledge",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+			},
+		}},
+		ToolChoice: "auto",
+	})
+	require.NoError(t, err)
+
+	require.Len(t, capturedRequest.Tools, 1)
+	assert.Equal(t, "knowledge_search", capturedRequest.Tools[0].Name)
+	require.NotNil(t, capturedRequest.ToolChoice)
+	assert.Equal(t, "auto", capturedRequest.ToolChoice.Type)
+	assert.Equal(t, "I will search.", resp.Content)
+	assert.Equal(t, "tool_use", resp.FinishReason)
+	require.Len(t, resp.ToolCalls, 1)
+	assert.Equal(t, "toolu_123", resp.ToolCalls[0].ID)
+	assert.Equal(t, "function", resp.ToolCalls[0].Type)
+	assert.Equal(t, "knowledge_search", resp.ToolCalls[0].Function.Name)
+	assert.JSONEq(t, `{"query":"pricing"}`, resp.ToolCalls[0].Function.Arguments)
+}
+
 func TestNewRemoteChat_AnthropicProvider(t *testing.T) {
 	chat, err := NewRemoteChat(&ChatConfig{
 		Source:    types.ModelSourceRemote,

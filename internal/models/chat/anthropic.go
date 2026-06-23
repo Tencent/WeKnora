@@ -27,17 +27,40 @@ type AnthropicChat struct {
 
 type anthropicMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+type anthropicContentBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   string          `json:"content,omitempty"`
+}
+
+type anthropicTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema"`
+}
+
+type anthropicToolChoice struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
 }
 
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	Stream      bool               `json:"stream,omitempty"`
-	System      string             `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	TopP        *float64           `json:"top_p,omitempty"`
+	Model       string                `json:"model"`
+	MaxTokens   int                   `json:"max_tokens"`
+	Stream      bool                  `json:"stream,omitempty"`
+	System      string                `json:"system,omitempty"`
+	Messages    []anthropicMessage    `json:"messages"`
+	Temperature *float64              `json:"temperature,omitempty"`
+	TopP        *float64              `json:"top_p,omitempty"`
+	Tools       []anthropicTool       `json:"tools,omitempty"`
+	ToolChoice  *anthropicToolChoice  `json:"tool_choice,omitempty"`
 }
 
 type anthropicResponse struct {
@@ -45,8 +68,11 @@ type anthropicResponse struct {
 	Type    string `json:"type"`
 	Role    string `json:"role"`
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type  string          `json:"type"`
+		Text  string          `json:"text"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
@@ -174,6 +200,42 @@ func (c *AnthropicChat) Chat(ctx context.Context, messages []Message, opts *Chat
 }
 
 func (c *AnthropicChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+	if opts != nil && len(opts.Tools) > 0 {
+		streamChan := make(chan types.StreamResponse, 2)
+		go func() {
+			defer close(streamChan)
+			resp, err := c.Chat(ctx, messages, opts)
+			if err != nil {
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeError,
+					Content:      err.Error(),
+					Done:         true,
+				}
+				return
+			}
+			for _, toolCall := range resp.ToolCalls {
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeToolCall,
+					ToolCalls:    resp.ToolCalls,
+					Done:         false,
+					Data: map[string]interface{}{
+						"tool_call_id": toolCall.ID,
+						"tool_name":    toolCall.Function.Name,
+					},
+				}
+			}
+			streamChan <- types.StreamResponse{
+				ResponseType: types.ResponseTypeAnswer,
+				Content:      resp.Content,
+				Done:         true,
+				ToolCalls:    resp.ToolCalls,
+				Usage:        &resp.Usage,
+				FinishReason: resp.FinishReason,
+			}
+		}()
+		return streamChan, nil
+	}
+
 	reqBody := c.buildRequest(messages, opts)
 	reqBody.Stream = true
 	jsonData, err := json.Marshal(reqBody)
@@ -268,30 +330,114 @@ func (c *AnthropicChat) buildRequest(messages []Message, opts *ChatOptions) anth
 			topP := opts.TopP
 			req.TopP = &topP
 		}
+		if opts.ToolChoice != "none" {
+			req.Tools = anthropicToolsFromChatTools(opts.Tools)
+		}
+		req.ToolChoice = anthropicToolChoiceFromChatOptions(opts, len(req.Tools) > 0)
 	}
 
 	var systemParts []string
+	var pendingToolResults []anthropicContentBlock
+	flushToolResults := func() {
+		if len(pendingToolResults) == 0 {
+			return
+		}
+		req.Messages = append(req.Messages, anthropicMessage{
+			Role:    "user",
+			Content: pendingToolResults,
+		})
+		pendingToolResults = nil
+	}
 	for _, msg := range messages {
 		content := strings.TrimSpace(msg.Content)
 		if content == "" {
 			content = textFromMultiContent(msg.MultiContent)
 		}
-		if content == "" {
+		if content == "" && len(msg.ToolCalls) == 0 && msg.Role != "tool" {
 			continue
 		}
 		switch msg.Role {
 		case "system":
+			flushToolResults()
 			systemParts = append(systemParts, content)
 		case "assistant":
-			req.Messages = append(req.Messages, anthropicMessage{Role: "assistant", Content: content})
+			flushToolResults()
+			req.Messages = append(req.Messages, anthropicMessage{Role: "assistant", Content: anthropicAssistantContent(msg, content)})
+		case "tool":
+			pendingToolResults = append(pendingToolResults, anthropicContentBlock{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   msg.Content,
+			})
 		case "user":
+			flushToolResults()
 			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
 		default:
+			flushToolResults()
 			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
 		}
 	}
+	flushToolResults()
 	req.System = strings.Join(systemParts, "\n\n")
 	return req
+}
+
+func anthropicToolsFromChatTools(tools []Tool) []anthropicTool {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]anthropicTool, 0, len(tools))
+	for _, tool := range tools {
+		schema := tool.Function.Parameters
+		if len(schema) == 0 {
+			schema = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		out = append(out, anthropicTool{
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+			InputSchema: schema,
+		})
+	}
+	return out
+}
+
+func anthropicToolChoiceFromChatOptions(opts *ChatOptions, hasTools bool) *anthropicToolChoice {
+	if opts == nil || !hasTools || opts.ToolChoice == "" {
+		return nil
+	}
+	switch opts.ToolChoice {
+	case "none":
+		return nil
+	case "required":
+		return &anthropicToolChoice{Type: "any"}
+	case "auto":
+		return &anthropicToolChoice{Type: "auto"}
+	default:
+		return &anthropicToolChoice{Type: "tool", Name: opts.ToolChoice}
+	}
+}
+
+func anthropicAssistantContent(msg Message, text string) any {
+	if len(msg.ToolCalls) == 0 {
+		return text
+	}
+	blocks := make([]anthropicContentBlock, 0, len(msg.ToolCalls)+1)
+	if strings.TrimSpace(text) != "" {
+		blocks = append(blocks, anthropicContentBlock{Type: "text", Text: text})
+	}
+	for _, tc := range msg.ToolCalls {
+		input := json.RawMessage(tc.Function.Arguments)
+		if len(input) == 0 || !json.Valid(input) {
+			input = json.RawMessage(`{}`)
+		}
+		blocks = append(blocks, anthropicContentBlock{
+			Type:  "tool_use",
+			ID:    tc.ID,
+			Name:  tc.Function.Name,
+			Input: input,
+		})
+	}
+	return blocks
 }
 
 func textFromMultiContent(parts []MessageContentPart) string {
@@ -309,15 +455,32 @@ func textFromMultiContent(parts []MessageContentPart) string {
 
 func (c *AnthropicChat) parseResponse(resp *anthropicResponse) *types.ChatResponse {
 	parts := make([]string, 0, len(resp.Content))
+	toolCalls := make([]types.LLMToolCall, 0)
 	for _, part := range resp.Content {
 		if part.Type == "text" && part.Text != "" {
 			parts = append(parts, part.Text)
+			continue
+		}
+		if part.Type == "tool_use" && part.Name != "" {
+			args := part.Input
+			if len(args) == 0 || !json.Valid(args) {
+				args = json.RawMessage(`{}`)
+			}
+			toolCalls = append(toolCalls, types.LLMToolCall{
+				ID:   part.ID,
+				Type: "function",
+				Function: types.FunctionCall{
+					Name:      part.Name,
+					Arguments: string(args),
+				},
+			})
 		}
 	}
 	inputTokens := resp.Usage.InputTokens
 	outputTokens := resp.Usage.OutputTokens
 	return &types.ChatResponse{
 		Content:      strings.Join(parts, ""),
+		ToolCalls:    toolCalls,
 		FinishReason: resp.StopReason,
 		Usage: types.TokenUsage{
 			PromptTokens:     inputTokens,
