@@ -200,8 +200,8 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Name:         "RSS / Atom Feed",
 		Description:  "Sync articles from RSS/Atom feeds",
 		Priority:     12,
-		AuthType:     "none",
-		Capabilities: []string{},
+		AuthType:     "custom",
+		Capabilities: []string{"incremental"},
 	},
 }
 

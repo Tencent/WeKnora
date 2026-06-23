@@ -132,6 +132,21 @@ function syncRssAuthHeadersToCredentials() {
   }
 }
 
+// Feed URLs may still live in credentials on older rows (not returned by the
+// API). The backend copies them into settings on read; fall back to the
+// selected feed resource IDs when settings are still empty.
+function hydrateRssFeedUrlsFromConfig(config: { settings?: Record<string, any>; resource_ids?: string[] }) {
+  const settings = config.settings || {}
+  if (String(settings.feed_urls || '').trim()) {
+    return { ...settings }
+  }
+  const ids = config.resource_ids || []
+  if (ids.length === 0) {
+    return { ...settings }
+  }
+  return { ...settings, feed_urls: ids.join('\n') }
+}
+
 function addRssAuthHeader() {
   rssAuthHeaders.value.push({ key: '', value: '' })
 }
@@ -387,7 +402,6 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     permissionPageUrl: '',
     requiredPermissions: [],
     fields: [
-      { key: 'feed_urls', labelKey: 'datasource.field.feedUrls', placeholder: 'https://example.com/feed.xml', multiline: true, hintKey: 'datasource.field.feedUrlsHint' },
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
@@ -431,13 +445,16 @@ watch(visible, async (v) => {
     credentialsConfigured.value = false
     refreshCredentialsStatus()
     testResult.value = credentialsConfigured.value ? 'success' : ''
+    const editConfig = props.dataSource.config || {}
     form.value = {
       name: props.dataSource.name,
       type: props.dataSource.type,
       config: {
         credentials: {},
-        resource_ids: props.dataSource.config?.resource_ids || [],
-        settings: props.dataSource.config?.settings || {},
+        resource_ids: editConfig.resource_ids || [],
+        settings: props.dataSource.type === 'rss'
+          ? hydrateRssFeedUrlsFromConfig(editConfig)
+          : (editConfig.settings || {}),
       },
       sync_schedule: props.dataSource.sync_schedule,
       sync_mode: props.dataSource.sync_mode,
@@ -484,6 +501,16 @@ watch(
   { deep: true },
 )
 
+watch(
+  () => form.value.config.settings.feed_urls,
+  () => {
+    if (needsConnectionTest()) {
+      testResult.value = ''
+      testErrorMsg.value = ''
+    }
+  },
+)
+
 function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
@@ -496,6 +523,7 @@ function selectType(def: ConnectorDef) {
 // --- Test connection (stateless, no DB write) ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
+  if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
     const fields = currentDef.value?.fields || []
     for (const f of fields) {
@@ -518,7 +546,12 @@ async function testConnection() {
       } as any)
       await validateConnection(tempDsId.value)
     } else {
-      await validateCredentials(form.value.type, form.value.config.credentials)
+      const creds = { ...form.value.config.credentials }
+      if (form.value.type === 'rss') {
+        // validate-credentials is credentials-only; feed URLs live in settings.
+        creds.feed_urls = form.value.config.settings.feed_urls
+      }
+      await validateCredentials(form.value.type, creds)
     }
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))
@@ -672,8 +705,18 @@ function toggleResource(id: string) {
   selectedResourceIds.value = [...cover]
 }
 
+function validateRssFeedUrls(): boolean {
+  if (form.value.type !== 'rss') return true
+  if (!String(form.value.config.settings.feed_urls || '').trim()) {
+    MessagePlugin.warning(`${t('datasource.field.feedUrls')} ${t('datasource.isRequired')}`)
+    return false
+  }
+  return true
+}
+
 function validateStep1Fields(): boolean {
   syncRssAuthHeadersToCredentials()
+  if (!validateRssFeedUrls()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
@@ -1076,6 +1119,21 @@ const drawerConfirmText = computed(() => {
         <div class="form-item">
           <label class="form-label required">{{ t('datasource.nameLabel') }}</label>
           <t-input v-model="form.name" :placeholder="t('datasource.namePlaceholder')" />
+        </div>
+      </section>
+
+      <section v-if="form.type === 'rss'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.field.feedUrls') }}</h4>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.field.feedUrls') }}</label>
+          <t-textarea
+            v-model="form.config.settings.feed_urls"
+            placeholder="https://example.com/feed.xml"
+            :autosize="{ minRows: 2, maxRows: 6 }"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.field.feedUrlsHint') }}</p>
         </div>
       </section>
 

@@ -32,9 +32,10 @@ const longArticleBody = `<p>This is the first paragraph of a reasonably long art
 
 // fakeFeed spins up an httptest server serving an RSS feed and article pages.
 type fakeFeed struct {
-	server      *httptest.Server
-	feedTitle   string
-	itemContent string // optional <description>/content for items
+	server             *httptest.Server
+	feedTitle          string
+	itemContent        string // optional <description>/content for items
+	articleAuthHeaders []string
 }
 
 func newFakeFeed(t *testing.T) *fakeFeed {
@@ -43,6 +44,11 @@ func newFakeFeed(t *testing.T) *fakeFeed {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/article/", func(w http.ResponseWriter, r *http.Request) {
+		for k, vals := range r.Header {
+			if strings.EqualFold(k, "X-Test-Auth") && len(vals) > 0 && vals[0] != "" {
+				f.articleAuthHeaders = append(f.articleAuthHeaders, vals[0])
+			}
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<!DOCTYPE html><html><head><title>%s</title></head>`+
 			`<body><nav>menu</nav><article><h1>Heading</h1>%s</article><footer>foot</footer></body></html>`,
@@ -87,14 +93,17 @@ func newFakeFeed(t *testing.T) *fakeFeed {
 func (f *fakeFeed) feedURL() string { return f.server.URL + "/feed.xml" }
 
 func makeConfig(feedURLs string, headers string) *types.DataSourceConfig {
-	creds := map[string]interface{}{"feed_urls": feedURLs}
+	cfg := &types.DataSourceConfig{
+		Type: types.ConnectorTypeRSS,
+		Settings: map[string]interface{}{
+			"feed_urls": feedURLs,
+		},
+		Credentials: map[string]interface{}{},
+	}
 	if headers != "" {
-		creds["auth_headers"] = headers
+		cfg.Credentials["auth_headers"] = headers
 	}
-	return &types.DataSourceConfig{
-		Type:        types.ConnectorTypeRSS,
-		Credentials: creds,
-	}
+	return cfg
 }
 
 func TestConnector_Type(t *testing.T) {
@@ -106,6 +115,33 @@ func TestConnector_Type(t *testing.T) {
 func TestParseConfig_RequiresFeedURLs(t *testing.T) {
 	if _, err := parseConfig(makeConfig("   ", "")); err == nil {
 		t.Fatal("expected error when feed_urls is blank")
+	}
+}
+
+func TestParseConfig_FeedURLsFromSettings(t *testing.T) {
+	cfg, err := parseConfig(makeConfig("https://example.com/feed.xml", ""))
+	if err != nil {
+		t.Fatalf("parseConfig error: %v", err)
+	}
+	got := cfg.feedURLList()
+	if len(got) != 1 || got[0] != "https://example.com/feed.xml" {
+		t.Fatalf("feedURLList = %v", got)
+	}
+}
+
+func TestParseConfig_LegacyFeedURLsInCredentials(t *testing.T) {
+	legacy := &types.DataSourceConfig{
+		Type: types.ConnectorTypeRSS,
+		Credentials: map[string]interface{}{
+			"feed_urls": "https://legacy.example/feed.xml",
+		},
+	}
+	cfg, err := parseConfig(legacy)
+	if err != nil {
+		t.Fatalf("parseConfig error: %v", err)
+	}
+	if got := cfg.feedURLList(); len(got) != 1 || got[0] != "https://legacy.example/feed.xml" {
+		t.Fatalf("feedURLList = %v", got)
 	}
 }
 
@@ -132,6 +168,14 @@ func TestConfig_ParseHeaders(t *testing.T) {
 	}
 }
 
+func TestItemExternalID_ScopesByFeed(t *testing.T) {
+	got := itemExternalID("https://a.com/feed", "guid-1")
+	want := "https://a.com/feed:guid-1"
+	if got != want {
+		t.Fatalf("itemExternalID = %q, want %q", got, want)
+	}
+}
+
 func TestConnector_Validate_Success(t *testing.T) {
 	f := newFakeFeed(t)
 	if err := NewConnector().Validate(context.Background(), makeConfig(f.feedURL(), "")); err != nil {
@@ -152,6 +196,20 @@ func TestConnector_Validate_PrivateFeedWithHeader(t *testing.T) {
 		context.Background(), makeConfig(f.feedURL(), "X-Test-Auth: secret"),
 	); err != nil {
 		t.Fatalf("Validate with header error: %v", err)
+	}
+}
+
+func TestConnector_FetchAll_DoesNotSendAuthHeadersToArticles(t *testing.T) {
+	f := newFakeFeed(t)
+	f.itemContent = "needs-auth"
+	_, err := NewConnector().FetchAll(
+		context.Background(), makeConfig(f.feedURL(), "X-Test-Auth: secret"), nil,
+	)
+	if err != nil {
+		t.Fatalf("FetchAll error: %v", err)
+	}
+	if len(f.articleAuthHeaders) != 0 {
+		t.Fatalf("article requests must not carry feed auth headers, got %v", f.articleAuthHeaders)
 	}
 }
 
@@ -192,8 +250,9 @@ func TestConnector_FetchAll_FullTextMarkdown(t *testing.T) {
 	}
 
 	it := items[0]
-	if it.ExternalID != "guid-1" {
-		t.Errorf("ExternalID = %q, want guid-1", it.ExternalID)
+	wantExternalID := itemExternalID(f.feedURL(), "guid-1")
+	if it.ExternalID != wantExternalID {
+		t.Errorf("ExternalID = %q, want %q", it.ExternalID, wantExternalID)
 	}
 	if it.ContentType != "text/markdown" {
 		t.Errorf("ContentType = %q, want text/markdown", it.ContentType)
@@ -234,6 +293,18 @@ func TestConnector_FetchIncremental_SkipsUnchanged(t *testing.T) {
 	}
 	if len(items2) != 0 {
 		t.Fatalf("expected 0 items on unchanged second sync, got %d", len(items2))
+	}
+}
+
+func TestConnector_Walk_PartialFeedFailure(t *testing.T) {
+	f := newFakeFeed(t)
+	cfg := makeConfig(f.feedURL()+", https://invalid.invalid/feed.xml", "")
+	items, err := NewConnector().FetchAll(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("expected partial success, got error: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items from healthy feed, got %d", len(items))
 	}
 }
 

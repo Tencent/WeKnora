@@ -7,15 +7,15 @@
 //
 // Capabilities:
 //   - Private feeds: optional custom HTTP headers (e.g. "Authorization: Bearer …")
-//     are attached to every request, both to the feed and to article pages.
+//     are attached only to feed fetches, never to third-party article pages.
 //   - Full text: when an item exposes a link, the article page is fetched and
 //     run through a readability extractor; the cleaned HTML is converted to
 //     Markdown. Feed-provided content (content:encoded / description) is used
 //     as a fallback.
-//   - Incremental: a per-feed fingerprint (item updated/published time, or a
-//     content hash when no timestamp is present) detects changed items so only
-//     new/updated articles are re-fetched. Deletions are NOT synced — feeds
-//     routinely drop old items, which would otherwise look like deletions.
+//   - Incremental: a per-item fingerprint hashes the final Markdown body that
+//     would be ingested, so feed-only metadata changes and full-article edits
+//     are both detected. Deletions are NOT synced — feeds routinely drop old
+//     items, which would otherwise look like deletions.
 //
 // All outbound requests go through the SSRF-safe HTTP client so a malicious
 // feed cannot redirect WeKnora to internal services.
@@ -34,22 +34,22 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// Config holds RSS-specific configuration parsed from DataSourceConfig.Credentials.
+// Config holds RSS-specific configuration.
 //
-// Both fields live under Credentials (rather than Settings) because the
-// existing data-source editor UI only renders credential inputs, and because
-// AuthHeaders may carry secrets that must be encrypted at rest. FeedURLs are
-// not secret but ride along for the same single-input flow.
+// FeedURLs are stored in DataSourceConfig.Settings (non-secret, editable in
+// the UI without replacing credentials). AuthHeaders live in Credentials
+// because they may carry secrets that must be encrypted at rest. Credentials
+// may still carry feed_urls for backward compatibility with older rows.
 type Config struct {
 	// FeedURLs is a newline- or comma-separated list of feed URLs.
 	FeedURLs string `json:"feed_urls"`
 
 	// AuthHeaders is an optional newline-separated list of custom request
-	// headers in "Name: Value" form, applied to every outbound request.
+	// headers in "Name: Value" form, applied only to feed fetches.
 	AuthHeaders string `json:"auth_headers,omitempty"`
 }
 
-// parseConfig extracts and validates RSS configuration from the credentials map.
+// parseConfig extracts and validates RSS configuration.
 func parseConfig(config *types.DataSourceConfig) (*Config, error) {
 	if config == nil {
 		return nil, fmt.Errorf("%w: config is nil", datasource.ErrInvalidConfig)
@@ -62,10 +62,28 @@ func parseConfig(config *types.DataSourceConfig) (*Config, error) {
 	if err := json.Unmarshal(credBytes, &cfg); err != nil {
 		return nil, fmt.Errorf("parse rss credentials: %w", err)
 	}
+	if urls := feedURLsFromSettings(config.Settings); urls != "" {
+		cfg.FeedURLs = urls
+	}
 	if len(cfg.feedURLList()) == 0 {
 		return nil, fmt.Errorf("%w: feed_urls is required", datasource.ErrInvalidCredentials)
 	}
 	return &cfg, nil
+}
+
+func feedURLsFromSettings(settings map[string]interface{}) string {
+	if len(settings) == 0 {
+		return ""
+	}
+	raw, ok := settings["feed_urls"]
+	if !ok {
+		return ""
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
 }
 
 // feedURLList splits FeedURLs on newlines and commas, trims, dedupes (order
@@ -124,27 +142,22 @@ func (c *Config) parseHeaders() map[string]string {
 
 // rssCursor stores incremental sync state.
 //
-// FeedItems maps feedURL → itemID → fingerprint, where fingerprint is the
-// item's updated/published timestamp (RFC3339) or, when no timestamp exists,
-// a "h:<sha256-prefix>" content hash. An item is considered unchanged when its
-// fingerprint matches the stored one.
+// FeedItems maps feedURL → itemID → fingerprint, where fingerprint is a
+// "h:<sha256-prefix>" hash of the final Markdown body that would be ingested.
 type rssCursor struct {
 	LastSyncTime time.Time                    `json:"last_sync_time"`
 	FeedItems    map[string]map[string]string `json:"feed_items,omitempty"`
 }
 
-// itemFingerprint returns a change-detection token for a feed item. It prefers
-// the explicit updated/published timestamp; absent that, it hashes the content
-// so edits to timestamp-less items are still detected.
-func itemFingerprint(updated, published *time.Time, content string) string {
-	if updated != nil && !updated.IsZero() {
-		return updated.UTC().Format(time.RFC3339)
-	}
-	if published != nil && !published.IsZero() {
-		return published.UTC().Format(time.RFC3339)
-	}
-	sum := sha256.Sum256([]byte(content))
+// contentFingerprint hashes ingested Markdown for incremental change detection.
+func contentFingerprint(markdown string) string {
+	sum := sha256.Sum256([]byte(markdown))
 	return "h:" + hex.EncodeToString(sum[:])[:16]
+}
+
+// itemExternalID scopes an item ID to its feed so GUIDs cannot collide across feeds.
+func itemExternalID(feedURL, itemID string) string {
+	return feedURL + ":" + itemID
 }
 
 // firstNonEmpty returns the first non-empty trimmed string among the args.

@@ -42,10 +42,10 @@ func newClient(headers map[string]string) *client {
 	}
 }
 
-// fetch retrieves rawURL with SSRF validation and size limiting. The user's
-// custom headers are applied first, then a default User-Agent / Accept if the
-// user did not override them.
-func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64) ([]byte, error) {
+// fetch retrieves rawURL with SSRF validation and size limiting. Custom auth
+// headers are only attached when withAuthHeaders is true (feed fetches); article
+// pages on third-party domains must not receive feed credentials.
+func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64, withAuthHeaders bool) ([]byte, error) {
 	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
 		return nil, fmt.Errorf("URL rejected: %w", err)
 	}
@@ -61,8 +61,10 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64) ([]byt
 		return nil, err
 	}
 
-	for k, v := range c.headers {
-		req.Header.Set(k, v)
+	if withAuthHeaders {
+		for k, v := range c.headers {
+			req.Header.Set(k, v)
+		}
 	}
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", defaultUserAgent)
@@ -91,7 +93,7 @@ func (c *client) fetch(ctx context.Context, rawURL string, maxSize int64) ([]byt
 
 // fetchFeed retrieves the raw bytes of a feed document.
 func (c *client) fetchFeed(ctx context.Context, feedURL string) ([]byte, error) {
-	return c.fetch(ctx, feedURL, maxFeedSize)
+	return c.fetch(ctx, feedURL, maxFeedSize, true)
 }
 
 // extractArticle fetches an article page and returns the readability-cleaned
@@ -99,7 +101,7 @@ func (c *client) fetchFeed(ctx context.Context, feedURL string) ([]byte, error) 
 // error if the page can't be fetched or no readable content is found, so the
 // caller can fall back to feed-provided content.
 func (c *client) extractArticle(ctx context.Context, articleURL string) (contentHTML, title string, err error) {
-	body, err := c.fetch(ctx, articleURL, maxArticleSize)
+	body, err := c.fetch(ctx, articleURL, maxArticleSize, false)
 	if err != nil {
 		return "", "", err
 	}

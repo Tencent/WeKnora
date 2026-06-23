@@ -124,18 +124,23 @@ func (c *Connector) FetchAll(
 	return items, err
 }
 
-// FetchIncremental returns only items whose fingerprint changed since the prior
-// cursor. Deletions are intentionally not emitted (feeds drop old items as a
-// matter of course).
+// FetchIncremental returns only items whose content fingerprint changed since
+// the prior cursor. Deletions are intentionally not emitted (feeds drop old
+// items as a matter of course).
 func (c *Connector) FetchIncremental(
 	ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
 	var prev *rssCursor
 	if cursor != nil && cursor.ConnectorCursor != nil {
 		var p rssCursor
-		b, _ := json.Marshal(cursor.ConnectorCursor)
-		_ = json.Unmarshal(b, &p)
-		prev = &p
+		b, err := json.Marshal(cursor.ConnectorCursor)
+		if err != nil {
+			logger.Warnf(ctx, "[RSS] marshal connector cursor: %v", err)
+		} else if err := json.Unmarshal(b, &p); err != nil {
+			logger.Warnf(ctx, "[RSS] unmarshal connector cursor: %v", err)
+		} else {
+			prev = &p
+		}
 	}
 
 	items, newCursor, err := c.walk(ctx, config, config.ResourceIDs, prev, true)
@@ -144,8 +149,12 @@ func (c *Connector) FetchIncremental(
 	}
 
 	cursorMap := make(map[string]interface{})
-	b, _ := json.Marshal(newCursor)
-	_ = json.Unmarshal(b, &cursorMap)
+	b, err := json.Marshal(newCursor)
+	if err != nil {
+		logger.Warnf(ctx, "[RSS] marshal new cursor: %v", err)
+	} else if err := json.Unmarshal(b, &cursorMap); err != nil {
+		logger.Warnf(ctx, "[RSS] unmarshal new cursor to map: %v", err)
+	}
 
 	return items, &types.SyncCursor{
 		LastSyncTime:    newCursor.LastSyncTime,
@@ -155,9 +164,9 @@ func (c *Connector) FetchIncremental(
 
 // walk is the shared implementation for FetchAll / FetchIncremental.
 //
-// When incremental is true, items whose fingerprint matches the prior cursor
-// are skipped (no article re-fetch). The returned cursor always reflects the
-// full current item set so a later sync can detect changes.
+// When incremental is true, items whose content fingerprint matches the prior
+// cursor are omitted from the result (ingest skipped). The returned cursor
+// always reflects the full current item set so a later sync can detect changes.
 func (c *Connector) walk(
 	ctx context.Context,
 	config *types.DataSourceConfig,
@@ -184,15 +193,22 @@ func (c *Connector) walk(
 		FeedItems:    make(map[string]map[string]string),
 	}
 	var out []types.FetchedItem
+	var feedErrors []string
 
 	for _, feedURL := range feedURLs {
 		data, err := cli.fetchFeed(ctx, feedURL)
 		if err != nil {
-			return nil, nil, fmt.Errorf("fetch feed %s: %w", feedURL, err)
+			logger.Warnf(ctx, "[RSS] sync: fetch %s failed: %v", feedURL, err)
+			feedErrors = append(feedErrors, fmt.Sprintf("%s: %v", feedURL, err))
+			newCursor.FeedItems[feedURL] = make(map[string]string)
+			continue
 		}
 		feed, err := parser.Parse(bytes.NewReader(data))
 		if err != nil {
-			return nil, nil, fmt.Errorf("parse feed %s: %w", feedURL, err)
+			logger.Warnf(ctx, "[RSS] sync: parse %s failed: %v", feedURL, err)
+			feedErrors = append(feedErrors, fmt.Sprintf("%s: %v", feedURL, err))
+			newCursor.FeedItems[feedURL] = make(map[string]string)
+			continue
 		}
 
 		newCursor.FeedItems[feedURL] = make(map[string]string)
@@ -212,38 +228,43 @@ func (c *Connector) walk(
 			}
 
 			feedContent := firstNonEmpty(item.Content, item.Description)
-			fp := itemFingerprint(item.UpdatedParsed, item.PublishedParsed, feedContent)
-			newCursor.FeedItems[feedURL][itemID] = fp
+			resolved := c.resolveItem(ctx, cli, feed, item, feedURL, itemID, feedContent)
+			newCursor.FeedItems[feedURL][itemID] = resolved.fingerprint
 
-			if incremental && prevItems != nil && prevItems[itemID] == fp {
+			if incremental && prevItems != nil && prevItems[itemID] == resolved.fingerprint {
 				skipped++
 				continue
 			}
 			kept++
-
-			out = append(out, c.buildItem(ctx, cli, feed, item, feedURL, itemID, feedContent))
+			out = append(out, resolved.item)
 		}
 
 		logger.Infof(ctx, "[RSS] feed %s: items=%d fetched=%d skipped=%d",
 			feedURL, len(feed.Items), kept, skipped)
 	}
 
-	if !incremental {
-		return out, newCursor, nil
+	if len(out) == 0 && len(feedErrors) > 0 && len(feedErrors) == len(feedURLs) {
+		return nil, nil, fmt.Errorf("all feeds failed: %s", strings.Join(feedErrors, "; "))
 	}
+
 	return out, newCursor, nil
 }
 
-// buildItem assembles a FetchedItem for a single feed entry, resolving the
+type resolvedFeedItem struct {
+	item        types.FetchedItem
+	fingerprint string
+}
+
+// resolveItem assembles a FetchedItem for a single feed entry, resolving the
 // best available content (full-text article > feed content) and converting it
 // to Markdown.
-func (c *Connector) buildItem(
+func (c *Connector) resolveItem(
 	ctx context.Context,
 	cli *client,
 	feed *gofeed.Feed,
 	item *gofeed.Item,
 	feedURL, itemID, feedContent string,
-) types.FetchedItem {
+) resolvedFeedItem {
 	title := firstNonEmpty(item.Title, "untitled")
 
 	// Prefer full article text; fall back to feed-provided content on failure.
@@ -274,22 +295,25 @@ func (c *Connector) buildItem(
 		author = item.Author.Name
 	}
 
-	return types.FetchedItem{
-		ExternalID:       itemID,
-		Title:            title,
-		Content:          []byte(content),
-		ContentType:      "text/markdown",
-		FileName:         sanitizeFileName(title) + ".md",
-		URL:              item.Link,
-		UpdatedAt:        updatedAt,
-		SourceResourceID: feedURL,
-		Metadata: map[string]string{
-			"channel":    types.ChannelRSS,
-			"feed_url":   feedURL,
-			"feed_title": feed.Title,
-			"guid":       item.GUID,
-			"link":       item.Link,
-			"author":     author,
+	return resolvedFeedItem{
+		fingerprint: contentFingerprint(content),
+		item: types.FetchedItem{
+			ExternalID:       itemExternalID(feedURL, itemID),
+			Title:            title,
+			Content:          []byte(content),
+			ContentType:      "text/markdown",
+			FileName:         sanitizeFileName(title) + ".md",
+			URL:              item.Link,
+			UpdatedAt:        updatedAt,
+			SourceResourceID: feedURL,
+			Metadata: map[string]string{
+				"channel":    types.ChannelRSS,
+				"feed_url":   feedURL,
+				"feed_title": feed.Title,
+				"guid":       item.GUID,
+				"link":       item.Link,
+				"author":     author,
+			},
 		},
 	}
 }
