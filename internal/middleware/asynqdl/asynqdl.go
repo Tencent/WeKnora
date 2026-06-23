@@ -16,6 +16,7 @@ package asynqdl
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -164,6 +165,7 @@ func buildDeadLetter(t *asynq.Task, taskErr error, attempts int) *types.TaskDead
 		Payload:   json.RawMessage(rawPayload),
 		LastError: truncateError(taskErr.Error(), 8192),
 		FailCount: attempts,
+		FailedAt:  time.Now(),
 	}
 }
 

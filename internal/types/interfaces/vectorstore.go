@@ -36,7 +36,15 @@ type VectorStoreService interface {
 	DeleteStore(ctx context.Context, tenantID uint64, id string) error
 	// TestConnection tests connectivity to a vector database.
 	// Returns the detected server version on success (e.g., "7.10.1"), empty string if unknown.
+	//
+	// Validation-free: intended for trusted configs (env stores, stored
+	// configs already validated at create time). Handlers receiving raw
+	// user input MUST use TestRawConnection instead.
 	TestConnection(ctx context.Context, engineType types.RetrieverEngineType, config types.ConnectionConfig) (string, error)
+	// TestRawConnection validates raw user-supplied connection config
+	// (engine-type allowlist, required fields, SSRF policy) and then delegates
+	// to TestConnection. This is the entry point for unpersisted user input.
+	TestRawConnection(ctx context.Context, engineType types.RetrieverEngineType, config types.ConnectionConfig) (string, error)
 	// SaveDetectedVersion updates the connection_config.version for a stored vector store.
 	SaveDetectedVersion(ctx context.Context, store *types.VectorStore, version string) error
 

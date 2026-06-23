@@ -19,6 +19,7 @@ export interface ModelConfig {
     embedding_parameters?: {
       dimension?: number;
       truncate_prompt_tokens?: number;
+      supports_dimension_override?: boolean;
     };
     interface_type?: 'ollama' | 'openai'; // VLLM专用
     parameter_size?: string; // Ollama模型参数大小 (e.g., "7B", "13B", "70B")
@@ -80,7 +81,9 @@ export function listModels(type?: string): Promise<ModelConfig[]> {
       })
       .catch((error: any) => {
         console.error('Failed to list models:', error);
-        resolve([]);
+        // 抛出而非吞掉：调用方（含缓存层）才能区分「真失败」与「成功但无模型」，
+        // 避免把一次瞬时失败的空结果缓存下来。各 UI 调用点均已 try/catch 兜底。
+        reject(error);
       });
   });
 }

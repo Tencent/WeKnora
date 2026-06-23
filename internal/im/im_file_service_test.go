@@ -39,6 +39,10 @@ func (s *stubIMFileService) GetFileURL(ctx context.Context, filePath string) (st
 
 func (s *stubIMFileService) DeleteFile(context.Context, string) error { return nil }
 
+func (s *stubIMFileService) CopyFile(context.Context, string, uint64, string) (string, error) {
+	return "", nil
+}
+
 func TestBuildIMFileServiceForProvider_FallbackToGlobal(t *testing.T) {
 	stub := &stubIMFileService{}
 	tenant := &types.Tenant{

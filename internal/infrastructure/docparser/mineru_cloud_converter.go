@@ -215,6 +215,13 @@ func (c *MinerUCloudReader) pollBatchResult(ctx context.Context, batchID string)
 	}
 
 	for time.Now().Before(deadline) {
+		// Bail out promptly on caller cancellation instead of spinning:
+		// fetchBatchStatus fails immediately and sleepCtx returns at once on a
+		// cancelled ctx, so without this guard the loop busy-hammers the cloud
+		// API and floods logs until the deadline.
+		if err := ctx.Err(); err != nil {
+			return "", nil, err
+		}
 		pollCount++
 
 		items, err := c.fetchBatchStatus(ctx, batchID, headers)

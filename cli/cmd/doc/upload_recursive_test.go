@@ -40,6 +40,7 @@ func (s *scriptedUploadSvc) CreateKnowledgeFromFile(
 	metadata map[string]string,
 	enableMultimodel *bool,
 	_, channel string,
+	_ *sdk.KnowledgeProcessOverrides,
 ) (*sdk.Knowledge, error) {
 	s.called = append(s.called, filepath.Base(filePath))
 	s.lastMetadata = metadata

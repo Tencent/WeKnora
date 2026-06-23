@@ -10,7 +10,7 @@
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
             <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
               <t-button variant="text" theme="default" size="small" class="header-action-btn"
-                style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
+                data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
                 <template #icon><t-icon name="folder-add" size="16px" /></template>
               </t-button>
             </t-tooltip>
@@ -624,7 +624,7 @@
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
           <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
-            @click="handleCreateKnowledgeBase">
+            data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
           </t-button>
@@ -652,7 +652,7 @@
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
           <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
-            @click="handleCreateKnowledgeBase">
+            data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
           </t-button>
@@ -763,6 +763,7 @@
       </Transition>
     </Teleport>
 
+    <ContextualGuide tour="kbList" :when="showKbListContextualGuide" />
   </div>
 </template>
 
@@ -770,16 +771,21 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { listKnowledgeBases, deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
+import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
+import ContextualGuide from '@/components/ContextualGuide.vue'
+import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
+import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useI18n } from 'vue-i18n'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
@@ -788,7 +794,9 @@ const router = useRouter()
 const route = useRoute()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
+const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadiness()
 const orgStore = useOrganizationStore()
+const chatResources = useChatResourcesStore()
 const { t } = useI18n()
 
 // 左侧空间选择：默认根据当前角色决定。
@@ -1146,51 +1154,31 @@ const filteredKnowledgeBases = computed(() => {
   if (spaceSelection.value !== 'all') {
     return []
   }
-  const result: Array<(KB & { isMine: true }) | (SharedKnowledgeBase['knowledge_base'] & { isMine: false; permission: string; shared_at: string; share_id: string } & any)> = []
-  // 本租户的 KB 分三段渲染：①任何人创建但被当前用户置顶的→「已置顶」组；
-  // ②我创建的非置顶；③同事创建的非置顶（contributor 视图下挂在「本空间 ·
-  // 仅查看」标题下）。置顶现在是 per-user 维度，必须跨创建者优先级地上浮，
-  // 否则同事创建但我置顶的 KB 会被错误地沉到底部。
-  const pinned: KB[] = []
-  const ownMine: KB[] = []
-  const teammateMine: KB[] = []
-  kbs.value.forEach(kb => {
-    if (kb.is_pinned) pinned.push(kb)
-    else if (isMyKb(kb)) ownMine.push(kb)
-    else teammateMine.push(kb)
-  })
-  pinned.sort((a, b) => {
-    const at = a.pinned_at ? Date.parse(a.pinned_at as string) : 0
-    const bt = b.pinned_at ? Date.parse(b.pinned_at as string) : 0
-    return bt - at
-  })
-  pinned.forEach(kb => result.push({ ...kb, isMine: true as const }))
-  ownMine.forEach(kb => result.push({ ...kb, isMine: true as const }))
-  teammateMine.forEach(kb => result.push({ ...kb, isMine: true as const }))
-  // 共享区按 permission 排序：可编辑（admin/editor）在前，仅查看（viewer）在后。
-  // 即便当前角色不显示分组标题，排序也保留——展示更可预测，并且让分组开关切换
-  // 时不会引起卡片顺序跳变。
-  const sortedShared = [...sharedKbs.value].sort((a, b) => {
-    const aE = isSharedKbEditable(a.permission) ? 0 : 1
-    const bE = isSharedKbEditable(b.permission) ? 0 : 1
-    return aE - bE
-  })
-  sortedShared.forEach(shared => {
-    const kb = shared.knowledge_base
-    if (!kb) return
-    result.push({
-      ...kb,
-      isMine: false as const,
-      permission: shared.permission,
-      shared_at: shared.shared_at,
-      share_id: shared.share_id,
-      org_name: shared.org_name,
-      knowledge_count: kb.knowledge_count,
-      chunk_count: kb.chunk_count,
-    } as any)
-  })
-  return result
+  // The "All" scope merges own + shared KBs. The card template keys each
+  // row by `kb.id`, so the same KB surfacing twice — owned *and* shared
+  // back, or shared into the caller's view through two different orgs —
+  // produced duplicate `v-for` keys and blanked the list once there were
+  // ≥2 entries (#795). mergeAllScopeKnowledgeBases de-duplicates by KB id
+  // (owned wins; most-privileged share kept) while preserving the existing
+  // pinned → mine → teammate → shared(editable-first) ordering.
+  return mergeAllScopeKnowledgeBases(
+    kbs.value as unknown as OwnedKnowledgeBase[],
+    sharedKbs.value as unknown as SharedKnowledgeBaseLike[],
+    authStore.user?.id,
+  ) as unknown as Array<(KB & { isMine: true }) | (SharedKnowledgeBase['knowledge_base'] & { isMine: false; permission: string; shared_at: string; share_id: string } & any)>
 })
+
+const showKbListEmpty = computed(() => {
+  if (loading.value) return false
+  if (!authStore.hasRole('contributor')) return false
+  if (spaceSelection.value === 'all' && filteredKnowledgeBases.value.length === 0) return true
+  if (spaceSelection.value === 'mine' && kbs.value.length === 0) return true
+  return false
+})
+
+const showKbListContextualGuide = computed(
+  () => showKbListEmpty.value && !uiStore.showKBEditorModal,
+)
 
 interface UploadTaskState {
   uploadId: string
@@ -1210,27 +1198,26 @@ interface UploadSummary {
   hasError: boolean
 }
 
-const fetchList = () => {
+const applyKbListData = (data: any[]) => {
+  kbs.value = data.map((kb: any) => ({
+    ...kb,
+    updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
+    showMore: false,
+    isProcessing: kb.is_processing || false,
+    processing_count: kb.processing_count || 0
+  }))
+}
+
+const fetchList = (force = false) => {
   loading.value = true
   // The creator filter only applies to the caller's own tenant KBs (the
   // first call). Shared KBs are inherently "not mine" so we don't filter
   // them server-side; the segmented control is also hidden whenever the
   // user is browsing the shared / per-space scopes.
   return Promise.all([
-    listKnowledgeBases({ creator: creatorFilter.value }).then((res: any) => {
-      const data = res.data || []
-      // 格式化时间，并初始化 showMore 状态
-      // is_processing 字段由后端返回
-      kbs.value = data.map((kb: any) => ({
-        ...kb,
-        updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
-        showMore: false,
-        isProcessing: kb.is_processing || false,
-        processing_count: kb.processing_count || 0
-      }))
-    }),
-    orgStore.fetchSharedKnowledgeBases(),
-    orgStore.fetchOrganizations()
+    chatResources.fetchKnowledgeBasesForList({ creator: creatorFilter.value }, force).then(applyKbListData),
+    orgStore.fetchSharedKnowledgeBases({ force }),
+    orgStore.fetchOrganizations({ force }),
   ]).finally(() => { loading.value = false }).then(() => {
     // 各空间知识库数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.knowledge_bases?.by_organization
@@ -1269,7 +1256,7 @@ watch(spaceSelection, (val) => {
 // than filtering in-memory so the server stays the single source of truth
 // (and we don't need to worry about stale share_count or pagination later).
 watch(creatorFilter, () => {
-  fetchList()
+  fetchList(true)
 })
 
 onMounted(() => {
@@ -1396,7 +1383,7 @@ const handleTogglePin = async (kb: KB) => {
       MessagePlugin.success(
         res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
       )
-      fetchList()
+      fetchList(true)
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
@@ -1410,7 +1397,7 @@ const handleTogglePinById = async (id: string) => {
       MessagePlugin.success(
         res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
       )
-      fetchList()
+      fetchList(true)
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
@@ -1427,7 +1414,7 @@ const handleShare = (kb: KB) => {
 
 const handleShareSuccess = () => {
   // 共享成功后可刷新列表
-  fetchList()
+  fetchList(true)
 }
 
 const handleSharedKbClick = (sharedKb: SharedKnowledgeBase) => {
@@ -1497,7 +1484,7 @@ const confirmDelete = () => {
       MessagePlugin.success(t('knowledgeList.messages.deleted'))
       deleteVisible.value = false
       deletingKb.value = null
-      fetchList()
+      fetchList(true)
     } else {
       MessagePlugin.error(res.message || t('knowledgeList.messages.deleteFailed'))
     }
@@ -1647,13 +1634,23 @@ const goSettings = (id: string) => {
 
 // 创建知识库
 const handleCreateKnowledgeBase = () => {
-  uiStore.openCreateKB()
+  markContextualGuideDone('kbList')
+  // 无模型时仍打开创建向导，并定位到模型配置页；用户可在向导内添加模型，无需先跳转系统设置
+  const initialSection =
+    modelsReadyLoaded.value && !isReadyForDocumentKb.value ? 'models' : undefined
+  uiStore.openCreateKB('document', initialSection)
 }
 
 // 知识库编辑器成功回调（创建或编辑成功）
 const handleKBEditorSuccess = (kbId: string) => {
   console.log('[KnowledgeBaseList] knowledge operation success:', kbId)
-  fetchList().then(() => {
+  const shouldOpenDetailForUploadGuide = !isContextualGuideDone('kbDetail')
+  // 列表页编辑同样要让单 KB 详情缓存失效，否则侧栏 / 详情页 60s 内仍显示旧信息
+  chatResources.invalidateKnowledgeBaseDetail(kbId)
+  fetchList(true).then(() => {
+    if (shouldOpenDetailForUploadGuide && kbId) {
+      goDetail(kbId)
+    }
     // 如果是从路由参数中获取的高亮ID，触发闪烁效果
     if (route.query.highlightKbId === kbId) {
       triggerHighlightFlash(kbId)
@@ -1724,7 +1721,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     clearTimeout(uploadRefreshTimer)
   }
   uploadRefreshTimer = setTimeout(() => {
-    fetchList()
+    fetchList(true)
     uploadRefreshTimer = null
   }, 800)
 }
@@ -1732,7 +1729,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 <style scoped lang="less">
 .kb-list-container {
-  margin: 0 16px 0 0;
+  margin: 0;
   height: 100%;
   box-sizing: border-box;
   flex: 1;
@@ -1746,7 +1743,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 20px 28px 0 28px;
+  padding: 20px 0 0 28px;
 }
 
 .header {
@@ -1754,6 +1751,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  padding-right: 28px;
 
   .header-title {
     display: flex;
@@ -1795,7 +1793,9 @@ const handleUploadFinishedEvent = (event: Event) => {
   overflow-x: hidden;
   // 顶部不留 padding，sticky 的分组标题 (top: 0) 才能贴到容器最顶；
   // 底部 padding 保留，避免最后一行卡片紧贴边。
-  padding: 0 0 8px;
+  padding: 0 28px 8px 0;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 
 .kb-list-main-loading {

@@ -21,16 +21,17 @@ const (
 
 // AliyunEmbedder implements text vectorization using Aliyun DashScope multimodal embedding API
 type AliyunEmbedder struct {
-	apiKey               string
-	baseURL              string
-	modelName            string
-	truncatePromptTokens int
-	dimensions           int
-	modelID              string
-	httpClient           *http.Client
-	timeout              time.Duration
-	maxRetries           int
-	customHeaders        map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	truncatePromptTokens      int
+	dimensions                int
+	modelID                   string
+	httpClient                *http.Client
+	timeout                   time.Duration
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
@@ -39,10 +40,20 @@ func (e *AliyunEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+func (e *AliyunEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
+}
+
+// AliyunEmbedParameters represents the parameters for Aliyun DashScope multimodal embedding
+type AliyunEmbedParameters struct {
+	Dimension int `json:"dimension,omitempty"`
+}
+
 // AliyunEmbedRequest represents an Aliyun DashScope multimodal embedding request
 type AliyunEmbedRequest struct {
-	Model string           `json:"model"`
-	Input AliyunEmbedInput `json:"input"`
+	Model      string                 `json:"model"`
+	Input      AliyunEmbedInput       `json:"input"`
+	Parameters *AliyunEmbedParameters `json:"parameters,omitempty"`
 }
 
 // AliyunEmbedInput represents the input structure for Aliyun embedding
@@ -188,6 +199,9 @@ func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 			Contents: contents,
 		},
 	}
+	if e.supportsDimensionsParam() {
+		reqBody.Parameters = &AliyunEmbedParameters{Dimension: e.dimensions}
+	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -242,6 +256,10 @@ func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 // GetModelName returns the model name
 func (e *AliyunEmbedder) GetModelName() string {
 	return e.modelName
+}
+
+func (e *AliyunEmbedder) supportsDimensionsParam() bool {
+	return e.supportsDimensionOverride && e.dimensions > 0
 }
 
 // GetDimensions returns the vector dimensions

@@ -72,6 +72,12 @@ verification including failed-doc aggregation.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, kbCheckFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "verify a knowledge base end-to-end: status plus failed-doc aggregation",
+		RequiredFlags: []string{"<kb-id> (positional)"},
+		Examples:      []string{"weknora kb check kb_abc"},
+		Output:        "envelope.data is {id, reachable, failed_count, ...}; deeper than `kb status`",
+	})
 	return cmd
 }
 

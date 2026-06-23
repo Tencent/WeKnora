@@ -53,6 +53,11 @@ the CLI can talk to; "auth list" is the catalog of *how*.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, profileListFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "list configured connection profiles (name, host, which is active)",
+		Examples: []string{"weknora profile list", "weknora profile list --jq '.data[].name'"},
+		Output:   "envelope.data is an array of {name, host, user, current}",
+	})
 	return cmd
 }
 

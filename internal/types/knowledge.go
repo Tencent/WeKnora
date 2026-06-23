@@ -124,7 +124,7 @@ type Knowledge struct {
 	// Description of the knowledge
 	Description string `json:"description"`
 	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
-	Source string `json:"source"`
+	Source string `json:"source"             gorm:"type:varchar(2048)"`
 	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
 	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'"`
 	// Parse status of the knowledge
@@ -204,11 +204,12 @@ type ManualKnowledgeMetadata struct {
 
 // ManualKnowledgePayload represents the payload for manual knowledge operations.
 type ManualKnowledgePayload struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Status  string `json:"status"`
-	TagID   string `json:"tag_id"`
-	Channel string `json:"channel"`
+	Title         string                     `json:"title"`
+	Content       string                     `json:"content"`
+	Status        string                     `json:"status"`
+	TagID         string                     `json:"tag_id"`
+	Channel       string                     `json:"channel"`
+	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
 // KnowledgeSearchScope defines a (tenant_id, knowledge_base_id) scope for knowledge search (e.g. own KBs + shared KBs).
@@ -340,6 +341,62 @@ func (k *Knowledge) EnsureManualDefaults() {
 // IsDraft returns whether the payload should be saved as draft.
 func (p ManualKnowledgePayload) IsDraft() bool {
 	return p.Status == "" || p.Status == ManualKnowledgeStatusDraft
+}
+
+const metadataKeyProcessOverrides = "process_overrides"
+
+// ProcessOverrides parses process config overrides from knowledge metadata.
+func (k *Knowledge) ProcessOverrides() (*KnowledgeProcessOverrides, error) {
+	if k == nil || len(k.Metadata) == 0 {
+		return nil, nil
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := metadataMap[metadataKeyProcessOverrides]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var overrides KnowledgeProcessOverrides
+	if err := json.Unmarshal(bytes, &overrides); err != nil {
+		return nil, err
+	}
+	return &overrides, nil
+}
+
+// SetProcessOverrides merges process config overrides into knowledge metadata.
+func (k *Knowledge) SetProcessOverrides(o *KnowledgeProcessOverrides) error {
+	if k == nil {
+		return nil
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return err
+	}
+	if o == nil {
+		delete(metadataMap, metadataKeyProcessOverrides)
+	} else {
+		bytes, err := json.Marshal(o)
+		if err != nil {
+			return err
+		}
+		var value interface{}
+		if err := json.Unmarshal(bytes, &value); err != nil {
+			return err
+		}
+		metadataMap[metadataKeyProcessOverrides] = value
+	}
+	bytes, err := json.Marshal(metadataMap)
+	if err != nil {
+		return err
+	}
+	k.Metadata = JSON(bytes)
+	return nil
 }
 
 // KnowledgeCheckParams defines parameters used to check if knowledge already exists.

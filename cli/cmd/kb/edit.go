@@ -109,7 +109,7 @@ to the user first.`,
 			// Build a retry command from the flags the user actually passed so
 			// agents can re-invoke with -y after explicit human approval.
 			retryCmd := buildKBEditRetryCmd(c, id)
-			if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "knowledge base", id, "kb.edit", retryCmd); err != nil {
+			if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "edit", "knowledge base", id, "kb.edit", retryCmd); err != nil {
 				return err
 			}
 			return runEdit(c.Context(), opts, fopts, cli, id)

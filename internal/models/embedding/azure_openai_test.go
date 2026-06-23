@@ -47,6 +47,7 @@ func TestAzureOpenAIEmbedderBatchEmbedSendsConfiguredDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create embedder: %v", err)
 	}
+	embedder.SetSupportsDimensionOverride(true)
 	embedder.httpClient = &http.Client{Transport: transport}
 
 	if _, err := embedder.BatchEmbed(context.Background(), []string{"hello"}); err != nil {
@@ -63,7 +64,7 @@ func TestAzureOpenAIEmbedderBatchEmbedSendsConfiguredDimensions(t *testing.T) {
 	}
 }
 
-func TestAzureOpenAIEmbedderBatchEmbedOmitsDimensionsForFixedSizeModels(t *testing.T) {
+func TestAzureOpenAIEmbedderBatchEmbedOmitsDimensionsByDefault(t *testing.T) {
 	t.Parallel()
 
 	var requestBody map[string]any
@@ -103,7 +104,7 @@ func TestAzureOpenAIEmbedderBatchEmbedOmitsDimensionsForFixedSizeModels(t *testi
 	}
 }
 
-func TestAzureOpenAIEmbedderBatchEmbedOmitsDimensionsForOlderAPIVersion(t *testing.T) {
+func TestAzureOpenAIEmbedderBatchEmbedSendsDimensionsWhenOverrideEnabledRegardlessOfAPIVersion(t *testing.T) {
 	t.Parallel()
 
 	var requestBody map[string]any
@@ -132,14 +133,19 @@ func TestAzureOpenAIEmbedderBatchEmbedOmitsDimensionsForOlderAPIVersion(t *testi
 	if err != nil {
 		t.Fatalf("create embedder: %v", err)
 	}
+	embedder.SetSupportsDimensionOverride(true)
 	embedder.httpClient = &http.Client{Transport: transport}
 
 	if _, err := embedder.BatchEmbed(context.Background(), []string{"hello"}); err != nil {
 		t.Fatalf("BatchEmbed returned error: %v", err)
 	}
 
-	if _, ok := requestBody["dimensions"]; ok {
-		t.Fatalf("expected request body to omit dimensions for older API versions, got %v", requestBody)
+	got, ok := requestBody["dimensions"]
+	if !ok {
+		t.Fatalf("expected request body to include dimensions when override is enabled, got %v", requestBody)
+	}
+	if got != float64(256) {
+		t.Fatalf("unexpected dimensions value: got %v want 256", got)
 	}
 }
 

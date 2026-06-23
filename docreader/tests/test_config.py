@@ -13,7 +13,7 @@ class DocReaderConfigTest(unittest.TestCase):
         self.assertEqual(cfg.markitdown_max_workers, 1)
         self.assertEqual(cfg.pdf_render_max_workers, 1)
         self.assertEqual(cfg.pdf_render_dpi, 200)
-        self.assertEqual(cfg.pdf_jpeg_quality, 90)
+        self.assertEqual(cfg.pdf_jpeg_quality, 85)
 
     def test_loads_parser_concurrency_env(self):
         env = {

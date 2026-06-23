@@ -3,10 +3,110 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// WikiCategoryMaxDepth is the hard cap on how many folder levels a wiki page's
+// category_path may keep. The ingest prompts intentionally ask the model for at
+// most 2 levels to keep the directory tree shallow; this storage cap is one
+// level deeper as a defensive bound so a slightly over-eager model (or a
+// reconcile remap) cannot create an unbounded breadcrumb. It is the single
+// source of truth shared by the service, repository, and taxonomy layers so
+// stored paths and queried paths are always cleaned identically.
+const WikiCategoryMaxDepth = 3
+
+var wikiCategorySeparatorReplacer = strings.NewReplacer("／", "/", "｜", "/", "|", "/")
+
+// CleanWikiCategoryPart normalizes a single raw category label that may itself
+// carry embedded separators, wrapping quotes/brackets, or page-type noise, and
+// returns the cleaned sub-labels (type labels such as "entity"/"实体" dropped).
+func CleanWikiCategoryPart(part string) []string {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return nil
+	}
+	part = wikiCategorySeparatorReplacer.Replace(part)
+	rawParts := strings.Split(part, "/")
+	cleaned := make([]string, 0, len(rawParts))
+	for _, raw := range rawParts {
+		label := strings.TrimSpace(raw)
+		label = strings.Trim(label, `"'“”‘’[]（）()`)
+		label = strings.TrimSpace(label)
+		if label == "" || isWikiTypeCategoryLabel(label) {
+			continue
+		}
+		cleaned = append(cleaned, label)
+	}
+	return cleaned
+}
+
+// CleanWikiCategoryPath cleans, deduplicates, and caps a full category path at
+// WikiCategoryMaxDepth. Centralizing this guarantees that the path a page is
+// stored with and the path a list/filter query is matched against go through
+// the exact same normalization, so directory filters cannot silently drift.
+func CleanWikiCategoryPath(parts []string) []string {
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		for _, label := range CleanWikiCategoryPart(part) {
+			if containsWikiString(cleaned, label) {
+				continue
+			}
+			cleaned = append(cleaned, label)
+			if len(cleaned) >= WikiCategoryMaxDepth {
+				return cleaned
+			}
+		}
+	}
+	return cleaned
+}
+
+// SplitWikiPageTypes parses a page_type value that may carry several
+// comma-separated types (e.g. "entity,concept") into a deduplicated slice,
+// dropping blanks. An empty/whitespace-only input yields nil ("no filter").
+// Shared by the handler (query parsing) and repository (List filter) so the
+// two layers split identically.
+func SplitWikiPageTypes(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	return out
+}
+
+func isWikiTypeCategoryLabel(label string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	normalized = strings.TrimSuffix(normalized, "s")
+	switch normalized {
+	case "entity", "实体", "實體", "concept", "概念", "summary", "摘要", "wiki", "页面", "頁面":
+		return true
+	default:
+		return false
+	}
+}
+
+func containsWikiString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
 
 // WikiPageType constants define the types of wiki pages
 const (
@@ -65,6 +165,28 @@ type WikiPage struct {
 	Summary string `json:"summary" gorm:"type:text"`
 	// Alternate names, abbreviations, acronyms or translated names
 	Aliases StringArray `json:"aliases" gorm:"type:json"`
+	// ParentSlug optionally points at the wiki page that should act as this
+	// page's semantic parent in the directory tree. The parent may be empty
+	// when the page is grouped only by FolderID.
+	ParentSlug string `json:"parent_slug,omitempty" gorm:"type:varchar(255);index"`
+	// FolderID is the single source of truth for where this page sits in the
+	// directory tree — a reference to wiki_folders.id ("" = wiki root). The
+	// CategoryPath / WikiPath / Depth fields below are denormalized caches
+	// recomputed from this folder's chain on every write so list/index/search
+	// queries don't have to join wiki_folders.
+	FolderID string `json:"folder_id,omitempty" gorm:"column:folder_id;type:varchar(36);index;default:''"`
+	// CategoryPath is the directory breadcrumb that groups this page in the
+	// wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. Derived cache of the
+	// folder chain identified by FolderID.
+	CategoryPath StringArray `json:"category_path,omitempty" gorm:"type:json"`
+	// WikiPath is a normalized, sortable path derived from page_type,
+	// category_path, and title. It keeps large directory listings cheap to sort.
+	WikiPath string `json:"wiki_path,omitempty" gorm:"type:varchar(1024);index"`
+	// Depth is len(CategoryPath), cached for filtering / display.
+	Depth int `json:"depth,omitempty" gorm:"default:0;index"`
+	// SortOrder allows generated or manually edited pages to control sibling
+	// ordering before falling back to title.
+	SortOrder int `json:"sort_order,omitempty" gorm:"default:0;index"`
 	// References to source knowledge IDs that contributed to this page.
 	// Format matches the legacy "<knowledge_id>|<doc_title>" convention used
 	// across the ingest pipeline, so retract / display code can split on `|`
@@ -101,6 +223,73 @@ type WikiPage struct {
 // TableName specifies the database table name
 func (WikiPage) TableName() string {
 	return "wiki_pages"
+}
+
+// WikiFolderRootID is the sentinel parent/folder id meaning "the wiki root"
+// (a page or folder directly under the top level, with no parent folder).
+const WikiFolderRootID = ""
+
+// WikiFolder is a first-class directory node in the wiki browser. Folders
+// exist independently of pages — an empty folder persists so users can lay
+// out a skeleton and file pages into it later. The tree is an adjacency list
+// (ParentID, "" = root); Path is the materialized "/"-joined name chain kept
+// purely for cheap display/sort. A wiki page's placement is WikiPage.FolderID.
+type WikiFolder struct {
+	ID              string         `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64         `json:"tenant_id" gorm:"index"`
+	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);index"`
+	ParentID        string         `json:"parent_id" gorm:"column:parent_id;type:varchar(36);index;default:''"`
+	Name            string         `json:"name" gorm:"type:varchar(255)"`
+	Path            string         `json:"path" gorm:"type:varchar(1024)"`
+	Depth           int            `json:"depth" gorm:"default:0"`
+	SortOrder       int            `json:"sort_order" gorm:"default:0"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+}
+
+// TableName specifies the database table name
+func (WikiFolder) TableName() string {
+	return "wiki_folders"
+}
+
+// WikiFolderNode is one directory node returned to the browser, enriched with
+// the live page count directly under it and whether it has child folders so
+// the UI can render an expand affordance without a second round-trip.
+type WikiFolderNode struct {
+	WikiFolder
+	PageCount   int64 `json:"page_count"`
+	HasChildren bool  `json:"has_children"`
+}
+
+// WikiFolderListResponse is the payload for listing the direct children of a
+// folder (parent_id="" = root level).
+type WikiFolderListResponse struct {
+	ParentID string           `json:"parent_id"`
+	Folders  []WikiFolderNode `json:"folders"`
+}
+
+// WikiFolderCreateRequest creates a new (initially empty) folder under ParentID.
+type WikiFolderCreateRequest struct {
+	ParentID string `json:"parent_id"`
+	Name     string `json:"name"`
+}
+
+// WikiFolderUpdateRequest renames and/or reparents a folder. ParentID is
+// applied only when MoveParent is true so a pure rename doesn't have to
+// re-send the (possibly root "") parent and risk an accidental move.
+type WikiFolderUpdateRequest struct {
+	Name       string `json:"name,omitempty"`
+	ParentID   string `json:"parent_id,omitempty"`
+	MoveParent bool   `json:"move_parent,omitempty"`
+}
+
+// WikiPageMoveRequest relocates the page identified by Slug into FolderID
+// ("" = root). Slug is carried in the body (not the path) because wiki slugs
+// are hierarchical ("entity/acme") and would collide with gin's catch-all.
+type WikiPageMoveRequest struct {
+	Slug     string `json:"slug" binding:"required"`
+	FolderID string `json:"folder_id"`
 }
 
 // WikiExtractionGranularity controls how aggressive Pass 0 (candidate slug
@@ -226,14 +415,17 @@ func (c *WikiConfig) Scan(value interface{}) error {
 
 // WikiPageListRequest represents a request to list wiki pages with filtering
 type WikiPageListRequest struct {
-	KnowledgeBaseID string `json:"knowledge_base_id"`
-	PageType        string `json:"page_type,omitempty"`  // filter by type
-	Status          string `json:"status,omitempty"`     // filter by status
-	Query           string `json:"query,omitempty"`      // full-text search
-	Page            int    `json:"page,omitempty"`       // pagination page (1-based)
-	PageSize        int    `json:"page_size,omitempty"`  // pagination size
-	SortBy          string `json:"sort_by,omitempty"`    // "updated_at", "created_at", "title"
-	SortOrder       string `json:"sort_order,omitempty"` // "asc" or "desc"
+	KnowledgeBaseID string      `json:"knowledge_base_id"`
+	PageType        string      `json:"page_type,omitempty"`      // filter by type
+	Status          string      `json:"status,omitempty"`         // filter by status
+	Query           string      `json:"query,omitempty"`          // full-text search
+	FolderID        *string     `json:"folder_id,omitempty"`      // exact folder placement ("" = root)
+	CategoryPath    StringArray `json:"category_path,omitempty"`  // exact directory path
+	CategoryDepth   *int        `json:"category_depth,omitempty"` // exact directory depth, including 0 for root
+	Page            int         `json:"page,omitempty"`           // pagination page (1-based)
+	PageSize        int         `json:"page_size,omitempty"`      // pagination size
+	SortBy          string      `json:"sort_by,omitempty"`        // "updated_at", "created_at", "title"
+	SortOrder       string      `json:"sort_order,omitempty"`     // "asc" or "desc"
 }
 
 // WikiPageListResponse represents a paginated list of wiki pages
@@ -244,6 +436,7 @@ type WikiPageListResponse struct {
 	PageSize   int         `json:"page_size"`
 	TotalPages int         `json:"total_pages"`
 }
+
 
 // WikiGraphMode enumerates the graph query modes exposed to the API.
 const (
@@ -345,9 +538,14 @@ func (WikiPageIssue) TableName() string {
 // carried — the backend projects SELECT slug, title, summary so a 40k-
 // page KB does not pay for TEXT content transport on every index open.
 type WikiIndexEntry struct {
-	Slug    string `json:"slug"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
+	Slug         string      `json:"slug"`
+	Title        string      `json:"title"`
+	Summary      string      `json:"summary"`
+	ParentSlug   string      `json:"parent_slug,omitempty"`
+	CategoryPath StringArray `json:"category_path,omitempty"`
+	WikiPath     string      `json:"wiki_path,omitempty"`
+	Depth        int         `json:"depth,omitempty"`
+	SortOrder    int         `json:"sort_order,omitempty"`
 }
 
 // WikiIndexGroup bundles the entries for one page_type into a page-sized
@@ -397,4 +595,3 @@ type WikiPageLite struct {
 	Aliases  StringArray `json:"aliases,omitempty"`
 	OutLinks StringArray `json:"out_links,omitempty"`
 }
-

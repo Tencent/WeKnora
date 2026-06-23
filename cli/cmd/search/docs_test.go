@@ -193,3 +193,85 @@ func mustTime(t *testing.T, s string) time.Time {
 	require.NoError(t, err)
 	return v
 }
+
+// TestDocsSearch_HasMore asserts the meta.has_more truncation signal: true when
+// more matches than --limit exist (over-fetch detects it, data trimmed to
+// --limit), absent/false when the full result set fits. Mirrors the list
+// commands' contract so an agent can tell its search was capped.
+func TestDocsSearch_HasMore(t *testing.T) {
+	page := make([]sdk.Knowledge, 10)
+	for i := range page {
+		page[i] = sdk.Knowledge{ID: "match", Title: "needle"}
+	}
+	type meta struct {
+		Count   int  `json:"count"`
+		HasMore bool `json:"has_more"`
+	}
+	parse := func(t *testing.T, s string) meta {
+		var env struct {
+			Meta meta `json:"meta"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(s), &env), "got %q", s)
+		return env.Meta
+	}
+
+	t.Run("truncated -> has_more true, data trimmed", func(t *testing.T) {
+		out, _ := iostreams.SetForTest(t)
+		svc := &fakeDocsSearchSvc{pages: map[int][]sdk.Knowledge{1: page}, total: 10}
+		require.NoError(t, runDocsSearch(context.Background(),
+			&DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 3, PageSize: docsPageSize, AllPages: true},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+		m := parse(t, out.String())
+		assert.Equal(t, 3, m.Count, "data must be trimmed to --limit")
+		assert.True(t, m.HasMore, "has_more must be true when results exceed --limit")
+	})
+
+	t.Run("fits -> has_more false", func(t *testing.T) {
+		out, _ := iostreams.SetForTest(t)
+		svc := &fakeDocsSearchSvc{pages: map[int][]sdk.Knowledge{1: page[:2]}, total: 2}
+		require.NoError(t, runDocsSearch(context.Background(),
+			&DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: true},
+			&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+		m := parse(t, out.String())
+		assert.Equal(t, 2, m.Count)
+		assert.False(t, m.HasMore, "has_more must be false/absent when results fit under --limit")
+	})
+}
+
+// TestNewCmdDocs_NoKBUsesResolver mirrors the chunks guard: `search docs`
+// without --kb resolves the KB through the shared flag→env→project-link
+// chain (Factory.ResolveKB), not cobra's required-flag check. With nothing
+// to resolve it reports the typed local.kb_id_required, not a usage error.
+func TestNewCmdDocs_NoKBUsesResolver(t *testing.T) {
+	iostreams.SetForTest(t)
+	t.Setenv("WEKNORA_KB_ID", "")
+	t.Chdir(t.TempDir())
+	cmd := NewCmdDocs(&cmdutil.Factory{
+		Client: func() (*sdk.Client, error) { return nil, errors.New("client should not be built") },
+	})
+	cmd.SetArgs([]string{"some query"}) // query but no --kb
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), `required flag(s) "kb"`)
+	typed := cmdutil.AsError(err)
+	require.NotNil(t, typed)
+	assert.Equal(t, cmdutil.CodeKBIDRequired, typed.Code)
+}
+
+// TestNewCmdDocs_HonorsKBEnv proves the env fallback is wired for search docs.
+func TestNewCmdDocs_HonorsKBEnv(t *testing.T) {
+	iostreams.SetForTest(t)
+	t.Setenv("WEKNORA_KB_ID", "kb_from_env")
+	cmd := NewCmdDocs(&cmdutil.Factory{
+		Client: func() (*sdk.Client, error) { return nil, errors.New("client boom") },
+	})
+	cmd.SetArgs([]string{"some query"}) // no --kb; env supplies it
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "kb is required")
+	assert.Contains(t, err.Error(), "client boom")
+}

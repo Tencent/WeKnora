@@ -4,7 +4,7 @@
     <div v-if="documents.length" class="documents-list">
       <div
         v-for="(doc, index) in documents"
-        :key="doc.knowledge_id || index"
+        :key="doc.faq_id || doc.knowledge_id || index"
         class="result-card document-card"
       >
         <div class="result-header document-header">
@@ -20,9 +20,22 @@
         </div>
         <div class="result-content expanded">
           <div class="info-section">
-            <div class="info-field">
-              <span class="field-label">{{ $t('chat.documentIdLabel') }}</span>
+            <div class="info-field" v-if="doc.is_faq && doc.faq_id">
+              <span class="field-label">{{ $t('chat.faqIdLabel') }}</span>
+              <span class="field-value"><code>{{ doc.faq_id }}</code></span>
+            </div>
+            <div class="info-field" v-if="doc.knowledge_id">
+              <span class="field-label">{{ doc.is_faq ? $t('chat.faqContainerIdLabel') : $t('chat.documentIdLabel') }}</span>
               <span class="field-value"><code>{{ doc.knowledge_id }}</code></span>
+            </div>
+            <div
+              v-if="doc.is_faq && doc.faq_answers?.length"
+              class="info-field info-field--block"
+            >
+              <span class="field-label">{{ $t('chat.faqAnswersLabel') }}</span>
+              <ul class="faq-answers-list">
+                <li v-for="(ans, aIdx) in doc.faq_answers" :key="aIdx">{{ ans }}</li>
+              </ul>
             </div>
             <div class="info-field" v-if="doc.description">
               <span class="field-label">{{ $t('chat.documentDescriptionLabel') }}</span>
@@ -205,12 +218,32 @@ const formatMetadataValue = (value: unknown) => {
   }
 }
 
+.faq-answers-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  li {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--td-text-color-primary);
+  }
+}
+
 .info-field {
   display: flex;
   gap: 10px;
   margin-bottom: 5px;
   font-size: 12px;
   line-height: 1.5;
+
+  &--block {
+    flex-direction: column;
+    gap: 4px;
+  }
 
   .field-label {
     color: var(--td-text-color-secondary);

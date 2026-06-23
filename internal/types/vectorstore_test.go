@@ -286,6 +286,25 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.True(t, seen["password"].Sensitive)
 	})
 
+	t.Run("milvus exposes optional database connection field", func(t *testing.T) {
+		var milvusType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "milvus" {
+				milvusType = typ
+				break
+			}
+		}
+		require.NotEmpty(t, milvusType.ConnectionFields)
+
+		seen := map[string]VectorStoreFieldInfo{}
+		for _, f := range milvusType.ConnectionFields {
+			seen[f.Name] = f
+		}
+		require.Contains(t, seen, "database")
+		assert.False(t, seen["database"].Required)
+		assert.Equal(t, "string", seen["database"].Type)
+	})
+
 	t.Run("elasticsearch has connection and index fields", func(t *testing.T) {
 		var esType VectorStoreTypeInfo
 		for _, typ := range types {
@@ -306,6 +325,43 @@ func TestGetVectorStoreTypes(t *testing.T) {
 			}
 		}
 		assert.True(t, passwordField.Sensitive)
+	})
+
+	t.Run("tencent vectordb defaults to one replica", func(t *testing.T) {
+		var tencentType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "tencent_vectordb" {
+				tencentType = typ
+				break
+			}
+		}
+		require.NotEmpty(t, tencentType.IndexFields)
+
+		seen := map[string]VectorStoreFieldInfo{}
+		for _, f := range tencentType.IndexFields {
+			seen[f.Name] = f
+		}
+		assert.Equal(t, 1, seen["replica_number"].Default)
+	})
+
+	t.Run("tencent vectordb replica default follows env", func(t *testing.T) {
+		t.Setenv(envTencentVectorDBReplicaNumber, "0")
+		types := GetVectorStoreTypes()
+
+		var tencentType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "tencent_vectordb" {
+				tencentType = typ
+				break
+			}
+		}
+		require.NotEmpty(t, tencentType.IndexFields)
+
+		seen := map[string]VectorStoreFieldInfo{}
+		for _, f := range tencentType.IndexFields {
+			seen[f.Name] = f
+		}
+		assert.Equal(t, 0, seen["replica_number"].Default)
 	})
 
 	t.Run("display names have no parenthetical suffix", func(t *testing.T) {

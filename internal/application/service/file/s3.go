@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -242,6 +243,37 @@ func (s *s3FileService) DeleteFile(ctx context.Context, filePath string) error {
 	}
 
 	return nil
+}
+
+// CopyFile copies an existing S3 object to a new knowledge-owned object using a
+// server-side CopyObject (no data leaves S3). The destination uses the same
+// layout as SaveFile. Returns ErrCrossBackendCopy when srcPath is not an s3:// path.
+func (s *s3FileService) CopyFile(ctx context.Context,
+	srcPath string, tenantID uint64, knowledgeID string,
+) (string, error) {
+	srcKey, err := s.parseS3FilePath(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("s3 copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+
+	ext := filepath.Ext(srcPath)
+	destKey := fmt.Sprintf("%s%d/%s/%s%s", s.pathPrefix, tenantID, knowledgeID, uuid.New().String(), ext)
+
+	// CopySource is "bucket/key"; the '/' separators must NOT be percent-encoded
+	// (url.PathEscape would turn them into %2F and break the bucket/key split).
+	// srcKey is already validated by parseS3FilePath -> SafeObjectKey.
+	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(s.bucketName),
+		CopySource: aws.String(s.bucketName + "/" + srcKey),
+		Key:        aws.String(destKey),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to copy file in S3: %w", err)
+	}
+
+	newPath := fmt.Sprintf("s3://%s/%s", s.bucketName, destKey)
+	logger.Infof(ctx, "Copied S3 object %s to %s", srcPath, newPath)
+	return newPath, nil
 }
 
 // SaveBytes saves bytes data to S3 and returns the file path

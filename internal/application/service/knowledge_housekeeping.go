@@ -276,9 +276,13 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 }
 
 // filterOutQueued returns the subset of candidates that have NO task left
-// in any queue backend. A dropped candidate is "backlogged, not orphaned":
+// in the queue backend. A dropped candidate is "backlogged, not orphaned":
 // its enrichment subtasks are waiting for a worker, so the missing span
 // heartbeat is expected and recovering it would be a false positive.
+// When no inspector is wired (nil) the asynq gate is a pass-through so
+// behavior falls back to durable pending-op and span checks. On inspector
+// error we still check durable wiki pending ops before treating the row
+// as stuck.
 func (h *HousekeepingService) filterOutQueued(
 	ctx context.Context, candidates []types.Knowledge,
 ) (kept []types.Knowledge, skipped int, probeErrors int) {

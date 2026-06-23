@@ -303,6 +303,11 @@ func (s *userService) buildMembershipsForUser(
 		} else if t, ok := tenantByID[m.TenantID]; ok && t != nil {
 			name = t.Name
 		}
+		// Drop memberships whose tenant row is gone (deleted tenant or
+		// stale tenant_members left over from before cascade delete).
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
 		out = append(out, types.Membership{
 			TenantID:   m.TenantID,
 			TenantName: name,

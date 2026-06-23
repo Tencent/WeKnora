@@ -2,11 +2,14 @@ package tencentvectordb
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -16,6 +19,8 @@ import (
 	"github.com/tencent/vectordatabase-sdk-go/tcvdbtext/encoder"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 )
+
+const copyIndicesQueryPageSize int64 = 500
 
 // NewTencentVectorDBRetrieveEngineRepository creates a Tencent VectorDB-backed retrieve repository.
 func NewTencentVectorDBRetrieveEngineRepository(
@@ -35,9 +40,23 @@ func NewTencentVectorDBRetrieveEngineRepository(
 		client:             client,
 		databaseName:       databaseName,
 		collectionBaseName: collectionBaseName,
+		useDimensionSuffix: shouldUseDimensionSuffix(indexCfg),
 		shardsNum:          defaultIfZero(indexCfg.GetShardsNum(1), 1),
-		replicasNum:        defaultIfZero(indexCfg.GetReplicaNumber(1), 1),
+		replicasNum:        resolveReplicaNumber(indexCfg),
 	}
+}
+
+func resolveReplicaNumber(indexCfg *types.IndexConfig) int {
+	if indexCfg != nil && indexCfg.ReplicaNumber > 0 {
+		return indexCfg.ReplicaNumber
+	}
+	if raw := strings.TrimSpace(os.Getenv(envTencentVectorDBReplicaNum)); raw != "" {
+		replicas, err := strconv.Atoi(raw)
+		if err == nil && replicas >= 0 {
+			return replicas
+		}
+	}
+	return defaultReplicaNumber
 }
 
 func (r *repository) EngineType() types.RetrieverEngineType {
@@ -138,34 +157,26 @@ func (r *repository) CopyIndices(
 	}
 	collectionName := r.collectionName(dimension)
 	ids := slices.Collect(maps.Keys(sourceToTargetChunkIDMap))
-	query, err := r.client.Database(r.databaseName).Collection(collectionName).Query(
-		ctx,
-		nil,
-		&tcvectordb.QueryDocumentParams{
-			Filter:         tcvectordb.NewFilter(tcvectordb.In(fieldChunkID, ids)),
-			RetrieveVector: true,
-			OutputFields:   outputFields(),
-			Limit:          int64(len(ids)),
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("tencent vectordb query source indices: %w", err)
-	}
 
-	embeddings := make([]*vectorEmbedding, 0, len(query.Documents))
-	for _, doc := range query.Documents {
-		embedding := fromDocument(doc)
-		targetChunkID := sourceToTargetChunkIDMap[embedding.ChunkID]
-		if targetChunkID == "" {
-			continue
+	var embeddings []*vectorEmbedding
+	for offset := int64(0); ; offset += copyIndicesQueryPageSize {
+		query, err := r.client.Database(r.databaseName).Collection(collectionName).Query(
+			ctx,
+			nil,
+			copySourceQueryParams(sourceKnowledgeBaseID, ids, offset),
+		)
+		if err != nil {
+			return fmt.Errorf("tencent vectordb query source indices: %w", err)
 		}
-		embedding.ID = targetChunkID
-		embedding.ChunkID = targetChunkID
-		embedding.KnowledgeBaseID = targetKnowledgeBaseID
-		if targetKBID := sourceToTargetKBIDMap[embedding.KnowledgeID]; targetKBID != "" {
-			embedding.KnowledgeID = targetKBID
+		embeddings = append(embeddings, remapCopiedEmbeddings(
+			query.Documents,
+			sourceToTargetKBIDMap,
+			sourceToTargetChunkIDMap,
+			targetKnowledgeBaseID,
+		)...)
+		if len(query.Documents) < int(copyIndicesQueryPageSize) {
+			break
 		}
-		embeddings = append(embeddings, embedding)
 	}
 	if len(embeddings) == 0 {
 		return nil
@@ -314,7 +325,7 @@ func (r *repository) KeywordsRetrieve(ctx context.Context, params types.Retrieve
 	matchedCollections := 0
 	failedCollections := 0
 	for _, collection := range collections.Collections {
-		if !strings.HasPrefix(collection.CollectionName, r.collectionBaseName+"_") {
+		if !r.matchesCollection(collection.CollectionName) {
 			continue
 		}
 		matchedCollections++
@@ -422,11 +433,24 @@ func (r *repository) ensureCollection(ctx context.Context, dimension int) error 
 		indexes,
 	)
 	if err != nil {
+		if isCollectionAlreadyExistsErr(err) {
+			logger.GetLogger(ctx).Infof("[TencentVectorDB] collection %s already exists, skip create", collectionName)
+			r.initialized.Store(dimension, true)
+			return nil
+		}
 		return fmt.Errorf("tencent vectordb create collection %s: %w", collectionName, err)
 	}
 
 	r.initialized.Store(dimension, true)
 	return nil
+}
+
+func isCollectionAlreadyExistsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "code: 15202") || strings.Contains(msg, "already exist")
 }
 
 func (r *repository) deleteByFilter(ctx context.Context, dimension int, cond string) error {
@@ -450,7 +474,7 @@ func (r *repository) updateChunkFields(ctx context.Context, chunkIDs []string, f
 	}
 
 	for _, collection := range collections.Collections {
-		if !strings.HasPrefix(collection.CollectionName, r.collectionBaseName+"_") {
+		if !r.matchesCollection(collection.CollectionName) {
 			continue
 		}
 		_, err := r.client.Database(r.databaseName).Collection(collection.CollectionName).Update(ctx, tcvectordb.UpdateDocumentParams{
@@ -465,7 +489,21 @@ func (r *repository) updateChunkFields(ctx context.Context, chunkIDs []string, f
 }
 
 func (r *repository) collectionName(dimension int) string {
+	if !r.useDimensionSuffix {
+		return r.collectionBaseName
+	}
 	return fmt.Sprintf("%s_%d", r.collectionBaseName, dimension)
+}
+
+func (r *repository) matchesCollection(collectionName string) bool {
+	if !r.useDimensionSuffix {
+		return collectionName == r.collectionBaseName
+	}
+	return strings.HasPrefix(collectionName, r.collectionBaseName+"_")
+}
+
+func shouldUseDimensionSuffix(indexCfg *types.IndexConfig) bool {
+	return indexCfg == nil || indexCfg.CollectionName == ""
 }
 
 func (r *repository) baseFilter(params types.RetrieveParams) *tcvectordb.Filter {
@@ -535,7 +573,7 @@ func (r *repository) toDocumentsWithSparseVectors(
 
 func toVectorEmbedding(indexInfo *types.IndexInfo, params map[string]any) *vectorEmbedding {
 	embedding := &vectorEmbedding{
-		ID:              indexInfo.ChunkID,
+		ID:              indexInfo.ID,
 		Content:         cleanInvalidUTF8(indexInfo.Content),
 		SourceID:        indexInfo.SourceID,
 		SourceType:      int(indexInfo.SourceType),
@@ -547,6 +585,9 @@ func toVectorEmbedding(indexInfo *types.IndexInfo, params map[string]any) *vecto
 	}
 	if embedding.ID == "" {
 		embedding.ID = indexInfo.SourceID
+	}
+	if embedding.ID == "" {
+		embedding.ID = indexInfo.ChunkID
 	}
 	if params != nil && slices.Contains(slices.Collect(maps.Keys(params)), fieldVector) {
 		if embeddingMap, ok := params[fieldVector].(map[string][]float32); ok {
@@ -566,6 +607,63 @@ func lookupEmbedding(embeddingMap map[string][]float32, indexInfo *types.IndexIn
 		return embedding
 	}
 	return embeddingMap[indexInfo.ChunkID]
+}
+
+func copySourceQueryParams(sourceKnowledgeBaseID string, chunkIDs []string, offset int64) *tcvectordb.QueryDocumentParams {
+	conditions := []string{tcvectordb.In(fieldChunkID, chunkIDs)}
+	if sourceKnowledgeBaseID != "" {
+		conditions = append([]string{tcvectordb.In(fieldKnowledgeBaseID, []string{sourceKnowledgeBaseID})}, conditions...)
+	}
+	return &tcvectordb.QueryDocumentParams{
+		Filter:         tcvectordb.NewFilter(strings.Join(conditions, " and ")),
+		RetrieveVector: true,
+		OutputFields:   outputFields(),
+		Offset:         offset,
+		Limit:          copyIndicesQueryPageSize,
+	}
+}
+
+func remapCopiedEmbeddings(
+	docs []tcvectordb.Document,
+	sourceToTargetKBIDMap map[string]string,
+	sourceToTargetChunkIDMap map[string]string,
+	targetKnowledgeBaseID string,
+) []*vectorEmbedding {
+	embeddings := make([]*vectorEmbedding, 0, len(docs))
+	for _, doc := range docs {
+		embedding := fromDocument(doc)
+		targetChunkID := sourceToTargetChunkIDMap[embedding.ChunkID]
+		if targetChunkID == "" {
+			continue
+		}
+		originalSourceID := embedding.SourceID
+		if originalSourceID == "" {
+			originalSourceID = embedding.ID
+		}
+		targetSourceID := translateSourceID(originalSourceID, embedding.ChunkID, targetChunkID)
+		embedding.ID = targetSourceID
+		embedding.SourceID = targetSourceID
+		embedding.ChunkID = targetChunkID
+		embedding.KnowledgeBaseID = targetKnowledgeBaseID
+		if targetKBID := sourceToTargetKBIDMap[embedding.KnowledgeID]; targetKBID != "" {
+			embedding.KnowledgeID = targetKBID
+		}
+		embeddings = append(embeddings, embedding)
+	}
+	return embeddings
+}
+
+func translateSourceID(originalSourceID, sourceChunkID, targetChunkID string) string {
+	switch {
+	case originalSourceID == sourceChunkID:
+		return targetChunkID
+	case strings.HasPrefix(originalSourceID, sourceChunkID+"-"):
+		questionID := strings.TrimPrefix(originalSourceID, sourceChunkID+"-")
+		return fmt.Sprintf("%s-%s", targetChunkID, questionID)
+	default:
+		sum := sha256.Sum256([]byte(targetChunkID + "\x00" + sourceChunkID + "\x00" + originalSourceID))
+		return fmt.Sprintf("%s-%s", targetChunkID, hex.EncodeToString(sum[:])[:16])
+	}
 }
 
 func cleanInvalidUTF8(s string) string {

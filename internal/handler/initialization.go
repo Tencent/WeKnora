@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -1528,15 +1529,18 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 // 所有 provider/model 通用字段都在这里集中声明；若未来新增字段（比如现在的
 // custom_headers），只需改一处，生产路径和测试路径会同时生效。
 type ModelTestRequest struct {
-	Source        string            `json:"source"` // 为空时按需默认为 "remote"
-	ModelName     string            `json:"modelName" binding:"required"`
-	BaseURL       string            `json:"baseUrl"`
-	APIKey        string            `json:"apiKey"`
-	Provider      string            `json:"provider"`
-	InterfaceType string            `json:"interfaceType,omitempty"`
-	Dimension     int               `json:"dimension,omitempty"`
-	CustomHeaders map[string]string `json:"customHeaders,omitempty"`
-	ExtraConfig   map[string]string `json:"extraConfig,omitempty"`
+	Source                    string            `json:"source"` // 为空时按需默认为 "remote"
+	ModelName                 string            `json:"modelName" binding:"required"`
+	BaseURL                   string            `json:"baseUrl"`
+	APIKey                    string            `json:"apiKey"`
+	Provider                  string            `json:"provider"`
+	InterfaceType             string            `json:"interfaceType,omitempty"`
+	Dimension                 int               `json:"dimension,omitempty"`
+	SupportsDimensionOverride bool              `json:"supportsDimensionOverride,omitempty"`
+	CustomHeaders             map[string]string `json:"customHeaders,omitempty"`
+	ExtraConfig               map[string]string `json:"extraConfig,omitempty"`
+	// AppSecret 用于 LKEAP Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。
+	AppSecret string `json:"appSecret,omitempty"`
 	// ModelID, when set, instructs the handler to substitute any missing
 	// secrets (APIKey, AppSecret via ExtraConfig) from the stored model
 	// record before assembling the test client. This lets the "Test
@@ -1559,10 +1563,7 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req == nil || req.ModelID == "" {
 		return
 	}
-	if req.APIKey != "" {
-		// Already supplied — nothing to merge. (We don't need to look up
-		// AppSecret separately since the WeKnoraCloud path resolves it
-		// from the tenant, not the model record.)
+	if req.APIKey != "" && req.AppSecret != "" {
 		return
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
@@ -1574,12 +1575,28 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req.APIKey == "" {
 		req.APIKey = stored.Parameters.APIKey
 	}
+	if req.AppSecret == "" {
+		req.AppSecret = stored.Parameters.AppSecret
+	}
 }
 
 // RemoteModelCheckRequest 兼容旧 swagger 定义。
 //
 // Deprecated: 保留是为了不破坏已生成的 API 文档，新代码请直接使用 ModelTestRequest。
 type RemoteModelCheckRequest = ModelTestRequest
+
+// decryptModelAppSecret 解密模型 Parameters 中的 AppSecret（与 modelService 行为一致）。
+func decryptModelAppSecret(encrypted string) string {
+	if encrypted == "" {
+		return encrypted
+	}
+	if key := utils.GetAESKey(); key != nil {
+		if plain, err := utils.DecryptAESGCM(encrypted, key); err == nil {
+			return plain
+		}
+	}
+	return encrypted
+}
 
 // buildTestModel 把测试连接请求转成一个临时的 *types.Model（不落库），
 // 供 ConfigFromModel 使用。source 为空时按 defaultSource 兜底（chat/rerank/asr
@@ -1598,13 +1615,15 @@ func (h *InitializationHandler) buildTestModel(
 		Parameters: types.ModelParameters{
 			BaseURL:       req.BaseURL,
 			APIKey:        req.APIKey,
+			AppSecret:     req.AppSecret,
 			Provider:      req.Provider,
 			InterfaceType: req.InterfaceType,
 			ExtraConfig:   req.ExtraConfig,
 			CustomHeaders: req.CustomHeaders,
 			EmbeddingParameters: types.EmbeddingParameters{
-				Dimension:            req.Dimension,
-				TruncatePromptTokens: 256,
+				Dimension:                 req.Dimension,
+				TruncatePromptTokens:      256,
+				SupportsDimensionOverride: req.SupportsDimensionOverride,
 			},
 		},
 	}
@@ -1896,6 +1915,10 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
+	if provider.ProviderName(model.Parameters.Provider) == provider.ProviderLKEAP {
+		appID = ""
+		appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
+	}
 	available, message := h.checkRerankModelConnection(ctx, model, appID, appSecret)
 
 	logger.Infof(ctx, "Rerank model check completed, available: %v, message: %s", available, message)

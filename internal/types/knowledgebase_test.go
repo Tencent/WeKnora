@@ -94,10 +94,10 @@ func TestKnowledgeBase_VectorStoreID_JSON(t *testing.T) {
 	})
 
 	unmarshalCases := []struct {
-		name       string
-		body       string
-		wantNil    bool
-		wantValue  string
+		name      string
+		body      string
+		wantNil   bool
+		wantValue string
 	}{
 		{name: "missing field", body: `{"id":"kb-1"}`, wantNil: true},
 		{name: "explicit null", body: `{"id":"kb-1","vector_store_id":null}`, wantNil: true},
@@ -156,8 +156,6 @@ func TestKnowledgeBase_UnmarshalJSON_WithVectorStoreID(t *testing.T) {
 	// Regression guard: the aux struct inside UnmarshalJSON must not shadow vector_store_id.
 	// If a future change introduces such a shadow, the value above would fail to populate.
 }
-
-
 
 // TestKnowledgeBase_HasVectorStore covers the nil-safe binding accessor.
 func TestKnowledgeBase_HasVectorStore(t *testing.T) {
@@ -267,5 +265,53 @@ func TestKnowledgeBase_SharesStoreWith(t *testing.T) {
 				t.Fatalf("SharesStoreWith: got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestEffectiveStorageProvider(t *testing.T) {
+	tests := []struct {
+		name          string
+		kbProvider    string
+		tenantDefault string
+		want          string
+	}{
+		{"kb pins provider", "minio", "cos", "minio"},
+		{"kb empty falls back to tenant default", "", "cos", "cos"},
+		{"both empty", "", "", ""},
+		{"tenant default cased", "", "  COS ", "cos"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			kb := &KnowledgeBase{}
+			if tt.kbProvider != "" {
+				kb.StorageProviderConfig = &StorageProviderConfig{Provider: tt.kbProvider}
+			}
+			if got := kb.EffectiveStorageProvider(tt.tenantDefault); got != tt.want {
+				t.Errorf("EffectiveStorageProvider(%q) with kb=%q = %q, want %q",
+					tt.tenantDefault, tt.kbProvider, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEffectiveStorageProvider_CrossBackendDetection documents the comparison the
+// clone preflight performs: a mismatch is only flagged when both effective
+// providers are non-empty and differ.
+func TestEffectiveStorageProvider_CrossBackendDetection(t *testing.T) {
+	tenantDefault := "minio"
+	src := &KnowledgeBase{} // inherits tenant default -> minio
+	dst := &KnowledgeBase{StorageProviderConfig: &StorageProviderConfig{Provider: "cos"}}
+
+	sp := src.EffectiveStorageProvider(tenantDefault)
+	dp := dst.EffectiveStorageProvider(tenantDefault)
+	if sp == "" || dp == "" || sp == dp {
+		t.Fatalf("expected cross-backend mismatch, got src=%q dst=%q", sp, dp)
+	}
+
+	// Same effective provider (dst empty inherits the same tenant default) must NOT be flagged.
+	dstSame := &KnowledgeBase{}
+	if dstSame.EffectiveStorageProvider(tenantDefault) != sp {
+		t.Errorf("same tenant default should match: got %q vs %q",
+			dstSame.EffectiveStorageProvider(tenantDefault), sp)
 	}
 }

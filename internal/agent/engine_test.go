@@ -219,6 +219,125 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 	}
 }
 
+// TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately is the
+// regression guard for the "answer first shows under Thinking, then jumps to
+// the answer area" UX bug. A natural-stop response that carries reasoning in
+// the dedicated reasoning channel (ResponseTypeThinking) plus plain answer
+// content (ResponseTypeAnswer) must route the reasoning to thought events and
+// the answer live to final-answer events — never the reverse.
+func TestStreamThinkingToEventBus_RoutesReasoningAndAnswerSeparately(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{ResponseType: types.ResponseTypeThinking, Content: "let me reason"},
+				{ResponseType: types.ResponseTypeThinking, Content: "", Done: true},
+				{ResponseType: types.ResponseTypeAnswer, Content: "The answer "},
+				{ResponseType: types.ResponseTypeAnswer, Content: "is 42.", Done: true, FinishReason: "stop"},
+			}},
+		},
+	}
+
+	engine := newTestEngine(t, mock)
+	var thoughts, answers string
+	engine.eventBus.On(event.EventAgentThought, func(_ context.Context, evt event.Event) error {
+		if d, ok := evt.Data.(event.AgentThoughtData); ok {
+			thoughts += d.Content
+		}
+		return nil
+	})
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		if d, ok := evt.Data.(event.AgentFinalAnswerData); ok {
+			answers += d.Content
+		}
+		return nil
+	})
+
+	resp, err := engine.streamThinkingToEventBus(context.Background(),
+		emptyMessages(), emptyTools(), 0, "sess-1")
+	require.NoError(t, err)
+
+	assert.Equal(t, "let me reason", thoughts, "reasoning_content must stream to thought events")
+	assert.Equal(t, "The answer is 42.", answers, "plain answer content must stream live to final-answer events")
+	assert.True(t, resp.AnswerStreamed, "AnswerStreamed must be set when answer text was streamed live")
+	assert.NotEmpty(t, resp.AnswerEventID, "AnswerEventID must identify the live answer stream")
+}
+
+// TestStreamThinkingToEventBus_SplitsInlineThinkBlock verifies that models which
+// embed reasoning inline as <think>…</think> in the content channel still have
+// their reasoning routed to thought events and only the real answer streamed to
+// the final-answer area.
+func TestStreamThinkingToEventBus_SplitsInlineThinkBlock(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{ResponseType: types.ResponseTypeAnswer, Content: "<think>hidden reasoning</think>Visible answer.",
+					Done: true, FinishReason: "stop"},
+			}},
+		},
+	}
+
+	engine := newTestEngine(t, mock)
+	var thoughts, answers string
+	engine.eventBus.On(event.EventAgentThought, func(_ context.Context, evt event.Event) error {
+		if d, ok := evt.Data.(event.AgentThoughtData); ok {
+			thoughts += d.Content
+		}
+		return nil
+	})
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		if d, ok := evt.Data.(event.AgentFinalAnswerData); ok {
+			answers += d.Content
+		}
+		return nil
+	})
+
+	_, err := engine.streamThinkingToEventBus(context.Background(),
+		emptyMessages(), emptyTools(), 0, "sess-1")
+	require.NoError(t, err)
+
+	assert.Equal(t, "hidden reasoning", thoughts, "inline <think> content must route to thought events")
+	assert.Equal(t, "Visible answer.", answers, "answer outside <think> must stream to final-answer events")
+}
+
+// TestExecuteLoop_NaturalStop_DoesNotDuplicateAnswer ensures the natural-stop
+// branch does not re-emit the full answer (it was already streamed live), so
+// the final-answer content appears exactly once instead of streaming under
+// Thinking and then "jumping" to a duplicate answer block.
+func TestExecuteLoop_NaturalStop_DoesNotDuplicateAnswer(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{ResponseType: types.ResponseTypeAnswer, Content: "Hello "},
+				{ResponseType: types.ResponseTypeAnswer, Content: "world", Done: true, FinishReason: "stop"},
+			}},
+		},
+	}
+
+	engine := newTestEngine(t, mock)
+	var answerContent string
+	var doneCount int
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		if d, ok := evt.Data.(event.AgentFinalAnswerData); ok {
+			answerContent += d.Content
+			if d.Done {
+				doneCount++
+			}
+		}
+		return nil
+	})
+
+	state := &types.AgentState{}
+	_, err := engine.executeLoop(context.Background(), state, "test query",
+		emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	require.NoError(t, err)
+
+	assert.True(t, state.IsComplete)
+	assert.Equal(t, "Hello world", state.FinalAnswer)
+	assert.Equal(t, "Hello world", answerContent,
+		"answer content must be emitted exactly once (streamed live, not re-emitted by the natural-stop branch)")
+	assert.GreaterOrEqual(t, doneCount, 1, "a Done marker must close the answer stream")
+}
+
 func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *testing.T) {
 	mock := &mockChat{
 		responses: []mockResponse{

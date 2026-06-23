@@ -22,6 +22,7 @@ type KnowledgeService interface {
 		customFileName string,
 		tagID string,
 		channel string,
+		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
@@ -37,6 +38,7 @@ type KnowledgeService interface {
 		title string,
 		tagID string,
 		channel string,
+		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
@@ -94,7 +96,13 @@ type KnowledgeService interface {
 		payload *types.ManualKnowledgePayload,
 	) (*types.Knowledge, error)
 	// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
-	ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// When processOverrides is non-nil, it is validated and persisted to the knowledge metadata
+	// before re-parsing, letting callers adjust parse config on reparse; nil keeps stored overrides.
+	ReparseKnowledge(
+		ctx context.Context,
+		knowledgeID string,
+		processOverrides *types.KnowledgeProcessOverrides,
+	) (*types.Knowledge, error)
 	// CancelKnowledgeParse marks an in-progress parse as cancelled by the
 	// user. The knowledge row and any partially written chunks/index are
 	// kept; downstream queued tasks for the same knowledge are best-effort
@@ -222,6 +230,9 @@ type KnowledgeRepository interface {
 	// statement so callers that flip several related fields (e.g. parse_status +
 	// error_message) cannot leave the row in a half-updated state.
 	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
+	// UpdateActiveDeletingKnowledgeColumns updates an active, non-deleted knowledge row
+	// only when it is still in the transient deleting state.
+	UpdateActiveDeletingKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) (bool, error)
 	// FinalizeSubtask atomically decrements pending_subtasks_count for the
 	// given knowledge and promotes parse_status from "finalizing" to
 	// "completed" when the count reaches zero. Returns the post-decrement

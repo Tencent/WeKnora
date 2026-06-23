@@ -166,8 +166,9 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 		for _, tc := range nonTerminalCalls {
 			argsJSON, _ := json.Marshal(tc.Args)
 			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, chat.ToolCall{
-				ID:   tc.ID,
-				Type: "function",
+				ID:               tc.ID,
+				Type:             "function",
+				ProviderMetadata: tc.ProviderMetadata,
 				Function: chat.FunctionCall{
 					Name:      tc.Name,
 					Arguments: string(argsJSON),
@@ -193,15 +194,20 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 	return msgs
 }
 
-// filterNonTerminalToolCalls drops final_answer entries since those are
-// terminal signals — the canonical answer text is replayed via the trailing
-// assistant message instead, so re-injecting final_answer here would either
-// duplicate the answer or confuse the model into thinking the previous turn
-// is still mid-flight.
+// legacyFinalAnswerToolName is the name of the now-removed final_answer tool.
+// It is retained here only to filter such calls out of OLD persisted agent
+// histories: pre-existing conversations recorded a final_answer tool call as
+// the terminal step, and the canonical answer text is replayed via the
+// trailing assistant message instead. Re-injecting it would duplicate the
+// answer or confuse the model into thinking the previous turn is mid-flight.
+const legacyFinalAnswerToolName = "final_answer"
+
+// filterNonTerminalToolCalls drops legacy final_answer entries from historical
+// tool calls (see legacyFinalAnswerToolName). New turns never produce them.
 func filterNonTerminalToolCalls(calls []types.ToolCall) []types.ToolCall {
 	out := make([]types.ToolCall, 0, len(calls))
 	for _, tc := range calls {
-		if tc.Name == agenttools.ToolFinalAnswer {
+		if tc.Name == legacyFinalAnswerToolName {
 			continue
 		}
 		out = append(out, tc)
@@ -222,7 +228,7 @@ func toolCallOutput(tc types.ToolCall) string {
 		}
 		return "Error: tool call failed"
 	}
-	return tc.Result.Output
+	return agenttools.CompactToolOutputForHistory(tc.Name, tc.Result)
 }
 
 // extractImageCaptionsFromMessage concatenates non-empty Caption fields from

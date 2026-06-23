@@ -7,7 +7,7 @@
 
     <div class="settings-group">
       <!-- LLM 大语言模型 -->
-      <div class="setting-row">
+      <div class="setting-row" data-guide="kb-create-llm">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.models.llmLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ $t('knowledgeEditor.models.llmDesc') }}</p>
@@ -25,13 +25,21 @@
         </div>
       </div>
 
-      <!-- Embedding 嵌入模型 (仅 RAG 检索启用时必填) -->
-      <div v-if="ragEnabled !== false" class="setting-row">
+      <!-- Embedding 嵌入模型: RAG 检索启用时必填; 纯 Wiki 时可选(用于目录归类相似度) -->
+      <div v-if="ragEnabled !== false || wikiEnabled" class="setting-row" data-guide="kb-create-embedding">
         <div class="setting-info">
-          <label>{{ $t('knowledgeEditor.models.embeddingLabel') }} <span v-if="ragEnabled" class="required">*</span></label>
-          <p class="desc">{{ $t('knowledgeEditor.models.embeddingDesc') }}</p>
+          <label>
+            {{ $t('knowledgeEditor.models.embeddingLabel') }}
+            <span v-if="ragEnabled" class="required">*</span>
+            <span v-else-if="wikiEnabled" class="optional">{{ $t('knowledgeEditor.models.embeddingOptional') }}</span>
+          </label>
+          <p class="desc">
+            {{ (wikiEnabled && ragEnabled === false)
+              ? $t('knowledgeEditor.models.embeddingWikiOptionalDesc')
+              : $t('knowledgeEditor.models.embeddingDesc') }}
+          </p>
           <t-alert
-            v-if="hasFiles"
+            v-if="ragEnabled && hasFiles"
             theme="warning"
             :message="$t('knowledgeEditor.models.embeddingLocked')"
             style="margin-top: 8px;"
@@ -43,7 +51,7 @@
             model-type="Embedding"
             :selected-model-id="config.embeddingModelId"
             :all-models="allModels"
-            :disabled="hasFiles"
+            :disabled="ragEnabled && hasFiles"
             @update:selected-model-id="handleEmbeddingChange"
             @add-model="handleAddModel('embedding')"
             :placeholder="$t('knowledgeEditor.models.embeddingPlaceholder')"
@@ -138,13 +146,13 @@ const handleAddModel = (subSection: string) => {
 }
 
 .section-header {
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 
   h2 {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
   }
 
   .section-description {
@@ -165,7 +173,7 @@ const handleAddModel = (subSection: string) => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 20px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
@@ -188,6 +196,13 @@ const handleAddModel = (subSection: string) => {
     .required {
       color: var(--td-error-color);
       margin-left: 2px;
+    }
+
+    .optional {
+      color: var(--td-text-color-placeholder);
+      font-size: 12px;
+      font-weight: 400;
+      margin-left: 4px;
     }
   }
 

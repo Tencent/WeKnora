@@ -65,7 +65,7 @@ Components deployed:
   - Redis ({{ include "weknora.redis.image" . }})
 {{- end }}
 
-{{- if or .Values.minio.enabled .Values.neo4j.enabled .Values.qdrant.enabled .Values.jaeger.enabled }}
+{{- if or .Values.minio.enabled .Values.neo4j.enabled .Values.qdrant.enabled }}
 
 Optional components enabled:
 {{- if .Values.minio.enabled }}
@@ -76,9 +76,6 @@ Optional components enabled:
 {{- end }}
 {{- if .Values.qdrant.enabled }}
   - Qdrant (Vector Database)
-{{- end }}
-{{- if .Values.jaeger.enabled }}
-  - Jaeger (Distributed Tracing)
 {{- end }}
 {{- end }}
 

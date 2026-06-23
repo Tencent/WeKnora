@@ -69,6 +69,12 @@ For full metadata (config / pinned / tenant), use 'weknora kb view <id>'.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, kbStatusFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "shallow health probe of a knowledge base (one HTTP call): reachability, no failed-doc aggregation",
+		RequiredFlags: []string{"<kb-id> (positional)"},
+		Examples:      []string{"weknora kb status kb_abc"},
+		Output:        "envelope.data is {id, reachable, ...}; use `kb check` for deep failed-doc aggregation",
+	})
 	return cmd
 }
 

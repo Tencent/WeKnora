@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick, h } from "vue";
+import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
@@ -14,9 +15,9 @@ import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
-import { listModels, type ModelConfig } from '@/api/model';
-import { listAgents, type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
-import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
+import { type ModelConfig } from '@/api/model';
+import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
+import { useChatResourcesStore } from '@/stores/chatResources';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
@@ -32,6 +33,13 @@ const settingsStore = useSettingsStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
+const chatResources = useChatResourcesStore();
+const {
+  agents,
+  disabledOwnAgentIds,
+  chatModels: availableModels,
+  webSearchProviders,
+} = storeToRefs(chatResources);
 const { t } = useI18n();
 
 let query = ref("");
@@ -122,10 +130,6 @@ const showAgentModeSelector = ref(false);
 const agentModeButtonRef = ref<HTMLElement>();
 const agentModeDropdownStyle = ref<Record<string, string>>({});
 
-// 智能体相关状态（完整列表供选中态解析；对话下拉用 enabledAgents）
-const agents = ref<CustomAgent[]>([]);
-/** 当前租户在对话下拉中停用的「我的」智能体 ID（仅影响本租户） */
-const disabledOwnAgentIds = ref<string[]>([]);
 const selectedAgentId = computed({
   get: () => settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
   set: (val: string) => settingsStore.selectAgent(val)
@@ -202,6 +206,7 @@ const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; k
 // 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
+  if (settingsStore._isApplyingSessionState) return;
   if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
     if (newKbMode === 'none') {
       settingsStore.selectKnowledgeBases([]);
@@ -224,8 +229,7 @@ watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId
 watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId], async ([agentId, sourceTenantId]) => {
   if (sourceTenantId && agentId) {
     try {
-      const res: any = await listKnowledgeBases({ agent_id: agentId });
-      const list = res?.data && Array.isArray(res.data) ? res.data : [];
+      const list = await chatResources.ensureAgentKnowledgeBases(agentId);
       sharedAgentKbList.value = list.map((kb: any) => ({
         id: kb.id,
         name: kb.name,
@@ -405,8 +409,8 @@ const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 
-// 获取已选择的知识库信息
-const knowledgeBases = ref<Array<{ id: string; name: string; type?: 'document' | 'faq'; knowledge_count?: number; chunk_count?: number }>>([]);
+// 已就绪的知识库（来自租户级缓存）
+const knowledgeBases = computed(() => chatResources.validKnowledgeBases);
 const fileList = ref<Array<{ id: string; name: string }>>([]);
 
 // 选中的知识库：包含自己的 + 组织共享的 + 共享智能体下的（用于展示已选列表与 org 角标）
@@ -501,8 +505,6 @@ const removeSelectedItem = (item: { id: string; type: 'kb' | 'file'; isAgentConf
   }
 };
 
-// 模型相关状态
-const availableModels = ref<ModelConfig[]>([]);
 // 使用 computed 从 store 读取，并通过 setter 同步回 store
 const selectedModelId = computed({
   get: () => settingsStore.conversationModels.selectedChatModelId || '',
@@ -547,47 +549,33 @@ const inputPlaceholder = computed(() => {
 });
 
 // 加载知识库列表（自己的 + 共享的，用于 @ 提及等）
-const loadKnowledgeBases = async () => {
+const loadKnowledgeBases = async (force = false) => {
   try {
-    const response: any = await listKnowledgeBases();
-    if (response.data && Array.isArray(response.data)) {
-      const validKbs = response.data.filter((kb: any) => {
-        if (!kb.summary_model_id || kb.summary_model_id === '') return false
-        const strategy = kb.indexing_strategy
-        const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
-        if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
-        return true
-      });
-      knowledgeBases.value = validKbs;
+    await chatResources.ensureKnowledgeBases(force);
+    const validKbs = knowledgeBases.value;
 
-      // 拉取共享知识库（供 @ 提及与清理选中项时识别）
-      await orgStore.fetchSharedKnowledgeBases().catch(() => { });
-
-      // 清理无效的知识库ID：只移除既不在自己列表、也不在组织共享、也不在共享智能体知识库中的 ID（刷新后保留共享智能体下已选知识库）
-      const validKbIds = new Set(validKbs.map((kb: any) => kb.id));
-      const sharedKbIds = new Set(
-        (orgStore.sharedKnowledgeBases || []).map((s: any) => s.knowledge_base?.id).filter(Boolean)
-      );
-      let sharedAgentKbIdSet = new Set<string>();
-      const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
-      const agentId = settingsStore.selectedAgentId;
-      if (sourceTenantId && agentId) {
-        try {
-          const res: any = await listKnowledgeBases({ agent_id: agentId });
-          const list = res?.data && Array.isArray(res.data) ? res.data : [];
-          list.forEach((kb: any) => kb?.id && sharedAgentKbIdSet.add(kb.id));
-        } catch {
-          sharedAgentKbIdSet = new Set();
-        }
+    const validKbIds = new Set(validKbs.map((kb: any) => kb.id));
+    const sharedKbIds = new Set(
+      (orgStore.sharedKnowledgeBases || []).map((s: any) => s.knowledge_base?.id).filter(Boolean)
+    );
+    let sharedAgentKbIdSet = new Set<string>();
+    const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+    const agentId = settingsStore.selectedAgentId;
+    if (sourceTenantId && agentId) {
+      try {
+        const list = await chatResources.ensureAgentKnowledgeBases(agentId, force);
+        list.forEach((kb: any) => kb?.id && sharedAgentKbIdSet.add(kb.id));
+      } catch {
+        sharedAgentKbIdSet = new Set();
       }
-      const currentSelectedIds = settingsStore.settings.selectedKnowledgeBases || [];
-      const validSelectedIds = currentSelectedIds.filter(
-        (id: string) => validKbIds.has(id) || sharedKbIds.has(id) || sharedAgentKbIdSet.has(id)
-      );
+    }
+    const currentSelectedIds = settingsStore.settings.selectedKnowledgeBases || [];
+    const validSelectedIds = currentSelectedIds.filter(
+      (id: string) => validKbIds.has(id) || sharedKbIds.has(id) || sharedAgentKbIdSet.has(id)
+    );
 
-      if (validSelectedIds.length !== currentSelectedIds.length) {
-        settingsStore.selectKnowledgeBases(validSelectedIds);
-      }
+    if (validSelectedIds.length !== currentSelectedIds.length) {
+      settingsStore.selectKnowledgeBases(validSelectedIds);
     }
   } catch (error) {
     console.error('Failed to load knowledge bases:', error);
@@ -644,8 +632,6 @@ watch(selectedFileIds, () => {
   loadFiles();
 }, { immediate: true });
 
-const webSearchProviders = ref<WebSearchProviderEntity[]>([]);
-
 const isWebSearchConfigured = computed(() => {
   const agentProviderId = agentWebSearchProviderId.value;
   if (agentProviderId) {
@@ -655,18 +641,16 @@ const isWebSearchConfigured = computed(() => {
   return webSearchProviders.value.some(p => p.is_default);
 });
 
-const loadWebSearchConfig = async () => {
+const loadWebSearchConfig = async (force = false) => {
   try {
-    const response = await listWebSearchProviders();
-    const providers = (response as any)?.data;
-    webSearchProviders.value = Array.isArray(providers) ? providers : [];
+    await chatResources.ensureWebSearchProviders(force);
 
     if (!isWebSearchConfigured.value && settingsStore.isWebSearchEnabled) {
       settingsStore.toggleWebSearch(false);
     }
   } catch (error) {
     console.error('Failed to load web search config:', error);
-    webSearchProviders.value = [];
+    chatResources.invalidate('webSearchProviders');
     if (settingsStore.isWebSearchEnabled) {
       settingsStore.toggleWebSearch(false);
     }
@@ -674,20 +658,14 @@ const loadWebSearchConfig = async () => {
 };
 
 // 加载智能体列表（我的 + 共享，供选中态与就绪检查用）
-const loadAgents = async () => {
+const loadAgents = async (force = false) => {
   try {
-    const [agentsRes] = await Promise.all([
-      listAgents(),
-      orgStore.fetchSharedAgents(),
-    ]);
-    const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
-    agents.value = res.data || []
-    disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
-    ensureSelectedAgentNotDisabled()
+    await chatResources.ensureAgents(force);
+    ensureSelectedAgentNotDisabled();
   } catch (error) {
-    console.error('Failed to load agents:', error)
+    console.error('Failed to load agents:', error);
   }
-}
+};
 
 // 默认选中的 builtin（builtin-quick-answer）也可能被当前租户管理员停用。
 // 列表加载完后做一次纠偏：若当前选中的是本租户停用的 agent（仅限「我的/builtin」，
@@ -775,16 +753,15 @@ const initChatModelSelection = () => {
   ensureModelSelection();
 };
 
-const loadChatModels = async () => {
+const loadChatModels = async (force = false) => {
   if (modelsLoading.value) return;
   modelsLoading.value = true;
   try {
-    const models = await listModels('KnowledgeQA');
-    availableModels.value = Array.isArray(models) ? models : [];
+    await chatResources.ensureChatModels(force);
     ensureModelSelection();
   } catch (error) {
     console.error('Failed to load chat models:', error);
-    availableModels.value = [];
+    chatResources.invalidate('models');
   } finally {
     modelsLoading.value = false;
   }
@@ -805,15 +782,29 @@ const ensureModelSelection = () => {
 };
 
 // 智能体身份或其数据到位时，把对话模型同步到智能体配置的 model_id。
-// 修复场景：导航离开再返回时，onMounted 中的 initChatModelSelection 会用
-// localStorage 的 lastPick（用户上一次手动挑选）覆盖 store 中的 selectedChatModelId，
-// 把共享智能体绑定的源租户 model_id 冲掉，UI 显示「未配置」。
-// 该 watch 在 loadAgents/sharedAgents 异步返回让 agentModelId 由空变非空时也会触发，
-// 与 handleSelectAgent 中的同步逻辑保持一致：智能体「拥有」其模型选择。
+// 修复场景：导航离开再返回时，initChatModelSelection 会用 localStorage 的 lastPick
+// 覆盖共享智能体绑定的源租户 model_id，UI 显示「未配置」——此时需要拉回 agent 模型。
+// 但若用户在本页手动改过模型（lastPick 与 agent 默认不同且当前选中即为 lastPick），
+// 则保留用户选择，避免 creatChat → chat 跳转后把模型 B 冲回智能体默认 A。
 watch(
   [selectedAgentId, () => settingsStore.selectedAgentSourceTenantId, agentModelId],
-  ([, , newModelId]) => {
-    if (newModelId && newModelId.trim() !== '' && newModelId !== selectedModelId.value) {
+  ([, sourceTenantId, newModelId]) => {
+    if (!newModelId || newModelId.trim() === '') return;
+
+    const lastPick = readLastChatModelID();
+    const isSharedAgent = !!sourceTenantId;
+    const agentModelInList = availableModels.value.some(m => m.id === newModelId);
+
+    if (
+      lastPick &&
+      selectedModelId.value === lastPick &&
+      lastPick !== newModelId &&
+      (!isSharedAgent || agentModelInList)
+    ) {
+      return;
+    }
+
+    if (newModelId !== selectedModelId.value) {
       selectedModelId.value = newModelId;
     }
   },
@@ -1007,8 +998,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     if (sourceTenantId && agentId) {
       // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析租户）
       try {
-        const res: any = await listKnowledgeBases({ agent_id: agentId });
-        const list = res?.data && Array.isArray(res.data) ? res.data : [];
+        const list = await chatResources.ensureAgentKnowledgeBases(agentId);
         const orgLabel = sharedAgentOrgName.value || '';
         // 保留 capabilities / indexing_strategy，后面过滤时要用
         availableKbs = list.map((kb: any) => ({
@@ -1109,7 +1099,10 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   const toolsAllowFiles = !hasAgentConfig.value || toolsConsumeFiles(agentAllowedTools.value);
   const shouldLoadFiles = kbModeAllowsFiles && toolsAllowFiles;
 
-  if (shouldLoadFiles) {
+  // 后端 /knowledge/search 要求非空 keyword；打开 @ 面板时仅展示本地 KB 列表，
+  // 用户输入搜索词后再拉取文件结果。
+  const fileSearchKeyword = q.trim();
+  if (shouldLoadFiles && fileSearchKeyword) {
     mentionLoading.value = true;
     try {
       const fileTypesParam = agentSupportedFileTypes.value.length > 0 ? agentSupportedFileTypes.value : undefined;
@@ -1117,7 +1110,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       const agentId = selectedAgentId.value;
       const searchOptions = sourceTenantId && agentId ? { agent_id: agentId } : undefined;
       const res: any = await searchKnowledge(
-        q || '',
+        fileSearchKeyword,
         mentionOffset.value,
         MENTION_PAGE_SIZE,
         fileTypesParam,
@@ -1490,11 +1483,17 @@ let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
-  loadKnowledgeBases();
-  loadWebSearchConfig();
+  // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
+  if (props.embeddedMode) return;
+
+  // 并行拉取；若 platform 已预取且缓存未过期则直接复用
   initChatModelSelection();
-  loadChatModels();
-  loadAgents();
+  void Promise.all([
+    loadKnowledgeBases(),
+    loadWebSearchConfig(),
+    loadChatModels(),
+    loadAgents(),
+  ]);
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
   // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
@@ -1572,7 +1571,8 @@ watch(() => route.params.kbId, (newKbId) => {
 
 watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
   if (prevVisible && !visible) {
-    loadWebSearchConfig();
+    loadWebSearchConfig(true);
+    loadChatModels(true);
   }
 });
 
@@ -1595,6 +1595,16 @@ const createSession = async (val: string) => {
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
+
+  // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
+  if (props.embeddedMode) {
+    const textarea = getTextareaEl();
+    if (textarea) textarea.blur();
+    emit('send-msg', val, selectedModelId.value || '', [], [], []);
+    clearvalue();
+    return;
+  }
+
   // 发送前校验当前选中的智能体（含默认快速问答）是否已配置完成
   const agentToCheck = selectedAgent.value;
   let actualAgent = agentToCheck;
@@ -1733,8 +1743,9 @@ const toggleAgentModeSelector = () => {
 
   showAgentModeSelector.value = !showAgentModeSelector.value;
   if (showAgentModeSelector.value) {
-    // 重新加载智能体列表
-    loadAgents();
+    if (!chatResources.isFresh('agents')) {
+      void loadAgents(true);
+    }
     // 多次更新位置确保准确
     nextTick(() => {
       updateAgentModeDropdownPosition();
@@ -2094,12 +2105,12 @@ defineExpose({
 
 </script>
 <template>
-  <div class="answers-input" @drop="onDrop" @dragover="onDragOver">
+  <div class="answers-input" :class="{ 'is-embedded': embeddedMode }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
     <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
     <!-- 富文本输入框容器 -->
-    <div class="rich-input-container">
+    <div class="rich-input-container" data-guide="chat-input">
       <!-- 图片预览区域 -->
       <div v-if="uploadedImages.length > 0" class="image-preview-bar">
         <div v-for="(img, idx) in uploadedImages" :key="idx" class="image-preview-item">
@@ -2138,6 +2149,202 @@ defineExpose({
       <t-textarea ref="textareaRef" v-model="query" :placeholder="inputPlaceholder" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
         @paste="onPaste" />
+
+      <!-- 控制栏（放在 rich-input-container 内，相对输入框边框定位） -->
+      <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
+        <!-- 左侧控制按钮 -->
+        <div class="control-left" v-if="!embeddedMode">
+          <!-- Agent 模式切换按钮 -->
+          <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
+            'is-normal': !isCustomAgent && !isAgentEnabled,
+            'is-agent': !isCustomAgent && isAgentEnabled,
+            'is-custom': isCustomAgent
+          }" @click.stop="toggleAgentModeSelector">
+            <span class="agent-mode-text">
+              {{ selectedAgent.name || (isAgentEnabled ? $t('input.agentMode') : $t('input.normalMode')) }}
+            </span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="dropdown-arrow"
+              :class="{ 'rotate': showAgentModeSelector }">
+              <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
+            </svg>
+          </div>
+
+          <!-- Agent 选择器下拉菜单 -->
+          <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
+            :currentAgentId="selectedAgentId" :agents="enabledAgents" @close="closeAgentModeSelector"
+            @select="handleSelectAgent" />
+
+          <!-- WebSearch 开关按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
+                <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
+                <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings')
+                  }}</a>
+              </div>
+              <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
+                $t('input.webSearch.toggleOn') }}</span>
+              <div v-else class="tooltip-with-link">
+                <span>{{ $t('input.webSearch.notConfigured') }}</span>
+                <a href="#" @click.prevent="handleGoToWebSearchSettings">{{ $t('input.goToSettings') }}</a>
+              </div>
+            </template>
+            <div class="control-btn websearch-btn" :class="{
+              'active': isWebSearchEnabled && isWebSearchConfigured,
+              'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
+            }" @click.stop="toggleWebSearch">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
+                class="control-icon websearch-icon" :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }">
+                <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
+                <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+                <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+                <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
+                  stroke-linecap="round" />
+                <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                  stroke-linecap="round" />
+              </svg>
+            </div>
+          </t-tooltip>
+
+          <!-- 图片上传按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <div v-if="!isImageUploadEnabledByAgent" class="tooltip-with-link">
+                <span>{{ $t('input.imageUploadDisabledByAgent') }}</span>
+                <a href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
+              </div>
+              <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
+            </template>
+            <div class="control-btn image-upload-btn" :class="{
+              'active': uploadedImages.length > 0,
+              'disabled': !isImageUploadEnabledByAgent
+            }" @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()">
+              <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor" class="control-icon">
+                <path
+                  d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z" />
+                <path d="M352 448a96 96 0 1 0 0-192 96 96 0 0 0 0 192z" />
+                <path d="M128 768l224-288 160 160 192-256L896 640v128H128z" />
+              </svg>
+              <span v-if="uploadedImages.length > 0" class="image-count">{{ uploadedImages.length }}</span>
+            </div>
+          </t-tooltip>
+
+          <!-- 附件上传按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <span>{{ uploadedAttachments.length > 0 ? $t('chat.attachmentWithCount', {
+                count: uploadedAttachments.length
+              }) : $t('chat.attachmentUploadTooltip') }}</span>
+            </template>
+            <div class="control-btn attachment-upload-btn" :class="{ 'active': uploadedAttachments.length > 0 }"
+              @click.stop="attachmentUploadRef?.triggerFileSelect()">
+              <!-- 回形针图标 -->
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round" class="control-icon">
+                <path
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+              <span v-if="uploadedAttachments.length > 0" class="attachment-count">{{ uploadedAttachments.length
+                }}</span>
+            </div>
+          </t-tooltip>
+
+          <!-- @ 知识库/文件选择按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <div v-if="isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
+                <span>{{ $t('input.kbDisabledByAgent') }}</span>
+                <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings')
+                  }}</a>
+              </div>
+              <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
+                count:
+                  allSelectedItems.length
+              }) : $t('input.knowledgeBase') }}</span>
+            </template>
+            <div ref="atButtonRef" class="control-btn kb-btn" data-guide="chat-kb-mention" :class="{
+              'active': allSelectedItems.length > 0,
+              'disabled': isKnowledgeBaseDisabledByAgent
+            }" @click.stop @mousedown.prevent="triggerMention">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
+                class="control-icon at-icon">
+                <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8" />
+                <path
+                  d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12"
+                  stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
+            </div>
+          </t-tooltip>
+
+          <!-- 模型显示 -->
+          <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
+            :disabled="!isModelLockedByAgent">
+            <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
+              <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
+                <span class="model-selector-name">
+                  {{ selectedModelDisplayName }}
+                </span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
+                  :class="{ 'rotate': showModelSelector }">
+                  <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
+                </svg>
+              </div>
+            </div>
+          </t-tooltip>
+        </div>
+
+        <Teleport to="body">
+          <div v-if="showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
+            <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
+              <div class="model-selector-header">
+                <span>{{ $t('conversationSettings.models.chatGroupLabel') }}</span>
+                <button class="model-selector-add" type="button" @click="handleModelChange('__add_model__')">
+                  <span class="add-icon">+</span>
+                  <span class="add-text">{{ $t('input.addModel') }}</span>
+                </button>
+              </div>
+              <div class="model-selector-content">
+                <div v-for="model in availableModels" :key="model.id" class="model-option"
+                  :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
+                  <div class="model-option-main">
+                    <span class="model-option-name">{{ modelDisplayName(model) }}</span>
+                    <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
+                    <span v-if="model.source === 'remote'" class="model-badge-remote">{{ $t('input.remote') }}</span>
+                    <span v-else-if="model.parameters?.parameter_size" class="model-badge-local">
+                      {{ model.parameters.parameter_size }}
+                    </span>
+                  </div>
+                  <div v-if="model.description" class="model-option-desc">
+                    {{ model.description }}
+                  </div>
+                </div>
+                <div v-if="availableModels.length === 0" class="model-option empty">
+                  {{ $t('input.noModel') }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Teleport>
+
+        <!-- 右侧控制按钮组 -->
+        <div class="control-right">
+          <!-- 停止按钮（仅在回复中时显示） -->
+          <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
+            <div @click="handleStop" class="control-btn stop-btn">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <rect x="5" y="5" width="6" height="6" rx="1" />
+              </svg>
+            </div>
+          </t-tooltip>
+
+          <!-- 发送按钮 -->
+          <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
+            :class="{ 'disabled': !query.length }">
+            <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Mention Selector -->
@@ -2146,198 +2353,6 @@ defineExpose({
         :loading="mentionLoading" :emptyHint="mentionEmptyHint" v-model:activeIndex="mentionActiveIndex"
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
-
-    <!-- 控制栏 -->
-    <div class="control-bar">
-      <!-- 左侧控制按钮 -->
-      <div class="control-left" v-if="!embeddedMode">
-        <!-- Agent 模式切换按钮 -->
-        <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
-          'is-normal': !isCustomAgent && !isAgentEnabled,
-          'is-agent': !isCustomAgent && isAgentEnabled,
-          'is-custom': isCustomAgent
-        }" @click.stop="toggleAgentModeSelector">
-          <span class="agent-mode-text">
-            {{ selectedAgent.name || (isAgentEnabled ? $t('input.agentMode') : $t('input.normalMode')) }}
-          </span>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="dropdown-arrow"
-            :class="{ 'rotate': showAgentModeSelector }">
-            <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
-          </svg>
-        </div>
-
-        <!-- Agent 选择器下拉菜单 -->
-        <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef" :currentAgentId="selectedAgentId"
-          :agents="enabledAgents" @close="closeAgentModeSelector" @select="handleSelectAgent" />
-
-        <!-- WebSearch 开关按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-          <template #content>
-            <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
-              <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings') }}</a>
-            </div>
-            <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
-              $t('input.webSearch.toggleOn') }}</span>
-            <div v-else class="tooltip-with-link">
-              <span>{{ $t('input.webSearch.notConfigured') }}</span>
-              <a href="#" @click.prevent="handleGoToWebSearchSettings">{{ $t('input.goToSettings') }}</a>
-            </div>
-          </template>
-          <div class="control-btn websearch-btn" :class="{
-            'active': isWebSearchEnabled && isWebSearchConfigured,
-            'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
-          }" @click.stop="toggleWebSearch">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
-              class="control-icon websearch-icon" :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }">
-              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
-              <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-              <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-              <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
-                stroke-linecap="round" />
-              <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
-                stroke-linecap="round" />
-            </svg>
-          </div>
-        </t-tooltip>
-
-        <!-- 图片上传按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-          <template #content>
-            <div v-if="!isImageUploadEnabledByAgent" class="tooltip-with-link">
-              <span>{{ $t('input.imageUploadDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
-            </div>
-            <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
-          </template>
-          <div class="control-btn image-upload-btn" :class="{
-            'active': uploadedImages.length > 0,
-            'disabled': !isImageUploadEnabledByAgent
-          }" @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()">
-            <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor" class="control-icon">
-              <path
-                d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z" />
-              <path d="M352 448a96 96 0 1 0 0-192 96 96 0 0 0 0 192z" />
-              <path d="M128 768l224-288 160 160 192-256L896 640v128H128z" />
-            </svg>
-            <span v-if="uploadedImages.length > 0" class="image-count">{{ uploadedImages.length }}</span>
-          </div>
-        </t-tooltip>
-
-        <!-- 附件上传按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-          <template #content>
-            <span>{{ uploadedAttachments.length > 0 ? $t('chat.attachmentWithCount', {
-              count: uploadedAttachments.length
-            }) : $t('chat.attachmentUploadTooltip') }}</span>
-          </template>
-          <div class="control-btn attachment-upload-btn" :class="{ 'active': uploadedAttachments.length > 0 }"
-            @click.stop="attachmentUploadRef?.triggerFileSelect()">
-            <!-- 回形针图标 -->
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-              stroke-linecap="round" stroke-linejoin="round" class="control-icon">
-              <path
-                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-            <span v-if="uploadedAttachments.length > 0" class="attachment-count">{{ uploadedAttachments.length }}</span>
-          </div>
-        </t-tooltip>
-
-        <!-- @ 知识库/文件选择按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-          <template #content>
-            <div v-if="isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
-              <span>{{ $t('input.kbDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings') }}</a>
-            </div>
-            <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
-              count:
-                allSelectedItems.length
-            }) : $t('input.knowledgeBase') }}</span>
-          </template>
-          <div ref="atButtonRef" class="control-btn kb-btn" :class="{
-            'active': allSelectedItems.length > 0,
-            'disabled': isKnowledgeBaseDisabledByAgent
-          }" @click.stop @mousedown.prevent="triggerMention">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
-              class="control-icon at-icon">
-              <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8" />
-              <path
-                d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12"
-                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
-          </div>
-        </t-tooltip>
-
-        <!-- 模型显示 -->
-        <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
-          :disabled="!isModelLockedByAgent">
-          <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
-            <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
-              <span class="model-selector-name">
-                {{ selectedModelDisplayName }}
-              </span>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
-                :class="{ 'rotate': showModelSelector }">
-                <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
-              </svg>
-            </div>
-          </div>
-        </t-tooltip>
-      </div>
-
-      <Teleport to="body">
-        <div v-if="showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
-          <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
-            <div class="model-selector-header">
-              <span>{{ $t('conversationSettings.models.chatGroupLabel') }}</span>
-              <button class="model-selector-add" type="button" @click="handleModelChange('__add_model__')">
-                <span class="add-icon">+</span>
-                <span class="add-text">{{ $t('input.addModel') }}</span>
-              </button>
-            </div>
-            <div class="model-selector-content">
-              <div v-for="model in availableModels" :key="model.id" class="model-option"
-                :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
-                <div class="model-option-main">
-                  <span class="model-option-name">{{ modelDisplayName(model) }}</span>
-                  <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
-                  <span v-if="model.source === 'remote'" class="model-badge-remote">{{ $t('input.remote') }}</span>
-                  <span v-else-if="model.parameters?.parameter_size" class="model-badge-local">
-                    {{ model.parameters.parameter_size }}
-                  </span>
-                </div>
-                <div v-if="model.description" class="model-option-desc">
-                  {{ model.description }}
-                </div>
-              </div>
-              <div v-if="availableModels.length === 0" class="model-option empty">
-                {{ $t('input.noModel') }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </Teleport>
-
-      <!-- 右侧控制按钮组 -->
-      <div class="control-right">
-        <!-- 停止按钮（仅在回复中时显示） -->
-        <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
-          <div @click="handleStop" class="control-btn stop-btn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <rect x="5" y="5" width="6" height="6" rx="1" />
-            </svg>
-          </div>
-        </t-tooltip>
-
-        <!-- 发送按钮 -->
-        <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn"
-          :class="{ 'disabled': !query.length }">
-          <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
-        </div>
-      </div>
-    </div>
 
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
     <Teleport to="body">
@@ -2360,6 +2375,18 @@ const getImgSrc = (url: string) => {
   width: 100%;
   display: flex;
   justify-content: center;
+
+  &.is-embedded {
+    position: relative;
+    bottom: auto;
+    left: auto;
+    transform: none;
+    z-index: auto;
+
+    .rich-input-container {
+      max-width: 100%;
+    }
+  }
 }
 
 /* 富文本输入框容器 */
@@ -2369,8 +2396,8 @@ const getImgSrc = (url: string) => {
   max-width: 800px;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
-  border: .5px solid var(--td-component-border, #E7E7E7);
-  box-shadow: 0 6px 6px 0 rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--td-component-stroke, #dcdcdc);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 8px 16px -4px rgba(0, 0, 0, 0.06);
 
   &:focus-within {
     border-color: var(--td-brand-color, #07C05F);
@@ -2384,7 +2411,7 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 5px;
   padding: 6px 12px 6px;
-  border-bottom: .5px solid var(--td-component-stroke, #e7e7e7);
+  border-bottom: 1px solid var(--td-component-stroke, #dcdcdc);
   background: var(--td-bg-color-container, #fff);
   border-radius: 11px 11px 0 0;
   /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
@@ -2599,6 +2626,10 @@ const getImgSrc = (url: string) => {
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, var(--td-bg-color-container, #fff) 40%, var(--td-bg-color-container, #fff) 100%);
   pointer-events: auto;
   padding-top: 8px;
+
+  &.is-embedded {
+    justify-content: flex-end;
+  }
 }
 
 .control-left {

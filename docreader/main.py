@@ -21,6 +21,8 @@ from docreader.proto.docreader_pb2 import (
     ReadRequest,
     ReadResponse,
     ImageRef,
+    ReadStreamMeta,
+    ReadStreamResponse,
     ListEnginesResponse,
     ParserEngineInfo,
 )
@@ -104,49 +106,93 @@ def _resolve_images(
     return "", refs
 
 
+def _mime_for_ref(ref_path: str) -> tuple[str, str]:
+    """Return (filename, mime_type) for an image reference path."""
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }
+    fname = os.path.basename(ref_path) or f"{uuid.uuid4().hex}.png"
+    ext = os.path.splitext(fname)[1].lower()
+    return fname, mime_map.get(ext, "application/octet-stream")
+
+
+def _iter_image_refs(images: dict):
+    """Yield ImageRef one at a time, freeing each source entry as we go.
+
+    Used by the streaming RPC so we never hold every decoded image plus its
+    base64 source in memory simultaneously (the inline path's peak-memory and
+    message-size problem for large scanned PDFs).
+    """
+    import base64
+
+    for ref_path in list(images.keys()):
+        b64data = images.pop(ref_path)
+        try:
+            img_bytes = base64.b64decode(b64data)
+        except Exception:
+            img_bytes = b64data.encode("utf-8") if isinstance(b64data, str) else b64data
+        del b64data
+        fname, mime = _mime_for_ref(ref_path)
+        yield ImageRef(
+            filename=fname,
+            original_ref=ref_path,
+            mime_type=mime,
+            image_data=img_bytes,
+        )
+
+
 class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
     def __init__(self):
         super().__init__()
         self.parser = Parser()
 
+    def _parse_request(self, request: ReadRequest):
+        """Run the parser for a ReadRequest, returning (result, source_desc).
+
+        Shared by the unary Read and streaming ReadStream RPCs.
+        """
+        cfg = request.config
+        parser_engine = cfg.parser_engine if cfg else ""
+        engine_overrides = dict(cfg.parser_engine_overrides) if cfg else {}
+
+        if request.url:
+            logger.info("Read(URL): url=%s", request.url)
+            result = self.parser.parse_url(
+                request.url,
+                request.title,
+                parser_engine=parser_engine,
+                engine_overrides=engine_overrides,
+            )
+            return result, request.url
+
+        file_type = request.file_type or os.path.splitext(request.file_name)[1][1:]
+        logger.info(
+            "Read(File): file=%s, type=%s, size=%d bytes",
+            request.file_name,
+            file_type,
+            len(request.file_content),
+        )
+        result = self.parser.parse_file(
+            request.file_name,
+            file_type,
+            request.file_content,
+            parser_engine=parser_engine,
+            engine_overrides=engine_overrides,
+        )
+        return result, request.file_name
+
     def Read(self, request: ReadRequest, context):
         """Unified read: file mode (file_content set) or URL mode (url set)."""
         request_id = request.request_id or str(uuid.uuid4())
-        is_url = bool(request.url)
 
         with request_id_context(request_id):
             try:
-                cfg = request.config
-                parser_engine = cfg.parser_engine if cfg else ""
-                engine_overrides = dict(cfg.parser_engine_overrides) if cfg else {}
-
-                if is_url:
-                    logger.info("Read(URL): url=%s", request.url)
-                    result = self.parser.parse_url(
-                        request.url,
-                        request.title,
-                        parser_engine=parser_engine,
-                        engine_overrides=engine_overrides,
-                    )
-                    source_desc = request.url
-                else:
-                    file_type = (
-                        request.file_type or os.path.splitext(request.file_name)[1][1:]
-                    )
-                    logger.info(
-                        "Read(File): file=%s, type=%s, size=%d bytes",
-                        request.file_name,
-                        file_type,
-                        len(request.file_content),
-                    )
-                    result = self.parser.parse_file(
-                        request.file_name,
-                        file_type,
-                        request.file_content,
-                        parser_engine=parser_engine,
-                        engine_overrides=engine_overrides,
-                    )
-                    source_desc = request.file_name
+                result, source_desc = self._parse_request(request)
 
                 if not result or not result.content:
                     error_msg = f"Failed to parse: {source_desc}"
@@ -176,6 +222,55 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 logger.error(error_msg)
                 logger.info("Traceback: %s", traceback.format_exc())
                 return ReadResponse(error=str(e))
+
+    def ReadStream(self, request: ReadRequest, context):
+        """Streaming read: yields one meta frame, then one frame per image.
+
+        Each frame is a small, independent gRPC message, so documents with many
+        page images (large scanned PDFs) are returned without hitting the unary
+        message-size cap, and neither side has to hold the whole payload at once.
+        """
+        request_id = request.request_id or str(uuid.uuid4())
+
+        with request_id_context(request_id):
+            _c = to_valid_utf8_text
+            try:
+                result, source_desc = self._parse_request(request)
+            except Exception as e:
+                logger.error("Error reading document: %s", e)
+                logger.info("Traceback: %s", traceback.format_exc())
+                yield ReadStreamResponse(meta=ReadStreamMeta(error=str(e)))
+                return
+
+            if not result or not result.content:
+                error_msg = f"Failed to parse: {source_desc}"
+                logger.error(error_msg)
+                yield ReadStreamResponse(meta=ReadStreamMeta(error=error_msg))
+                return
+
+            images = result.images or {}
+            image_count = len(images)
+            yield ReadStreamResponse(
+                meta=ReadStreamMeta(
+                    markdown_content=_c(result.content),
+                    image_dir_path="",
+                    metadata={k: _c(str(v)) for k, v in result.metadata.items()}
+                    if result.metadata
+                    else {},
+                    image_count=image_count,
+                )
+            )
+
+            sent = 0
+            for ref in _iter_image_refs(images):
+                yield ReadStreamResponse(image=ref)
+                sent += 1
+
+            logger.info(
+                "ReadStream response: content_len=%d, images=%d",
+                len(result.content),
+                sent,
+            )
 
     def ListEngines(self, request, context):
         overrides = dict(getattr(request, "config_overrides", None) or {})

@@ -16,17 +16,21 @@
               <div class="sidebar-header">
                 <h2 class="sidebar-title">{{ mode === 'create' ? $t('knowledgeEditor.titleCreate') : $t('knowledgeEditor.titleEdit') }}</h2>
               </div>
-              <div class="settings-nav">
-                <div 
-                  v-for="(item, index) in navItems" 
-                  :key="index"
-                  :class="['nav-item', { 'active': currentSection === item.key }]"
-                  @click="currentSection = item.key"
-                >
-                  <t-icon :name="item.icon" class="nav-icon" />
-                  <span class="nav-label">{{ item.label }}</span>
-                  <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
-                </div>
+              <div class="settings-nav" data-guide="kb-editor-sidebar">
+                <template v-for="group in navGroups" :key="group.key">
+                  <div class="nav-group-title">{{ group.label }}</div>
+                  <div
+                    v-for="(item, index) in group.items"
+                    :key="index"
+                    :class="['nav-item', { 'active': currentSection === item.key }]"
+                    :data-guide="`kb-editor-nav-${item.key}`"
+                    @click="currentSection = item.key"
+                  >
+                    <t-icon :name="item.icon" class="nav-icon" />
+                    <span class="nav-label">{{ item.label }}</span>
+                    <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
+                  </div>
+                </template>
               </div>
             </div>
 
@@ -60,6 +64,7 @@
                         <t-radio-group
                           v-model="formData.type"
                           :disabled="mode === 'edit'"
+                          data-guide="kb-create-type"
                         >
                           <t-radio-button value="document">{{ $t('knowledgeEditor.basic.typeDocument') }}</t-radio-button>
                           <t-radio-button value="faq">{{ $t('knowledgeEditor.basic.typeFAQ') }}</t-radio-button>
@@ -71,7 +76,8 @@
                       <div v-if="!isFAQ" class="form-item">
                         <label class="form-label required">{{ $t('knowledgeEditor.indexing.title') }}</label>
                         <p class="form-tip">{{ $t('knowledgeEditor.indexing.description') }}</p>
-                        <div class="indexing-checks" :class="{ 'is-locked': isIndexingLocked }">
+                        <div class="indexing-checks" :class="{ 'is-locked': isIndexingLocked }"
+                          data-guide="kb-create-indexing">
                           <div
                             class="indexing-check-item"
                             :class="{ 'is-checked': formData.indexingStrategy.vectorEnabled, 'is-disabled': isIndexingLocked }"
@@ -129,7 +135,7 @@
                         <p class="form-tip granularity-hint">{{ granularityHint }}</p>
                       </div>
 
-                      <div class="form-item">
+                      <div class="form-item" data-guide="kb-create-name">
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.nameLabel') }}</label>
                         <t-input 
                           v-model="formData.name" 
@@ -216,7 +222,7 @@
                 </div>
 
                 <!-- 解析引擎 -->
-                <div v-if="!isFAQ && formData" v-show="currentSection === 'parser'" class="section">
+                <div v-if="!isFAQ && formData && currentSection === 'parser'" class="section">
                   <KBParserSettings
                     :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
                     @update:parser-engine-rules="handleParserEngineRulesUpdate"
@@ -224,7 +230,7 @@
                 </div>
 
                 <!-- 存储引擎 -->
-                <div v-if="!isFAQ && formData" v-show="currentSection === 'storage'" class="section">
+                <div v-if="!isFAQ && formData && currentSection === 'storage'" class="section">
                   <KBStorageSettings
                     :storage-provider="formData.storageProvider"
                     :has-files="mode === 'edit' && hasFiles"
@@ -251,7 +257,7 @@
 
                     <div class="settings-group">
                       <!-- 多模态开关 -->
-                      <div class="setting-row">
+                      <div class="setting-row" data-guide="kb-create-multimodal-toggle">
                         <div class="setting-info">
                           <label>{{ $t('knowledgeEditor.advanced.multimodal.label') }}</label>
                           <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.description') }}</p>
@@ -266,7 +272,8 @@
                       </div>
 
                       <!-- VLLM 模型选择（多模态启用时） -->
-                      <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+                      <div v-if="formData.multimodalConfig.enabled" class="setting-row"
+                        data-guide="kb-create-multimodal-vllm">
                         <div class="setting-info">
                           <label>{{ $t('knowledgeEditor.advanced.multimodal.vllmLabel') }} <span class="required">*</span></label>
                           <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.vllmDescription') }}</p>
@@ -331,7 +338,7 @@
                 </div>
 
                 <!-- 知识图谱 -->
-                <div v-if="!isFAQ" v-show="currentSection === 'graph'" class="section">
+                <div v-if="!isFAQ && currentSection === 'graph'" class="section">
                   <GraphSettings
                     v-if="formData"
                     :graph-extract="formData.nodeExtractConfig"
@@ -354,12 +361,12 @@
                 </div>
 
                 <!-- 数据源管理（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'datasource'" class="section">
+                <div v-if="mode === 'edit' && kbId && currentSection === 'datasource'" class="section">
                   <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
                 </div>
 
                 <!-- 共享设置（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'share'" class="section">
+                <div v-if="mode === 'edit' && kbId && currentSection === 'share'" class="section">
                   <KBShareSettings :kb-id="kbId" :can-share="canShareKB" />
                 </div>
               </div>
@@ -369,7 +376,7 @@
                 <t-button theme="default" variant="outline" @click="handleClose">
                   {{ $t('common.cancel') }}
                 </t-button>
-                <t-button theme="primary" @click="handleSubmit" :loading="saving">
+                <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving">
                   {{ mode === 'create' ? $t('knowledgeEditor.buttons.create') : $t('knowledgeEditor.buttons.save') }}
                 </t-button>
               </div>
@@ -379,15 +386,21 @@
       </div>
     </Transition>
   </Teleport>
+
+  <KbCreateContextualGuide :when="visible && mode === 'create'" :is-faq="isFAQ"
+    :needs-embedding="kbCreateNeedsEmbedding" />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import KbCreateContextualGuide from '@/components/KbCreateContextualGuide.vue'
+import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config/contextualGuides'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
-import { listModels } from '@/api/model'
-import { getStorageEngineConfig } from '@/api/system'
+import { type ModelConfig } from '@/api/model'
+import { useChatResourcesStore } from '@/stores/chatResources'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import KBModelConfig from './settings/KBModelConfig.vue'
@@ -404,6 +417,8 @@ import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
 const authStore = useAuthStore()
+const chatResources = useChatResourcesStore()
+const editorResources = useEditorResourcesStore()
 const { t } = useI18n()
 
 // Props
@@ -445,6 +460,21 @@ const copyKbId = async () => {
 }
 
 const currentSection = ref<string>('basic')
+
+const onKbEditorFocusSection = (event: Event) => {
+  const section = (event as CustomEvent<{ section?: string }>).detail?.section
+  if (section) {
+    currentSection.value = section
+  }
+}
+
+onMounted(() => {
+  window.addEventListener(KB_EDITOR_FOCUS_SECTION_EVENT, onKbEditorFocusSection)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener(KB_EDITOR_FOCUS_SECTION_EVENT, onKbEditorFocusSection)
+})
 const saving = ref(false)
 const loading = ref(false)
 const allModels = ref<any[]>([])
@@ -522,6 +552,35 @@ const navItems = computed(() => {
   return items
 })
 
+// 左侧导航分组（与 AgentEditorModal 对齐）
+const navGroups = computed(() => {
+  const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
+  const pickItems = (keys: string[]) =>
+    keys.map((key) => itemMap.get(key)).filter(Boolean) as typeof navItems.value
+  return [
+    {
+      key: 'basic',
+      label: t('knowledgeEditor.navGroups.basic'),
+      items: pickItems(['basic', 'models', 'vectorStore', 'faq']),
+    },
+    {
+      key: 'processing',
+      label: t('knowledgeEditor.navGroups.processing'),
+      items: pickItems(['parser', 'chunking', 'multimodal', 'asr', 'graph', 'advanced']),
+    },
+    {
+      key: 'data',
+      label: t('knowledgeEditor.navGroups.data'),
+      items: pickItems(['storage', 'datasource']),
+    },
+    {
+      key: 'integration',
+      label: t('knowledgeEditor.navGroups.integration'),
+      items: pickItems(['share']),
+    },
+  ].filter((group) => group.items.length > 0)
+})
+
 // 模型配置引用
 const modelConfigRef = ref<InstanceType<typeof KBModelConfig>>()
 const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
@@ -529,6 +588,28 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 // 表单数据
 const formData = ref<any>(null)
 const isFAQ = computed(() => formData.value?.type === 'faq')
+
+const kbCreateNeedsEmbedding = computed(() => {
+  if (!formData.value || formData.value.type === 'faq') return false
+  const s = formData.value.indexingStrategy
+  return Boolean(s?.vectorEnabled || s?.keywordEnabled)
+})
+
+const applyDefaultModelsIfEmpty = () => {
+  if (!formData.value || props.mode !== 'create') return
+  const pick = (type: ModelConfig['type']) => {
+    const list = allModels.value.filter((m) => m.type === type)
+    return list.find((m) => m.is_default) || list[0]
+  }
+  const chat = pick('KnowledgeQA')
+  const embedding = pick('Embedding')
+  if (!formData.value.modelConfig.llmModelId && chat?.id) {
+    formData.value.modelConfig.llmModelId = chat.id
+  }
+  if (!formData.value.modelConfig.embeddingModelId && embedding?.id) {
+    formData.value.modelConfig.embeddingModelId = embedding.id
+  }
+}
 
 watch(
   () => formData.value?.type,
@@ -630,10 +711,10 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
 }
 
 // 加载所有模型
-const loadAllModels = async () => {
+const loadAllModels = async (force = false) => {
   try {
-    const models = await listModels()
-    allModels.value = models || []
+    await chatResources.ensureModels(force)
+    allModels.value = chatResources.allModels || []
   } catch (error) {
     console.error('Failed to load model list:', error)
     MessagePlugin.error(t('knowledgeEditor.messages.loadModelsFailed'))
@@ -647,9 +728,8 @@ const loadKBData = async () => {
   
   loading.value = true
   try {
-    const [kbInfo, models, filesResult] = await Promise.all([
+    const [kbInfo, filesResult] = await Promise.all([
       getKnowledgeBaseById(props.kbId),
-      loadAllModels(),
       listKnowledgeFiles(props.kbId, { page: 1, page_size: 1 })
     ])
     
@@ -877,10 +957,10 @@ const handleStorageProviderUpdate = (value: string) => {
   }
 }
 
-async function loadTenantDefaultStorageProvider() {
+async function loadTenantDefaultStorageProvider(force = false) {
   try {
-    const res = await getStorageEngineConfig()
-    tenantDefaultStorageProvider.value = res?.data?.default_provider || 'local'
+    await editorResources.ensureStorageEngine(force)
+    tenantDefaultStorageProvider.value = editorResources.storageConfig?.default_provider || 'local'
   } catch {
     tenantDefaultStorageProvider.value = 'local'
   }
@@ -978,7 +1058,6 @@ const buildSubmitData = () => {
       chunk_size: formData.value.chunkingConfig.chunkSize,
       chunk_overlap: formData.value.chunkingConfig.chunkOverlap,
       separators: formData.value.chunkingConfig.separators,
-      enable_multimodal: formData.value.multimodalConfig.enabled,
       enable_parent_child: formData.value.chunkingConfig.enableParentChild,
       parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
       child_chunk_size: formData.value.chunkingConfig.childChunkSize,
@@ -1133,6 +1212,7 @@ const doSubmit = async () => {
         throw new Error(result.message || t('knowledgeEditor.messages.createFailed'))
       }
       MessagePlugin.success(t('knowledgeEditor.messages.createSuccess'))
+      markContextualGuideDone('kbCreate')
       emit('success', result.data.id)
     } else {
       // 编辑模式：分别更新基本信息和配置
@@ -1316,6 +1396,7 @@ watch(() => props.visible, async (newVal) => {
       formData.value = initFormData(props.initialType || 'document')
       formData.value.storageProvider = tenantDefaultStorageProvider.value
       hasFiles.value = false
+      applyDefaultModelsIfEmpty()
     }
   } else {
     // 关闭弹窗时，延迟重置状态（等待动画结束）
@@ -1331,7 +1412,7 @@ watch(
   () => uiStore.showSettingsModal,
   async (visible, previous) => {
     if (!visible && previous && props.visible) {
-      await loadAllModels()
+      await loadAllModels(true)
     }
   }
 )
@@ -1393,68 +1474,89 @@ watch(
 .settings-container {
   display: flex;
   height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
+/* 左侧导航：与 AgentEditorModal 对齐 */
 .settings-sidebar {
-  width: 200px;
-  background: var(--td-bg-color-settings-modal);
+  width: 208px;
+  background-color: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .sidebar-header {
-  padding: 24px 20px;
+  padding: 16px 14px 12px;
   border-bottom: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
 }
 
 .sidebar-title {
   margin: 0;
-  font-family: var(--app-font-family);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
 
 .settings-nav {
   flex: 1;
-  padding: 12px 8px;
+  padding: 8px 8px 12px;
   overflow-y: auto;
+  min-height: 0;
+}
+
+.nav-group-title {
+  padding: 6px 14px 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  .settings-nav > &:first-child {
+    padding-top: 2px;
+  }
+
+  .settings-nav > &:not(:first-child) {
+    padding-top: 8px;
+  }
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  margin-bottom: 4px;
+  padding: 6px 12px;
+  margin-bottom: 2px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-family: var(--app-font-family);
   font-size: 14px;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-primary);
+  user-select: none;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover);
+    background-color: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
+    background-color: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
     font-weight: 500;
   }
 }
 
 .nav-icon {
-  margin-right: 8px;
-  font-size: 18px;
+  margin-right: 9px;
+  font-size: 16px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: inherit;
 }
 
 .nav-label {
@@ -1462,24 +1564,21 @@ watch(
 }
 
 .nav-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  flex-shrink: 0;
   min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--td-bg-color-secondarycontainer);
   font-size: 11px;
   font-weight: 600;
-  background: var(--td-bg-color-component);
+  line-height: 18px;
+  text-align: center;
   color: var(--td-text-color-secondary);
-  line-height: 1;
-  flex-shrink: 0;
-}
 
-.nav-item.active .nav-badge {
-  background: var(--td-brand-color);
-  color: #fff;
+  .nav-item.active & {
+    background: color-mix(in srgb, var(--td-brand-color) 18%, transparent);
+    color: var(--td-brand-color);
+  }
 }
 
 .settings-content {
@@ -1505,11 +1604,11 @@ watch(
 
 .section-content {
   .section-header {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
 
   .section-title {
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
     font-family: var(--app-font-family);
     font-size: 20px;
     font-weight: 600;
@@ -1732,13 +1831,13 @@ watch(
   width: 100%;
 
   .section-header {
-    margin-bottom: 32px;
+    margin-bottom: 20px;
 
     h2 {
       font-size: 20px;
       font-weight: 600;
       color: var(--td-text-color-primary);
-      margin: 0 0 8px 0;
+      margin: 0 0 6px 0;
     }
 
     .section-description {
@@ -1758,7 +1857,7 @@ watch(
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: 20px 0;
+    padding: 16px 0;
     border-bottom: 1px solid var(--td-component-stroke);
 
     &:last-child {

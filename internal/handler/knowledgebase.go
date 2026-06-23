@@ -119,7 +119,7 @@ func buildKBResponse(
 //   - KB has no binding         → DefaultStoreDisplay()
 //   - KB is owned by another tenant (cross-tenant shared) → SharedStoreDisplay()
 //   - KB is own-tenant bound    → look up in the batch result; misses
-//                                  fall back to UnavailableStoreDisplay()
+//     fall back to UnavailableStoreDisplay()
 //
 // Resolver failures degrade gracefully: every own-tenant bound KB renders
 // as unavailable instead of breaking the list response.
@@ -271,7 +271,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 
 // HybridSearch godoc
 // @Summary      混合搜索
-// @Description  在知识库中执行向量和关键词混合搜索
+// @Description  在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
@@ -281,6 +281,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/hybrid-search [post]
 // @Router       /knowledge-bases/{id}/hybrid-search [get]
 func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1002,6 +1003,24 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 				"source and target knowledge bases are bound to different vector stores; " +
 					"cross-store cloning is not yet supported"))
 			return
+		}
+		// Pre-flight defense 3: storage backend must match — only meaningful
+		// when the tenant has a StorageEngineConfig. Without it,
+		// resolveFileService ignores per-KB provider pins and routes ALL KBs to
+		// the global storage service, so a clone can never span two real
+		// backends and the pins must NOT be used to reject (false positive).
+		// When a tenant config exists, pins are honored, so reject a genuine
+		// cross-backend clone before enqueueing.
+		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil && tenant.StorageEngineConfig != nil {
+			tenantDefault := tenant.StorageEngineConfig.DefaultProvider
+			srcProvider := sourceKB.EffectiveStorageProvider(tenantDefault)
+			dstProvider := targetKB.EffectiveStorageProvider(tenantDefault)
+			if srcProvider != "" && dstProvider != "" && srcProvider != dstProvider {
+				c.Error(apperrors.NewBadRequestError(
+					"source and target knowledge bases use different storage backends (" +
+						srcProvider + " vs " + dstProvider + "); cross-storage-backend cloning is not supported"))
+				return
+			}
 		}
 	}
 

@@ -258,7 +258,7 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderQianfan
 	case containsAny(baseURL, "longcat.chat"):
 		return ProviderLongCat
-	case containsAny(baseURL, "lkeap.cloud.tencent.com", "api.lkeap"):
+	case containsAny(baseURL, "lkeap.cloud.tencent.com", "api.lkeap", "lkeap.tencentcloudapi.com"):
 		return ProviderLKEAP
 	case containsAny(baseURL, "nvidia.com"):
 		return ProviderNvidia

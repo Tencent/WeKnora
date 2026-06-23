@@ -136,16 +136,40 @@ func (r *sessionRepository) QueryPaged(
 	}
 
 	// LEFT JOIN IM mappings to surface origin fields and support source/agent filters.
-	joinClause := "LEFT JOIN im_channel_sessions ics ON ics.session_id = s.id AND ics.deleted_at IS NULL"
+	// Soft-deleted mappings are intentionally included: a session that was ever bound
+	// to an IM channel belongs to that platform, not "web". /clear and session
+	// recycling soft-delete the mapping (and start a fresh session), so filtering
+	// deleted mappings out here would mis-bucket those past IM conversations into the
+	// user's own web chats ("web" = ics.id IS NULL).
+	// Safe from row fan-out because the IM flow only ever creates a *fresh* session
+	// for a new mapping (never re-maps an existing one), so a session has at most one
+	// mapping row. If that ever changes, this JOIN would need a one-row-per-session
+	// guard (the unique index only constrains active mappings).
+	joinClause := "LEFT JOIN im_channel_sessions ics ON ics.session_id = s.id"
 
 	applySource := func(db *gorm.DB) *gorm.DB {
-		switch strings.ToLower(strings.TrimSpace(q.Source)) {
+		src := strings.TrimSpace(q.Source)
+		lower := strings.ToLower(src)
+		embedPrefix := types.EmbedSessionMarkerPrefix
+		switch lower {
 		case "":
 			return db
 		case "web":
-			return db.Where("ics.id IS NULL")
+			// User web chats only — exclude embed-widget sessions (same IM-null row).
+			return db.Where(
+				"ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?)",
+				embedPrefix+"%",
+			)
+		case "embed":
+			return db.Where("ics.id IS NULL AND s.description LIKE ?", embedPrefix+"%")
 		default:
-			return db.Where("ics.platform = ?", strings.ToLower(q.Source))
+			if strings.HasPrefix(lower, "embed:") {
+				channelID := strings.TrimSpace(src[len("embed:"):])
+				if channelID != "" {
+					return db.Where("ics.id IS NULL AND s.description = ?", embedPrefix+channelID)
+				}
+			}
+			return db.Where("ics.platform = ?", lower)
 		}
 	}
 	applyAgent := func(db *gorm.DB) *gorm.DB {

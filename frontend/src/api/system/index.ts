@@ -15,6 +15,10 @@ export interface SystemInfo {
    *  When non-empty, the system info view should surface a troubleshooting
    *  banner (see docs/migration-troubleshooting.md). */
   db_migration_error?: string
+  /** Server process boot time (RFC3339, UTC). */
+  started_at?: string
+  /** Seconds since process start. */
+  uptime_seconds?: number
 }
 
 export interface PlaceholderDefinition {
@@ -86,6 +90,15 @@ export interface ParserEngineConfig {
   mineru_cloud_enable_table?: boolean | null
   mineru_cloud_enable_ocr?: boolean | null
   mineru_cloud_language?: string
+  // PaddleOCR-VL 自建参数
+  paddleocr_vl_endpoint?: string
+  paddleocr_vl_use_seal_recognition?: boolean | null
+  paddleocr_vl_use_chart_recognition?: boolean | null
+  // PaddleOCR-VL 云 API 参数
+  paddleocr_vl_cloud_token?: string
+  paddleocr_vl_cloud_model?: string
+  paddleocr_vl_cloud_use_seal_recognition?: boolean | null
+  paddleocr_vl_cloud_use_chart_recognition?: boolean | null
 }
 
 export interface ParserEnginesResponse {

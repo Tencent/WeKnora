@@ -291,3 +291,23 @@ func TestWaitResult_ExitCode(t *testing.T) {
 		})
 	}
 }
+
+// On aggregate failure, doc wait emits the partition envelope to stdout; the
+// returned error must be Silent so PrintError does NOT write a second,
+// contradictory {ok:false} envelope to stderr. Regression for the dual-envelope
+// contract violation (stdout ok:true + stderr ok:false for one invocation).
+func TestDocWait_FailureError_IsSilent(t *testing.T) {
+	// Mirror RunBatch's contract: the failure carries CodeOperationFailed for
+	// the exit code, but Silent=true suppresses the stderr envelope.
+	err := cmdutil.NewError(cmdutil.CodeOperationFailed, "1 doc(s) failed").WithSilent()
+	typed := cmdutil.AsError(err)
+	if typed == nil {
+		t.Fatal("expected typed *Error")
+	}
+	if !typed.Silent {
+		t.Error("doc wait failure error must be Silent to avoid a contradictory stderr envelope")
+	}
+	if cmdutil.ExitCode(err) != 1 {
+		t.Errorf("exit code = %d, want 1", cmdutil.ExitCode(err))
+	}
+}

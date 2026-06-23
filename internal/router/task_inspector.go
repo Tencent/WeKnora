@@ -47,7 +47,17 @@ type knowledgeIDProbe struct {
 
 // queuesScanned is the fixed set of queue names this codebase enqueues
 // into. Kept tight on purpose — we never scan user-defined queues.
-var queuesScanned = []string{"default", "critical", "low"}
+// MUST include every queue any cancelable task type can land in; the
+// multimodal queue is required here so cancelling a knowledge also purges
+// its (potentially hundreds of) pending image:multimodal tasks.
+var queuesScanned = []string{
+	types.QueueDefault,
+	types.QueueCritical,
+	types.QueueLow,
+	types.QueueMultimodal,
+	types.QueueGraph,
+	types.QueueQuestion,
+}
 
 // taskTypesForKnowledgeCancel lists every asynq task type that carries
 // a knowledge_id in its payload and should be cancelable. The set is
@@ -98,7 +108,7 @@ func (a *asynqTaskInspector) CancelTasksForKnowledge(
 
 // HasQueuedTasksForKnowledge reports whether any pending / scheduled /
 // retry / active task referencing knowledgeID still lives in the queue.
-// Read-only counterpart of CancelTasksForKnowledge: the housekeeping
+// Read-only counterpart of CancelTasksForKnowledge — the housekeeping
 // sweep uses it to avoid flagging a backlogged-but-not-orphaned row as
 // failed. Short-circuits on the first match and never deletes anything.
 func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
@@ -118,11 +128,7 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 	}
 	for _, queue := range queuesScanned {
 		for _, l := range listers {
-			found, err := a.queueStateHasMatch(ctx, queue, knowledgeID, l.state, l.list)
-			if err != nil {
-				return false, err
-			}
-			if found {
+			if a.queueStateHasMatch(ctx, queue, knowledgeID, l.state, l.list) {
 				return true, nil
 			}
 		}
@@ -132,31 +138,32 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 
 // queueStateHasMatch pages through one (queue, state) list looking for a
 // task that references knowledgeID. Mirrors the delete* scanners but is
-// strictly read-only and returns early on the first hit.
+// strictly read-only and returns early on the first hit. A backend error
+// is logged and treated as "no match" (false); the caller's fail-safe
+// then errs toward recovering the row rather than preserving it forever.
 func (a *asynqTaskInspector) queueStateHasMatch(
 	ctx context.Context, queue, knowledgeID, state string,
 	list func(string, ...asynq.ListOption) ([]*asynq.TaskInfo, error),
-) (bool, error) {
+) bool {
 	page := 1
 	for {
 		tasks, err := list(queue, asynq.PageSize(listPageSize), asynq.Page(page))
 		if err != nil {
-			if errors.Is(err, asynq.ErrQueueNotFound) {
-				return false, nil
+			if !errors.Is(err, asynq.ErrQueueNotFound) {
+				logger.Warnf(ctx, "[TaskInspector] probe %s queue=%s page=%d: %v", state, queue, page, err)
 			}
-			logger.Warnf(ctx, "[TaskInspector] list %s queue=%s page=%d: %v", state, queue, page, err)
-			return false, err
+			return false
 		}
 		if len(tasks) == 0 {
-			return false, nil
+			return false
 		}
 		for _, t := range tasks {
 			if matchesKnowledge(t.Type, t.Payload, knowledgeID) {
-				return true, nil
+				return true
 			}
 		}
 		if len(tasks) < listPageSize {
-			return false, nil
+			return false
 		}
 		page++
 	}

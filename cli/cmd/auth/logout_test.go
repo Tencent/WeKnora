@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,24 +61,28 @@ func TestLogout_CurrentProfile(t *testing.T) {
 	}
 }
 
-func TestLogout_NamedContext(t *testing.T) {
+// TestLogout_ActiveProfileViaOverride exercises targeting a non-default
+// profile. Production resolves this via the global --profile flag (which
+// rewrites cfg.CurrentProfile in Factory.Config); here we simulate that by
+// setting CurrentProfile=staging directly, since runLogout's single target is
+// the active profile.
+func TestLogout_ActiveProfileViaOverride(t *testing.T) {
 	isolateConfig(t)
 	_, _ = iostreams.SetForTest(t)
 	store := secrets.NewMemStore()
 	require.NoError(t, store.Set("staging", "api_key", "sk-staging"))
 
 	cfg := &config.Config{
-		CurrentProfile: "prod",
+		CurrentProfile: "staging", // global --profile staging resolves to this
 		Profiles: map[string]config.Profile{
 			"prod":    {Host: "https://prod", TokenRef: "tok"},
 			"staging": {Host: "https://staging", APIKeyRef: store.Ref("staging", "api_key")},
 		},
 	}
-	require.NoError(t, runLogout(&LogoutOptions{Name: "staging", Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
+	require.NoError(t, runLogout(&LogoutOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
 
-	assert.Equal(t, "prod", cfg.CurrentProfile, "current_profile untouched when removing other")
-	assert.NotContains(t, cfg.Profiles, "staging")
-	assert.Contains(t, cfg.Profiles, "prod")
+	assert.NotContains(t, cfg.Profiles, "staging", "active profile (staging) is the target")
+	assert.Contains(t, cfg.Profiles, "prod", "non-target profile untouched")
 }
 
 func TestLogout_All(t *testing.T) {
@@ -110,14 +113,16 @@ func TestLogout_NoProfiles(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeAuthUnauthenticated, typed.Code)
 }
 
-func TestLogout_UnknownName(t *testing.T) {
+// TestLogout_ActiveProfileMissing covers the corrupt-config case where the
+// active profile name (e.g. set via --profile ghost) has no matching entry.
+func TestLogout_ActiveProfileMissing(t *testing.T) {
 	isolateConfig(t)
 	_, _ = iostreams.SetForTest(t)
 	cfg := &config.Config{
-		CurrentProfile: "prod",
+		CurrentProfile: "ghost", // points at a non-existent entry
 		Profiles:       map[string]config.Profile{"prod": {Host: "https://prod"}},
 	}
-	err := runLogout(&LogoutOptions{Name: "ghost"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
+	err := runLogout(&LogoutOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -137,16 +142,13 @@ func TestLogout_NoCurrentNoFlag(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeInputMissingFlag, typed.Code)
 }
 
-// TestLogout_Cobra exercises the cobra layer for the mutually-exclusive
-// --name + --all flag pair.
-func TestLogout_Cobra_FlagsMutuallyExclusive(t *testing.T) {
+// TestLogout_NoNameFlag asserts the --name flag is gone (logout now targets
+// the active profile / global --profile) while --all stands alone.
+func TestLogout_NoNameFlag(t *testing.T) {
 	isolateConfig(t)
 	_, _ = iostreams.SetForTest(t)
 	cfg := &config.Config{Profiles: map[string]config.Profile{"a": {}}}
 	cmd := NewCmdLogout(newLogoutFactory(t, cfg, secrets.NewMemStore()))
-	cmd.SetContext(context.Background())
-	cmd.SetArgs([]string{"--name", "a", "--all"})
-	cmd.SilenceErrors = true
-	cmd.SilenceUsage = true
-	require.Error(t, cmd.Execute())
+	assert.Nil(t, cmd.Flags().Lookup("name"), "--name flag must be removed")
+	assert.NotNil(t, cmd.Flags().Lookup("all"), "--all flag must remain")
 }

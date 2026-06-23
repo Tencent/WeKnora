@@ -23,6 +23,65 @@ func tokenTestFactory(t *testing.T, cfg *config.Config, store *secrets.MemStore)
 	return f
 }
 
+// TestAuthToken_DefaultIsRawToken locks the scripting contract: with no
+// explicit --format, `weknora auth token` emits the raw token (so
+// WEKNORA_TOKEN=$(weknora auth token) works), NOT the JSON envelope — even
+// though the global --format default is json. Explicit --format json still
+// emits the {token,mode,profile} envelope (covered by the JSON test below).
+func TestAuthToken_DefaultIsRawToken(t *testing.T) {
+	cfg := &config.Config{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
+			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
+		},
+	}
+	store := secrets.NewMemStore()
+	_ = store.Set("prod", "access", "jwt-default-xyz")
+
+	out, _ := iostreams.SetForTest(t)
+	cmd := NewCmdToken(tokenTestFactory(t, cfg, store))
+	cmd.PersistentFlags().String("format", "", "") // mirror the root persistent flag, unset
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got := out.String(); got != "jwt-default-xyz" {
+		t.Errorf("default output must be the raw token (not an envelope); got %q", got)
+	}
+}
+
+// TestAuthToken_JQImpliesJSON: --jq filters the envelope, so passing it without
+// an explicit --format must resolve to JSON (not the raw-token default), else
+// the filter would be silently dropped.
+func TestAuthToken_JQImpliesJSON(t *testing.T) {
+	cfg := &config.Config{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
+			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
+		},
+	}
+	store := secrets.NewMemStore()
+	_ = store.Set("prod", "access", "jwt-jq-xyz")
+
+	out, _ := iostreams.SetForTest(t)
+	cmd := NewCmdToken(tokenTestFactory(t, cfg, store))
+	cmd.PersistentFlags().String("format", "", "")
+	cmd.PersistentFlags().StringP("jq", "q", "", "")
+	// Structural projection: proves jq ran on the JSON envelope (object out),
+	// not the raw-token text path (which would print the bare string).
+	cmd.SetArgs([]string{"--jq", ".data | {token}"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("--jq without --format must filter the JSON envelope, got non-JSON %q: %v", out.String(), err)
+	}
+	if got["token"] != "jwt-jq-xyz" {
+		t.Errorf("jq projection wrong: %+v", got)
+	}
+}
+
 func TestAuthToken_BearerMode_PlainOutput(t *testing.T) {
 	cfg := &config.Config{
 		CurrentProfile: "prod",

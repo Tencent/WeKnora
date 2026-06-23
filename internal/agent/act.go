@@ -127,7 +127,6 @@ var toolDisplayNames = map[string]string{
 	agenttools.ToolDataSchema:          "查看数据结构",
 	agenttools.ToolWebSearch:           "搜索网页",
 	agenttools.ToolWebFetch:            "获取网页",
-	agenttools.ToolFinalAnswer:         "最终回答",
 	agenttools.ToolExecuteSkillScript:  "执行技能脚本",
 	agenttools.ToolReadSkill:           "读取技能",
 }
@@ -318,9 +317,10 @@ func (e *AgentEngine) runToolCall(
 		if repairErr := json.Unmarshal([]byte(repaired), &args); repairErr != nil {
 			logger.Errorf(ctx, "%s Failed to parse arguments (repair failed): %v", toolTag, err)
 			return types.ToolCall{
-				ID:   tc.ID,
-				Name: tc.Function.Name,
-				Args: map[string]any{"_raw": argsStr},
+				ID:               tc.ID,
+				Name:             tc.Function.Name,
+				Args:             map[string]any{"_raw": argsStr},
+				ProviderMetadata: tc.ProviderMetadata,
 				Result: &types.ToolResult{
 					Success: false,
 					Error: fmt.Sprintf(
@@ -414,11 +414,12 @@ func (e *AgentEngine) runToolCall(
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
 	toolCall := types.ToolCall{
-		ID:       tc.ID,
-		Name:     tc.Function.Name,
-		Args:     args,
-		Result:   result,
-		Duration: duration,
+		ID:               tc.ID,
+		Name:             tc.Function.Name,
+		Args:             args,
+		Result:           result,
+		Duration:         duration,
+		ProviderMetadata: tc.ProviderMetadata,
 	}
 
 	if err != nil {

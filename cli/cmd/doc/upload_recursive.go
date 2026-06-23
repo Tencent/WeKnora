@@ -85,7 +85,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 	channel := cmp.Or(opts.Channel, uploadChannel)
 
 	outcomes, runErr := cmdutil.RunBatch(ctx, matches, func(ctx context.Context, p string) error {
-		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, meta, opts.EnableMultimodel, "", channel)
+		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, meta, opts.EnableMultimodel, "", channel, nil)
 		if err != nil {
 			code := cmdutil.ClassifyHTTPError(err)
 			if firstFailCode == "" {

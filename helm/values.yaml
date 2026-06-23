@@ -492,12 +492,3 @@ qdrant:
   persistence:
     enabled: true
     size: 10Gi
-
-# -- Jaeger configuration (Distributed Tracing)
-# Equivalent to: docker compose --profile jaeger
-jaeger:
-  # -- Enable Jaeger tracing
-  enabled: false
-  image:
-    repository: jaegertracing/all-in-one
-    tag: latest

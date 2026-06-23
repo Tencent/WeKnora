@@ -67,6 +67,10 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 
 	// Parse outbound links from content
 	page.OutLinks = s.parseOutLinks(page.Content)
+	if err := s.applyFolderToPage(ctx, page); err != nil {
+		return nil, err
+	}
+	normalizeWikiHierarchy(page)
 
 	now := time.Now()
 	page.CreatedAt = now
@@ -115,17 +119,33 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	existing.SourceRefs = page.SourceRefs
 	existing.ChunkRefs = page.ChunkRefs
 	existing.PageMetadata = page.PageMetadata
+	existing.ParentSlug = page.ParentSlug
+	existing.FolderID = page.FolderID
+	existing.SortOrder = page.SortOrder
 	existing.Status = page.Status
 	existing.UpdatedAt = time.Now()
+
+	// CategoryPath is a derived cache of FolderID — recompute it from the
+	// folder chain rather than trusting whatever the caller sent.
+	if err := s.applyFolderToPage(ctx, existing); err != nil {
+		return nil, err
+	}
 
 	// Outbound links are a pure derivative of content, so they only shift
 	// when content shifts. Re-parse unconditionally to stay consistent with
 	// the stored body.
 	existing.OutLinks = s.parseOutLinks(existing.Content)
+	normalizeWikiHierarchy(existing)
 
 	if contentChanged {
 		if err := s.repo.Update(ctx, existing); err != nil {
 			return nil, fmt.Errorf("update wiki page: %w", err)
+		}
+		// GORM's struct Updates path skips zero values, so persist hierarchy
+		// metadata through the explicit map path as well. This keeps clearing
+		// parent/category fields deterministic without changing version again.
+		if err := s.repo.UpdateMeta(ctx, existing); err != nil {
+			return nil, fmt.Errorf("update wiki page hierarchy meta: %w", err)
 		}
 	} else {
 		// No user-visible change — persist bookkeeping fields but preserve
@@ -145,6 +165,7 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 
 // UpdatePageMeta updates only metadata (status, source_refs) without version bump or link re-parse.
 func (s *wikiPageService) UpdatePageMeta(ctx context.Context, page *types.WikiPage) error {
+	normalizeWikiHierarchy(page)
 	page.UpdatedAt = time.Now()
 	return s.repo.UpdateMeta(ctx, page)
 }
@@ -191,6 +212,9 @@ func (s *wikiPageService) ListPages(ctx context.Context, req *types.WikiPageList
 	pages, total, err := s.repo.List(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	for _, page := range pages {
+		normalizeWikiHierarchy(page)
 	}
 
 	pageSize := req.PageSize
@@ -322,6 +346,9 @@ func (s *wikiPageService) GetIndexView(
 		}
 		if entries == nil {
 			entries = []types.WikiIndexEntry{}
+		}
+		for i := range entries {
+			normalizeWikiIndexEntryHierarchy(&entries[i], pt)
 		}
 		next := ""
 		// Only emit a cursor when a full page was returned AND more rows
@@ -811,6 +838,12 @@ func (s *wikiPageService) FindSimilarPages(ctx context.Context, kbID string, que
 	return s.repo.FindSimilarPages(ctx, kbID, query, pageTypes, limit)
 }
 
+// ListDistinctCategoryPaths returns the existing wiki folder paths. Used by
+// wiki ingest's taxonomy planner to ground folder reuse.
+func (s *wikiPageService) ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error) {
+	return s.repo.ListDistinctCategoryPaths(ctx, kbID, maxPaths)
+}
+
 // CountByType is a service-layer pass-through over the repo. Used by
 // the index intro path to frame the LLM prompt's "showing N of M" hint.
 func (s *wikiPageService) CountByType(ctx context.Context, kbID string) (map[string]int64, error) {
@@ -917,11 +950,59 @@ func (s *wikiPageService) createDefaultPage(ctx context.Context, kbID string, sl
 		Summary:         title,
 		Version:         1,
 	}
+	normalizeWikiHierarchy(page)
 
 	if err := s.repo.Create(ctx, page); err != nil {
 		return nil, fmt.Errorf("create default %s page: %w", slug, err)
 	}
 	return page, nil
+}
+
+func normalizeWikiHierarchy(page *types.WikiPage) {
+	if page == nil {
+		return
+	}
+	page.ParentSlug = strings.TrimSpace(page.ParentSlug)
+
+	cleanPath := types.StringArray(types.CleanWikiCategoryPath(page.CategoryPath))
+	page.CategoryPath = cleanPath
+	page.Depth = len(cleanPath)
+
+	display := strings.TrimSpace(page.Title)
+	if display == "" {
+		display = strings.TrimSpace(page.Slug)
+	}
+	page.WikiPath = buildWikiPath(page.PageType, cleanPath, display)
+}
+
+func normalizeWikiIndexEntryHierarchy(entry *types.WikiIndexEntry, pageType string) {
+	if entry == nil {
+		return
+	}
+
+	cleanPath := types.StringArray(types.CleanWikiCategoryPath(entry.CategoryPath))
+	entry.CategoryPath = cleanPath
+	entry.Depth = len(cleanPath)
+
+	display := strings.TrimSpace(entry.Title)
+	if display == "" {
+		display = strings.TrimSpace(entry.Slug)
+	}
+	entry.WikiPath = buildWikiPath(pageType, cleanPath, display)
+}
+
+// buildWikiPath assembles the normalized, sortable "page_type/cat.../title"
+// breadcrumb used for directory ordering. Empty segments are skipped.
+func buildWikiPath(pageType string, categoryPath []string, display string) string {
+	parts := make([]string, 0, len(categoryPath)+2)
+	if pt := strings.TrimSpace(pageType); pt != "" {
+		parts = append(parts, pt)
+	}
+	parts = append(parts, categoryPath...)
+	if display != "" {
+		parts = append(parts, display)
+	}
+	return strings.Join(parts, "/")
 }
 
 // containsString checks if a string slice contains a given string
@@ -964,6 +1045,400 @@ func (s *wikiPageService) ListIssues(ctx context.Context, kbID string, slug stri
 // UpdateIssueStatus updates an issue's status
 func (s *wikiPageService) UpdateIssueStatus(ctx context.Context, issueID string, status string) error {
 	return s.repo.UpdateIssueStatus(ctx, issueID, status)
+}
+
+// --- Folder tree (wiki_folders) ---
+
+// wikiFolderSegments splits a materialized folder path ("AI/RAG") into cleaned
+// segments. Empty/blank path yields nil (the wiki root).
+func wikiFolderSegments(path string) []string {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	return types.CleanWikiCategoryPath(strings.Split(path, "/"))
+}
+
+// applyFolderToPage refreshes a page's derived category_path cache from its
+// authoritative FolderID. Root ("") clears the path. A folder id that does not
+// resolve is treated as a hard error so we never silently misplace a page.
+func (s *wikiPageService) applyFolderToPage(ctx context.Context, page *types.WikiPage) error {
+	if page == nil {
+		return nil
+	}
+	if strings.TrimSpace(page.FolderID) == "" {
+		page.FolderID = ""
+		page.CategoryPath = nil
+		return nil
+	}
+	folder, err := s.repo.GetFolderByID(ctx, page.KnowledgeBaseID, page.FolderID)
+	if err != nil {
+		if errors.Is(err, repository.ErrWikiFolderNotFound) {
+			return fmt.Errorf("wiki page references unknown folder %q", page.FolderID)
+		}
+		return fmt.Errorf("resolve page folder: %w", err)
+	}
+	page.CategoryPath = types.StringArray(wikiFolderSegments(folder.Path))
+	return nil
+}
+
+// GetFolder retrieves a single folder by id.
+func (s *wikiPageService) GetFolder(ctx context.Context, kbID string, id string) (*types.WikiFolder, error) {
+	return s.repo.GetFolderByID(ctx, kbID, id)
+}
+
+// ListChildFolders returns the direct children of parentID for a tree view
+// scoped to pageTypes. PageCount is recursive (the folder's whole subtree) so
+// a parent reflects everything filed beneath it. A folder is shown when its
+// subtree holds a page matching pageTypes. Wholly-empty folders (no pages of
+// any type underneath) are only listed when multiple types are requested —
+// the merged knowledge view — so single-type tabs like summary do not surface
+// empty containers.
+func (s *wikiPageService) ListChildFolders(
+	ctx context.Context, kbID string, parentID string, pageTypes []string,
+) ([]types.WikiFolderNode, error) {
+	all, err := s.repo.ListAllFolders(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	scopedDirect, err := s.repo.CountPagesByFolder(ctx, kbID, pageTypes)
+	if err != nil {
+		return nil, err
+	}
+	allDirect := scopedDirect
+	if len(pageTypes) > 0 {
+		allDirect, err = s.repo.CountPagesByFolder(ctx, kbID, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	recScoped := recursiveFolderCounts(all, scopedDirect)
+	recAll := recursiveFolderCounts(all, allDirect)
+	showEmptyFolders := len(pageTypes) > 1
+	// A folder belongs in this view if it (recursively) contains a page of the
+	// requested types, or — only in the merged knowledge view — if it is a
+	// completely empty container with no pages of any type underneath.
+	relevant := func(id string) bool {
+		if recScoped[id] > 0 {
+			return true
+		}
+		if showEmptyFolders {
+			return recAll[id] == 0
+		}
+		return false
+	}
+
+	out := make([]types.WikiFolderNode, 0)
+	for _, f := range all {
+		if f.ParentID != parentID || !relevant(f.ID) {
+			continue
+		}
+		hasChildren := false
+		for _, g := range all {
+			if g.ParentID == f.ID && relevant(g.ID) {
+				hasChildren = true
+				break
+			}
+		}
+		out = append(out, types.WikiFolderNode{
+			WikiFolder:  *f,
+			PageCount:   recScoped[f.ID],
+			HasChildren: hasChildren,
+		})
+	}
+	return out, nil
+}
+
+// recursiveFolderCounts maps each folder id to the sum of `direct` page counts
+// over the folder and all of its descendants, using the materialized path so a
+// single pass over the (navigation-sized) folder set suffices.
+func recursiveFolderCounts(all []*types.WikiFolder, direct map[string]int64) map[string]int64 {
+	res := make(map[string]int64, len(all))
+	for _, f := range all {
+		sum := direct[f.ID]
+		prefix := f.Path + "/"
+		for _, g := range all {
+			if g.ID != f.ID && strings.HasPrefix(g.Path, prefix) {
+				sum += direct[g.ID]
+			}
+		}
+		res[f.ID] = sum
+	}
+	return res
+}
+
+// validateFolderName trims and rejects blank names or names carrying directory
+// separators (a folder name is a single tree level).
+func validateFolderName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("folder name is required")
+	}
+	if strings.ContainsAny(name, "/｜|／") {
+		return "", fmt.Errorf("folder name %q must not contain a path separator", name)
+	}
+	return name, nil
+}
+
+// CreateFolder creates a new empty folder under parentID.
+func (s *wikiPageService) CreateFolder(
+	ctx context.Context, kbID string, tenantID uint64, parentID string, name string,
+) (*types.WikiFolder, error) {
+	name, err := validateFolderName(name)
+	if err != nil {
+		return nil, err
+	}
+
+	parentPath := ""
+	depth := 1
+	if parentID != types.WikiFolderRootID {
+		parent, err := s.repo.GetFolderByID(ctx, kbID, parentID)
+		if err != nil {
+			return nil, err
+		}
+		parentPath = parent.Path
+		depth = parent.Depth + 1
+	}
+
+	if _, err := s.repo.GetChildFolderByName(ctx, kbID, parentID, name); err == nil {
+		return nil, repository.ErrWikiFolderConflict
+	} else if !errors.Is(err, repository.ErrWikiFolderNotFound) {
+		return nil, err
+	}
+
+	path := name
+	if parentPath != "" {
+		path = parentPath + "/" + name
+	}
+	now := time.Now()
+	folder := &types.WikiFolder{
+		ID:              uuid.New().String(),
+		TenantID:        tenantID,
+		KnowledgeBaseID: kbID,
+		ParentID:        parentID,
+		Name:            name,
+		Path:            path,
+		Depth:           depth,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.repo.CreateFolder(ctx, folder); err != nil {
+		return nil, fmt.Errorf("create wiki folder: %w", err)
+	}
+	return folder, nil
+}
+
+// FindOrCreateFolderPath resolves a category path to a leaf folder id, creating
+// any missing intermediate folders along the way. Concurrency-safe against the
+// unique (kb, parent, name) constraint via a re-fetch on create conflict.
+func (s *wikiPageService) FindOrCreateFolderPath(
+	ctx context.Context, kbID string, tenantID uint64, path []string,
+) (string, []string, error) {
+	clean := types.CleanWikiCategoryPath(path)
+	if len(clean) == 0 {
+		return types.WikiFolderRootID, nil, nil
+	}
+	parentID := types.WikiFolderRootID
+	parentPath := ""
+	for depth, name := range clean {
+		child, err := s.repo.GetChildFolderByName(ctx, kbID, parentID, name)
+		if err != nil {
+			if !errors.Is(err, repository.ErrWikiFolderNotFound) {
+				return "", nil, err
+			}
+			fp := name
+			if parentPath != "" {
+				fp = parentPath + "/" + name
+			}
+			now := time.Now()
+			child = &types.WikiFolder{
+				ID:              uuid.New().String(),
+				TenantID:        tenantID,
+				KnowledgeBaseID: kbID,
+				ParentID:        parentID,
+				Name:            name,
+				Path:            fp,
+				Depth:           depth + 1,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}
+			if cerr := s.repo.CreateFolder(ctx, child); cerr != nil {
+				// Lost a create race (or unique violation): the sibling must
+				// now exist — re-fetch it rather than failing the whole plan.
+				child, err = s.repo.GetChildFolderByName(ctx, kbID, parentID, name)
+				if err != nil {
+					return "", nil, fmt.Errorf("create wiki folder %q: %w", fp, cerr)
+				}
+			}
+		}
+		parentID = child.ID
+		parentPath = child.Path
+	}
+	return parentID, clean, nil
+}
+
+// MovePage relocates a page into folderID ("" = root) and refreshes its cached
+// category path. Bookkeeping-only write (no version bump).
+func (s *wikiPageService) MovePage(
+	ctx context.Context, kbID string, slug string, folderID string,
+) (*types.WikiPage, error) {
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	page.FolderID = strings.TrimSpace(folderID)
+	if err := s.applyFolderToPage(ctx, page); err != nil {
+		return nil, err
+	}
+	page.UpdatedAt = time.Now()
+	normalizeWikiHierarchy(page)
+	if err := s.repo.UpdateMeta(ctx, page); err != nil {
+		return nil, fmt.Errorf("move wiki page: %w", err)
+	}
+	return page, nil
+}
+
+// RenameOrMoveFolder renames and/or reparents a folder, then recomputes the
+// materialized path/depth of the entire subtree and the cached category path of
+// every page underneath. Guards against cycles (moving a folder into itself or
+// one of its descendants) and sibling name collisions.
+func (s *wikiPageService) RenameOrMoveFolder(
+	ctx context.Context, kbID string, id string, newName string, newParentID string, moveParent bool,
+) (*types.WikiFolder, error) {
+	folder, err := s.repo.GetFolderByID(ctx, kbID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	name := folder.Name
+	if strings.TrimSpace(newName) != "" {
+		if name, err = validateFolderName(newName); err != nil {
+			return nil, err
+		}
+	}
+
+	targetParent := folder.ParentID
+	if moveParent {
+		targetParent = newParentID
+	}
+
+	parentPath := ""
+	depthBase := 0
+	if targetParent != types.WikiFolderRootID {
+		if targetParent == folder.ID {
+			return nil, errors.New("cannot move a folder into itself")
+		}
+		parent, err := s.repo.GetFolderByID(ctx, kbID, targetParent)
+		if err != nil {
+			return nil, err
+		}
+		if parent.Path == folder.Path || strings.HasPrefix(parent.Path, folder.Path+"/") {
+			return nil, errors.New("cannot move a folder into its own descendant")
+		}
+		parentPath = parent.Path
+		depthBase = parent.Depth
+	}
+
+	if existing, err := s.repo.GetChildFolderByName(ctx, kbID, targetParent, name); err == nil {
+		if existing.ID != folder.ID {
+			return nil, repository.ErrWikiFolderConflict
+		}
+	} else if !errors.Is(err, repository.ErrWikiFolderNotFound) {
+		return nil, err
+	}
+
+	oldPath := folder.Path
+	newPath := name
+	if parentPath != "" {
+		newPath = parentPath + "/" + name
+	}
+	if newPath == oldPath && targetParent == folder.ParentID {
+		return folder, nil // no-op
+	}
+
+	all, err := s.repo.ListAllFolders(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	affected := make([]string, 0)
+	var updated *types.WikiFolder
+	for _, f := range all {
+		switch {
+		case f.ID == folder.ID:
+			f.ParentID = targetParent
+			f.Name = name
+			f.Path = newPath
+			f.Depth = depthBase + 1
+		case strings.HasPrefix(f.Path, oldPath+"/"):
+			f.Path = newPath + f.Path[len(oldPath):]
+			f.Depth = len(wikiFolderSegments(f.Path))
+		default:
+			continue
+		}
+		f.UpdatedAt = now
+		if err := s.repo.UpdateFolder(ctx, f); err != nil {
+			return nil, err
+		}
+		affected = append(affected, f.ID)
+		if f.ID == folder.ID {
+			updated = f
+		}
+	}
+
+	if err := s.recomputePagesForFolders(ctx, kbID, affected); err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		updated = folder
+	}
+	return updated, nil
+}
+
+// recomputePagesForFolders refreshes the cached category_path/wiki_path/depth of
+// every page filed under any of the given folder ids (used after a folder
+// subtree is moved/renamed). Bookkeeping-only writes (no version bump).
+func (s *wikiPageService) recomputePagesForFolders(ctx context.Context, kbID string, folderIDs []string) error {
+	if len(folderIDs) == 0 {
+		return nil
+	}
+	pages, err := s.repo.ListPagesByFolderIDs(ctx, kbID, folderIDs)
+	if err != nil {
+		return err
+	}
+	for _, page := range pages {
+		if err := s.applyFolderToPage(ctx, page); err != nil {
+			return err
+		}
+		page.UpdatedAt = time.Now()
+		normalizeWikiHierarchy(page)
+		if err := s.repo.UpdateMeta(ctx, page); err != nil {
+			logger.Warnf(ctx, "wiki: recompute folder path for page %s failed: %v", page.Slug, err)
+		}
+	}
+	return nil
+}
+
+// DeleteFolder removes a folder that has no pages and no child folders. The UI
+// must relocate contents first; this keeps deletion non-destructive.
+func (s *wikiPageService) DeleteFolder(ctx context.Context, kbID string, id string) error {
+	if _, err := s.repo.GetFolderByID(ctx, kbID, id); err != nil {
+		return err
+	}
+	children, err := s.repo.ListChildFolders(ctx, kbID, id)
+	if err != nil {
+		return err
+	}
+	if len(children) > 0 {
+		return errors.New("folder is not empty: it still has sub-folders")
+	}
+	pages, err := s.repo.ListPagesByFolderIDs(ctx, kbID, []string{id})
+	if err != nil {
+		return err
+	}
+	if len(pages) > 0 {
+		return errors.New("folder is not empty: it still contains pages")
+	}
+	return s.repo.DeleteFolder(ctx, kbID, id)
 }
 
 // InjectCrossLinks scans affected pages and injects [[wiki-links]] for mentions

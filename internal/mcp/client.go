@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -49,6 +50,13 @@ type MCPClient interface {
 // ClientConfig represents configuration for creating an MCP client
 type ClientConfig struct {
 	Service *types.MCPService
+
+	// OAuth wiring (only used when Service.AuthConfig.AuthType == oauth).
+	// The token store is scoped to (TenantID, UserID, Service.ID) so each
+	// user connects with their own access/refresh token.
+	TenantID  uint64
+	UserID    string
+	OAuthRepo interfaces.MCPOAuthRepository
 }
 
 // mcpGoClient wraps mark3labs/mcp-go client to implement our MCPClient interface
@@ -92,18 +100,33 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		}
 	}
 
+	// Build OAuth config when this service uses the OAuth strategy. The
+	// client_id comes from the dynamically-registered client persisted at
+	// authorization time; the token store loads the invoking user's token
+	// and transparently refreshes it.
+	oauthConfig, useOAuth, err := buildOAuthConfig(config, httpClient)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create client based on transport type
 	var mcpClient *client.Client
-	var err error
 	switch config.Service.TransportType {
 	case types.MCPTransportSSE:
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for SSE transport")
 		}
-		mcpClient, err = client.NewSSEMCPClient(*config.Service.URL,
-			client.WithHTTPClient(httpClient),
-			client.WithHeaders(headers),
-		)
+		if useOAuth {
+			mcpClient, err = client.NewOAuthSSEClient(*config.Service.URL, oauthConfig,
+				transport.WithHTTPClient(httpClient),
+				transport.WithHeaders(headers),
+			)
+		} else {
+			mcpClient, err = client.NewSSEMCPClient(*config.Service.URL,
+				client.WithHTTPClient(httpClient),
+				client.WithHeaders(headers),
+			)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SSE client: %w", err)
 		}
@@ -111,11 +134,18 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for HTTP Streamable transport")
 		}
-		// For HTTP streamable, we need to use transport options
-		mcpClient, err = client.NewStreamableHttpClient(*config.Service.URL,
-			transport.WithHTTPBasicClient(httpClient),
-			transport.WithHTTPHeaders(headers),
-		)
+		if useOAuth {
+			mcpClient, err = client.NewOAuthStreamableHttpClient(*config.Service.URL, oauthConfig,
+				transport.WithHTTPBasicClient(httpClient),
+				transport.WithHTTPHeaders(headers),
+			)
+		} else {
+			// For HTTP streamable, we need to use transport options
+			mcpClient, err = client.NewStreamableHttpClient(*config.Service.URL,
+				transport.WithHTTPBasicClient(httpClient),
+				transport.WithHTTPHeaders(headers),
+			)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to create HTTP streamable client: %w", err)
 		}
@@ -132,6 +162,37 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	}
 	mcpClient.OnConnectionLost(instance.onConnectionLost)
 	return instance, nil
+}
+
+// buildOAuthConfig returns the OAuth configuration for an OAuth-enabled MCP
+// service, or (_, false, nil) when the service does not use OAuth. It loads
+// the dynamically-registered client_id and wires a per-user token store so
+// the transport injects the invoking user's bearer token and refreshes it.
+func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.OAuthConfig, bool, error) {
+	svc := config.Service
+	if !svc.AuthConfig.IsOAuth() {
+		return transport.OAuthConfig{}, false, nil
+	}
+	if config.OAuthRepo == nil {
+		return transport.OAuthConfig{}, false, fmt.Errorf("OAuth repository is required for OAuth MCP services")
+	}
+	if config.UserID == "" {
+		return transport.OAuthConfig{}, false, fmt.Errorf("user context is required to connect to an OAuth MCP service")
+	}
+
+	oauthCfg := transport.OAuthConfig{
+		Scopes:                svc.AuthConfig.Scopes,
+		TokenStore:            newDBTokenStore(config.OAuthRepo, config.TenantID, config.UserID, svc.ID),
+		PKCEEnabled:           true,
+		AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
+		HTTPClient:            httpClient,
+	}
+	if regClient, err := config.OAuthRepo.GetClient(context.Background(), config.TenantID, svc.ID); err == nil && regClient != nil {
+		oauthCfg.ClientID = regClient.ClientID
+		oauthCfg.ClientSecret = regClient.ClientSecret
+		oauthCfg.RedirectURI = regClient.RedirectURI
+	}
+	return oauthCfg, true, nil
 }
 
 // onConnectionLost callback when the connection is lost

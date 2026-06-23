@@ -71,7 +71,15 @@ func testElasticsearchConnection(ctx context.Context, config types.ConnectionCon
 		req.SetBasicAuth(config.Username, config.Password)
 	}
 
-	client := &http.Client{Timeout: connectionTestTimeout}
+	client := &http.Client{
+		Timeout: connectionTestTimeout,
+		// A health probe must not follow redirects: a malicious or compromised
+		// endpoint could return a 302 to an internal address, defeating the
+		// SSRF check that only validated the original (user-supplied) Addr.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.Warnf(ctx, "Elasticsearch connection test failed: %v", err)

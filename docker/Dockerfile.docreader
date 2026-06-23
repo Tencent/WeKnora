@@ -94,6 +94,7 @@ RUN apt-get update && apt-get install -y \
     libjpeg62-turbo \
     wget \
     gnupg \
+    openjdk-17-jre-headless \
     libgl1 \
     libglib2.0-0 \
     antiword \

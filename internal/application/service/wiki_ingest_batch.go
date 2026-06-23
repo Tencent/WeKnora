@@ -485,6 +485,14 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	_ = eg.Wait()
 
+	// Plan the directory once for the whole batch BEFORE reduce. Reduce writes
+	// pages in parallel, so it can't converge on shared folders on its own; this
+	// single pass assigns every new entity/concept slug a coherent category_path
+	// that reuses existing folders. Reduce then only applies the plan to pages
+	// that don't already have a category (user-curated pages are never churned).
+	batchCtx.PlannedFolderID = s.resolvePlannedFolders(ctx, kb,
+		s.planBatchTaxonomy(ctx, chatModel, kb, slugUpdates, lang))
+
 	// 2. REDUCE PHASE (Parallel upserting grouped by Slug)
 	egReduce, reduceCtx := errgroup.WithContext(ctx)
 	egReduce.SetLimit(reduceParallel) // Reduce phase limit (LLM + DB concurrent connections, configurable)
@@ -960,7 +968,7 @@ func (s *wikiIngestService) mapOneDocument(
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang)
+		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
 		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
 			"cited_slugs":      len(citations),
 			"new_slugs":        len(newSlugs),
@@ -1627,6 +1635,17 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// already been logged, and the eg.Go caller would otherwise
 			// log it a second time as "reduce failed for slug".
 			err = nil
+		}
+	}
+
+	// Apply the batch taxonomy plan, but only to pages that aren't already
+	// filed — so brand-new pages get a coherent folder while previously-filed
+	// or user-moved pages keep their placement (manual edits are authoritative).
+	// The page's category_path cache is derived from folder_id downstream by
+	// CreatePage/UpdatePage, so assigning the folder id is sufficient here.
+	if page.FolderID == "" && batchCtx != nil {
+		if fid := batchCtx.PlannedFolderID[slug]; fid != "" {
+			page.FolderID = fid
 		}
 	}
 

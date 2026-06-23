@@ -2,6 +2,7 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -34,6 +35,10 @@ func (f *fakeDownloadSvc) OpenKnowledgeFile(_ context.Context, id string) (strin
 	return f.filename, io.NopCloser(strings.NewReader(f.content)), nil
 }
 
+// textFopts returns a text-mode FormatOptions for tests that don't care
+// about JSON output.
+func textFopts() *cmdutil.FormatOptions { return &cmdutil.FormatOptions{Mode: cmdutil.FormatText} }
+
 func TestDownload_DefaultUsesServerFilename(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	tmp := t.TempDir()
@@ -42,7 +47,7 @@ func TestDownload_DefaultUsesServerFilename(t *testing.T) {
 	defer os.Chdir(prevWD)
 
 	svc := &fakeDownloadSvc{content: "PDF-1.4 bytes", filename: "report.pdf"}
-	require.NoError(t, runDownload(context.Background(), &DownloadOptions{}, svc, "doc_abc"))
+	require.NoError(t, runDownload(context.Background(), &DownloadOptions{}, textFopts(), svc, "doc_abc"))
 
 	got, err := os.ReadFile(filepath.Join(tmp, "report.pdf"))
 	require.NoError(t, err)
@@ -53,7 +58,7 @@ func TestDownload_OutFile(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	dest := filepath.Join(t.TempDir(), "out.bin")
 	svc := &fakeDownloadSvc{content: "hello", filename: "ignored.txt"}
-	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: dest}, svc, "doc_abc"))
+	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: dest}, textFopts(), svc, "doc_abc"))
 
 	got, err := os.ReadFile(dest)
 	require.NoError(t, err)
@@ -63,14 +68,14 @@ func TestDownload_OutFile(t *testing.T) {
 func TestDownload_OutDash_Stdout(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDownloadSvc{content: "binary payload", filename: "report.pdf"}
-	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: "-"}, svc, "doc_abc"))
+	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: "-"}, textFopts(), svc, "doc_abc"))
 	assert.Equal(t, "binary payload", out.String())
 }
 
 func TestDownload_NoFilenameFromServer_DefaultPath_Errors(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDownloadSvc{content: "x", filename: ""}
-	err := runDownload(context.Background(), &DownloadOptions{}, svc, "doc_abc")
+	err := runDownload(context.Background(), &DownloadOptions{}, textFopts(), svc, "doc_abc")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -81,7 +86,7 @@ func TestDownload_NoFilenameFromServer_DefaultPath_Errors(t *testing.T) {
 func TestDownload_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDownloadSvc{err: errors.New("HTTP error 404: not found")}
-	err := runDownload(context.Background(), &DownloadOptions{Output: filepath.Join(t.TempDir(), "x")}, svc, "doc_missing")
+	err := runDownload(context.Background(), &DownloadOptions{Output: filepath.Join(t.TempDir(), "x")}, textFopts(), svc, "doc_missing")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -94,7 +99,7 @@ func TestDownload_RefusesOverwrite(t *testing.T) {
 	require.NoError(t, os.WriteFile(dest, []byte("OLD"), 0o644))
 
 	svc := &fakeDownloadSvc{content: "NEW", filename: ""}
-	err := runDownload(context.Background(), &DownloadOptions{Output: dest}, svc, "doc_abc")
+	err := runDownload(context.Background(), &DownloadOptions{Output: dest}, textFopts(), svc, "doc_abc")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -116,7 +121,7 @@ func TestDownload_RejectsServerPathTraversal(t *testing.T) {
 	// The server sends "../../etc/shadow" - we accept only "shadow" and
 	// write to cwd.
 	svc := &fakeDownloadSvc{content: "exfil", filename: "../../etc/shadow"}
-	require.NoError(t, runDownload(context.Background(), &DownloadOptions{}, svc, "doc_abc"))
+	require.NoError(t, runDownload(context.Background(), &DownloadOptions{}, textFopts(), svc, "doc_abc"))
 
 	// File must land inside cwd; parent dirs untouched.
 	got, err := os.ReadFile(filepath.Join(tmp, "shadow"))
@@ -145,7 +150,52 @@ func TestDownload_ForceOverwrites(t *testing.T) {
 	require.NoError(t, os.WriteFile(dest, []byte("OLD"), 0o644))
 
 	svc := &fakeDownloadSvc{content: "NEW", filename: ""}
-	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: dest, Clobber: true}, svc, "doc_abc"))
+	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: dest, Clobber: true}, textFopts(), svc, "doc_abc"))
 	got, _ := os.ReadFile(dest)
 	assert.Equal(t, "NEW", string(got))
+}
+
+// TestDownload_JSONEnvelope verifies that --format json emits a success
+// envelope with path/bytes/filename when downloading to a temp file.
+func TestDownload_JSONEnvelope(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	dest := filepath.Join(t.TempDir(), "report.pdf")
+	svc := &fakeDownloadSvc{content: "PDF bytes here", filename: "report.pdf"}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+
+	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: dest}, fopts, svc, "doc_abc"))
+
+	// File content must still be written correctly.
+	got, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "PDF bytes here", string(got))
+
+	// stdout must contain the JSON envelope.
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Path     string `json:"path"`
+			Bytes    int64  `json:"bytes"`
+			Filename string `json:"filename"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out.String()), &env), "expected valid JSON envelope, got %q", out.String())
+	assert.True(t, env.OK)
+	assert.Equal(t, dest, env.Data.Path)
+	assert.Equal(t, int64(len("PDF bytes here")), env.Data.Bytes)
+	assert.Equal(t, "report.pdf", env.Data.Filename)
+}
+
+// TestDownload_JSONEnvelope_SuppressedOnStdout verifies that when output is
+// stdout (--output -), the JSON envelope is NOT emitted even with --format json
+// because raw bytes already occupy stdout.
+func TestDownload_JSONEnvelope_SuppressedOnStdout(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeDownloadSvc{content: "binary payload", filename: "report.pdf"}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+
+	require.NoError(t, runDownload(context.Background(), &DownloadOptions{Output: "-"}, fopts, svc, "doc_abc"))
+
+	// stdout must contain only the raw bytes, not a JSON envelope.
+	assert.Equal(t, "binary payload", out.String())
 }

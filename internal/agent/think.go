@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -138,6 +139,69 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	thinkingID := generateEventID("thinking")
 	answerID := generateEventID("answer")
 
+	// Routing state shared across chunk callbacks:
+	//   - splitter separates inline <think>…</think> reasoning from answer text
+	//     in the plain `content` channel (models that don't use reasoning_content).
+	//   - thinkingOpen tracks whether the thought stream still needs a Done marker.
+	//   - answerStreamed records that user-facing answer text was sent live to
+	//     the final-answer area, so the natural-stop branch only emits Done.
+	splitter := agenttools.NewThinkStreamSplitter()
+	thinkingOpen := false
+	answerStreamed := false
+
+	emitThought := func(content string, done bool) {
+		if content == "" && !done {
+			return
+		}
+		emittedEventTypes["thought_chunk"]++
+		e.eventBus.Emit(ctx, event.Event{
+			ID:        thinkingID,
+			Type:      event.EventAgentThought,
+			SessionID: sessionID,
+			Data: event.AgentThoughtData{
+				Content:   content,
+				Iteration: iteration,
+				Done:      done,
+			},
+		})
+	}
+	// closeThinking emits the thought Done marker once, used right before the
+	// first answer chunk so the UI flips the thinking card to "completed"
+	// instead of leaving it spinning while the answer streams.
+	closeThinking := func() {
+		if thinkingOpen {
+			emitThought("", true)
+			thinkingOpen = false
+		}
+	}
+	emitAnswer := func(content string) {
+		if content == "" {
+			return
+		}
+		// Suppress whitespace-only content emitted before the real answer has
+		// started. OpenAI-compatible models frequently prepend a stray newline
+		// (e.g. "\n\n") to the plain content channel in the same chunk where
+		// they request tool calls. Routing that to the final-answer area leaks
+		// spurious empty "answer" events interleaved with tool_call events.
+		// Once genuine answer text has streamed (answerStreamed), preserve all
+		// whitespace so the answer's own formatting stays intact.
+		if !answerStreamed && strings.TrimSpace(content) == "" {
+			return
+		}
+		closeThinking()
+		answerStreamed = true
+		emittedEventTypes["final_answer_chunk"]++
+		e.eventBus.Emit(ctx, event.Event{
+			ID:        answerID,
+			Type:      event.EventAgentFinalAnswer,
+			SessionID: sessionID,
+			Data: event.AgentFinalAnswerData{
+				Content: content,
+				Done:    false,
+			},
+		})
+	}
+
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
@@ -160,23 +224,6 @@ func (e *AgentEngine) streamThinkingToEventBus(
 							Iteration:  iteration,
 						},
 					})
-				}
-			}
-
-			// Handle final_answer tool's streaming answer content
-			if chunk.ResponseType == types.ResponseTypeAnswer {
-				if source, _ := chunk.Data["source"].(string); source == "final_answer_tool" {
-					emittedEventTypes["final_answer_chunk"]++
-					e.eventBus.Emit(ctx, event.Event{
-						ID:        answerID,
-						Type:      event.EventAgentFinalAnswer,
-						SessionID: sessionID,
-						Data: event.AgentFinalAnswerData{
-							Content: chunk.Content,
-							Done:    false,
-						},
-					})
-					return
 				}
 			}
 
@@ -204,18 +251,41 @@ func (e *AgentEngine) streamThinkingToEventBus(
 				}
 			}
 
+			// reasoning_content (separate thinking channel, e.g. DeepSeek V4) →
+			// thought area. Forward the Done marker the provider sends when it
+			// transitions from reasoning to answer.
+			if chunk.ResponseType == types.ResponseTypeThinking {
+				if chunk.Content != "" {
+					thinkingOpen = true
+					emitThought(chunk.Content, false)
+				} else if chunk.Done && thinkingOpen {
+					closeThinking()
+				}
+				return
+			}
+
+			// Plain content channel. Streamed live to the answer area
+			// (optimistically rendered as the final answer). If the round turns
+			// out to call tools, this was a preamble; the subsequent tool-call
+			// events let the UI retract it from the answer area and relocate it
+			// into the steps. Split out any inline <think> reasoning so it goes
+			// to the thought area instead.
 			if chunk.Content != "" {
-				emittedEventTypes["thought_chunk"]++
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        thinkingID, // Same ID for all chunks in this stream
-					Type:      event.EventAgentThought,
-					SessionID: sessionID,
-					Data: event.AgentThoughtData{
-						Content:   chunk.Content,
-						Iteration: iteration,
-						Done:      chunk.Done,
-					},
-				})
+				thinkPart, answerPart := splitter.Feed(chunk.Content)
+				if thinkPart != "" {
+					thinkingOpen = true
+					emitThought(thinkPart, false)
+				}
+				emitAnswer(answerPart)
+			}
+			if chunk.Done {
+				thinkPart, answerPart := splitter.Flush()
+				if thinkPart != "" {
+					thinkingOpen = true
+					emitThought(thinkPart, false)
+				}
+				emitAnswer(answerPart)
+				closeThinking()
 			}
 		},
 	)
@@ -243,6 +313,10 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		ReasoningContent: llmResult.ReasoningContent,
 		ToolCalls:        llmResult.ToolCalls,
 		FinishReason:     finishReason,
+		AnswerStreamed:   answerStreamed,
+	}
+	if answerStreamed {
+		resp.AnswerEventID = answerID
 	}
 	if llmResult.Usage != nil {
 		resp.Usage = *llmResult.Usage

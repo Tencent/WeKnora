@@ -658,6 +658,16 @@ type WikiBatchContext struct {
 	// Already Normalize()'d — consumers can assume it is one of the
 	// three valid values.
 	ExtractionGranularity types.WikiExtractionGranularity
+
+	// PlannedFolderID holds the per-slug wiki_folders.id assigned by the batch
+	// taxonomy planning pass (planBatchTaxonomy + folder resolution), keyed by
+	// page slug. Reduce applies it only to pages that aren't already filed
+	// (FolderID == ""), so the whole batch lands on one coherent tree without
+	// churning user-curated placements. The folders themselves are created
+	// sequentially before reduce, so the parallel reduce phase only assigns
+	// pre-resolved ids and never races on folder creation. Read-only during
+	// reduce.
+	PlannedFolderID map[string]string
 }
 
 // SlugUpdate represents a single update operation for a specific slug
@@ -1197,6 +1207,100 @@ func collectLinkRefs(pages []*types.WikiPage) []linkRef {
 	return refs
 }
 
+// wikiTaxonomyPromptMaxPaths caps how many existing folders are rendered into a
+// planning prompt as the set to reuse. Reached only for pathologically large
+// taxonomies; the similarity preprocessing keeps the fed set well under it.
+const wikiTaxonomyPromptMaxPaths = 150
+
+// wikiTaxonomyFolderPoolMax bounds the existing folders pulled from the DB as the
+// candidate pool for similarity selection. Distinct folders are few even for
+// large KBs, so this only guards against a degenerate taxonomy.
+const wikiTaxonomyFolderPoolMax = 400
+
+// wikiTaxonomyFeedAllMaxFolders is the folder count at or below which the whole
+// folder set is fed to the planner as-is: a healthy navigation directory is
+// small, so feeding everything gives perfect reuse recall with no embedding cost
+// (similarity preprocessing only earns its keep once folders are numerous).
+const wikiTaxonomyFeedAllMaxFolders = 60
+
+// wikiTaxonomyRelevantTopK is how many nearest existing deeper folders each item
+// contributes to the reuse set when similarity preprocessing kicks in.
+const wikiTaxonomyRelevantTopK = 3
+
+// wikiTaxonomyPlanChunkSize caps how many items go into a single planning call.
+// Larger batches are split into chunks; folders assigned by earlier chunks are
+// fed forward as "existing folders" so later chunks converge onto the same tree.
+const wikiTaxonomyPlanChunkSize = 60
+
+const wikiTaxonomyEmptyTreeHint = "(none yet — this knowledge base has no folders, design a fresh directory)"
+
+type wikiTaxonomyNode struct {
+	children map[string]*wikiTaxonomyNode
+}
+
+func insertWikiTaxonomyPath(root *wikiTaxonomyNode, path []string) {
+	if root == nil || len(path) == 0 {
+		return
+	}
+	cur := root
+	for _, part := range path {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if cur.children == nil {
+			cur.children = make(map[string]*wikiTaxonomyNode)
+		}
+		child := cur.children[part]
+		if child == nil {
+			child = &wikiTaxonomyNode{}
+			cur.children[part] = child
+		}
+		cur = child
+	}
+}
+
+func appendWikiTaxonomyNode(buf *strings.Builder, label string, node *wikiTaxonomyNode, depth int) {
+	if label != "" {
+		fmt.Fprintf(buf, "%s%s\n", strings.Repeat("  ", depth), label)
+	}
+	if node == nil || len(node.children) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(node.children))
+	for k := range node.children {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		appendWikiTaxonomyNode(buf, k, node.children[k], depth+1)
+	}
+}
+
+// formatExistingTaxonomyForPrompt renders distinct category_path values as an
+// indented folder tree for LLM extraction prompts.
+func formatExistingTaxonomyForPrompt(paths [][]string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	root := &wikiTaxonomyNode{}
+	for _, path := range paths {
+		insertWikiTaxonomyPath(root, path)
+	}
+	if len(root.children) == 0 {
+		return ""
+	}
+	var buf strings.Builder
+	keys := make([]string, 0, len(root.children))
+	for k := range root.children {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		appendWikiTaxonomyNode(&buf, k, root.children[k], 0)
+	}
+	return strings.TrimSpace(buf.String())
+}
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs
@@ -1693,8 +1797,10 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		return "", fmt.Errorf("parse template: %w", err)
 	}
 
+	maskedData, urlMap := maskTemplateDataImageURLs(data)
+
 	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.Execute(&buf, maskedData); err != nil {
 		return "", fmt.Errorf("execute template: %w", err)
 	}
 
@@ -1710,7 +1816,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 			Thinking:    &thinking,
 		})
 		if err == nil {
-			return response.Content, nil
+			return unmaskImageURLs(response.Content, urlMap), nil
 		}
 		lastErr = err
 
@@ -1999,7 +2105,159 @@ var (
 	// <image_caption>...</image_caption> blocks, and stripping the content
 	// would silently destroy the very text we want to keep.
 	imageWrapperTagRE = regexp.MustCompile(`(?i)</?image[a-z_]*\b[^>]*/?>`)
+
+	// Markdown image references with the URL captured separately so LLM-bound
+	// image URLs can be frozen while captions remain editable.
+	mdImageURLRE = regexp.MustCompile(`!\[[^\]]*\]\(([^)]*)\)`)
+
+	// Enriched image blocks store the original object URL as an attribute,
+	// e.g. <image url="...">. Capture both double- and single-quoted forms.
+	imageURLAttrRE = regexp.MustCompile(`(?i)<image\b[^>]*\surl\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+
+	imagePlaceholderTokenRE = regexp.MustCompile(`wkimg:[A-Za-z0-9_-]+`)
 )
+
+func maskTemplateDataImageURLs(data map[string]string) (map[string]string, map[string]string) {
+	if len(data) == 0 {
+		return data, nil
+	}
+
+	masked := make(map[string]string, len(data))
+	urlToToken := make(map[string]string)
+	tokenToURL := make(map[string]string)
+
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		masked[key] = maskImageURLsWithState(data[key], urlToToken, tokenToURL)
+	}
+
+	return masked, tokenToURL
+}
+
+// maskImageURLs replaces image URLs with low-entropy placeholders. It only
+// freezes URLs; alt/caption text remains in place for the LLM to edit.
+func maskImageURLs(s string) (string, map[string]string) {
+	urlToToken := make(map[string]string)
+	tokenToURL := make(map[string]string)
+	return maskImageURLsWithState(s, urlToToken, tokenToURL), tokenToURL
+}
+
+func maskImageURLsWithState(s string, urlToToken, tokenToURL map[string]string) string {
+	urls := collectMaskableImageURLs(s)
+	if len(urls) == 0 {
+		return s
+	}
+
+	for _, url := range urls {
+		if _, ok := urlToToken[url]; ok {
+			continue
+		}
+		token := fmt.Sprintf("wkimg:%04d", len(tokenToURL)+1)
+		urlToToken[url] = token
+		tokenToURL[token] = url
+	}
+
+	replaceURLs := append([]string(nil), urls...)
+	sort.SliceStable(replaceURLs, func(i, j int) bool {
+		return len(replaceURLs[i]) > len(replaceURLs[j])
+	})
+
+	masked := s
+	for _, url := range replaceURLs {
+		masked = strings.ReplaceAll(masked, url, urlToToken[url])
+	}
+	return masked
+}
+
+func collectMaskableImageURLs(s string) []string {
+	seen := make(map[string]struct{})
+	var urls []string
+
+	addURL := func(url string) {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			return
+		}
+		if _, ok := seen[url]; ok {
+			return
+		}
+		seen[url] = struct{}{}
+		urls = append(urls, url)
+	}
+
+	for _, match := range mdImageURLRE.FindAllStringSubmatch(s, -1) {
+		addURL(match[1])
+	}
+	for _, match := range imageURLAttrRE.FindAllStringSubmatch(s, -1) {
+		if match[1] != "" {
+			addURL(match[1])
+			continue
+		}
+		addURL(match[2])
+	}
+
+	return urls
+}
+
+// unmaskImageURLs restores known placeholders and drops any corrupted or
+// invented image placeholders so broken image links never reach storage.
+func unmaskImageURLs(out string, urlMap map[string]string) string {
+	out = mdImageURLRE.ReplaceAllStringFunc(out, func(match string) string {
+		parts := mdImageURLRE.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		url := strings.TrimSpace(parts[1])
+		if realURL, ok := urlMap[url]; ok {
+			idx := strings.LastIndex(match, "(")
+			if idx < 0 {
+				return match
+			}
+			return match[:idx+1] + realURL + ")"
+		}
+		if strings.HasPrefix(url, "wkimg:") {
+			return ""
+		}
+		return match
+	})
+
+	return replaceImagePlaceholderTokensOutsideMarkdown(out, urlMap)
+}
+
+func replaceImagePlaceholderTokensOutsideMarkdown(s string, urlMap map[string]string) string {
+	matches := mdImageURLRE.FindAllStringIndex(s, -1)
+	if len(matches) == 0 {
+		return replaceImagePlaceholderTokens(s, urlMap)
+	}
+
+	var b strings.Builder
+	last := 0
+	for _, match := range matches {
+		if match[0] > last {
+			b.WriteString(replaceImagePlaceholderTokens(s[last:match[0]], urlMap))
+		}
+		b.WriteString(s[match[0]:match[1]])
+		last = match[1]
+	}
+	if last < len(s) {
+		b.WriteString(replaceImagePlaceholderTokens(s[last:], urlMap))
+	}
+	return b.String()
+}
+
+func replaceImagePlaceholderTokens(s string, urlMap map[string]string) string {
+	return imagePlaceholderTokenRE.ReplaceAllStringFunc(s, func(token string) string {
+		if realURL, ok := urlMap[token]; ok {
+			return realURL
+		}
+		return ""
+	})
+}
 
 // stripImageMarkup removes image-only placeholders (Markdown image refs,
 // <img> tags, <image_original> redundancy blocks) and unwraps the

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
-import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse } from '@/api/knowledge-base/index'
+import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledgeDetails } from '@/api/knowledge-base/index'
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace'
+import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
 interface SpanNode {
   span_id?: string
@@ -92,6 +93,8 @@ const STAGES = ['docreader', 'chunking', 'embedding', 'multimodal', 'postprocess
 const POLL_INTERVAL_MS = 2000
 
 const data = ref<SpansResponse | null>(null)
+const processOverrides = ref<KnowledgeProcessOverrides | null>(null)
+const currentKnowledgeFileType = ref('')
 const loading = ref(false)
 const refreshing = ref(false)
 const selectedAttempt = ref<number | undefined>(undefined)
@@ -473,31 +476,20 @@ const canCancelParse = computed<boolean>(() => {
   return isPolling(status)
 })
 
-function onCancelParse() {
+async function onCancelParseConfirm() {
   if (cancelling.value) return
   const id = props.knowledgeId
   if (!id) return
-  const dialog = DialogPlugin.confirm({
-    header: t('knowledgeBase.cancelParse'),
-    body: t('knowledgeBase.cancelParseConfirmBody', { title: props.docTitle || id }) as string,
-    confirmBtn: { content: t('knowledgeBase.cancelParse') as string, theme: 'danger' },
-    cancelBtn: t('common.cancel') as string,
-    theme: 'warning',
-    onConfirm: async () => {
-      cancelling.value = true
-      try {
-        await cancelKnowledgeParse(id)
-        MessagePlugin.success(t('knowledgeBase.cancelParseSubmitted'))
-        await fetchSpans({ manual: true })
-      } catch (e: any) {
-        MessagePlugin.error(e?.message || t('knowledgeBase.cancelParseFailed'))
-      } finally {
-        cancelling.value = false
-        dialog.hide()
-      }
-    },
-    onClose: () => dialog.destroy(),
-  })
+  cancelling.value = true
+  try {
+    await cancelKnowledgeParse(id)
+    MessagePlugin.success(t('knowledgeBase.cancelParseSubmitted'))
+    await fetchSpans({ manual: true })
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.cancelParseFailed'))
+  } finally {
+    cancelling.value = false
+  }
 }
 
 function onAttemptChange(n: number) {
@@ -516,11 +508,14 @@ watch(
   () => {
     selectedAttempt.value = undefined
     data.value = null
+    processOverrides.value = null
+    currentKnowledgeFileType.value = ''
     expandedRows.value = new Set(['__root__'])
     selectedSpanId.value = null
     attemptStatuses.clear()
     userToggledRows.value = new Set()
     fetchSpans()
+    fetchProcessOverrides()
   },
 )
 
@@ -530,8 +525,25 @@ function onKeydown(ev: KeyboardEvent) {
   }
 }
 
+async function fetchProcessOverrides() {
+  if (props.compact || !props.knowledgeId) return
+  try {
+    const res: any = await getKnowledgeDetails(props.knowledgeId)
+    if (res?.success && res.data) {
+      processOverrides.value = res.data.metadata?.process_overrides ?? null
+      currentKnowledgeFileType.value = normalizeFileType(
+        res.data.file_type || getFileTypeFromName(res.data.file_name || res.data.title || ''),
+      )
+    }
+  } catch {
+    processOverrides.value = null
+    currentKnowledgeFileType.value = ''
+  }
+}
+
 onMounted(() => {
   fetchSpans()
+  fetchProcessOverrides()
   // One permanent interval for the entire component lifetime. The
   // tick decides whether to actually fetch — no clearing, no
   // re-arming, no watchers wired into it. If this interval ever
@@ -1301,6 +1313,71 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
     pct: typeof s.duration_ms === 'number' && s.duration_ms > 0 ? Math.min(100, (s.duration_ms / total) * 100) : 0,
   }))
 })
+
+function normalizeFileType(value: string): string {
+  return String(value || '').trim().replace(/^\./, '').toLowerCase()
+}
+
+function getFileTypeFromName(name: string): string {
+  const clean = String(name || '').split(/[?#]/)[0]
+  const dot = clean.lastIndexOf('.')
+  return dot >= 0 ? clean.slice(dot + 1) : ''
+}
+
+function formatParserRulesForCurrentFile(
+  rules: Array<{ file_types?: string[]; engine?: string }>,
+): string {
+  const currentType = currentKnowledgeFileType.value
+  if (currentType) {
+    const matched = rules.find((rule) =>
+      (rule.file_types || []).some((ft) => normalizeFileType(ft) === currentType),
+    )
+    if (matched?.engine) {
+      return `${currentType}→${matched.engine}`
+    }
+  }
+  return rules.map(r => `${(r.file_types || []).join('/')}→${r.engine}`).join(', ')
+}
+
+// Human-readable summary of the per-upload parse overrides stored in
+// knowledge.metadata.process_overrides. Empty overrides → KB defaults.
+const processConfigLines = computed<string[]>(() => {
+  const o = processOverrides.value
+  if (!o) return [t('knowledgeStages.processConfig.kbDefault')]
+  const k = (s: string) => `knowledgeStages.processConfig.${s}`
+  const onOff = (v: boolean) => (v ? t(k('on')) : t(k('off')))
+  const lines: string[] = []
+
+  const cc = o.chunking_config
+  if (cc) {
+    const parts: string[] = []
+    if (cc.chunk_size != null) parts.push(t(k('chunkSize'), { n: cc.chunk_size }))
+    if (cc.enable_parent_child != null) {
+      parts.push(cc.enable_parent_child ? t(k('parentChildOn')) : t(k('parentChildOff')))
+    }
+    if (parts.length) lines.push(`${t(k('chunking'))}: ${parts.join(' · ')}`)
+  }
+
+  const rules = o.parser_engine_rules || cc?.parser_engine_rules
+  if (rules?.length) {
+    lines.push(`${t(k('parser'))}: ${formatParserRulesForCurrentFile(rules)}`)
+  }
+
+  const mm = o.vlm_config?.enabled ?? o.enable_multimodel
+  if (mm != null) lines.push(`${t(k('multimodal'))}: ${onOff(mm)}`)
+
+  if (o.asr_config?.enabled != null) lines.push(`${t(k('asr'))}: ${onOff(o.asr_config.enabled)}`)
+
+  const qg = o.question_generation_config
+  if (qg?.enabled != null) {
+    lines.push(`${t(k('question'))}: ${qg.enabled ? t(k('questionOn'), { n: qg.question_count ?? 3 }) : t(k('off'))}`)
+  }
+
+  const graph = o.graph_enabled ?? o.extract_config?.enabled
+  if (graph != null) lines.push(`${t(k('graph'))}: ${onOff(graph)}`)
+
+  return lines.length ? lines : [t('knowledgeStages.processConfig.kbDefault')]
+})
 </script>
 
 <template>
@@ -1344,6 +1421,19 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               <span class="kp-live-text">{{ t('knowledgeStages.live') }}</span>
             </span>
             <div class="kp-head-actions">
+              <t-popup trigger="hover" placement="bottom-right" :overlay-style="{ maxWidth: '340px' }">
+                <button type="button" class="kp-icon-btn"
+                  :title="t('knowledgeStages.processConfig.title')"
+                  :aria-label="t('knowledgeStages.processConfig.title')">
+                  <t-icon name="info-circle" size="14px" />
+                </button>
+                <template #content>
+                  <div class="kp-proccfg-pop">
+                    <div class="kp-proccfg-title">{{ t('knowledgeStages.processConfig.title') }}</div>
+                    <div v-for="(line, i) in processConfigLines" :key="i" class="kp-proccfg-line">{{ line }}</div>
+                  </div>
+                </template>
+              </t-popup>
               <button type="button" class="kp-icon-btn" :class="{
                 'kp-icon-btn-spin': refreshing,
                 'kp-icon-btn-autoflow': isLive && !refreshing,
@@ -1353,12 +1443,22 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 @click="onManualRefresh">
                 <t-icon name="refresh" size="14px" />
               </button>
-              <button v-if="canCancelParse" type="button" class="kp-icon-btn kp-icon-btn-danger"
-                :class="{ 'kp-icon-btn-spin': cancelling }" :disabled="cancelling"
-                :title="t('knowledgeBase.cancelParse')" :aria-label="t('knowledgeBase.cancelParse')"
-                @click="onCancelParse">
-                <t-icon :name="cancelling ? 'loading' : 'close-circle'" size="15px" />
-              </button>
+              <t-popconfirm
+                v-if="canCancelParse"
+                theme="warning"
+                :content="t('knowledgeBase.cancelParseConfirmBody', { title: props.docTitle || props.knowledgeId })"
+                :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+                :cancel-btn="{ content: t('common.cancel') }"
+                placement="bottom"
+                @confirm="onCancelParseConfirm"
+              >
+                <button type="button" class="kp-icon-btn kp-icon-btn-danger"
+                  :class="{ 'kp-icon-btn-spin': cancelling }" :disabled="cancelling"
+                  :title="t('knowledgeBase.cancelParse')" :aria-label="t('knowledgeBase.cancelParse')"
+                  @click.stop>
+                  <t-icon :name="cancelling ? 'loading' : 'close-circle'" size="15px" />
+                </button>
+              </t-popconfirm>
               <t-button v-if="data?.parse_status === 'failed'" size="small" theme="primary" variant="outline"
                 @click="onRetry">
                 <t-icon name="refresh" size="14px" />
@@ -3163,5 +3263,27 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 .kp-stage-emph {
   color: var(--td-brand-color);
   font-weight: 600;
+}
+
+.kp-proccfg-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+  max-width: 320px;
+}
+
+.kp-proccfg-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  margin-bottom: 2px;
+}
+
+.kp-proccfg-line {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+  word-break: break-word;
 }
 </style>

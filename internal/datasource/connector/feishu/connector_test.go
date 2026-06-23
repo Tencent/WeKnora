@@ -161,12 +161,41 @@ func fakeFeishuWithChildFailure(topNodes []wikiNode, failingParentToken string) 
 
 func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, failingParentToken string) (*httptest.Server, *Config) {
 	mux := http.NewServeMux()
+	nodeByToken := make(map[string]wikiNode)
+	for _, node := range topNodes {
+		node.SpaceID = "space1"
+		nodeByToken[node.NodeToken] = node
+	}
+	for parentToken, nodes := range childNodes {
+		for _, node := range nodes {
+			node.SpaceID = "space1"
+			if node.ParentNodeID == "" {
+				node.ParentNodeID = parentToken
+			}
+			nodeByToken[node.NodeToken] = node
+		}
+	}
 
 	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, tokenResponse{
 			apiResponse:       apiResponse{Code: 0},
 			TenantAccessToken: "fake-token",
 			Expire:            7200,
+		})
+	})
+
+	mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, wikiSpaceListResponse{
+			apiResponse: apiResponse{Code: 0},
+			Data: struct {
+				Items     []wikiSpace `json:"items"`
+				HasMore   bool        `json:"has_more"`
+				PageToken string      `json:"page_token"`
+			}{
+				Items: []wikiSpace{
+					{SpaceID: "space1", Name: "Test Space", Description: "desc", Visibility: "public"},
+				},
+			},
 		})
 	})
 
@@ -180,6 +209,14 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 		nodes := topNodes
 		if parentToken != "" {
 			nodes = childNodes[parentToken]
+			for i := range nodes {
+				if nodes[i].ParentNodeID == "" {
+					nodes[i].ParentNodeID = parentToken
+				}
+				if nodes[i].SpaceID == "" {
+					nodes[i].SpaceID = "space1"
+				}
+			}
 		}
 		writeJSON(w, wikiNodeListResponse{
 			apiResponse: apiResponse{Code: 0},
@@ -190,6 +227,23 @@ func fakeFeishuHierarchy(topNodes []wikiNode, childNodes map[string][]wikiNode, 
 			}{
 				Items: nodes,
 			},
+		})
+	})
+
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/get_node", func(w http.ResponseWriter, r *http.Request) {
+		nodeToken := r.URL.Query().Get("token")
+		node, ok := nodeByToken[nodeToken]
+		if !ok {
+			writeJSON(w, wikiNodeInfoResponse{
+				apiResponse: apiResponse{Code: 1663, Msg: "node not found"},
+			})
+			return
+		}
+		writeJSON(w, wikiNodeInfoResponse{
+			apiResponse: apiResponse{Code: 0},
+			Data: struct {
+				Node wikiNode `json:"node"`
+			}{Node: node},
 		})
 	})
 
@@ -392,7 +446,7 @@ func TestConnectorListResources(t *testing.T) {
 	defer ts.Close()
 
 	c := NewConnector()
-	resources, err := c.ListResources(context.Background(), makeConfig(cfg, nil))
+	resources, err := c.ListResources(context.Background(), makeConfig(cfg, nil), "")
 	if err != nil {
 		t.Fatalf("ListResources() error: %v", err)
 	}
@@ -408,6 +462,133 @@ func TestConnectorListResources(t *testing.T) {
 	}
 	if resources[0].Type != "wiki_space" {
 		t.Errorf("Type = %q, want %q", resources[0].Type, "wiki_space")
+	}
+	if !resources[0].HasChildren {
+		t.Errorf("HasChildren = false, want true")
+	}
+}
+
+// TestConnectorListResources_LazyLoadsOneLevel verifies that ListResources loads
+// the wiki tree lazily — only the requested level — instead of recursing the whole
+// tree up front (Tencent/WeKnora#1672).
+func TestConnectorListResources_LazyLoadsOneLevel(t *testing.T) {
+	topNodes := []wikiNode{
+		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true, ObjEditTime: "100"},
+		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "docx", Title: "Peer", ObjEditTime: "200"},
+	}
+	childNodes := map[string][]wikiNode{
+		"nt-root": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", ObjEditTime: "300"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
+	defer ts.Close()
+
+	c := NewConnector()
+
+	// Root listing: only the space, no descendants.
+	spaces, err := c.ListResources(context.Background(), makeConfig(cfg, nil), "")
+	if err != nil {
+		t.Fatalf("ListResources(root) error: %v", err)
+	}
+	if len(spaces) != 1 || spaces[0].ExternalID != "space1" || !spaces[0].HasChildren {
+		t.Fatalf("want single space with children, got %+v", spaces)
+	}
+
+	// Expanding the space returns only its top-level nodes.
+	top, err := c.ListResources(context.Background(), makeConfig(cfg, nil), "space1")
+	if err != nil {
+		t.Fatalf("ListResources(space1) error: %v", err)
+	}
+	if len(top) != 2 {
+		t.Fatalf("want 2 top-level nodes, got %d: %+v", len(top), top)
+	}
+	byID := make(map[string]types.Resource)
+	for _, r := range top {
+		byID[r.ExternalID] = r
+	}
+	root := byID["space1:nt-root"]
+	if root.ParentID != "space1" || !root.HasChildren {
+		t.Fatalf("root node resource wrong: %+v", root)
+	}
+
+	// Expanding a node returns only its direct children.
+	children, err := c.ListResources(context.Background(), makeConfig(cfg, nil), "space1:nt-root")
+	if err != nil {
+		t.Fatalf("ListResources(space1:nt-root) error: %v", err)
+	}
+	if len(children) != 1 {
+		t.Fatalf("want 1 child node, got %d: %+v", len(children), children)
+	}
+	child := children[0]
+	if child.ExternalID != "space1:nt-child" || child.ParentID != "space1:nt-root" || child.Name != "Child" {
+		t.Fatalf("child resource wrong: %+v", child)
+	}
+	if child.Metadata["space_id"] != "space1" || child.Metadata["node_token"] != "nt-child" {
+		t.Fatalf("child metadata wrong: %+v", child.Metadata)
+	}
+}
+
+// TestConnectorResolveResourceAncestors verifies that the ancestor chain of a
+// deeply nested selection is resolved (so an edit-mode picker can reveal it)
+// without listing the whole tree.
+func TestConnectorResolveResourceAncestors(t *testing.T) {
+	topNodes := []wikiNode{
+		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "docx", Title: "Root", HasChild: true},
+	}
+	childNodes := map[string][]wikiNode{
+		"nt-root": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "docx", Title: "Child", HasChild: true},
+		},
+		"nt-child": {
+			{NodeToken: "nt-grandchild", ObjToken: "obj-gc", ObjType: "docx", Title: "Grandchild"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
+	defer ts.Close()
+
+	c := NewConnector()
+
+	// A deeply nested node resolves to its space plus every intermediate parent.
+	ancestors, err := c.ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"space1:nt-grandchild"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors error: %v", err)
+	}
+	got := make(map[string]bool)
+	for _, a := range ancestors {
+		got[a] = true
+	}
+	for _, want := range []string{"space1", "space1:nt-root", "space1:nt-child"} {
+		if !got[want] {
+			t.Fatalf("missing ancestor %q, got %+v", want, ancestors)
+		}
+	}
+	if got["space1:nt-grandchild"] {
+		t.Fatalf("selection itself must not be returned as its own ancestor: %+v", ancestors)
+	}
+
+	// A top-level node only needs its space loaded.
+	ancestors, err = c.ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"space1:nt-root"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(top-level) error: %v", err)
+	}
+	if len(ancestors) != 1 || ancestors[0] != "space1" {
+		t.Fatalf("want [space1] for a top-level node, got %+v", ancestors)
+	}
+
+	// A whole-space selection is already top-level: nothing to reveal.
+	ancestors, err = c.ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"space1"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(space) error: %v", err)
+	}
+	if len(ancestors) != 0 {
+		t.Fatalf("want no ancestors for a space selection, got %+v", ancestors)
 	}
 }
 
@@ -632,6 +813,46 @@ func TestFetchAll_ChildNodeListErrorReturnsPartialItems(t *testing.T) {
 	}
 	if !strings.Contains(placeholder.Metadata["error"], "list children of nt-parent") {
 		t.Errorf("placeholder error = %q", placeholder.Metadata["error"])
+	}
+}
+
+func TestFetchAll_WikiNodeResourceSyncsSelectedSubtree(t *testing.T) {
+	topNodes := []wikiNode{
+		{NodeToken: "nt-root", ObjToken: "obj-root", ObjType: "file", Title: "Root.pdf", NodeEditTime: "100", HasChild: true},
+		{NodeToken: "nt-peer", ObjToken: "obj-peer", ObjType: "file", Title: "Peer.pdf", NodeEditTime: "200"},
+	}
+	childNodes := map[string][]wikiNode{
+		"nt-root": {
+			{NodeToken: "nt-child", ObjToken: "obj-child", ObjType: "file", Title: "Child.pdf", NodeEditTime: "300"},
+		},
+	}
+	ts, cfg := fakeFeishuHierarchy(topNodes, childNodes, "")
+	defer ts.Close()
+
+	resourceID := "space1:nt-root"
+	items, err := NewConnector().FetchAll(context.Background(), makeConfig(cfg, []string{resourceID}), []string{resourceID})
+	if err != nil {
+		t.Fatalf("FetchAll() error: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("want selected root and child only, got %d: %+v", len(items), items)
+	}
+
+	got := make(map[string]types.FetchedItem)
+	for _, item := range items {
+		got[item.ExternalID] = item
+	}
+	if _, ok := got["nt-root"]; !ok {
+		t.Fatal("selected root node was not fetched")
+	}
+	if _, ok := got["nt-child"]; !ok {
+		t.Fatal("child node was not fetched")
+	}
+	if _, ok := got["nt-peer"]; ok {
+		t.Fatal("peer outside selected subtree must not be fetched")
+	}
+	if got["nt-root"].SourceResourceID != resourceID || got["nt-child"].SourceResourceID != resourceID {
+		t.Fatalf("SourceResourceID should preserve selected resource id: %+v", got)
 	}
 }
 

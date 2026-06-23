@@ -19,14 +19,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/searchutil"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 func (s *knowledgeService) cloneKnowledge(
@@ -59,8 +57,32 @@ func (s *knowledgeService) cloneKnowledge(
 		StorageSize:      src.StorageSize,
 		Metadata:         src.Metadata,
 	}
+
+	// Deep-copy the source document file into an object owned by the destination
+	// knowledge. Without this the clone only shares the source's storage path, so
+	// deleting the source knowledge would destroy the clone's file too. The new
+	// object is tracked for cleanup if the clone fails downstream.
+	var copiedFilePaths []string
+	if src.FilePath != "" {
+		srcKB, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, src.KnowledgeBaseID)
+		if kbErr != nil {
+			return fmt.Errorf("clone knowledge: failed to load source knowledge base: %w", kbErr)
+		}
+		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
+		dstSvc := s.resolveFileService(ctx, targetKB)
+		newPath, copyErr := copyOwnedObject(ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID)
+		if copyErr != nil {
+			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
+		}
+		dst.FilePath = newPath
+		copiedFilePaths = append(copiedFilePaths, newPath)
+	}
+
 	defer func() {
 		if err != nil {
+			if len(copiedFilePaths) > 0 {
+				cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
+			}
 			dst.ParseStatus = "failed"
 			dst.ErrorMessage = err.Error()
 			_ = s.repo.UpdateKnowledge(ctx, dst)
@@ -179,13 +201,17 @@ func finalizeIndexedKnowledgeState(
 // identical whether callers come through this path or invoke the chunker
 // directly with a zero-value config.
 func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
+	return buildSplitterConfigFromChunking(kb.ChunkingConfig)
+}
+
+func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterConfig {
 	chunkCfg := chunker.SplitterConfig{
-		ChunkSize:    kb.ChunkingConfig.ChunkSize,
-		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
-		Separators:   kb.ChunkingConfig.Separators,
-		Strategy:     kb.ChunkingConfig.Strategy,
-		TokenLimit:   kb.ChunkingConfig.TokenLimit,
-		Languages:    kb.ChunkingConfig.Languages,
+		ChunkSize:    cc.ChunkSize,
+		ChunkOverlap: cc.ChunkOverlap,
+		Separators:   cc.Separators,
+		Strategy:     cc.Strategy,
+		TokenLimit:   cc.TokenLimit,
+		Languages:    cc.Languages,
 	}
 	if chunkCfg.ChunkSize <= 0 {
 		chunkCfg.ChunkSize = chunker.DefaultChunkSize
@@ -234,22 +260,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		options = opts[0]
 	}
 
-	ctx, span := tracing.ContextWithSpan(ctx, "knowledgeService.processChunks")
-	defer span.End()
-	span.SetAttributes(
-		attribute.Int("tenant_id", int(knowledge.TenantID)),
-		attribute.String("knowledge_base_id", knowledge.KnowledgeBaseID),
-		attribute.String("knowledge_id", knowledge.ID),
-		attribute.String("embedding_model_id", kb.EmbeddingModelID),
-		attribute.Int("chunk_count", len(chunks)),
-	)
-
 	// Check if knowledge is being deleted/cancelled before processing.
 	// Both statuses short-circuit identically here — there's nothing to clean
 	// up yet so the branch is purely "stop early".
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
-		span.AddEvent("aborted: knowledge " + status)
 		return
 	}
 
@@ -260,7 +275,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
-			span.RecordError(err)
 			return
 		}
 	} else {
@@ -465,14 +479,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Nothing has been persisted yet, so both branches just bail.
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
-		span.AddEvent("aborted: knowledge " + status + " before saving")
 		return
 	}
 
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
-	span.AddEvent("create chunks")
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
@@ -481,7 +493,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
-		span.RecordError(err)
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return
@@ -533,7 +544,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 
 		// Calculate storage size required for embeddings
-		span.AddEvent("estimate storage size")
 		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
 		if tenantInfo.StorageQuota > 0 {
 			// Re-fetch tenant storage information
@@ -543,7 +553,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
-				span.RecordError(err)
 				return
 			}
 			// Check if there's enough storage quota available
@@ -552,7 +561,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
-				span.RecordError(errors.New("storage quota exceeded"))
 				return
 			}
 		}
@@ -567,11 +575,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 			}
-			span.AddEvent("aborted: knowledge " + status + " before indexing")
 			return
 		}
 
-		span.AddEvent("batch index")
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
 		if err != nil {
 			knowledge.ParseStatus = types.ParseStatusFailed
@@ -590,7 +596,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			); err != nil {
 				logger.Errorf(ctx, "Delete index failed: %v", err)
 			}
-			span.RecordError(err)
 			// Map vector store / embedding rate-limit errors to a
 			// stable code so the UI can offer "retry later" hints.
 			code := werrors.ErrCodeVectorStoreWriteFailed
@@ -621,7 +626,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
 				}
 			}
-			span.AddEvent("aborted: knowledge " + status + " during processing")
 			return
 		}
 	} else {
@@ -1943,7 +1947,11 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 
 // ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
 // This method reuses the logic from UpdateManualKnowledge for resource cleanup and async parsing.
-func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
+func (s *knowledgeService) ReparseKnowledge(
+	ctx context.Context,
+	knowledgeID string,
+	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
@@ -1972,6 +1980,27 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		logger.Errorf(ctx, "Failed to get knowledge base for reparse: %v", err)
 		return nil, err
 	}
+
+	// When the caller supplies new overrides (e.g. via the reparse confirm
+	// dialog), validate them against this knowledge's file type, then persist
+	// to metadata so both this call's enqueue and the worker re-read the same
+	// config. nil keeps whatever was stored at upload time.
+	if processOverrides != nil {
+		if err := ValidateProcessOverrides(ctx, kb, processOverrides, reparseFileTypes(existing)); err != nil {
+			return nil, err
+		}
+		if err := existing.SetProcessOverrides(processOverrides); err != nil {
+			logger.Errorf(ctx, "Failed to set process overrides on reparse: %v", err)
+			return nil, err
+		}
+		if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "metadata", existing.Metadata); err != nil {
+			logger.Errorf(ctx, "Failed to persist process overrides on reparse: %v", err)
+			return nil, err
+		}
+	}
+
+	processOverrides, _ = existing.ProcessOverrides()
+	reparseEff := ResolveProcessConfig(kb, processOverrides)
 
 	// Keep wiki's pending queue consistent across both manual and non-manual
 	// paths. The destructive work (swapping old wiki contributions for new)
@@ -2060,17 +2089,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 	if existing.FilePath != "" {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-		// Determine multimodal setting
-		enableMultimodel := kb.IsMultimodalEnabled()
-
-		// Check question generation config
-		enableQuestionGeneration := false
-		questionCount := 3 // default
-		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-			enableQuestionGeneration = true
-			if kb.QuestionGenerationConfig.QuestionCount > 0 {
-				questionCount = kb.QuestionGenerationConfig.QuestionCount
-			}
+		enableMultimodel := reparseEff.EnableMultimodel
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
+		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
+		if questionCount <= 0 {
+			questionCount = 3
 		}
 
 		lang, _ := types.LanguageFromContext(ctx)
@@ -2119,16 +2142,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 	if existing.Type == "file_url" && existing.Source != "" {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-		enableMultimodel := kb.IsMultimodalEnabled()
-
-		// Check question generation config
-		enableQuestionGeneration := false
-		questionCount := 3
-		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-			enableQuestionGeneration = true
-			if kb.QuestionGenerationConfig.QuestionCount > 0 {
-				questionCount = kb.QuestionGenerationConfig.QuestionCount
-			}
+		enableMultimodel := reparseEff.EnableMultimodel
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
+		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
+		if questionCount <= 0 {
+			questionCount = 3
 		}
 
 		lang, _ := types.LanguageFromContext(ctx)
@@ -2172,16 +2190,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 	if existing.Type == "url" && existing.Source != "" {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-		enableMultimodel := kb.IsMultimodalEnabled()
-
-		// Check question generation config
-		enableQuestionGeneration := false
-		questionCount := 3
-		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-			enableQuestionGeneration = true
-			if kb.QuestionGenerationConfig.QuestionCount > 0 {
-				questionCount = kb.QuestionGenerationConfig.QuestionCount
-			}
+		enableMultimodel := reparseEff.EnableMultimodel
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
+		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
+		if questionCount <= 0 {
+			questionCount = 3
 		}
 
 		lang, _ := types.LanguageFromContext(ctx)
@@ -2734,6 +2747,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
+	processOverrides, _ := knowledge.ProcessOverrides()
+	eff := ResolveProcessConfig(kb, processOverrides)
+
 	// Re-check abort status right before flipping to "processing" — closes
 	// the race where the user cancels between the entry guard above and
 	// this write (otherwise the worker would overwrite cancelled→processing
@@ -2775,7 +2791,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// 检查音频ASR配置（仅对文件导入）
-	if payload.FilePath != "" && IsAudioType(payload.FileType) && !kb.ASRConfig.IsASREnabled() {
+	if payload.FilePath != "" && IsAudioType(payload.FileType) && !eff.ASRConfig.IsASREnabled() {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			Errorf("processDocument audio without ASR model configured")
 		knowledge.ParseStatus = "failed"
@@ -2857,7 +2873,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		payload.FilePath = filePath
 		payload.FileName = resolvedFileName
 		payload.FileType = resolvedFileType
-		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
 		if err != nil {
 			return err
 		}
@@ -2866,7 +2882,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	} else if payload.URL != "" {
 		// URL import
-		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
 		if err != nil {
 			return err
 		}
@@ -2910,7 +2926,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	} else {
 		// File import
-		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
 		if err != nil {
 			return err
 		}
@@ -2921,7 +2937,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 1.5: ASR transcription for audio files
 	if convertResult != nil && convertResult.IsAudio && len(convertResult.AudioData) > 0 {
-		if !kb.ASRConfig.IsASREnabled() {
+		if !eff.ASRConfig.IsASREnabled() {
 			logger.Error(ctx, "Audio file detected but ASR is not configured")
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
@@ -2933,7 +2949,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "[ASR] Starting audio transcription for knowledge %s, audio size=%d bytes",
 			knowledge.ID, len(convertResult.AudioData))
 
-		asrModel, err := s.modelService.GetASRModel(ctx, kb.ASRConfig.ModelID)
+		asrModel, err := s.modelService.GetASRModel(ctx, eff.ASRConfig.ModelID)
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
 			knowledge.ParseStatus = "failed"
@@ -3003,7 +3019,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// Step 3: Split into chunks using Go chunker
-	chunkCfg := buildSplitterConfig(kb)
+	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
@@ -3016,8 +3032,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		processOpts.Metadata = convertResult.Metadata
 	}
 
-	if kb.ChunkingConfig.EnableParentChild {
-		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
+	if eff.ChunkingConfig.EnableParentChild {
+		parentCfg, childCfg := buildParentChildConfigs(eff.ChunkingConfig, chunkCfg)
 		pcResult := chunker.SplitParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
 		chunks = make([]types.ParsedChunk, len(pcResult.Children))
 		for i, c := range pcResult.Children {
@@ -3064,6 +3080,7 @@ func (s *knowledgeService) convert(
 	payload types.DocumentProcessPayload,
 	kb *types.KnowledgeBase,
 	knowledge *types.Knowledge,
+	eff types.EffectiveProcessConfig,
 	isLastRetry bool,
 ) (*types.ReadResult, error) {
 	// Stage tracking: docreader. Mark the stage as running here so the
@@ -3097,13 +3114,13 @@ func (s *knowledgeService) convert(
 		}
 	}
 
-	parserEngine := kb.ChunkingConfig.ResolveParserEngine(fileType)
+	parserEngine := eff.ChunkingConfig.ResolveParserEngine(fileType)
 	if isURL {
-		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
+		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
 	}
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
-		kb.ID, fileType, isURL, parserEngine, kb.ChunkingConfig.ParserEngineRules)
+		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
 
 	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
 	if reader == nil {
@@ -3256,6 +3273,10 @@ func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileTyp
 		return docparser.NewMinerUReader(overrides)
 	case "mineru_cloud":
 		return docparser.NewMinerUCloudReader(overrides)
+	case "paddleocr_vl":
+		return docparser.NewPaddleOCRVLReader(overrides)
+	case "paddleocr_vl_cloud":
+		return docparser.NewPaddleOCRVLCloudReader(overrides)
 	case "builtin":
 		// 明确指定使用 builtin 引擎（docreader），不使用 simple format 兜底
 		return s.documentReader
@@ -3343,7 +3364,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			continue
 		}
 
-		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes)
+		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes, asynq.Queue(types.QueueMultimodal))
 		if _, err := s.task.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
 		} else {

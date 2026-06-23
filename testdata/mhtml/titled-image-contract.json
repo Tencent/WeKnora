@@ -1,0 +1,11 @@
+{
+  "markdown_content": "| 体验方向 | 代表内容 |\n| --- | --- |\n| 赛季制建立 | BP、Rank |\n\n![图片](images/第 1 页 (测试).gif \"阶段 1) 图片\")\n\n高机动性身法与独特枪械反馈\n\nalpha  \nbeta\n\n* parent\n  + child\n\n> quoted\n\n```\nline1\n\n\nline2\n```",
+  "images": [
+    {
+      "filename": "第 1 页 (测试).gif",
+      "original_ref": "images/第 1 页 (测试).gif",
+      "mime_type": "image/gif",
+      "image_data_base64": "R0lGODdhQABAAIEAAFCM3AAAAAAAAAAAACwAAAAAQABAAEAIaQABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyBDihxJsqTJkyhTqlzJsqXLlzBjypxJs6bNmzhz6tzJs6fPn0CDCh1KtKjRo0iTKl3KtKnTp1CjSp1KtarVq1izagUQEAA7"
+    }
+  ]
+}

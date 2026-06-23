@@ -13,9 +13,8 @@ import (
 )
 
 type LogoutOptions struct {
-	Name   string // --name: target a specific profile (default: current)
-	All    bool   // --all: clear every profile
-	Yes    bool   // sourced from the global -y/--yes persistent flag
+	All    bool // --all: clear every profile
+	Yes    bool // sourced from the global -y/--yes persistent flag
 	DryRun bool
 }
 
@@ -43,8 +42,8 @@ them with --all) and drop the profile entry from ~/.config/weknora/config.yaml.
 Note: this does NOT revoke the credential server-side - for API keys, you
 must rotate them in the server UI; for JWT, the token will continue to be
 accepted until it expires.`,
-		Example: `  weknora auth logout                       # current profile
-  weknora auth logout --name staging        # specific profile
+		Example: `  weknora auth logout                       # active profile
+  weknora --profile staging auth logout     # specific profile
   weknora auth logout --all`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -64,16 +63,11 @@ accepted until it expires.`,
 			if len(cfg.Profiles) == 0 {
 				return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
 			}
-			if opts.Name != "" {
-				if err := cmdutil.ValidateProfileName(opts.Name); err != nil {
-					return err
-				}
-			}
 			if _, err := pickLogoutTargets(opts, cfg); err != nil {
 				return err
 			}
 			if opts.DryRun {
-				planArgs := map[string]any{"name": opts.Name}
+				planArgs := map[string]any{"profile": cfg.CurrentProfile}
 				if opts.All {
 					planArgs = map[string]any{"all": true}
 				}
@@ -87,17 +81,15 @@ accepted until it expires.`,
 			return runLogout(opts, fopts, f)
 		},
 	}
-	cmd.Flags().StringVar(&opts.Name, "name", "", "Profile to log out (defaults to the current profile)")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured profile")
 	cmdutil.AddFormatFlag(cmd, authLogoutFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
-	cmd.MarkFlagsMutuallyExclusive("name", "all")
 	cmdutil.SetRisk(cmd, "auth.logout")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor: "clear stored credentials for one profile (or all) and remove the profile from config",
+		UsedFor: "clear stored credentials for the active profile (or all) and remove the profile from config",
 		Examples: []string{
 			"weknora auth logout",
-			"weknora auth logout --name staging",
+			"weknora --profile staging auth logout",
 			"weknora auth logout --all",
 		},
 		Warnings: []string{
@@ -116,15 +108,6 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	if len(cfg.Profiles) == 0 {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
 	}
-	// Reject shell-metacharacter names so opts.Name is safe to interpolate
-	// into envelope.error.retry_command. Validation is name-only — the
-	// profile may or may not exist in cfg.Profiles; the existence check
-	// happens in pickLogoutTargets.
-	if opts.Name != "" {
-		if err := cmdutil.ValidateProfileName(opts.Name); err != nil {
-			return err
-		}
-	}
 
 	targets, err := pickLogoutTargets(opts, cfg)
 	if err != nil {
@@ -136,10 +119,8 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	retryCmd := "weknora auth logout -y"
 	if opts.All {
 		retryCmd = "weknora auth logout --all -y"
-	} else if opts.Name != "" {
-		retryCmd = fmt.Sprintf("weknora auth logout --name %s -y", opts.Name)
 	}
-	if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "auth credentials", scope, "auth.logout", retryCmd); err != nil {
+	if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "auth credentials", scope, "auth.logout", retryCmd); err != nil {
 		return err
 	}
 
@@ -178,13 +159,10 @@ func pickLogoutTargets(opts *LogoutOptions, cfg *config.Config) ([]string, error
 		}
 		return names, nil
 	}
-	name := opts.Name
-	if name == "" {
-		name = cfg.CurrentProfile
-	}
+	name := cfg.CurrentProfile
 	if name == "" {
 		return nil, cmdutil.NewError(cmdutil.CodeInputMissingFlag,
-			"no current profile set; pass --name <profile> or --all")
+			"no active profile set; use the global --profile <profile> or --all")
 	}
 	if _, ok := cfg.Profiles[name]; !ok {
 		return nil, cmdutil.NewError(cmdutil.CodeLocalProfileNotFound,

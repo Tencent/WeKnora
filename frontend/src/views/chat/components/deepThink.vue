@@ -88,7 +88,7 @@ const toggleFold = () => {
     border-radius: 8px;
     background-color: var(--td-bg-color-container);
     border: .5px solid var(--td-component-stroke);
-    box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
+    box-shadow: 0 2px 4px color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     overflow: hidden;
     box-sizing: border-box;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -105,7 +105,7 @@ const toggleFold = () => {
         user-select: none;
 
         &:hover {
-            background-color: rgba(7, 192, 95, 0.04);
+            background-color: color-mix(in srgb, var(--td-brand-color) 4%, transparent);
         }
 
         .think-title {

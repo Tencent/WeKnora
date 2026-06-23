@@ -18,7 +18,28 @@ type Connector interface {
 
 	// ListResources lists available resources that can be synced (documents, spaces, folders, etc.)
 	// Returns a list of Resource objects that the user can select for syncing.
-	ListResources(ctx context.Context, config *types.DataSourceConfig) ([]types.Resource, error)
+	//
+	// parentID controls lazy (on-demand) loading of hierarchical resources:
+	//   - parentID == "" → return the top-level resources (e.g. Feishu wiki spaces).
+	//   - parentID != "" → return only the direct children of that resource.
+	// Connectors whose listing is already flat or returns the full tree in a single
+	// call may ignore parentID for the root call and return an empty slice for any
+	// non-empty parentID.
+	ListResources(ctx context.Context, config *types.DataSourceConfig, parentID string) ([]types.Resource, error)
+
+	// ResolveResourceAncestors resolves, for each of the given resource IDs, the
+	// ExternalIDs of every ancestor whose direct children must be loaded so a
+	// lazily-loaded picker can reveal a pre-existing (possibly deeply nested)
+	// selection. The returned set is deduplicated and unordered.
+	//
+	// It exists so connectors that load their tree one level at a time (e.g. the
+	// Feishu wiki) can expose, in O(depth) per selection, the path back to the
+	// root without re-traversing the whole tree. Connectors that already return
+	// the full tree (Notion) or a flat list (Yuque) have nothing to reveal and
+	// return an empty slice.
+	ResolveResourceAncestors(
+		ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+	) ([]string, error)
 
 	// FetchAll performs a full sync of the specified resources.
 	// Returns all items from the given resource IDs.
@@ -92,7 +113,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Description:  "Sync documents, wikis, and content from Feishu",
 		Priority:     0,
 		AuthType:     "oauth2",
-		Capabilities: []string{"incremental", "webhook", "deletion_sync"},
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeNotion: {
 		Type:         types.ConnectorTypeNotion,

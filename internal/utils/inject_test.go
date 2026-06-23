@@ -448,3 +448,17 @@ func TestInjectAndConditions(t *testing.T) {
 		})
 	}
 }
+
+func BenchmarkInjectAndConditions(b *testing.B) {
+	const sql = "SELECT id, title FROM docs WHERE status = 'active' ORDER BY created_at LIMIT 50"
+	for i := 0; i < b.N; i++ {
+		_ = InjectAndConditions(sql, "tenant_id = 1")
+	}
+}
+
+func BenchmarkCheckSQLInjectionRisks(b *testing.B) {
+	const where = "status = 'active' AND name LIKE '%foo%' AND (deleted_at IS NULL OR archived = false)"
+	for i := 0; i < b.N; i++ {
+		_ = checkSQLInjectionRisks(where)
+	}
+}

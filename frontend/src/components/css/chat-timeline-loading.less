@@ -1,0 +1,128 @@
+@keyframes chatTimelineTypingBounce {
+
+  0%,
+  60%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  30% {
+    transform: translate3d(0, -5px, 0);
+  }
+}
+
+@keyframes chatTimelineLoadingFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// A light sweep across in-progress text (the "光影" / shimmer effect). The base
+// is the muted secondary color and a brighter band slides across, signalling
+// "this step is still running" without the layout cost of a spinner.
+// One full gradient width (background-size is 200%) so the loop is seamless.
+@keyframes chatStreamShimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: -100% 50%;
+  }
+}
+
+.chat-stream-shimmer-text() {
+  // Stronger contrast: a dim placeholder base with a bright primary glint, so
+  // the sweeping band reads clearly rather than as a subtle shift.
+  background-image: linear-gradient(100deg,
+      var(--td-text-color-placeholder) 0%,
+      var(--td-text-color-placeholder) 36%,
+      var(--td-text-color-primary) 50%,
+      var(--td-text-color-placeholder) 64%,
+      var(--td-text-color-placeholder) 100%);
+  background-size: 200% 100%;
+  // Let the gradient tile (default repeat): the dim stops on both ends match,
+  // so the element is always fully painted and the band sweeps seamlessly.
+  // (no-repeat would leave the uncovered area transparent -> invisible text.)
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: chatStreamShimmer 1.5s linear infinite;
+  // Keep the sweep on its own compositor layer so it stays smooth while the
+  // surrounding timeline relayouts on each streamed token.
+  will-change: background-position;
+}
+
+// In-progress step / thinking / tool-call titles shimmer while pending. Both the
+// agent timeline (.action-pending) and the RAG pipeline (.is-running) opt in.
+.action-card.action-pending .action-name,
+.action-name.is-running {
+  .chat-stream-shimmer-text();
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .action-card.action-pending .action-name,
+  .action-name.is-running {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: var(--td-text-color-secondary);
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.streaming-loading-node {
+  .tree-child-content {
+    position: relative;
+  }
+
+  .loading-indicator {
+    display: flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0;
+    margin: 0;
+    position: relative;
+    animation: chatTimelineLoadingFadeIn 0.3s ease-out;
+  }
+
+  .loading-typing {
+    position: absolute;
+    left: -42px;
+    top: 9px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    span {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--td-text-color-placeholder);
+      animation: chatTimelineTypingBounce 1.4s ease-in-out infinite;
+      // Composite each dot on its own layer so the bounce runs off the main
+      // thread and does not smear/ghost while the answer relayouts every token.
+      will-change: transform;
+      backface-visibility: hidden;
+
+      &:nth-child(1) {
+        animation-delay: 0s;
+      }
+
+      &:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+
+      &:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+    }
+  }
+}

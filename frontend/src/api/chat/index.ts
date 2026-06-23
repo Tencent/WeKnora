@@ -6,8 +6,12 @@ export async function createSessions(data = {}) {
   return post("/api/v1/sessions", data);
 }
 
-export async function getSessionsList(page: number, page_size: number) {
-  return get(`/api/v1/sessions?page=${page}&page_size=${page_size}`);
+export async function getSessionsList(page: number, page_size: number, source?: string) {
+  const params = new URLSearchParams({ page: String(page), page_size: String(page_size) });
+  if (source) {
+    params.set("source", source);
+  }
+  return get(`/api/v1/sessions?${params.toString()}`);
 }
 
 export async function pinSession(session_id: string) {

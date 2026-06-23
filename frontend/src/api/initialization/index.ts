@@ -276,6 +276,8 @@ interface BaseModelTestPayload {
     customHeaders?: Record<string, string>;
     extraConfig?: Record<string, string>;
     interfaceType?: string;
+    /** 第二段密钥（如 LKEAP Rerank 的腾讯云 SecretKey） */
+    appSecret?: string;
 }
 
 // 检查远程API模型
@@ -310,6 +312,7 @@ export function testEmbeddingModel(modelConfig: {
     baseUrl?: string;
     apiKey?: string;
     dimension?: number;
+    supportsDimensionOverride?: boolean;
     provider?: string;
     modelId?: string;
 } & BaseModelTestPayload): Promise<{ available: boolean; message?: string; dimension?: number }> {

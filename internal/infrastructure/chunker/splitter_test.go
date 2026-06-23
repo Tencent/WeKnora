@@ -674,6 +674,66 @@ func TestSplitText_EmptyHeaderRowPrepend(t *testing.T) {
 	}
 }
 
+func TestHeaderTracker_ColumnMismatchEndsTable(t *testing.T) {
+	ht := newHeaderTracker()
+	ht.update("| Name | Game | Fame | Blame |\n| --- | --- | --- | --- |\n")
+	if ht.getHeaders() == "" {
+		t.Fatal("expected active table header")
+	}
+	ht.update("| Sinple | Table |\n")
+	if h := ht.getHeaders(); h != "" {
+		t.Fatalf("2-col row should end 4-col table header, still active:\n%s", h)
+	}
+}
+
+func TestHeaderTracker_ParagraphBreakEndsOnNextUnit(t *testing.T) {
+	ht := newHeaderTracker()
+	ht.update("| Name | Game | Fame | Blame |\n| --- | --- | --- | --- |\n")
+	ht.update("| Russell Wilson | Football | High | Tacky uniform |\n\n")
+	if h := ht.getHeaders(); h == "" {
+		t.Fatal("paragraph break alone should not clear header yet")
+	}
+	if !ht.pendingTableBreak {
+		t.Fatal("expected pendingTableBreak after row ending with \\n\\n")
+	}
+	ht.update("| Sinple | Table |\n")
+	if h := ht.getHeaders(); h != "" {
+		t.Fatalf("next table row should clear previous header, got %q", h)
+	}
+	if !ht.headerEndedThisUnit {
+		t.Fatal("expected flush signal when new table starts after paragraph break")
+	}
+}
+
+func TestSplitText_EnTablesNoCrossTableHeader(t *testing.T) {
+	text := "## A table, with and without a header row\n\n" +
+		"| Name | Game | Fame | Blame |\n" +
+		"| --- | --- | --- | --- |\n" +
+		"| Lebron James | Basketball | Very High | Leaving Cleveland |\n" +
+		"| Ryan Braun | Baseball | Moderate | Steroids |\n" +
+		"| Russell Wilson | Football | High | Tacky uniform |\n\n" +
+		"| Sinple | Table |\n" +
+		"| Without | Header |\n\n" +
+		"| Simple  Multiparagraph | Table  Full |\n" +
+		"| Of  Paragraphs | In each  Cell. |\n"
+
+	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 20, Separators: []string{"\n\n", "\n", "。"}}
+	chunks := SplitText(text, cfg)
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+
+	for i, c := range chunks {
+		hasSinple := strings.Contains(c.Content, "| Sinple | Table |")
+		hasSimple := strings.Contains(c.Content, "| Simple  Multiparagraph |")
+		if hasSinple || hasSimple {
+			if strings.Contains(c.Content, "| Name | Game | Fame | Blame |") {
+				t.Errorf("chunk[%d] must not carry table-1 header into later tables:\n%s", i, c.Content)
+			}
+		}
+	}
+}
+
 func TestSplitText_MultipleTablesInDocument(t *testing.T) {
 	text := "" +
 		"第一个表格：\n\n" +

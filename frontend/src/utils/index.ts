@@ -12,7 +12,7 @@ declare global {
 
 // 从运行时配置获取最大文件大小(MB)，支持 Docker 环境动态配置
 // 优先级：运行时配置 > 构建时环境变量 > 默认值 50MB
-const MAX_FILE_SIZE_MB = window.__RUNTIME_CONFIG__?.MAX_FILE_SIZE_MB 
+export const MAX_FILE_SIZE_MB = window.__RUNTIME_CONFIG__?.MAX_FILE_SIZE_MB
   || Number(import.meta.env.VITE_MAX_FILE_SIZE_MB) 
   || 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -40,16 +40,19 @@ export function formatStringDate(date: any) {
     year + "-" + month + "-" + day + " " + hour + ":" + minute + ":" + second
   );
 }
-const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "jpg", "jpeg", "png", "csv", "xlsx", "xls", "mp3", "wav", "m4a", "flac", "ogg"]);
+const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "epub", "mhtml", "jpg", "jpeg", "png", "csv", "xlsx", "xls", "mp3", "wav", "m4a", "flac", "ogg"]);
 
 /**
  * Returns true when the file should be **rejected**.
  * @param validTypes - override the default extension whitelist with a dynamic set (e.g. from engine registry).
  */
 export function kbFileTypeVerification(file: any, silent = false, validTypes?: Set<string> | string[]) {
-  const allowed = validTypes
+  const provided = validTypes
     ? (validTypes instanceof Set ? validTypes : new Set(validTypes))
-    : DEFAULT_VALID_TYPES;
+    : undefined;
+  // An empty whitelist means the engine registry hasn't loaded yet; fall back to
+  // the default set rather than rejecting every file.
+  const allowed = provided && provided.size > 0 ? provided : DEFAULT_VALID_TYPES;
 
   const type = file.name.substring(file.name.lastIndexOf(".") + 1).toLowerCase();
   if (!allowed.has(type)) {

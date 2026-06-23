@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // EventType represents the type of event in the system
@@ -144,6 +146,11 @@ func (eb *EventBus) Emit(ctx context.Context, event Event) error {
 		for _, handler := range handlers {
 			h := handler // capture loop variable
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Errorf(ctx, "event handler panic recovered (type=%s): %v", event.Type, r)
+					}
+				}()
 				_ = h(ctx, event)
 			}()
 		}
@@ -186,6 +193,11 @@ func (eb *EventBus) EmitAndWait(ctx context.Context, event Event) error {
 
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					errChan <- fmt.Errorf("event handler panic (type=%s): %v", event.Type, r)
+				}
+			}()
 			if err := h(ctx, event); err != nil {
 				errChan <- err
 			}

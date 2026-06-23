@@ -6,6 +6,13 @@ option go_package = "github.com/Tencent/WeKnora/internal/docreader/proto";
 
 service DocReader {
   rpc Read(ReadRequest) returns (ReadResponse) {}
+  // ReadStream is the streaming counterpart of Read. It first emits one
+  // ReadStreamResponse carrying the parse metadata (markdown / metadata /
+  // error), then emits one message per image. This keeps every gRPC message
+  // small so large scanned PDFs (hundreds of page images, far exceeding the
+  // unary message-size cap) can be returned without RESOURCE_EXHAUSTED and
+  // with bounded memory on both ends.
+  rpc ReadStream(ReadRequest) returns (stream ReadStreamResponse) {}
   rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse) {}
 }
 
@@ -42,6 +49,24 @@ message ReadResponse {
   string image_dir_path = 3;
   map<string, string> metadata = 4;
   string error = 5;
+}
+
+// Metadata header for a streamed read. Sent exactly once, before any image.
+message ReadStreamMeta {
+  string markdown_content = 1;
+  string image_dir_path = 2;
+  map<string, string> metadata = 3;
+  string error = 4;
+  uint32 image_count = 5; // best-effort total image count (0 if unknown)
+}
+
+// One frame of a ReadStream. The first frame carries `meta`; every subsequent
+// frame carries a single `image`.
+message ReadStreamResponse {
+  oneof payload {
+    ReadStreamMeta meta = 1;
+    ImageRef image = 2;
+  }
 }
 
 message ListEnginesRequest {

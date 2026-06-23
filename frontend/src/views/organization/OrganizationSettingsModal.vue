@@ -1713,13 +1713,13 @@ watch(currentSection, (section) => {
       }
 
       &:hover {
-        background: var(--td-bg-color-secondarycontainer-hover);
+        background: var(--td-bg-color-container-hover);
         color: var(--td-text-color-primary);
       }
 
       &.active {
-        background: var(--td-brand-color-light);
-        color: @primary-color;
+        background: var(--td-bg-color-secondarycontainer);
+        color: var(--td-brand-color);
         font-weight: 600;
       }
     }

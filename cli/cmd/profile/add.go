@@ -13,6 +13,7 @@ import (
 type AddOptions struct {
 	Host   string
 	User   string
+	Use    bool // --use: switch to this profile after adding
 	DryRun bool
 }
 
@@ -32,24 +33,25 @@ type addResult struct {
 
 // NewCmdAdd builds `weknora profile add`. Registers a *credentialless*
 // connection target - host + optional user only. Credentials for the new
-// profile are attached separately with `weknora auth login --name <n>`,
-// separating "where" the CLI talks to (the host) and "how" it authenticates
-// (the credential). If you want one command for both, run
-// `weknora auth login --name <n> --host <h>` instead.
+// profile are attached separately by making it active and running
+// `weknora auth login`, separating "where" the CLI talks to (the host) and
+// "how" it authenticates (the credential). Pass --use to switch to the new
+// profile immediately, then run `weknora auth login`.
 func NewCmdAdd(f *cmdutil.Factory) *cobra.Command {
 	opts := &AddOptions{}
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Register a new profile (host without credentials)",
 		Long: `Add a new profile entry to config.yaml. Stores host (and optionally
-user) but does NOT prompt for credentials. Use ` + "`weknora auth login --name <n>`" + ` to
-attach credentials in a single step instead, or run ` + "`weknora auth login --name <n>`" + ` after
-` + "`weknora profile add`" + ` to fill them in.
+user) but does NOT prompt for credentials. To attach credentials, make the
+profile active (` + "`weknora profile use <n>`" + `, or ` + "`profile add <n> --use`" + `) and run
+` + "`weknora auth login`" + `.
 
 The first profile added is auto-selected as the current profile. Subsequent
-adds leave the current profile untouched.`,
+adds leave the current profile untouched unless --use is passed.`,
 		Example: `  weknora profile add staging --host https://staging.example.com
-  weknora profile add prod    --host https://prod.example.com --user alice@example.com`,
+  weknora profile add prod    --host https://prod.example.com --user alice@example.com
+  weknora profile add prod    --host https://prod.example.com --use   # switch to it now`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -93,9 +95,15 @@ adds leave the current profile untouched.`,
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "Server base URL, e.g. https://kb.example.com (required)")
 	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in 'profile list' (optional, cosmetic only)")
+	cmd.Flags().BoolVar(&opts.Use, "use", false, "Switch to this profile after adding it")
 	cmdutil.AddFormatFlag(cmd, profileAddFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	_ = cmd.MarkFlagRequired("host")
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Register a new profile (connection target) with a name and host URL. Does not store credentials; make it active (--use, or `profile use <n>`) and run `auth login` afterwards to authenticate.",
+		RequiredFlags: []string{"<name> (positional)", "--host"},
+		Output:        "envelope.data has name, host, user, current",
+	})
 	return cmd
 }
 
@@ -133,7 +141,10 @@ func runAddWithConfig(opts *AddOptions, fopts *cmdutil.FormatOptions, name, host
 	}
 	cfg.Profiles[name] = config.Profile{Host: host, User: opts.User}
 	wasFirst := cfg.CurrentProfile == ""
-	if wasFirst {
+	// The first profile is auto-selected; --use forces selection even when
+	// another profile is already current.
+	current := wasFirst || opts.Use
+	if current {
 		cfg.CurrentProfile = name
 	}
 	if err := config.Save(cfg); err != nil {
@@ -141,12 +152,12 @@ func runAddWithConfig(opts *AddOptions, fopts *cmdutil.FormatOptions, name, host
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, addResult{Name: name, Host: host, User: opts.User, Current: wasFirst}, nil)
+		return fopts.Emit(iostreams.IO.Out, addResult{Name: name, Host: host, User: opts.User, Current: current}, nil)
 	}
-	if wasFirst {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s (now current). Run `weknora auth login --name %s` to attach credentials.\n", name, name)
+	if current {
+		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s (now current). Run `weknora auth login` to attach credentials.\n", name)
 	} else {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s. Run `weknora auth login --name %s` to attach credentials.\n", name, name)
+		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s. Run `weknora profile use %s` then `weknora auth login` to attach credentials.\n", name, name)
 	}
 	return nil
 }

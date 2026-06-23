@@ -1,5 +1,50 @@
 package agent
 
+// WikiTaxonomyPlanPrompt assigns a directory path (category) to every entity /
+// concept page produced by ONE ingest batch in a single call, so the whole set
+// lands on one coherent tree that reuses existing folders — instead of each page
+// inventing its own folders in parallel (which diverges worst on the founding
+// batch, when the KB still has no folders to anchor on). The result is applied
+// in reduce only to pages that don't already have a category, so user edits and
+// previously-filed pages are never churned.
+const WikiTaxonomyPlanPrompt = `You are organizing a wiki knowledge base into a navigation directory. Assign each item below to a directory path (category) so the whole set lands on ONE coherent tree.
+
+<existing_folders>
+{{.ExistingTaxonomy}}
+</existing_folders>
+
+<items>
+{{.Items}}
+</items>
+
+<instructions>
+For every item, output a category path: an array of folder labels from broad to narrow (at most 2 levels). The category classifies WHAT the item fundamentally IS (the stable library "shelf" it always sits on), never the role it plays in one document.
+
+How to choose a path for each item:
+1. If an existing folder in <existing_folders> fits, REUSE its EXACT label (character-for-character). Do NOT invent a synonym folder (e.g. do NOT create "春节习俗" when "春节 / 传统习俗" already fits).
+2. If NO existing folder fits, CREATE a new, broad, durable folder for it (e.g. an organization → "组织", a legal idea → "法律概念", a place → "地点"). The directory does not have to stay small — most items DO have a natural home, so coin a sensible top-level folder rather than leaving them unfiled. Group items of the SAME kind under the SAME new folder so the tree stays coherent.
+3. Only give an empty path [] when an item genuinely belongs to NO durable subject at all. This must be RARE. The absence of a matching existing folder is NOT a reason for []; create a folder instead.
+
+Other rules:
+- Group items of the SAME kind under the SAME folder at the SAME depth. Do not file one equivalent item a level deeper than its siblings (e.g. avoid "地点 / 地址 / Address1" next to "地点 / Address2" — pick one consistent depth for equivalent items).
+- Prefer a single broad top-level folder; add a second level only for a genuinely durable sub-domain shared by several items.
+- Do NOT use the item type ("entity"/"concept") as a folder. Do NOT put slashes inside a single label.
+- Every item slug in <items> MUST appear exactly once in the output.
+- Write ALL folder labels in {{.Language}}.
+
+### JSON Formatting Rules
+- Output ONLY valid JSON, no preamble.
+- Do NOT use literal newlines inside JSON string values.
+</instructions>
+
+Output format:
+{
+  "assignments": [
+    {"slug": "entity/zhang-san", "path": ["人物"]},
+    {"slug": "concept/spring-festival", "path": ["节日", "传统节日"]}
+  ]
+}`
+
 // Wiki ingest prompt templates for LLM-powered wiki page generation.
 // These prompts are used by the wiki ingest pipeline to extract structured
 // knowledge from raw documents and build/update wiki pages.
@@ -30,7 +75,7 @@ const WikiSummaryPrompt = `You are a wiki editor. Given the following document c
 3. Include the key facts, arguments, and conclusions.
 4. Use proper heading hierarchy (## for sections, ### for subsections).
 5. **Wiki-link rule**: The available_wiki_pages list above maps slugs to display names and their aliases (format: "[[slug]] = display name (Aliases: a, b)"). Whenever you mention a name or alias that matches a listed entry, you MUST write it as [[slug|display name]] (e.g. [[entity/zhong-guo|中国]]), NOT as bold (**name**) or bare [[slug]]. Use the EXACT slugs provided — do NOT invent new slugs.
-6. **Image rule**: If the document contains <images> tags with <image> elements, you SHOULD include the relevant images in your summary using the Markdown syntax: ![caption](url). Place the images where they are contextually relevant to the text.
+6. **Image rule**: If the document contains <images> tags with <image> elements, you SHOULD include the relevant images in your summary using the Markdown syntax: ![caption](url). Place the images where they are contextually relevant to the text. The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 7. At the end, include a "## Key Takeaways" section with bullet points.
 8. Write in {{.Language}}.
 9. Keep the summary concise but thorough (500-1500 words depending on document length).
@@ -73,7 +118,7 @@ Each entity should have:
 - "slug": URL-friendly slug, format "entity/<lowercase-hyphenated-name>" (use romanized/pinyin form for non-Latin names). **Reuse previous slug if the entity was extracted before.**
 - "aliases": An array of strings representing names that refer to THE EXACT SAME entity. Only include: official abbreviations (e.g. "IBM" for "International Business Machines"), full/short name variants (e.g. "腾讯" for "腾讯控股有限公司"), translations (e.g. "Apple" for "苹果公司"), and well-known alternate names (e.g. "Alphabet" for "Google母公司"). Do NOT include parent categories, related products, generic terms, or broader concepts. Provide [] if none.
 - "description": **Index listing summary** — one sentence, 15-40 words, in {{.Language}}. Describes WHAT this entity IS and its role in the document. Must be self-contained (understandable without reading the full page). This will be displayed in the wiki index.
-- "details": A 2-5 sentence summary in {{.Language}} of key facts from the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url).
+- "details": A 2-5 sentence summary in {{.Language}} of key facts from the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url). The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 
 Only include entities that are substantively discussed (mentioned at least twice or described in detail). Do NOT include generic terms.
 
@@ -83,7 +128,7 @@ Each concept should have:
 - "slug": URL-friendly slug, format "concept/<lowercase-hyphenated-name>" (use romanized/pinyin form for non-Latin names). **Reuse previous slug if the concept was extracted before.**
 - "aliases": An array of strings representing names that refer to THE EXACT SAME concept. Only include: official abbreviations (e.g. "RAG" for "Retrieval-Augmented Generation"), full/short name variants, and well-known synonyms used interchangeably in the field. Do NOT include sub-topics, related techniques, broader categories, or implementation details. Provide [] if none.
 - "description": **Index listing summary** — one sentence, 15-40 words, in {{.Language}}. Defines WHAT this concept IS. Must be self-contained (understandable without reading the full page). This will be displayed in the wiki index.
-- "details": A 2-5 sentence explanation in {{.Language}} as discussed in the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url).
+- "details": A 2-5 sentence explanation in {{.Language}} as discussed in the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url). The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 
 Only include concepts that are substantively discussed. Skip trivial or overly generic concepts.
 
@@ -207,30 +252,27 @@ Output ONLY valid JSON. Example:
 // to read a batch of chunks and, for each candidate entity/concept, list the
 // chunk IDs that substantively discuss it. This keeps per-slug "facts" in
 // their verbatim form (the chunk text) instead of asking the LLM to paraphrase.
+// Block order matters for provider prefix caching: the static rules,
+// output schema and the per-document-stable <candidate_slugs> are placed
+// BEFORE the per-batch <chunks> block. Within one document only ChunksXML
+// changes between batches, so every batch after the first shares the long
+// [rules | candidate_slugs] prefix and avoids re-billing the static rules.
 const WikiChunkCitationPrompt = `You are a precise citation system. Your job is to scan a batch of document chunks and decide, for each candidate entity/concept below, which chunks substantively discuss it.
-
-<candidate_slugs>
-{{.CandidateSlugs}}
-</candidate_slugs>
-
-<chunks>
-{{.ChunksXML}}
-</chunks>
 
 <instructions>
 **IMPORTANT: Write ALL names, descriptions, and details in {{.Language}}**.
 
 ### Primary task
-For each candidate slug above, select the chunk IDs (from the <chunks> block) that **substantively discuss** that entity/concept. "Substantively" means the chunk states at least one concrete fact, attribute, step, date, number, relationship, or other useful piece of information about the candidate — not a passing mention.
+For each candidate slug (listed in <candidate_slugs> below), select the chunk IDs (from the <chunks> block below) that **substantively discuss** that entity/concept. "Substantively" means the chunk states at least one concrete fact, attribute, step, date, number, relationship, or other useful piece of information about the candidate — not a passing mention.
 
-- Only cite chunks that appear in the <chunks> block above.
+- Only cite chunks that appear in the <chunks> block below.
 - Use the "id" attribute of each <c> element verbatim (e.g. "c003").
 - If a candidate is not meaningfully discussed in ANY chunk in this batch, omit it from the output (do not include empty arrays).
 - A chunk CAN be cited by multiple candidates if it genuinely discusses multiple of them.
 - If a chunk is overly long or mixes unrelated topics, still cite it for every candidate it discusses.
 
 ### Secondary task: new slugs
-If this batch reveals a significant entity/concept that is **NOT** in <candidate_slugs>, you may add it under "new_slugs" so it gets incorporated. Only add genuinely new, substantively-discussed items. Do NOT rediscover items already listed above — reuse their slug if they are already candidates.
+If this batch reveals a significant entity/concept that is **NOT** in <candidate_slugs>, you may add it under "new_slugs" so it gets incorporated. Only add genuinely new, substantively-discussed items. Do NOT rediscover items already listed in <candidate_slugs> — reuse their slug if they are already candidates.
 
 Each new slug must include:
 - "type": "entity" or "concept"
@@ -261,7 +303,17 @@ Output format:
   ]
 }
 
-If nothing in this batch is cite-worthy, return: {"citations": {}, "new_slugs": []}`
+If nothing in this batch is cite-worthy, return: {"citations": {}, "new_slugs": []}
+
+<candidate_slugs>
+{{.CandidateSlugs}}
+</candidate_slugs>
+
+<chunks>
+{{.ChunksXML}}
+</chunks>
+
+Now apply the instructions above to the chunks and output ONLY the JSON.`
 
 // WikiPageModifyPrompt updates an existing wiki page with new additions and removes stale/deleted information in a single pass.
 const WikiPageModifyPrompt = `You are a wiki editor tasked with updating an existing wiki page. You must process a set of NEW information to add, AND/OR a set of deleted documents whose exclusive contributions must be REMOVED.
@@ -323,7 +375,7 @@ The <new_information> block above is assembled from VERBATIM source chunks that 
 4. Preserve existing information that is still valid and still about {{.PageTitle}}.
 5. Keep [[slug|name]] wiki-link references ONLY if the slug appears in the <valid_wiki_links> list above. Remove any [[slug|name]] whose slug is NOT in that list. Do NOT invent new wiki-link slugs. The page's own slug ({{.PageSlug}}) MUST NOT appear as a [[...]] link inside its own content.
 6. Maintain the existing page structure and formatting style. Use "# {{.PageTitle}}" as the top-level heading if the page does not already have one. Do NOT introduce new heading levels beyond what the source or existing page justifies.
-7. **Image rule**: Include relevant images using Markdown syntax: ![caption](url) from new information if applicable.
+7. **Image rule**: Include relevant images using Markdown syntax: ![caption](url) from new information if applicable. The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 {{if .HasRetractions}}
 8. If after removing deleted content the page becomes nearly empty and there is no new information to add, output just: "SUMMARY: (empty page)\n# {{.PageTitle}}\n\n*This page's primary source document was removed.*"
 {{end}}

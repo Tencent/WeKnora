@@ -1,4 +1,4 @@
-import { get, post, put } from '@/utils/request'
+import { del, get, post, put } from '@/utils/request'
 import i18n from '@/i18n'
 
 const t = (key: string) => i18n.global.t(key)
@@ -92,6 +92,23 @@ export async function updateTenant(
 }
 
 /**
+ * 删除当前工作区。权限：owner。
+ */
+export async function deleteTenant(
+  tenantId: number,
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const response = await del(`/api/v1/tenants/${tenantId}`)
+    return response as unknown as { success: boolean; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.deleteFailed'),
+    }
+  }
+}
+
+/**
  * 创建新工作区（任意已登录用户均可调用）。
  * 后端会自动把调用者写成新租户的 Owner，并生成 api_key、默认 storage_quota
  * 等服务端字段，所以这里只暴露 name + description。
@@ -141,4 +158,3 @@ export async function searchTenants(params: SearchTenantsParams = {}): Promise<S
     }
   }
 }
-

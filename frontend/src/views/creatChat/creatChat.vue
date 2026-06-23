@@ -8,30 +8,34 @@
             <div ref="sqContainerRef" class="suggested-questions-container">
                 <!-- 骨架屏占位 -->
                 <div v-if="sqLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
-                    <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
+                    <div class="suggested-questions-title"><t-skeleton animation="gradient"
+                            :row-col="[{ width: '120px', height: '14px' }]" /></div>
                     <div class="suggested-questions-grid">
-                        <div v-for="n in 6" :key="'sq-skel-'+n" class="suggested-question-card sq-card-skeleton">
-                            <t-skeleton animation="gradient" :row-col="[{ width: '90%', height: '14px' }, { width: '60%', height: '14px' }]" />
+                        <div v-for="n in 6" :key="'sq-skel-' + n" class="suggested-question-card sq-card-skeleton">
+                            <t-skeleton animation="gradient"
+                                :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
                         </div>
                     </div>
                 </div>
-                <transition v-else appear name="sq-slide-fade" mode="out-in"
-                    @before-leave="onBeforeLeave"
-                    @after-leave="onAfterLeave"
-                    @enter="onEnter"
-                    @after-enter="onQuestionsEntered"
-                >
+                <transition v-else appear name="sq-slide-fade" mode="out-in" @before-leave="onBeforeLeave"
+                    @after-leave="onAfterLeave" @enter="onEnter" @after-enter="onQuestionsEntered">
                     <div v-if="suggestedQuestions.length > 0" :key="sqRenderKey" class="suggested-questions-inner">
-                        <div class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</div>
+                        <div class="suggested-questions-title-row">
+                            <p class="suggested-questions-caption">
+                                <span class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</span>
+                                <button type="button" class="suggested-questions-refresh" :disabled="sqLoading"
+                                    :title="$t('chat.refreshSuggestedQuestions')"
+                                    :aria-label="$t('chat.refreshSuggestedQuestions')" @click="fetchSuggestedQuestions">
+                                    <t-icon :name="sqLoading ? 'loading' : 'refresh'"
+                                        :class="{ 'sq-refresh-spin': sqLoading }" />
+                                </button>
+                            </p>
+                        </div>
                         <div class="suggested-questions-grid">
-                            <div
-                                v-for="(item, index) in suggestedQuestions"
-                                :key="item.question"
-                                class="suggested-question-card"
-                                :class="{ 'sq-card-visible': sqCardsRevealed }"
+                            <div v-for="(item, index) in suggestedQuestions" :key="item.question"
+                                class="suggested-question-card" :class="{ 'sq-card-visible': sqCardsRevealed }"
                                 :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
-                                @click="handleSuggestedQuestionClick(item.question)"
-                            >
+                                @click="handleSuggestedQuestionClick(item.question)">
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
                             </div>
@@ -42,19 +46,17 @@
             <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
         </div>
     </div>
-    
+
+    <ContextualGuide tour="chat" :when="showChatContextualGuide" />
+
     <!-- 知识库编辑器（创建/编辑统一组件） -->
-    <KnowledgeBaseEditorModal 
-      :visible="uiStore.showKBEditorModal"
-      :mode="uiStore.kbEditorMode"
-      :kb-id="uiStore.currentKBId || undefined"
-      :initial-type="uiStore.kbEditorType"
-      @update:visible="(val) => val ? null : uiStore.closeKBEditor()"
-      @success="handleKBEditorSuccess"
-    />
+    <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
+        :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
+        @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 </template>
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue';
+import { ref, watch, onMounted, nextTick, computed } from 'vue';
+import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
@@ -75,6 +77,10 @@ const settingsStore = useSettingsStore();
 const uiStore = useUIStore();
 const { t } = useI18n();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
+
+const showChatContextualGuide = computed(() => {
+    return route.name === 'globalCreatChat' || route.name === 'kbCreatChat';
+});
 
 // ===== 推荐问题 =====
 const suggestedQuestions = ref<SuggestedQuestion[]>([]);
@@ -129,7 +135,7 @@ const onQuestionsEntered = () => {
 
 const fetchSuggestedQuestions = async () => {
     const fetchId = ++suggestedQuestionsFetchId;
-    if (suggestedQuestions.value.length === 0) sqLoading.value = true;
+    sqLoading.value = true;
     try {
         const agentId = settingsStore.selectedAgentId;
         if (!agentId) return;
@@ -186,7 +192,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
 
     // 构建 session 数据，包含 Agent 配置
     const sessionData: any = {};
-    
+
     // 添加 Agent 配置（知识库信息在 agent_config 中）
     sessionData.agent_config = {
         enabled: true,
@@ -213,11 +219,11 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
 
 const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
     const now = new Date().toISOString();
-    let obj = { 
-        title: t('createChat.newSessionTitle'), 
-        path: `chat/${sessionId}`, 
-        id: sessionId, 
-        isMore: false, 
+    let obj = {
+        title: t('createChat.newSessionTitle'),
+        path: `chat/${sessionId}`,
+        id: sessionId,
+        isMore: false,
         isNoTitle: true,
         created_at: now,
         updated_at: now
@@ -248,6 +254,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     align-items: center;
     width: 100%;
     max-width: 800px;
+    gap: 24px;
 
     :deep(.answers-input) {
         position: static;
@@ -262,7 +269,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     font-size: 28px;
     font-weight: 600;
     align-items: center;
-    margin-bottom: 30px;
+    margin-bottom: 0;
 
     .icon {
         display: flex;
@@ -282,84 +289,61 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-.suggested-questions-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-bottom: 24px;
-    width: 100%;
-    max-width: 800px;
-    transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-}
+@import '../../components/css/suggested-questions.less';
 
 @keyframes skeletonFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.suggested-questions-container {
+    max-width: 800px;
+    margin: 0;
+    padding: 0 16px;
+    transition: height 0.35s @suggested-ease;
 }
 
 .suggested-questions-inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 100%;
     animation: skeletonFadeIn 0.3s ease-out;
 }
 
-// 容器整体过渡：淡入 + 轻微上滑
 .sq-slide-fade-enter-active {
-    transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.35s @suggested-ease, transform 0.35s @suggested-ease;
 }
+
 .sq-slide-fade-leave-active {
     transition: opacity 0.15s cubic-bezier(0.4, 0, 1, 1),
-                transform 0.15s cubic-bezier(0.4, 0, 1, 1);
+        transform 0.15s cubic-bezier(0.4, 0, 1, 1);
 }
+
 .sq-slide-fade-enter-from {
     opacity: 0;
     transform: translateY(10px);
 }
+
 .sq-slide-fade-leave-to {
     opacity: 0;
     transform: translateY(-4px);
 }
 
-.suggested-questions-title {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin-bottom: 12px;
-    font-weight: 500;
-}
-
-.suggested-questions-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-    width: 100%;
-}
-
 .suggested-question-card {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 16px;
-    border-radius: 20px;
-    border: 1px solid var(--td-component-stroke);
-    background: var(--td-bg-color-container);
-    cursor: pointer;
-    max-width: 100%;
     opacity: 0;
     transform: translateY(8px) scale(0.97);
-    transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.2s ease,
-                background 0.2s ease,
-                box-shadow 0.2s ease;
+    transition:
+        opacity 0.35s @suggested-ease,
+        transform 0.35s @suggested-ease,
+        background 0.2s @suggested-ease,
+        border-color 0.25s @suggested-ease,
+        box-shadow 0.25s @suggested-ease;
 
     &.sq-card-skeleton {
         opacity: 1;
         transform: none;
-        cursor: default;
     }
 
     &.sq-card-visible {
@@ -367,32 +351,12 @@ const handleKBEditorSuccess = (kbId: string) => {
         transform: translateY(0) scale(1);
     }
 
-    &:hover {
-        border-color: var(--td-brand-color);
-        background: var(--td-brand-color-light);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    &:not(.sq-card-skeleton):active {
+        transform: scale(0.98);
     }
-}
 
-.suggested-question-text {
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.suggested-question-badge {
-    font-size: 10px;
-    padding: 1px 5px;
-    border-radius: 4px;
-    flex-shrink: 0;
-    font-weight: 500;
-
-    &.faq {
-        background: var(--td-success-color-1);
-        color: var(--td-success-color);
+    &.sq-card-visible:active {
+        transform: scale(0.98);
     }
 }
 
@@ -415,6 +379,7 @@ const handleKBEditorSuccess = (kbId: string) => {
         width: 500px !important;
     }
 }
+
 @media (max-width: 750px) {
     .answers-input {
         transform: translateX(-250px);
@@ -424,6 +389,7 @@ const handleKBEditorSuccess = (kbId: string) => {
         width: 340px !important;
     }
 }
+
 @media (max-width: 600px) {
     .answers-input {
         transform: translateX(-250px);
@@ -433,7 +399,6 @@ const handleKBEditorSuccess = (kbId: string) => {
         width: 300px !important;
     }
 }
-
 </style>
 <style lang="less">
 .del-menu-popup {

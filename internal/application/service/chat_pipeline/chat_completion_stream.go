@@ -100,29 +100,34 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	})
 
 	// Start goroutine to consume channel and emit events directly.
-	// For non-agent mode, thinking content is embedded in answer stream with <think> tags.
+	// reasoning_content is routed to EventAgentThought (SSE response_type=thinking)
+	// and plain answer text to EventAgentFinalAnswer, matching the Agent pipeline.
 	// The goroutine monitors ctx.Done() to avoid leaking when the context is cancelled
 	// and the upstream channel is not closed promptly.
 	go func() {
+		thinkingID := fmt.Sprintf("%s-thinking", uuid.New().String()[:8])
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
-		var finalContent string
-		var thinkingStarted bool
-		var thinkingEnded bool
+		thinkingOpen := false
+
+		closeThinking := func() {
+			if !thinkingOpen {
+				return
+			}
+			eventBus.Emit(ctx, types.Event{
+				ID:        thinkingID,
+				Type:      types.EventType(event.EventAgentThought),
+				SessionID: chatManage.SessionID,
+				Data: event.AgentThoughtData{
+					Done: true,
+				},
+			})
+			thinkingOpen = false
+		}
 
 		for {
 			select {
 			case <-ctx.Done():
-				if thinkingStarted && !thinkingEnded {
-					eventBus.Emit(ctx, types.Event{
-						ID:        answerID,
-						Type:      types.EventType(event.EventAgentFinalAnswer),
-						SessionID: chatManage.SessionID,
-						Data: event.AgentFinalAnswerData{
-							Content: "</think>",
-							Done:    true,
-						},
-					})
-				}
+				closeThinking()
 				pipelineInfo(ctx, "Stream", "context_cancelled", map[string]interface{}{
 					"session_id": chatManage.SessionID,
 				})
@@ -130,18 +135,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 			case response, ok := <-responseChan:
 				if !ok {
-					if thinkingStarted && !thinkingEnded {
-						finalContent += "</think>"
-						eventBus.Emit(ctx, types.Event{
-							ID:        answerID,
-							Type:      types.EventType(event.EventAgentFinalAnswer),
-							SessionID: chatManage.SessionID,
-							Data: event.AgentFinalAnswerData{
-								Content: "</think>",
-								Done:    true,
-							},
-						})
-					}
+					closeThinking()
 					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
 						"session_id": chatManage.SessionID,
 					})
@@ -167,43 +161,26 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeThinking {
-					content := response.Content
-					if !thinkingStarted {
-						content = "<think>" + content
-						thinkingStarted = true
-					}
-					if response.Done && !thinkingEnded {
-						content = content + "</think>"
-						thinkingEnded = true
-					}
-					finalContent += content
-					eventBus.Emit(ctx, types.Event{
-						ID:        answerID,
-						Type:      types.EventType(event.EventAgentFinalAnswer),
-						SessionID: chatManage.SessionID,
-						Data: event.AgentFinalAnswerData{
-							Content: content,
-							Done:    false,
-						},
-					})
-					continue
-				}
-
-				if response.ResponseType == types.ResponseTypeAnswer {
-					if thinkingStarted && !thinkingEnded {
-						thinkingEnded = true
-						finalContent += "</think>"
+					if response.Content != "" {
+						thinkingOpen = true
 						eventBus.Emit(ctx, types.Event{
-							ID:        answerID,
-							Type:      types.EventType(event.EventAgentFinalAnswer),
+							ID:        thinkingID,
+							Type:      types.EventType(event.EventAgentThought),
 							SessionID: chatManage.SessionID,
-							Data: event.AgentFinalAnswerData{
-								Content: "</think>",
+							Data: event.AgentThoughtData{
+								Content: response.Content,
 								Done:    false,
 							},
 						})
 					}
-					finalContent += response.Content
+					if response.Done {
+						closeThinking()
+					}
+					continue
+				}
+
+				if response.ResponseType == types.ResponseTypeAnswer {
+					closeThinking()
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),

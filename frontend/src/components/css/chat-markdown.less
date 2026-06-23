@@ -1,0 +1,639 @@
+@import './chat-hljs.less';
+
+// Single source of truth for chat answer Markdown typography and block styles.
+// Used by botmsg, AgentStreamDisplay, embed chat, and the dev Markdown test page.
+// Future chat Markdown visual changes should be made here instead of in
+// individual Vue components. Non-chat document/wiki preview styles intentionally
+// live outside this file.
+//
+// Shared typography for chat answer markdown (botmsg, AgentStreamDisplay, embed).
+// Tuned against ChatGPT markdown test doc: 16px body, 24px line-height on paragraphs,
+// stepped headings, dotted links, light tables, pill inline code, kbd chips.
+.chat-markdown-typography() {
+  font-size: 16px;
+  color: var(--td-text-color-primary);
+  line-height: 1.625;
+  letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
+
+  // Trailing fade on the newest streamed characters: the tail is wrapped in
+  // this span (see applyStreamingTailFade) so its right edge dissolves, giving
+  // a soft "just typed" reveal that settles once streaming stops and the wrap
+  // is no longer emitted.
+  :deep(.stream-fade-tail) {
+    -webkit-mask-image: linear-gradient(to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 0.7) 30%,
+        rgba(0, 0, 0, 0) 100%);
+    mask-image: linear-gradient(to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 0.7) 30%,
+        rgba(0, 0, 0, 0) 100%);
+  }
+
+  :deep(p) {
+    margin: 0 0 0.25em;
+    line-height: 1.625;
+
+    + p {
+      margin-top: 0.75em;
+    }
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  // Citation-only paragraphs from marked (tag on its own line) — keep compact.
+  :deep(p:has(> .citation:only-child)) {
+    margin: 0.125em 0 0.375em;
+    line-height: 1.625;
+  }
+
+  // Inline citations share the paragraph line box with body text.
+  :deep(p:has(.citation)) {
+    line-height: 1.625;
+  }
+
+  :deep(p:has(.citation) + p:has(> img:only-child)),
+  :deep(p:has(> .citation:only-child) + p:has(> img:only-child)) {
+    margin-top: 0.5em;
+  }
+
+  // Models often emit standalone **小节标题：** paragraphs instead of headings.
+  // Tagged at render time (markStandaloneStrongParagraphs) rather than via
+  // `p:has(> strong:only-child)`: CSS `:only-child` ignores text nodes, so the
+  // selector matched any paragraph whose only *element* child was a <strong>,
+  // causing a visible top-margin jump mid-stream the instant one **bold** run
+  // closed inside an otherwise text-heavy paragraph.
+  :deep(p.md-strong-title) {
+    margin-top: 1.25em;
+    margin-bottom: 0.5em;
+    line-height: 1.5;
+
+    &:first-child {
+      margin-top: 0;
+    }
+  }
+
+  :deep(p + ul),
+  :deep(p + ol),
+  :deep(ul + p),
+  :deep(ol + p),
+  :deep(blockquote + p),
+  :deep(p + blockquote) {
+    margin-top: 0.75em;
+  }
+
+  :deep(strong) {
+    font-weight: 600;
+  }
+
+  :deep(em) {
+    font-style: italic;
+  }
+
+  :deep(del) {
+    text-decoration: line-through;
+    opacity: 0.72;
+  }
+
+  :deep(kbd) {
+    display: inline-block;
+    padding: 0.15em 0.45em;
+    font-family: var(--app-font-family-mono);
+    font-size: 0.8125em;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-secondarycontainer);
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 5px;
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--td-text-color-primary) 8%, transparent);
+  }
+
+  :deep(code):not(pre code) {
+    background: color-mix(in srgb, var(--td-text-color-primary) 8%, transparent);
+    padding: 0.15em 0.3em;
+    border-radius: 4px;
+    font-family: var(--app-font-family-mono);
+    font-size: 0.875em;
+    font-weight: 500;
+  }
+
+  :deep(pre:not(.chat-code-block__pre):not(.chat-mermaid-block__canvas)) {
+    background: var(--td-bg-color-secondarycontainer);
+    padding: 14px 16px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0.75em 0;
+    line-height: 1.55;
+    font-size: 13px;
+
+    code {
+      background: none;
+      padding: 0;
+      font-size: inherit;
+      font-weight: 400;
+    }
+  }
+
+  :deep(.chat-code-block) {
+    margin: 0.75em 0;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  }
+
+  :deep(.chat-code-block__header) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 36px;
+    padding: 6px 10px 6px 12px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  :deep(.chat-code-block__lang) {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--td-text-color-secondary);
+    letter-spacing: 0.02em;
+    text-transform: none;
+  }
+
+  :deep(.chat-code-block__copy) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+    &:hover {
+      background: color-mix(in srgb, var(--td-text-color-primary) 6%, var(--td-bg-color-secondarycontainer));
+      border-color: var(--td-component-border);
+      color: var(--td-text-color-primary);
+    }
+
+    &.is-copied {
+      color: var(--td-text-color-primary);
+    }
+
+    &.is-error {
+      color: var(--td-error-color);
+    }
+  }
+
+  :deep(.chat-code-block__copy-icon) {
+    flex-shrink: 0;
+  }
+
+  :deep(.chat-code-block__pre) {
+    margin: 0;
+    padding: 14px 16px;
+    border-radius: 0;
+    background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 88%, var(--td-bg-color-container));
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+
+    code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      font-size: inherit;
+      font-weight: 400;
+      white-space: pre;
+      display: block;
+    }
+  }
+
+  :deep(.chat-mermaid-block) {
+    margin: 0.75em 0;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--td-text-color-primary) 5%, transparent);
+  }
+
+  :deep(.chat-mermaid-block__header) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 36px;
+    padding: 6px 10px 6px 12px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  :deep(.chat-mermaid-block__badge) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--td-text-color-secondary);
+  }
+
+  :deep(.chat-mermaid-block__expand) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--td-text-color-primary) 6%, var(--td-bg-color-secondarycontainer));
+      border-color: var(--td-component-border);
+      color: var(--td-text-color-primary);
+    }
+
+    &:disabled,
+    &.is-disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+  }
+
+  :deep(.chat-mermaid-block__canvas) {
+    margin: 0;
+    padding: 20px 16px 18px;
+    border: 0;
+    border-radius: 0;
+    background: var(--td-bg-color-container);
+    overflow-x: auto;
+    text-align: center;
+    cursor: zoom-in;
+
+    svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .node rect,
+    .node circle,
+    .node ellipse,
+    .node polygon,
+    .node path {
+      stroke-width: 1.5px;
+    }
+
+    .edgePath path,
+    .flowchart-link {
+      stroke-width: 1.6px;
+    }
+
+    .label,
+    .nodeLabel,
+    .edgeLabel {
+      font-family: var(--app-font-family);
+    }
+  }
+
+  :deep(.chat-mermaid-block--loading .streaming-mermaid-loading) {
+    margin: 0;
+    max-width: none;
+    min-height: 200px;
+    border: 0;
+    border-radius: 0;
+  }
+
+  :deep(pre.mermaid:not(.chat-mermaid-block__canvas)) {
+    margin: 0.75em 0;
+    padding: 20px 16px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 10px;
+    background: var(--td-bg-color-secondarycontainer);
+    overflow-x: auto;
+    text-align: center;
+    cursor: zoom-in;
+
+    svg {
+      max-width: 100%;
+      height: auto;
+    }
+  }
+
+  :deep(ul) {
+    margin: 0.35em 0 0.75em;
+    padding-left: 1.625em;
+    list-style-type: disc;
+    list-style-position: outside;
+
+    ul {
+      list-style-type: disc;
+      margin: 0.25em 0 0;
+      padding-left: 1.25em;
+    }
+  }
+
+  :deep(ol) {
+    margin: 0.35em 0 0.75em;
+    padding-left: 1.625em;
+    list-style-type: decimal;
+    list-style-position: outside;
+
+    ol {
+      list-style-type: decimal;
+      margin: 0.25em 0 0;
+      padding-left: 1.25em;
+    }
+  }
+
+  :deep(li) {
+    margin: 0;
+    line-height: 1.625;
+    padding-left: 0.375em;
+
+    + li {
+      margin-top: 0.375em;
+    }
+
+    &::marker {
+      font-weight: 700;
+      color: var(--td-text-color-primary);
+    }
+
+    > p {
+      margin: 0;
+
+      + p {
+        margin-top: 0.25em;
+      }
+    }
+  }
+
+  :deep(ol > li)::marker {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :deep(li > ul),
+  :deep(li > ol) {
+    margin-top: 0.25em;
+    margin-bottom: 0;
+  }
+
+  :deep(li:has(> input[type='checkbox'])) {
+    list-style: none;
+    margin-left: -1.625em;
+    padding-left: 0;
+
+    &::marker {
+      content: none;
+    }
+
+    input[type='checkbox'] {
+      margin: 0 0.5em 0 0;
+      vertical-align: middle;
+      accent-color: var(--td-brand-color);
+    }
+  }
+
+  :deep(blockquote) {
+    border-left: 2px solid var(--td-component-stroke);
+    padding: 0.5em 0 0.5em 1.25em;
+    margin: 0.5em 0 0.75em;
+    color: var(--td-text-color-secondary);
+    font-weight: 400;
+    font-style: normal;
+
+    blockquote {
+      margin-top: 0.35em;
+      margin-bottom: 0;
+    }
+  }
+
+  :deep(blockquote),
+  :deep(blockquote p) {
+    line-height: 1.5;
+  }
+
+  :deep(hr) {
+    margin: 1.75em 0;
+    border: none;
+    border-top: 1px solid var(--td-component-stroke);
+  }
+
+  :deep(h1) {
+    font-size: 1.5em;
+    font-weight: 600;
+    margin: 0 0 0.375em;
+    line-height: 1.333;
+  }
+
+  :deep(h2) {
+    font-size: 1.25em;
+    font-weight: 600;
+    margin: 1em 0 0.25em;
+    line-height: 1.4;
+
+    &:first-child {
+      margin-top: 0;
+    }
+  }
+
+  :deep(h3) {
+    font-size: 1.125em;
+    font-weight: 600;
+    margin: 0.875em 0 0.25em;
+    line-height: 1.556;
+  }
+
+  :deep(h4),
+  :deep(h5),
+  :deep(h6) {
+    font-weight: 600;
+    margin: 1em 0 0;
+    line-height: 1.5;
+  }
+
+  :deep(h4) {
+    font-size: 1em;
+  }
+
+  :deep(h5) {
+    font-size: 0.9375em;
+  }
+
+  :deep(h6) {
+    font-size: 0.875em;
+    font-weight: 600;
+    color: var(--td-text-color-secondary);
+  }
+
+  :deep(h1:first-child),
+  :deep(h2:first-child),
+  :deep(h3:first-child),
+  :deep(h4:first-child),
+  :deep(h5:first-child),
+  :deep(h6:first-child) {
+    margin-top: 0;
+  }
+
+  :deep(a) {
+    color: var(--td-brand-color);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--td-brand-color) 45%, transparent);
+    text-underline-offset: 0.18em;
+
+    &:hover {
+      color: var(--td-brand-color-hover);
+      text-decoration-color: var(--td-brand-color);
+    }
+  }
+
+  :deep(.chat-markdown-table) {
+    width: fit-content;
+    max-width: 100%;
+    margin: 0.875em 0 1em;
+    overflow-x: auto;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 8px;
+    background: var(--td-bg-color-container);
+    -webkit-overflow-scrolling: touch;
+  }
+
+  :deep(table) {
+    word-break: initial;
+    border-collapse: separate;
+    border-spacing: 0;
+    display: table;
+    font-size: 14px;
+    line-height: 1.55;
+    width: max-content;
+    min-width: 0;
+  }
+
+  :deep(table thead) {
+    background-color: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 75%, var(--td-bg-color-container));
+  }
+
+  :deep(table tbody tr:nth-child(2n)) {
+    background-color: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 45%, transparent);
+  }
+
+  :deep(table tr th) {
+    font-weight: 600;
+    border: 0;
+    border-right: 1px solid var(--td-component-stroke);
+    border-bottom: 1px solid var(--td-component-stroke);
+    background-color: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 75%, var(--td-bg-color-container));
+    text-align: left;
+    margin: 0;
+    padding: 8px 12px;
+    white-space: nowrap;
+  }
+
+  :deep(table tr td) {
+    border: 0;
+    border-right: 1px solid var(--td-component-stroke);
+    border-bottom: 1px solid var(--td-component-stroke);
+    text-align: left;
+    margin: 0;
+    padding: 8px 12px;
+    vertical-align: top;
+  }
+
+  :deep(table tr th:last-child),
+  :deep(table tr td:last-child) {
+    border-right: 0;
+  }
+
+  :deep(table tbody tr:last-child td) {
+    border-bottom: 0;
+  }
+
+  :deep(table th[align='center']),
+  :deep(table td[align='center']) {
+    text-align: center;
+  }
+
+  :deep(table th[align='right']),
+  :deep(table td[align='right']) {
+    text-align: right;
+  }
+
+  :deep(img) {
+    max-width: 80%;
+    max-height: 300px;
+    width: auto;
+    height: auto;
+    border-radius: 8px;
+    display: block;
+    margin: 1.25em 0;
+    border: 0.5px solid var(--td-component-stroke);
+    object-fit: contain;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+  }
+
+  // Protected images not yet hydrated still carry the 1x1 placeholder gif.
+  // Without a fixed size width:auto/height:auto collapse it to a ~1px line that
+  // jumps to full size on load (reads as flicker during streaming). Give it a
+  // stable skeleton box so the later swap to the real image is a calm fade-in.
+  // Match both the explicit loading marker and the transparent GIF itself.
+  // During a streaming DOM patch the marker can briefly be absent while src is
+  // already the 1x1 placeholder; matching src prevents that frame becoming a
+  // tall, one-pixel vertical line in Chromium.
+  :deep(img[data-img-loading]),
+  :deep(img[data-protected-src][src^='data:image/gif;base64']) {
+    width: 260px;
+    height: 180px;
+    min-width: min(260px, 80%);
+    min-height: 180px;
+    max-width: 80%;
+    object-fit: cover;
+    cursor: default;
+    background: linear-gradient(
+      100deg,
+      var(--td-bg-color-secondarycontainer, #f3f3f3) 30%,
+      var(--td-bg-color-container-hover, #eaeaea) 50%,
+      var(--td-bg-color-secondarycontainer, #f3f3f3) 70%
+    );
+    background-size: 200% 100%;
+    animation: chat-img-skeleton 1.2s ease-in-out infinite;
+  }
+
+  @keyframes chat-img-skeleton {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+
+  :deep(p:has(> img:only-child)) {
+    margin: 1.25em 0;
+    line-height: 0;
+  }
+
+  :deep(.mermaid) {
+    margin: 0;
+  }
+
+  .chat-markdown-hljs();
+}

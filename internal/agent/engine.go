@@ -594,7 +594,7 @@ func (e *AgentEngine) runReActIteration(
 		return iterOutcomeBreak, nil
 	}
 
-	// 2. Analyze: Check for stop conditions (natural stop or final_answer tool)
+	// 2. Analyze: Check for stop conditions (natural stop with no tool calls)
 	verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
 	if verdict.isDone {
 		// Guard against empty content: when the LLM stops naturally with no
@@ -607,7 +607,7 @@ func (e *AgentEngine) runReActIteration(
 					round, *emptyRetries, maxEmptyResponseRetries)
 				*messagesPtr = append(*messagesPtr, chat.Message{
 					Role:    "user",
-					Content: "Please provide your answer by calling the final_answer tool.",
+					Content: "Please provide your complete answer now as plain text.",
 				})
 				return iterOutcomeContinue, nil
 			}
@@ -624,6 +624,17 @@ func (e *AgentEngine) runReActIteration(
 		state.RoundSteps = append(state.RoundSteps, verdict.step)
 		return iterOutcomeBreak, nil
 	}
+
+	// This round is non-terminal (it will execute tools and loop again). Any
+	// plain assistant text streamed live to the answer area this round was a
+	// preamble (e.g. "let me search the knowledge base…"), not the final
+	// answer. No explicit retraction signal is emitted: the agent only ends by
+	// stopping naturally with plain text and no tool calls, so the upcoming
+	// tool-call events are themselves the authoritative "that wasn't the final
+	// answer" marker. Both the stream handler and the UI treat any answer text
+	// preceding a tool call in the same stream as a preamble and relocate it
+	// into the steps tree. The preamble is still preserved as this round's
+	// Thought.
 
 	// 3. Act: Execute tool calls
 	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)

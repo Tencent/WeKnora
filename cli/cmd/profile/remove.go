@@ -117,7 +117,7 @@ func runRemove(opts *RemoveOptions, fopts *cmdutil.FormatOptions, name string, s
 	// Confirmation only fires for removing the current profile - non-current
 	// remove uses the same low-friction policy as `auth logout`.
 	if wasCurrent {
-		if err := cmdutil.ConfirmDestructive(p, opts.Yes, jsonOut, "current profile", name, "profile.remove", fmt.Sprintf("weknora profile remove %s -y", name)); err != nil {
+		if err := cmdutil.ConfirmDestructive(p, opts.Yes, jsonOut, "remove", "current profile", name, "profile.remove", fmt.Sprintf("weknora profile remove %s -y", name)); err != nil {
 			return err
 		}
 	}

@@ -9,33 +9,17 @@
         <div v-if="graphReady" class="wiki-graph-search-container">
           <div class="wiki-graph-search-row">
             <div class="wiki-graph-search">
-              <t-select
-                v-model="graphSearchValue"
-                filterable
-                :options="graphSearchEffectiveOptions"
-                :loading="graphSearchLoading"
-                :on-search="handleGraphRemoteSearch"
-                :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')"
-                @change="handleGraphSearchSelect"
-                @enter="handleGraphSearchEnter"
-                :popup-props="{ zIndex: 100 }"
-                class="graph-search-select"
-              >
+              <t-select v-model="graphSearchValue" filterable :options="graphSearchEffectiveOptions"
+                :loading="graphSearchLoading" :on-search="handleGraphRemoteSearch"
+                :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" @change="handleGraphSearchSelect"
+                @enter="handleGraphSearchEnter" :popup-props="{ zIndex: 100 }" class="graph-search-select">
                 <template #prefixIcon><t-icon name="search" /></template>
               </t-select>
             </div>
-            <t-popup
-              trigger="click"
-              placement="bottom-right"
-              :show-arrow="true"
-              overlay-class-name="wiki-graph-help-popup"
-            >
-              <div
-                class="wiki-graph-help-trigger"
-                role="button"
-                tabindex="0"
-                :title="$t('knowledgeEditor.wikiBrowser.helpButtonTitle')"
-              >
+            <t-popup trigger="click" placement="bottom-right" :show-arrow="true"
+              overlay-class-name="wiki-graph-help-popup">
+              <div class="wiki-graph-help-trigger" role="button" tabindex="0"
+                :title="$t('knowledgeEditor.wikiBrowser.helpButtonTitle')">
                 <t-icon name="help-circle" />
               </div>
               <template #content>
@@ -51,52 +35,42 @@
               </template>
             </t-popup>
           </div>
-          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status graph-issues-badge" @click="showGlobalIssuesDrawer = true">
+          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status graph-issues-badge"
+            @click="showGlobalIssuesDrawer = true">
             <t-icon name="error-circle" style="color: var(--td-warning-color);" />
-            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', { count: stats.pending_issues }) }}</span>
+            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', {
+              count:
+                stats.pending_issues
+            })
+            }}</span>
           </div>
         </div>
 
         <!-- Legend Overlay -->
         <div v-if="graphReady" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
           <div class="legend-items">
-            <div 
-              class="legend-item clickable" 
-              :class="{ disabled: !graphFilterTypes.has('summary') }"
-              @click="toggleGraphFilterType('summary')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('summary') }"
+              @click="toggleGraphFilterType('summary')">
               <span class="legend-dot" style="background: #0052d9"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterSummary') }}
             </div>
-            <div 
-              class="legend-item clickable"
-              :class="{ disabled: !graphFilterTypes.has('entity') }"
-              @click="toggleGraphFilterType('entity')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('entity') }"
+              @click="toggleGraphFilterType('entity')">
               <span class="legend-dot" style="background: #2ba471"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterEntity') }}
             </div>
-            <div 
-              class="legend-item clickable"
-              :class="{ disabled: !graphFilterTypes.has('concept') }"
-              @click="toggleGraphFilterType('concept')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('concept') }"
+              @click="toggleGraphFilterType('concept')">
               <span class="legend-dot" style="background: #e37318"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterConcept') }}
             </div>
-            <div 
-              class="legend-item clickable"
-              :class="{ disabled: !graphFilterTypes.has('synthesis') }"
-              @click="toggleGraphFilterType('synthesis')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('synthesis') }"
+              @click="toggleGraphFilterType('synthesis')">
               <span class="legend-dot" style="background: #0594fa"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterSynthesis') }}
             </div>
-            <div 
-              class="legend-item clickable"
-              :class="{ disabled: !graphFilterTypes.has('comparison') }"
-              @click="toggleGraphFilterType('comparison')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('comparison') }"
+              @click="toggleGraphFilterType('comparison')">
               <span class="legend-dot" style="background: #d54941"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterComparison') }}
             </div>
@@ -109,14 +83,12 @@
             </div>
             <div class="legend-action" @click="toggleArrows">
               <span class="legend-action-icon"><t-icon :name="showArrows ? 'browse-off' : 'browse'" /></span>
-              <span>{{ showArrows ? $t('knowledgeEditor.wikiBrowser.hideArrows') : $t('knowledgeEditor.wikiBrowser.showArrows') }}</span>
+              <span>{{ showArrows ? $t('knowledgeEditor.wikiBrowser.hideArrows') :
+                $t('knowledgeEditor.wikiBrowser.showArrows')
+              }}</span>
             </div>
-            <div
-              v-if="graphMode === 'ego' && graphFrontierCount > 0"
-              class="legend-action"
-              @click="growFrontier"
-              :title="$t('knowledgeEditor.wikiBrowser.growFrontierTitle', { count: graphFrontierCount })"
-            >
+            <div v-if="graphMode === 'ego' && graphFrontierCount > 0" class="legend-action" @click="growFrontier"
+              :title="$t('knowledgeEditor.wikiBrowser.growFrontierTitle', { count: graphFrontierCount })">
               <span class="legend-action-icon"><t-icon name="chart-bubble" /></span>
               <span>{{ $t('knowledgeEditor.wikiBrowser.growFrontier', { count: graphFrontierCount }) }}</span>
             </div>
@@ -146,54 +118,40 @@
           <div v-else class="wiki-empty-icon">
             <t-icon name="chart-bubble" size="48px" />
           </div>
-          <p class="wiki-empty-desc">{{ graphLoading ? $t('knowledgeEditor.wikiBrowser.graphEmpty') : $t('knowledgeEditor.wikiBrowser.graphNoData') }}</p>
+          <p class="wiki-empty-desc">{{ graphLoading ? $t('knowledgeEditor.wikiBrowser.graphEmpty') :
+            $t('knowledgeEditor.wikiBrowser.graphNoData') }}</p>
         </div>
 
         <!-- Graph page detail drawer -->
-        <t-drawer
-          v-model:visible="graphDrawerVisible"
-          :header="graphDrawerPage?.title || ''"
-          size="480px"
-          :footer="false"
-          placement="right"
-          :attach="false"
-          :show-overlay="false"
-          :close-btn="true"
-          destroy-on-close
-          class="wiki-graph-drawer"
-        >
+        <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" size="480px"
+          :footer="false" placement="right" :attach="false" :show-overlay="false" :close-btn="true" destroy-on-close
+          class="wiki-graph-drawer">
           <template v-if="graphDrawerPage">
             <div class="wiki-reader-meta" style="margin-bottom: 8px;">
               <t-tag size="small" :theme="getTypeTheme(graphDrawerPage.page_type)" variant="light-outline">
                 {{ getTypeLabel(graphDrawerPage.page_type) }}
               </t-tag>
-              <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', { ver: graphDrawerPage.version }) }}</span>
-              <t-button
-                v-if="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug"
-                size="small"
-                variant="outline"
-                theme="default"
-                style="margin-left: auto;"
-                :disabled="!graphDrawerCanBloom"
-                @click="loadBloomNeighbors(graphDrawerPage.slug)"
-              >
+              <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', {
+                ver:
+                  graphDrawerPage.version
+              }) }}</span>
+              <t-button v-if="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug" size="small"
+                variant="outline" theme="default" style="margin-left: auto;" :disabled="!graphDrawerCanBloom"
+                @click="loadBloomNeighbors(graphDrawerPage.slug)">
                 {{ $t('knowledgeEditor.wikiBrowser.bloomNeighbors') }}
               </t-button>
-              <t-button
-                v-if="graphMode !== 'ego' || graphCenter !== graphDrawerPage.slug"
-                size="small"
-                variant="outline"
-                theme="primary"
+              <t-button v-if="graphMode !== 'ego' || graphCenter !== graphDrawerPage.slug" size="small"
+                variant="outline" theme="primary"
                 :style="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug ? '' : 'margin-left: auto;'"
-                @click="loadEgoGraph(graphDrawerPage.slug)"
-              >
+                @click="loadEgoGraph(graphDrawerPage.slug)">
                 {{ $t('knowledgeEditor.wikiBrowser.expandNeighbors') }}
               </t-button>
             </div>
             <div v-if="graphDrawerNeighborHint" class="wiki-drawer-neighbor-hint" style="margin-bottom: 16px;">
               {{ graphDrawerNeighborHint }}
             </div>
-            <div ref="drawerBodyRef" class="wiki-reader-body" v-html="graphDrawerContent" @click="handleGraphDrawerClick"></div>
+            <div ref="drawerBodyRef" class="wiki-reader-body" v-html="graphDrawerContent"
+              @click="handleGraphDrawerClick"></div>
           </template>
         </t-drawer>
       </div>
@@ -206,20 +164,21 @@
         <div class="wiki-sidebar-header">
           <div v-if="stats && (stats.pending_tasks > 0 || stats.is_active)" class="wiki-queue-status">
             <t-loading size="small" />
-            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.queueStatus', { count: stats.pending_tasks || 0 }) }}</span>
+            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.queueStatus', {
+              count: stats.pending_tasks || 0
+            }) }}</span>
           </div>
           <!-- Global Issues -->
-          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status" @click="showGlobalIssuesDrawer = true">
+          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status"
+            @click="showGlobalIssuesDrawer = true">
             <t-icon name="error-circle" style="color: var(--td-warning-color);" />
-            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', { count: stats.pending_issues }) }}</span>
+            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', {
+              count:
+                stats.pending_issues
+            }) }}</span>
           </div>
-          <t-input
-            v-model="searchQuery"
-            :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')"
-            clearable
-            @enter="doSearch"
-            @clear="searchResults = null"
-          >
+          <t-input v-model="searchQuery" :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" clearable
+            @enter="doSearch" @clear="searchResults = null">
             <template #prefixIcon><t-icon name="search" /></template>
           </t-input>
         </div>
@@ -228,12 +187,8 @@
           <!-- Search mode: flat list of hits, no group chrome. Clearing
                the search snaps back to the bucketed view below. -->
           <template v-if="searchResults !== null">
-            <div
-              v-for="page in searchResults"
-              :key="page.id"
-              :class="['wiki-page-item', { active: selectedPage?.id === page.id }]"
-              @click="selectPage(page)"
-            >
+            <div v-for="page in searchResults" :key="page.id"
+              :class="['wiki-page-item', { active: selectedPage?.id === page.id }]" @click="selectPage(page)">
               <div class="wiki-page-item-title">{{ page.title }}</div>
               <div class="wiki-page-item-summary">{{ page.summary }}</div>
               <div class="wiki-page-item-meta">
@@ -249,83 +204,171 @@
             <!-- Index overview (pinned at top). Rendered lazily from a
                  structured API response — never loads the full directory
                  as markdown. -->
-            <div
-              v-if="indexAvailable"
-              :class="['wiki-nav-item', { active: activeSystemView === 'index' }]"
-              @click="openIndexView"
-            >
+            <div v-if="indexAvailable" :class="['wiki-nav-item', { active: activeSystemView === 'index' }]"
+              @click="openIndexView">
               <t-icon name="catalog" class="wiki-nav-icon" />
               <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.indexTitle') }}</span>
             </div>
 
             <!-- Log feed (pinned). Events live in wiki_log_entries and
                  are loaded lazily when the user clicks this entry. -->
-            <div
-              v-if="logAvailable"
-              :class="['wiki-nav-item', { active: activeSystemView === 'log' }]"
-              @click="openLogView"
-            >
+            <div v-if="logAvailable" :class="['wiki-nav-item', { active: activeSystemView === 'log' }]"
+              @click="openLogView">
               <t-icon name="history" class="wiki-nav-icon" />
               <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</span>
             </div>
 
             <div class="wiki-sidebar-divider" v-if="indexAvailable || logAvailable"></div>
 
-            <!-- Horizontal tab bar: one per non-empty page_type. Clicking a
-                 tab swaps the visible list to that bucket. Parallel tabs are
-                 easier to scan than a vertical stack of collapsibles and
-                 sidestep nested-scroller UX entirely — only one virtualized
-                 list is mounted at a time. -->
-            <div v-if="visibleTabs.length > 0" class="wiki-tab-bar">
-              <div
-                v-for="tab in visibleTabs"
-                :key="tab.type"
-                :class="['wiki-tab', { active: activeTab === tab.type }]"
-                @click="setActiveTab(tab.type)"
-              >
-                <span class="wiki-tab-label">{{ tab.label }}</span>
-                <span class="wiki-tab-count">{{ tab.total }}</span>
-              </div>
-            </div>
-
-            <!-- Active-tab list -->
-            <template v-if="activeGroup">
-              <RecycleScroller
-                ref="groupScrollerRef"
-                class="wiki-group-scroller"
-                :items="activeGroup.pages"
-                :item-size="WIKI_PAGE_ITEM_HEIGHT"
-                key-field="id"
-                :buffer="400"
-                page-mode
-                v-slot="{ item }"
-              >
-                <div
-                  :class="['wiki-page-item', { active: selectedPage?.id === item.id }]"
-                  @click="selectPage(item)"
-                >
-                  <div class="wiki-page-item-title">{{ item.title }}</div>
-                  <div class="wiki-page-item-summary">{{ item.summary }}</div>
-                  <div class="wiki-page-item-meta">
-                    <span>{{ formatDate(item.updated_at) }}</span>
+            <!-- Tab bar + tree share one horizontal inset so the "new folder"
+                 action lines up with the folder rows below. -->
+            <div v-if="visibleTabs.length > 0 || activeGroup" class="wiki-tree-panel">
+              <div v-if="visibleTabs.length > 0" class="wiki-tab-bar">
+                <div class="wiki-tab-bar-scroll">
+                  <div v-for="tab in visibleTabs" :key="tab.type"
+                    :class="['wiki-tab', { active: activeTab === tab.type }]" @click="setActiveTab(tab.type)">
+                    <span class="wiki-tab-label">{{ tab.label }}</span>
+                    <span class="wiki-tab-count">{{ tab.total }}</span>
                   </div>
                 </div>
-              </RecycleScroller>
-              <!-- Sentinel: when this hits the viewport, fetch the next
-                   page. Page-mode RecycleScroller delegates scrolling to
-                   `.wiki-page-list`, so scroll-end events don't fire on
-                   the scroller itself; IntersectionObserver is the right
-                   primitive here and degrades gracefully while loading. -->
-              <div
-                v-if="activeGroup.hasMore"
-                ref="groupSentinelRef"
-                class="wiki-group-sentinel"
-                :data-type="activeGroup.type"
-              ></div>
-              <div v-if="activeGroup.loading" class="wiki-group-loading">
-                <t-loading size="small" />
+                <div class="wiki-tab-bar-actions">
+                  <div class="wiki-view-toggle" role="group"
+                    :aria-label="$t('knowledgeEditor.wikiBrowser.viewModeToggle')">
+                    <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.viewTree')" placement="top">
+                      <button type="button" class="wiki-view-toggle-btn"
+                        :class="{ active: sidebarViewMode === 'tree' }" :aria-pressed="sidebarViewMode === 'tree'"
+                        :aria-label="$t('knowledgeEditor.wikiBrowser.viewTree')" :disabled="sidebarViewSwitching"
+                        @click="switchSidebarViewMode('tree')">
+                        <t-icon name="tree-list" />
+                      </button>
+                    </t-tooltip>
+                    <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.viewList')" placement="top">
+                      <button type="button" class="wiki-view-toggle-btn"
+                        :class="{ active: sidebarViewMode === 'list' }" :aria-pressed="sidebarViewMode === 'list'"
+                        :aria-label="$t('knowledgeEditor.wikiBrowser.viewList')" :disabled="sidebarViewSwitching"
+                        @click="switchSidebarViewMode('list')">
+                        <t-icon name="view-list" />
+                      </button>
+                    </t-tooltip>
+                  </div>
+                  <t-tooltip v-if="props.canEdit" :content="$t('knowledgeEditor.wikiBrowser.newRootFolder')" placement="top">
+                    <button type="button" class="wiki-tab-bar-action"
+                      :disabled="sidebarViewMode !== 'tree' || sidebarViewSwitching || sidebarTabSwitching"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.newRootFolder')"
+                      @click.stop="startCreateRootFolder">
+                      <t-icon name="folder-add" />
+                    </button>
+                  </t-tooltip>
+                </div>
               </div>
-            </template>
+
+              <!-- Active-tab list -->
+              <template v-if="activeGroup && sidebarViewMode === 'tree'">
+                <!-- The list container is itself the "move to root" drop target;
+                   folder rows stop propagation so their own drop wins. This
+                   avoids inserting/removing a drop bar during the drag, which
+                   was cancelling the native drag after the first success. -->
+                <div ref="treeListRef"
+                  :class="['wiki-tree-list', { 'wiki-tree-list--root-drop': dropTargetKey === '__root__' }]"
+                  @dragover.prevent="onRootDragOver" @dragleave="onDirectoryDragLeave('__root__')"
+                  @drop.prevent="onDropOnDirectory($event, '', [])">
+                  <div v-if="creatingRootFolder" class="wiki-directory-item wiki-directory-item--editing"
+                    :style="{ '--wiki-tree-depth': 0 }" @click.stop>
+                    <input ref="creatingRootFolderInputRef" v-model="creatingRootFolderName"
+                      class="wiki-directory-rename-input"
+                      :placeholder="$t('knowledgeEditor.wikiBrowser.folderNamePlaceholder')"
+                      @keydown.enter="submitCreateRootFolder" @keydown.esc="cancelCreateRootFolder" />
+                    <div class="wiki-tree-trailing wiki-folder-inline-actions">
+                      <t-button variant="text" theme="default" size="small" class="wiki-folder-action-btn confirm"
+                        @click.stop="submitCreateRootFolder">
+                        <t-icon name="check" size="16px" />
+                      </t-button>
+                      <t-button variant="text" theme="default" size="small" class="wiki-folder-action-btn cancel"
+                        @click.stop="cancelCreateRootFolder">
+                        <t-icon name="close" size="16px" />
+                      </t-button>
+                    </div>
+                  </div>
+                  <template v-for="item in activeTreeRows" :key="item.rowKey">
+                    <div v-if="item.kind === 'directory'"
+                      :class="['wiki-directory-item', { 'wiki-directory-item--drop': dropTargetKey === item.pathKey }]"
+                      :style="{ '--wiki-tree-depth': item.depth }" :draggable="editingFolderId !== item.folderId"
+                      @click="toggleDirectory(item.pathKey)"
+                      @dragstart="onFolderDragStart($event, item.folderId, item.path)" @dragend="onPageDragEnd"
+                      @dragover.prevent.stop="onDirectoryDragOver($event, item.pathKey)"
+                      @dragleave.stop="onDirectoryDragLeave(item.pathKey)"
+                      @drop.prevent.stop="onDropOnDirectory($event, item.folderId, item.path)">
+                      <t-icon :name="item.collapsed ? 'chevron-right' : 'chevron-down'" class="wiki-directory-toggle" />
+                      <input v-if="editingFolderId === item.folderId" v-model="editingName"
+                        class="wiki-directory-rename-input"
+                        :placeholder="$t('knowledgeEditor.wikiBrowser.folderNamePlaceholder')" @click.stop
+                        @keydown.enter="commitRenameFolder(item.folderId, item.label)" @keydown.esc="cancelRenameFolder"
+                        @blur="commitRenameFolder(item.folderId, item.label)" />
+                      <template v-else>
+                        <span class="wiki-directory-title">{{ item.label }}</span>
+                        <div class="wiki-tree-trailing">
+                          <span class="wiki-directory-count">{{ item.count }}</span>
+                          <WikiFolderActions v-if="item.folderId" :name="item.label" :page-count="item.count"
+                            :has-children="item.hasChildren"
+                            @create="(name: string) => createFolder(item.folderId, item.path, name)"
+                            @rename="() => startRenameFolder(item.folderId, item.label)"
+                            @delete="() => deleteFolder(item.folderId)" />
+                        </div>
+                      </template>
+                    </div>
+                    <div v-else-if="item.kind === 'load-more'" class="wiki-directory-load-more"
+                      :data-loadmore-key="item.rowKey" :style="{ '--wiki-tree-depth': item.depth }"
+                      @click="loadPagesForType(item.type, { categoryPath: item.path })">
+                      <t-loading v-if="item.loading" size="small" />
+                      <template v-else>
+                        <t-icon name="chevron-down" />
+                        <span>{{ $t('knowledgeEditor.wikiBrowser.logLoadMore') }}</span>
+                      </template>
+                    </div>
+                    <div v-else
+                      :class="['wiki-page-item', 'wiki-page-item--tree', { active: selectedPage?.id === item.page.id }]"
+                      :style="{ '--wiki-tree-depth': item.depth }" :title="item.page.title" draggable="true"
+                      @click="selectPage(item.page)" @dragstart="onPageDragStart($event, item.page)"
+                      @dragend="onPageDragEnd">
+                      <t-icon :name="getPageIcon(item.page)"
+                        :class="['wiki-page-file-icon', `wiki-page-file-icon--${item.page.page_type}`]" />
+                      <span class="wiki-page-item-title">{{ item.page.title }}</span>
+                    </div>
+                  </template>
+                </div>
+                <!-- Sentinel: when this hits the viewport, fetch the next
+                   page. The tree list itself is intentionally plain DOM:
+                   rows are already paged, and avoiding dynamic row
+                   measurement keeps expand/collapse visually stable. -->
+                <div v-if="activeGroup.hasMore" ref="groupSentinelRef" class="wiki-group-sentinel"
+                  :data-type="activeGroup.type"></div>
+                <div v-if="activeGroup.loading" class="wiki-group-loading">
+                  <t-loading size="small" />
+                </div>
+              </template>
+
+              <!-- Classic flat list. It owns a separate paged dataset because
+                   tree mode requests one directory at a time. -->
+              <template v-else-if="activeGroup">
+                <RecycleScroller class="wiki-group-scroller" :items="activeFlatPages"
+                  :item-size="WIKI_PAGE_ITEM_HEIGHT" key-field="id" :buffer="400" page-mode
+                  v-slot="{ item }">
+                  <div :class="['wiki-page-item', 'wiki-page-item--list', { active: selectedPage?.id === item.id }]"
+                    @click="selectPage(item)">
+                    <div class="wiki-page-item-title">{{ item.title }}</div>
+                    <div class="wiki-page-item-summary">{{ item.summary }}</div>
+                    <div class="wiki-page-item-meta">
+                      <span>{{ formatDate(item.updated_at) }}</span>
+                    </div>
+                  </div>
+                </RecycleScroller>
+                <div v-if="activeFlatState?.hasMore" ref="groupSentinelRef" class="wiki-group-sentinel"
+                  :data-type="activeGroup.type"></div>
+                <div v-if="activeFlatState?.loading" class="wiki-group-loading">
+                  <t-loading size="small" />
+                </div>
+              </template>
+            </div>
 
             <!-- Empty state -->
             <div v-if="!hasContentPages && !loading" class="wiki-empty-state">
@@ -356,18 +399,11 @@
               <div class="wiki-reader-header">
                 <h2 class="wiki-reader-title" style="display: flex; align-items: center;">
                   {{ selectedPage.title }}
-                  
-                  <t-popup
-                    v-if="pageIssues.length > 0"
-                    v-model="showIssuesBox"
-                    placement="bottom-left"
-                    trigger="click"
-                    :overlayInnerStyle="{ padding: 0, boxShadow: 'var(--td-shadow-3)', borderRadius: '8px', width: '560px', maxWidth: '90vw' }"
-                  >
-                    <span 
-                      class="wiki-issue-trigger"
-                      :title="$t('knowledgeEditor.wikiBrowser.issueTitle', { count: pageIssues.length })"
-                    >
+
+                  <t-popup v-if="pageIssues.length > 0" v-model="showIssuesBox" placement="bottom-left" trigger="click"
+                    :overlayInnerStyle="{ padding: 0, boxShadow: 'var(--td-shadow-3)', borderRadius: '8px', width: '560px', maxWidth: '90vw' }">
+                    <span class="wiki-issue-trigger"
+                      :title="$t('knowledgeEditor.wikiBrowser.issueTitle', { count: pageIssues.length })">
                       <t-icon name="error-circle-filled" style="color: var(--td-warning-color);" />
                     </span>
 
@@ -375,46 +411,62 @@
                       <div class="wiki-issue-popup-content">
                         <div class="wiki-issue-popup-header">
                           <div class="wiki-issue-popup-title">
-                            <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixSuggestions', { count: pageIssues.length }) }}</span>
+                            <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixSuggestions', { count: pageIssues.length })
+                            }}</span>
                           </div>
-                          <t-button v-if="props.canEdit" size="small" theme="primary" variant="base" @click="triggerAutoFix">
+                          <t-button v-if="props.canEdit" size="small" theme="primary" variant="base"
+                            @click="triggerAutoFix">
                             <template #icon><t-icon name="tools" /></template>
                             {{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}
                           </t-button>
                         </div>
-                      <div class="wiki-issue-popup-list">
-                        <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
-                          <div class="wiki-issue-popup-main">
-                            <div class="wiki-issue-popup-tags">
-                              <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
-                              <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
-                              <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
-                              <t-tag v-else theme="primary" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
-                            </div>
-                            <div class="wiki-issue-popup-desc">
-                              {{ issue.description }}
-                            </div>
-                            <div class="wiki-issue-popup-meta">
-                              <span class="wiki-issue-popup-reporter">
-                                {{ issue.reported_by === 'wiki-researcher-agent' ? $t('knowledgeEditor.wikiBrowser.issueAiLinter') : $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
-                              </span>
-                              <div v-if="props.canEdit" class="wiki-issue-popup-actions">
-                                <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)" style="margin-right: 12px; font-weight: 500;">
-                                  <t-icon name="tools" style="margin-right: 4px;" />{{ $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
+                        <div class="wiki-issue-popup-list">
+                          <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
+                            <div class="wiki-issue-popup-main">
+                              <div class="wiki-issue-popup-tags">
+                                <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light"
+                                  size="small">{{
+                                    $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
+                                <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger"
+                                  variant="light" size="small">{{
+                                    $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
+                                <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light"
+                                  size="small">{{
+                                    $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
+                                <t-tag v-else theme="primary" variant="light" size="small">{{
+                                  $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
+                              </div>
+                              <div class="wiki-issue-popup-desc">
+                                {{ issue.description }}
+                              </div>
+                              <div class="wiki-issue-popup-meta">
+                                <span class="wiki-issue-popup-reporter">
+                                  {{ issue.reported_by === 'wiki-researcher-agent' ?
+                                    $t('knowledgeEditor.wikiBrowser.issueAiLinter') :
+                                    $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
                                 </span>
-                                <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);" @click="handleIssueIgnore(issue.id)">{{ $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
+                                <div v-if="props.canEdit" class="wiki-issue-popup-actions">
+                                  <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)"
+                                    style="margin-right: 12px; font-weight: 500;">
+                                    <t-icon name="tools" style="margin-right: 4px;" />{{
+                                      $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
+                                  </span>
+                                  <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);"
+                                    @click="handleIssueIgnore(issue.id)">{{
+                                      $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
+                                </div>
                               </div>
                             </div>
                           </div>
                         </div>
-                      </div>
                       </div>
                     </template>
                   </t-popup>
                 </h2>
                 <div v-if="selectedPage.aliases && selectedPage.aliases.length" class="wiki-reader-aliases">
                   <span class="wiki-alias-label">{{ $t('knowledgeEditor.wikiBrowser.aliases') }}:</span>
-                  <t-tag v-for="alias in selectedPage.aliases" :key="alias" size="small" variant="light" class="wiki-alias-tag">
+                  <t-tag v-for="alias in selectedPage.aliases" :key="alias" size="small" variant="light"
+                    class="wiki-alias-tag">
                     {{ alias }}
                   </t-tag>
                 </div>
@@ -422,14 +474,14 @@
                   <t-tag size="small" :theme="getTypeTheme(selectedPage.page_type)" variant="light-outline">
                     {{ getTypeLabel(selectedPage.page_type) }}
                   </t-tag>
-                  <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', { ver: selectedPage.version }) }}</span>
+                  <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', {
+                    ver:
+                      selectedPage.version
+                  })
+                  }}</span>
                   <span class="wiki-reader-meta-text">{{ formatDate(selectedPage.updated_at) }}</span>
-                  <t-link
-                    theme="primary"
-                    hover="color"
-                    class="wiki-reader-graph-link"
-                    @click="emit('view-graph', selectedPage.slug)"
-                  >
+                  <t-link theme="primary" hover="color" class="wiki-reader-graph-link"
+                    @click="emit('view-graph', selectedPage.slug)">
                     <template #prefixIcon><t-icon name="chart-bubble" /></template>
                     {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
                   </t-link>
@@ -442,28 +494,19 @@
                   <t-icon name="link" size="14px" />
                   {{ $t('knowledgeEditor.wikiBrowser.linkedFrom') }}
                 </span>
-                <a
-                  v-for="link in selectedPage.in_links"
-                  :key="'in-' + link"
-                  href="#"
-                  class="wiki-backlink-tag"
-                  @click.prevent="navigateToSlug(link)"
-                >{{ slugDisplayName(link) }}</a>
+                <a v-for="link in selectedPage.in_links" :key="'in-' + link" href="#" class="wiki-backlink-tag"
+                  @click.prevent="navigateToSlug(link)">{{ slugDisplayName(link) }}</a>
               </div>
 
               <!-- Content -->
-              <div ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent" @click="handleContentClick"></div>
+              <div ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent" @click="handleContentClick">
+              </div>
 
               <!-- Source refs -->
               <div v-if="parsedSourceRefs.length" class="wiki-reader-sources">
                 <span class="wiki-link-label">{{ $t('knowledgeEditor.wikiBrowser.sources') }}</span>
-                <a
-                  v-for="ref in parsedSourceRefs"
-                  :key="ref.id"
-                  href="#"
-                  class="wiki-source-ref"
-                  @click.prevent="emit('open-source-doc', ref.id)"
-                >
+                <a v-for="ref in parsedSourceRefs" :key="ref.id" href="#" class="wiki-source-ref"
+                  @click.prevent="emit('open-source-doc', ref.id)">
                   <t-icon name="file" size="14px" />
                   {{ ref.title }}
                 </a>
@@ -490,12 +533,8 @@
                 <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.logLoading') }}</p>
               </div>
               <template v-else-if="indexMarkdown">
-                <div
-                  ref="indexBodyRef"
-                  class="wiki-reader-body wiki-index-body"
-                  v-html="renderedIndexMarkdown"
-                  @click="handleContentClick"
-                ></div>
+                <div ref="indexBodyRef" class="wiki-reader-body wiki-index-body" v-html="renderedIndexMarkdown"
+                  @click="handleContentClick"></div>
                 <div v-if="indexHasMore" ref="indexSentinelRef" class="wiki-index-sentinel">
                   <span v-if="indexLoading" class="wiki-index-loading">
                     {{ $t('knowledgeEditor.wikiBrowser.logLoading') }}
@@ -531,25 +570,15 @@
                   </div>
                   <div v-if="entry.summary" class="wiki-log-entry-summary">{{ entry.summary }}</div>
                   <div v-if="entry.pages_affected && entry.pages_affected.length" class="wiki-log-entry-pages">
-                    <a
-                      v-for="ref in entry.pages_affected"
-                      :key="entry.id + ':' + ref.slug"
-                      href="#"
-                      class="wiki-log-entry-page"
-                      :title="ref.slug"
-                      @click.prevent="navigateToSlug(ref.slug)"
-                    >{{ ref.title || ref.slug }}</a>
+                    <a v-for="ref in entry.pages_affected" :key="entry.id + ':' + ref.slug" href="#"
+                      class="wiki-log-entry-page" :title="ref.slug" @click.prevent="navigateToSlug(ref.slug)">{{
+                        ref.title || ref.slug }}</a>
                   </div>
                 </div>
                 <div v-if="logNextCursor || !logInitialized" class="wiki-log-load-more">
-                  <t-button
-                    size="small"
-                    variant="outline"
-                    theme="default"
-                    :loading="logLoading"
-                    @click="loadMoreLog"
-                  >
-                    {{ logInitialized ? $t('knowledgeEditor.wikiBrowser.logLoadMore') : $t('knowledgeEditor.wikiBrowser.logLoading') }}
+                  <t-button size="small" variant="outline" theme="default" :loading="logLoading" @click="loadMoreLog">
+                    {{ logInitialized ? $t('knowledgeEditor.wikiBrowser.logLoadMore') :
+                      $t('knowledgeEditor.wikiBrowser.logLoading') }}
                   </t-button>
                 </div>
               </div>
@@ -560,7 +589,8 @@
               <div class="wiki-empty-icon">
                 <t-icon name="browse" size="48px" />
               </div>
-              <p class="wiki-empty-title" v-if="hasContentPages">{{ $t('knowledgeEditor.wikiBrowser.selectPageHint') }}</p>
+              <p class="wiki-empty-title" v-if="hasContentPages">{{ $t('knowledgeEditor.wikiBrowser.selectPageHint') }}
+              </p>
               <template v-else>
                 <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.emptyTitle') }}</p>
                 <p class="wiki-empty-desc">{{ $t('knowledgeEditor.wikiBrowser.emptyDesc') }}</p>
@@ -570,70 +600,93 @@
         </div>
       </div>
     </template>
-    
+
     <!-- Image Preview -->
     <Teleport to="body">
-      <picturePreview v-if="imagePreviewVisible" :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
+      <picturePreview v-if="imagePreviewVisible" :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl"
+        @closePreImg="closeImagePreview" />
     </Teleport>
-    
+
     <!-- Global Issues Drawer -->
-    <t-drawer
-      v-model:visible="showGlobalIssuesDrawer"
-      :header="$t('knowledgeEditor.wikiBrowser.globalIssuesTitle')"
-      size="480px"
-      :footer="false"
-      class="wiki-global-issues-drawer"
-    >
+    <t-drawer v-model:visible="showGlobalIssuesDrawer" :header="$t('knowledgeEditor.wikiBrowser.globalIssuesTitle')"
+      size="480px" :footer="false" class="wiki-global-issues-drawer">
       <div class="wiki-issue-popup-list">
         <div v-for="issue in globalIssues" :key="issue.id" class="wiki-issue-popup-item">
           <div class="wiki-issue-popup-main">
             <div class="wiki-issue-popup-tags">
-              <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
-              <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
-              <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
-              <t-tag v-else theme="primary" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
+              <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light" size="small">{{
+                $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
+              <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger" variant="light"
+                size="small">{{
+                  $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
+              <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light" size="small">{{
+                $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
+              <t-tag v-else theme="primary" variant="light" size="small">{{
+                $t('knowledgeEditor.wikiBrowser.issueAttention')
+              }}</t-tag>
             </div>
             <div class="wiki-issue-popup-desc">
-              <div style="font-weight: 500; margin-bottom: 4px; color: var(--td-brand-color); cursor: pointer;" @click="navigateToSlugAndFix(issue.slug)">
-                <t-icon name="link" size="12px"/> {{ $t('knowledgeEditor.wikiBrowser.issuePagePrefix') }}{{ slugDisplayName(issue.slug) }}
+              <div style="font-weight: 500; margin-bottom: 4px; color: var(--td-brand-color); cursor: pointer;"
+                @click="navigateToSlugAndFix(issue.slug)">
+                <t-icon name="link" size="12px" /> {{ $t('knowledgeEditor.wikiBrowser.issuePagePrefix') }}{{
+                  slugDisplayName(issue.slug) }}
               </div>
               {{ issue.description }}
             </div>
             <div class="wiki-issue-popup-meta">
               <span class="wiki-issue-popup-reporter">
-                {{ issue.reported_by === 'wiki-researcher-agent' ? $t('knowledgeEditor.wikiBrowser.issueAiLinter') : $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
+                {{ issue.reported_by === 'wiki-researcher-agent' ? $t('knowledgeEditor.wikiBrowser.issueAiLinter') :
+                  $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
               </span>
               <div class="wiki-issue-popup-actions">
-                <span class="wiki-issue-popup-action" @click="navigateToSlugAndFix(issue.slug)" style="margin-right: 12px; font-weight: 500;">
-                  <t-icon name="arrow-right-circle" style="margin-right: 4px;" />{{ $t('knowledgeEditor.wikiBrowser.issueGoFix') }}
+                <span class="wiki-issue-popup-action" @click="navigateToSlugAndFix(issue.slug)"
+                  style="margin-right: 12px; font-weight: 500;">
+                  <t-icon name="arrow-right-circle" style="margin-right: 4px;" />{{
+                    $t('knowledgeEditor.wikiBrowser.issueGoFix') }}
                 </span>
-                <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);" @click="handleGlobalIssueIgnore(issue.id)">{{ $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
+                <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);"
+                  @click="handleGlobalIssueIgnore(issue.id)">{{ $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
               </div>
             </div>
           </div>
         </div>
-        <div v-if="globalIssues.length === 0" style="padding: 40px; text-align: center; color: var(--td-text-color-placeholder);">
+        <div v-if="globalIssues.length === 0"
+          style="padding: 40px; text-align: center; color: var(--td-text-color-placeholder);">
           {{ $t('knowledgeEditor.wikiBrowser.globalIssuesEmpty') }}
         </div>
       </div>
     </t-drawer>
 
     <!-- Fix Chat Drawer -->
-    <t-drawer
-      v-model:visible="showFixDrawer"
-      :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')"
-      size="700px"
-      :footer="false"
-      class="wiki-fix-drawer"
-    >
-      <ChatView 
-        v-if="showFixDrawer"
-        :session_id="currentFixSessionId" 
-        agentId="builtin-wiki-fixer" 
-        :kbIds="[props.knowledgeBaseId]"
-        :embeddedMode="true"
-      />
+    <t-drawer v-model:visible="showFixDrawer" :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')" size="700px"
+      :footer="false" class="wiki-fix-drawer">
+      <ChatView v-if="showFixDrawer" :session_id="currentFixSessionId" agentId="builtin-wiki-fixer"
+        :kbIds="[props.knowledgeBaseId]" :embeddedMode="true" />
     </t-drawer>
+
+    <!-- In-place move confirmation, anchored at the drop point. Confirming runs
+         the actual move API; cancelling discards the staged move. -->
+    <teleport to="body">
+      <div v-if="pendingMove" class="wiki-move-confirm-mask" @click="cancelPendingMove">
+        <div class="wiki-move-confirm anchored-form-popup-card"
+          :style="{ left: `${pendingMove.x}px`, top: `${pendingMove.y}px` }" @click.stop>
+          <div class="anchored-form-popup-title">
+            {{ $t('knowledgeEditor.wikiBrowser.moveConfirmTitle') }}
+          </div>
+          <div class="anchored-form-popup-body">
+            {{ $t('knowledgeEditor.wikiBrowser.moveConfirm', { target: pendingMove.targetLabel }) }}
+          </div>
+          <div class="anchored-form-popup-footer">
+            <t-button variant="outline" @click="cancelPendingMove">
+              {{ $t('common.cancel') }}
+            </t-button>
+            <t-button theme="primary" @click="confirmPendingMove">
+              {{ $t('common.confirm') }}
+            </t-button>
+          </div>
+        </div>
+      </div>
+    </teleport>
   </div>
 </template>
 
@@ -645,17 +698,19 @@ import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
-// RecycleScroller virtualizes the sidebar page lists so expanding a
-// 40k-item group no longer commits 40k DOM nodes. Each item has a fixed
-// height (title + 2-line summary + meta + padding) which keeps recycle
-// mode cheap — no measurement overhead per item.
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
+import WikiFolderActions from './WikiFolderActions.vue'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
 import {
   listWikiPages,
+  listWikiFolders,
+  createWikiFolder,
+  updateWikiFolder,
+  deleteWikiFolder,
+  moveWikiPage,
   getWikiPage,
   getWikiIndex,
   getWikiLog,
@@ -665,6 +720,7 @@ import {
   listWikiIssues,
   updateWikiIssueStatus,
   type WikiPage,
+  type WikiFolderNode,
   type WikiGraphData,
   type WikiStats,
   type WikiPageIssue,
@@ -719,8 +775,50 @@ interface PageTypeBucket {
   total: number      // KB-wide count reported by the backend for this type
   loading: boolean
   initialized: boolean // true once the first page has been fetched
+  categoryPaths: Array<{ path: string[]; count: number }>
+  // folderIdByPath maps a materialized folder path ("AI/LLM") to its stable
+  // wiki_folders id, populated as folder levels load. Drag-and-drop and the
+  // directory rows resolve a folder's id through this map.
+  folderIdByPath: Record<string, string>
+  categoriesLoading: boolean
+  categoriesInitialized: boolean
+  // categoryPages tracks the directory-skeleton pagination per parent level,
+  // keyed by directoryPathKey(type, parentPath). Each level is paged in on
+  // demand so a folder with thousands of siblings doesn't arrive in one shot.
+  categoryPages: Record<string, DirectoryCategoryState>
+  directoryPages: Record<string, DirectoryPageState>
+  flatItems: WikiPage[]
+  flatNextPage: number
+  flatTotal: number
+  flatLoading: boolean
+  flatInitialized: boolean
+}
+interface DirectoryPageState {
+  nextPage: number
+  total: number
+  loading: boolean
+  initialized: boolean
+}
+interface DirectoryCategoryState {
+  nextPage: number   // next directory page to fetch, 1-based
+  totalPages: number
+  loading: boolean
+  initialized: boolean
+}
+type WikiTreeRow =
+  | { kind: 'directory'; rowKey: string; pathKey: string; folderId: string; path: string[]; label: string; depth: number; count: number; hasChildren: boolean; collapsed: boolean }
+  | { kind: 'load-more'; rowKey: string; type: string; path: string[]; depth: number; loading: boolean }
+  | { kind: 'page'; rowKey: string; page: WikiPage; depth: number }
+interface WikiTreeDirectory {
+  label: string
+  path: string[]
+  dirs: Map<string, WikiTreeDirectory>
+  pages: WikiPage[]
+  count: number
 }
 const pagesByType = ref<Record<string, PageTypeBucket>>({})
+const collapsedDirectories = ref<Set<string>>(new Set())
+const touchedDirectories = ref<Set<string>>(new Set())
 // Index view state. The reader renders an incrementally-built markdown
 // string rather than a structured list — opening the view loads intro
 // only, and "Load more" appends one directory section at a time in a
@@ -895,15 +993,15 @@ function applyGraphFilters() {
 // Fit graph to view
 function fitGraphToView() {
   if (!graphReady.value || !graphPanZoomRef || !graphRef.value || graphNodes.length === 0) return
-  
+
   const container = graphRef.value
   const width = container.clientWidth
   const height = container.clientHeight
-  
+
   // Find bounding box of all VISIBLE nodes
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   let visibleCount = 0
-  
+
   for (const node of graphNodes) {
     // Every node in graphNodes is a visible candidate now that filtering
     // is server-side — no need to recheck the client-side allow-list.
@@ -913,30 +1011,30 @@ function fitGraphToView() {
     maxY = Math.max(maxY, node.y)
     visibleCount++
   }
-  
+
   if (visibleCount === 0) return // No visible nodes
-  
+
   // Calculate center of the bounding box
   const cx = (minX + maxX) / 2
   const cy = (minY + maxY) / 2
-  
+
   // Calculate scale to fit the bounding box (with some padding)
   const padding = 60
   const boxWidth = Math.max(maxX - minX, 100) + padding * 2
   const boxHeight = Math.max(maxY - minY, 100) + padding * 2
-  
+
   const scaleX = width / boxWidth
   const scaleY = height / boxHeight
   const targetScale = Math.max(0.2, Math.min(2, Math.min(scaleX, scaleY))) // Limit scale between 0.2 and 2
-  
+
   // Offset center if drawer is open
   const targetCx = width / 2 - (graphDrawerVisible.value ? 240 : 0)
   const targetCy = height / 2
-  
+
   // Target translation
   const targetTx = targetCx - cx * targetScale
   const targetTy = targetCy - cy * targetScale
-  
+
   graphPanZoomRef.flyTo(targetTx, targetTy, targetScale, 600)
 }
 
@@ -960,42 +1058,79 @@ const navFromSystemView = ref<'' | 'index' | 'log'>('')
 // the "other" bucket at the bottom of groupedPages.
 const typeOrder = ['summary', 'entity', 'concept', 'synthesis', 'comparison']
 
+// Entity and concept pages look and behave alike, so the sidebar merges all
+// non-summary content types under a single "knowledge" tab and distinguishes
+// the individual page types by icon instead. Summary keeps its own tab and is
+// shown after the knowledge tab.
+const KNOWLEDGE_TAB = 'knowledge'
+const KNOWLEDGE_TYPES = ['entity', 'concept', 'synthesis', 'comparison']
+// CONTENT_TABS are the sidebar tabs in display order: the merged knowledge tab
+// first, then summary. Each tab maps to its own bucket keyed by the tab id.
+const CONTENT_TABS = [KNOWLEDGE_TAB, 'summary']
+
+// tabPageTypes maps a sidebar tab onto the comma-separated page_type filter the
+// backend expects. The knowledge tab folds every non-summary content type into
+// one request so the server returns a single merged list and directory
+// skeleton — no per-type fan-out on the client.
+function tabPageTypes(tab: string): string {
+  return tab === KNOWLEDGE_TAB ? KNOWLEDGE_TYPES.join(',') : tab
+}
+
+// Pick the default sidebar tab in CONTENT_TABS display order (knowledge
+// before summary), not whatever tab happened to finish loading first.
+function preferredDefaultTab(tabs: Array<{ type: string }>): string {
+  for (const tab of CONTENT_TABS) {
+    if (tabs.some(t => t.type === tab)) return tab
+  }
+  return tabs[0]?.type || ''
+}
+
 // groupedPages projects the bucketed state into the shape the sidebar
 // template expects: one {type, label, items, total, loading, hasMore}
 // per displayed group. Groups with zero total are hidden (nothing to
 // show) but groups with total > 0 but items.length === 0 still render
 // so the collapse header can trigger a lazy fetch.
 const groupedPages = computed(() => {
-  const out: {
+  type Group = {
     type: string
     label: string
     pages: WikiPage[]
     total: number
     loading: boolean
     hasMore: boolean
-  }[] = []
-  const seen = new Set<string>()
-  const push = (type: string) => {
-    const bucket = pagesByType.value[type]
-    if (!bucket) return
-    if (bucket.total === 0) return
-    out.push({
-      type,
-      label: getTypeLabel(type),
-      pages: bucket.items,
-      total: bucket.total,
-      loading: bucket.loading,
-      hasMore: bucket.items.length < bucket.total,
-    })
-    seen.add(type)
   }
-  for (const type of typeOrder) push(type)
-  // Any types present in the buckets but not in typeOrder go last in
-  // insertion order so the sidebar doesn't suddenly hide a future type.
-  for (const type of Object.keys(pagesByType.value)) {
-    if (seen.has(type)) continue
-    if (type === 'index' || type === 'log') continue
-    push(type)
+  const out: Group[] = []
+  const seen = new Set<string>()
+  // Stats are reported per real page_type; the knowledge tab sums its members
+  // so the count is available before the first page request completes.
+  const statTotal = (tab: string) => {
+    const byType = stats.value?.pages_by_type
+    if (!byType) return 0
+    if (tab === KNOWLEDGE_TAB) return KNOWLEDGE_TYPES.reduce((sum, t) => sum + (byType[t] || 0), 0)
+    return byType[tab] || 0
+  }
+  const push = (tab: string) => {
+    const bucket = pagesByType.value[tab]
+    if (!bucket) return
+    const total = bucket.total || statTotal(tab) || bucket.categoryPaths.length
+    if (total === 0) return
+    out.push({
+      type: tab,
+      label: getTypeLabel(tab),
+      pages: bucket.items,
+      total,
+      loading: bucket.loading,
+      hasMore: bucket.total > 0 && bucket.items.length < bucket.total,
+    })
+    seen.add(tab)
+  }
+  for (const tab of CONTENT_TABS) push(tab)
+  // Any tabs present in the buckets but not handled above go last in insertion
+  // order so the sidebar doesn't suddenly hide a future tab.
+  for (const tab of Object.keys(pagesByType.value)) {
+    if (seen.has(tab)) continue
+    if (tab === 'index' || tab === 'log') continue
+    push(tab)
   }
   return out
 })
@@ -1006,7 +1141,7 @@ const groupedPages = computed(() => {
 // reported by the backend — zero everywhere means no content pages.
 const hasContentPages = computed(() => {
   for (const bucket of Object.values(pagesByType.value)) {
-    if (bucket.total > 0) return true
+    if (bucket.total > 0 || bucket.categoryPaths.length > 0) return true
   }
   return false
 })
@@ -1294,35 +1429,106 @@ function handleGraphDrawerClick(e: MouseEvent) {
 
 // activeTab drives which page_type's list is visible in the sidebar.
 // Pre-tabbed UX stacked collapsible groups, but on a 40k-page KB the
-// expanded groups nest RecycleScroller viewports and scroll events get
+// expanded groups left multiple virtualized viewports and scroll events got
 // ambiguous — "which list am I scrolling?" The tabbed version removes
 // that ambiguity by mounting exactly one scroller at a time.
 const activeTab = ref<string>('')
-// The outer scroll container — the RecycleScroller runs in page-mode and
-// delegates scrolling here, so we need a handle to reset scrollTop on
-// tab switches. Otherwise the retained scroll position from the old tab
-// re-triggers the sentinel on the new tab's (shorter) list and cascades
-// load-more calls until the new bucket catches up.
+type SidebarViewMode = 'tree' | 'list'
+const SIDEBAR_VIEW_MODE_KEY = 'weknora.wiki.sidebar.viewMode'
+function initialSidebarViewMode(): SidebarViewMode {
+  try {
+    return localStorage.getItem(SIDEBAR_VIEW_MODE_KEY) === 'list' ? 'list' : 'tree'
+  } catch {
+    return 'tree'
+  }
+}
+const sidebarViewMode = ref<SidebarViewMode>(initialSidebarViewMode())
+// Suppress visibleTabs watcher during the first sidebar load. Knowledge and
+// summary buckets load in parallel; whichever API returns first used to win
+// the race and stick on summary even though knowledge is the intended default.
+let initialSidebarLoad = true
+// The outer scroll container. We reset it on tab switches so the retained
+// scroll position from the old tab doesn't immediately expose the new
+// tab's sentinel and cascade load-more calls.
 const pageListRef = ref<HTMLElement | null>(null)
-// Handle on the active RecycleScroller. In page-mode the scroller only
-// recomputes its visible window on scroll events; when we extend `items`
-// in place the previously-rendered tail remains mounted at its old
-// offsets, so newly appended rows appear out of order at the bottom
-// until the user jiggles the scroll. Calling `updateVisibleItems` after
-// a batch arrives forces the recompute and avoids that "ghost last page"
-// artifact.
-const groupScrollerRef = ref<{ updateVisibleItems?: (force: boolean) => void } | null>(null)
+const sidebarViewSwitching = ref(false)
+const sidebarTabSwitching = ref(false)
 
-function setActiveTab(type: string) {
-  if (activeTab.value === type) return
-  activeTab.value = type
+watch(sidebarViewMode, (mode) => {
+  try { localStorage.setItem(SIDEBAR_VIEW_MODE_KEY, mode) } catch { /* ignore */ }
+  cancelCreateRootFolder()
+  if (pageListRef.value) pageListRef.value.scrollTop = 0
+})
+
+async function switchSidebarViewMode(mode: SidebarViewMode) {
+  if (mode === sidebarViewMode.value || sidebarViewSwitching.value) return
+  sidebarViewSwitching.value = true
+  try {
+    // The flat list has its own unscoped pagination stream. Fetch its first
+    // page before swapping containers so the user never lands on an empty
+    // RecycleScroller while the request is still in flight.
+    if (mode === 'list' && activeTab.value) {
+      const ready = await loadFlatPagesForType(activeTab.value)
+      if (!ready && activeFlatPages.value.length === 0) return
+    }
+    sidebarViewMode.value = mode
+  } finally {
+    sidebarViewSwitching.value = false
+  }
+}
+
+function waitForTabData(type: string, mode: SidebarViewMode): Promise<void> {
+  const isBusy = () => {
+    const bucket = pagesByType.value[type]
+    if (!bucket) return false
+    return mode === 'list'
+      ? bucket.flatLoading
+      : bucket.loading || bucket.categoriesLoading
+  }
+  if (!isBusy()) return Promise.resolve()
+
+  return new Promise(resolve => {
+    const stop = watch(isBusy, (busy) => {
+      if (!busy) {
+        stop()
+        resolve()
+      }
+    }, { flush: 'post' })
+    // The request may finish between the initial check and watcher setup.
+    if (!isBusy()) {
+      stop()
+      resolve()
+    }
+  })
+}
+
+async function setActiveTab(type: string) {
+  if (activeTab.value === type || sidebarTabSwitching.value) return
+  sidebarTabSwitching.value = true
+  ensureBucket(type)
+  try {
+    // Initial sidebar requests run in parallel. A tab can become visible from
+    // stats before its page/folder requests finish, so prepare the target
+    // bucket before replacing the current content instead of briefly mounting
+    // an empty tree/list on the first click after refresh.
+    if (sidebarViewMode.value === 'list') {
+      await loadFlatPagesForType(type)
+    } else {
+      await Promise.all([
+        loadPagesForType(type),
+        loadCategoriesForType(type),
+      ])
+    }
+    await waitForTabData(type, sidebarViewMode.value)
+
+    cancelCreateRootFolder()
+    activeTab.value = type
+  } finally {
+    sidebarTabSwitching.value = false
+  }
   // Snap back to the top before the new list renders so the sentinel
   // has to be scrolled to, not simply appear at a retained scroll depth.
   if (pageListRef.value) pageListRef.value.scrollTop = 0
-  const bucket = pagesByType.value[type]
-  if (bucket && !bucket.initialized && !bucket.loading) {
-    loadPagesForType(type)
-  }
 }
 
 // visibleTabs mirrors groupedPages but is meant for rendering the
@@ -1340,29 +1546,221 @@ const activeGroup = computed(() => {
   return groupedPages.value.find(g => g.type === activeTab.value) || null
 })
 
+const activeFlatPages = computed(() => {
+  if (!activeTab.value) return []
+  return pagesByType.value[activeTab.value]?.flatItems || []
+})
+
+const activeFlatState = computed(() => {
+  if (!activeTab.value) return null
+  const bucket = pagesByType.value[activeTab.value]
+  if (!bucket) return null
+  return {
+    loading: bucket.flatLoading,
+    hasMore: !bucket.flatInitialized || bucket.flatItems.length < bucket.flatTotal,
+  }
+})
+
+function pageCategoryPath(page: WikiPage): string[] {
+  const raw = Array.isArray(page.category_path) ? page.category_path : []
+  return raw.map(part => String(part || '').trim()).filter(Boolean)
+}
+
+function directoryPathKey(type: string, parts: string[]): string {
+  return `${type}:${parts.join('/')}`
+}
+
+function toggleDirectory(pathKey: string) {
+  const next = new Set(collapsedDirectories.value)
+  if (next.has(pathKey)) {
+    next.delete(pathKey)
+    const parsed = parseDirectoryPathKey(pathKey)
+    if (parsed) {
+      loadCategoriesForType(parsed.type, { parentPath: parsed.path })
+      loadPagesForType(parsed.type, { categoryPath: parsed.path })
+    }
+  } else {
+    next.add(pathKey)
+  }
+  collapsedDirectories.value = next
+
+  const touched = new Set(touchedDirectories.value)
+  touched.add(pathKey)
+  touchedDirectories.value = touched
+}
+
+function parseDirectoryPathKey(pathKey: string): { type: string; path: string[] } | null {
+  const idx = pathKey.indexOf(':')
+  if (idx < 0) return null
+  const type = pathKey.slice(0, idx)
+  const path = pathKey.slice(idx + 1).split('/').map(part => part.trim()).filter(Boolean)
+  return { type, path }
+}
+
+function clearDirectoryStateForType(type: string) {
+  const prefix = `${type}:`
+  collapsedDirectories.value = new Set([...collapsedDirectories.value].filter(key => !key.startsWith(prefix)))
+  touchedDirectories.value = new Set([...touchedDirectories.value].filter(key => !key.startsWith(prefix)))
+}
+
+function initializeDefaultCollapsedDirectories(type: string, pagesToInspect: WikiPage[]) {
+  if (pagesToInspect.length === 0) return
+
+  const next = new Set(collapsedDirectories.value)
+  const touched = touchedDirectories.value
+  let changed = false
+
+  for (const page of pagesToInspect) {
+    const path = pageCategoryPath(page)
+    for (let i = 0; i < path.length; i++) {
+      const key = directoryPathKey(type, path.slice(0, i + 1))
+      if (touched.has(key) || next.has(key)) continue
+      next.add(key)
+      changed = true
+    }
+  }
+
+  if (changed) {
+    collapsedDirectories.value = next
+  }
+}
+
+const activeTreeRows = computed<WikiTreeRow[]>(() => {
+  const group = activeGroup.value
+  if (!group) return []
+  const groupType = group.type
+
+  const rows: WikiTreeRow[] = []
+  const root: WikiTreeDirectory = {
+    label: '',
+    path: [],
+    dirs: new Map(),
+    pages: [],
+    count: 0,
+  }
+
+  function ensureDirectory(parent: WikiTreeDirectory, label: string): WikiTreeDirectory {
+    const existing = parent.dirs.get(label)
+    if (existing) return existing
+
+    const dir: WikiTreeDirectory = {
+      label,
+      path: [...parent.path, label],
+      dirs: new Map(),
+      pages: [],
+      count: 0,
+    }
+    parent.dirs.set(label, dir)
+    return dir
+  }
+
+  // Each tab maps to a single bucket; the knowledge tab's bucket already holds
+  // the server-merged pages and directory skeleton (page_type=entity,concept,…).
+  const bucket = pagesByType.value[groupType]
+  const hasCategorySkeleton = (bucket?.categoryPaths.length || 0) > 0
+  for (const category of bucket?.categoryPaths || []) {
+    const categoryPath = category.path
+    let cursor = root
+    for (let i = 0; i < categoryPath.length; i++) {
+      const part = categoryPath[i]
+      cursor = ensureDirectory(cursor, part)
+      if (i === categoryPath.length - 1) {
+        cursor.count = category.count
+      }
+    }
+  }
+
+  for (const page of group.pages) {
+    const path = pageCategoryPath(page)
+    let cursor = root
+    if (!hasCategorySkeleton) cursor.count += 1
+
+    for (const part of path) {
+      cursor = ensureDirectory(cursor, part)
+      if (!hasCategorySkeleton) cursor.count += 1
+    }
+
+    cursor.pages.push(page)
+  }
+
+  function appendDirectory(dir: WikiTreeDirectory, depth: number) {
+    const key = directoryPathKey(groupType, dir.path)
+    const collapsed = collapsedDirectories.value.has(key)
+    rows.push({
+      kind: 'directory',
+      rowKey: `dir:${key}`,
+      pathKey: key,
+      folderId: bucket?.folderIdByPath[dir.path.join('/')] || '',
+      path: dir.path,
+      label: dir.label,
+      depth,
+      count: dir.count,
+      hasChildren: dir.dirs.size > 0,
+      collapsed,
+    })
+    if (collapsed) return
+
+    for (const child of dir.dirs.values()) {
+      appendDirectory(child, depth + 1)
+    }
+    for (const page of dir.pages) {
+      rows.push({
+        kind: 'page',
+        rowKey: `page:${page.id}`,
+        page,
+        depth: depth + 1,
+      })
+    }
+    const state = bucket?.directoryPages[key]
+    const hasMore = state && state.total > 0 && (state.nextPage - 1) * WIKI_SIDEBAR_PAGE_SIZE < state.total
+    if (state?.loading || hasMore) {
+      rows.push({
+        kind: 'load-more',
+        rowKey: `load-more:${key}`,
+        type: groupType,
+        path: dir.path,
+        depth: depth + 1,
+        loading: !!state?.loading,
+      })
+    }
+  }
+
+  for (const dir of root.dirs.values()) {
+    appendDirectory(dir, 0)
+  }
+  for (const page of root.pages) {
+    rows.push({
+      kind: 'page',
+      rowKey: `page:${page.id}`,
+      page,
+      depth: 0,
+    })
+  }
+  return rows
+})
+
 // Keep activeTab in sync with what's available. When loadPages first
 // populates buckets, pick the first non-empty tab. When a user deletes
 // the last page of the active type we transparently switch to the next
 // available one so the sidebar never shows "tab selected with no list".
 watch(visibleTabs, (tabs) => {
+  if (initialSidebarLoad) return
   if (tabs.length === 0) {
     activeTab.value = ''
     return
   }
   if (!tabs.some(t => t.type === activeTab.value)) {
-    activeTab.value = tabs[0].type
+    activeTab.value = preferredDefaultTab(tabs)
   }
 })
 
-// IntersectionObserver-driven infinite scroll for the active tab.
-// In page-mode the RecycleScroller doesn't emit scroll-end, so we
-// observe a 1px sentinel placed after the list. When it enters the
-// viewport we pull the next page for the active bucket; guards in
-// loadPagesForType prevent double-fetching. We re-bind whenever the
-// sentinel element changes (tab switch, empty/has-more transitions).
+// IntersectionObserver-driven infinite scroll for the active tab. We
+// observe a 1px sentinel placed after the list; when it enters the
+// viewport we pull the next page for the active bucket. Guards in
+// loadPagesForType prevent double-fetching.
 const groupSentinelRef = ref<HTMLElement | null>(null)
 let groupSentinelObserver: IntersectionObserver | null = null
-watch(groupSentinelRef, (el) => {
+watch([groupSentinelRef, sidebarViewMode], ([el]) => {
   if (groupSentinelObserver) {
     groupSentinelObserver.disconnect()
     groupSentinelObserver = null
@@ -1372,19 +1770,55 @@ watch(groupSentinelRef, (el) => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue
       const type = (entry.target as HTMLElement).dataset.type
-      if (type) loadPagesForType(type)
+      if (!type) continue
+      if (sidebarViewMode.value === 'list') loadFlatPagesForType(type)
+      else loadPagesForType(type)
     }
   }, { rootMargin: '200px' })
   groupSentinelObserver.observe(el)
 }, { flush: 'post' })
 
-// WIKI_PAGE_ITEM_HEIGHT must match the rendered height of .wiki-page-item
-// INCLUDING its bottom margin. RecycleScroller absolutely positions
-// items at multiples of this value; if the CSS renders at a different
-// height, siblings overlap. Measured height with 1-line title + 2-line
-// 12/1.5 summary + meta + 10/10 padding = ~95px; we lock the item to
-// exactly 100px below so the math is independent of summary text length.
 const WIKI_PAGE_ITEM_HEIGHT = 100
+
+// Auto-load for the "load more" rows that live INSIDE the tree (more
+// pages within an expanded directory, or more sub-folders at a level).
+// The bottom group sentinel only covers the root page list; these rows
+// can sit in the MIDDLE of the list, so we observe each of them. When a
+// row scrolls into view it fires its loader instead of waiting for a
+// manual click. Re-attaching on every activeTreeRows change also drains
+// the case the user asked about — "current page loaded but more remain,
+// and the row never reached the bottom": observe() re-fires for any row
+// still intersecting after the previous batch rendered, and the loader
+// guards stop the cascade once the directory is exhausted or the row is
+// pushed out of view.
+const treeListRef = ref<HTMLElement | null>(null)
+let loadMoreObserver: IntersectionObserver | null = null
+
+function dispatchLoadMore(rowKey: string) {
+  const row = activeTreeRows.value.find(r => r.rowKey === rowKey)
+  if (!row) return
+  if (row.kind === 'load-more') {
+    loadPagesForType(row.type, { categoryPath: row.path })
+  }
+}
+
+watch([activeTreeRows, treeListRef], () => {
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect()
+    loadMoreObserver = null
+  }
+  const container = treeListRef.value
+  if (!container) return
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue
+      const key = (entry.target as HTMLElement).dataset.loadmoreKey
+      if (key) dispatchLoadMore(key)
+    }
+  }, { rootMargin: '200px' })
+  container.querySelectorAll<HTMLElement>('[data-loadmore-key]')
+    .forEach(el => loadMoreObserver!.observe(el))
+}, { flush: 'post' })
 
 function getTypeTheme(type: string): string {
   const map: Record<string, string> = {
@@ -1396,6 +1830,7 @@ function getTypeTheme(type: string): string {
 
 function getTypeLabel(type: string): string {
   const map: Record<string, string> = {
+    knowledge: t('knowledgeEditor.wikiBrowser.filterKnowledge'),
     summary: t('knowledgeEditor.wikiBrowser.filterSummary'),
     entity: t('knowledgeEditor.wikiBrowser.filterEntity'),
     concept: t('knowledgeEditor.wikiBrowser.filterConcept'),
@@ -1405,6 +1840,19 @@ function getTypeLabel(type: string): string {
     log: 'Log',
   }
   return map[type] || type
+}
+
+// getPageIcon picks a distinct icon per page_type so the merged knowledge
+// tab can still tell entities, concepts, etc. apart at a glance.
+function getPageIcon(page: WikiPage): string {
+  const map: Record<string, string> = {
+    entity: 'tag',
+    concept: 'lightbulb',
+    synthesis: 'relativity',
+    comparison: 'view-module',
+    summary: 'file',
+  }
+  return map[page.page_type] || 'file'
 }
 
 const renderedContent = computed(() => {
@@ -1481,17 +1929,70 @@ function handleContentClick(e: MouseEvent) {
 // the initial paint is snappy even on a big KB, large enough that the
 // virtualized scroller normally gets everything it needs in one request
 // for common wikis. Later pages are pulled on scroll.
-const WIKI_SIDEBAR_PAGE_SIZE = 50
-
-// CONTENT_PAGE_TYPES is the list of page_type buckets the sidebar
-// renders as collapsible groups. We initialize all of them up-front so
-// the sidebar scaffolding renders immediately with "loading" markers —
-// if a bucket truly has 0 pages server-side, the total field comes back
-// as 0 and groupedPages hides it.
-const CONTENT_PAGE_TYPES = ['summary', 'entity', 'concept', 'synthesis', 'comparison']
+const WIKI_SIDEBAR_PAGE_SIZE = 100
 
 function emptyBucket(): PageTypeBucket {
-  return { items: [], nextPage: 1, total: 0, loading: false, initialized: false }
+  return {
+    items: [],
+    nextPage: 1,
+    total: 0,
+    loading: false,
+    initialized: false,
+    categoryPaths: [],
+    folderIdByPath: {},
+    categoriesLoading: false,
+    categoriesInitialized: false,
+    categoryPages: {},
+    directoryPages: {},
+    flatItems: [],
+    flatNextPage: 1,
+    flatTotal: 0,
+    flatLoading: false,
+    flatInitialized: false,
+  }
+}
+
+async function loadFlatPagesForType(type: string, reset = false): Promise<boolean> {
+  const bucket = ensureBucket(type)
+  if (bucket.flatLoading) return bucket.flatItems.length > 0
+  if (!reset && bucket.flatInitialized && bucket.flatItems.length >= bucket.flatTotal) return true
+
+  bucket.flatLoading = true
+  try {
+    const requestPage = reset ? 1 : bucket.flatNextPage
+    const res = await listWikiPages(props.knowledgeBaseId, {
+      page_type: tabPageTypes(type),
+      page: requestPage,
+      page_size: WIKI_SIDEBAR_PAGE_SIZE,
+      sort_by: 'wiki_path',
+      sort_order: 'asc',
+    })
+    const body: any = (res as any).data || res
+    const batch: WikiPage[] = body?.pages || []
+    if (reset) {
+      bucket.flatItems = batch
+      bucket.flatNextPage = 2
+    } else {
+      const seen = new Set(bucket.flatItems.map(page => page.id))
+      for (const page of batch) {
+        if (!seen.has(page.id)) bucket.flatItems.push(page)
+      }
+      bucket.flatNextPage += 1
+    }
+    bucket.flatTotal = Number(body?.total) || 0
+    bucket.flatInitialized = true
+
+    const seenPages = new Set(pages.value.map(page => page.id))
+    for (const page of batch) {
+      if (!seenPages.has(page.id)) pages.value.push(page)
+    }
+    return true
+  } catch (e) {
+    console.error(`Failed to load flat wiki pages of type ${type}:`, e)
+    return false
+  } finally {
+    bucket.flatLoading = false
+  }
 }
 
 function ensureBucket(type: string): PageTypeBucket {
@@ -1501,37 +2002,393 @@ function ensureBucket(type: string): PageTypeBucket {
   return pagesByType.value[type]
 }
 
+// loadCategoriesForType pulls the child folders of one directory level from the
+// authoritative wiki_folders tree. Empty folders are returned only for the
+// merged knowledge tab (multi page_type); the summary tab omits them.
+// bucket.folderIdByPath; the root level uses id "". Each level's children are
+// returned in one shot (the tree is navigation-sized), so there is no
+// per-level "load more folders" pagination anymore.
+async function loadCategoriesForType(type: string, opts: { reset?: boolean; parentPath?: string[] } = {}) {
+  const bucket = ensureBucket(type)
+  const parentPath = opts.parentPath || []
+  const parentKey = directoryPathKey(type, parentPath)
+  const isRoot = parentPath.length === 0
+
+  const parentId = isRoot ? '' : bucket.folderIdByPath[parentPath.join('/')]
+  // A deeper level whose parent folder id we have not yet recorded cannot be
+  // resolved against the (id-based) folders endpoint — skip until it loads.
+  if (!isRoot && parentId === undefined) return
+
+  let state = bucket.categoryPages[parentKey]
+  if (state?.loading) return
+  if (!opts.reset && state && state.initialized) return // a level is loaded in a single request
+  if (!state) {
+    state = { nextPage: 1, totalPages: 1, loading: false, initialized: false }
+  }
+
+  const setState = (next: DirectoryCategoryState) => {
+    bucket.categoryPages = { ...bucket.categoryPages, [parentKey]: next }
+  }
+  setState({ ...state, loading: true })
+  if (isRoot) bucket.categoriesLoading = true
+  try {
+    const res = await listWikiFolders(props.knowledgeBaseId, parentId || '', tabPageTypes(type))
+    const body: any = (res as any).data || res
+    const folders: WikiFolderNode[] = Array.isArray(body?.folders) ? body.folders : []
+    const incoming = folders
+      .map(folder => ({
+        path: String(folder.path || '').split('/').map(part => part.trim()).filter(Boolean),
+        count: Number(folder.page_count) || 0,
+        id: String(folder.id || ''),
+      }))
+      .filter(entry => entry.path.length > 0)
+      // Summary is a single page_type; empty folders belong in the merged
+      // knowledge view only (backend filters too — belt-and-suspenders).
+      .filter(entry => type !== 'summary' || entry.count > 0)
+
+    const existing = new Map((opts.reset ? [] : bucket.categoryPaths)
+      .map(entry => [directoryPathKey(type, entry.path), entry]))
+    const folderIds = opts.reset ? {} : { ...bucket.folderIdByPath }
+    for (const entry of incoming) {
+      existing.set(directoryPathKey(type, entry.path), { path: entry.path, count: entry.count })
+      folderIds[entry.path.join('/')] = entry.id
+    }
+    bucket.categoryPaths = Array.from(existing.values())
+    bucket.folderIdByPath = folderIds
+    if (opts.reset) bucket.categoryPages = {}
+    setState({ nextPage: 2, totalPages: 1, loading: false, initialized: true })
+    if (isRoot) bucket.categoriesInitialized = true
+    initializeDefaultCollapsedDirectories(type, incoming.map(entry => ({
+      category_path: entry.path,
+    } as WikiPage)))
+  } catch (e) {
+    console.error(`Failed to load wiki folders of type ${type}:`, e)
+    setState({ ...state, loading: false })
+  } finally {
+    if (isRoot) bucket.categoriesLoading = false
+  }
+}
+
+// reloadDirectoryForType resets and reloads both the folder skeleton and the
+// pages for one tab. Used after a structural mutation (move page, create /
+// rename / delete folder) so the tree reflects the new layout authoritatively
+// instead of guessing at the optimistic delta.
+async function reloadDirectoryForType(type: string) {
+  const refreshFlatList = sidebarViewMode.value === 'list' || ensureBucket(type).flatInitialized
+  clearDirectoryStateForType(type)
+  await loadPagesForType(type, { reset: true })
+  await loadCategoriesForType(type, { reset: true })
+  if (refreshFlatList) await loadFlatPagesForType(type, true)
+}
+
+// --- Drag-and-drop: move a page or folder into a folder ------------------
+// draggedItem holds whatever is being dragged — a page (move into folder) or a
+// folder (reparent). dropTargetKey is the row highlighted as the hover target
+// ("__root__" for the toolbar drop zone). Both clear on dragend / drop so a
+// cancelled drag leaves no sticky highlight.
+type DraggedItem =
+  | { kind: 'page'; page: WikiPage }
+  | { kind: 'folder'; folderId: string; path: string[] }
+const draggedItem = ref<DraggedItem | null>(null)
+const dropTargetKey = ref<string>('')
+
+// primeDragData sets dataTransfer so the native HTML5 drag actually starts.
+// Firefox refuses to initiate a drag unless some data is set, and without an
+// explicit effectAllowed/dropEffect the cursor shows "no-drop" and the drop
+// event never fires — which is why the move felt impossible to trigger.
+function primeDragData(e: DragEvent) {
+  if (!e.dataTransfer) return
+  e.dataTransfer.effectAllowed = 'move'
+  try {
+    e.dataTransfer.setData('text/plain', '')
+  } catch {
+    // Some browsers throw if setData is called outside a real dragstart; ignore.
+  }
+}
+
+function onPageDragStart(e: DragEvent, page: WikiPage) {
+  draggedItem.value = { kind: 'page', page }
+  primeDragData(e)
+}
+
+function onFolderDragStart(e: DragEvent, folderId: string, path: string[]) {
+  if (!folderId) return
+  draggedItem.value = { kind: 'folder', folderId, path }
+  primeDragData(e)
+}
+
+function onPageDragEnd() {
+  draggedItem.value = null
+  dropTargetKey.value = ''
+}
+
+function onDirectoryDragOver(e: DragEvent, pathKey: string) {
+  if (!draggedItem.value) return
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropTargetKey.value = pathKey
+}
+
+// onRootDragOver fires on the list container itself. Folder rows stop their
+// dragover from bubbling here, so reaching this handler means the cursor is
+// over empty list space (or a page row) — i.e. a "move to root" target.
+function onRootDragOver(e: DragEvent) {
+  if (!draggedItem.value) return
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropTargetKey.value = '__root__'
+}
+
+function onDirectoryDragLeave(pathKey: string) {
+  if (dropTargetKey.value === pathKey) dropTargetKey.value = ''
+}
+
+// A move is staged here on drop and only executed once the user confirms via
+// the in-place confirmation popup (anchored at the drop point). This avoids
+// silently mutating the tree on an accidental drag.
+const pendingMove = ref<
+  | { item: DraggedItem; folderId: string; targetLabel: string; x: number; y: number }
+  | null
+>(null)
+
+function onDropOnDirectory(e: DragEvent, folderId: string, path: string[]) {
+  const item = draggedItem.value
+  draggedItem.value = null
+  dropTargetKey.value = ''
+  if (!item) return
+  const targetPath = path.join('/')
+
+  if (item.kind === 'page') {
+    // No-op when the page already lives in this folder.
+    if ((pageCategoryPath(item.page) || []).join('/') === targetPath) return
+  } else {
+    // Folder reparent. Reject no-op (same parent) and the illegal move of a
+    // folder into itself or one of its descendants.
+    const sourcePath = item.path.join('/')
+    if (sourcePath === targetPath) return
+    if (folderId === item.folderId) return
+    if (targetPath === sourcePath || targetPath.startsWith(`${sourcePath}/`)) {
+      MessagePlugin.warning(t('knowledgeEditor.wikiBrowser.moveFolderIntoSelf'))
+      return
+    }
+  }
+
+  const targetLabel = path.length > 0
+    ? path[path.length - 1]
+    : t('knowledgeEditor.wikiBrowser.rootFolderLabel')
+  pendingMove.value = { item, folderId, targetLabel, x: e.clientX, y: e.clientY }
+}
+
+function cancelPendingMove() {
+  pendingMove.value = null
+}
+
+async function confirmPendingMove() {
+  const move = pendingMove.value
+  pendingMove.value = null
+  if (!move) return
+  const { item, folderId } = move
+
+  if (item.kind === 'page') {
+    try {
+      await moveWikiPage(props.knowledgeBaseId, item.page.slug, folderId)
+      MessagePlugin.success(t('knowledgeEditor.wikiBrowser.movePageSuccess'))
+      await reloadDirectoryForType(activeTab.value)
+    } catch (e) {
+      console.error('Failed to move wiki page:', e)
+      MessagePlugin.error(t('knowledgeEditor.wikiBrowser.movePageFailed'))
+    }
+    return
+  }
+
+  try {
+    await updateWikiFolder(props.knowledgeBaseId, item.folderId, { parent_id: folderId, move_parent: true })
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.moveFolderSuccess'))
+    await reloadDirectoryForType(activeTab.value)
+  } catch (e: any) {
+    console.error('Failed to move wiki folder:', e)
+    MessagePlugin.error(
+      e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.moveFolderFailed'),
+    )
+  }
+}
+
+// --- Folder create / rename / delete -------------------------------------
+// These are invoked by the in-place WikiFolderActions popup (no full-page
+// dialog). The popup owns the input / confirm surface; these handlers only do
+// the API call, surface a toast, and reload the affected tab so the tree
+// reflects the new layout authoritatively.
+async function createFolder(parentId: string, parentPath: string[], name: string) {
+  try {
+    await createWikiFolder(props.knowledgeBaseId, parentId, name)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.createFolderSuccess'))
+    // Keep the parent expanded so the new child is visible.
+    if (parentPath.length > 0) {
+      collapsedDirectories.value = new Set(
+        [...collapsedDirectories.value].filter(k => k !== directoryPathKey(activeTab.value, parentPath)),
+      )
+    }
+    await reloadDirectoryForType(activeTab.value)
+  } catch (e: any) {
+    console.error('Failed to create wiki folder:', e)
+    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.createFolderFailed'))
+  }
+}
+
+// Inline rename: the directory row swaps its label for a text input instead
+// of opening a popup. editingFolderId marks the active row; editingName backs
+// the input. Committed on Enter / blur, abandoned on Escape.
+const editingFolderId = ref('')
+const editingName = ref('')
+
+const creatingRootFolder = ref(false)
+const creatingRootFolderName = ref('')
+const creatingRootFolderInputRef = ref<HTMLInputElement | null>(null)
+
+function startCreateRootFolder() {
+  if (creatingRootFolder.value) return
+  creatingRootFolder.value = true
+  creatingRootFolderName.value = ''
+  nextTick(() => {
+    creatingRootFolderInputRef.value?.focus()
+  })
+}
+
+function cancelCreateRootFolder() {
+  creatingRootFolder.value = false
+  creatingRootFolderName.value = ''
+}
+
+async function submitCreateRootFolder() {
+  const name = creatingRootFolderName.value.trim()
+  if (!name) return
+  cancelCreateRootFolder()
+  await createFolder('', [], name)
+}
+
+function startRenameFolder(folderId: string, currentName: string) {
+  if (!folderId) return
+  editingFolderId.value = folderId
+  editingName.value = currentName
+  // Only one rename input exists at a time; focus + select it once rendered.
+  nextTick(() => {
+    const el = document.querySelector('.wiki-directory-rename-input') as HTMLInputElement | null
+    el?.focus()
+    el?.select()
+  })
+}
+
+function cancelRenameFolder() {
+  editingFolderId.value = ''
+  editingName.value = ''
+}
+
+async function commitRenameFolder(folderId: string, originalName: string) {
+  if (editingFolderId.value !== folderId) return
+  const name = editingName.value.trim()
+  cancelRenameFolder()
+  if (!name || name === originalName) return
+  try {
+    await updateWikiFolder(props.knowledgeBaseId, folderId, { name })
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.renameFolderSuccess'))
+    await reloadDirectoryForType(activeTab.value)
+  } catch (e: any) {
+    console.error('Failed to rename wiki folder:', e)
+    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.renameFolderFailed'))
+  }
+}
+
+async function deleteFolder(folderId: string) {
+  if (!folderId) return
+  try {
+    await deleteWikiFolder(props.knowledgeBaseId, folderId)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.deleteFolderSuccess'))
+    await reloadDirectoryForType(activeTab.value)
+  } catch (e: any) {
+    console.error('Failed to delete wiki folder:', e)
+    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.deleteFolderFailed'))
+  }
+}
+
 // loadPagesForType fetches the next page for a single type bucket. The
 // first call seeds `total` from the backend so subsequent `hasMore`
 // checks work without another round-trip. Guard against concurrent
 // invocations for the same type (e.g. scroll event fires rapidly while
 // a network request is still in flight).
-async function loadPagesForType(type: string, opts: { reset?: boolean } = {}) {
+async function loadPagesForType(type: string, opts: { reset?: boolean; categoryPath?: string[] } = {}) {
   const bucket = ensureBucket(type)
-  if (bucket.loading) return
-  if (opts.reset) {
-    bucket.items = []
-    bucket.nextPage = 1
-    bucket.total = 0
-    bucket.initialized = false
+  const categoryPath = opts.categoryPath || []
+  const scopedToCategory = categoryPath.length > 0
+  const scopedPathKey = scopedToCategory ? directoryPathKey(type, categoryPath) : ''
+  if (scopedToCategory && !bucket.directoryPages[scopedPathKey]) {
+    bucket.directoryPages = {
+      ...bucket.directoryPages,
+      [scopedPathKey]: { nextPage: 1, total: 0, loading: false, initialized: false },
+    }
   }
-  if (bucket.initialized && bucket.items.length >= bucket.total) return
+  const scopedState = scopedToCategory ? bucket.directoryPages[scopedPathKey] : null
+  if (scopedState?.loading || (!scopedToCategory && bucket.loading)) return
+  if (scopedToCategory) {
+    const state = scopedState
+    if (!state) return
+    if (state.initialized && state.total > 0 && (state.nextPage - 1) * WIKI_SIDEBAR_PAGE_SIZE >= state.total) return
+  } else if (!opts.reset && bucket.initialized && bucket.items.length >= bucket.total) {
+    return
+  }
 
-  bucket.loading = true
+  if (scopedState) {
+    bucket.directoryPages = {
+      ...bucket.directoryPages,
+      [scopedPathKey]: { ...scopedState, loading: true },
+    }
+  }
+  else bucket.loading = true
   try {
+    const currentScopedState = scopedToCategory ? bucket.directoryPages[scopedPathKey] : null
+    const requestPage = opts.reset ? 1 : (currentScopedState ? currentScopedState.nextPage : bucket.nextPage)
     const res = await listWikiPages(props.knowledgeBaseId, {
-      page_type: type,
-      page: bucket.nextPage,
+      page_type: tabPageTypes(type),
+      page: requestPage,
       page_size: WIKI_SIDEBAR_PAGE_SIZE,
+      sort_by: 'wiki_path',
+      sort_order: 'asc',
+      category_path: categoryPath.join('/'),
+      category_depth: categoryPath.length,
     })
     const body: any = (res as any).data || res
     const batch: WikiPage[] = body?.pages || []
     const reportedTotal = Number(body?.total) || 0
 
-    bucket.items.push(...batch)
-    bucket.total = reportedTotal
-    bucket.nextPage += 1
-    bucket.initialized = true
+    if (!scopedToCategory) {
+      if (opts.reset) {
+        bucket.items = batch
+        bucket.nextPage = 2
+        bucket.directoryPages = {}
+        clearDirectoryStateForType(type)
+      } else {
+        const seenItems = new Set(bucket.items.map(p => p.id))
+        for (const p of batch) {
+          if (!seenItems.has(p.id)) bucket.items.push(p)
+        }
+        bucket.nextPage += 1
+      }
+      bucket.total = reportedTotal
+      bucket.initialized = true
+    } else if (currentScopedState) {
+      const seenItems = new Set(bucket.items.map(p => p.id))
+      for (const p of batch) {
+        if (!seenItems.has(p.id)) bucket.items.push(p)
+      }
+      bucket.directoryPages = {
+        ...bucket.directoryPages,
+        [scopedPathKey]: {
+          ...currentScopedState,
+          total: reportedTotal,
+          nextPage: currentScopedState.nextPage + 1,
+          initialized: true,
+          loading: false,
+        },
+      }
+    }
+    initializeDefaultCollapsedDirectories(type, batch)
 
     // Mirror the newly arrived rows into the flat pages list so
     // slugDisplayName and friends keep working.
@@ -1544,14 +2401,19 @@ async function loadPagesForType(type: string, opts: { reset?: boolean } = {}) {
   } catch (e) {
     console.error(`Failed to load wiki pages of type ${type}:`, e)
   } finally {
-    bucket.loading = false
+    if (scopedState) {
+      const latest = bucket.directoryPages[scopedPathKey]
+      if (latest?.loading) {
+        bucket.directoryPages = {
+          ...bucket.directoryPages,
+          [scopedPathKey]: { ...latest, loading: false, initialized: true },
+        }
+      }
+    }
+    else bucket.loading = false
   }
 
-  // Kick the RecycleScroller into recomputing its visible window now
-  // that `items` has grown. Without this, new rows appear in the wrong
-  // order at the bottom until the user scrolls to trigger a recompute.
   await nextTick()
-  groupScrollerRef.value?.updateVisibleItems?.(true)
 }
 
 // loadIndexAndLog probes the wiki index so the sidebar knows to show
@@ -1620,6 +2482,31 @@ async function openIndexView() {
   // the view is a render-time concern.
 }
 
+function appendIndexDirectoryLines(items: WikiIndexEntryDTO[]): string {
+  let out = ''
+  const emittedDirs = new Set<string>()
+  for (const entry of items) {
+    const path = (Array.isArray(entry.category_path) ? entry.category_path : [])
+      .map(part => String(part || '').trim())
+      .filter(Boolean)
+    for (let i = 0; i < path.length; i++) {
+      const parts = path.slice(0, i + 1)
+      const key = parts.join('/')
+      if (emittedDirs.has(key)) continue
+      emittedDirs.add(key)
+      out += `${'  '.repeat(i)}**${path[i]}**\n`
+    }
+    const display = entry.title || entry.slug
+    const indent = '  '.repeat(path.length)
+    if (entry.summary) {
+      out += `${indent}[[${entry.slug}|${display}]] — ${entry.summary}\n`
+    } else {
+      out += `${indent}[[${entry.slug}|${display}]]\n`
+    }
+  }
+  return out
+}
+
 // loadMoreIndexSection advances the directory one step forward. The
 // order is fixed (Summary → Entity → Concept → …); within a section we
 // paginate with the backend's cursor, and only move to the next section
@@ -1661,27 +2548,7 @@ async function loadMoreIndexSection() {
       const label = getTypeLabel(type)
       appended += `\n## ${label} (${total})\n\n`
     }
-    for (const entry of items) {
-      // Plain lines rather than `- [[slug]]`: marked renders the latter
-      // as <ul><li>, which adds a disc bullet before every slug. Each
-      // entry occupies one line thanks to `breaks: true` in renderMarkdown.
-      //
-      // Use the `[[slug|display]]` form so the anchor text shows the
-      // human-readable title (e.g. "东城区") instead of the URL-safe slug
-      // ("entity/dongcheng-qu"). The [[ ]] preprocessor in renderMarkdown
-      // splits on the pipe and uses the right-hand side for display text
-      // while the left-hand side drives navigation via handleContentClick.
-      //
-      // Fall back to the slug when the page has no title — the backend
-      // guarantees title is non-empty for published pages, but drafts
-      // or partially-indexed pages can slip through.
-      const display = entry.title || entry.slug
-      if (entry.summary) {
-        appended += `[[${entry.slug}|${display}]] — ${entry.summary}\n`
-      } else {
-        appended += `[[${entry.slug}|${display}]]\n`
-      }
-    }
+    appended += appendIndexDirectoryLines(items)
     if (appended) {
       indexMarkdown.value = indexMarkdown.value + appended
     }
@@ -1815,22 +2682,27 @@ async function loadPages() {
   loading.value = true
   try {
     searchResults.value = null
-    for (const type of CONTENT_PAGE_TYPES) ensureBucket(type)
+    for (const tab of CONTENT_TABS) ensureBucket(tab)
     await loadIndexAndLog()
-    await Promise.all(CONTENT_PAGE_TYPES.map(type => loadPagesForType(type, { reset: true })))
+    await Promise.all(CONTENT_TABS.map(async tab => {
+      await loadPagesForType(tab, { reset: true })
+      await loadCategoriesForType(tab, { reset: true })
+    }))
 
-    // Pick the first non-empty bucket as the default active tab.
-    // Keeping `activeTab` unset while buckets are still loading would
-    // momentarily render no list at all, so we only overwrite it when
-    // the current selection is empty or missing.
-    if (!activeTab.value || !pagesByType.value[activeTab.value] || pagesByType.value[activeTab.value].total === 0) {
-      for (const type of CONTENT_PAGE_TYPES) {
-        const bucket = pagesByType.value[type]
-        if (bucket && bucket.total > 0) {
-          activeTab.value = type
-          break
-        }
+    // Default to the knowledge tab (first in CONTENT_TABS) once every
+    // bucket has had a chance to load. On later reloads (e.g. after
+    // indexing finishes) keep the user's current tab when still valid.
+    if (initialSidebarLoad) {
+      activeTab.value = preferredDefaultTab(visibleTabs.value)
+      initialSidebarLoad = false
+    } else {
+      const tabValid = activeTab.value && visibleTabs.value.some(tab => tab.type === activeTab.value)
+      if (!tabValid) {
+        activeTab.value = preferredDefaultTab(visibleTabs.value)
       }
+    }
+    if (sidebarViewMode.value === 'list' && activeTab.value) {
+      await loadFlatPagesForType(activeTab.value, true)
     }
 
     // Auto-select based on query string or default to the index
@@ -2373,7 +3245,7 @@ async function startFixSession(prompt: string) {
     if (res && (res as any).data && (res as any).data.id) {
       const sessionId = (res as any).data.id
       const now = new Date().toISOString()
-      
+
       menuStore.updataMenuChildren({
         title: t('knowledgeEditor.wikiBrowser.fixAssistantTitle'),
         path: `chat/${sessionId}`,
@@ -2383,10 +3255,10 @@ async function startFixSession(prompt: string) {
         created_at: now,
         updated_at: now
       })
-      
+
       menuStore.changeIsFirstSession(true)
       menuStore.changeFirstQuery(prompt, [], '', [])
-      
+
       currentFixSessionId.value = sessionId
       showFixDrawer.value = true
       showIssuesBox.value = false // Hide issues box
@@ -2411,11 +3283,11 @@ function triggerFixIssue(issue: WikiPageIssue) {
 function triggerAutoFix() {
   if (!selectedPage.value || pageIssues.value.length === 0) return
   let prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptAutoStart', { slug: selectedPage.value.slug }) + '\n\n'
-  
+
   pageIssues.value.forEach((issue, idx) => {
     prompt += `${idx + 1}. Issue ID: ${issue.id}\n`
   })
-  
+
   startFixSession(prompt)
 }
 
@@ -2528,6 +3400,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     container.innerHTML = ''
     return
   }
+  const graph = data
 
   // Stop any previous animation
   if (graphAnimFrame) { cancelAnimationFrame(graphAnimFrame); graphAnimFrame = 0 }
@@ -2570,7 +3443,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Build adjacency for highlight
   const adjacency = new Map<string, Set<string>>()
-  for (const edge of data.edges) {
+  for (const edge of graph.edges) {
     if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set())
     if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set())
     adjacency.get(edge.source)!.add(edge.target)
@@ -2586,7 +3459,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Build nodes
   const nodeMap = new Map<string, GNode>()
-  graphNodes = data.nodes.map((n, i) => {
+  graphNodes = graph.nodes.map((n, i) => {
     const prior = opts.preserveLayout ? priorCoords.get(n.slug) : undefined
     let x: number
     let y: number
@@ -2614,7 +3487,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       pinned = false
     } else {
       // Full repaint — classic circular layout.
-      const angle = (2 * Math.PI * i) / data.nodes.length
+      const angle = (2 * Math.PI * i) / graph.nodes.length
       const r = Math.min(width, height) * 0.35
       x = width / 2 + r * Math.cos(angle) + (Math.random() - 0.5) * 50
       y = height / 2 + r * Math.sin(angle) + (Math.random() - 0.5) * 50
@@ -2632,8 +3505,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   })
 
   // Node radius based on link count (logarithmic scale to prevent overly large nodes)
-  function nodeRadius(n: GNode) { 
-    return Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4)) 
+  function nodeRadius(n: GNode) {
+    return Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4))
   }
 
   // Define arrow markers in SVG <defs>
@@ -2700,7 +3573,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Detect bidirectional edges (A→B and B→A both exist)
   const edgePairSet = new Set<string>()
-  for (const edge of data.edges) {
+  for (const edge of graph.edges) {
     edgePairSet.add(`${edge.source}→${edge.target}`)
   }
 
@@ -2709,7 +3582,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   const edgeEls: EdgeEl[] = []
   const processedPairs = new Set<string>()
 
-  for (const edge of data.edges) {
+  for (const edge of graph.edges) {
     const pairKey = [edge.source, edge.target].sort().join('↔')
     if (processedPairs.has(pairKey)) continue
     processedPairs.add(pairKey)
@@ -2743,7 +3616,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     // still hiding 80 more connections just out of view, so they either
     // click "bloom" on everything (wasteful) or on nothing (miss the
     // interesting pages). adjacency here is the undirected neighbor set
-    // we've already built from data.edges; link_count is the KB-wide
+    // we've already built from graph.edges; link_count is the KB-wide
     // in+out degree reported by the backend. Diff > 0 means there's
     // more to fetch.
     //
@@ -2754,7 +3627,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     // thinking there's something to click.
     const visibleNeighbors = adjacency.get(n.slug)?.size ?? 0
     const hiddenNeighbors = Math.max(0, n.linkCount - visibleNeighbors)
-    const isEgoCenter = data.meta?.mode === 'ego' && data.meta.center === n.slug
+    const isEgoCenter = graph.meta?.mode === 'ego' && graph.meta.center === n.slug
     const showExpansionRing = hiddenNeighbors > 0 && !isEgoCenter
     const expansionRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
     expansionRing.setAttribute('r', String(r + 3))
@@ -2813,7 +3686,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     // painter's algorithm draws it on top; the node-shadow filter and
     // the drawer cover it otherwise.
     let bloomBtn: SVGGElement | null = null
-    const bloomBtnEligible = !isEgoCenter && data.meta?.mode === 'ego' && hiddenNeighbors > 0
+    const bloomBtnEligible = !isEgoCenter && graph.meta?.mode === 'ego' && hiddenNeighbors > 0
     if (bloomBtnEligible) {
       bloomBtn = document.createElementNS('http://www.w3.org/2000/svg', 'g')
       bloomBtn.classList.add('node-bloom-btn')
@@ -2997,14 +3870,14 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       for (let j = i + 1; j < sortedNodes.length; j++) {
         const n2 = sortedNodes[j]
         const dx = n2.x - n1.x
-        
+
         // Because nodes are sorted by X, if dx > MAX_REPULSION_DIST, 
         // all subsequent n2 nodes will also be too far on the X axis, so we can break early
         if (dx > MAX_REPULSION_DIST) break
-        
+
         const dy = n2.y - n1.y
         if (Math.abs(dy) > MAX_REPULSION_DIST) continue // Too far on Y axis
-        
+
         const distSq = dx * dx + dy * dy
         if (distSq > MAX_REPULSION_DIST_SQ) continue
 
@@ -3013,14 +3886,14 @@ function renderGraph(opts: RenderGraphOpts = {}) {
         const force = (200 * alpha) / Math.max(distSq, 100) * 60
         const fx = (dx / dist) * force
         const fy = (dy / dist) * force
-        
+
         if (!n1.pinned) { n1.vx -= fx; n1.vy -= fy }
         if (!n2.pinned) { n2.vx += fx; n2.vy += fy }
       }
     }
 
     // Attraction along edges
-    for (const edge of data.edges) {
+    for (const edge of graph.edges) {
       const s = nodeMap.get(edge.source)
       const t = nodeMap.get(edge.target)
       if (!s || !t) continue
@@ -3089,9 +3962,9 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   graphNodeElsRef = nodeEls
   graphEdgeElsRef = edgeEls.map(e => ({ line: e.line, source: e.source, target: e.target, bidir: e.bidir }))
   graphAdjacencyRef = adjacency
-  
+
   applyGraphFilters()
-  
+
   graphAnimFrame = requestAnimationFrame(tick)
   graphReady.value = true
 }
@@ -3203,14 +4076,14 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
         text.style.opacity = '1' // Always show selected/highlighted
         continue
       }
-      
+
       let visibilityThreshold = 0.5 // Default: need to zoom in to at least 0.5 to see all labels
-      
+
       // Highly connected nodes get their labels shown earlier
       if (node.linkCount > 10) visibilityThreshold = 0.2
       else if (node.linkCount > 5) visibilityThreshold = 0.35
       else if (node.linkCount > 2) visibilityThreshold = 0.45
-      
+
       if (scale < visibilityThreshold) {
         text.style.opacity = '0'
       } else {
@@ -3286,7 +4159,7 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
     if (panning) {
       panning = false
       svg.style.cursor = 'default'
-      
+
       // If we barely moved, consider it a click to clear selection
       const dx = e.clientX - dragStartX
       const dy = e.clientY - dragStartY
@@ -3311,10 +4184,10 @@ function applyHighlight(
 ) {
   const neighbors = adjacency.get(slug) || new Set()
   const hoverNeighbors = hoverSlug ? (adjacency.get(hoverSlug) || new Set()) : new Set()
-  
+
   // Helper to get consistent radius
   const getRadius = (n: GNode) => Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4))
-  
+
   for (const { g, circle, activeRing, node } of nodeEls) {
     const r = getRadius(node)
     if (node.slug === slug) {
@@ -3334,7 +4207,7 @@ function applyHighlight(
       circle.setAttribute('stroke-width', '2')
       g.style.opacity = '0.2'
     }
-    
+
     if (node.slug === graphSelectedSlug.value) {
       activeRing.style.opacity = '1'
     } else {
@@ -3345,13 +4218,13 @@ function applyHighlight(
     if (e.source === slug || e.target === slug || (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug))) {
       e.line.setAttribute('stroke-opacity', '0.9')
       e.line.setAttribute('stroke-width', '2')
-      
+
       // Determine which node is driving the highlight color
       const focusSlug = (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug)) ? hoverSlug : slug
       const hlColor = nodeColorMap[
         nodeEls.find(n => n.node.slug === focusSlug)?.node.type || ''
       ] || '#0052d9'
-      
+
       e.line.setAttribute('stroke', hlColor)
       e.line.setAttribute('marker-end', 'url(#arrow-end-hl)')
       if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start-hl)')
@@ -3616,6 +4489,10 @@ onUnmounted(() => {
     groupSentinelObserver.disconnect()
     groupSentinelObserver = null
   }
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect()
+    loadMoreObserver = null
+  }
 })
 </script>
 
@@ -3654,7 +4531,7 @@ onUnmounted(() => {
   border-radius: 6px;
   color: var(--td-text-color-secondary);
   font-size: 13px;
-  
+
   .queue-text {
     line-height: 1.2;
   }
@@ -3688,13 +4565,124 @@ onUnmounted(() => {
   padding: 0 12px 12px;
 }
 
-// In page-mode the RecycleScroller delegates scrolling to the nearest
-// scrollable ancestor (`.wiki-page-list`), so the scroller itself
-// must not constrain height or introduce its own overflow. We only
-// reserve a minimum to keep the empty-state loader from collapsing.
-.wiki-group-scroller {
-  min-height: 60px;
-  margin-bottom: 4px;
+.wiki-tree-list {
+  padding: 0 0 4px;
+}
+
+// Tab bar + tree list share horizontal inset. Tree rows are plain flex and
+// left-aligned; only folder rows reserve trailing space for count / actions.
+.wiki-tree-panel {
+  --wiki-tree-depth-indent: 14px;
+  padding: 0 8px;
+}
+
+.wiki-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 6px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--td-bg-color-container);
+}
+
+.wiki-tab-bar-scroll {
+  display: flex;
+  gap: 16px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.wiki-tab-bar-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wiki-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.wiki-view-toggle-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+
+  &.active {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .t-icon {
+    font-size: 15px;
+  }
+}
+
+.wiki-tab-bar-action {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  .t-icon {
+    font-size: 15px;
+  }
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:disabled {
+    color: var(--td-text-color-placeholder);
+    background: transparent;
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+}
+
+.wiki-tree-trailing {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .wiki-group-sentinel {
@@ -3726,10 +4714,12 @@ onUnmounted(() => {
 
   &.active {
     background: var(--td-brand-color-light);
+
     .wiki-nav-text {
       color: var(--td-brand-color);
       font-weight: 600;
     }
+
     .wiki-nav-icon {
       color: var(--td-brand-color);
     }
@@ -3753,72 +4743,64 @@ onUnmounted(() => {
   margin: 8px 12px;
 }
 
-.wiki-tab-bar {
-  display: flex;
-  gap: 4px;
-  padding: 8px 0;
-  overflow-x: auto;
-  // Hide scrollbar while still allowing horizontal pan when types
-  // overflow the sidebar width (rare but happens with long labels).
-  scrollbar-width: none;
-  &::-webkit-scrollbar { display: none; }
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--td-bg-color-container);
-}
-
 .wiki-tab {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 14px;
-  font-size: 12px;
+  gap: 5px;
+  padding: 7px 2px 8px;
+  border-radius: 0;
+  font-size: 13px;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
+  position: relative;
   transition: background 0.15s, color 0.15s;
 
   &:hover {
-    background: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
     color: var(--td-brand-color);
-    font-weight: 500;
+    font-weight: 600;
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: 2px;
+      right: 2px;
+      bottom: 1px;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: var(--td-brand-color);
+    }
   }
 
   .wiki-tab-count {
     font-size: 11px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 10px;
-    padding: 0 6px;
-    line-height: 16px;
+    padding: 0;
+    line-height: 1;
     color: var(--td-text-color-placeholder);
   }
 
   &.active .wiki-tab-count {
-    background: var(--td-brand-color-1, rgba(0, 82, 217, 0.12));
     color: var(--td-brand-color);
+    font-weight: 500;
   }
 }
 
 .wiki-page-item {
-  // Lock the rendered height so it matches WIKI_PAGE_ITEM_HEIGHT (100)
-  // minus margin-bottom (2). RecycleScroller absolute-positions rows
-  // at multiples of itemSize, so any variance between actual rendered
-  // height and the constant causes neighbors to overlap.
-  height: 98px;
+  min-height: 64px;
   box-sizing: border-box;
   overflow: hidden;
   padding: 10px 12px;
   border-radius: 6px;
   cursor: pointer;
   margin-bottom: 2px;
+  // Without this, mousedown-drag on the title text starts a text selection
+  // instead of an HTML5 drag, so the page never picks up.
+  user-select: none;
   transition: background 0.15s;
 
   &:hover {
@@ -3830,20 +4812,27 @@ onUnmounted(() => {
   }
 }
 
-.wiki-page-item-title {
+.wiki-group-scroller {
+  min-height: 60px;
+  margin: 4px 0;
+}
+
+.wiki-page-item--list {
+  height: 98px;
+  padding: 10px 2px;
+}
+
+.wiki-page-item--list .wiki-page-item-title {
+  display: block;
   font-size: 13px;
   font-weight: 500;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   margin-bottom: 4px;
 }
 
 .wiki-page-item-summary {
   font-size: 12px;
-  color: var(--td-text-color-secondary);
   line-height: 1.5;
+  color: var(--td-text-color-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -3853,10 +4842,192 @@ onUnmounted(() => {
 
 .wiki-page-item-meta {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   font-size: 11px;
   color: var(--td-text-color-placeholder);
+}
+
+.wiki-directory-item {
+  height: 34px;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 1px 0;
+  color: var(--td-text-color-secondary);
+  background: transparent;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+
+    :deep(.wiki-directory-action--reveal) {
+      opacity: 1;
+    }
+  }
+}
+
+.wiki-directory-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid var(--td-brand-color);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+  outline: none;
+}
+
+.wiki-directory-item--drop {
+  background: var(--td-brand-color-light);
+  box-shadow: inset 0 0 0 1px var(--td-brand-color);
+}
+
+.wiki-directory-item--editing {
+  cursor: default;
+
+  &:hover {
+    background: transparent;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.wiki-folder-inline-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+
+  :deep(.t-button) {
+    padding: 0 4px;
+    height: 24px;
+  }
+
+  :deep(.wiki-folder-action-btn) {
+    border-radius: 4px;
+    transition: all 0.2s ease;
+
+    .t-icon {
+      font-size: 14px;
+    }
+  }
+
+  :deep(.wiki-folder-action-btn.confirm) {
+    background: transparent;
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-brand-color);
+    }
+  }
+
+  :deep(.wiki-folder-action-btn.cancel) {
+    background: transparent;
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-error-color);
+    }
+  }
+}
+
+// While dragging, the whole list is the "move to root" target; a subtle inset
+// ring signals it without inserting any element that would shift the layout.
+.wiki-tree-list--root-drop {
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--td-brand-color);
+}
+
+// In-place move confirmation anchored at the drop point (teleported to body).
+.wiki-move-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 3500;
+}
+
+.wiki-move-confirm {
+  position: fixed;
+  // x/y are the drop coords; nudge so the card sits just below-right of the
+  // cursor. max-width + viewport clamping keep it on-screen for edge drops.
+  transform: translate(8px, 8px);
+}
+
+.wiki-directory-toggle,
+.wiki-page-file-icon {
+  flex: 0 0 auto;
+  color: var(--td-text-color-placeholder);
+  font-size: 15px;
+}
+
+.wiki-directory-title,
+.wiki-page-item-title {
+  min-width: 0;
+  flex: 1;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-directory-title {
+  font-weight: 600;
+}
+
+.wiki-directory-count {
+  flex: 0 0 auto;
+  min-width: 22px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.wiki-directory-load-more {
+  height: 30px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 1px 0;
+  color: var(--td-brand-color);
+  font-size: 12px;
+
+  &:hover {
+    background: var(--td-brand-color-light);
+  }
+}
+
+.wiki-page-item--tree {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
+  border-radius: 6px;
+  margin: 1px 0;
+}
+
+.wiki-page-item--tree .wiki-page-item-title {
+  font-weight: 500;
 }
 
 // ── Right Content ──
@@ -3988,26 +5159,58 @@ onUnmounted(() => {
   }
 }
 
+// Wiki reader styles are for the knowledge-base document surface only.
+// Chat answer Markdown styles are centralized in components/css/chat-markdown.less.
 .wiki-reader-body {
   line-height: 1.6;
   font-size: 14px;
   color: var(--td-text-color-primary);
 
-  :deep(h1) { font-size: 24px; margin: 28px 0 16px; font-weight: 600; line-height: 1.4; }
-  :deep(h2) { font-size: 18px; margin: 24px 0 12px; font-weight: 600; line-height: 1.4; }
-  :deep(h3) { font-size: 16px; margin: 20px 0 10px; font-weight: 600; line-height: 1.5; }
-  :deep(h4), :deep(h5), :deep(h6) { font-size: 14px; margin: 16px 0 8px; font-weight: 600; line-height: 1.5; }
-  
-  :deep(p) { margin: 0 0 14px; }
-  
-  :deep(ul), :deep(ol) { 
-    margin: 0 0 14px; 
-    padding-left: 24px; 
+  :deep(h1) {
+    font-size: 24px;
+    margin: 28px 0 16px;
+    font-weight: 600;
+    line-height: 1.4;
   }
-  :deep(li) { 
-    margin-bottom: 6px; 
+
+  :deep(h2) {
+    font-size: 18px;
+    margin: 24px 0 12px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  :deep(h3) {
+    font-size: 16px;
+    margin: 20px 0 10px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  :deep(h4),
+  :deep(h5),
+  :deep(h6) {
+    font-size: 14px;
+    margin: 16px 0 8px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  :deep(p) {
+    margin: 0 0 14px;
+  }
+
+  :deep(ul),
+  :deep(ol) {
+    margin: 0 0 14px;
+    padding-left: 24px;
+  }
+
+  :deep(li) {
+    margin-bottom: 6px;
     line-height: 1.6;
   }
+
   :deep(li > p) {
     margin-bottom: 6px;
   }
@@ -4020,7 +5223,7 @@ onUnmounted(() => {
     border-radius: 0 4px 4px 0;
     color: var(--td-text-color-secondary);
   }
-  
+
   :deep(code) {
     font-family: var(--app-font-family-mono);
     font-size: 13px;
@@ -4029,14 +5232,14 @@ onUnmounted(() => {
     border-radius: 4px;
     color: var(--td-brand-color);
   }
-  
+
   :deep(pre) {
     margin: 0 0 14px;
     padding: 12px 16px;
     background: var(--td-bg-color-secondarycontainer);
     border-radius: 6px;
     overflow-x: auto;
-    
+
     code {
       padding: 0;
       background: transparent;
@@ -4050,7 +5253,7 @@ onUnmounted(() => {
     font-size: 13px;
     margin-top: 16px;
     margin-bottom: 24px;
-    
+
     img {
       max-width: 100%;
       max-height: 400px;
@@ -4060,7 +5263,7 @@ onUnmounted(() => {
       margin: 0 auto 8px;
       cursor: zoom-in;
       transition: opacity 0.2s;
-      
+
       &:hover {
         opacity: 0.9;
       }
@@ -4073,6 +5276,7 @@ onUnmounted(() => {
     border-bottom: 1px dashed var(--td-brand-color);
     cursor: pointer;
     font-weight: 500;
+
     &:hover {
       border-bottom-style: solid;
       text-decoration: none !important;
@@ -4506,16 +5710,16 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 11px;
   color: var(--td-text-color-secondary);
-  
+
   &.clickable {
     cursor: pointer;
     transition: all 0.15s;
-    
+
     &:hover {
       color: var(--td-text-color-primary);
     }
   }
-  
+
   &.disabled {
     color: var(--td-text-color-placeholder);
     text-decoration: line-through;
@@ -4556,6 +5760,7 @@ onUnmounted(() => {
 
   &:hover {
     color: var(--td-brand-color);
+
     .legend-action-icon {
       color: var(--td-brand-color);
     }
@@ -4563,6 +5768,7 @@ onUnmounted(() => {
 
   &.active {
     color: var(--td-brand-color);
+
     .legend-action-icon {
       color: var(--td-brand-color);
     }
@@ -4645,8 +5851,15 @@ onUnmounted(() => {
 }
 
 @keyframes node-active-pulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  100% { transform: scale(1.6); opacity: 0; }
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
 }
 
 .node-active-ring {
@@ -4663,7 +5876,7 @@ onUnmounted(() => {
   justify-content: center;
   font-size: 20px;
   transition: opacity 0.2s ease;
-  
+
   &:hover {
     opacity: 0.8;
   }
@@ -4692,7 +5905,7 @@ onUnmounted(() => {
   font-weight: 500;
   font-size: 14px;
   color: var(--td-text-color-primary);
-  
+
   .wiki-issue-popup-icon {
     color: var(--td-brand-color);
     margin-right: 8px;
@@ -4717,7 +5930,7 @@ onUnmounted(() => {
   border-radius: 6px;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
   background: var(--td-bg-color-container);
-  
+
   &:hover {
     border-color: var(--td-brand-color-light);
   }
@@ -4751,10 +5964,12 @@ onUnmounted(() => {
 .wiki-issue-popup-desc::-webkit-scrollbar {
   width: 4px;
 }
+
 .wiki-issue-popup-desc::-webkit-scrollbar-thumb {
   background: var(--td-scrollbar-color);
   border-radius: 4px;
 }
+
 .wiki-issue-popup-desc::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -4784,7 +5999,7 @@ onUnmounted(() => {
   color: var(--td-brand-color);
   cursor: pointer;
   transition: opacity 0.2s ease;
-  
+
   &:hover {
     opacity: 0.8;
   }
@@ -4801,7 +6016,7 @@ onUnmounted(() => {
     height: 100%;
     overflow: hidden;
   }
-  
+
   .chat {
     max-width: 100% !important;
     min-width: 100% !important;
@@ -4810,12 +6025,12 @@ onUnmounted(() => {
     flex: 1 !important;
     border-radius: 0 !important;
   }
-  
+
   .chat_scroll_box {
     padding: 0 !important;
   }
 
-  .chat > .input-container {
+  .chat>.input-container {
     padding: 16px 0 0 0 !important;
     box-sizing: border-box;
     width: 100% !important;

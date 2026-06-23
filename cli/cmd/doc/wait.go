@@ -74,13 +74,19 @@ For fail-fast semantics, use shell composition:
 				return err
 			}
 
+			// The partition (completed/failed/timeout) is already on stdout via
+			// emitWaitResult. On aggregate failure we still need a non-zero exit,
+			// but the error is Silent so PrintError does NOT write a second,
+			// contradictory {ok:false} envelope to stderr — the agent reads the
+			// failure detail from the stdout partition + the exit code (1/124).
+			// Same contract as cmdutil.RunBatch.
 			switch res.ExitCode() {
 			case 0:
 				return nil
 			case 1:
-				return cmdutil.NewError(cmdutil.CodeOperationFailed, fmt.Sprintf("%d doc(s) failed", len(res.Failed)))
+				return cmdutil.NewError(cmdutil.CodeOperationFailed, fmt.Sprintf("%d doc(s) failed", len(res.Failed))).WithSilent()
 			case 124:
-				return cmdutil.NewError(cmdutil.CodeOperationTimeout, fmt.Sprintf("wait timed out (%d doc(s) still pending)", len(res.Timeout)))
+				return cmdutil.NewError(cmdutil.CodeOperationTimeout, fmt.Sprintf("wait timed out (%d doc(s) still pending)", len(res.Timeout))).WithSilent()
 			}
 			return nil
 		},
@@ -88,6 +94,19 @@ For fail-fast semantics, use shell composition:
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", 10*time.Minute, "Max wait time before exiting 124")
 	cmd.Flags().DurationVar(&opts.Interval, "interval", 2*time.Second, "Initial poll interval; exponential backoff capped at 15s + jitter")
 	cmdutil.AddFormatFlag(cmd)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "block until one or more documents reach a terminal parse state (completed or failed), or --timeout elapses",
+		RequiredFlags: []string{"<doc-id>... (one or more positionals)"},
+		Examples: []string{
+			"weknora doc wait doc_abc",
+			"weknora doc wait doc_a doc_b --timeout 5m",
+		},
+		Output: "envelope.data is {completed:[], failed:[{id,message}], timeout:[]}",
+		Warnings: []string{
+			"exit code carries the aggregate result: 0 all completed, 1 any failed, 124 timeout",
+			"ok:true means the wait ran to a terminal state — NOT that every doc succeeded; branch on the exit code or inspect data.failed",
+		},
+	})
 	return cmd
 }
 
@@ -146,7 +165,9 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	result := &WaitResult{}
+	// Completed is non-omitempty (always present in the partition), so start it
+	// as an empty slice rather than nil — agents see `"completed":[]`, not null.
+	result := &WaitResult{Completed: []string{}}
 	var mu sync.Mutex
 	addCompleted := func(id string) {
 		mu.Lock()

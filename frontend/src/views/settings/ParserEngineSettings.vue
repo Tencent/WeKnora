@@ -311,6 +311,60 @@
             />
           </div>
         </section>
+
+        <!-- Section 3 — paddleocr_vl 自建配置 -->
+        <section v-if="currentEngine.Name === 'paddleocr_vl'" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.configSection', '配置') }}</h4>
+
+          <div class="form-item">
+            <label class="form-label required">{{ t('settings.parser.selfHostedEndpoint') }}</label>
+            <t-input
+              v-model="config.paddleocr_vl_endpoint"
+              :placeholder="$t('settings.parser.paddleocrVlEndpointPlaceholder')"
+              clearable
+            />
+            <p class="form-desc">{{ $t('settings.parser.paddleocrVlEndpointHint') }}</p>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.featuresLabel', '识别选项') }}</label>
+            <div class="form-toggles">
+              <t-checkbox v-model="config.paddleocr_vl_use_seal_recognition">{{ $t('settings.parser.sealRecognition') }}</t-checkbox>
+              <t-checkbox v-model="config.paddleocr_vl_use_chart_recognition">{{ $t('settings.parser.chartRecognition') }}</t-checkbox>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section 3 — paddleocr_vl_cloud 云 API 配置 -->
+        <section v-if="currentEngine.Name === 'paddleocr_vl_cloud'" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.configSection', '配置') }}</h4>
+
+          <div class="form-item">
+            <label class="form-label required">Token</label>
+            <t-input
+              v-model="config.paddleocr_vl_cloud_token"
+              type="password"
+              :placeholder="$t('settings.parser.paddleocrVlCloudTokenPlaceholder')"
+              clearable
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+          </div>
+          <div class="form-item">
+            <label class="form-label">Model</label>
+            <t-input
+              v-model="config.paddleocr_vl_cloud_model"
+              placeholder="PaddleOCR-VL-1.6"
+              clearable
+            />
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.featuresLabel', '识别选项') }}</label>
+            <div class="form-toggles">
+              <t-checkbox v-model="config.paddleocr_vl_cloud_use_seal_recognition">{{ $t('settings.parser.sealRecognition') }}</t-checkbox>
+              <t-checkbox v-model="config.paddleocr_vl_cloud_use_chart_recognition">{{ $t('settings.parser.chartRecognition') }}</t-checkbox>
+            </div>
+          </div>
+        </section>
       </div>
     </SettingDrawer>
   </div>
@@ -336,7 +390,7 @@ const { t } = useI18n()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 
-const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud'])
+const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud', 'paddleocr_vl', 'paddleocr_vl_cloud'])
 
 /** 各解析引擎的项目/官方文档地址 */
 const ENGINE_DOC_LINKS: Record<string, string> = {
@@ -344,6 +398,8 @@ const ENGINE_DOC_LINKS: Record<string, string> = {
   markitdown: 'https://github.com/microsoft/markitdown',
   mineru: 'https://github.com/opendatalab/MinerU',
   mineru_cloud: 'https://mineru.net/apiManage/docs',
+  paddleocr_vl: 'https://github.com/PaddlePaddle/PaddleOCR',
+  paddleocr_vl_cloud: 'https://aistudio.baidu.com/paddleocr',
 }
 
 /** 解析引擎配置默认值（与 DocReader/Python 侧一致） */
@@ -363,6 +419,13 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   mineru_cloud_enable_table: true,
   mineru_cloud_enable_ocr: true,
   mineru_cloud_language: 'ch',
+  paddleocr_vl_endpoint: '',
+  paddleocr_vl_use_seal_recognition: true,
+  paddleocr_vl_use_chart_recognition: false,
+  paddleocr_vl_cloud_token: '',
+  paddleocr_vl_cloud_model: 'PaddleOCR-VL-1.6',
+  paddleocr_vl_cloud_use_seal_recognition: true,
+  paddleocr_vl_cloud_use_chart_recognition: false,
 }
 
 const engines = ref<ParserEngineInfo[]>([])
@@ -407,6 +470,8 @@ const ENGINE_ORDER: Record<string, number> = {
   markitdown: 3,
   mineru: 4,
   mineru_cloud: 5,
+  paddleocr_vl: 6,
+  paddleocr_vl_cloud: 7,
 }
 
 const sortedEngines = computed(() => {
@@ -491,6 +556,13 @@ async function loadConfig() {
       mineru_cloud_enable_table: data?.mineru_cloud_enable_table ?? DEFAULT_PARSER_CONFIG.mineru_cloud_enable_table ?? true,
       mineru_cloud_enable_ocr: data?.mineru_cloud_enable_ocr ?? DEFAULT_PARSER_CONFIG.mineru_cloud_enable_ocr ?? true,
       mineru_cloud_language: data?.mineru_cloud_language ?? DEFAULT_PARSER_CONFIG.mineru_cloud_language ?? 'ch',
+      paddleocr_vl_endpoint: data?.paddleocr_vl_endpoint ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_endpoint ?? '',
+      paddleocr_vl_use_seal_recognition: data?.paddleocr_vl_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_use_seal_recognition ?? true,
+      paddleocr_vl_use_chart_recognition: data?.paddleocr_vl_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_use_chart_recognition ?? false,
+      paddleocr_vl_cloud_token: data?.paddleocr_vl_cloud_token ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_token ?? '',
+      paddleocr_vl_cloud_model: data?.paddleocr_vl_cloud_model ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_model ?? 'PaddleOCR-VL-1.6',
+      paddleocr_vl_cloud_use_seal_recognition: data?.paddleocr_vl_cloud_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_seal_recognition ?? true,
+      paddleocr_vl_cloud_use_chart_recognition: data?.paddleocr_vl_cloud_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_chart_recognition ?? false,
     }
   } catch {
     config.value = { ...DEFAULT_PARSER_CONFIG }
@@ -521,6 +593,13 @@ function buildConfigPayload(): ParserEngineConfig {
     mineru_cloud_enable_table: config.value.mineru_cloud_enable_table,
     mineru_cloud_enable_ocr: config.value.mineru_cloud_enable_ocr,
     mineru_cloud_language: config.value.mineru_cloud_language?.trim() ?? '',
+    paddleocr_vl_endpoint: config.value.paddleocr_vl_endpoint?.trim() ?? '',
+    paddleocr_vl_use_seal_recognition: config.value.paddleocr_vl_use_seal_recognition,
+    paddleocr_vl_use_chart_recognition: config.value.paddleocr_vl_use_chart_recognition,
+    paddleocr_vl_cloud_token: config.value.paddleocr_vl_cloud_token?.trim() ?? '',
+    paddleocr_vl_cloud_model: config.value.paddleocr_vl_cloud_model?.trim() ?? '',
+    paddleocr_vl_cloud_use_seal_recognition: config.value.paddleocr_vl_cloud_use_seal_recognition,
+    paddleocr_vl_cloud_use_chart_recognition: config.value.paddleocr_vl_cloud_use_chart_recognition,
   }
 }
 
@@ -739,7 +818,9 @@ onMounted(loadAll)
   color: #0089FF;
 }
 .engine-card--mineru .engine-card__badge,
-.engine-card--mineru_cloud .engine-card__badge {
+.engine-card--mineru_cloud .engine-card__badge,
+.engine-card--paddleocr_vl .engine-card__badge,
+.engine-card--paddleocr_vl_cloud .engine-card__badge {
   background: rgba(98, 53, 187, 0.12);
   color: #6235BB;
 }
@@ -1086,7 +1167,9 @@ onMounted(loadAll)
   color: #0089FF;
 }
 .parser-engine-drawer--mineru .setting-drawer__header-icon,
-.parser-engine-drawer--mineru_cloud .setting-drawer__header-icon {
+.parser-engine-drawer--mineru_cloud .setting-drawer__header-icon,
+.parser-engine-drawer--paddleocr_vl .setting-drawer__header-icon,
+.parser-engine-drawer--paddleocr_vl_cloud .setting-drawer__header-icon {
   background: rgba(98, 53, 187, 0.12);
   color: #6235BB;
 }

@@ -78,7 +78,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/stream"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -107,15 +106,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Core infrastructure configuration
 	logger.Debugf(ctx, "[Container] Registering core infrastructure...")
 	must(container.Provide(config.LoadConfig))
-	must(container.Provide(initTracer))
 	must(container.Provide(initLangfuse))
 	must(container.Provide(initDatabase))
 	must(container.Provide(initFileService))
 	must(container.Provide(initRedisClient))
 	must(container.Provide(initAntsPool))
 
-	// Register tracer cleanup handler (tracer needs to be available for cleanup registration)
-	must(container.Invoke(registerTracerCleanup))
 	must(container.Invoke(registerLangfuseCleanup))
 
 	// Register goroutine pool cleanup handler
@@ -157,10 +153,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(memoryRepo.NewMemoryRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
+	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewCustomAgentRepository))
 	must(container.Provide(repository.NewOrganizationRepository))
 	must(container.Provide(repository.NewKBShareRepository))
 	must(container.Provide(repository.NewAgentShareRepository))
+	must(container.Provide(repository.NewEmbedChannelRepository))
 	must(container.Provide(repository.NewTenantDisabledSharedAgentRepository))
 	must(container.Provide(repository.NewUserResourceFavoriteRepository))
 	must(container.Provide(service.NewWebSearchStateService))
@@ -174,6 +172,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
 	must(container.Provide(mcp.NewMCPManager))
+	must(container.Provide(mcp.NewOAuthManager))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
@@ -214,6 +213,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewWikiLogEntryService))
 	must(container.Provide(service.NewWikiIngestService, dig.Name("wikiIngest")))
 	must(container.Provide(service.NewWikiLintService))
+	must(container.Provide(service.NewEmbedChannelService))
 
 	// Web search service (needed by AgentService)
 	logger.Debugf(ctx, "[Container] Registering web search registry and providers...")
@@ -327,6 +327,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewSystemHandler))
 	must(container.Provide(handler.NewMCPServiceHandler))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
+	must(container.Provide(handler.NewMCPOAuthHandler))
 	must(container.Provide(handler.NewModelCredentialsHandler))
 	must(container.Provide(handler.NewWebSearchProviderCredentialsHandler))
 	must(container.Provide(handler.NewDataSourceCredentialsHandler))
@@ -348,6 +349,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(imPkg.NewService))
 	must(container.Invoke(registerIMAdapterFactories))
 	must(container.Provide(handler.NewIMHandler))
+	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
@@ -412,18 +414,6 @@ func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-// initTracer initializes OpenTelemetry tracer
-// Sets up distributed tracing for observability across the application
-// Parameters:
-//   - None
-//
-// Returns:
-//   - Configured tracer instance
-//   - Error if initialization fails
-func initTracer() (*tracing.Tracer, error) {
-	return tracing.InitTracer()
 }
 
 // initLangfuse initializes the Langfuse ingestion client.
@@ -1205,19 +1195,6 @@ func registerPoolCleanup(pool *ants.Pool, cleaner interfaces.ResourceCleaner) {
 	})
 }
 
-// registerTracerCleanup registers the tracer for cleanup
-// Ensures proper cleanup of the tracer when application shuts down
-// Parameters:
-//   - tracer: Tracer instance
-//   - cleaner: Resource cleaner
-func registerTracerCleanup(tracer *tracing.Tracer, cleaner interfaces.ResourceCleaner) {
-	// Register the cleanup function - actual context will be provided during cleanup
-	cleaner.RegisterWithName("Tracer", func() error {
-		// Create context for cleanup with longer timeout for tracer shutdown
-		return tracer.Cleanup(context.Background())
-	})
-}
-
 // registerLangfuseCleanup ensures buffered Langfuse events are flushed on
 // shutdown. A 5-second timeout matches other external-service cleanups and
 // balances data durability against a slow remote endpoint holding up exit.
@@ -1314,16 +1291,27 @@ func NewDuckDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
 	}
 
-	// Try to install and load required extensions.
+	// Try to install and load required extensions unless explicitly disabled.
 	//   - spatial: used for st_read_meta() to enumerate layer (sheet) names from .xlsx/.xls
 	//   - excel:   used for read_xlsx() which gives proper type inference per sheet
-	bgCtx := context.Background()
-	for _, ext := range []string{"spatial", "excel"} {
-		if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
-			logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
-		}
-		if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", ext)); err != nil {
-			logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext, err)
+	//
+	// INSTALL hits extensions.duckdb.org (public internet). In locked-down
+	// runtimes with no egress, set DUCKDB_SKIP_EXTENSION_LOAD=1 to avoid a
+	// startup hang; xlsx/xls ingest may fail later without these extensions.
+	if strings.EqualFold(os.Getenv("DUCKDB_SKIP_EXTENSION_LOAD"), "true") ||
+		os.Getenv("DUCKDB_SKIP_EXTENSION_LOAD") == "1" {
+		logger.Infof(context.Background(),
+			"[DuckDB] Skipping spatial/excel extension install/load "+
+				"(DUCKDB_SKIP_EXTENSION_LOAD is set; xlsx ingest may fail without them)")
+	} else {
+		bgCtx := context.Background()
+		for _, ext := range []string{"spatial", "excel"} {
+			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
+				logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
+			}
+			if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", ext)); err != nil {
+				logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext, err)
+			}
 		}
 	}
 

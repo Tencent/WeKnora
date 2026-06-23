@@ -209,7 +209,7 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			yes, _ := cmd.Flags().GetBool("yes")
 			// Build the retry command from the flags the user actually passed.
 			retryCmd := buildAgentEditRetryCmd(cmd, opts.AgentID)
-			if err := cmdutil.ConfirmDestructive(f.Prompter(), yes, fopts.WantsJSON(), "agent", opts.AgentID, "agent.edit", retryCmd); err != nil {
+			if err := cmdutil.ConfirmDestructive(f.Prompter(), yes, fopts.WantsJSON(), "edit", "agent", opts.AgentID, "agent.edit", retryCmd); err != nil {
 				return err
 			}
 			cli, err := f.Client()

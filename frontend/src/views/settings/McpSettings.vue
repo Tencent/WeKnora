@@ -12,24 +12,13 @@
     </div>
 
     <template v-else>
-      <div class="settings-toolbar">
-        <div class="toolbar-info">
-          <h3>{{ $t('mcpSettings.configuredServices') }}</h3>
-          <p>{{ $t('mcpSettings.manageAndTest') }}</p>
-        </div>
-        <t-button v-if="authStore.hasRole('admin')" size="small" theme="primary" variant="outline" @click="handleAdd">
-          <template #icon><t-icon name="add" /></template>
-          {{ $t('mcpSettings.addService') }}
-        </t-button>
+      <div class="list-section-header">
+        <h3>{{ $t('mcpSettings.configuredServices') }}</h3>
+        <p>{{ $t('mcpSettings.manageAndTest') }}</p>
       </div>
 
-      <div v-if="services.length === 0" class="empty-state">
-        <t-empty :description="$t('mcpSettings.empty')">
-          <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="handleAdd">
-            <template #icon><t-icon name="add" /></template>
-            {{ $t('mcpSettings.addFirst') }}
-          </t-button>
-        </t-empty>
+      <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+        <t-empty :description="$t('mcpSettings.empty')" />
       </div>
 
       <div v-else class="services-grid">
@@ -103,6 +92,17 @@
             </div>
           </div>
         </div>
+        <button
+          v-if="authStore.hasRole('admin')"
+          type="button"
+          class="service-card service-card--add"
+          @click="handleAdd"
+        >
+          <span class="service-card--add__icon" aria-hidden="true">
+            <add-icon />
+          </span>
+          <span class="service-card--add__label">{{ $t('mcpSettings.addService') }}</span>
+        </button>
       </div>
     </template>
 
@@ -112,15 +112,7 @@
       :service="currentService"
       :mode="dialogMode"
       @success="handleDialogSuccess"
-      @test="handleDrawerTest"
-    />
-
-    <!-- Test Result Dialog -->
-    <McpTestResult
-      v-model:visible="testDialogVisible"
-      :result="testResult"
-      :service-name="testingServiceName"
-      :service-id="testingServiceId"
+      @created="handleDialogCreated"
     />
   </div>
 </template>
@@ -128,16 +120,15 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   listMCPServices,
   updateMCPService,
   deleteMCPService,
-  type MCPService,
-  type MCPTestResult
+  type MCPService
 } from '@/api/mcp-service'
 import McpServiceDialog from './components/McpServiceDialog.vue'
-import McpTestResult from './components/McpTestResult.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 
@@ -150,10 +141,6 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogMode = ref<'add' | 'edit'>('add')
 const currentService = ref<MCPService | null>(null)
-const testDialogVisible = ref(false)
-const testResult = ref<MCPTestResult | null>(null)
-const testingServiceName = ref('')
-const testingServiceId = ref('')
 
 // Load MCP services
 const loadServices = async () => {
@@ -196,10 +183,22 @@ const handleEdit = (service: MCPService) => {
   dialogVisible.value = true
 }
 
-// Handle dialog success
+// Handle dialog success (edit-mode update): close + refresh.
 const handleDialogSuccess = () => {
   dialogVisible.value = false
   loadServices()
+}
+
+// Handle first create: keep the drawer open and flip it to edit mode bound to
+// the newly created service, so OAuth authorization and "test connection"
+// (both of which need a saved service id) are usable right away. The list is
+// refreshed in the background; we prefer the freshly-fetched record so the
+// edit form sees server-side fields (e.g. credential metadata).
+const handleDialogCreated = async (created: MCPService) => {
+  await loadServices()
+  const full = services.value.find((s) => s.id === created.id) || created
+  currentService.value = { ...full }
+  dialogMode.value = 'edit'
 }
 
 // Handle toggle enabled/disabled
@@ -263,15 +262,6 @@ const getBuiltinServiceOptions = () => {
   return [
     { content: t('common.edit'), value: 'edit' }
   ]
-}
-
-// Drawer 内点击"测试连接"后，复用现有的 testResult dialog 展示结果。
-// 抽屉只负责调 API + 拿结果，弹窗位置/状态由父组件统一管。
-const handleDrawerTest = ({ service, result }: { service: MCPService; result: MCPTestResult }) => {
-  testingServiceName.value = service.name
-  testingServiceId.value = service.id
-  testResult.value = result
-  testDialogVisible.value = true
 }
 
 // Handle menu action. 'test' has been removed from the menu — testing now
@@ -355,30 +345,21 @@ onMounted(() => {
   text-align: center;
 }
 
-.settings-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+.list-section-header {
   margin-bottom: 16px;
 
-  .toolbar-info {
-    flex: 1;
-    min-width: 0;
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+    margin: 0 0 4px 0;
+  }
 
-    h3 {
-      font-size: 15px;
-      font-weight: 500;
-      color: var(--td-text-color-primary);
-      margin: 0 0 4px 0;
-    }
-
-    p {
-      font-size: 13px;
-      color: var(--td-text-color-placeholder);
-      margin: 0;
-      line-height: 1.5;
-    }
+  p {
+    font-size: 13px;
+    color: var(--td-text-color-placeholder);
+    margin: 0;
+    line-height: 1.5;
   }
 }
 
@@ -397,6 +378,11 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  .service-card--add {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 // Transport-distinguished card. 与 ModelSettings / WebSearchSettings 同形。
@@ -432,6 +418,51 @@ onMounted(() => {
   &--builtin:not(.service-card--clickable):hover {
     box-shadow: none;
     border-color: var(--td-component-stroke);
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    font: inherit;
+    text-align: center;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
   }
 }
 

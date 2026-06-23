@@ -62,6 +62,7 @@ type UploadService interface {
 		metadata map[string]string,
 		enableMultimodel *bool,
 		customFileName, channel string,
+		processConfig *sdk.KnowledgeProcessOverrides,
 	) (*sdk.Knowledge, error)
 }
 
@@ -188,6 +189,11 @@ Server-side ingestion knobs:
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	cmdutil.AddFormatFlag(cmd, docUploadFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Upload a local file to the resolved knowledge base. KB resolved via --kb flag, WEKNORA_KB_ID env, or project link. Emits the created Knowledge object with its id.",
+		RequiredFlags: []string{"<file> (positional)"},
+		Output:        "envelope.data is the created Knowledge object with id, knowledge_base_id, file_name, parse_status",
+	})
 	return cmd
 }
 
@@ -289,7 +295,7 @@ func runUpload(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOp
 	if err != nil {
 		return err
 	}
-	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, meta, opts.EnableMultimodel, opts.Name, cmp.Or(opts.Channel, uploadChannel))
+	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, meta, opts.EnableMultimodel, opts.Name, cmp.Or(opts.Channel, uploadChannel), nil)
 	if err != nil {
 		if errors.Is(err, sdk.ErrDuplicateFile) {
 			// SDK returns sentinel without an "HTTP error <status>:" prefix

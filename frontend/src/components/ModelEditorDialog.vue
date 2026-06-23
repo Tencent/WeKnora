@@ -29,6 +29,25 @@
 
     <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
 
+      <section v-if="!isEdit" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionType') }}</h4>
+        <div class="model-type-options" role="radiogroup" :aria-label="$t('model.editor.typeLabel')">
+          <button
+            v-for="opt in modelTypeChoices"
+            :key="opt.value"
+            type="button"
+            class="model-type-option"
+            :class="{ 'is-active': activeModelType === opt.value }"
+            role="radio"
+            :aria-checked="activeModelType === opt.value"
+            @click="selectModelType(opt.value)"
+          >
+            <t-icon :name="opt.icon" class="model-type-option__icon" />
+            <span class="model-type-option__label">{{ opt.label }}</span>
+          </button>
+        </div>
+      </section>
+
       <!--
         Section 1 — 模型来源 + 模型名称（来源直接决定下方字段，所以放一节）
       -->
@@ -44,18 +63,6 @@
             <button
               type="button"
               class="source-option"
-              :class="{ 'is-active': formData.source === 'local', 'is-disabled': ollamaServiceStatus === false || modelType === 'rerank' }"
-              :disabled="ollamaServiceStatus === false || modelType === 'rerank'"
-              role="radio"
-              :aria-checked="formData.source === 'local'"
-              @click="formData.source = 'local'"
-            >
-              <t-icon name="server" class="source-option__icon" />
-              <span class="source-option__label">{{ $t('model.editor.sourceLocal') }}</span>
-            </button>
-            <button
-              type="button"
-              class="source-option"
               :class="{ 'is-active': formData.source === 'remote' }"
               role="radio"
               :aria-checked="formData.source === 'remote'"
@@ -64,16 +71,28 @@
               <t-icon name="cloud" class="source-option__icon" />
               <span class="source-option__label">{{ $t('model.editor.sourceRemote') }}</span>
             </button>
+            <button
+              type="button"
+              class="source-option"
+              :class="{ 'is-active': formData.source === 'local', 'is-disabled': ollamaServiceStatus === false || activeModelType === 'rerank' }"
+              :disabled="ollamaServiceStatus === false || activeModelType === 'rerank'"
+              role="radio"
+              :aria-checked="formData.source === 'local'"
+              @click="formData.source = 'local'"
+            >
+              <t-icon name="server" class="source-option__icon" />
+              <span class="source-option__label">{{ $t('model.editor.sourceLocal') }}</span>
+            </button>
           </div>
 
           <!-- ReRank模型不支持Ollama的提示信息 -->
-          <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
+          <div v-if="activeModelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
             <t-icon name="info-circle-filled" class="tip-icon info" />
             <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
           </div>
 
           <!-- Ollama不可用时的提示信息 -->
-          <div v-else-if="shouldShowOllamaUnavailableTip(formData.source, modelType, ollamaServiceStatus)"
+          <div v-else-if="shouldShowOllamaUnavailableTip(formData.source, activeModelType, ollamaServiceStatus)"
             class="ollama-unavailable-tip">
             <t-icon name="error-circle-filled" class="tip-icon" />
             <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
@@ -215,7 +234,9 @@
           </div>
 
           <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-            <label class="form-label">{{ $t('model.editor.apiKeyOptional') }}</label>
+            <label class="form-label">{{
+              isLkeapRerank ? $t('model.editor.lkeap.secretIdLabel') : $t('model.editor.apiKeyOptional')
+            }}</label>
             <!--
               Edit mode: credentials live behind the /credentials subresource
               of the model — managed by the shared CredentialResource card,
@@ -230,7 +251,8 @@
             <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
               :meta="credentialMeta" />
             <t-input v-else v-model="formData.apiKey" :type="showApiKey ? 'text' : 'password'"
-              :placeholder="apiKeyPlaceholder" class="api-key-input" autocomplete="off" spellcheck="false">
+              :placeholder="isLkeapRerank ? $t('model.editor.lkeap.secretIdPlaceholder') : apiKeyPlaceholder"
+              class="api-key-input" autocomplete="off" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
               <template #suffix-icon>
                 <t-icon
@@ -241,6 +263,22 @@
                 />
               </template>
             </t-input>
+            <p v-if="isLkeapRerank" class="form-desc">{{ $t('model.editor.lkeap.rerankCredentialHint') }}</p>
+          </div>
+
+          <!-- LKEAP Rerank 创建模式：SecretKey（编辑模式由 CredentialResource 管理） -->
+          <div v-if="isLkeapRerank && !isEdit" class="form-item">
+            <label class="form-label required">{{ $t('model.editor.lkeap.secretKeyLabel') }}</label>
+            <t-input v-model="formData.appSecret" type="password"
+              :placeholder="$t('model.editor.lkeap.secretKeyPlaceholder')" autocomplete="off" spellcheck="false">
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+          </div>
+
+          <div v-if="isLkeapRerank" class="form-item">
+            <label class="form-label">{{ $t('model.editor.lkeap.regionLabel') }}</label>
+            <t-input v-model="formData.lkeapRegion" :placeholder="$t('model.editor.lkeap.regionPlaceholder')" />
+            <p class="form-desc">{{ $t('model.editor.lkeap.regionDesc') }}</p>
           </div>
 
           <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
@@ -275,16 +313,16 @@
       </template>
 
       <!-- Section 3 — 高级选项（仅在有内容时渲染，避免空 section 出现底部分隔线） -->
-      <section v-if="modelType === 'embedding' || modelType === 'chat'" class="setting-drawer__section">
+      <section v-if="activeModelType === 'embedding' || activeModelType === 'chat'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
 
         <!-- Embedding 专用：维度 -->
-        <div v-if="modelType === 'embedding'" class="form-item">
+        <div v-if="activeModelType === 'embedding'" class="form-item">
           <label class="form-label">{{ $t('model.editor.dimensionLabel') }}</label>
           <div class="dimension-control">
             <t-input v-model.number="formData.dimension" type="number" :min="128" :max="4096"
               :placeholder="$t('model.editor.dimensionPlaceholder')"
-              :disabled="formData.source === 'local' && checking" />
+              :disabled="!formData.supportsDimensionOverride || (formData.source === 'local' && checking)" />
             <!-- Ollama 本地模型：自动检测维度按钮 -->
             <t-button v-if="formData.source === 'local' && formData.modelName" variant="text" size="small"
               :loading="checking" @click="checkOllamaDimension" class="dimension-check-btn">
@@ -297,13 +335,46 @@
           </p>
         </div>
 
+        <div v-if="activeModelType === 'embedding'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.dimensionOverrideLabel') }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.supportsDimensionOverride" />
+            <span class="form-desc form-desc--inline">{{ $t('model.editor.dimensionOverrideDesc') }}</span>
+          </div>
+        </div>
+
         <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
-        <div v-if="modelType === 'chat'" class="form-item">
+        <div v-if="activeModelType === 'chat'" class="form-item">
           <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
           <div class="vision-toggle">
             <t-switch v-model="formData.supportsVision" />
             <span class="form-desc form-desc--inline">{{ $t('model.editor.supportsVisionDesc') }}</span>
           </div>
+        </div>
+
+        <!-- Chat + 远程 API：思考模式参数格式 -->
+        <div v-if="showThinkingControlField" class="form-item">
+          <label class="form-label">{{ $t('model.editor.thinkingControlLabel') }}</label>
+          <t-select
+            v-model="formData.thinkingControl"
+            :key="`thinking-${formData.id}-${formData.thinkingControl}`"
+            :popup-props="{ overlayClassName: 'thinking-control-select-popup' }"
+            @change="onThinkingControlManualPick"
+          >
+            <t-option
+              v-for="opt in thinkingControlOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :label="opt.label"
+              :show-overflow-tooltip="false"
+            >
+              <div class="thinking-control-option">
+                <span class="thinking-control-option__title">{{ opt.label }}</span>
+                <span class="thinking-control-option__hint">{{ opt.hint }}</span>
+              </div>
+            </t-option>
+          </t-select>
+          <p class="form-desc">{{ $t('model.editor.thinkingControlDesc') }}</p>
         </div>
       </section>
 
@@ -323,6 +394,11 @@ import {
 } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
+import {
+  defaultThinkingControl,
+  resolveThinkingControl,
+  type ThinkingControlValue,
+} from '@/utils/thinkingControl'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -345,16 +421,25 @@ interface ModelFormData {
   baseUrl?: string
   apiKey?: string
   dimension?: number
+  supportsDimensionOverride?: boolean
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
+  thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
+  /** LKEAP Rerank：腾讯云 SecretKey（创建时写入 app_secret） */
+  appSecret?: string
+  /** LKEAP Rerank：地域，如 ap-guangzhou */
+  lkeapRegion?: string
 }
+
+type EditorModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 
 interface Props {
   visible: boolean
-  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+  modelType: EditorModelType
   modelData?: ModelFormData | null
 }
 
@@ -368,8 +453,24 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
-  'confirm': [data: ModelFormData]
+  'confirm': [data: ModelFormData & { modelType?: EditorModelType }]
 }>()
+
+const draftModelType = ref<EditorModelType>(props.modelType)
+
+const isEdit = computed(() => !!props.modelData)
+
+const activeModelType = computed(() => (
+  isEdit.value ? props.modelType : draftModelType.value
+))
+
+const modelTypeChoices = computed(() => ([
+  { value: 'chat' as const, label: t('modelSettings.typeShort.chat'), icon: 'chat' },
+  { value: 'embedding' as const, label: t('modelSettings.typeShort.embedding'), icon: 'chart-bubble' },
+  { value: 'rerank' as const, label: t('modelSettings.typeShort.rerank'), icon: 'filter-sort' },
+  { value: 'vllm' as const, label: t('modelSettings.typeShort.vllm'), icon: 'image' },
+  { value: 'asr' as const, label: t('modelSettings.typeShort.asr'), icon: 'sound' },
+]))
 
 // API 返回的 Provider 列表
 const apiProviderOptions = ref<ModelProviderOption[]>([])
@@ -436,6 +537,16 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding']
   },
   {
+    value: 'gemini',
+    label: t('model.editor.providers.gemini.label'),
+    defaultUrls: {
+      chat: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      embedding: 'https://generativelanguage.googleapis.com/v1beta'
+    },
+    description: t('model.editor.providers.gemini.description'),
+    modelTypes: ['chat', 'embedding']
+  },
+  {
     value: 'siliconflow',
     label: t('model.editor.providers.siliconflow.label'),
     defaultUrls: {
@@ -492,7 +603,7 @@ const fallbackProviderOptions = computed(() => [
 const loadProviders = async () => {
   loadingProviders.value = true
   try {
-    const providers = await listModelProviders(props.modelType)
+    const providers = await listModelProviders(activeModelType.value)
     if (providers.length > 0) {
       apiProviderOptions.value = providers
     }
@@ -520,7 +631,7 @@ const providerOptions = computed(() => {
   }
   // 回退到硬编码值，按 modelTypes 过滤
   return fallbackProviderOptions.value.filter(p =>
-    p.modelTypes.includes(props.modelType)
+    p.modelTypes.includes(activeModelType.value)
   )
 })
 
@@ -529,7 +640,50 @@ const dialogVisible = computed({
   set: (val) => emit('update:visible', val)
 })
 
-const isEdit = computed(() => !!props.modelData)
+const showThinkingControlField = computed(() =>
+  activeModelType.value === 'chat' && formData.value.source === 'remote',
+)
+
+const resolvedThinkingControl = (): ThinkingControlValue =>
+  defaultThinkingControl(
+    formData.value.provider || '',
+    formData.value.modelName || '',
+  )
+
+/** 用户是否手动改过思考参数格式（改过则不再自动覆盖，直到换服务商） */
+const thinkingControlManual = ref(false)
+/** 正在从 modelData 灌入表单，忽略厂商/来源控件的程序化 change 副作用 */
+const hydratingForm = ref(false)
+
+const onThinkingControlManualPick = () => {
+  thinkingControlManual.value = true
+}
+
+const syncThinkingControlToForm = (force = false) => {
+  if (!showThinkingControlField.value) return
+  if (!force && !isEdit.value && thinkingControlManual.value) return
+  formData.value.thinkingControl = resolvedThinkingControl()
+}
+
+const applyThinkingControlFromModelData = () => {
+  if (!props.modelData || activeModelType.value !== 'chat' || formData.value.source !== 'remote') return
+  thinkingControlManual.value = !!props.modelData.thinkingControl
+  formData.value.thinkingControl = resolveThinkingControl(
+    props.modelData.thinkingControl,
+    formData.value.provider || props.modelData.provider || '',
+    formData.value.modelName || props.modelData.modelName || '',
+  )
+}
+
+const thinkingControlOptions = computed(() => {
+  const keys = ['none', 'chatTemplateKwargs', 'enableThinking', 'thinkingType'] as const
+  const values = ['none', 'chat_template_kwargs', 'enable_thinking', 'thinking_type'] as const
+  return keys.map((key, i) => ({
+    value: values[i],
+    label: t(`model.editor.thinkingControl.${key}.label`),
+    hint: t(`model.editor.thinkingControl.${key}.hint`),
+  }))
+})
 
 // Header icon for the SettingDrawer — uses the same TDesign icon name table
 // as the model card list, so the drawer's leading badge visually matches the
@@ -542,20 +696,27 @@ const modelTypeIcon = computed(() => {
     vllm: 'image',
     asr: 'sound',
   }
-  return map[props.modelType] || 'setting'
+  return map[activeModelType.value] || 'setting'
 })
 
+const isLkeapRerank = computed(
+  () => activeModelType.value === 'rerank' && formData.value.provider === 'lkeap',
+)
+
 // Credential resource binding for the shared <CredentialResource> component.
-// "app_secret" is only relevant for the WeKnora Cloud provider; the visible
-// fields collapse to just api_key for every other provider. We always pass
-// both keys to the backend (it returns metadata for each), but only render
-// the ones meaningful to the current provider.
 const credentialFields = computed<CredentialFieldDef<ModelCredentialField>[]>(() => {
   const fields: CredentialFieldDef<ModelCredentialField>[] = [
-    { key: 'api_key', label: t('model.editor.apiKeyOptional') as string },
+    {
+      key: 'api_key',
+      label: (isLkeapRerank.value
+        ? t('model.editor.lkeap.secretIdLabel')
+        : t('model.editor.apiKeyOptional')) as string,
+    },
   ]
   if (formData.value.provider === 'weknoracloud') {
     fields.push({ key: 'app_secret', label: 'App Secret' })
+  } else if (isLkeapRerank.value) {
+    fields.push({ key: 'app_secret', label: t('model.editor.lkeap.secretKeyLabel') as string })
   }
   return fields
 })
@@ -647,17 +808,21 @@ const goToWeKnoraCloudSettings = async () => {
 const formData = ref<ModelFormData>({
   id: '',
   name: '',
-  source: 'local',
-  provider: 'openai',
+  source: 'remote',
+  provider: 'generic',
   modelName: '',
   displayName: '',
   baseUrl: '',
   apiKey: '',
   dimension: undefined,
+  supportsDimensionOverride: false,
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
-  customHeaders: []
+  thinkingControl: defaultThinkingControl('generic', ''),
+  customHeaders: [],
+  appSecret: '',
+  lkeapRegion: 'ap-guangzhou',
 })
 
 const rules = computed(() => ({
@@ -702,18 +867,18 @@ const rules = computed(() => ({
 
 // 获取弹窗描述文字
 const getModalDescription = () => {
-  const key = `model.editor.description.${props.modelType}` as const
+  const key = `model.editor.description.${activeModelType.value}` as const
   return t(key) || t('model.editor.description.default')
 }
 
 // 获取模型名称占位符
 const getModelNamePlaceholder = () => {
-  if (props.modelType === 'vllm') {
+  if (activeModelType.value === 'vllm') {
     return formData.value.source === 'local'
       ? t('model.editor.modelNamePlaceholder.localVllm')
       : t('model.editor.modelNamePlaceholder.remoteVllm')
   }
-  if (props.modelType === 'asr') {
+  if (activeModelType.value === 'asr') {
     return t('model.editor.modelNamePlaceholder.remoteAsr')
   }
   return formData.value.source === 'local'
@@ -722,10 +887,10 @@ const getModelNamePlaceholder = () => {
 }
 
 const getBaseUrlPlaceholder = () => {
-  if (props.modelType === 'vllm') {
+  if (activeModelType.value === 'vllm') {
     return t('model.editor.baseUrlPlaceholderVllm')
   }
-  if (props.modelType === 'asr') {
+  if (activeModelType.value === 'asr') {
     return t('model.editor.baseUrlPlaceholderAsr')
   }
   return t('model.editor.baseUrlPlaceholder')
@@ -774,6 +939,42 @@ const goToOllamaSettings = async () => {
 // 上一次打开时的 modelData id：用来判断切换模型/新增 vs. 同一次新增的连续打开
 const lastOpenedModelId = ref<string | null>(null)
 
+const selectModelType = async (type: EditorModelType) => {
+  if (isEdit.value || draftModelType.value === type) return
+  draftModelType.value = type
+
+  if (type === 'rerank') {
+    formData.value.source = 'remote'
+  }
+  if (type !== 'embedding') {
+    formData.value.dimension = undefined
+    formData.value.supportsDimensionOverride = false
+    dimensionChecked.value = false
+    dimensionSuccess.value = false
+    dimensionMessage.value = ''
+  }
+  if (type !== 'chat') {
+    formData.value.supportsVision = false
+    thinkingControlManual.value = false
+  }
+  remoteChecked.value = false
+  remoteAvailable.value = false
+  remoteMessage.value = ''
+
+  await loadProviders()
+  const supported = providerOptions.value.some(p => p.value === formData.value.provider)
+  if (!supported) {
+    formData.value.provider = 'generic'
+    formData.value.baseUrl = ''
+  } else {
+    handleProviderChange(formData.value.provider)
+  }
+  if (showThinkingControlField.value && !isEdit.value) {
+    thinkingControlManual.value = false
+    syncThinkingControlToForm(true)
+  }
+}
+
 // 监听 visible 变化，初始化表单
 watch(() => props.visible, (val) => {
   if (val) {
@@ -795,54 +996,73 @@ watch(() => props.visible, (val) => {
     dimensionMessage.value = ''
 
     const currentId = props.modelData?.id ?? null
+    draftModelType.value = props.modelType
 
-    if (props.modelData) {
-      // 编辑：始终用最新的 modelData 覆盖。apiKey field is left blank — in
-      // edit mode the credential is owned by the <CredentialResource> card,
-      // not by this form's apiKey field.
-      formData.value = {
-        ...props.modelData,
-        apiKey: '',
-        customHeaders: Array.isArray(props.modelData.customHeaders)
-          ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
-          : []
+    hydratingForm.value = true
+    try {
+      if (props.modelData) {
+        // 编辑：始终用最新的 modelData 覆盖。apiKey field is left blank — in
+        // edit mode the credential is owned by the <CredentialResource> card,
+        // not by this form's apiKey field.
+        formData.value = {
+          ...props.modelData,
+          apiKey: '',
+          customHeaders: Array.isArray(props.modelData.customHeaders)
+            ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
+            : [],
+        }
+        applyThinkingControlFromModelData()
+      } else if (lastOpenedModelId.value !== null || !formData.value.id) {
+        // 上次是编辑某个模型，或第一次新增 → 重置成空白
+        resetForm()
       }
-    } else if (lastOpenedModelId.value !== null || !formData.value.id) {
-      // 上次是编辑某个模型，或第一次新增 → 重置成空白
-      resetForm()
-    }
-    // 否则：连续两次"新增"打开（中间是点遮罩/ESC 关闭的）→ 保留上次填写
+      // 否则：连续两次"新增"打开（中间是点遮罩/ESC 关闭的）→ 保留上次填写
 
-    lastOpenedModelId.value = currentId
+      lastOpenedModelId.value = currentId
 
-    // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
-    if (props.modelType === 'rerank') {
-      formData.value.source = 'remote'
-    }
+      // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
+      if (activeModelType.value === 'rerank') {
+        formData.value.source = 'remote'
+      }
 
-    // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
-    if (formData.value.provider === 'weknoracloud') {
-      checkWkcCredentialStatus()
+      // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
+      if (formData.value.provider === 'weknoracloud') {
+        checkWkcCredentialStatus()
+      }
+
+      if (showThinkingControlField.value && !isEdit.value) {
+        thinkingControlManual.value = false
+        syncThinkingControlToForm(true)
+      }
+    } finally {
+      nextTick(() => {
+        hydratingForm.value = false
+      })
     }
   }
 })
 
 // 重置表单
 const resetForm = () => {
+  thinkingControlManual.value = false
   formData.value = {
     id: generateId(),
     name: '', // 保留字段但不使用，保存时用 modelName
-    source: 'local',
+    source: 'remote',
     provider: 'generic',
     modelName: '',
     displayName: '',
     baseUrl: '',
     apiKey: '',
     dimension: undefined, // 默认不填，让用户手动输入或通过检测按钮获取
+    supportsDimensionOverride: false,
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
-    customHeaders: []
+    thinkingControl: defaultThinkingControl('generic', ''),
+    customHeaders: [],
+    appSecret: '',
+    lkeapRegion: 'ap-guangzhou',
   }
   modelChecked.value = false
   modelAvailable.value = false
@@ -860,9 +1080,12 @@ const handleProviderChange = (value: string) => {
   const provider = providerOptions.value.find(opt => opt.value === value)
   if (provider && provider.defaultUrls) {
     // 根据当前模型类型获取对应的默认 URL
-    const defaultUrl = provider.defaultUrls[props.modelType]
+    const defaultUrl = provider.defaultUrls[activeModelType.value]
     if (defaultUrl) {
       formData.value.baseUrl = defaultUrl
+    }
+    if (value === 'lkeap' && activeModelType.value === 'rerank' && !formData.value.modelName?.trim()) {
+      formData.value.modelName = 'lke-reranker-base'
     }
     // 重置校验状态
     remoteChecked.value = false
@@ -873,7 +1096,42 @@ const handleProviderChange = (value: string) => {
   if (value === 'weknoracloud') {
     checkWkcCredentialStatus()
   }
+  if (hydratingForm.value) return
+  if (activeModelType.value !== 'chat' || formData.value.source !== 'remote') return
+  if (!isEdit.value) {
+    thinkingControlManual.value = false
+    syncThinkingControlToForm(true)
+    return
+  }
+  // 编辑时仅用户主动换厂商才跟随默认
+  thinkingControlManual.value = false
+  syncThinkingControlToForm(true)
 }
+
+watch(
+  () => [formData.value.source, formData.value.provider, formData.value.modelName] as const,
+  ([source, provider, modelName], [prevSource, prevProvider, prevModelName]) => {
+    if (hydratingForm.value || isEdit.value) return
+    if (activeModelType.value !== 'chat' || source !== 'remote') return
+    if (source === prevSource && provider === prevProvider && modelName === prevModelName) return
+
+    const providerChanged = provider !== prevProvider
+
+    if (providerChanged) {
+      thinkingControlManual.value = false
+      syncThinkingControlToForm(true)
+      return
+    }
+    if (!thinkingControlManual.value) {
+      syncThinkingControlToForm(true)
+      return
+    }
+    const prevDefault = defaultThinkingControl(prevProvider || '', prevModelName || '')
+    if (formData.value.thinkingControl === prevDefault) {
+      syncThinkingControlToForm(true)
+    }
+  },
+)
 
 // 监听来源变化，重置校验状态（已合并到下面的 watch）
 
@@ -977,7 +1235,7 @@ const checkModelStatus = async () => {
 
 // 检查 Ollama 本地 Embedding 模型维度
 const checkOllamaDimension = async () => {
-  if (!formData.value.modelName || formData.value.source !== 'local' || props.modelType !== 'embedding') {
+  if (!formData.value.modelName || formData.value.source !== 'local' || activeModelType.value !== 'embedding') {
     return
   }
 
@@ -989,7 +1247,8 @@ const checkOllamaDimension = async () => {
     const result = await testEmbeddingModel({
       source: 'local',
       modelName: formData.value.modelName,
-      dimension: formData.value.dimension
+      dimension: formData.value.dimension,
+      supportsDimensionOverride: formData.value.supportsDimensionOverride ?? false,
     })
 
     dimensionChecked.value = true
@@ -1055,7 +1314,7 @@ const checkRemoteAPI = async () => {
       ? { modelId: props.modelData.id as string }
       : {}
 
-    switch (props.modelType) {
+    switch (activeModelType.value) {
       case 'chat':
         // 对话模型（KnowledgeQA）
         result = await checkRemoteModel({
@@ -1076,6 +1335,7 @@ const checkRemoteAPI = async () => {
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
           dimension: formData.value.dimension,
+          supportsDimensionOverride: formData.value.supportsDimensionOverride ?? false,
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
@@ -1087,8 +1347,17 @@ const checkRemoteAPI = async () => {
         }
         break
 
-      case 'rerank':
-        // Rerank 模型
+      case 'rerank': {
+        const lkeapExtra = isLkeapRerank.value
+          ? {
+              extraConfig: {
+                region: (formData.value.lkeapRegion || 'ap-guangzhou').trim(),
+              },
+              ...(formData.value.appSecret?.trim()
+                ? { appSecret: formData.value.appSecret.trim() }
+                : {}),
+            }
+          : {}
         result = await checkRerankModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
@@ -1096,8 +1365,10 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          ...lkeapExtra,
         })
         break
+      }
 
       case 'vllm':
         // VLLM 模型（多模态）
@@ -1202,7 +1473,10 @@ const handleConfirm = async () => {
       formData.value.id = generateId()
     }
 
-    emit('confirm', { ...formData.value })
+    emit('confirm', {
+      ...formData.value,
+      ...(isEdit.value ? {} : { modelType: activeModelType.value }),
+    })
     dialogVisible.value = false
     // 保存成功后重置草稿，下次打开新增模型时是空白
     resetForm()
@@ -1233,7 +1507,7 @@ watch(() => formData.value.modelName, async (newValue, oldValue) => {
   }
 
   // 如果是 embedding 模型且选择的是 Ollama 本地模型，且模型名称发生了实际变化
-  if (props.modelType === 'embedding' &&
+  if (activeModelType.value === 'embedding' &&
     formData.value.source === 'local' &&
     newValue !== oldValue &&
     oldValue !== '') {
@@ -1330,6 +1604,16 @@ watch(() => formData.value.source, () => {
   downloading.value = false
   downloadProgress.value = 0
   currentDownloadModel.value = ''
+
+  if (
+    !hydratingForm.value
+    && !isEdit.value
+    && formData.value.source === 'remote'
+    && activeModelType.value === 'chat'
+  ) {
+    thinkingControlManual.value = false
+    syncThinkingControlToForm(true)
+  }
 })
 
 // 监听模型名称变化，清理维度检测状态
@@ -1379,6 +1663,54 @@ const handleCancel = () => {
     margin-right: 4px;
     font-weight: 500;
     line-height: 1;
+  }
+}
+
+.model-type-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.model-type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  min-height: 32px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+
+  &__icon {
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  &__label {
+    white-space: nowrap;
+  }
+
+  &:hover:not(.is-active) {
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    color: var(--td-text-color-primary);
+  }
+
+  &.is-active {
+    border-color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
   }
 }
 
@@ -1813,6 +2145,14 @@ const handleCancel = () => {
   &--inline {
     margin: 0;
   }
+
+  &--recommend {
+    color: var(--td-brand-color);
+  }
+
+  &--warn {
+    color: var(--td-warning-color);
+  }
 }
 
 .vision-toggle {
@@ -1911,6 +2251,39 @@ const handleCancel = () => {
 
 <!-- 非 scoped 样式：t-select popup 渲染到 body 下，scoped 样式无法覆盖 -->
 <style lang="less">
+.thinking-control-select-popup {
+  min-width: 22rem;
+  max-width: min(28rem, calc(100vw - 2rem));
+  padding: 4px;
+
+  .t-select-option {
+    height: auto !important;
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin: 2px 0;
+    white-space: normal;
+  }
+}
+
+.thinking-control-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  min-width: 0;
+
+  &__title {
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    word-break: break-word;
+  }
+}
+
 .provider-select-popup {
   // 容器留点呼吸：避免选项贴着 popup 圆角
   padding: 4px;

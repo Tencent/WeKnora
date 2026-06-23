@@ -28,6 +28,13 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 	return &wikiPageRepository{db: db}
 }
 
+func (r *wikiPageRepository) wikiCategoryRankOrder() string {
+	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
+		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	}
+	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+}
+
 // Create inserts a new wiki page record
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
 	return r.db.WithContext(ctx).Create(page).Error
@@ -101,6 +108,12 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 			"source_refs":   page.SourceRefs,
 			"chunk_refs":    page.ChunkRefs,
 			"page_metadata": page.PageMetadata,
+			"parent_slug":   page.ParentSlug,
+			"folder_id":     page.FolderID,
+			"category_path": page.CategoryPath,
+			"wiki_path":     page.WikiPath,
+			"depth":         page.Depth,
+			"sort_order":    page.SortOrder,
 			"updated_at":    page.UpdatedAt,
 		})
 	if result.Error != nil {
@@ -143,8 +156,10 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	query := r.db.WithContext(ctx).Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", req.KnowledgeBaseID)
 
-	if req.PageType != "" {
-		query = query.Where("page_type = ?", req.PageType)
+	if pageTypes := types.SplitWikiPageTypes(req.PageType); len(pageTypes) == 1 {
+		query = query.Where("page_type = ?", pageTypes[0])
+	} else if len(pageTypes) > 1 {
+		query = query.Where("page_type IN ?", pageTypes)
 	}
 	if req.Status != "" {
 		query = query.Where("status = ?", req.Status)
@@ -157,6 +172,27 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 			"%"+req.Query+"%",
 		)
 	}
+	// Directory filters are pushed to SQL so the DB does the counting and
+	// pagination instead of loading every page of the type into memory. `depth`
+	// is a cached column (= len(category_path)); `category_path` is a JSON column
+	// whose stored text is json.Marshal of the cleaned path, so we compare
+	// against the same encoding. Postgres needs an explicit jsonb cast for array
+	// equality; SQLite stores JSON as TEXT and compares directly.
+	if req.FolderID != nil {
+		query = query.Where("folder_id = ?", *req.FolderID)
+	}
+	if req.CategoryDepth != nil {
+		query = query.Where("depth = ?", *req.CategoryDepth)
+	}
+	if wantPath := types.CleanWikiCategoryPath(req.CategoryPath); len(wantPath) > 0 {
+		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
+			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
+			} else {
+				query = query.Where("category_path = ?", string(encoded))
+			}
+		}
+	}
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -167,7 +203,7 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	sortBy := "updated_at"
 	if req.SortBy != "" {
 		switch req.SortBy {
-		case "title", "created_at", "updated_at", "page_type":
+		case "title", "created_at", "updated_at", "page_type", "wiki_path", "sort_order", "depth":
 			sortBy = req.SortBy
 		}
 	}
@@ -175,9 +211,15 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	if req.SortOrder == "asc" {
 		sortOrder = "ASC"
 	}
-	query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder))
+	if sortBy == "wiki_path" {
+		query = query.Order(r.wikiCategoryRankOrder()).
+			Order(fmt.Sprintf("wiki_path %s", sortOrder)).
+			Order("sort_order ASC").
+			Order("title ASC")
+	} else {
+		query = query.Order(fmt.Sprintf("%s %s", sortBy, sortOrder))
+	}
 
-	// Pagination
 	page := req.Page
 	if page < 1 {
 		page = 1
@@ -187,6 +229,8 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		pageSize = 20
 	}
 	offset := (page - 1) * pageSize
+
+	// Pagination
 	query = query.Offset(offset).Limit(pageSize)
 
 	var pages []*types.WikiPage
@@ -249,7 +293,10 @@ func (r *wikiPageRepository) ListByTypeLight(
 
 	var entries []types.WikiIndexEntry
 	if err := base.
-		Select("slug", "title", "summary").
+		Select("slug", "title", "summary", "parent_slug", "category_path", "wiki_path", "depth", "sort_order").
+		Order(r.wikiCategoryRankOrder()).
+		Order("wiki_path ASC").
+		Order("sort_order ASC").
 		Order("title ASC").
 		Limit(limit).
 		Offset(offset).
@@ -366,6 +413,190 @@ func (r *wikiPageRepository) ListBySlugs(
 		out[r.Slug] = &r
 	}
 	return out, nil
+}
+
+// ListDistinctCategoryPaths returns the materialized paths of existing wiki
+// folders (split into segments), ordered by path and capped at maxPaths. Used
+// by the batch taxonomy planner as the candidate pool of folders to reuse
+// (similarity preprocessing then narrows it per batch). The folder tree is the
+// single source of truth, so this no longer scans page rows.
+func (r *wikiPageRepository) ListDistinctCategoryPaths(
+	ctx context.Context,
+	kbID string,
+	maxPaths int,
+) ([][]string, error) {
+	if maxPaths <= 0 {
+		maxPaths = 150
+	}
+	var paths []string
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiFolder{}).
+		Where("knowledge_base_id = ? AND path <> ?", kbID, "").
+		Order("path ASC").
+		Limit(maxPaths).
+		Pluck("path", &paths).Error; err != nil {
+		return nil, err
+	}
+	out := make([][]string, 0, len(paths))
+	for _, p := range paths {
+		if seg := types.CleanWikiCategoryPath(strings.Split(p, "/")); len(seg) > 0 {
+			out = append(out, seg)
+		}
+	}
+	return out, nil
+}
+
+// --- Folder tree (wiki_folders) ---
+
+// ErrWikiFolderNotFound is returned when a wiki folder is not found.
+var ErrWikiFolderNotFound = errors.New("wiki folder not found")
+
+// ErrWikiFolderConflict is returned when a sibling folder with the same name
+// already exists under the same parent.
+var ErrWikiFolderConflict = errors.New("wiki folder name conflict")
+
+func (r *wikiPageRepository) CreateFolder(ctx context.Context, folder *types.WikiFolder) error {
+	return r.db.WithContext(ctx).Create(folder).Error
+}
+
+func (r *wikiPageRepository) GetFolderByID(ctx context.Context, kbID string, id string) (*types.WikiFolder, error) {
+	var folder types.WikiFolder
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND id = ?", kbID, id).
+		First(&folder).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrWikiFolderNotFound
+		}
+		return nil, err
+	}
+	return &folder, nil
+}
+
+func (r *wikiPageRepository) GetChildFolderByName(
+	ctx context.Context, kbID string, parentID string, name string,
+) (*types.WikiFolder, error) {
+	var folder types.WikiFolder
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND parent_id = ? AND name = ?", kbID, parentID, name).
+		First(&folder).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrWikiFolderNotFound
+		}
+		return nil, err
+	}
+	return &folder, nil
+}
+
+func (r *wikiPageRepository) ListChildFolders(
+	ctx context.Context, kbID string, parentID string,
+) ([]*types.WikiFolder, error) {
+	var folders []*types.WikiFolder
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND parent_id = ?", kbID, parentID).
+		Order("sort_order ASC").
+		Order("name ASC").
+		Find(&folders).Error; err != nil {
+		return nil, err
+	}
+	return folders, nil
+}
+
+func (r *wikiPageRepository) ListAllFolders(ctx context.Context, kbID string) ([]*types.WikiFolder, error) {
+	var folders []*types.WikiFolder
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ?", kbID).
+		Order("depth ASC").
+		Order("path ASC").
+		Find(&folders).Error; err != nil {
+		return nil, err
+	}
+	return folders, nil
+}
+
+func (r *wikiPageRepository) UpdateFolder(ctx context.Context, folder *types.WikiFolder) error {
+	result := r.db.WithContext(ctx).
+		Model(&types.WikiFolder{}).
+		Where("id = ?", folder.ID).
+		Updates(map[string]interface{}{
+			"parent_id":  folder.ParentID,
+			"name":       folder.Name,
+			"path":       folder.Path,
+			"depth":      folder.Depth,
+			"sort_order": folder.SortOrder,
+			"updated_at": folder.UpdatedAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrWikiFolderNotFound
+	}
+	return nil
+}
+
+func (r *wikiPageRepository) DeleteFolder(ctx context.Context, kbID string, id string) error {
+	result := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND id = ?", kbID, id).
+		Delete(&types.WikiFolder{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrWikiFolderNotFound
+	}
+	return nil
+}
+
+func (r *wikiPageRepository) CountPagesInFolder(ctx context.Context, kbID string, folderID string) (int64, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Where("knowledge_base_id = ? AND folder_id = ? AND status <> ?",
+			kbID, folderID, types.WikiPageStatusArchived).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *wikiPageRepository) CountPagesByFolder(
+	ctx context.Context, kbID string, pageTypes []string,
+) (map[string]int64, error) {
+	type folderCount struct {
+		FolderID string
+		Cnt      int64
+	}
+	var rows []folderCount
+	q := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("folder_id, COUNT(*) as cnt").
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived)
+	if len(pageTypes) > 0 {
+		q = q.Where("page_type IN ?", pageTypes)
+	}
+	if err := q.Group("folder_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.FolderID] = row.Cnt
+	}
+	return out, nil
+}
+
+func (r *wikiPageRepository) ListPagesByFolderIDs(
+	ctx context.Context, kbID string, folderIDs []string,
+) ([]*types.WikiPage, error) {
+	if len(folderIDs) == 0 {
+		return nil, nil
+	}
+	var pages []*types.WikiPage
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND folder_id IN ?", kbID, folderIDs).
+		Find(&pages).Error; err != nil {
+		return nil, err
+	}
+	return pages, nil
 }
 
 // ListSummariesByKnowledgeIDs returns summary-page content keyed by the

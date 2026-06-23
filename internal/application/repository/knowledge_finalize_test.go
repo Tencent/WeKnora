@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     type VARCHAR(50) NOT NULL DEFAULT '',
     title VARCHAR(255) NOT NULL DEFAULT '',
     description TEXT,
-    source VARCHAR(128) NOT NULL DEFAULT '',
+    source VARCHAR(2048) NOT NULL DEFAULT '',
     parse_status VARCHAR(50) NOT NULL DEFAULT 'unprocessed',
     enable_status VARCHAR(50) NOT NULL DEFAULT 'enabled',
     embedding_model_id VARCHAR(64),
@@ -89,6 +89,20 @@ func reloadKnowledgeRow(t *testing.T, db *gorm.DB, id string) (status string, co
 	row := db.Raw(`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`, id).Row()
 	require.NoError(t, row.Scan(&status, &count))
 	return status, count
+}
+
+func insertKnowledgeWithStatus(t *testing.T, db *gorm.DB, status string, deleted bool) string {
+	t.Helper()
+	id := uuid.New().String()
+	deletedAt := interface{}(nil)
+	if deleted {
+		deletedAt = "2026-06-16 12:00:00"
+	}
+	require.NoError(t, db.Exec(`
+		INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, parse_status, deleted_at)
+		VALUES (?, 1, ?, 'document', 'delete-test', 'manual', ?, ?)
+	`, id, uuid.New().String(), status, deletedAt).Error)
+	return id
 }
 
 // TestFinalizeSubtask_Concurrent_ExactlyOnePromote spawns N goroutines that
@@ -267,4 +281,40 @@ func TestUpdateKnowledge_PendingCounterOmittedOnReset(t *testing.T) {
 	require.NoError(t, repo.UpdateKnowledgeColumn(ctx, id, "pending_subtasks_count", 0))
 	_, count = reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, 0, count)
+}
+
+func TestUpdateActiveDeletingKnowledgeColumns_GuardsStateAndSoftDelete(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db).(*knowledgeRepository)
+	ctx := context.Background()
+
+	activeDeletingID := insertKnowledgeWithStatus(t, db, types.ParseStatusDeleting, false)
+	activeCompletedID := insertKnowledgeWithStatus(t, db, types.ParseStatusCompleted, false)
+	deletedDeletingID := insertKnowledgeWithStatus(t, db, types.ParseStatusDeleting, true)
+
+	updated, err := repo.UpdateActiveDeletingKnowledgeColumns(ctx, activeDeletingID, map[string]interface{}{
+		"parse_status":  types.ParseStatusFailed,
+		"error_message": "delete task exhausted retries",
+	})
+	require.NoError(t, err)
+	assert.True(t, updated)
+
+	updated, err = repo.UpdateActiveDeletingKnowledgeColumns(ctx, activeCompletedID, map[string]interface{}{
+		"parse_status": types.ParseStatusFailed,
+	})
+	require.NoError(t, err)
+	assert.False(t, updated)
+
+	updated, err = repo.UpdateActiveDeletingKnowledgeColumns(ctx, deletedDeletingID, map[string]interface{}{
+		"parse_status": types.ParseStatusFailed,
+	})
+	require.NoError(t, err)
+	assert.False(t, updated)
+
+	status, _ := reloadKnowledgeRow(t, db, activeDeletingID)
+	assert.Equal(t, types.ParseStatusFailed, status)
+	status, _ = reloadKnowledgeRow(t, db, activeCompletedID)
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	status, _ = reloadKnowledgeRow(t, db, deletedDeletingID)
+	assert.Equal(t, types.ParseStatusDeleting, status)
 }

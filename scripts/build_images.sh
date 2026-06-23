@@ -185,6 +185,12 @@ build_frontend_image() {
     
     cd "$PROJECT_ROOT"
     
+    # 获取版本信息（用于注入前端 commit hash）
+    get_version_info
+
+    log_info "构建前端静态资源..."
+    VITE_IS_DOCKER=true VITE_FRONTEND_COMMIT="$COMMIT_ID" "$SCRIPT_DIR/build_frontend_dist.sh"
+
     docker build \
         --platform $PLATFORM \
         -f frontend/Dockerfile \

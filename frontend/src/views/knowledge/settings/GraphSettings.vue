@@ -1,10 +1,9 @@
 <template>
-  <div class="graph-settings">
-    <div class="section-header">
+  <div class="graph-settings" :class="{ 'graph-settings--embedded': embedded }">
+    <div v-if="!embedded" class="section-header">
       <h2>{{ t('graphSettings.title') }}</h2>
       <p class="section-description">{{ t('graphSettings.description') }}</p>
-      
-      <!-- Warning message when graph database is not enabled -->
+
       <t-alert
         v-if="!isGraphDatabaseEnabled"
         theme="warning"
@@ -18,6 +17,15 @@
         </template>
       </t-alert>
     </div>
+    <t-alert
+      v-else-if="!isGraphDatabaseEnabled"
+      theme="warning"
+      class="embedded-graph-alert"
+    >
+      <template #message>
+        <div>{{ t('graphSettings.disabledWarning') }}</div>
+      </template>
+    </t-alert>
 
     <div v-if="isGraphDatabaseEnabled" class="settings-group">
       <!-- 启用实体关系提取 -->
@@ -296,11 +304,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, computed, withDefaults } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
-import { getSystemInfo } from '@/api/system'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
@@ -323,9 +331,12 @@ interface Props {
   graphExtract: GraphExtractConfig
   modelId: string
   allModels?: any[]
+  embedded?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  embedded: false,
+})
 
 const emit = defineEmits<{
   'update:graphExtract': [value: GraphExtractConfig]
@@ -544,11 +555,13 @@ const clearExtractExample = () => {
   MessagePlugin.success(t('graphSettings.exampleCleared'))
 }
 
+const editorResources = useEditorResourcesStore()
+
 // 加载系统信息
-const loadSystemInfo = async () => {
+const loadSystemInfo = async (force = false) => {
   try {
-    const response = await getSystemInfo()
-    systemInfo.value = response.data
+    await editorResources.ensureSystemInfo(force)
+    systemInfo.value = editorResources.systemInfo
   } catch (error: any) {
     console.error('Failed to load system info:', error)
   }
@@ -575,13 +588,13 @@ onMounted(async () => {
 }
 
 .section-header {
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 
   h2 {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
   }
 
   .section-description {
@@ -602,7 +615,7 @@ onMounted(async () => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 20px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
@@ -763,5 +776,28 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.graph-settings--embedded {
+  .embedded-graph-alert {
+    margin-bottom: 12px;
+  }
+
+  .setting-row:not(.vertical) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 0;
+  }
+
+  .setting-row:not(.vertical) .setting-info {
+    flex: none;
+    max-width: none;
+    padding-right: 0;
+  }
+
+  .setting-row:not(.vertical) .setting-control {
+    align-self: flex-start;
+  }
 }
 </style>

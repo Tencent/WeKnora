@@ -196,7 +196,7 @@ func TestTool_ListsRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "agent_invoke", "chunk_list"}
+	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "session_ask", "chunk_list"}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
@@ -208,6 +208,29 @@ func TestTool_ListsRegistered(t *testing.T) {
 	}
 	if len(res.Tools) != len(want) {
 		t.Errorf("registered %d tools, want exactly %d (no scope creep)", len(res.Tools), len(want))
+	}
+}
+
+// TestTool_SessionAsk_NotAgentInvoke asserts the MCP rename landed: the
+// registered set must contain "session_ask" and must NOT contain the
+// stale "agent_invoke" name (clean break, no deprecation alias).
+func TestTool_SessionAsk_NotAgentInvoke(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	names := map[string]bool{}
+	for _, tool := range res.Tools {
+		names[tool.Name] = true
+	}
+	if !names["session_ask"] {
+		t.Error("expected tool 'session_ask' to be registered")
+	}
+	if names["agent_invoke"] {
+		t.Error("stale tool 'agent_invoke' must NOT be registered (clean break, no alias)")
 	}
 }
 
@@ -448,7 +471,7 @@ func TestMCP_ChatToolReturnsThinking(t *testing.T) {
 	}
 }
 
-func TestMCP_AgentInvokeToolReturnsToolCalls(t *testing.T) {
+func TestMCP_SessionAskToolReturnsToolCalls(t *testing.T) {
 	svc := &fakeSvc{
 		agentEvents: []*sdk.AgentStreamResponse{
 			{ResponseType: sdk.AgentResponseTypeThinking, Content: "agent thinks"},
@@ -458,8 +481,8 @@ func TestMCP_AgentInvokeToolReturnsToolCalls(t *testing.T) {
 		},
 	}
 	c, _ := newTestServer(t, svc)
-	var out agentInvokeOutput
-	callTool(t, c, "agent_invoke", map[string]any{"agent_id": "ag1", "query": "tool question"}, &out)
+	var out sessionAskOutput
+	callTool(t, c, "session_ask", map[string]any{"agent_id": "ag1", "query": "tool question"}, &out)
 	if out.Thinking != "agent thinks" {
 		t.Errorf("thinking = %q, want %q", out.Thinking, "agent thinks")
 	}
@@ -495,7 +518,7 @@ func TestTool_AgentList(t *testing.T) {
 	}
 }
 
-func TestTool_AgentInvoke(t *testing.T) {
+func TestTool_SessionAsk(t *testing.T) {
 	svc := &fakeSvc{
 		agentEvents: []*sdk.AgentStreamResponse{
 			{ResponseType: sdk.AgentResponseTypeAnswer, Content: "result"},
@@ -504,8 +527,8 @@ func TestTool_AgentInvoke(t *testing.T) {
 		},
 	}
 	c, _ := newTestServer(t, svc)
-	var out agentInvokeOutput
-	callTool(t, c, "agent_invoke", map[string]any{"agent_id": "ag1", "query": "x"}, &out)
+	var out sessionAskOutput
+	callTool(t, c, "session_ask", map[string]any{"agent_id": "ag1", "query": "x"}, &out)
 	if out.Answer != "result" {
 		t.Errorf("answer = %q", out.Answer)
 	}
@@ -517,7 +540,7 @@ func TestTool_AgentInvoke(t *testing.T) {
 	}
 }
 
-func TestTool_AgentInvoke_StreamAbort(t *testing.T) {
+func TestTool_SessionAsk_StreamAbort(t *testing.T) {
 	svc := &fakeSvc{
 		agentEvents:    []*sdk.AgentStreamResponse{{ResponseType: sdk.AgentResponseTypeAnswer, Content: "partial"}},
 		agentStreamErr: errors.New("connection reset"),
@@ -525,7 +548,7 @@ func TestTool_AgentInvoke_StreamAbort(t *testing.T) {
 	c, _ := newTestServer(t, svc)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{Name: "agent_invoke", Arguments: map[string]any{"agent_id": "ag1", "query": "x"}})
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{Name: "session_ask", Arguments: map[string]any{"agent_id": "ag1", "query": "x"}})
 	if err != nil {
 		t.Fatalf("unexpected transport error: %v", err)
 	}
@@ -625,7 +648,7 @@ func TestToolAnnotations_AllToolsHaveExpectedHints(t *testing.T) {
 		"search_chunks": {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "Search Knowledge Chunks"},
 		"chat":          {destructive: false, readOnly: false, idempotent: false, openWorld: true, title: "Chat with KB (Streaming RAG)"},
 		"agent_list":    {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Custom Agents"},
-		"agent_invoke":  {destructive: false, readOnly: false, idempotent: false, openWorld: true, title: "Invoke Custom Agent"},
+		"session_ask":   {destructive: false, readOnly: false, idempotent: false, openWorld: true, title: "Ask a Custom Agent (session ask --agent)"},
 		"chunk_list":    {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Knowledge Chunks"},
 	}
 

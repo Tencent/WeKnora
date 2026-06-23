@@ -64,6 +64,12 @@ Use --jq to project specific fields or reach into nested config.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "fetch one custom agent's full configuration by id",
+		RequiredFlags: []string{"<agent-id> (positional)"},
+		Examples:      []string{"weknora agent view agent_abc"},
+		Output:        "envelope.data is the custom agent (id, name, description, is_builtin, and a nested config object holding model/kb_scope/...)",
+	})
 	return cmd
 }
 

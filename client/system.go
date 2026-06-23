@@ -19,6 +19,8 @@ type SystemInfo struct {
 	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
 	DBVersion           string `json:"db_version,omitempty"`
 	DBMigrationError    string `json:"db_migration_error,omitempty"`
+	StartedAt           string `json:"started_at,omitempty"`
+	UptimeSeconds       int64  `json:"uptime_seconds,omitempty"`
 }
 
 // ParserEngine represents a document parser engine

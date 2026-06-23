@@ -83,6 +83,19 @@ var ErrDuplicateFile = errors.New("file already exists")
 // ErrDuplicateURL is returned when attempting to create a knowledge entry with a URL that already exists
 var ErrDuplicateURL = errors.New("URL already exists")
 
+// KnowledgeProcessOverrides stores per-upload parse config overrides sent as process_config.
+// When nil, the server uses the knowledge base defaults only.
+type KnowledgeProcessOverrides struct {
+	ParserEngineRules        []ParserEngineRule            `json:"parser_engine_rules,omitempty"`
+	ChunkingConfig           *ChunkingConfig               `json:"chunking_config,omitempty"`
+	EnableMultimodel         *bool                         `json:"enable_multimodel,omitempty"`
+	VLMConfig                *VLMConfig                    `json:"vlm_config,omitempty"`
+	ASRConfig                *ASRConfig                    `json:"asr_config,omitempty"`
+	QuestionGenerationConfig *QuestionGenerationConfig     `json:"question_generation_config,omitempty"`
+	GraphEnabled             *bool                         `json:"graph_enabled,omitempty"`
+	ExtractConfig            *ExtractConfig                `json:"extract_config,omitempty"`
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from a local file path
 // Parameters:
 //   - knowledgeBaseID: The ID of the knowledge base
@@ -91,8 +104,10 @@ var ErrDuplicateURL = errors.New("URL already exists")
 //   - enableMultimodel: Optional flag to enable multimodal processing
 //   - customFileName: Optional custom file name (useful for folder uploads with path)
 //   - channel: Optional ingestion channel (e.g. "web", "api", "wechat"); empty defaults to "web"
+//   - processConfig: Optional parse config overrides (serialized as process_config form field)
 func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	knowledgeBaseID string, filePath string, metadata map[string]string, enableMultimodel *bool, customFileName string, channel string,
+	processConfig *KnowledgeProcessOverrides,
 ) (*Knowledge, error) {
 	// Open the local file
 	file, err := os.Open(filePath)
@@ -159,6 +174,16 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 		}
 	}
 
+	if processConfig != nil {
+		processConfigBytes, err := json.Marshal(processConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize process_config: %w", err)
+		}
+		if err := writer.WriteField("process_config", string(processConfigBytes)); err != nil {
+			return nil, fmt.Errorf("failed to write process_config field: %w", err)
+		}
+	}
+
 	// Close the multipart writer
 	err = writer.Close()
 	if err != nil {
@@ -209,6 +234,8 @@ type CreateKnowledgeFromURLRequest struct {
 	TagID string `json:"tag_id,omitempty"`
 	// Channel identifies the ingestion channel (e.g. "web", "browser_extension", "api")
 	Channel string `json:"channel,omitempty"`
+	// ProcessConfig is optional per-upload parse config overrides (KnowledgeProcessOverrides).
+	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
 // CreateKnowledgeFromURL creates a knowledge entry from a URL.
@@ -532,6 +559,103 @@ func (c *Client) CancelKnowledgeParse(ctx context.Context, knowledgeID string) (
 	}
 
 	var response KnowledgeResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// KnowledgeSpanNode mirrors one node of the server's document-parsing trace
+// tree (root → stage → subspan). Children carries nested subspans such as
+// per-image multimodal calls or LLM generations under a stage.
+type KnowledgeSpanNode struct {
+	KnowledgeID  string                 `json:"knowledge_id"`
+	Attempt      int                    `json:"attempt"`
+	SpanID       string                 `json:"span_id"`
+	ParentSpanID string                 `json:"parent_span_id,omitempty"`
+	Name         string                 `json:"name"`
+	Kind         string                 `json:"kind"`   // root / stage / subspan / generation
+	Status       string                 `json:"status"` // pending / running / done / failed / skipped / cancelled
+	Input        map[string]interface{} `json:"input,omitempty"`
+	Output       map[string]interface{} `json:"output,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	ErrorCode    string                 `json:"error_code,omitempty"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	StartedAt    *time.Time             `json:"started_at,omitempty"`
+	FinishedAt   *time.Time             `json:"finished_at,omitempty"`
+	DurationMs   int64                  `json:"duration_ms,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	Children     []*KnowledgeSpanNode   `json:"children,omitempty"`
+}
+
+// KnowledgeSpanError describes the most recent failed span in a trace.
+type KnowledgeSpanError struct {
+	Stage      string     `json:"stage"`
+	Code       string     `json:"code"`
+	Message    string     `json:"message"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+// KnowledgeProcessingTrace is the document-parsing trace for one parse
+// attempt: a five-segment stage timeline (docreader, chunking, embedding,
+// multimodal, postprocess) plus any subspans, with the current stage and
+// last error surfaced for convenience.
+type KnowledgeProcessingTrace struct {
+	KnowledgeID    string              `json:"knowledge_id"`
+	ParseStatus    string              `json:"parse_status"`
+	CurrentAttempt int                 `json:"current_attempt"`
+	CurrentStage   string              `json:"current_stage"`
+	Trace          *KnowledgeSpanNode  `json:"trace"`
+	LastError      *KnowledgeSpanError `json:"last_error,omitempty"`
+}
+
+type knowledgeProcessingTraceResponse struct {
+	Success bool                     `json:"success"`
+	Data    KnowledgeProcessingTrace `json:"data"`
+}
+
+// GetKnowledgeProcessingSpans fetches the document-parsing trace tree for a
+// knowledge entry. The response always contains the five canonical stages;
+// stages that have not produced rows yet are synthesized as "pending"
+// placeholders so the timeline is stable to render.
+//
+// Parameters:
+//   - ctx: Context for the request
+//   - knowledgeID: The ID of the knowledge entry
+//   - attempt: A specific parse attempt number; pass 0 for the latest attempt
+//
+// Returns:
+//   - *KnowledgeProcessingTrace: The trace for the selected attempt
+//   - error: Error information if the request fails
+//
+// Example:
+//
+//	trace, err := client.GetKnowledgeProcessingSpans(ctx, "knowledge-id-123", 0)
+//	if err != nil {
+//	    log.Fatalf("Failed to get parsing trace: %v", err)
+//	}
+//	fmt.Printf("parse_status=%s current_stage=%s\n", trace.ParseStatus, trace.CurrentStage)
+func (c *Client) GetKnowledgeProcessingSpans(
+	ctx context.Context, knowledgeID string, attempt int,
+) (*KnowledgeProcessingTrace, error) {
+	if knowledgeID == "" {
+		return nil, fmt.Errorf("knowledge ID cannot be empty")
+	}
+
+	queryParams := url.Values{}
+	if attempt > 0 {
+		queryParams.Add("attempt", strconv.Itoa(attempt))
+	}
+
+	path := fmt.Sprintf("/api/v1/knowledge/%s/spans", knowledgeID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	var response knowledgeProcessingTraceResponse
 	if err := parseResponse(resp, &response); err != nil {
 		return nil, err
 	}

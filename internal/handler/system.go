@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -19,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -121,6 +123,10 @@ type GetSystemInfoResponse struct {
 	// succeeded; non-empty values let the frontend surface a troubleshooting
 	// banner instead of silently hiding the DB version row (see issue #1319).
 	DBMigrationError string `json:"db_migration_error,omitempty"`
+	// StartedAt is the server process boot time (RFC3339, UTC).
+	StartedAt string `json:"started_at,omitempty"`
+	// UptimeSeconds is seconds elapsed since process start.
+	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
 }
 
 // 编译时注入的版本信息
@@ -172,6 +178,13 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		dbVersion = "unknown"
 	}
 
+	var startedAt string
+	var uptimeSec int64
+	if boot := runtime.ServerStartedAt(); !boot.IsZero() {
+		startedAt = boot.UTC().Format(time.RFC3339)
+		uptimeSec = int64(runtime.ServerUptime().Seconds())
+	}
+
 	response := GetSystemInfoResponse{
 		Version:             Version,
 		Edition:             Edition,
@@ -184,6 +197,8 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		MinioEnabled:        minioEnabled,
 		DBVersion:           dbVersion,
 		DBMigrationError:    dbMigrationErr,
+		StartedAt:           startedAt,
+		UptimeSeconds:       uptimeSec,
 	}
 
 	logger.Info(ctx, "System info retrieved successfully")

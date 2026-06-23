@@ -27,6 +27,10 @@ func newFakeESServer(t *testing.T) *httptest.Server {
 		_, _ = w.Write([]byte(`{"version":{"number":"7.10.1"}}`))
 	}))
 	t.Cleanup(srv.Close)
+	// CreateStore now SSRF-validates the connection addr before the probe.
+	// The httptest server listens on 127.0.0.1, which the SSRF policy blocks
+	// by default, so whitelist it for the duration of the test.
+	withSSRFWhitelist(t, "127.0.0.1")
 	return srv
 }
 
@@ -308,6 +312,10 @@ func TestCreateStore_ConnectionConfigValidation(t *testing.T) {
 }
 
 func TestCreateStore_DuplicateCheck_DBStore(t *testing.T) {
+	// "es" is an unresolvable host on a blocked port (9200); whitelist it so
+	// the test reaches the duplicate check (step 3) rather than failing the
+	// SSRF guard (step 2.1).
+	withSSRFWhitelist(t, "es")
 	repo := &mockVectorStoreRepo{existsByEndpoint: true}
 	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
 
@@ -329,6 +337,9 @@ func TestCreateStore_DuplicateCheck_DBStore(t *testing.T) {
 }
 
 func TestCreateStore_DuplicateCheck_DBError(t *testing.T) {
+	// Whitelist "es" so the flow reaches the duplicate-check DB error (step 3)
+	// instead of stopping at the SSRF guard (step 2.1).
+	withSSRFWhitelist(t, "es")
 	repo := &mockVectorStoreRepo{
 		existsByEndpointErr: assert.AnError,
 	}
@@ -348,6 +359,9 @@ func TestCreateStore_DuplicateCheck_DBError(t *testing.T) {
 }
 
 func TestCreateStore_DuplicateCheck_EnvStore(t *testing.T) {
+	// Whitelist "es" so the flow reaches the env-store duplicate check rather
+	// than failing the SSRF guard (step 2.1) on the unresolvable es:9200 host.
+	withSSRFWhitelist(t, "es")
 	// Set up env to simulate an existing elasticsearch env store
 	t.Setenv("RETRIEVE_DRIVER", "elasticsearch_v8")
 	t.Setenv("ELASTICSEARCH_ADDR", "http://es:9200")

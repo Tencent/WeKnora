@@ -189,7 +189,16 @@ func createQdrantEngine(store types.VectorStore) (interfaces.RetrieveEngineServi
 }
 
 func createMilvusEngine(ctx context.Context, store types.VectorStore) (interfaces.RetrieveEngineService, error) {
-	cc := store.ConnectionConfig
+	milvusCfg := buildMilvusClientConfig(store.ConnectionConfig)
+	client, err := milvusclient.New(ctx, &milvusCfg)
+	if err != nil {
+		return nil, fmt.Errorf("create milvus client: %w", err)
+	}
+	repo := milvusRepo.NewMilvusRetrieveEngineRepository(client, &store.IndexConfig)
+	return retriever.NewKVHybridRetrieveEngine(repo, types.MilvusRetrieverEngineType), nil
+}
+
+func buildMilvusClientConfig(cc types.ConnectionConfig) milvusclient.ClientConfig {
 	addr := cc.Addr
 	if addr == "" {
 		addr = "localhost:19530"
@@ -205,15 +214,10 @@ func createMilvusEngine(ctx context.Context, store types.VectorStore) (interface
 	if cc.Password != "" {
 		milvusCfg.Password = cc.Password
 	}
-	// NOTE: Milvus DBName is not yet in ConnectionConfig.
-	// Phase 1 limitation — only the default database is used.
-
-	client, err := milvusclient.New(ctx, &milvusCfg)
-	if err != nil {
-		return nil, fmt.Errorf("create milvus client: %w", err)
+	if cc.Database != "" {
+		milvusCfg.DBName = cc.Database
 	}
-	repo := milvusRepo.NewMilvusRetrieveEngineRepository(client, &store.IndexConfig)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.MilvusRetrieverEngineType), nil
+	return milvusCfg
 }
 
 func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {

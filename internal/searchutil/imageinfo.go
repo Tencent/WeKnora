@@ -260,6 +260,52 @@ func EnrichContentWithImageInfo(content string, imageInfoJSON string) string {
 	return content
 }
 
+// EnrichContentWithImageInfoForChat is like EnrichContentWithImageInfo but only
+// wraps Markdown images that have a matching image_info entry. This avoids
+// turning every parent thumbnail into an <image> block when only a few pages
+// were retrieved, and skips appending orphan image_info extras.
+func EnrichContentWithImageInfoForChat(content string, imageInfoJSON string) string {
+	var imageInfos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos); err != nil {
+		return content
+	}
+	if len(imageInfos) == 0 {
+		return content
+	}
+
+	imageInfoMap := make(map[string]*types.ImageInfo)
+	for i := range imageInfos {
+		if imageInfos[i].URL != "" {
+			imageInfoMap[imageInfos[i].URL] = &imageInfos[i]
+		}
+		if imageInfos[i].OriginalURL != "" {
+			imageInfoMap[imageInfos[i].OriginalURL] = &imageInfos[i]
+		}
+	}
+
+	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		imgURL := match[2]
+		imgInfo, found := imageInfoMap[imgURL]
+		if !found || imgInfo == nil {
+			continue
+		}
+		inner := BuildImageInfoXML(imgInfo)
+		if inner == "" {
+			continue
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("<image url=\"%s\">\n", imgURL))
+		b.WriteString(inner)
+		b.WriteString("</image>")
+		content = strings.Replace(content, match[0], b.String(), 1)
+	}
+	return content
+}
+
 // BuildImageInfoXML returns XML-tagged caption / ocr for one image.
 func BuildImageInfoXML(img *types.ImageInfo) string {
 	var b strings.Builder

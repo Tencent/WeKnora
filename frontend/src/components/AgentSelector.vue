@@ -370,10 +370,10 @@ const getMcpCapability = (agent: CustomAgent): string => {
     return '';
   }
   if (config.mcp_selection_mode === 'all') {
-    return t('agent.detail.shareScope.mcpAll');
+    return t('agent.shareScope.mcpAll');
   }
   if (config.mcp_services?.length) {
-    return t('agent.detail.shareScope.mcpSelected', { count: config.mcp_services.length });
+    return t('agent.shareScope.mcpSelected', { count: config.mcp_services.length });
   }
   return t('agent.capabilities.mcpEnabled');
 };

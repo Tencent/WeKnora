@@ -36,7 +36,7 @@ type TaskInspector interface {
 	// Best-effort and short-circuiting: it returns true as soon as the
 	// first match is seen. On backend error it returns (false, err);
 	// callers decide the fail-safe direction. Lite mode (no Redis)
-	// always returns false: inline executors never queue, so the
+	// always returns false — inline executors never queue, so the
 	// span/updated_at checks remain authoritative there.
 	HasQueuedTasksForKnowledge(ctx context.Context, knowledgeID string) (bool, error)
 }

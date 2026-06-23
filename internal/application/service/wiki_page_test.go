@@ -99,6 +99,56 @@ func TestNormalizeSlug(t *testing.T) {
 	}
 }
 
+func TestNormalizeWikiHierarchyCleansModelCategoryNoise(t *testing.T) {
+	page := &types.WikiPage{
+		Slug:         "concept/ai-knowledge",
+		Title:        "AI时代的知识困境",
+		PageType:     types.WikiPageTypeConcept,
+		CategoryPath: types.StringArray{"概念/爱护花草", " 实体/标牌 ", "摘要", "生态/平台", "多余层级"},
+	}
+
+	normalizeWikiHierarchy(page)
+
+	want := types.StringArray{"爱护花草", "标牌", "生态"}
+	if len(page.CategoryPath) != len(want) {
+		t.Fatalf("CategoryPath = %v, want %v", page.CategoryPath, want)
+	}
+	for i := range want {
+		if page.CategoryPath[i] != want[i] {
+			t.Fatalf("CategoryPath[%d] = %q, want %q; full path=%v", i, page.CategoryPath[i], want[i], page.CategoryPath)
+		}
+	}
+	if page.Depth != 3 {
+		t.Fatalf("Depth = %d, want 3", page.Depth)
+	}
+	if page.WikiPath != "concept/爱护花草/标牌/生态/AI时代的知识困境" {
+		t.Fatalf("WikiPath = %q", page.WikiPath)
+	}
+}
+
+func TestNormalizeWikiIndexEntryHierarchyCleansModelCategoryNoise(t *testing.T) {
+	entry := &types.WikiIndexEntry{
+		Slug:         "entity/sign",
+		Title:        "爱护花草标牌",
+		CategoryPath: types.StringArray{"实体/标牌", "概念", "生态/行为倡导"},
+	}
+
+	normalizeWikiIndexEntryHierarchy(entry, types.WikiPageTypeEntity)
+
+	want := types.StringArray{"标牌", "生态", "行为倡导"}
+	if len(entry.CategoryPath) != len(want) {
+		t.Fatalf("CategoryPath = %v, want %v", entry.CategoryPath, want)
+	}
+	for i := range want {
+		if entry.CategoryPath[i] != want[i] {
+			t.Fatalf("CategoryPath[%d] = %q, want %q; full path=%v", i, entry.CategoryPath[i], want[i], entry.CategoryPath)
+		}
+	}
+	if entry.WikiPath != "entity/标牌/生态/行为倡导/爱护花草标牌" {
+		t.Fatalf("WikiPath = %q", entry.WikiPath)
+	}
+}
+
 func TestContainsString(t *testing.T) {
 	slice := []string{"a", "b", "c"}
 	if !containsString(slice, "b") {

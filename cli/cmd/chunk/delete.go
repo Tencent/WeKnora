@@ -101,7 +101,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 				opts.ChunkID = args[0]
 				return runDelete(c.Context(), opts, fopts, cli, f.Prompter())
 			}
-			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "chunk", len(args), "chunk.delete", "weknora chunk delete "+strings.Join(args, " ")+" --doc "+opts.DocID+" -y"); err != nil {
+			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "chunk", len(args), "chunk.delete", "weknora chunk delete "+strings.Join(args, " ")+" --doc "+opts.DocID+" -y"); err != nil {
 				return err
 			}
 			outcomes, runErr := cmdutil.RunBatch(c.Context(), args, func(ctx context.Context, id string) error {
@@ -143,7 +143,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "chunk", opts.ChunkID, "chunk.delete", "weknora chunk delete "+opts.ChunkID+" --doc "+opts.DocID+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "chunk", opts.ChunkID, "chunk.delete", "weknora chunk delete "+opts.ChunkID+" --doc "+opts.DocID+" -y"); err != nil {
 		return err
 	}
 	if err := svc.DeleteChunk(ctx, opts.DocID, opts.ChunkID); err != nil {

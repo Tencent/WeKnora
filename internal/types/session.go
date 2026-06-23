@@ -130,7 +130,8 @@ func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
 // SessionListQuery bundles the parameters for listing sessions.
 // UserID empty means "tenant-wide" (used by API-key callers / legacy rows).
 // Keyword matches title ILIKE '%keyword%'.
-// Source values: "web" (no IM mapping) or an IM platform name (e.g. "feishu", "wechat").
+// Source values: "web" (user chats, no IM/embed), "embed" / "embed:{channelID}",
+// or an IM platform name (e.g. "feishu", "wechat").
 // AgentID currently only filters sessions that have an IM channel mapping.
 type SessionListQuery struct {
 	TenantID uint64

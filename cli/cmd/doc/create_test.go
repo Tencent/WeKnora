@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -137,4 +138,22 @@ func TestCreate_EmptyText_RejectsBeforeSDK(t *testing.T) {
 	require.Error(t, err)
 	// Verify the SDK was NOT called.
 	assert.Nil(t, svc.got.req, "SDK must not be called when --text is empty")
+}
+
+// TestCreate_AgentHelp_EmitsUsedFor verifies that when WEKNORA_AGENT_HELP=1
+// the `doc create --help` path emits a JSON blob containing "used_for".
+// This is the representative test for 3.2; the mechanism is covered by
+// internal/cmdutil/agenthelp_test.go — we test the wiring here.
+func TestCreate_AgentHelp_EmitsUsedFor(t *testing.T) {
+	t.Setenv("WEKNORA_AGENT_HELP", "1")
+	_, _ = iostreams.SetForTest(t)
+
+	f := &cmdutil.Factory{}
+	cmd := NewCmdCreate(f)
+
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.HelpFunc()(cmd, nil)
+
+	assert.Contains(t, buf.String(), `"used_for"`)
 }

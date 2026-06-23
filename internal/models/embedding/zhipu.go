@@ -16,16 +16,17 @@ import (
 
 // ZhipuEmbedder implements text vectorization functionality using Zhipu AI API
 type ZhipuEmbedder struct {
-	apiKey               string
-	baseURL              string
-	modelName            string
-	truncatePromptTokens int
-	dimensions           int
-	modelID              string
-	httpClient           *http.Client
-	timeout              time.Duration
-	maxRetries           int
-	customHeaders        map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	truncatePromptTokens      int
+	dimensions                int
+	modelID                   string
+	httpClient                *http.Client
+	timeout                   time.Duration
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
@@ -33,6 +34,7 @@ type ZhipuEmbedder struct {
 type ZhipuEmbedRequest struct {
 	Model                string   `json:"model"`
 	Input                []string `json:"input"`
+	Dimensions           int      `json:"dimensions,omitempty"`
 	TruncatePromptTokens int      `json:"truncate_prompt_tokens,omitempty"`
 }
 
@@ -85,6 +87,10 @@ func NewZhipuEmbedder(apiKey, baseURL, modelName string,
 // SetCustomHeaders sets custom HTTP headers for the embedder
 func (e *ZhipuEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
+}
+
+func (e *ZhipuEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
 }
 
 // Embed converts text to vector
@@ -149,6 +155,9 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 		Model:                e.modelName,
 		Input:                texts,
 		TruncatePromptTokens: e.truncatePromptTokens,
+	}
+	if e.supportsDimensionsParam() {
+		reqBody.Dimensions = e.dimensions
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -231,6 +240,10 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 // GetModelName returns the model name
 func (e *ZhipuEmbedder) GetModelName() string {
 	return e.modelName
+}
+
+func (e *ZhipuEmbedder) supportsDimensionsParam() bool {
+	return e.supportsDimensionOverride && e.dimensions > 0
 }
 
 // GetDimensions returns the vector dimensions

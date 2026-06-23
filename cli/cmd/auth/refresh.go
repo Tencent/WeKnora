@@ -12,7 +12,6 @@ import (
 )
 
 type RefreshOptions struct {
-	Name   string // --name: target profile (defaults to current)
 	DryRun bool
 }
 
@@ -45,8 +44,8 @@ Both new tokens replace the existing entries in the OS keyring.
 
 API-key profiles are rejected with input.invalid_argument - they have no
 refresh semantic. Rotate the key in the server UI instead.`,
-		Example: `  weknora auth refresh                 # refresh the current profile
-  weknora auth refresh --name staging  # refresh a specific profile`,
+		Example: `  weknora auth refresh                      # refresh the active profile
+  weknora --profile staging auth refresh   # refresh a specific profile`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -61,13 +60,10 @@ refresh semantic. Rotate the key in the server UI instead.`,
 			if cfgErr != nil {
 				return cfgErr
 			}
-			name := opts.Name
-			if name == "" {
-				name = cfg.CurrentProfile
-			}
+			name := cfg.CurrentProfile
 			if name == "" {
 				return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-					"no current profile configured; run `weknora auth login` to set one up")
+					"no active profile configured; run `weknora auth login` to set one up")
 			}
 			prof, ok := cfg.Profiles[name]
 			if !ok {
@@ -98,9 +94,12 @@ refresh semantic. Rotate the key in the server UI instead.`,
 			return runRefresh(c.Context(), opts, fopts, f, defaultRefresher)
 		},
 	}
-	cmd.Flags().StringVar(&opts.Name, "name", "", "Profile to refresh (defaults to the current profile)")
 	cmdutil.AddFormatFlag(cmd, authRefreshFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor: "Renew the JWT access token for the active profile (override with the global --profile) using the stored refresh token. API-key profiles are rejected.",
+		Output:  "envelope.data has profile name that was refreshed",
+	})
 	return cmd
 }
 
@@ -116,13 +115,10 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, fopts *cmdutil.Format
 	if err != nil {
 		return err
 	}
-	name := opts.Name
-	if name == "" {
-		name = cfg.CurrentProfile
-	}
+	name := cfg.CurrentProfile
 	if name == "" {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			"no current profile configured; run `weknora auth login` to set one up")
+			"no active profile configured; run `weknora auth login` to set one up")
 	}
 	c, ok := cfg.Profiles[name]
 	if !ok {

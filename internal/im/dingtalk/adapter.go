@@ -41,8 +41,7 @@ var (
 type Adapter struct {
 	clientID       string
 	clientSecret   string
-	cardTemplateID string          // optional: enables AI card streaming when set
-	client         *LongConnClient // nil for webhook mode
+	cardTemplateID string // optional: enables AI card streaming when set
 
 	// accessToken cache
 	tokenMu    sync.RWMutex
@@ -60,14 +59,15 @@ func NewWebhookAdapter(clientID, clientSecret, cardTemplateID string) *Adapter {
 	}
 }
 
-// NewAdapter creates a DingTalk adapter backed by a stream client.
-func NewAdapter(client *LongConnClient, clientID, clientSecret, cardTemplateID string) *Adapter {
+// NewAdapter creates a DingTalk adapter for stream (websocket) mode.
+// The stream connection itself is managed separately by the supervisor; the
+// adapter only sends replies (via sessionWebhook or OpenAPI).
+func NewAdapter(clientID, clientSecret, cardTemplateID string) *Adapter {
 	startStreamReaper()
 	return &Adapter{
 		clientID:       clientID,
 		clientSecret:   clientSecret,
 		cardTemplateID: cardTemplateID,
-		client:         client,
 	}
 }
 
@@ -457,7 +457,7 @@ const (
 
 var (
 	streamsMu       sync.Mutex
-	dStreams         = map[string]*streamState{}
+	dStreams        = map[string]*streamState{}
 	startReaperOnce sync.Once
 	reaperStopCh    = make(chan struct{})
 )

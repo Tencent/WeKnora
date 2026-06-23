@@ -106,6 +106,11 @@ don't require a file upload or remote URL. KB resolution follows the standard
 	_ = cmd.MarkFlagRequired("text")
 	cmdutil.AddFormatFlag(cmd, docCreateFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Create a knowledge entry from inline Markdown text. KB resolved via --kb flag, WEKNORA_KB_ID env, or project link. Emits the created Knowledge object with its id.",
+		RequiredFlags: []string{"--text"},
+		Output:        "envelope.data is the created Knowledge object with id, knowledge_base_id, title, parse_status",
+	})
 	return cmd
 }
 
