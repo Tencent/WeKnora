@@ -131,10 +131,14 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		cm.SummaryConfig.MaxCompletionTokens = customAgent.Config.MaxCompletionTokens
 		logger.Infof(ctx, "Using custom agent's max_completion_tokens: %d", customAgent.Config.MaxCompletionTokens)
 	}
-	// Agent-level thinking setting takes full control (no global fallback)
+	// Agent-level thinking setting takes full control (no global fallback).
+	// EnsureDefaults pins nil to explicit false so thinking_control wire formats
+	// always receive a value.
 	cm.SummaryConfig.Thinking = customAgent.Config.Thinking
 	if customAgent.Config.Thinking != nil {
 		logger.Infof(ctx, "Using custom agent's thinking: %v", *customAgent.Config.Thinking)
+	} else {
+		logger.Warnf(ctx, "Custom agent thinking is unset after EnsureDefaults; model thinking param will be omitted")
 	}
 
 	// Override retrieval strategy settings

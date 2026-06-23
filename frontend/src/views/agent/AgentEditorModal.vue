@@ -2459,6 +2459,9 @@ watch(() => props.visible, async (val) => {
 
       // 补全可能缺失的字段
       agentData.config = { ...defaultFormData.config, ...agentData.config };
+      if (agentData.config.thinking == null) {
+        agentData.config.thinking = false;
+      }
 
       // 确保数组字段存在
       if (!agentData.config.suggested_prompts) agentData.config.suggested_prompts = [];

@@ -1,5 +1,5 @@
 <template>
-  <div v-if="visible" class="rag-pipeline-progress">
+  <div v-if="visible" ref="rootElement" class="rag-pipeline-progress">
     <div v-if="showPrePipelineWait" class="tree-children">
       <div class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch" />
@@ -18,9 +18,9 @@
     <div v-else-if="!showCollapsedRoot" class="tree-children">
       <div v-for="(step, index) in steps" :key="step.id" class="tree-child" :class="{
         'tree-child-last':
-          !showActivityIndicator
-          && !showDoneRow
+          !showDoneRow
           && !hasReferences
+          && !showThinkingStep
           && index === steps.length - 1,
       }">
         <div class="tree-branch" />
@@ -42,7 +42,7 @@
       </div>
 
       <div v-if="hasReferences" class="tree-child rag-ref-step"
-        :class="{ 'tree-child-last': !showDoneRow && !showActivityIndicator }">
+        :class="{ 'tree-child-last': !showThinkingStep && !showDoneRow }">
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
@@ -60,7 +60,34 @@
         </div>
       </div>
 
-      <div v-if="showDoneRow" class="tree-child agent-step-done" :class="{ 'tree-child-last': !showActivityIndicator }">
+      <div v-if="showThinkingStep" class="tree-child rag-thinking-step"
+        :class="{ 'tree-child-last': !showDoneRow }">
+        <div class="tree-branch" />
+        <div class="tree-child-content">
+          <div class="tool-event">
+            <div class="action-card" :class="{ 'action-pending': thinkingPending }">
+              <div class="action-header" :class="{ 'no-results': !thinkingContent }" @click="toggleThinking">
+                <div class="action-title">
+                  <t-icon class="action-title-icon" name="lightbulb" />
+                  <span class="action-name">{{ t('agent.think') }}</span>
+                </div>
+              </div>
+              <div v-if="thinkingPending && !thinkingContent" class="thinking-loading">
+                <div class="loading-typing">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+              <div v-else-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+                {{ thinkingContent }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="showDoneRow" class="tree-child agent-step-done tree-child-last">
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
@@ -71,19 +98,6 @@
                   <span class="action-name">{{ t('common.finish') }}</span>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="showActivityIndicator" class="tree-child tree-child-last streaming-loading-node">
-        <div class="tree-branch" />
-        <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span />
-              <span />
-              <span />
             </div>
           </div>
         </div>
@@ -106,7 +120,7 @@
 
       <div v-if="showExpandedTimeline" class="tree-children tree-children-expanded">
         <div v-for="(step, index) in steps" :key="step.id" class="tree-child"
-          :class="{ 'tree-child-last': index === steps.length - 1 && !hasReferences && !showDoneRow }">
+          :class="{ 'tree-child-last': index === steps.length - 1 && !hasReferences && !showDoneRow && !showThinkingStep }">
           <div class="tree-branch" />
           <div class="tree-child-content">
             <div class="tool-event">
@@ -125,7 +139,8 @@
           </div>
         </div>
 
-        <div v-if="hasReferences" class="tree-child rag-ref-step" :class="{ 'tree-child-last': !showDoneRow }">
+        <div v-if="hasReferences" class="tree-child rag-ref-step"
+          :class="{ 'tree-child-last': !showThinkingStep && !showDoneRow }">
           <div class="tree-branch" />
           <div class="tree-child-content">
             <div class="tool-event">
@@ -138,6 +153,32 @@
                 </div>
                 <DocInfo v-show="refsExpanded" :session="session" :embedded-mode="embeddedMode" timeline-mode
                   content-only />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="showThinkingStep" class="tree-child rag-thinking-step" :class="{ 'tree-child-last': !showDoneRow }">
+          <div class="tree-branch" />
+          <div class="tree-child-content">
+            <div class="tool-event">
+              <div class="action-card" :class="{ 'action-pending': thinkingPending }">
+                <div class="action-header" :class="{ 'no-results': !thinkingContent }" @click="toggleThinking">
+                  <div class="action-title">
+                    <t-icon class="action-title-icon" name="lightbulb" />
+                    <span class="action-name">{{ t('agent.think') }}</span>
+                  </div>
+                </div>
+                <div v-if="thinkingPending && !thinkingContent" class="thinking-loading">
+                  <div class="loading-typing">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </div>
+                <div v-else-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+                  {{ thinkingContent }}
+                </div>
               </div>
             </div>
           </div>
@@ -164,7 +205,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DocInfo from './docInfo.vue'
 import { getAgentToolIconName } from '@/utils/agent-tool-icons'
@@ -187,6 +228,25 @@ const props = defineProps<{
 const { t } = useI18n()
 const userExpanded = ref(false)
 const refsExpanded = ref(false)
+const thinkingExpanded = ref(true)
+const rootElement = ref<HTMLElement | null>(null)
+
+const thinkingContent = computed(() => {
+  const stream = props.session?.agentEventStream
+  if (!Array.isArray(stream)) return ''
+  return stream
+    .filter((event) => event.type === 'thinking')
+    .map((event) => String(event.content || ''))
+    .join('')
+})
+
+const hasThinking = computed(() => thinkingContent.value.trim().length > 0)
+
+const hasThinkingEvent = computed(() => {
+  const stream = props.session?.agentEventStream
+  if (!Array.isArray(stream)) return false
+  return stream.some((event) => event.type === 'thinking')
+})
 
 const hasAnswer = computed(() => {
   const sessionContent = props.session?.content
@@ -252,7 +312,9 @@ const allStepsDone = computed(
 )
 
 const showCollapsedRoot = computed(
-  () => (hasAnswer.value || Boolean(props.session?.is_completed)) && steps.value.length > 0,
+  () =>
+    (hasAnswer.value || Boolean(props.session?.is_completed)) &&
+    (steps.value.length > 0 || hasThinking.value),
 )
 
 const showExpandedTimeline = computed(() => {
@@ -260,18 +322,35 @@ const showExpandedTimeline = computed(() => {
   return userExpanded.value
 })
 
-const showDoneRow = computed(() => allStepsDone.value)
+const showDoneRow = computed(() => {
+  const turnDone = hasAnswer.value || Boolean(props.session?.is_completed)
+  if (!turnDone) return false
+  if (steps.value.length > 0 && !allStepsDone.value) return false
+  return true
+})
 
-const showPrePipelineWait = computed(
-  () => !hasAnswer.value && !props.session?.is_completed && steps.value.length === 0,
+const showPrePipelineWait = computed(() => {
+  if (hasAnswer.value || props.session?.is_completed || steps.value.length > 0 || hasThinking.value) {
+    return false
+  }
+  return true
+})
+
+// Only show the thinking row once the backend actually streams thinking events.
+// Do not pre-empt during the model phase — that flashes "思考" even when thinking is disabled.
+const showThinkingStep = computed(() => hasThinkingEvent.value)
+
+const thinkingPending = computed(
+  () =>
+    showThinkingStep.value &&
+    !hasThinking.value &&
+    !hasAnswer.value &&
+    !props.session?.is_completed,
 )
 
-// Trailing dots on the timeline axis while pipeline steps are running or waiting for the answer.
-const showActivityIndicator = computed(
-  () => steps.value.length > 0 && !hasAnswer.value && !props.session?.is_completed,
+const visible = computed(
+  () => steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value,
 )
-
-const visible = computed(() => steps.value.length > 0 || showPrePipelineWait.value)
 
 const referenceDocCount = computed(() => {
   const refs = props.session?.knowledge_references ?? []
@@ -303,6 +382,10 @@ const referencesHeaderText = computed(() => {
 })
 
 const collapsedSummaryHtml = computed(() => {
+  if (steps.value.length === 0) {
+    return hasThinking.value ? t('agentStream.toolStatus.thinkingDone') : ''
+  }
+
   const parts: string[] = [t('agentStream.ragPipeline.searchDone')]
   const docCount = referenceDocCount.value
   const webCount = referenceWebCount.value
@@ -338,6 +421,37 @@ function toggleExpanded() {
 function toggleReferences() {
   refsExpanded.value = !refsExpanded.value
 }
+
+function toggleThinking() {
+  if (!showThinkingStep.value || !thinkingContent.value) return
+  thinkingExpanded.value = !thinkingExpanded.value
+}
+
+watch(thinkingPending, (pending) => {
+  if (pending) {
+    thinkingExpanded.value = true
+  }
+})
+
+watch(hasAnswer, (answered) => {
+  if (answered && hasThinking.value) {
+    thinkingExpanded.value = false
+  }
+})
+
+watch(thinkingContent, () => {
+  if (!thinkingPending.value) return
+  nextTick(() => {
+    if (!rootElement.value) return
+    const els = rootElement.value.querySelectorAll('.thinking-detail-content')
+    els.forEach((el) => {
+      const htmlEl = el as HTMLElement
+      if (htmlEl.scrollHeight > htmlEl.clientHeight) {
+        htmlEl.scrollTop = htmlEl.scrollHeight
+      }
+    })
+  })
+})
 </script>
 
 <style scoped lang="less">
@@ -529,6 +643,29 @@ function toggleReferences() {
       color: var(--td-text-color-secondary);
       font-weight: 500;
     }
+  }
+}
+
+.rag-thinking-step {
+  .thinking-loading {
+    padding: 4px 0 0;
+  }
+
+  .thinking-detail-content {
+    margin-top: 4px;
+    padding: 0;
+    font-size: var(--agent-step-summary-size);
+    font-weight: 400;
+    color: var(--td-text-color-placeholder);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .action-pending .action-name {
+    color: var(--td-text-color-secondary);
   }
 }
 </style>

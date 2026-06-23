@@ -315,6 +315,12 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.AgentMode == AgentModeSmartReasoning {
 		a.Config.MultiTurnEnabled = true
 	}
+	// Pin thinking to an explicit false when unset so provider-specific wire
+	// formats (e.g. thinking_control=thinking_type) always receive a value.
+	if a.Config.Thinking == nil {
+		disabled := false
+		a.Config.Thinking = &disabled
+	}
 }
 
 // IsAgentMode returns true if this agent uses ReAct agent mode

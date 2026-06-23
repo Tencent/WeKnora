@@ -63,6 +63,14 @@ test('rag mode delegates pre-answer loading to pipeline and keeps dots while ans
   assert.match(source, /v-if="!ragMode \|\| displayEvents\.length > 0 \|\| showAgentActivityIndicator"/)
 })
 
+test('rag mode keeps model thinking out of the answer stream component', () => {
+  assert.match(source, /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer'/)
+  assert.doesNotMatch(
+    source,
+    /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer' \|\| e\.type === 'thinking'/,
+  )
+})
+
 test('only the collapsed root summary shows an expand chevron', () => {
   assert.match(source, /tree-root-summary[\s\S]*class="action-show-icon"/)
   assert.match(source, /showIntermediateSteps \? 'chevron-down' : 'chevron-right'/)

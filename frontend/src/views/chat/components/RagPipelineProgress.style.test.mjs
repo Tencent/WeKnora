@@ -21,7 +21,8 @@ test('rag pipeline persists and collapses after the answer arrives', () => {
   assert.match(source, /showCollapsedRoot/)
   assert.match(source, /tree-root-summary/)
   assert.match(source, /collapsedSummaryHtml/)
-  assert.match(source, /visible = computed\(\(\) => steps\.value\.length > 0 \|\| showPrePipelineWait\.value\)/)
+  assert.match(source, /hasThinking\.value/)
+  assert.match(source, /const visible = computed\([\s\S]*showPrePipelineWait\.value/)
 })
 
 test('rag pipeline toggles expand and collapse from the root header', () => {
@@ -42,10 +43,12 @@ test('rag pipeline embeds references in the timeline instead of a separate card'
   assert.match(source, /rag-ref-step[\s\S]*name="file-search"/)
 })
 
-test('rag pipeline keeps loading inside the timeline without duplicate dots', () => {
+test('rag pipeline keeps loading inside the thinking step instead of orphan dots', () => {
   assert.match(source, /showPrePipelineWait/)
-  assert.match(source, /showActivityIndicator = computed\(\s*\(\) => steps\.value\.length > 0 && !hasAnswer\.value/)
-  assert.match(source, /showPrePipelineWait = computed/)
+  assert.match(source, /showThinkingStep/)
+  assert.match(source, /thinking-loading/)
+  assert.match(source, /hasThinkingEvent/)
+  assert.doesNotMatch(source, /showActivityIndicator/)
 })
 
 test('rag pipeline places references before the done row', () => {
@@ -53,6 +56,20 @@ test('rag pipeline places references before the done row', () => {
   const doneIndex = source.indexOf('agent-step-done')
   assert.ok(refsIndex > -1 && doneIndex > -1)
   assert.ok(refsIndex < doneIndex)
+})
+
+test('done row appears only after the full turn completes', () => {
+  assert.match(source, /const showDoneRow = computed\(\(\) => \{[\s\S]*hasAnswer\.value/)
+})
+
+test('rag pipeline renders model thinking inside the timeline before the done row', () => {
+  assert.match(source, /rag-thinking-step/)
+  assert.match(source, /showThinkingStep/)
+  assert.match(source, /name="lightbulb"/)
+  const doneIndex = source.indexOf('agent-step-done')
+  const thinkingIndex = source.indexOf('rag-thinking-step')
+  assert.ok(doneIndex > -1 && thinkingIndex > -1)
+  assert.ok(thinkingIndex < doneIndex)
 })
 
 test('clickable timeline headers use pointer cursor', () => {
