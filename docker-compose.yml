@@ -325,7 +325,7 @@ services:
 
   # 修改的PostgreSQL配置
   postgres:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: ${POSTGRES_IMAGE:-paradedb/paradedb:v0.22.2-pg17}
     container_name: WeKnora-postgres
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
