@@ -12,10 +12,10 @@
 //     run through a readability extractor; the cleaned HTML is converted to
 //     Markdown. Feed-provided content (content:encoded / description) is used
 //     as a fallback.
-//   - Incremental: a per-item fingerprint hashes the final Markdown body that
-//     would be ingested, so feed-only metadata changes and full-article edits
-//     are both detected. Deletions are NOT synced — feeds routinely drop old
-//     items, which would otherwise look like deletions.
+//   - Incremental: feed-level signals skip full-text article fetches when a feed
+//     entry is unchanged; content fingerprints detect feed-body changes. Article-
+//     only edits without feed updates may be missed until the feed entry changes.
+//     Deletions are NOT synced — feeds routinely drop old items.
 //
 // All outbound requests go through the SSRF-safe HTTP client so a malicious
 // feed cannot redirect WeKnora to internal services.
@@ -26,12 +26,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/mmcdole/gofeed"
 )
 
 // Config holds RSS-specific configuration.
@@ -144,15 +146,61 @@ func (c *Config) parseHeaders() map[string]string {
 //
 // FeedItems maps feedURL → itemID → fingerprint, where fingerprint is a
 // "h:<sha256-prefix>" hash of the final Markdown body that would be ingested.
+// FeedSignals maps feedURL → itemID → feed-only signal used to skip full-text
+// article fetches when the feed entry itself has not changed.
 type rssCursor struct {
 	LastSyncTime time.Time                    `json:"last_sync_time"`
 	FeedItems    map[string]map[string]string `json:"feed_items,omitempty"`
+	FeedSignals  map[string]map[string]string `json:"feed_signals,omitempty"`
 }
 
 // contentFingerprint hashes ingested Markdown for incremental change detection.
 func contentFingerprint(markdown string) string {
 	sum := sha256.Sum256([]byte(markdown))
 	return "h:" + hex.EncodeToString(sum[:])[:16]
+}
+
+// feedSignalFingerprint hashes feed-visible fields so incremental sync can skip
+// article-page fetches when the entry has not changed in the feed.
+func feedSignalFingerprint(item *gofeed.Item, feedContent string) string {
+	if item == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(item.GUID)
+	b.WriteByte('\n')
+	b.WriteString(item.Link)
+	b.WriteByte('\n')
+	b.WriteString(item.Title)
+	b.WriteByte('\n')
+	if item.UpdatedParsed != nil && !item.UpdatedParsed.IsZero() {
+		b.WriteString(item.UpdatedParsed.UTC().Format(time.RFC3339))
+	}
+	b.WriteByte('\n')
+	if item.PublishedParsed != nil && !item.PublishedParsed.IsZero() {
+		b.WriteString(item.PublishedParsed.UTC().Format(time.RFC3339))
+	}
+	b.WriteByte('\n')
+	b.WriteString(feedContent)
+	sum := sha256.Sum256([]byte(b.String()))
+	return "s:" + hex.EncodeToString(sum[:])[:16]
+}
+
+func copyFeedCursor(dst, prev *rssCursor, feedURL string) {
+	if dst == nil || prev == nil {
+		return
+	}
+	if src, ok := prev.FeedItems[feedURL]; ok && len(src) > 0 {
+		dst.FeedItems[feedURL] = maps.Clone(src)
+	}
+	if prev.FeedSignals != nil {
+		if src, ok := prev.FeedSignals[feedURL]; ok && len(src) > 0 {
+			if dst.FeedSignals == nil {
+				dst.FeedSignals = make(map[string]map[string]string)
+			}
+			dst.FeedSignals[feedURL] = maps.Clone(src)
+		}
+	}
 }
 
 // itemExternalID scopes an item ID to its feed so GUIDs cannot collide across feeds.

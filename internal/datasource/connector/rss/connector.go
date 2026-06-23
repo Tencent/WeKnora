@@ -144,29 +144,37 @@ func (c *Connector) FetchIncremental(
 	}
 
 	items, newCursor, err := c.walk(ctx, config, config.ResourceIDs, prev, true)
-	if err != nil {
+	if err != nil && newCursor == nil {
 		return nil, nil, err
 	}
 
 	cursorMap := make(map[string]interface{})
-	b, err := json.Marshal(newCursor)
-	if err != nil {
-		logger.Warnf(ctx, "[RSS] marshal new cursor: %v", err)
-	} else if err := json.Unmarshal(b, &cursorMap); err != nil {
-		logger.Warnf(ctx, "[RSS] unmarshal new cursor to map: %v", err)
+	if newCursor != nil {
+		b, marshalErr := json.Marshal(newCursor)
+		if marshalErr != nil {
+			logger.Warnf(ctx, "[RSS] marshal new cursor: %v", marshalErr)
+		} else if unmarshalErr := json.Unmarshal(b, &cursorMap); unmarshalErr != nil {
+			logger.Warnf(ctx, "[RSS] unmarshal new cursor to map: %v", unmarshalErr)
+		}
 	}
 
-	return items, &types.SyncCursor{
-		LastSyncTime:    newCursor.LastSyncTime,
-		ConnectorCursor: cursorMap,
-	}, nil
+	var syncCursor *types.SyncCursor
+	if newCursor != nil {
+		syncCursor = &types.SyncCursor{
+			LastSyncTime:    newCursor.LastSyncTime,
+			ConnectorCursor: cursorMap,
+		}
+	}
+
+	return items, syncCursor, err
 }
 
 // walk is the shared implementation for FetchAll / FetchIncremental.
 //
-// When incremental is true, items whose content fingerprint matches the prior
-// cursor are omitted from the result (ingest skipped). The returned cursor
-// always reflects the full current item set so a later sync can detect changes.
+// When incremental is true, items whose feed signal and content fingerprint are
+// both unchanged are omitted from the result (ingest skipped) without fetching
+// article pages. The returned cursor always reflects the best-known item state
+// so a later sync can detect changes.
 func (c *Connector) walk(
 	ctx context.Context,
 	config *types.DataSourceConfig,
@@ -191,6 +199,7 @@ func (c *Connector) walk(
 	newCursor := &rssCursor{
 		LastSyncTime: time.Now().UTC(),
 		FeedItems:    make(map[string]map[string]string),
+		FeedSignals:  make(map[string]map[string]string),
 	}
 	var out []types.FetchedItem
 	var feedErrors []string
@@ -200,21 +209,26 @@ func (c *Connector) walk(
 		if err != nil {
 			logger.Warnf(ctx, "[RSS] sync: fetch %s failed: %v", feedURL, err)
 			feedErrors = append(feedErrors, fmt.Sprintf("%s: %v", feedURL, err))
-			newCursor.FeedItems[feedURL] = make(map[string]string)
+			copyFeedCursor(newCursor, prev, feedURL)
 			continue
 		}
 		feed, err := parser.Parse(bytes.NewReader(data))
 		if err != nil {
 			logger.Warnf(ctx, "[RSS] sync: parse %s failed: %v", feedURL, err)
 			feedErrors = append(feedErrors, fmt.Sprintf("%s: %v", feedURL, err))
-			newCursor.FeedItems[feedURL] = make(map[string]string)
+			copyFeedCursor(newCursor, prev, feedURL)
 			continue
 		}
 
 		newCursor.FeedItems[feedURL] = make(map[string]string)
+		newCursor.FeedSignals[feedURL] = make(map[string]string)
 		var prevItems map[string]string
+		var prevSignals map[string]string
 		if incremental && prev != nil {
 			prevItems = prev.FeedItems[feedURL]
+			if prev.FeedSignals != nil {
+				prevSignals = prev.FeedSignals[feedURL]
+			}
 		}
 
 		var kept, skipped int
@@ -228,8 +242,25 @@ func (c *Connector) walk(
 			}
 
 			feedContent := firstNonEmpty(item.Content, item.Description)
+			feedSig := feedSignalFingerprint(item, feedContent)
+
+			if incremental && prevItems != nil {
+				prevFP := prevItems[itemID]
+				prevSig := ""
+				if prevSignals != nil {
+					prevSig = prevSignals[itemID]
+				}
+				if prevFP != "" && feedSig == prevSig {
+					newCursor.FeedItems[feedURL][itemID] = prevFP
+					newCursor.FeedSignals[feedURL][itemID] = feedSig
+					skipped++
+					continue
+				}
+			}
+
 			resolved := c.resolveItem(ctx, cli, feed, item, feedURL, itemID, feedContent)
 			newCursor.FeedItems[feedURL][itemID] = resolved.fingerprint
+			newCursor.FeedSignals[feedURL][itemID] = feedSig
 
 			if incremental && prevItems != nil && prevItems[itemID] == resolved.fingerprint {
 				skipped++
@@ -243,8 +274,11 @@ func (c *Connector) walk(
 			feedURL, len(feed.Items), kept, skipped)
 	}
 
-	if len(out) == 0 && len(feedErrors) > 0 && len(feedErrors) == len(feedURLs) {
-		return nil, nil, fmt.Errorf("all feeds failed: %s", strings.Join(feedErrors, "; "))
+	if len(feedErrors) > 0 {
+		if len(out) == 0 && len(feedErrors) == len(feedURLs) {
+			return nil, newCursor, fmt.Errorf("all feeds failed: %s", strings.Join(feedErrors, "; "))
+		}
+		return out, newCursor, &datasource.PartialFetchError{Details: feedErrors}
 	}
 
 	return out, newCursor, nil

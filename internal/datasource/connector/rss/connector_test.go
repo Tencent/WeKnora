@@ -2,15 +2,20 @@ package rss
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
+	"github.com/mmcdole/gofeed"
 )
 
 // TestMain whitelists loopback for SSRF so the httptest servers (127.0.0.1)
@@ -36,6 +41,8 @@ type fakeFeed struct {
 	feedTitle          string
 	itemContent        string // optional <description>/content for items
 	articleAuthHeaders []string
+	articleFetches     atomic.Int32
+	failFeed           atomic.Bool
 }
 
 func newFakeFeed(t *testing.T) *fakeFeed {
@@ -44,6 +51,7 @@ func newFakeFeed(t *testing.T) *fakeFeed {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/article/", func(w http.ResponseWriter, r *http.Request) {
+		f.articleFetches.Add(1)
 		for k, vals := range r.Header {
 			if strings.EqualFold(k, "X-Test-Auth") && len(vals) > 0 && vals[0] != "" {
 				f.articleAuthHeaders = append(f.articleAuthHeaders, vals[0])
@@ -56,6 +64,10 @@ func newFakeFeed(t *testing.T) *fakeFeed {
 	})
 
 	mux.HandleFunc("/feed.xml", func(w http.ResponseWriter, r *http.Request) {
+		if f.failFeed.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if auth := r.Header.Get("X-Test-Auth"); f.itemContent == "needs-auth" && auth != "secret" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -168,6 +180,19 @@ func TestConfig_ParseHeaders(t *testing.T) {
 	}
 }
 
+func TestFeedSignalFingerprint(t *testing.T) {
+	item := &gofeed.Item{GUID: "g1", Link: "https://example.com/a", Title: "t"}
+	sig1 := feedSignalFingerprint(item, "body")
+	sig2 := feedSignalFingerprint(item, "body")
+	if sig1 == "" || sig1 != sig2 {
+		t.Fatalf("feed signal unstable: %q vs %q", sig1, sig2)
+	}
+	sig3 := feedSignalFingerprint(item, "changed")
+	if sig1 == sig3 {
+		t.Fatal("expected different signal when feed content changes")
+	}
+}
+
 func TestItemExternalID_ScopesByFeed(t *testing.T) {
 	got := itemExternalID("https://a.com/feed", "guid-1")
 	want := "https://a.com/feed:guid-1"
@@ -269,6 +294,35 @@ func TestConnector_FetchAll_FullTextMarkdown(t *testing.T) {
 	}
 }
 
+func TestConnector_FetchIncremental_SkipsWithoutArticleFetch(t *testing.T) {
+	f := newFakeFeed(t)
+	cfg := makeConfig(f.feedURL(), "")
+	cfg.ResourceIDs = []string{f.feedURL()}
+
+	items, cursor, err := NewConnector().FetchIncremental(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("first FetchIncremental error: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items on first sync, got %d", len(items))
+	}
+	if got := f.articleFetches.Load(); got != 2 {
+		t.Fatalf("first sync article fetches = %d, want 2", got)
+	}
+
+	f.articleFetches.Store(0)
+	items2, _, err := NewConnector().FetchIncremental(context.Background(), cfg, cursor)
+	if err != nil {
+		t.Fatalf("second FetchIncremental error: %v", err)
+	}
+	if len(items2) != 0 {
+		t.Fatalf("expected 0 items on unchanged second sync, got %d", len(items2))
+	}
+	if got := f.articleFetches.Load(); got != 0 {
+		t.Fatalf("unchanged incremental sync must not refetch articles, got %d fetches", got)
+	}
+}
+
 func TestConnector_FetchIncremental_SkipsUnchanged(t *testing.T) {
 	f := newFakeFeed(t)
 	cfg := makeConfig(f.feedURL(), "")
@@ -300,11 +354,51 @@ func TestConnector_Walk_PartialFeedFailure(t *testing.T) {
 	f := newFakeFeed(t)
 	cfg := makeConfig(f.feedURL()+", https://invalid.invalid/feed.xml", "")
 	items, err := NewConnector().FetchAll(context.Background(), cfg, nil)
-	if err != nil {
-		t.Fatalf("expected partial success, got error: %v", err)
+	var partial *datasource.PartialFetchError
+	if !errors.As(err, &partial) {
+		t.Fatalf("expected PartialFetchError, got %v", err)
+	}
+	if len(partial.Details) != 1 {
+		t.Fatalf("expected 1 feed error, got %v", partial.Details)
 	}
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items from healthy feed, got %d", len(items))
+	}
+}
+
+func TestConnector_Walk_PreservesCursorOnFeedFailure(t *testing.T) {
+	f := newFakeFeed(t)
+	cfg := makeConfig(f.feedURL(), "")
+	cfg.ResourceIDs = []string{f.feedURL()}
+
+	_, cursor, err := NewConnector().FetchIncremental(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("first sync error: %v", err)
+	}
+
+	f.failFeed.Store(true)
+	_, newCursor, err := NewConnector().FetchIncremental(context.Background(), cfg, cursor)
+	if err == nil {
+		t.Fatal("expected error when sole feed is unavailable")
+	}
+	if newCursor == nil || newCursor.ConnectorCursor == nil {
+		t.Fatal("expected cursor to be preserved on feed failure")
+	}
+
+	var restored rssCursor
+	b, err := json.Marshal(newCursor.ConnectorCursor)
+	if err != nil {
+		t.Fatalf("marshal cursor: %v", err)
+	}
+	if err := json.Unmarshal(b, &restored); err != nil {
+		t.Fatalf("unmarshal cursor: %v", err)
+	}
+	items := restored.FeedItems[f.feedURL()]
+	if len(items) != 2 {
+		t.Fatalf("expected preserved fingerprints for 2 items, got %d", len(items))
+	}
+	if items["guid-1"] == "" || items["guid-2"] == "" {
+		t.Fatalf("expected non-empty preserved fingerprints, got %+v", items)
 	}
 }
 

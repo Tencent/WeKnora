@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/textproto"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -639,7 +640,24 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		logger.Infof(ctx, "incremental sync fetched %d items", len(items))
 	}
 
+	var fetchWarnings []string
+	var partialFetch *datasource.PartialFetchError
+	if errors.As(fetchErr, &partialFetch) {
+		fetchWarnings = partialFetch.Details
+		fetchErr = nil
+	}
+
 	if fetchErr != nil {
+		// Persist connector cursor even when fetch failed so transient outages
+		// (e.g. RSS feed downtime) do not force a full re-ingest on recovery.
+		if nextCursor != nil {
+			if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
+				ds.LastSyncCursor = cursorJSON
+				if uerr := s.dsRepo.UpdateSyncState(ctx, ds); uerr != nil {
+					logger.Warnf(ctx, "failed to persist sync cursor after fetch error: %v", uerr)
+				}
+			}
+		}
 		logger.Errorf(ctx, "fetch operation failed: %v", fetchErr)
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
@@ -744,7 +762,17 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	ds.LastSyncAt = timePtr(time.Now().UTC())
-	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusSuccess, "", wasPaused)
+	syncStatus := types.SyncLogStatusSuccess
+	syncErrorMessage := ""
+	if len(fetchWarnings) > 0 {
+		syncStatus = types.SyncLogStatusPartial
+		syncErrorMessage = fmt.Sprintf("Some feeds failed: %s", strings.Join(fetchWarnings, "; "))
+		for _, w := range fetchWarnings {
+			result.Errors = append(result.Errors, w)
+		}
+		resultJSON, _ = result.ToJSON()
+	}
+	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused)
 
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
