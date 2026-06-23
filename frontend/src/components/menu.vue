@@ -137,7 +137,7 @@
                                                 :src="platformLogo(bucket.platform)" :alt="bucket.platform"
                                                 class="session-channel-inline-icon" />
                                             <t-icon v-else name="internet" class="session-channel-inline-icon"
-                                                size="12px" />
+                                                size="14px" />
                                             <span class="session-folder-label">{{ bucket.label }}</span>
                                         </span>
                                         <t-icon class="session-group-chevron"
@@ -155,12 +155,12 @@
                                     </div>
                                 </div>
                                 <div v-for="subitem in bucket.items" :key="subitem.id"
-                                    class="submenu_item_p session-chat-row session-folder-item"
-                                    :class="{
+                                    class="submenu_item_p session-chat-row session-folder-item" :class="{
                                         'session-chat-row--active': !batchMode && subitem.path === currentSecondpath,
                                         'session-chat-row--selected': batchMode && batchSelectedIds.includes(subitem.id),
                                     }">
-                                    <div class="session-list-row session-list-row--flat">
+                                    <div
+                                        class="session-list-row session-list-row--flat session-list-row--channel-nested">
                                         <div class="session-list-row__body">
                                             <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
                                                 :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
@@ -191,8 +191,7 @@
                                 </span>
                             </div>
                             <div v-for="subitem in group.items" :key="subitem.id"
-                                class="submenu_item_p session-chat-row"
-                                :class="{
+                                class="submenu_item_p session-chat-row" :class="{
                                     'session-chat-row--active': !batchMode && subitem.path === currentSecondpath,
                                     'session-chat-row--selected': batchMode && batchSelectedIds.includes(subitem.id),
                                 }">
@@ -1465,7 +1464,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
     .submenu {
         font-family: var(--app-font-family);
-        font-size: 14px;
+        font-size: 13px;
         font-style: normal;
         min-width: 0;
         padding-top: 3px;
@@ -1500,14 +1499,20 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .session-channels-section {
-        margin-bottom: 2px;
+        // 渠道图标 14px + 间距 6px → 子会话标题与文件夹文案左对齐
+        --sidebar-channel-icon-size: 14px;
+        --sidebar-channel-icon-gap: 6px;
+        --sidebar-channel-label-inset: calc(var(--sidebar-inset-x) + var(--sidebar-channel-icon-size) + var(--sidebar-channel-icon-gap));
+        margin-bottom: 4px;
 
         .session-folder-header {
-            font-size: 12px;
-            line-height: 20px;
+            min-height: 28px;
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 18px;
+            color: var(--td-text-color-secondary);
         }
 
-        // 与置顶会话一致：图标内联在标题前，间距 4px
         .session-folder-entry {
             display: inline-flex;
             align-items: center;
@@ -1518,9 +1523,9 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
         .session-channel-inline-icon {
             flex-shrink: 0;
-            width: 12px;
-            height: 12px;
-            margin-right: 4px;
+            width: var(--sidebar-channel-icon-size);
+            height: var(--sidebar-channel-icon-size);
+            margin-right: var(--sidebar-channel-icon-gap);
             object-fit: contain;
             filter: grayscale(1);
             opacity: 0.55;
@@ -1529,6 +1534,20 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         :deep(.session-channel-inline-icon.t-icon) {
             color: var(--td-text-color-secondary);
             opacity: 0.75;
+        }
+
+        .session-list-row--channel-nested {
+            padding-left: var(--sidebar-channel-label-inset);
+        }
+
+        .session-folder-item.session-chat-row .session-list-row {
+            min-height: 28px;
+        }
+
+        .session-folder-item :deep(.submenu_item) {
+            font-size: 13px;
+            line-height: 18px;
+            padding: 4px 0;
         }
     }
 
@@ -1590,9 +1609,10 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         padding-bottom: 2px;
         border-radius: 6px;
         cursor: pointer;
-        color: var(--td-text-color-primary);
+        color: var(--td-text-color-secondary);
         font-size: 13px;
-        line-height: 20px;
+        font-weight: 500;
+        line-height: 18px;
         user-select: none;
         outline: none;
 
@@ -1682,7 +1702,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         overflow: hidden;
 
         &.session-chat-row .session-list-row {
-            min-height: 30px;
+            min-height: 28px;
             border-radius: 6px;
             transition: background 0.15s ease, color 0.15s ease;
         }
@@ -1727,11 +1747,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         align-items: center;
         color: var(--td-text-color-primary);
         font-weight: 400;
-        font-size: 14px;
-        line-height: 20px;
+        font-size: 13px;
+        line-height: 18px;
         height: 100%;
         width: 100%;
-        padding: 6px 0;
+        padding: 5px 0;
         position: relative;
         min-width: 0;
         background: transparent;
