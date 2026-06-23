@@ -41,6 +41,9 @@ const (
 	// streamFlushInterval is how often buffered stream content is flushed to the IM platform.
 	// This prevents API rate-limiting while keeping perceived latency low.
 	streamFlushInterval = 300 * time.Millisecond
+	// agentCompleteWaitTimeout bounds how long IM waits for EventAgentComplete after
+	// the final answer stream finishes, preventing indefinite hangs.
+	agentCompleteWaitTimeout = 10 * time.Second
 )
 
 // imCitationTagRe matches inline citation tags produced by the agent pipeline.
@@ -583,6 +586,50 @@ func applyIMCompleteDataToMessage(msg *types.Message, data event.AgentCompleteDa
 	}
 	if steps := sanitizeIMAgentSteps(data.AgentSteps); len(steps) > 0 {
 		msg.AgentSteps = steps
+	}
+}
+
+// waitForIMAgentComplete blocks until EventAgentComplete, ctx cancellation, or timeout.
+func waitForIMAgentComplete(ctx context.Context, completeDone <-chan struct{}, sessionID string) {
+	timer := time.NewTimer(agentCompleteWaitTimeout)
+	defer timer.Stop()
+	select {
+	case <-completeDone:
+	case <-ctx.Done():
+		logger.Warnf(ctx, "[IM] QA context ended before agent complete event: session=%s", sessionID)
+	case <-timer.C:
+		logger.Warnf(ctx, "[IM] Timed out waiting for agent complete event: session=%s", sessionID)
+	}
+}
+
+// pickIMStoredAnswer returns the best available answer text from IM stream buffers.
+func pickIMStoredAnswer(candidates ...string) string {
+	for _, s := range candidates {
+		if strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// mergeIMAgentAnswerBuffers copies optimistic/live answers into persistence buffers
+// when EventAgentFinalAnswer did not populate answerBuilder (e.g. cancel before complete).
+func mergeIMAgentAnswerBuffers(answerBuilder, answerOuter, agentLiveAnswer *strings.Builder, completeFinal string) {
+	if answerBuilder.Len() > 0 {
+		return
+	}
+	switch {
+	case agentLiveAnswer.Len() > 0:
+		live := agentLiveAnswer.String()
+		answerBuilder.WriteString(live)
+		if answerOuter.Len() == 0 {
+			answerOuter.WriteString(live)
+		}
+	case answerOuter.Len() > 0:
+		answerBuilder.WriteString(answerOuter.String())
+	case strings.TrimSpace(completeFinal) != "":
+		answerBuilder.WriteString(completeFinal)
+		answerOuter.WriteString(completeFinal)
 	}
 }
 
@@ -1847,7 +1894,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		agentToolSteps    []IMToolStep
 		pipelineToolSteps []IMToolStep
 
-		streamedAny bool
+		agentCompleteFinalAnswer string
+		streamedAny              bool
 	)
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 	closeComplete := func() { completeOnce.Do(func() { close(completeDone) }) }
@@ -1957,13 +2005,9 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 		bufMu.Lock()
 		agentDone = true
+		agentCompleteFinalAnswer = data.FinalAnswer
 		applyIMCompleteDataToMessage(assistantMsg, data)
-		if answerBuilder.Len() == 0 && agentLiveAnswer.Len() > 0 {
-			answerBuilder.WriteString(agentLiveAnswer.String())
-			answerOuter.WriteString(agentLiveAnswer.String())
-		} else if answerBuilder.Len() == 0 && answerOuter.Len() > 0 {
-			answerBuilder.WriteString(answerOuter.String())
-		}
+		mergeIMAgentAnswerBuffers(&answerBuilder, &answerOuter, &agentLiveAnswer, data.FinalAnswer)
 		bufMu.Unlock()
 		closeComplete()
 		return nil
@@ -2147,21 +2191,23 @@ loop:
 	}
 
 	if useAgent {
-		select {
-		case <-completeDone:
-		case <-qaCtx.Done():
-			logger.Warnf(ctx, "[IM] QA context ended before agent complete event: session=%s", session.ID)
-		}
+		waitForIMAgentComplete(qaCtx, completeDone, session.ID)
 	}
 
 	bufMu.Lock()
 	parts := getStreamParts()
+	resolvedAnswer := pickIMStoredAnswer(
+		answerBuilder.String(),
+		answerOuter.String(),
+		agentLiveAnswer.String(),
+		agentCompleteFinalAnswer,
+	)
 	if parts.Answer == "" {
-		parts.Answer = answerBuilder.String()
+		parts.Answer = resolvedAnswer
 	}
-	answer := answerBuilder.String()
+	answer := resolvedAnswer
 	finalErr := qaErr
-	noVisibleContent := !streamedAny
+	noVisibleContent := !streamedAny && strings.TrimSpace(resolvedAnswer) == ""
 	bufMu.Unlock()
 
 	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc)
@@ -2296,6 +2342,9 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		}
 		answerMu.Lock()
 		applyIMCompleteDataToMessage(assistantMsg, data)
+		if answerBuilder.Len() == 0 && strings.TrimSpace(data.FinalAnswer) != "" {
+			answerBuilder.WriteString(data.FinalAnswer)
+		}
 		answerMu.Unlock()
 		closeComplete()
 		return nil
@@ -2339,11 +2388,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	select {
 	case <-done:
 		if useAgent {
-			select {
-			case <-completeDone:
-			case <-ctx.Done():
-				logger.Warnf(ctx, "[IM] QA context ended before agent complete event: session=%s", session.ID)
-			}
+			waitForIMAgentComplete(ctx, completeDone, session.ID)
 		}
 	case <-ctx.Done():
 		// Mark assistant message as completed to avoid dangling incomplete records

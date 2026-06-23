@@ -56,7 +56,7 @@ func (m *recordingStreamSender) snapshot() (chunks []string, final string, ended
 func TestStreamDisplayPipeline_agentScenario_redGreen(t *testing.T) {
 	// Simulates the agent IM stream lifecycle aligned with Web:
 	// 1) intermediate updates show styled thinking + tools
-	// 2) final replace shows collapsed think summary + answer
+	// 2) final replace shows answer only (no collapsed think header)
 	rawIntermediate := "<think>\n分析 Civilization VI 问题\n正在调用 搜索关键词...\n搜索关键词\n</think>\n\n"
 
 	rec := &recordingStreamSender{}
@@ -99,7 +99,7 @@ func TestStreamDisplayPipeline_agentScenario_redGreen(t *testing.T) {
 	if chunks[0] == final {
 		t.Fatal("intermediate update should differ from final answer-only content")
 	}
-	if finalized != "《文明6》是回合制策略游戏。" && !strings.Contains(finalized, "思考过程") {
+	if finalized != "《文明6》是回合制策略游戏。" {
 		t.Fatalf("FinalizeStream content = %q", finalized)
 	}
 	if !strings.Contains(finalized, "《文明6》是回合制策略游戏。") {

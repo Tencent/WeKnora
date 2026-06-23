@@ -1,7 +1,6 @@
 package im
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 )
@@ -122,37 +121,6 @@ func formatIMAgentIntermediate(parts IMStreamParts) string {
 	return strings.Join(sections, MarkdownThinkStyle.Separator)
 }
 
-// buildIMAgentCollapsedSummary returns a one-line collapsed think header (Web: tree root).
-func buildIMAgentCollapsedSummary(parts IMStreamParts) string {
-	think := strings.TrimSpace(agentThinkContent(parts))
-	if think == "" {
-		return ""
-	}
-	summary := formatIMAgentStepsSummary(parts)
-	line := "> 💭 **思考过程**"
-	if summary != "" {
-		line += " · " + summary
-	}
-	return line
-}
-
-func formatIMAgentStepsSummary(parts IMStreamParts) string {
-	toolCount := len(parts.AgentToolSteps)
-	hasNarrative := strings.TrimSpace(parts.AgentInner) != ""
-
-	var segments []string
-	if hasNarrative {
-		segments = append(segments, "思考 1 轮")
-	}
-	if toolCount > 0 {
-		segments = append(segments, fmt.Sprintf("调用 %d 次工具", toolCount))
-	}
-	if len(segments) == 0 {
-		return ""
-	}
-	return strings.Join(segments, " · ")
-}
-
 // formatIMQuickQAIntermediate mirrors Web RagPipelineProgress:
 // pipeline steps as plain lines, model reasoning in a separate "思考" block,
 // and once answer starts streaming the progress collapses to answer-only preview.
@@ -180,14 +148,9 @@ func FormatIMIntermediateFromParts(parts IMStreamParts, agentInProgress bool) st
 	return formatIMAgentIntermediate(parts)
 }
 
-// FormatIMFinalFromParts returns the final replace frame: collapsed think summary + answer for agent mode.
+// FormatIMFinalFromParts returns the final replace frame (answer-only for all modes).
 func FormatIMFinalFromParts(parts IMStreamParts) string {
 	answer := strings.TrimSpace(parts.Answer)
-	if parts.Mode == IMStreamModeAgent {
-		if collapsed := buildIMAgentCollapsedSummary(parts); collapsed != "" && answer != "" {
-			return collapsed + MarkdownThinkStyle.Separator + answer
-		}
-	}
 	if answer != "" {
 		return answer
 	}

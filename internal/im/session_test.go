@@ -2,6 +2,7 @@ package im
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/event"
@@ -256,5 +257,37 @@ func TestApplyIMCompleteDataToMessage(t *testing.T) {
 	}
 	if len(msg.AgentSteps) != 1 || msg.AgentSteps[0].ReasoningContent != "thinking" {
 		t.Fatalf("AgentSteps = %#v, want one thinking step", msg.AgentSteps)
+	}
+}
+
+func TestPickIMStoredAnswerPrefersFirstNonEmpty(t *testing.T) {
+	got := pickIMStoredAnswer("", "outer", "live", "complete")
+	if got != "outer" {
+		t.Fatalf("pickIMStoredAnswer = %q, want outer", got)
+	}
+	got = pickIMStoredAnswer("", "", "live", "complete")
+	if got != "live" {
+		t.Fatalf("pickIMStoredAnswer = %q, want live", got)
+	}
+}
+
+func TestMergeIMAgentAnswerBuffersUsesLiveThenComplete(t *testing.T) {
+	var builder, outer, live strings.Builder
+	live.WriteString("live answer")
+
+	mergeIMAgentAnswerBuffers(&builder, &outer, &live, "complete final")
+	if builder.String() != "live answer" {
+		t.Fatalf("builder = %q, want live answer", builder.String())
+	}
+	if outer.String() != "live answer" {
+		t.Fatalf("outer = %q, want live answer", outer.String())
+	}
+
+	builder.Reset()
+	outer.Reset()
+	live.Reset()
+	mergeIMAgentAnswerBuffers(&builder, &outer, &live, "complete final")
+	if builder.String() != "complete final" {
+		t.Fatalf("builder = %q, want complete final", builder.String())
 	}
 }

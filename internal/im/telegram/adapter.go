@@ -438,8 +438,11 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 	msgID := state.msgID
 	state.mu.Unlock()
 
-	if err := a.editMessage(ctx, chatID, msgID, finalContent, ""); err != nil {
-		logger.Warnf(ctx, "[Telegram] Failed to finalize stream: %v", err)
+	if err := a.editMessage(ctx, chatID, msgID, finalContent, "Markdown"); err != nil {
+		logger.Warnf(ctx, "[Telegram] Markdown finalize failed, retrying plain: %v", err)
+		if retryErr := a.editMessage(ctx, chatID, msgID, finalContent, ""); retryErr != nil {
+			logger.Warnf(ctx, "[Telegram] Failed to finalize stream: %v", retryErr)
+		}
 	}
 	return nil
 }

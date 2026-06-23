@@ -236,7 +236,7 @@ func TestFormatIMQuickQA_collapsesToAnswerWhenStreaming(t *testing.T) {
 	}
 }
 
-func TestFormatIMFinalFromParts_collapsesThinkForAgent(t *testing.T) {
+func TestFormatIMFinalFromParts_agentAnswerOnly(t *testing.T) {
 	parts := IMStreamParts{
 		Mode: IMStreamModeAgent,
 		AgentInner: "好的，让我搜索\n",
@@ -248,17 +248,11 @@ func TestFormatIMFinalFromParts_collapsesThinkForAgent(t *testing.T) {
 		Answer:     "文明6是一款策略游戏。",
 	}
 	got := FormatIMFinalFromParts(parts)
-	if !strings.Contains(got, "思考过程") {
-		t.Fatalf("final should keep collapsed think summary, got: %q", got)
+	if got != "文明6是一款策略游戏。" {
+		t.Fatalf("final should be answer-only, got: %q", got)
 	}
-	if !strings.Contains(got, "调用 2 次工具") {
-		t.Fatalf("final summary should mention tool count, got: %q", got)
-	}
-	if !strings.Contains(got, "文明6是一款策略游戏。") {
-		t.Fatalf("final must include answer, got: %q", got)
-	}
-	if strings.Contains(got, "检索知识库") {
-		t.Fatalf("final must not expand full tool lines, got: %q", got)
+	if strings.Contains(got, "思考过程") {
+		t.Fatalf("final must not include collapsed think header, got: %q", got)
 	}
 }
 
