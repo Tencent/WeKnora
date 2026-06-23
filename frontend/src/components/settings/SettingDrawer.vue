@@ -7,9 +7,9 @@
       <div class="setting-drawer-resize-line" />
     </div>
   </teleport>
-  <t-drawer v-model:visible="drawerVisible" :size="effectiveWidth" :z-index="2500" placement="right"
+  <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="2500" placement="right"
     attach="body" destroy-on-close
-    :class="['setting-drawer', { 'setting-drawer--resizing': drawerResizing }]">
+    :class="drawerClass">
     <!--
       Custom header. We replace TDesign's default header so we can put a leading
       icon badge and an optional subtitle (description) right next to the title,
@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, useAttrs, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
@@ -90,6 +90,8 @@ interface Props {
   hideFooter?: boolean
 }
 
+defineOptions({ inheritAttrs: false })
+
 const props = withDefaults(defineProps<Props>(), {
   description: '',
   icon: '',
@@ -112,6 +114,12 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const attrs = useAttrs()
+
+const drawerPassthroughAttrs = computed(() => {
+  const { class: _class, ...rest } = attrs
+  return rest
+})
 
 // ---------- visibility ----------
 const drawerVisible = computed({
@@ -172,6 +180,13 @@ const persistWidth = (width: number) => {
 
 // ---------- Custom drag-resize (visible handle, same as doc-content) ----------
 const drawerResizing = ref(false)
+
+const drawerClass = computed(() => [
+  'setting-drawer',
+  attrs.class,
+  { 'setting-drawer--resizing': drawerResizing.value },
+])
+
 let resizeStartX = 0
 let resizeStartWidth = 0
 

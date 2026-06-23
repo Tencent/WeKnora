@@ -30,6 +30,7 @@ const (
 	ChannelIM               = "im"                // Generic IM channel
 	ChannelNotion           = "notion"            // Notion
 	ChannelYuque            = "yuque"             // Yuque (语雀)
+	ChannelRSS              = "rss"               // RSS / Atom feed
 )
 
 // Knowledge parse status constants
