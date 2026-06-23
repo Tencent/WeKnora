@@ -348,6 +348,14 @@ const thinkingPending = computed(
     !props.session?.is_completed,
 )
 
+const isThinkingStreaming = computed(
+  () =>
+    showThinkingStep.value &&
+    thinkingExpanded.value &&
+    !hasAnswer.value &&
+    !props.session?.is_completed,
+)
+
 const visible = computed(
   () => steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value,
 )
@@ -427,6 +435,16 @@ function toggleThinking() {
   thinkingExpanded.value = !thinkingExpanded.value
 }
 
+function scrollThinkingDetailToBottom() {
+  nextTick(() => {
+    if (!rootElement.value) return
+    rootElement.value.querySelectorAll('.thinking-detail-content').forEach((el) => {
+      const htmlEl = el as HTMLElement
+      htmlEl.scrollTop = htmlEl.scrollHeight
+    })
+  })
+}
+
 watch(thinkingPending, (pending) => {
   if (pending) {
     thinkingExpanded.value = true
@@ -440,17 +458,13 @@ watch(hasAnswer, (answered) => {
 })
 
 watch(thinkingContent, () => {
-  if (!thinkingPending.value) return
-  nextTick(() => {
-    if (!rootElement.value) return
-    const els = rootElement.value.querySelectorAll('.thinking-detail-content')
-    els.forEach((el) => {
-      const htmlEl = el as HTMLElement
-      if (htmlEl.scrollHeight > htmlEl.clientHeight) {
-        htmlEl.scrollTop = htmlEl.scrollHeight
-      }
-    })
-  })
+  if (!isThinkingStreaming.value) return
+  scrollThinkingDetailToBottom()
+})
+
+watch(thinkingExpanded, (expanded) => {
+  if (!expanded || !isThinkingStreaming.value) return
+  scrollThinkingDetailToBottom()
 })
 </script>
 

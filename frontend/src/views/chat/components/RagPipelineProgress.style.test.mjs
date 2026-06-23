@@ -82,3 +82,9 @@ test('collapsed summary uses the same title-to-answer spacing as agent', () => {
   assert.match(source, /\.tree-container \{\s*margin: 0 0 16px;/)
   assert.match(source, /\.rag-pipeline-progress \{[\s\S]*margin: 0;/)
 })
+
+test('rag pipeline auto-scrolls capped thinking detail while streaming', () => {
+  assert.match(source, /isThinkingStreaming/)
+  assert.match(source, /scrollThinkingDetailToBottom/)
+  assert.match(source, /watch\(thinkingContent[\s\S]*scrollThinkingDetailToBottom/)
+})
