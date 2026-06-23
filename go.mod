@@ -18,6 +18,7 @@ require (
 	github.com/elastic/go-elasticsearch/v8 v8.19.6
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-gonic/gin v1.12.0
+	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/go-openapi/strfmt v0.26.2
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
@@ -87,6 +88,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
+	github.com/Azure/go-ntlmssp v0.1.0 // indirect
 	github.com/JohannesKaufmann/dom v0.2.0 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
@@ -147,6 +149,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/getsentry/sentry-go v0.30.0 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
+	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect
 	github.com/go-ego/gse v0.80.3 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect

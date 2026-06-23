@@ -185,13 +185,13 @@
 
           <div class="form-content">
             <t-form ref="formRef" :data="formData" :rules="formRules" @submit="handleLogin" layout="vertical">
-              <t-form-item :label="$t('auth.email')" name="email">
-                <t-input v-model="formData.email" :placeholder="$t('auth.emailPlaceholder')" type="text"
-                  autocomplete="email" size="large" :disabled="loading" />
+              <t-form-item :label="$t('auth.loginIdentifier')" name="email">
+                <t-input v-model="formData.email" :placeholder="$t('auth.loginIdentifierPlaceholder')" type="text"
+                  autocomplete="username" size="large" :disabled="loading" />
               </t-form-item>
 
               <t-form-item :label="$t('auth.password')" name="password">
-                <t-input v-model="formData.password" :placeholder="$t('auth.passwordPlaceholder')" type="password"
+                <t-input v-model="formData.password" :placeholder="$t('auth.loginPasswordPlaceholder')" type="password"
                   size="large" :disabled="loading" @enter="handleLogin" />
               </t-form-item>
 
@@ -448,15 +448,10 @@ const registerData = reactive<{ [key: string]: any }>({
 // Login form validation rules
 const formRules = computed(() => ({
   email: [
-    { required: true, message: t('auth.emailRequired'), type: 'error' },
-    { email: true, message: t('auth.emailInvalid'), type: 'error' }
+    { required: true, message: t('auth.loginIdentifierRequired'), type: 'error' }
   ],
   password: [
-    { required: true, message: t('auth.passwordRequired'), type: 'error' },
-    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
+    { required: true, message: t('auth.passwordRequired'), type: 'error' }
   ]
 }))
 

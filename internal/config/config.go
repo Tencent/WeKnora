@@ -24,6 +24,7 @@ type Config struct {
 	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
 	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
 	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
+	LDAPAuth        *LDAPAuthConfig        `yaml:"ldap_auth"        json:"ldap_auth"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
 	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
@@ -303,6 +304,24 @@ type OIDCAuthConfig struct {
 	UserInfoMapping       *OIDCUserInfoMapping `yaml:"user_info_mapping"      json:"user_info_mapping"`
 }
 
+type LDAPAuthConfig struct {
+	Enable            bool   `yaml:"enable"              json:"enable"`
+	LoginMode         string `yaml:"login_mode"          json:"login_mode"`
+	Host              string `yaml:"host"                json:"host"`
+	Domain            string `yaml:"domain"              json:"domain"`
+	Port              int    `yaml:"port"                json:"port"`
+	UseSSL            bool   `yaml:"use_ssl"             json:"use_ssl"`
+	BaseDN            string `yaml:"base_dn"             json:"base_dn"`
+	Timeout           int    `yaml:"timeout"             json:"timeout"`
+	DefaultTenantName string `yaml:"default_tenant_name" json:"default_tenant_name"`
+	DefaultRole       string `yaml:"default_role"        json:"default_role"`
+}
+
+const (
+	LDAPLoginModeOptional = "optional"
+	LDAPLoginModeRequired = "required"
+)
+
 // PromptTemplateI18n holds localized name and description for a prompt template.
 type PromptTemplateI18n struct {
 	Name        string `yaml:"name"        json:"name"`
@@ -561,6 +580,7 @@ func LoadConfig() (*Config, error) {
 
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
+	applyLDAPEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
@@ -606,6 +626,32 @@ func ValidateConfig(cfg *Config) error {
 		if strings.TrimSpace(cfg.OIDCAuth.DiscoveryURL) == "" &&
 			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
 			errs = append(errs, "oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and oidc_auth.token_endpoint are required when OIDC is enabled")
+		}
+	}
+
+	if cfg.LDAPAuth != nil {
+		ldapMode := strings.TrimSpace(cfg.LDAPAuth.LoginMode)
+		if ldapMode != "" && ldapMode != LDAPLoginModeOptional && ldapMode != LDAPLoginModeRequired {
+			errs = append(errs, fmt.Sprintf("ldap_auth.login_mode must be %q or %q, got %q",
+				LDAPLoginModeOptional, LDAPLoginModeRequired, ldapMode))
+		}
+		if ldapMode == LDAPLoginModeRequired && !cfg.LDAPAuth.Enable {
+			errs = append(errs, "ldap_auth.enable must be true when ldap_auth.login_mode is required")
+		}
+	}
+
+	if cfg.LDAPAuth != nil && cfg.LDAPAuth.Enable {
+		if strings.TrimSpace(cfg.LDAPAuth.Host) == "" {
+			errs = append(errs, "ldap_auth.host is required when LDAP is enabled")
+		}
+		if strings.TrimSpace(cfg.LDAPAuth.Domain) == "" {
+			errs = append(errs, "ldap_auth.domain is required when LDAP is enabled")
+		}
+		if cfg.LDAPAuth.Port < 0 || cfg.LDAPAuth.Port > 65535 {
+			errs = append(errs, "ldap_auth.port must be between 0 and 65535")
+		}
+		if role := types.TenantRole(strings.TrimSpace(cfg.LDAPAuth.DefaultRole)); role != "" && !role.IsValid() {
+			errs = append(errs, fmt.Sprintf("ldap_auth.default_role must be one of owner/admin/contributor/viewer, got %q", role))
 		}
 	}
 
@@ -723,6 +769,67 @@ func applyOIDCEnvOverrides(cfg *Config) {
 	}
 }
 
+func applyLDAPEnvOverrides(cfg *Config) {
+	if cfg.LDAPAuth == nil {
+		cfg.LDAPAuth = &LDAPAuthConfig{}
+	}
+
+	if value := strings.TrimSpace(os.Getenv("LDAP_ENABLED")); value != "" {
+		cfg.LDAPAuth.Enable = strings.EqualFold(value, "true")
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_LOGIN_MODE")); value != "" {
+		cfg.LDAPAuth.LoginMode = strings.ToLower(value)
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_HOST")); value != "" {
+		cfg.LDAPAuth.Host = value
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_DOMAIN")); value != "" {
+		cfg.LDAPAuth.Domain = value
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_PORT")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.LDAPAuth.Port = parsed
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_USE_SSL")); value != "" {
+		cfg.LDAPAuth.UseSSL = strings.EqualFold(value, "true")
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_BASE_DN")); value != "" {
+		cfg.LDAPAuth.BaseDN = value
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_TIMEOUT")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.LDAPAuth.Timeout = parsed
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_DEFAULT_TENANT_NAME")); value != "" {
+		cfg.LDAPAuth.DefaultTenantName = value
+	}
+	if value := strings.TrimSpace(os.Getenv("LDAP_DEFAULT_ROLE")); value != "" {
+		cfg.LDAPAuth.DefaultRole = value
+	}
+
+	if cfg.LDAPAuth.Port == 0 {
+		if cfg.LDAPAuth.UseSSL {
+			cfg.LDAPAuth.Port = 636
+		} else {
+			cfg.LDAPAuth.Port = 389
+		}
+	}
+	if cfg.LDAPAuth.Timeout <= 0 {
+		cfg.LDAPAuth.Timeout = 10
+	}
+	if strings.TrimSpace(cfg.LDAPAuth.LoginMode) == "" {
+		cfg.LDAPAuth.LoginMode = LDAPLoginModeOptional
+	}
+	if strings.TrimSpace(cfg.LDAPAuth.DefaultTenantName) == "" {
+		cfg.LDAPAuth.DefaultTenantName = "LDAP Users"
+	}
+	if strings.TrimSpace(cfg.LDAPAuth.DefaultRole) == "" {
+		cfg.LDAPAuth.DefaultRole = string(types.TenantRoleContributor)
+	}
+}
+
 func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 	if cfg.KnowledgeBase == nil {
 		cfg.KnowledgeBase = &KnowledgeBaseConfig{}
@@ -779,24 +886,27 @@ func applyAgentEnvOverrides(cfg *Config) {
 //     config.yaml `enable_rbac: false` or `WEKNORA_TENANT_ENABLE_RBAC=false`).
 //
 // Env overrides (when set and non-empty):
+//   - AUTH_REGISTRATION_MODE            ("self_serve"/"invite_only")
 //   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
 //   - WEKNORA_TENANT_MAX_OWNED_PER_USER (integer; <0 disables the cap,
 //     0 falls back to the handler default, >0 enforces that exact cap).
 //     Unparseable / empty values are ignored so a stale shell variable
 //     can't silently disable the quota for a future deployment.
 //
-// Note: auth.registration_mode has no dedicated env override. The
-// long-standing DISABLE_REGISTRATION=true env var is the single env-layer
-// knob and, when set, coerces registration_mode to invite_only here. That
-// way both the API gate (handler) and the /auth/config-driven UI gate
-// (frontend hides the register entry) stay consistent — without needing
-// two parallel env vars.
+// The long-standing DISABLE_REGISTRATION=true env var is still supported
+// as a conservative alias for AUTH_REGISTRATION_MODE=invite_only. When set,
+// it wins over any looser mode so both the API gate and /auth/config-driven
+// UI gate stay consistent.
 func applyAuthAndTenantDefaults(cfg *Config) {
 	if cfg.Auth == nil {
 		cfg.Auth = &AuthConfig{}
 	}
 	if cfg.Tenant == nil {
 		cfg.Tenant = &TenantConfig{}
+	}
+
+	if value := strings.TrimSpace(os.Getenv("AUTH_REGISTRATION_MODE")); value != "" {
+		cfg.Auth.RegistrationMode = value
 	}
 
 	if legacy := strings.TrimSpace(os.Getenv("DISABLE_REGISTRATION")); strings.EqualFold(legacy, "true") {

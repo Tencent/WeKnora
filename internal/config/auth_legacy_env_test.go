@@ -12,21 +12,26 @@ import "testing"
 func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t *testing.T) {
 	cases := []struct {
 		name     string
+		envMode  string // value for AUTH_REGISTRATION_MODE (empty == unset)
 		disable  string // value for DISABLE_REGISTRATION (empty == unset)
 		cfgMode  string // pre-set value on cfg.Auth.RegistrationMode
 		expected string
 	}{
-		{"true coerces empty YAML to invite_only", "true", "", AuthRegistrationModeInviteOnly},
-		{"case-insensitive TRUE also coerces", "TRUE", "", AuthRegistrationModeInviteOnly},
-		{"true overrides explicit self_serve YAML", "true", AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly},
-		{"true is a no-op when YAML already invite_only", "true", AuthRegistrationModeInviteOnly, AuthRegistrationModeInviteOnly},
-		{"false leaves YAML untouched", "false", AuthRegistrationModeSelfServe, AuthRegistrationModeSelfServe},
-		{"unset falls back to default self_serve", "", "", AuthRegistrationModeSelfServe},
-		{"unset keeps explicit invite_only YAML", "", AuthRegistrationModeInviteOnly, AuthRegistrationModeInviteOnly},
+		{"env mode sets invite_only", AuthRegistrationModeInviteOnly, "", "", AuthRegistrationModeInviteOnly},
+		{"env mode sets self_serve over YAML", AuthRegistrationModeSelfServe, "", AuthRegistrationModeInviteOnly, AuthRegistrationModeSelfServe},
+		{"legacy true overrides env self_serve", AuthRegistrationModeSelfServe, "true", "", AuthRegistrationModeInviteOnly},
+		{"true coerces empty YAML to invite_only", "", "true", "", AuthRegistrationModeInviteOnly},
+		{"case-insensitive TRUE also coerces", "", "TRUE", "", AuthRegistrationModeInviteOnly},
+		{"true overrides explicit self_serve YAML", "", "true", AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly},
+		{"true is a no-op when YAML already invite_only", "", "true", AuthRegistrationModeInviteOnly, AuthRegistrationModeInviteOnly},
+		{"false leaves YAML untouched", "", "false", AuthRegistrationModeSelfServe, AuthRegistrationModeSelfServe},
+		{"unset falls back to default self_serve", "", "", "", AuthRegistrationModeSelfServe},
+		{"unset keeps explicit invite_only YAML", "", "", AuthRegistrationModeInviteOnly, AuthRegistrationModeInviteOnly},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AUTH_REGISTRATION_MODE", tc.envMode)
 			t.Setenv("DISABLE_REGISTRATION", tc.disable)
 			// Other tenant env vars must not leak between cases.
 			t.Setenv("WEKNORA_TENANT_ENABLE_RBAC", "")
@@ -40,4 +45,40 @@ func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t 
 			}
 		})
 	}
+}
+
+func TestApplyLDAPEnvOverrides_LoginMode(t *testing.T) {
+	t.Run("defaults to optional", func(t *testing.T) {
+		t.Setenv("LDAP_ENABLED", "")
+		t.Setenv("LDAP_LOGIN_MODE", "")
+
+		cfg := &Config{}
+		applyLDAPEnvOverrides(cfg)
+
+		if cfg.LDAPAuth.LoginMode != LDAPLoginModeOptional {
+			t.Fatalf("login_mode = %q, want %q", cfg.LDAPAuth.LoginMode, LDAPLoginModeOptional)
+		}
+	})
+
+	t.Run("env can require LDAP", func(t *testing.T) {
+		t.Setenv("LDAP_ENABLED", "true")
+		t.Setenv("LDAP_LOGIN_MODE", "required")
+
+		cfg := &Config{LDAPAuth: &LDAPAuthConfig{Host: "ldap.example.com", Domain: "example.com"}}
+		applyLDAPEnvOverrides(cfg)
+
+		if cfg.LDAPAuth.LoginMode != LDAPLoginModeRequired {
+			t.Fatalf("login_mode = %q, want %q", cfg.LDAPAuth.LoginMode, LDAPLoginModeRequired)
+		}
+		if err := ValidateConfig(cfg); err != nil {
+			t.Fatalf("ValidateConfig returned error: %v", err)
+		}
+	})
+
+	t.Run("required mode needs LDAP enabled", func(t *testing.T) {
+		cfg := &Config{LDAPAuth: &LDAPAuthConfig{LoginMode: LDAPLoginModeRequired}}
+		if err := ValidateConfig(cfg); err == nil {
+			t.Fatal("ValidateConfig returned nil, want error")
+		}
+	})
 }
