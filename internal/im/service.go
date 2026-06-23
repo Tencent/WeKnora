@@ -1931,6 +1931,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		bufMu.Unlock()
 		closeDone()
+		closeComplete()
 		return nil
 	})
 
@@ -2102,6 +2103,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			bufMu.Unlock()
 			closeDone()
+			closeComplete()
 		}
 	}()
 
@@ -2252,6 +2254,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
 		answerMu.Unlock()
 		closeDone()
+		closeComplete()
 		return nil
 	})
 
@@ -2328,6 +2331,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 			qaErr = fmt.Errorf("QA execution error: %w", err)
 			answerMu.Unlock()
 			closeDone()
+			closeComplete()
 		}
 	}()
 
