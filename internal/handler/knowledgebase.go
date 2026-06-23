@@ -794,11 +794,12 @@ type UpdateKnowledgeBaseRequest struct {
 	Name        string                     `json:"name"        binding:"required"`
 	Description string                     `json:"description"`
 	Config      *types.KnowledgeBaseConfig `json:"config"`
+	VLMConfig   *types.VLMConfig           `json:"vlm_config"`
 }
 
 // UpdateKnowledgeBase godoc
 // @Summary      更新知识库
-// @Description  更新知识库的名称、描述和配置
+// @Description  更新知识库的名称、描述、配置和多模态配置
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
@@ -838,7 +839,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
 	// Update the knowledge base
-	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config)
+	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config, req.VLMConfig)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(apperrors.NewInternalServerError(err.Error()))

@@ -119,6 +119,10 @@ export function updateKnowledgeBase(id: string, data: {
       graph_enabled: boolean;
     };
   }
+  vlm_config?: {
+    enabled: boolean;
+    model_id?: string;
+  };
 }) {
   return put(`/api/v1/knowledge-bases/${id}` , data);
 }

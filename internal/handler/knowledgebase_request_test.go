@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
 // TestUpdateKBRequest_DoesNotAcceptVectorStoreID is the structural enforcement
@@ -61,4 +63,21 @@ func assertNoVectorStoreIDField(t *testing.T, typ reflect.Type) {
 		}
 	}
 	visit(typ, typ.Name())
+}
+
+func TestUpdateKBRequest_AcceptsVLMConfig(t *testing.T) {
+	payload := []byte(`{
+		"name": "kb",
+		"description": "desc",
+		"vlm_config": {
+			"enabled": true,
+			"model_id": "vlm-model-1"
+		}
+	}`)
+
+	var req UpdateKnowledgeBaseRequest
+	require.NoError(t, json.Unmarshal(payload, &req))
+	require.NotNil(t, req.VLMConfig)
+	require.True(t, req.VLMConfig.Enabled)
+	require.Equal(t, "vlm-model-1", req.VLMConfig.ModelID)
 }
