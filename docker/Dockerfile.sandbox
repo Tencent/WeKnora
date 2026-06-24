@@ -8,6 +8,12 @@ FROM node:20-slim AS node-base
 # Stage 2: Final image
 FROM python:3.11-slim
 
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s@http://deb.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources && \
+        sed -i "s@http://security.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+
 # Copy Node.js from node image (avoids NodeSource install overhead)
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/
 COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules

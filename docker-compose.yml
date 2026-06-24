@@ -15,6 +15,12 @@ services:
       # For remote deployment, set this to the remote App's service port.
       - APP_PORT=${APP_BACKEND_PORT:-8080}
       - APP_SCHEME=${APP_SCHEME:-http}
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - http_proxy=
+      - https_proxy=
+      - NO_PROXY=localhost,127.0.0.1,::1,app,postgres,redis,minio,docreader,qdrant,milvus,weaviate,doris-fe,doris-be,langfuse-web,langfuse-worker,langfuse-clickhouse,langfuse-minio,neo4j,searxng,mcp
+      - no_proxy=localhost,127.0.0.1,::1,app,postgres,redis,minio,docreader,qdrant,milvus,weaviate,doris-fe,doris-be,langfuse-web,langfuse-worker,langfuse-clickhouse,langfuse-minio,neo4j,searxng,mcp
     # NOTE: If using a remote App backend, comment out or remove the depends_on
     # block below and set APP_HOST/APP_BACKEND_PORT/APP_SCHEME in your .env file.
     depends_on:
@@ -31,6 +37,8 @@ services:
       dockerfile: docker/Dockerfile.app
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
+        - PIP_INDEX_URL=${PIP_INDEX_URL:-}
+        - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -81,6 +89,17 @@ services:
       - DB_NAME=${DB_NAME:-}
       - TZ=${TZ:-Asia/Shanghai}
       - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
+      - AUTH_REGISTRATION_MODE=${AUTH_REGISTRATION_MODE:-}
+      - LDAP_ENABLED=${LDAP_ENABLED:-false}
+      - LDAP_LOGIN_MODE=${LDAP_LOGIN_MODE:-optional}
+      - LDAP_HOST=${LDAP_HOST:-}
+      - LDAP_PORT=${LDAP_PORT:-}
+      - LDAP_DOMAIN=${LDAP_DOMAIN:-}
+      - LDAP_USE_SSL=${LDAP_USE_SSL:-false}
+      - LDAP_BASE_DN=${LDAP_BASE_DN:-}
+      - LDAP_TIMEOUT=${LDAP_TIMEOUT:-}
+      - LDAP_DEFAULT_TENANT_NAME=${LDAP_DEFAULT_TENANT_NAME:-}
+      - LDAP_DEFAULT_ROLE=${LDAP_DEFAULT_ROLE:-}
       # ========== Langfuse (optional observability) ==========
       # Enabled automatically when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are set.
       # See docs/Langfuse集成.md for the full list of tuning knobs.
@@ -195,12 +214,22 @@ services:
       - WEKNORA_ASYNQ_CONCURRENCY=${WEKNORA_ASYNQ_CONCURRENCY:-32}
       - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
       - WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL=${WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL:-}
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - http_proxy=
+      - https_proxy=
+      - NO_PROXY=localhost,127.0.0.1,::1,postgres,redis,minio,docreader,qdrant,milvus,weaviate,doris-fe,doris-be,langfuse-web,langfuse-worker,langfuse-clickhouse,langfuse-minio,neo4j,searxng,mcp,${NO_PROXY_EXTRA:-}
+      - no_proxy=localhost,127.0.0.1,::1,postgres,redis,minio,docreader,qdrant,milvus,weaviate,doris-fe,doris-be,langfuse-web,langfuse-worker,langfuse-clickhouse,langfuse-minio,neo4j,searxng,mcp,${NO_PROXY_EXTRA:-}
     depends_on:
       redis:
         condition: service_started
       postgres:
         condition: service_healthy
       docreader:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      neo4j:
         condition: service_healthy
     networks:
       - WeKnora-network
@@ -215,6 +244,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.sandbox
+      args:
+        - APT_MIRROR=${APT_MIRROR:-}
     profiles:
       - full
     command: ["true"]
@@ -227,6 +258,8 @@ services:
       dockerfile: docker/Dockerfile.docreader
       args:
         - APT_MIRROR=${APT_MIRROR:-}
+        - PIP_INDEX_URL=${PIP_INDEX_URL:-}
+        - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}
     container_name: WeKnora-docreader
     # docreader gRPC ships without auth/TLS and is only consumed by the app
     # container over the WeKnora-network (DOCREADER_ADDR defaults to
@@ -274,6 +307,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.odl-hybrid
+      args:
+        - APT_MIRROR=${APT_MIRROR:-}
+        - PIP_INDEX_URL=${PIP_INDEX_URL:-}
+        - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}
     image: weknora-odl-hybrid:local
     container_name: WeKnora-odl-hybrid
     profiles:
@@ -288,8 +325,10 @@ services:
 
   # 修改的PostgreSQL配置
   postgres:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: ${POSTGRES_IMAGE:-paradedb/paradedb:v0.22.2-pg17}
     container_name: WeKnora-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
@@ -387,10 +426,6 @@ services:
       retries: 3
     networks:
       - WeKnora-network
-    profiles:
-      - minio
-      - full
-
   neo4j:
     image: neo4j:2025.10.1
     container_name: WeKnora-neo4j
@@ -401,23 +436,25 @@ services:
       - NEO4J_apoc_export_file_enabled=true
       - NEO4J_apoc_import_file_enabled=true
       - NEO4J_apoc_import_file_use__neo4j__config=true
-      - NEO4JLABS_PLUGINS=["apoc"]
+      - NEO4J_PLUGINS=["apoc"]
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u '${NEO4J_USERNAME:-neo4j}' -p '${NEO4J_PASSWORD:-password}' 'RETURN 1;' >/dev/null"]
+      interval: 30s
+      timeout: 20s
+      retries: 10
+      start_period: 90s
     restart: always
     networks:
       - WeKnora-network
-    profiles:
-      - neo4j
-      - full
-
   qdrant:
     image: qdrant/qdrant:v1.16.2
     container_name: WeKnora-qdrant
     ports:
       - "${QDRANT_REST_PORT:-6333}:6333"
-      - "${QDRANT_PORT:-6334}:6334"
+      - "${QDRANT_GRPC_HOST_PORT:-6334}:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
@@ -467,6 +504,7 @@ services:
       - CLUSTER_GOSSIP_BIND_PORT=7000
       - CLUSTER_DATA_BIND_PORT=7001
       - RAFT_BOOTSTRAP_EXPECT=1
+      - ENABLE_TOKENIZER_GSE=true
     ports:
       - "9035:8080"
       - "50052:50051"
@@ -498,8 +536,12 @@ services:
     image: apache/doris:fe-4.1.0
     container_name: WeKnora-doris-fe
     hostname: doris-fe
+    entrypoint:
+      - bash
+      - -lc
+      - sed -i 's/-Dfile.encoding=UTF-8/-XX:-UseContainerSupport -Dfile.encoding=UTF-8/g; s/-Xmx8192m -Xms8192m/-Xmx2048m -Xms2048m/g' fe/conf/fe.conf && exec bash init_fe.sh
     environment:
-      - FE_SERVERS=fe1:doris-fe:9010
+      - FE_SERVERS=fe1:172.19.0.50:9010
       - FE_ID=1
     ports:
       - "${DORIS_FE_HTTP_PORT:-8030}:8030"
@@ -508,7 +550,8 @@ services:
       - doris_fe_meta:/opt/apache-doris/fe/doris-meta
       - doris_fe_log:/opt/apache-doris/fe/log
     networks:
-      - WeKnora-network
+      WeKnora-network:
+        ipv4_address: 172.19.0.50
     restart: unless-stopped
     profiles:
       - doris
@@ -518,8 +561,8 @@ services:
     container_name: WeKnora-doris-be
     hostname: doris-be
     environment:
-      - FE_SERVERS=fe1:doris-fe:9010
-      - BE_ADDR=doris-be:9050
+      - FE_SERVERS=fe1:172.19.0.50:9010
+      - BE_ADDR=172.19.0.51:9050
     depends_on:
       - doris-fe
     ports:
@@ -528,7 +571,8 @@ services:
       - doris_be_storage:/opt/apache-doris/be/storage
       - doris_be_log:/opt/apache-doris/be/log
     networks:
-      - WeKnora-network
+      WeKnora-network:
+        ipv4_address: 172.19.0.51
     restart: unless-stopped
     profiles:
       - doris
@@ -767,6 +811,9 @@ services:
   mcp:
     build:
       context: ./mcp-server
+      args:
+        - PIP_INDEX_URL=${PIP_INDEX_URL:-}
+        - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}
     container_name: WeKnora-mcp
     ports:
       - "${MCP_PORT:-8082}:8000"

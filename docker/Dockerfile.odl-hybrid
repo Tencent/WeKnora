@@ -7,6 +7,14 @@
 # ODL_HYBRID_EXTRA_ARGS="--force-ocr" (requires extra system/Python deps).
 FROM python:3.10.18-bookworm
 
+ARG APT_MIRROR=""
+ARG PIP_INDEX_URL=""
+ARG PIP_TRUSTED_HOST=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s@http://deb.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources && \
+        sed -i "s@http://security.debian.org@${APT_MIRROR}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+
 # Docling table/layout models import cv2 (OpenCV), which needs libGL at runtime
 # even when hybrid runs with --no-ocr.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -17,6 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     && rm -rf /var/lib/apt/lists/*
 
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
 RUN pip install --no-cache-dir "opendataloader-pdf[hybrid]>=2.4.7"
 
 EXPOSE 5002

@@ -158,42 +158,46 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 // Login authenticates a user and returns tokens
 func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*types.LoginResponse, error) {
 	logger.Info(ctx, "Start user login")
-	// Get user by email
-	user, err := s.userRepo.GetUserByEmail(ctx, req.Email)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get user by email: %v", err)
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Invalid email or password",
-		}, nil
-	}
-	if user == nil {
-		logger.Warn(ctx, "User not found for email")
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Invalid email or password",
-		}, nil
+	identifier := strings.TrimSpace(req.Email)
+
+	var user *types.User
+	localAuthenticated := false
+	if !s.isLDAPLoginRequired() {
+		localUser, err := s.findLoginUser(ctx, identifier)
+		if err != nil && !isUserLookupNotFound(err) {
+			logger.Errorf(ctx, "Failed to get login user: %v", err)
+			return &types.LoginResponse{Success: false, Message: "Invalid account or password"}, nil
+		}
+		if localUser != nil && strings.TrimSpace(localUser.PasswordHash) != "" {
+			if err := bcrypt.CompareHashAndPassword([]byte(localUser.PasswordHash), []byte(req.Password)); err == nil {
+				user = localUser
+				localAuthenticated = true
+				logger.Info(ctx, "Password verification successful")
+			} else {
+				logger.Warn(ctx, "Password verification failed")
+			}
+		}
 	}
 
-	// Check if user is active
+	if !localAuthenticated && s.shouldTryLDAPLogin(identifier) {
+		ldapUser, ldapErr := s.loginWithLDAP(ctx, identifier, req.Password)
+		if ldapErr == nil {
+			user = ldapUser
+			logger.Info(ctx, "LDAP verification successful")
+		} else {
+			logger.Warnf(ctx, "LDAP login failed for %s: %v", secutils.SanitizeForLog(identifier), ldapErr)
+		}
+	}
+
+	if user == nil {
+		logger.Warn(ctx, "User not found after authentication")
+		return &types.LoginResponse{Success: false, Message: "Invalid account or password"}, nil
+	}
+
 	if !user.IsActive {
 		logger.Warn(ctx, "User account is disabled")
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Account is disabled",
-		}, nil
+		return &types.LoginResponse{Success: false, Message: "Account is disabled"}, nil
 	}
-
-	// Verify password
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password))
-	if err != nil {
-		logger.Warn(ctx, "Password verification failed")
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Invalid email or password",
-		}, nil
-	}
-	logger.Info(ctx, "Password verification successful")
 
 	// Generate tokens. Resolve the target tenant once so the JWT claim
 	// and the tenant we return below agree — otherwise an honoured
