@@ -75,7 +75,7 @@ const currentOption = computed(() =>
 const iconFor = (item: SourceItem | undefined): string => {
   if (!item) return 'chat'
   if (item.value === DEFAULT_SESSION_BUCKET_KEY) return 'chat'
-  if (item.value.startsWith('embed:')) return 'internet'
+  if (item.value.startsWith('embed:')) return 'code'
   return 'link'
 }
 

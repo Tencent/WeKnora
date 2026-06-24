@@ -71,6 +71,29 @@
                       </div>
                     </div>
 
+                    <!-- 集成渠道状态（编辑模式，配置在集成中心） -->
+                    <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('integrations.agentEditor.label') }}</label>
+                        <p class="desc">{{ $t('integrations.agentEditor.desc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <div class="integration-inline">
+                          <span class="integration-inline__stat">
+                            {{ $t('integrations.tabs.im') }} · {{ agentIMChannelCount }}
+                          </span>
+                          <span class="integration-inline__sep" aria-hidden="true">|</span>
+                          <span class="integration-inline__stat">
+                            {{ $t('integrations.tabs.embed') }} · {{ agentEmbedChannelCount }}
+                          </span>
+                          <button type="button" class="integration-inline__link" @click="gotoIntegrations">
+                            <span>{{ $t('integrations.agentEditor.manage') }}</span>
+                            <t-icon name="chevron-right" size="14px" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
                     <!-- 运行模式（首先选择） -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -1315,39 +1338,6 @@
                   v-show="currentSection === 'share'" class="section">
                   <AgentShareSettings :agent-id="editorAgent.id" :agent="editorAgent" />
                 </div>
-
-                <!-- IM集成（仅编辑模式） -->
-                <div v-if="editorMode === 'edit' && editorAgent?.id && currentSection === 'im'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agentEditor.im.title') }}</h2>
-                    <p class="section-description">
-                      {{ $t('agentEditor.im.description') }}
-                      <a href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md"
-                        target="_blank" rel="noopener noreferrer" class="doc-link">
-                        {{ $t('agentEditor.im.docLink') }}
-                        <t-icon name="link" class="link-icon" />
-                      </a>
-                    </p>
-                  </div>
-                  <div class="settings-group">
-                    <IMChannelPanel :agent-id="editorAgent.id" />
-                  </div>
-                </div>
-
-                <!-- 网页嵌入（仅编辑模式） -->
-                <div v-if="editorMode === 'edit' && editorAgent?.id && currentSection === 'embed'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agentEditor.embed.title') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.embed.description') }}</p>
-                  </div>
-                  <div class="settings-group">
-                    <AgentEmbedChannelPanel
-                      :agent-id="editorAgent.id"
-                      :agent-web-search-enabled="formData.config?.web_search_enabled === true"
-                      :agent-image-upload-enabled="formData.config?.image_upload_enabled === true"
-                    />
-                  </div>
-                </div>
               </div>
 
               <!-- 底部操作栏 -->
@@ -1372,6 +1362,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { useRouter } from 'vue-router';
 import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
 import {
   AGENT_EDITOR_FOCUS_SECTION_EVENT,
@@ -1382,6 +1373,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
   updateAgent,
+  listIMChannels,
   type CustomAgent,
   type PlaceholderDefinition,
   type AgentTypePreset,
@@ -1403,8 +1395,7 @@ import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
-import IMChannelPanel from '@/components/IMChannelPanel.vue';
-import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue';
+import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import {
   evaluateToolRequirement,
@@ -1415,6 +1406,7 @@ import {
 
 const uiStore = useUIStore();
 const authStore = useAuthStore();
+const router = useRouter();
 const orgStore = useOrganizationStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
@@ -1472,7 +1464,7 @@ const currentSection = ref(props.initialSection || 'basic');
 
 const onAgentEditorFocusSection = (event: Event) => {
   const section = (event as CustomEvent<{ section?: string }>).detail?.section
-  if (section) {
+  if (section && navItems.value.some((item) => item.key === section)) {
     currentSection.value = section
   }
 }
@@ -1857,13 +1849,9 @@ const navItems = computed(() => {
   if (isAgentMode.value && skillsAvailable.value) {
     items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
   }
-  // 发布与集成（仅编辑模式）
+  // 发布（仅编辑模式）
   if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') });
-  }
-  if (editorMode.value === 'edit' && editorAgent.value?.id) {
-    items.push({ key: 'im', icon: 'chat-message', label: t('agentEditor.im.title') });
-    items.push({ key: 'embed', icon: 'internet', label: t('agentEditor.embed.title') });
   }
   return items;
 });
@@ -1892,7 +1880,7 @@ const navGroups = computed(() => {
     {
       key: 'integration',
       label: t('agentEditor.navGroups.integration'),
-      items: pickItems(['share', 'im', 'embed']),
+      items: pickItems(['share']),
     },
   ].filter((group) => group.items.length > 0);
 });
@@ -2078,6 +2066,30 @@ watch(currentSection, (section) => {
     syncActivePromptAnchor();
   }
 });
+
+const agentIMChannelCount = ref(0);
+const agentEmbedChannelCount = ref(0);
+
+async function loadAgentIntegrationCounts(agentId: string) {
+  try {
+    const [imResp, embedResp] = await Promise.all([
+      listIMChannels(agentId),
+      listEmbedChannels(agentId),
+    ]);
+    agentIMChannelCount.value = imResp?.data?.length ?? 0;
+    agentEmbedChannelCount.value = embedResp?.data?.length ?? 0;
+  } catch {
+    agentIMChannelCount.value = 0;
+    agentEmbedChannelCount.value = 0;
+  }
+}
+
+function gotoIntegrations() {
+  const agentId = editorAgent.value?.id;
+  if (!agentId) return;
+  handleClose();
+  router.push({ path: '/platform/integrations', query: { agentId } });
+}
 
 const filteredIntentPlaceholders = computed(() => {
   if (!intentPromptPopup.value.prefix) {
@@ -2492,6 +2504,7 @@ watch(() => props.visible, async (val) => {
       if (agentData.is_builtin) {
         fillBuiltinAgentDefaults();
       }
+      void loadAgentIntegrationCounts(agentData.id);
     } else {
       // 创建新智能体，使用系统默认值
       const newFormData = JSON.parse(JSON.stringify(defaultFormData));
@@ -2557,6 +2570,9 @@ watch(() => props.visible, async (val) => {
       }
       applyDefaultChatModelIfEmpty()
     }
+  } else {
+    agentIMChannelCount.value = 0;
+    agentEmbedChannelCount.value = 0;
   }
 });
 
@@ -4256,6 +4272,46 @@ const handleSave = async () => {
 
   :deep(.t-input-number) {
     width: 120px;
+  }
+}
+
+.integration-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+
+  &__stat {
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+  }
+
+  &__sep {
+    color: var(--td-component-stroke);
+    font-size: 12px;
+  }
+
+  &__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 4px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--td-brand-color);
+    cursor: pointer;
+
+    &:hover {
+      opacity: 0.85;
+    }
+
+    :deep(.t-icon) {
+      display: block;
+    }
   }
 }
 

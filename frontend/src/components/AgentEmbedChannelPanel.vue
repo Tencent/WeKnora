@@ -20,7 +20,7 @@
             @click="openDrawer(ch)"
           >
             <div class="channel-card__badge">
-              <t-icon name="internet" size="18px" />
+              <t-icon name="code" size="18px" />
             </div>
             <div class="channel-card__body">
               <div class="channel-card__header">
@@ -75,7 +75,7 @@
       v-model:visible="showDrawer"
       :title="drawerTitle"
       :description="drawerDescription"
-      icon="internet"
+      icon="code"
       storage-key="setting-drawer:embed-channel"
       :confirm-loading="saving"
       :hide-footer="!isAdmin"
@@ -84,6 +84,16 @@
     >
       <section class="setting-drawer__section embed-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionChannel') }}</h4>
+
+        <div v-if="tenantMode && !editingId" class="form-item">
+          <label class="form-label">{{ $t('integrations.selectAgent') }}</label>
+          <t-select
+            v-model="createAgentId"
+            :options="agentOptions"
+            filterable
+            :placeholder="$t('integrations.selectAgentPlaceholder')"
+          />
+        </div>
 
         <div v-if="editingId && isAdmin" class="form-item">
           <div class="enable-row">
@@ -182,7 +192,7 @@
             <div class="setting-info">
               <label>{{ $t('embedPublish.allowWebSearch') }}</label>
               <p class="desc">{{ $t('embedPublish.allowWebSearchDesc') }}</p>
-              <p v-if="form.allow_web_search && !agentWebSearchEnabled" class="desc desc--warn">
+              <p v-if="form.allow_web_search && !agentWebSearchEnabledEffective" class="desc desc--warn">
                 {{ $t('embedPublish.agentWebSearchDisabledHint') }}
               </p>
             </div>
@@ -199,7 +209,7 @@
             <div class="setting-info">
               <label>{{ $t('embedPublish.allowFileUpload') }}</label>
               <p class="desc">{{ $t('embedPublish.allowFileUploadDesc') }}</p>
-              <p v-if="form.allow_file_upload && !agentImageUploadEnabled" class="desc desc--warn">
+              <p v-if="form.allow_file_upload && !agentImageUploadEnabledEffective" class="desc desc--warn">
                 {{ $t('embedPublish.agentImageUploadDisabledHint') }}
               </p>
             </div>
@@ -477,6 +487,7 @@ import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import EmbedChannelPreview from '@/components/EmbedChannelPreview.vue'
 import {
   listEmbedChannels,
+  listAllEmbedChannels,
   createEmbedChannel,
   updateEmbedChannel,
   deleteEmbedChannel,
@@ -498,12 +509,17 @@ import {
   validateAllowedOrigins,
   type AllowedOriginsValidationError,
 } from '@/utils/embedAllowedOrigins'
+import { listAgents, type CustomAgent } from '@/api/agent'
 
-const props = defineProps<{
-  agentId: string
+const props = withDefaults(defineProps<{
+  agentId?: string
+  tenantMode?: boolean
+  initialAgentId?: string
   agentWebSearchEnabled?: boolean
   agentImageUploadEnabled?: boolean
-}>()
+}>(), {
+  tenantMode: false,
+})
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -530,6 +546,38 @@ const originsError = ref('')
 const drawerSnippetTab = ref<'iframe' | 'widget' | 'secure'>('iframe')
 const secureServerLangTab = ref<'node' | 'go'>('node')
 const sessionStats = ref<Record<string, number>>({})
+const agents = ref<CustomAgent[]>([])
+const createAgentId = ref('')
+
+const agentOptions = computed(() =>
+  agents.value.map((agent) => ({ label: agent.name, value: agent.id })),
+)
+
+const drawerAgentId = computed(() => {
+  if (!props.tenantMode) return props.agentId || ''
+  if (editingId.value) {
+    return drawerChannel.value?.agent_id || ''
+  }
+  return createAgentId.value
+})
+
+const drawerAgent = computed(() =>
+  agents.value.find((agent) => agent.id === drawerAgentId.value),
+)
+
+const agentWebSearchEnabledEffective = computed(() => {
+  if (props.tenantMode) {
+    return drawerAgent.value?.config?.web_search_enabled === true
+  }
+  return props.agentWebSearchEnabled === true
+})
+
+const agentImageUploadEnabledEffective = computed(() => {
+  if (props.tenantMode) {
+    return drawerAgent.value?.config?.image_upload_enabled === true
+  }
+  return props.agentImageUploadEnabled === true
+})
 
 const EMBED_TOKEN_STORAGE = 'weknora_embed_publish_tokens'
 const WEKNORA_BRAND_COLOR = '#07C05F'
@@ -618,6 +666,10 @@ const channelSummary = (ch: EmbedChannel) => {
   const parts = [
     `${t('embedPublish.rateLimit')} ${ch.rate_limit_per_minute || 30}${t('embedPublish.rateLimitUnit')}`,
   ]
+  if (props.tenantMode) {
+    const agentName = agents.value.find((agent) => agent.id === ch.agent_id)?.name
+    if (agentName) parts.unshift(agentName)
+  }
   if (ch.allowed_origins?.length) {
     parts.push(t('embedPublish.originsCount', { n: ch.allowed_origins.length }))
   }
@@ -644,11 +696,20 @@ const storeToken = (channelId: string, token: string) => {
 }
 
 const load = async () => {
-  if (!props.agentId) return
+  if (!props.tenantMode && !props.agentId) return
   loading.value = true
   try {
-    const res = await listEmbedChannels(props.agentId)
-    channels.value = res?.data || []
+    if (props.tenantMode) {
+      const [res, agentRes] = await Promise.all([
+        listAllEmbedChannels(),
+        listAgents(),
+      ])
+      channels.value = res?.data || []
+      agents.value = agentRes?.data || []
+    } else {
+      const res = await listEmbedChannels(props.agentId!)
+      channels.value = res?.data || []
+    }
     tokenByChannel.value = { ...loadStoredTokens(), ...tokenByChannel.value }
     await Promise.all(channels.value.map(async (ch) => {
       try {
@@ -665,8 +726,8 @@ const load = async () => {
   }
 }
 
-watch(() => props.agentId, () => {
-  if (props.agentId) load()
+watch(() => [props.tenantMode, props.agentId], () => {
+  if (props.tenantMode || props.agentId) load()
 }, { immediate: true })
 
 const tokenFor = (ch: EmbedChannel) => tokenByChannel.value[ch.id] || ch.publish_token
@@ -779,6 +840,7 @@ const fillFormFromChannel = (ch: EmbedChannel) => {
 const openCreate = () => {
   editingId.value = ''
   editingEnabled.value = true
+  createAgentId.value = props.tenantMode ? (props.initialAgentId || '') : ''
   form.value = defaultForm()
   originsText.value = ''
   originsError.value = ''
@@ -854,7 +916,12 @@ const saveForm = async () => {
       const updated = channels.value.find((ch) => ch.id === editingId.value) ?? res?.data
       if (updated) fillFormFromChannel(updated)
     } else {
-      const res = await createEmbedChannel(props.agentId, payload)
+      const targetAgentId = props.tenantMode ? createAgentId.value : props.agentId
+      if (!targetAgentId) {
+        MessagePlugin.warning(t('integrations.selectAgentHint'))
+        return
+      }
+      const res = await createEmbedChannel(targetAgentId, payload)
       if (res?.data?.publish_token) {
         storeToken(res.data.id, res.data.publish_token)
         revealedTokens[res.data.id] = true

@@ -1128,6 +1128,13 @@ const fetchList = (force = false) => {
 const checkAndOpenEditModal = () => {
   const editId = route.query.edit as string
   const section = route.query.section as string
+  if (editId && (section === 'im' || section === 'embed' || section === 'integrations')) {
+    router.replace({
+      path: '/platform/integrations',
+      query: { tab: section, agentId: editId },
+    })
+    return
+  }
   if (editId) {
     const agent = agents.value.find(a => a.id === editId)
     if (agent) {
