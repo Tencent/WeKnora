@@ -1099,16 +1099,19 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   const toolsAllowFiles = !hasAgentConfig.value || toolsConsumeFiles(agentAllowedTools.value);
   const shouldLoadFiles = kbModeAllowsFiles && toolsAllowFiles;
 
-  // 后端 /knowledge/search 要求非空 keyword；打开 @ 面板时仅展示本地 KB 列表，
-  // 用户输入搜索词后再拉取文件结果。
+  // 空关键词时显式请求最近文件；有关键词时返回匹配文件。
+  // `recent=true` 只用于浏览态，避免其他搜索调用漏传关键词时静默退化为最近列表。
   const fileSearchKeyword = q.trim();
-  if (shouldLoadFiles && fileSearchKeyword) {
+  if (shouldLoadFiles) {
     mentionLoading.value = true;
     try {
       const fileTypesParam = agentSupportedFileTypes.value.length > 0 ? agentSupportedFileTypes.value : undefined;
       const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
       const agentId = selectedAgentId.value;
-      const searchOptions = sourceTenantId && agentId ? { agent_id: agentId } : undefined;
+      const searchOptions = {
+        ...(sourceTenantId && agentId ? { agent_id: agentId } : {}),
+        recent: !fileSearchKeyword,
+      };
       const res: any = await searchKnowledge(
         fileSearchKeyword,
         mentionOffset.value,
@@ -2366,6 +2369,8 @@ const getImgSrc = (url: string) => {
 }
 </script>
 <style scoped lang="less">
+@import './css/chat-resource-chips.less';
+
 .answers-input {
   position: absolute;
   z-index: 99;
@@ -2418,18 +2423,24 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip {
+  .chat-resource-chip-surface();
+
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 6px 3px 5px;
-  border-radius: 6px;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 7px 3px 6px;
+  border-radius: var(--td-radius-medium, 6px);
+  box-sizing: border-box;
   font-size: 12px;
   font-weight: 500;
   cursor: default;
-  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
-  border: .5px solid transparent;
-  color: var(--td-text-color-primary, #1f2937);
-  line-height: 1.3;
+  transition: background 0.15s, border-color 0.15s;
+  line-height: 18px;
+
+  &:hover {
+    .chat-resource-chip-hover();
+  }
 }
 
 .mention-chip__icon-wrap {
@@ -2441,7 +2452,6 @@ const getImgSrc = (url: string) => {
   min-width: 0;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
 }
 
 .mention-chip__icon {
@@ -2493,7 +2503,7 @@ const getImgSrc = (url: string) => {
   line-height: 1;
   font-weight: 400;
   cursor: pointer;
-  opacity: 0.45;
+  opacity: 0.5;
   transition: opacity 0.15s, background 0.15s, color 0.15s;
   color: currentColor;
   flex-shrink: 0;
@@ -2505,72 +2515,39 @@ const getImgSrc = (url: string) => {
 
 .mention-chip__remove:hover {
   opacity: 1;
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--td-bg-color-component);
   color: var(--td-text-color-primary, #1f2937);
 }
 
-/* 知识库：浅绿/青色调 */
+/* 标签表面保持中性，仅用图标颜色表达资源类型。 */
 .mention-chip--kb {
-  background: rgba(5, 192, 95, 0.08);
-  border-color: rgba(5, 192, 95, 0.25);
-  color: var(--td-text-color-primary, #1f2937);
+  color: var(--td-text-color-primary);
 }
 
 .mention-chip--kb .mention-chip__icon-wrap {
-  background: rgba(5, 192, 95, 0.12);
   color: var(--td-brand-color, #07c05f);
 }
 
-.mention-chip--kb:hover {
-  background: rgba(5, 192, 95, 0.12);
-  border-color: rgba(5, 192, 95, 0.35);
-}
-
-/* FAQ：浅紫/靛色调 */
 .mention-chip--faq {
-  background: rgba(107, 114, 228, 0.08);
-  border-color: rgba(107, 114, 228, 0.25);
-  color: var(--td-text-color-primary, #1f2937);
+  color: var(--td-text-color-primary);
 }
 
 .mention-chip--faq .mention-chip__icon-wrap {
-  background: rgba(107, 114, 228, 0.12);
-  color: var(--td-brand-color);
+  color: var(--weknora-faq-color, #0052d9);
 }
 
-.mention-chip--faq:hover {
-  background: rgba(107, 114, 228, 0.12);
-  border-color: rgba(107, 114, 228, 0.35);
-}
-
-/* 文件：浅灰/中性色 */
 .mention-chip--file {
-  background: var(--td-bg-color-secondarycontainer, #f3f4f6);
-  border-color: var(--td-component-stroke, #e5e7eb);
-  color: var(--td-text-color-primary, #1f2937);
+  color: var(--td-text-color-primary);
 }
 
 .mention-chip--file .mention-chip__icon-wrap {
-  background: rgba(107, 114, 128, 0.12);
   color: var(--td-text-color-secondary, #6b7280);
-}
-
-.mention-chip--file:hover {
-  background: var(--td-bg-color-component, #e5e7eb);
-  border-color: var(--td-component-stroke, #d1d5db);
 }
 
 /* 智能体预配置：虚线边框区分 */
 .mention-chip--agent {
   border-style: dashed;
-}
-
-.mention-chip--agent.mention-chip--kb {
-  border-color: rgba(5, 192, 95, 0.4);
-}
-
-.mention-chip--agent.mention-chip--faq {
-  border-color: rgba(107, 114, 228, 0.4);
+  border-color: var(--td-component-border);
 }
 
 :deep(.t-textarea__inner) {
@@ -2709,16 +2686,18 @@ const getImgSrc = (url: string) => {
 
 .kb-btn {
   height: 28px;
-  padding: 0 10px;
-  min-width: auto;
+  width: 30px;
+  padding: 0;
+  min-width: 30px;
   position: relative;
 
   &.active {
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
+    box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 
     &:hover {
-      background: rgba(16, 185, 129, 0.15);
+      background: var(--td-bg-color-secondarycontainer-hover);
     }
   }
 
@@ -2731,23 +2710,26 @@ const getImgSrc = (url: string) => {
     }
 
     &.active:hover {
-      background: rgba(16, 185, 129, 0.1);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 }
 
 .kb-count {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
+  top: -5px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
   background: var(--td-brand-color);
-  color: white;
-  font-size: 10px;
+  color: var(--td-text-color-anti, #fff);
+  font-size: 9px;
   font-weight: 600;
-  border-radius: 8px;
+  line-height: 15px;
+  border: 2px solid var(--td-bg-color-container);
+  border-radius: var(--td-radius-round, 999px);
+  box-sizing: content-box;
   display: flex;
   align-items: center;
   justify-content: center;

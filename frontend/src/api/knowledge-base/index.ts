@@ -458,16 +458,19 @@ export function searchKnowledge(
   offset = 0,
   limit = 20,
   fileTypes?: string[],
-  options?: { agent_id?: string }
+  options?: { agent_id?: string; recent?: boolean }
 ) {
   const query = new URLSearchParams();
-  query.set('keyword', keyword);
+  if (keyword) {
+    query.set('keyword', keyword);
+  }
   query.set('offset', String(offset));
   query.set('limit', String(limit));
   if (fileTypes && fileTypes.length > 0) {
     query.set('file_types', fileTypes.join(','));
   }
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.recent) query.set('recent', 'true');
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }
 

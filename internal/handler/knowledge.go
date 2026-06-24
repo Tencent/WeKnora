@@ -1811,7 +1811,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 
 // SearchKnowledge godoc
 // @Summary      Search knowledge
-// @Description  Search knowledge files by keyword. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.
+// @Description  Search knowledge files by keyword. Pass recent=true without a keyword to browse recent files. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.
 // @Tags         Knowledge
 // @Accept       json
 // @Produce      json
@@ -1820,6 +1820,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Param        limit      query     int     false "Limit for pagination (default 20)"
 // @Param        file_types query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
 // @Param        agent_id   query     string  false "Shared agent ID (search within agent's KB scope)"
+// @Param        recent     query     bool    false "Return recent files when keyword is empty"
 // @Success      200         {object}  map[string]interface{}     "Search results"
 // @Failure      400         {object}  errors.AppError            "Invalid request"
 // @Security     Bearer
@@ -1831,18 +1832,19 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
 	}
 	// Accept both ?keyword= (legacy / upstream name) and ?query= (what most
-	// MCP / agent integrations send). Falling silently back to an unsorted
-	// listing when both are empty caused the "all queries return the same 5
-	// newest cards" footgun — return 400 instead so the caller gets a clear
-	// signal that the search wasn't query-driven.
+	// MCP / agent integrations send). Empty input is only valid for an explicit
+	// recent-file browse request; ordinary callers still get a clear 400 instead
+	// of silently receiving the same newest cards for every missing query.
 	keyword := c.Query("keyword")
 	if keyword == "" {
 		keyword = c.Query("query")
 	}
-	if strings.TrimSpace(keyword) == "" {
+	recent, _ := strconv.ParseBool(c.DefaultQuery("recent", "false"))
+	if strings.TrimSpace(keyword) == "" && !recent {
 		c.Error(errors.NewBadRequestError("missing search keyword: pass ?keyword=... or ?query=..."))
 		return
 	}
+	keyword = strings.TrimSpace(keyword)
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 

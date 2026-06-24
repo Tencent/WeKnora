@@ -8,8 +8,8 @@
         :key="item.id"
         placement="right-start"
         trigger="hover"
-        :show-arrow="true"
-        :delay="[200, 0]"
+        :show-arrow="false"
+        :delay="[320, 80]"
         :disabled="isScrolling"
         :overlay-class-name="'mention-detail-popup'"
         :overlay-inner-class-name="'mention-detail-popup-wrap'"
@@ -28,7 +28,7 @@
           </div>
           <div class="item-main">
             <span class="name">{{ item.name }}</span>
-            <span class="count">({{ item.count || 0 }})</span>
+            <span class="count">{{ item.count || 0 }}</span>
           </div>
         </div>
         <template #content>
@@ -82,8 +82,8 @@
         :key="item.id"
         placement="right-start"
         trigger="hover"
-        :show-arrow="true"
-        :delay="[200, 0]"
+        :show-arrow="false"
+        :delay="[320, 80]"
         :disabled="isScrolling"
         :overlay-class-name="'mention-detail-popup'"
         :overlay-inner-class-name="'mention-detail-popup-wrap'"
@@ -301,59 +301,62 @@ const scrollToItem = (index: number) => {
   position: fixed;
   z-index: 10000;
   background: var(--td-bg-color-container, #fff);
-  border: 1px solid var(--td-component-border, #e7e9eb);
-  border-radius: var(--td-radius-medium, 6px);
-  box-shadow: var(--td-shadow-2, 0 3px 14px 2px rgba(0, 0, 0, 0.05));
-  width: 300px;
-  max-height: 360px;
+  border: 1px solid var(--td-component-stroke, #e7e9eb);
+  border-radius: var(--td-radius-extraLarge, 12px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
+  width: 288px;
+  max-height: 344px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 4px 0;
+  padding: 6px 0;
 }
 
 .mention-group {
-  padding: 4px 0;
+  padding: 2px 0 5px;
 }
 
 .mention-group:not(:last-child) {
-  border-bottom: 1px solid var(--td-component-border, #f0f0f0);
+  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
 }
 
 .mention-group-header {
-  padding: 8px 12px 4px;
+  padding: 7px 14px 5px;
   font-size: var(--td-font-size-mark-small, 12px);
   font-weight: 600;
-  color: var(--td-text-color-secondary, #999);
+  line-height: 18px;
+  color: var(--td-text-color-placeholder, #999);
 }
 
 .mention-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  margin: 0 4px;
+  min-height: 40px;
+  padding: 7px 10px;
+  margin: 1px 6px;
+  box-sizing: border-box;
   cursor: pointer;
-  border-radius: var(--td-radius-default, 3px);
+  border-radius: var(--td-radius-medium, 6px);
   color: var(--td-text-color-primary, #333);
   font-size: var(--td-font-size-body-medium, 14px);
   font-family: var(--app-font-family);
-  transition: background 0.2s cubic-bezier(0.38, 0, 0.24, 1);
+  transition: background 0.15s ease;
 }
 
 .mention-item:hover {
-  background: var(--td-bg-color-container-hover, #f3f3f3);
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
 }
 
 .mention-item.active {
-  background: var(--td-brand-color-light, #e9f8ec);
-  color: var(--td-brand-color, #07c05f);
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  color: var(--td-text-color-primary, #333);
 }
 
 .icon-wrap {
   position: relative;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 
@@ -361,11 +364,10 @@ const scrollToItem = (index: number) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--td-radius-small, 2px);
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  /* background: var(--td-bg-color-secondarycontainer, #f3f3f3); */
+  font-size: 16px;
 }
 
 /* 右下角组织角标：柔和小圆 + 绿色/灰色 icon，不刺眼 */
@@ -399,9 +401,11 @@ const scrollToItem = (index: number) => {
 }
 
 .mention-item.active .icon {
-  /* Active state keeps the colored icon but maybe adjusts background or just inherits */
-  background: transparent;
-  color: inherit;
+  color: var(--td-brand-color);
+}
+
+.mention-item.active .faq-icon {
+  color: var(--weknora-faq-color, #0052d9);
 }
 
 .item-main {
@@ -413,6 +417,7 @@ const scrollToItem = (index: number) => {
 }
 
 .name {
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -425,9 +430,11 @@ const scrollToItem = (index: number) => {
 }
 
 .count {
+  margin-left: auto;
   flex-shrink: 0;
   font-size: var(--td-font-size-mark-small, 12px);
-  color: var(--td-text-color-secondary, #999);
+  font-variant-numeric: tabular-nums;
+  color: var(--td-text-color-placeholder, #999);
 }
 
 .org-name {
@@ -451,7 +458,7 @@ const scrollToItem = (index: number) => {
 }
 
 .empty {
-  padding: 24px 12px;
+  padding: 28px 16px;
   text-align: center;
   color: var(--td-text-color-placeholder, #999);
   font-size: var(--td-font-size-body-medium, 14px);
@@ -467,16 +474,16 @@ const scrollToItem = (index: number) => {
 <style>
 /* 详情浮层在 Teleport 中，需全局样式 */
 .mention-detail-popup-wrap.t-popup__content {
-  padding: 12px;
-  max-width: 320px;
-  min-width: 240px;
-}
-/* 箭头对齐到触发条目的垂直中心（条目高约36px，箭头应在距顶部约18px处） */
-.mention-detail-popup.t-popup[data-popper-placement^="right"] > .t-popup__arrow {
-  top: 14px !important;
+  min-width: 220px;
+  max-width: 280px;
+  padding: 13px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-large, 9px);
+  background: var(--td-bg-color-container);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 .mention-detail-content {
-  font-size: var(--td-font-size-body-medium, 14px);
+  font-size: var(--td-font-size-body-small, 12px);
   color: var(--td-text-color-primary, #333);
   line-height: 1.5;
 }
@@ -494,26 +501,30 @@ const scrollToItem = (index: number) => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .mention-detail-content .detail-name {
   font-weight: 600;
-  font-size: var(--td-font-size-body-large, 14px);
+  font-size: var(--td-font-size-body-medium, 14px);
+  line-height: 20px;
   word-break: break-word;
 }
 .mention-detail-content .detail-type-badge {
   flex-shrink: 0;
-  padding: 2px 6px;
-  border-radius: var(--td-radius-small, 2px);
+  padding: 1px 6px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-medium, 6px);
   font-size: var(--td-font-size-mark-small, 12px);
+  line-height: 18px;
 }
 .mention-detail-content .detail-type-badge.doc {
-  background: rgba(16, 185, 129, 0.1);
-  color: var(--td-success-color);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-brand-color);
 }
 .mention-detail-content .detail-type-badge.faq {
-  background: rgba(0, 82, 217, 0.1);
-  color: var(--td-brand-color);
+  border-color: rgba(0, 82, 217, 0.16);
+  background: rgba(0, 82, 217, 0.08);
+  color: var(--weknora-faq-color, #0052d9);
 }
 .mention-detail-content .detail-desc {
   margin: 0 0 8px;
@@ -532,7 +543,7 @@ const scrollToItem = (index: number) => {
   color: var(--td-text-color-placeholder, #999);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   align-items: flex-start;
 }
 .mention-detail-content .detail-readonly-hint {
