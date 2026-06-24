@@ -142,6 +142,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
+	must(container.Provide(repository.NewProcessingDashboardRepository))
 	must(container.Provide(repository.NewChunkRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
@@ -188,6 +189,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewAgentShareService))
 	must(container.Provide(service.NewKnowledgeService))
 	must(container.Provide(service.NewSpanTracker))
+	must(container.Provide(service.NewProcessingDashboardService))
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
@@ -264,6 +266,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// dequeue of pending/scheduled/retry tasks + active-task cancel).
 		must(container.Provide(router.NewAsynqInspector))
 		must(container.Provide(router.NewAsynqTaskInspector))
+		must(container.Provide(router.NewAsynqProcessingQueueSnapshotReader))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
@@ -272,6 +275,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// dispatches inline goroutines that the checkpoint-based abort
 		// already handles.
 		must(container.Provide(router.NewNoopTaskInspector))
+		must(container.Provide(router.NewNoopProcessingQueueSnapshotReader))
 	}
 
 	// Chat pipeline components for processing chat requests
@@ -316,6 +320,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
+	must(container.Provide(handler.NewProcessingDashboardHandler))
 	must(container.Provide(handler.NewChunkHandler))
 	must(container.Provide(handler.NewFAQHandler))
 	must(container.Provide(handler.NewTagHandler))
