@@ -62,10 +62,11 @@ type knowledgeService struct {
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 
 	// In-memory fallbacks for Lite mode (no Redis)
-	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
-	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo
-	wikiRepo            interfaces.WikiPageRepository
-	wikiService         interfaces.WikiPageService
+	memFAQProgress         sync.Map // taskID -> *types.FAQImportProgress
+	memFAQRunningImport    sync.Map // kbID -> *runningFAQImportInfo
+	memRetryFailedProgress sync.Map // taskID -> *types.KnowledgeRetryFailedProgress
+	wikiRepo               interfaces.WikiPageRepository
+	wikiService            interfaces.WikiPageService
 
 	// spanTracker records the per-attempt span tree for the parsing
 	// pipeline. Best-effort: a nil tracker (test harness) is safely

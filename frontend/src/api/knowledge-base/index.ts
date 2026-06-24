@@ -127,6 +127,36 @@ export function rebuildKBIndex(kbId: string) {
   return post(`/api/v1/knowledge-bases/${kbId}/rebuild-index`, {});
 }
 
+export interface RetryFailedDocumentsResponse {
+  task_id: string
+  kb_id: string
+  total: number
+  message: string
+}
+
+export interface RetryFailedDocumentsProgress {
+  task_id: string
+  kb_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  progress: number
+  total: number
+  processed: number
+  failed: number
+  skipped: number
+  message: string
+  error: string
+  created_at: number
+  updated_at: number
+}
+
+export function retryFailedDocuments(kbId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/retry-failed-documents`, {});
+}
+
+export function getRetryFailedDocumentsProgress(taskId: string) {
+  return get(`/api/v1/knowledge-bases/retry-failed-documents/progress/${taskId}`);
+}
+
 export function deleteKnowledgeBase(id: string) {
   return del(`/api/v1/knowledge-bases/${id}`);
 }

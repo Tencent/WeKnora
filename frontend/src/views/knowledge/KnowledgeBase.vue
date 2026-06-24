@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, type ComponentPublicInstance } from "vue";
-import { MessagePlugin } from "tdesign-vue-next";
+import { DialogPlugin, MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timeline.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
@@ -26,7 +26,9 @@ const editorResources = useEditorResourcesStore();
 const router = useRouter();
 import {
   batchQueryKnowledge,
+  getRetryFailedDocumentsProgress,
   listKnowledgeTags,
+  listKnowledgeFiles,
   updateKnowledgeTagBatch,
   createKnowledgeBaseTag,
   updateKnowledgeBaseTag,
@@ -34,10 +36,12 @@ import {
   uploadKnowledgeFile,
   createKnowledgeFromURL,
   reparseKnowledge,
+  retryFailedDocuments,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  type RetryFailedDocumentsProgress,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
@@ -397,6 +401,33 @@ const moveMode = ref<'reuse_vectors' | 'reparse'>('reuse_vectors');
 const moveSubmitting = ref(false);
 let movePollTimer: ReturnType<typeof setInterval> | null = null;
 
+const failedDocumentCount = ref(0);
+const failedCountLoading = ref(false);
+const retryFailedSubmitting = ref(false);
+const retryFailedProgressVisible = ref(false);
+const retryFailedProgress = ref<RetryFailedDocumentsProgress | null>(null);
+let retryFailedPollTimer: ReturnType<typeof setInterval> | null = null;
+const retryFailedDoneCount = computed(() => {
+  const progress = retryFailedProgress.value;
+  if (!progress) return 0;
+  return (progress.processed || 0) + (progress.failed || 0) + (progress.skipped || 0);
+});
+const retryFailedProgressPercent = computed(() => {
+  const progress = retryFailedProgress.value;
+  if (!progress) return 0;
+  if (typeof progress.progress === 'number') return Math.min(100, Math.max(0, progress.progress));
+  if (!progress.total) return 0;
+  return Math.round((retryFailedDoneCount.value / progress.total) * 100);
+});
+const retryFailedButtonDisabled = computed(() =>
+  isFAQ.value || !canEdit.value || failedCountLoading.value || retryFailedSubmitting.value || failedDocumentCount.value === 0
+);
+const retryFailedButtonTip = computed(() => {
+  if (failedCountLoading.value) return t('knowledgeBase.retryFailedDocumentsCounting');
+  if (failedDocumentCount.value === 0) return t('knowledgeBase.retryFailedDocumentsDisabled');
+  return t('knowledgeBase.retryFailedDocumentsCountTip', { count: failedDocumentCount.value });
+});
+
 // View mode (grid / list) — persisted per browser
 type DocViewMode = 'grid' | 'list';
 const VIEW_MODE_KEY = 'weknora.kb.docs.viewMode';
@@ -591,10 +622,33 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
       ...filterParams.value,
     },
     kbIdValue,
-  );
+  ).finally(() => {
+    refreshFailedDocumentCount(kbIdValue);
+  });
 };
 
 const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
+
+const refreshFailedDocumentCount = async (kbIdValue: string) => {
+  if (!kbIdValue || isFAQ.value || !canEdit.value) {
+    failedDocumentCount.value = 0;
+    return;
+  }
+  failedCountLoading.value = true;
+  try {
+    const res: any = await listKnowledgeFiles(kbIdValue, {
+      page: 1,
+      page_size: 1,
+      parse_status: 'failed',
+    });
+    if (!isCurrentKb(kbIdValue)) return;
+    failedDocumentCount.value = Number(res?.total || 0);
+  } catch {
+    if (isCurrentKb(kbIdValue)) failedDocumentCount.value = 0;
+  } finally {
+    if (isCurrentKb(kbIdValue)) failedCountLoading.value = false;
+  }
+};
 
 const loadTags = async (kbIdValue: string, reset = false) => {
   if (!kbIdValue) {
@@ -1057,11 +1111,22 @@ onUnmounted(() => {
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
+  stopRetryFailedPoll();
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
   }
 });
+watch([kbId, isFAQ, canEdit], ([newKbId, newIsFAQ, newCanEdit]) => {
+  stopRetryFailedPoll();
+  retryFailedSubmitting.value = false;
+  retryFailedProgressVisible.value = false;
+  retryFailedProgress.value = null;
+  failedDocumentCount.value = 0;
+  if (newKbId && !newIsFAQ && newCanEdit) {
+    refreshFailedDocumentCount(newKbId);
+  }
+}, { immediate: true });
 watch(() => cardList.value, (newValue) => {
   if (isFAQ.value) return;
   docListLoading.value = false;
@@ -1344,6 +1409,105 @@ const stopMovePoll = () => {
     clearInterval(movePollTimer);
     movePollTimer = null;
   }
+};
+
+const confirmRetryFailedDocuments = () => {
+  if (!kbId.value || retryFailedButtonDisabled.value) return;
+  const confirmDialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.retryFailedDocumentsConfirmTitle'),
+    body: t('knowledgeBase.retryFailedDocumentsConfirm', { count: failedDocumentCount.value }),
+    confirmBtn: t('knowledgeBase.retryFailedDocumentsConfirmButton'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      confirmDialog.hide();
+      await submitRetryFailedDocuments();
+    },
+  });
+};
+
+const submitRetryFailedDocuments = async () => {
+  if (!kbId.value || retryFailedSubmitting.value) return;
+  retryFailedSubmitting.value = true;
+  try {
+    const res: any = await retryFailedDocuments(kbId.value);
+    const data = res?.data || {};
+    if (!data.task_id || !data.total) {
+      MessagePlugin.info(t('knowledgeBase.retryFailedDocumentsNoFailed'));
+      failedDocumentCount.value = 0;
+      retryFailedSubmitting.value = false;
+      return;
+    }
+
+    retryFailedProgress.value = {
+      task_id: data.task_id,
+      kb_id: data.kb_id || kbId.value,
+      status: 'pending',
+      progress: 0,
+      total: data.total || 0,
+      processed: 0,
+      failed: 0,
+      skipped: 0,
+      message: data.message || '',
+      error: '',
+      created_at: 0,
+      updated_at: 0,
+    };
+    retryFailedProgressVisible.value = true;
+    MessagePlugin.info(t('knowledgeBase.retryFailedDocumentsSubmittedStart'));
+    startRetryFailedPoll(data.task_id);
+  } catch (error: any) {
+    retryFailedSubmitting.value = false;
+    MessagePlugin.error(error?.message || t('knowledgeBase.retryFailedDocumentsFailed'));
+  }
+};
+
+const startRetryFailedPoll = (taskId: string) => {
+  stopRetryFailedPoll();
+  const poll = async () => {
+    try {
+      const res: any = await getRetryFailedDocumentsProgress(taskId);
+      const data = res?.data as RetryFailedDocumentsProgress | undefined;
+      if (!data) return;
+      retryFailedProgress.value = data;
+
+      if (data.status === 'completed') {
+        stopRetryFailedPoll();
+        retryFailedSubmitting.value = false;
+        finishRetryFailedProgress(data);
+      } else if (data.status === 'failed') {
+        stopRetryFailedPoll();
+        retryFailedSubmitting.value = false;
+        MessagePlugin.error(data.error || data.message || t('knowledgeBase.retryFailedDocumentsFailed'));
+        resetPage();
+        loadKnowledgeFiles(kbId.value);
+      }
+    } catch {
+      // Keep polling; transient progress read failures should not stop the submission view.
+    }
+  };
+  poll();
+  retryFailedPollTimer = setInterval(poll, 2000);
+};
+
+const stopRetryFailedPoll = () => {
+  if (retryFailedPollTimer) {
+    clearInterval(retryFailedPollTimer);
+    retryFailedPollTimer = null;
+  }
+};
+
+const finishRetryFailedProgress = (progress: RetryFailedDocumentsProgress) => {
+  const failed = progress.failed || 0;
+  const skipped = progress.skipped || 0;
+  const processed = progress.processed || 0;
+  if (failed > 0 || skipped > 0) {
+    MessagePlugin.warning(t('knowledgeBase.retryFailedDocumentsPartial', { processed, failed, skipped }));
+  } else {
+    MessagePlugin.success(t('knowledgeBase.retryFailedDocumentsSubmitted', { count: processed }));
+  }
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
+  scheduleWikiStatusProbes();
 };
 
 const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => {
@@ -2237,6 +2401,22 @@ async function createNewSession(value: string): Promise<void> {
                   </t-tooltip>
                 </div>
                 <div v-if="canEdit" class="doc-filter-actions">
+                  <t-tooltip :content="retryFailedButtonTip" placement="top">
+                    <t-button
+                      size="small"
+                      theme="default"
+                      variant="outline"
+                      class="retry-failed-documents-btn"
+                      :disabled="retryFailedButtonDisabled"
+                      :loading="failedCountLoading || retryFailedSubmitting"
+                      @click="confirmRetryFailedDocuments"
+                    >
+                      <template #icon>
+                        <t-icon name="refresh" size="16px" />
+                      </template>
+                      {{ $t('knowledgeBase.retryFailedDocuments') }}
+                    </t-button>
+                  </t-tooltip>
                   <KbUploadSourceDropdown
                     ref="uploadSourceRef"
                     :accept-file-types="acceptFileTypes"
@@ -2632,6 +2812,30 @@ async function createNewSession(value: string): Promise<void> {
   <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
     :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
+
+  <t-dialog
+    v-model:visible="retryFailedProgressVisible"
+    :header="$t('knowledgeBase.retryFailedDocumentsProgressTitle')"
+    :footer="false"
+    width="420px"
+    :close-on-overlay-click="false"
+  >
+    <div class="retry-failed-progress">
+      <div class="retry-failed-progress__line">
+        {{ $t('knowledgeBase.retryFailedDocumentsProgressText', {
+          done: retryFailedDoneCount,
+          total: retryFailedProgress?.total || 0
+        }) }}
+      </div>
+      <t-progress :percentage="retryFailedProgressPercent" :label="false"
+        :status="retryFailedProgress?.status === 'failed' ? 'error' : retryFailedProgress?.status === 'completed' ? 'success' : 'active'" />
+      <div class="retry-failed-progress__meta">
+        <span>{{ $t('knowledgeBase.retryFailedDocumentsProcessed', { count: retryFailedProgress?.processed || 0 }) }}</span>
+        <span>{{ $t('knowledgeBase.retryFailedDocumentsSkipped', { count: retryFailedProgress?.skipped || 0 }) }}</span>
+        <span>{{ $t('knowledgeBase.retryFailedDocumentsSubmitFailed', { count: retryFailedProgress?.failed || 0 }) }}</span>
+      </div>
+    </div>
+  </t-dialog>
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
 </template>
@@ -3172,7 +3376,15 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .doc-filter-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     flex-shrink: 0;
+
+    .retry-failed-documents-btn {
+      max-width: 168px;
+      white-space: nowrap;
+    }
 
     :deep(.content-bar-icon-btn) {
       color: var(--td-text-color-secondary);
@@ -3184,6 +3396,27 @@ async function createNewSession(value: string): Promise<void> {
         background: var(--td-bg-color-secondarycontainer);
       }
     }
+  }
+
+  .retry-failed-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .retry-failed-progress__line {
+    color: var(--td-text-color-primary);
+    font-size: 14px;
+    line-height: 22px;
+  }
+
+  .retry-failed-progress__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
+    line-height: 20px;
   }
 
   :deep(.t-input) {

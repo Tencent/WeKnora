@@ -202,6 +202,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Register knowledge move handler
 	mux.HandleFunc(types.TypeKnowledgeMove, params.KnowledgeService.ProcessKnowledgeMove)
 
+	// Register retry failed documents handler
+	mux.HandleFunc(types.TypeKnowledgeRetryFailed, params.KnowledgeService.ProcessKnowledgeRetryFailed)
+
 	// Register knowledge list delete handler
 	mux.HandleFunc(types.TypeKnowledgeListDelete, params.KnowledgeService.ProcessKnowledgeListDelete)
 

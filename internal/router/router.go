@@ -401,8 +401,12 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
 		// 获取知识库复制进度 — Viewer+
 		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
+		// 获取失败文档重试提交进度 — Viewer+
+		kb.GET("/retry-failed-documents/progress/:task_id", g.Viewer(), handler.GetRetryFailedDocumentsProgress)
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)
+		// 重试失败文档 — 与单篇 reparse 一样需要 KB 写权限
+		kb.POST("/:id/retry-failed-documents", g.KBAccessWrite("id"), handler.RetryFailedDocuments)
 	}
 }
 
