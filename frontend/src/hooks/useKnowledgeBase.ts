@@ -42,7 +42,7 @@ export default function (knowledgeBaseId?: string) {
     query: {
       page: number;
       page_size: number;
-      tag_id?: string;
+      tag_ids?: string;
       keyword?: string;
       file_type?: string;
       parse_status?: string;
@@ -155,9 +155,9 @@ export default function (knowledgeBaseId?: string) {
     
     // 获取当前选中的分类ID
     const uiStore = useUIStore();
-    const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined;
-    
-    uploadKnowledgeFile(currentKbId, { file, tag_id: tagIdToUpload })
+    const tagIdsToUpload = uiStore.selectedTagIds.length > 0 ? [...uiStore.selectedTagIds] : undefined;
+
+    uploadKnowledgeFile(currentKbId, { file, tag_ids: tagIdsToUpload })
       .then((result: any) => {
         if (result.success) {
           MessagePlugin.info(t('knowledgeBase.uploadSuccess'));

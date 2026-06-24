@@ -416,7 +416,7 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 
-const selectedTagId = ref<string>('');
+const selectedTagIds = ref<string[]>([]);
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
@@ -482,7 +482,7 @@ const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
   return {
-    tag_id: selectedTagId.value || undefined,
+    tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
     keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
     file_type: selectedFileType.value || undefined,
     parse_status: selectedParseStatus.value || undefined,
@@ -494,10 +494,23 @@ const filterParams = computed(() => {
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
 const onPickTag = (item: any, tagId: string | number) => {
   if (item) item.isTagPopup = false;
-  const currentId = item?.tag_id ? String(item.tag_id) : '';
-  const nextId = tagId ? String(tagId) : '';
-  if (currentId === nextId) return;
-  handleKnowledgeTagChange(item.id, nextId);
+  const currentTags = item?.tags || [];
+  const tagIdStr = tagId ? String(tagId) : '';
+  let updatedTags: string[];
+  if (!tagIdStr) {
+    // Clear all tags
+    updatedTags = [];
+  } else {
+    const idx = currentTags.findIndex((t: any) => t.id === tagIdStr);
+    if (idx >= 0) {
+      // Remove tag
+      updatedTags = currentTags.filter((t: any) => t.id !== tagIdStr).map((t: any) => t.id);
+    } else {
+      // Add tag
+      updatedTags = [...currentTags.map((t: any) => t.id), tagIdStr];
+    }
+  }
+  handleKnowledgeTagChange(item.id, updatedTags);
 };
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
@@ -657,10 +670,11 @@ const loadTags = async (kbIdValue: string, reset = false) => {
   }
 };
 
-const handleTagFilterChange = (value: string) => {
-  selectedTagId.value = value;
-  // 同步更新 store 中的 selectedTagId，供 menu.vue 上传时使用
-  uiStore.setSelectedTagId(value);
+const handleTagFilterChange = (tagIds: string[]) => {
+  selectedTagIds.value = tagIds;
+  // 同步更新 store 中的 selectedTagIds，供 menu.vue 上传时使用
+  uiStore.clearSelectedTagIds();
+  tagIds.forEach(id => uiStore.toggleSelectedTagId(id));
   resetPage();
   loadKnowledgeFiles(kbId.value);
 };
@@ -674,11 +688,14 @@ const handleTagRowClick = (tagId: string) => {
     editingTagId.value = null;
     editingTagName.value = '';
   }
-  if (selectedTagId.value === tagId) {
-    handleTagFilterChange('');
-    return;
+  // Toggle selection
+  const idx = selectedTagIds.value.indexOf(tagId);
+  if (idx >= 0) {
+    selectedTagIds.value.splice(idx, 1);
+  } else {
+    selectedTagIds.value.push(tagId);
   }
-  handleTagFilterChange(tagId);
+  handleTagFilterChange([...selectedTagIds.value]);
 };
 
 const startCreateTag = () => {
@@ -788,10 +805,10 @@ const confirmDeleteTag = (tag: any) => {
   deleteKnowledgeBaseTag(kbId.value, tag.seq_id, { force: true })
     .then(() => {
       MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'));
-      if (selectedTagId.value === tag.id) {
+      if (selectedTagIds.value.includes(tag.id)) {
         // Reset to show all entries when current tag is deleted
-        selectedTagId.value = '';
-        handleTagFilterChange('');
+        selectedTagIds.value = selectedTagIds.value.filter(id => id !== tag.id);
+        handleTagFilterChange([...selectedTagIds.value]);
       }
       loadTags(kbId.value, true);
       // 由于后端是异步删除文档，延迟刷新以确保看到最新数据
@@ -805,11 +822,9 @@ const confirmDeleteTag = (tag: any) => {
     });
 };
 
-const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) => {
+const handleKnowledgeTagChange = async (knowledgeId: string, tagIds: string[]) => {
   try {
-    // Pass the tag value directly (empty string means no tag)
-    const tagIdToUpdate = tagValue || null;
-    await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIdToUpdate } });
+    await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIds } });
     MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
     resetPage(); // Reset page counter to 1 when reloading files after tag change
     loadKnowledgeFiles(kbId.value);
@@ -832,9 +847,10 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
     if (!isCurrentKb(targetKbId)) return;
 
     kbInfo.value = data;
-    selectedTagId.value = '';
+    selectedTagIds.value = [];
+    uiStore.clearSelectedTagIds();
     // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
-    uiStore.setSelectedTagId('');
+    uiStore.clearSelectedTagIds();
     if (!isFAQ.value) {
       docListLoading.value = true;
       loadKnowledgeFiles(targetKbId);
@@ -914,14 +930,14 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     resetPage();
     tagSearchQuery.value = '';
     tagPage.value = 1;
-    uiStore.setSelectedTagId('');
+    uiStore.clearSelectedTagIds();
   }
   loadKnowledgeBaseInfo(newKbId);
 }, { immediate: true });
 
-watch(selectedTagId, (newVal, oldVal) => {
+watch(selectedTagIds, (newVal, oldVal) => {
   if (oldVal === undefined) return
-  if (newVal !== oldVal && kbId.value) {
+  if (kbId.value) {
     loadKnowledgeFiles(kbId.value);
   }
 });
@@ -1099,7 +1115,7 @@ type KnowledgeCard = {
   isMore?: boolean;
   metadata?: any;
   error_message?: string;
-  tag_id?: string;
+  tags?: Array<{ id: string; name: string; color?: string }>;
 };
 // needsStatusPolling decides whether a card row is still "in flight"
 // enough that the doc list should keep refreshing it. Keep in sync with
@@ -1444,7 +1460,7 @@ const executeUploadBatch = async (
     return { successCount: 0, failCount: files.length };
   }
 
-  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
   let successCount = 0;
   let failCount = 0;
   const totalCount = files.length;
@@ -1457,10 +1473,10 @@ const executeUploadBatch = async (
     try {
       const uploadData: {
         file: File
-        tag_id?: string
+        tag_ids?: string[]
         fileName?: string
         process_config?: KnowledgeProcessOverrides
-      } = { file, tag_id: tagIdToUpload };
+      } = { file, tag_ids: tagIdsToUpload };
 
       const fileName = getFolderUploadFileName(file);
       if (fileName) uploadData.fileName = fileName;
@@ -1516,11 +1532,11 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
     return;
   }
 
-  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
   try {
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
-      tag_id: tagIdToUpload,
+      tag_ids: tagIdsToUpload,
       process_config: processConfig,
     });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
@@ -1924,7 +1940,7 @@ const handleListAction = (
 
 // Clear selection on filter/tag/kb change to avoid acting on hidden items.
 watch(
-  [selectedTagId, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
+  [selectedTagIds, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
   () => {
     clearSelection();
   },
@@ -2138,7 +2154,7 @@ async function createNewSession(value: string): Promise<void> {
 
                 <template v-if="filteredTags.length">
                   <div v-for="tag in filteredTags" :key="tag.id" class="tag-list-item"
-                    :class="{ active: selectedTagId === tag.id, editing: editingTagId === tag.id }"
+                    :class="{ active: selectedTagIds.includes(tag.id), editing: editingTagId === tag.id }"
                     @click="handleTagRowClick(tag.id)">
                     <div class="tag-list-left">
                       <span class="tag-hash-icon">#</span>
@@ -2506,13 +2522,13 @@ async function createNewSession(value: string): Promise<void> {
                               <template #content>
                                 <div class="tag-popup-list">
                                   <div v-for="tag in tagList" :key="tag.id" class="tag-popup-item"
-                                    :class="{ 'is-selected': String(item.tag_id) === String(tag.id) }"
+                                    :class="{ 'is-selected': (item.tags || []).some((t: any) => t.id === tag.id) }"
                                     @click="onPickTag(item, tag.id)">
                                     <t-icon class="tag-popup-check"
-                                      :class="{ visible: String(item.tag_id) === String(tag.id) }" name="check" />
+                                      :class="{ visible: (item.tags || []).some((t: any) => t.id === tag.id) }" name="check" />
                                     <span class="tag-popup-name">{{ tag.name }}</span>
                                   </div>
-                                  <template v-if="item.tag_id">
+                                  <template v-if="(item.tags || []).length > 0">
                                     <div class="tag-popup-divider"></div>
                                     <div class="tag-popup-item is-action" @click="onPickTag(item, '')">
                                       <t-icon class="tag-popup-check" name="close" />
@@ -2521,19 +2537,23 @@ async function createNewSession(value: string): Promise<void> {
                                   </template>
                                 </div>
                               </template>
-                              <t-tag v-if="getTagName(item.tag_id)" size="small" variant="light-outline"
-                                class="card-tag-chip">
-                                <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
-                              </t-tag>
+                              <template v-if="(item.tags || []).length > 0">
+                                <t-tag v-for="tag in item.tags" :key="tag.id" size="small" variant="light-outline"
+                                  class="card-tag-chip" :style="{ marginRight: '4px' }">
+                                  <span class="tag-text">{{ tag.name }}</span>
+                                </t-tag>
+                              </template>
                               <span v-else class="card-tag-add">
                                 <t-icon name="add" size="12px" />
                                 <span>{{ t('knowledgeBase.tagLabel') }}</span>
                               </span>
                             </t-popup>
-                            <t-tag v-else-if="getTagName(item.tag_id)" size="small" variant="light-outline"
-                              class="card-tag-chip">
-                              <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
-                            </t-tag>
+                            <template v-else-if="(item.tags || []).length > 0">
+                              <t-tag v-for="tag in item.tags" :key="tag.id" size="small" variant="light-outline"
+                                class="card-tag-chip" :style="{ marginRight: '4px' }">
+                                <span class="tag-text">{{ tag.name }}</span>
+                              </t-tag>
+                            </template>
                           </div>
                           <div class="card-type">
                             <span>{{ getKnowledgeType(item) }}</span>
@@ -2584,8 +2604,8 @@ async function createNewSession(value: string): Promise<void> {
                           }}</span>
                           <span v-if="(hoveredCardItem as any).channel && (hoveredCardItem as any).channel !== 'web'"
                             class="card-popover-channel">{{ getChannelLabel((hoveredCardItem as any).channel) }}</span>
-                          <span v-if="getTagName(hoveredCardItem.tag_id)" class="card-popover-tag">{{
-                            getTagName(hoveredCardItem.tag_id)
+                          <span v-if="(hoveredCardItem as any).tags && (hoveredCardItem as any).tags.length > 0" class="card-popover-tag">{{
+                            (hoveredCardItem as any).tags.map((t: any) => t.name).join(', ')
                           }}</span>
                           <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
                         </div>

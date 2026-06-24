@@ -336,17 +336,13 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		}
 	}
 
-	// 获取分类ID（如果提供），用于知识分类管理
-	tagID := c.PostForm("tag_id")
-	// 过滤特殊值，空字符串或 "__untagged__" 表示未分类
-	if tagID == "__untagged__" || tagID == "" {
-		tagID = ""
-	}
+	// 获取分类ID列表（如果提供），逗号分隔，用于知识多标签分类管理
+	tagIDs := parseCommaSeparatedTagIDs(c.PostForm("tag_ids"))
 
 	channel := c.PostForm("channel")
 
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagID, channel, processOverrides)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
@@ -412,7 +408,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		FileType         string                           `json:"file_type"`
 		EnableMultimodel *bool                            `json:"enable_multimodel"`
 		Title            string                           `json:"title"`
-		TagID            string                           `json:"tag_id"`
+		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
 	}
@@ -443,7 +439,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 
 	// Create knowledge entry from the URL
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagID, req.Channel, req.ProcessConfig,
+		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
@@ -837,7 +833,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	}
 
 	filter := types.KnowledgeListFilter{
-		TagID:       c.Query("tag_id"),
+		TagIDs:      parseCommaSeparatedTagIDs(c.Query("tag_ids")),
 		Keyword:     c.Query("keyword"),
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
@@ -862,9 +858,9 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_id=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
-		secutils.SanitizeForLog(filter.TagID),
+		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
 		secutils.SanitizeForLog(filter.Keyword),
 		secutils.SanitizeForLog(filter.FileType),
 		secutils.SanitizeForLog(filter.ParseStatus),
@@ -1673,8 +1669,8 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 }
 
 type knowledgeTagBatchRequest struct {
-	Updates map[string]*string `json:"updates" binding:"required,min=1"`
-	KBID    string             `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
+	Updates map[string][]string `json:"updates" binding:"required,min=1"`
+	KBID    string              `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
 }
 
 // UpdateKnowledgeTagBatch godoc
@@ -2196,6 +2192,24 @@ func resolveAgentAllowedKBIDs(agent *types.CustomAgent) []string {
 		}
 		return nil
 	}
+}
+
+// parseCommaSeparatedTagIDs splits a comma-separated string of tag IDs and
+// filters out empty strings and the "__untagged__" sentinel value.
+func parseCommaSeparatedTagIDs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" || p == "__untagged__" {
+			continue
+		}
+		result = append(result, p)
+	}
+	return result
 }
 
 // parseFilterTime parses a query-string timestamp accepted by knowledge list

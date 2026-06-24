@@ -15,7 +15,7 @@ interface KnowledgeItem {
   file_type?: string;
   file_size?: number | string;
   type?: string;
-  tag_id?: string | number;
+  tags?: Tag[];
   parse_status?: string;
   summary_status?: string;
   updated_at?: string;
@@ -248,9 +248,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
 
         <div class="cell cell-tag">
-          <t-tag v-if="getTagName(item.tag_id)" size="small" variant="light-outline" class="row-tag">
-            {{ getTagName(item.tag_id) }}
-          </t-tag>
+          <template v-if="item.tags && item.tags.length > 0">
+            <t-tag v-for="tag in item.tags" :key="tag.id" size="small" variant="light-outline" class="row-tag" :style="{ marginRight: '4px' }">
+              {{ tag.name }}
+            </t-tag>
+          </template>
           <span v-else class="row-muted">--</span>
         </div>
 

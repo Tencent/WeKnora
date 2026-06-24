@@ -1100,7 +1100,6 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 
 	// 4. Update knowledge record
 	knowledge.KnowledgeBaseID = targetKB.ID
-	knowledge.TagID = "" // Clear tag since tags are KB-scoped
 	knowledge.ParseStatus = types.ParseStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
@@ -1127,7 +1126,6 @@ func (s *knowledgeService) moveKnowledgeReparse(
 	// 2. Update knowledge to belong to target KB
 	knowledge.KnowledgeBaseID = targetKB.ID
 	knowledge.EmbeddingModelID = targetKB.EmbeddingModelID
-	knowledge.TagID = "" // Clear tag since tags are KB-scoped
 	knowledge.ParseStatus = types.ParseStatusPending
 	knowledge.EnableStatus = "disabled"
 	knowledge.Description = ""

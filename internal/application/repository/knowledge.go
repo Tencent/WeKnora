@@ -98,8 +98,11 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.
 func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) *gorm.DB {
-	if filter.TagID != "" {
-		query = query.Where("tag_id = ?", filter.TagID)
+	if len(filter.TagIDs) > 0 {
+		query = query.Where(
+			"knowledges.id IN (SELECT knowledge_id FROM knowledge_tag_relations WHERE tag_id IN (?))",
+			filter.TagIDs,
+		)
 	}
 	if filter.Keyword != "" {
 		escaped := escapeLikeKeyword(filter.Keyword)
@@ -729,15 +732,22 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 	return knowledges, hasMore, nil
 }
 
-// ListIDsByTagID returns all knowledge IDs that have the specified tag ID
-func (r *knowledgeRepository) ListIDsByTagID(
+// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics)
+func (r *knowledgeRepository) ListIDsByTagIDs(
 	ctx context.Context,
 	tenantID uint64,
-	kbID, tagID string,
+	kbID string,
+	tagIDs []string,
 ) ([]string, error) {
+	if len(tagIDs) == 0 {
+		return nil, nil
+	}
 	var ids []string
 	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ?", tenantID, kbID, tagID).
-		Pluck("id", &ids).Error
+		Joins("JOIN knowledge_tag_relations ktr ON knowledges.id = ktr.knowledge_id").
+		Where("knowledges.tenant_id = ? AND knowledges.knowledge_base_id = ? AND ktr.tag_id IN (?)",
+			tenantID, kbID, tagIDs).
+		Distinct("knowledges.id").
+		Pluck("knowledges.id", &ids).Error
 	return ids, err
 }

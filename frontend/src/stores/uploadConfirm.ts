@@ -8,7 +8,7 @@ export interface UploadConfirmManualSource {
   knowledgeId?: string
   title: string
   content: string
-  tagId?: string
+  tagIds?: string[]
 }
 
 export interface UploadConfirmReparseSource {

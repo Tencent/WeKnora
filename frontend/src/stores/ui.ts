@@ -8,7 +8,7 @@ export const useUIStore = defineStore('ui', {
     currentKBId: null as string | null,
     kbEditorType: 'document' as 'document' | 'faq',
     // 当前选中的分类ID，用于文件上传时传递
-    selectedTagId: '__untagged__' as string,
+    selectedTagIds: [] as string[],
     kbEditorInitialSection: null as string | null,
     settingsInitialSection: null as string | null,
     settingsInitialSubSection: null as string | null,
@@ -107,8 +107,17 @@ export const useUIStore = defineStore('ui', {
     },
 
     // 设置当前选中的分类ID
-    setSelectedTagId(tagId: string) {
-      this.selectedTagId = tagId
+    toggleSelectedTagId(tagId: string) {
+      const idx = this.selectedTagIds.indexOf(tagId)
+      if (idx >= 0) {
+        this.selectedTagIds.splice(idx, 1)
+      } else {
+        this.selectedTagIds.push(tagId)
+      }
+    },
+
+    clearSelectedTagIds() {
+      this.selectedTagIds = []
     },
 
     toggleSidebar() {
