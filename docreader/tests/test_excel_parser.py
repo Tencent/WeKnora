@@ -181,6 +181,75 @@ class XlsxMergeFillTest(unittest.TestCase):
         self.assertIn("D: D10", chunks[9])
 
 
+class ExcelImageFilterTest(unittest.TestCase):
+    """Tests for filtering embedded image function strings (#1779)."""
+
+    def _xlsx_with_image_functions(self) -> bytes:
+        """Create an XLSX where image functions are stored as text values.
+
+        WPS embeds images using =DISPIMG("ID",1) which may appear as plain
+        text (not a formula) in some export scenarios.
+        """
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Name"
+        ws["B1"] = "Photo"
+        ws["A2"] = "Alice"
+        ws["B2"] = '_xlfn.DISPIMG("ID_ABCDEF123",1)'
+        ws["A3"] = "Bob"
+        ws["B3"] = '_xlfn.DISPIMG("ID_GHIJKL456",1)'
+        ws["A4"] = "Charlie"
+        ws["B4"] = "real data"
+        bio = io.BytesIO()
+        wb.save(bio)
+        return bio.getvalue()
+
+    def test_dispimg_text_values_are_excluded(self):
+        """Image function strings stored as text must not appear in output."""
+        document = ExcelParser().parse_into_text(self._xlsx_with_image_functions())
+        self.assertNotIn("DISPIMG", document.content)
+        self.assertNotIn("_xlfn", document.content)
+        # Real data must still be present
+        self.assertIn("Alice", document.content)
+        self.assertIn("Bob", document.content)
+        self.assertIn("Charlie", document.content)
+        self.assertIn("real data", document.content)
+
+    def test_dispimg_with_equals_prefix(self):
+        """=_xlfn.DISPIMG(...) as text (not formula) should also be filtered."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Name"
+        ws["B1"] = "Photo"
+        ws["A2"] = "Alice"
+        # Stored as text with = prefix (some exporters do this)
+        ws["B2"] = '=_xlfn.DISPIMG("ID_123",1)'
+        bio = io.BytesIO()
+        wb.save(bio)
+        # Note: openpyxl treats strings starting with = as formulas,
+        # so data_only=True in fill_merged_cells_xlsx will turn them to None.
+        # This test verifies the formula path also works correctly.
+        document = ExcelParser().parse_into_text(bio.getvalue())
+        self.assertNotIn("DISPIMG", document.content)
+        self.assertIn("Alice", document.content)
+
+    def test_image_function_variations(self):
+        """Various image function patterns should all be filtered."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = '_xlfn.DISPIMG("ID_001",1)'
+        ws["A2"] = '=DISPIMG("ID_002",1)'
+        ws["A3"] = '_xlfn.IMAGE("https://example.com/img.png")'
+        ws["A4"] = '=_xlfn.IMAGE("https://example.com/img.png",1)'
+        ws["A5"] = "Normal text"
+        bio = io.BytesIO()
+        wb.save(bio)
+        document = ExcelParser().parse_into_text(bio.getvalue())
+        self.assertNotIn("DISPIMG", document.content)
+        self.assertNotIn("_xlfn.IMAGE", document.content)
+        self.assertIn("Normal text", document.content)
+
+
 class ExcelParserTest(unittest.TestCase):
     def test_parse_phantom_shared_strings_workbook(self):
         document = ExcelParser().parse_into_text(_xlsx_with_phantom_shared_strings())
