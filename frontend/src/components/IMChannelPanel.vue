@@ -978,8 +978,8 @@ onUnmounted(() => {
   line-height: 18px;
 
   &.wecom {
-    background: rgba(7, 193, 96, 0.08);
-    color: #07c160;
+    background: rgba(0, 130, 239, 0.08);
+    color: #0082ef;
   }
 
   &.feishu {

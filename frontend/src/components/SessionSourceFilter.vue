@@ -26,7 +26,12 @@
             <t-icon v-else :name="iconFor(item)" class="session-source-filter__icon" size="14px" />
             <span class="session-source-filter__option-label" :title="item.label">{{ item.label }}</span>
           </span>
-          <t-icon v-if="item.value === current" name="check" class="session-source-filter__check" size="13px" />
+          <t-icon
+            name="check"
+            class="session-source-filter__check"
+            :class="{ 'session-source-filter__check--visible': item.value === current }"
+            size="13px"
+          />
         </button>
       </div>
     </Teleport>
@@ -78,17 +83,27 @@ const updatePanelPosition = (): void => {
   const trigger = triggerRef.value
   if (!trigger) return
   const rect = trigger.getBoundingClientRect()
-  const width = Math.max(rect.width, 168)
-  const left = props.inline
-    ? Math.max(VIEWPORT_MARGIN, rect.right - width)
-    : Math.max(
-      VIEWPORT_MARGIN,
-      Math.min(rect.left, window.innerWidth - width - VIEWPORT_MARGIN),
-    )
+  if (props.inline) {
+    panelStyle.value = {
+      top: `${rect.bottom + PANEL_GAP}px`,
+      right: `${Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.right)}px`,
+      left: 'auto',
+    }
+    return
+  }
+  const panelWidth = Math.min(
+    Math.max(rect.width, 108),
+    window.innerWidth - VIEWPORT_MARGIN * 2,
+  )
+  const left = Math.max(
+    VIEWPORT_MARGIN,
+    Math.min(rect.left, window.innerWidth - panelWidth - VIEWPORT_MARGIN),
+  )
   panelStyle.value = {
     top: `${rect.bottom + PANEL_GAP}px`,
     left: `${left}px`,
-    width: `${width}px`,
+    right: 'auto',
+    minWidth: `${panelWidth}px`,
   }
 }
 
@@ -189,7 +204,7 @@ onBeforeUnmount(() => {
 .session-source-filter__option-leading {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -217,13 +232,12 @@ onBeforeUnmount(() => {
   width: 14px;
   height: 14px;
   object-fit: contain;
-  opacity: 0.72;
-  filter: grayscale(0.15);
+  opacity: 0.82;
 
   .session-source-filter--inline & {
     width: 12px;
     height: 12px;
-    opacity: 0.55;
+    opacity: 0.7;
   }
 }
 
@@ -257,29 +271,33 @@ onBeforeUnmount(() => {
 .session-source-filter__panel {
   position: fixed;
   z-index: 3000;
-  padding: 4px;
+  width: max-content;
+  min-width: 108px;
+  max-width: min(200px, calc(100vw - 16px));
+  padding: 3px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--td-bg-color-sidebar, var(--td-bg-color-container));
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05), 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
 .session-source-filter__option {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  min-height: 30px;
-  padding: 5px 8px;
+  min-height: 28px;
+  padding: 4px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--td-text-color-primary);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
   font-family: var(--app-font-family);
   text-align: left;
+  white-space: nowrap;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -294,20 +312,28 @@ onBeforeUnmount(() => {
     }
 
     .session-source-filter__logo {
-      opacity: 0.9;
+      opacity: 0.92;
       filter: none;
     }
   }
 }
 
 .session-source-filter__option-label {
-  font-size: 13px;
-  font-weight: 430;
-  line-height: 18px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
 }
 
 .session-source-filter__check {
-  flex: 0 0 auto;
-  color: var(--td-text-color-secondary);
+  flex: 0 0 13px;
+  width: 13px;
+  margin-left: 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px !important;
+  visibility: hidden;
+
+  &--visible {
+    visibility: visible;
+  }
 }
 </style>
