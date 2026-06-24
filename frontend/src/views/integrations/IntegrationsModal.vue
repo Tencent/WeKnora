@@ -30,7 +30,7 @@
 
             <div class="settings-content">
               <div class="content-wrapper">
-                <div v-show="currentSection === 'im'" class="section">
+                <div v-if="currentSection === 'im'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.im.title') }}</h2>
                     <p class="section-description">
@@ -49,7 +49,7 @@
                   <IMChannelPanel tenant-mode :initial-agent-id="initialAgentId" />
                 </div>
 
-                <div v-show="currentSection === 'embed'" class="section">
+                <div v-if="currentSection === 'embed'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.embed.title') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.embed.description') }}</p>

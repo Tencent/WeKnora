@@ -1129,9 +1129,10 @@ const checkAndOpenEditModal = () => {
   const editId = route.query.edit as string
   const section = route.query.section as string
   if (editId && (section === 'im' || section === 'embed' || section === 'integrations')) {
+    const tab = section === 'embed' ? 'embed' : 'im'
     router.replace({
       path: '/platform/integrations',
-      query: { tab: section, agentId: editId },
+      query: { tab, agentId: editId },
     })
     return
   }
