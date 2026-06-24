@@ -3,6 +3,7 @@
     <div class="channels-section">
       <div class="channels-header">
         <span class="channels-title">{{ $t('embedPublish.channelsTitle') }}</span>
+        <IntegrationsAgentFilter v-model="filterAgentId" :agents="agents" />
         <span class="channels-count">{{ channels.length }}</span>
       </div>
 
@@ -29,7 +30,7 @@
                   {{ $t('embedPublish.disabled') }}
                 </t-tag>
               </div>
-              <span v-if="tenantMode && agentDisplayName(ch)" class="channel-card__agent-name">
+              <span v-if="agentDisplayName(ch)" class="channel-card__agent-name">
                 {{ agentDisplayName(ch) }}
               </span>
             </div>
@@ -135,7 +136,7 @@
       <section class="setting-drawer__section embed-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionChannel') }}</h4>
 
-        <div v-if="tenantMode" class="form-item">
+        <div class="form-item">
           <label class="form-label required">{{ $t('integrations.boundAgent') }}</label>
           <div class="agent-field-row">
             <t-select
@@ -542,14 +543,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import EmbedChannelPreview from '@/components/EmbedChannelPreview.vue'
 import {
-  listEmbedChannels,
   listAllEmbedChannels,
   createEmbedChannel,
   updateEmbedChannel,
@@ -575,16 +575,9 @@ import {
   type AllowedOriginsValidationError,
 } from '@/utils/embedAllowedOrigins'
 import { listAgents, type CustomAgent } from '@/api/agent'
+import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue'
 
-const props = withDefaults(defineProps<{
-  agentId?: string
-  tenantMode?: boolean
-  initialAgentId?: string
-  agentWebSearchEnabled?: boolean
-  agentImageUploadEnabled?: boolean
-}>(), {
-  tenantMode: false,
-})
+const filterAgentId = defineModel<string>('filterAgentId', { default: '' })
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -592,7 +585,12 @@ const isAdmin = computed(() => authStore.hasRole('admin'))
 
 const loading = ref(false)
 const saving = ref(false)
-const channels = ref<EmbedChannel[]>([])
+const allChannels = ref<EmbedChannel[]>([])
+const channels = computed(() => {
+  const filter = filterAgentId.value?.trim()
+  if (!filter) return allChannels.value
+  return allChannels.value.filter((ch) => ch.agent_id === filter)
+})
 const tokenByChannel = ref<Record<string, string>>({})
 const revealedTokens = reactive<Record<string, boolean>>({})
 const previewVisible = ref(false)
@@ -621,7 +619,6 @@ const agentOptions = computed(() =>
 )
 
 const drawerAgentId = computed(() => {
-  if (!props.tenantMode) return props.agentId || ''
   if (editingId.value) {
     return drawerChannel.value?.agent_id || ''
   }
@@ -632,19 +629,13 @@ const drawerAgent = computed(() =>
   agents.value.find((agent) => agent.id === drawerAgentId.value),
 )
 
-const agentWebSearchEnabledEffective = computed(() => {
-  if (props.tenantMode) {
-    return drawerAgent.value?.config?.web_search_enabled === true
-  }
-  return props.agentWebSearchEnabled === true
-})
+const agentWebSearchEnabledEffective = computed(() =>
+  drawerAgent.value?.config?.web_search_enabled === true,
+)
 
-const agentImageUploadEnabledEffective = computed(() => {
-  if (props.tenantMode) {
-    return drawerAgent.value?.config?.image_upload_enabled === true
-  }
-  return props.agentImageUploadEnabled === true
-})
+const agentImageUploadEnabledEffective = computed(() =>
+  drawerAgent.value?.config?.image_upload_enabled === true,
+)
 
 const EMBED_TOKEN_STORAGE = 'weknora_embed_publish_tokens'
 const WEKNORA_BRAND_COLOR = '#07C05F'
@@ -724,9 +715,7 @@ function handleChannelMenuClick(data: { value?: string }, ch: EmbedChannel) {
 const drawerTitle = computed(() => {
   if (!editingId.value) return t('embedPublish.createTitle')
   const ch = drawerChannel.value
-  const agentId = props.tenantMode
-    ? (createAgentId.value || ch?.agent_id || '')
-    : (ch?.agent_id || props.agentId || '')
+  const agentId = createAgentId.value || ch?.agent_id || ''
   return channelDisplayName({
     id: editingId.value,
     name: form.value.name,
@@ -734,7 +723,7 @@ const drawerTitle = computed(() => {
   } as EmbedChannel)
 })
 
-function defaultEmbedChannelName(agentId = props.tenantMode ? createAgentId.value : props.agentId): string {
+function defaultEmbedChannelName(agentId = createAgentId.value): string {
   const agent = agentId ? agents.value.find((item) => item.id === agentId) : undefined
   if (agent?.name?.trim()) {
     return t('embedPublish.defaultChannelNameWithAgent', { agent: agent.name.trim() })
@@ -776,7 +765,7 @@ const drawerConfirmText = computed(() =>
 )
 
 function validateWizardStep(step: number): boolean {
-  if (step === 0 && props.tenantMode && !createAgentId.value) {
+  if (step === 0 && !createAgentId.value) {
     MessagePlugin.warning(t('integrations.selectAgentHint'))
     return false
   }
@@ -845,22 +834,16 @@ const storeToken = (channelId: string, token: string) => {
 }
 
 const load = async () => {
-  if (!props.tenantMode && !props.agentId) return
   loading.value = true
   try {
-    if (props.tenantMode) {
-      const [res, agentRes] = await Promise.all([
-        listAllEmbedChannels(),
-        listAgents(),
-      ])
-      channels.value = res?.data || []
-      agents.value = agentRes?.data || []
-    } else {
-      const res = await listEmbedChannels(props.agentId!)
-      channels.value = res?.data || []
-    }
+    const [res, agentRes] = await Promise.all([
+      listAllEmbedChannels(),
+      listAgents(),
+    ])
+    allChannels.value = res?.data || []
+    agents.value = agentRes?.data || []
     tokenByChannel.value = { ...loadStoredTokens(), ...tokenByChannel.value }
-    await Promise.all(channels.value.map(async (ch) => {
+    await Promise.all(allChannels.value.map(async (ch) => {
       try {
         const statsRes = await getEmbedChannelStats(ch.id)
         if (statsRes?.data?.session_count != null) {
@@ -875,9 +858,15 @@ const load = async () => {
   }
 }
 
-watch(() => [props.tenantMode, props.agentId], () => {
-  if (props.tenantMode || props.agentId) load()
-}, { immediate: true })
+watch(filterAgentId, (id) => {
+  if (!showDrawer.value && !editingId.value && id) {
+    createAgentId.value = id
+  }
+})
+
+onMounted(() => {
+  void load()
+})
 
 watch(stepTitles, (titles) => {
   if (wizardStep.value >= titles.length) {
@@ -1010,7 +999,7 @@ const openCreate = () => {
   channelNameTouched.value = false
   editingId.value = ''
   editingEnabled.value = true
-  createAgentId.value = props.tenantMode ? (props.initialAgentId || '') : ''
+  createAgentId.value = filterAgentId.value || ''
   form.value = defaultForm()
   applyDefaultChannelNameIfNeeded()
   originsText.value = ''
@@ -1056,7 +1045,7 @@ const mapOriginsApiError = (message: string): string | null => {
 
 const saveForm = async () => {
   if (!isAdmin.value) return
-  if (props.tenantMode && !createAgentId.value) {
+  if (!createAgentId.value) {
     MessagePlugin.warning(t('integrations.selectAgentHint'))
     return
   }
@@ -1086,7 +1075,7 @@ const saveForm = async () => {
       webhook_url: form.value.webhook_url || '',
       webhook_secret: form.value.webhook_secret || undefined,
       enabled: editingId.value ? editingEnabled.value : true,
-      ...(props.tenantMode ? { agent_id: createAgentId.value } : {}),
+      agent_id: createAgentId.value,
     }
     if (editingId.value) {
       const previousAgentId = drawerChannel.value?.agent_id
@@ -1106,7 +1095,7 @@ const saveForm = async () => {
         }
       }
     } else {
-      const targetAgentId = props.tenantMode ? createAgentId.value : props.agentId
+      const targetAgentId = createAgentId.value
       if (!targetAgentId) {
         MessagePlugin.warning(t('integrations.selectAgentHint'))
         return
@@ -1157,9 +1146,7 @@ async function openPreviewForChannel(
 ) {
   previewLoading.value = true
   try {
-    const agentId = props.tenantMode
-      ? ((opts?.useDraft ? createAgentId.value : '') || ch.agent_id)
-      : ch.agent_id
+    const agentId = ((opts?.useDraft ? createAgentId.value : '') || ch.agent_id)
     if (agentId) {
       clearEmbedStoredChatSessionIfAgentMismatch(ch.id, agentId)
     }

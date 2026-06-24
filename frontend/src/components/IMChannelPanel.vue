@@ -3,6 +3,7 @@
     <div class="channels-section">
       <div class="channels-header">
         <span class="channels-title">{{ $t('agentEditor.im.channelsTitle') }}</span>
+        <IntegrationsAgentFilter v-model="filterAgentId" :agents="agents" />
         <span class="channels-count">{{ channels.length }}</span>
       </div>
 
@@ -35,7 +36,7 @@
                   {{ $t('agentEditor.im.disabled') }}
                 </t-tag>
               </div>
-              <span v-if="tenantMode && agentDisplayName(channel)" class="channel-card__agent-name">
+              <span v-if="agentDisplayName(channel)" class="channel-card__agent-name">
                 {{ agentDisplayName(channel) }}
               </span>
             </div>
@@ -148,7 +149,7 @@
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionChannel') }}</h4>
 
-          <div v-if="tenantMode" class="form-item">
+          <div class="form-item">
             <label class="form-label required">{{ $t('integrations.boundAgent') }}</label>
             <div class="agent-field-row">
               <t-select
@@ -595,6 +596,7 @@ import { useChatResourcesStore } from '@/stores/chatResources';
 import type { IMChannel } from '@/api/agent';
 import { useAuthStore } from '@/stores/auth';
 import SettingDrawer from '@/components/settings/SettingDrawer.vue';
+import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue';
 import wecomLogo from '@/assets/img/im/wecom.svg';
 import feishuLogo from '@/assets/img/im/feishu.svg';
 import slackLogo from '@/assets/img/im/slack.svg';
@@ -620,20 +622,19 @@ const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[pla
 const { t } = useI18n();
 const authStore = useAuthStore();
 
-const props = withDefaults(defineProps<{
-  agentId?: string;
-  tenantMode?: boolean;
-  initialAgentId?: string;
-}>(), {
-  tenantMode: false,
-});
+const filterAgentId = defineModel<string>('filterAgentId', { default: '' });
 
 const agents = ref<CustomAgent[]>([]);
 const agentOptions = computed(() =>
   agents.value.map((agent) => ({ label: agent.name, value: agent.id })),
 );
 
-const channels = ref<Array<IMChannel | IMChannelOverview>>([]);
+const allChannels = ref<Array<IMChannel | IMChannelOverview>>([]);
+const channels = computed(() => {
+  const filter = filterAgentId.value?.trim();
+  if (!filter) return allChannels.value;
+  return allChannels.value.filter((channel) => channel.agent_id === filter);
+});
 const loading = ref(false);
 const saving = ref(false);
 const showCreateDialog = ref(false);
@@ -673,7 +674,7 @@ const drawerTitle = computed(() => {
 });
 
 function validateWizardStep(step: number): boolean {
-  if (step === 0 && props.tenantMode && !formData.value.target_agent_id) {
+  if (step === 0 && !formData.value.target_agent_id) {
     MessagePlugin.warning(t('integrations.selectAgentHint'));
     return false;
   }
@@ -886,26 +887,16 @@ async function loadChannels() {
   loading.value = true;
   try {
     const chatResources = useChatResourcesStore();
-    if (props.tenantMode) {
-      const [channelRes, agentRes] = await Promise.all([
-        listAllIMChannels(),
-        listAgents(),
-        chatResources.ensureKnowledgeBases(),
-      ]);
-      channels.value = channelRes.data || [];
-      agents.value = agentRes?.data || [];
-    } else if (props.agentId) {
-      const [channelRes] = await Promise.all([
-        listIMChannels(props.agentId),
-        chatResources.ensureKnowledgeBases(),
-      ]);
-      channels.value = channelRes.data || [];
-    } else {
-      channels.value = [];
-    }
+    const [channelRes, agentRes] = await Promise.all([
+      listAllIMChannels(),
+      listAgents(),
+      chatResources.ensureKnowledgeBases(),
+    ]);
+    allChannels.value = channelRes.data || [];
+    agents.value = agentRes?.data || [];
     knowledgeBases.value = chatResources.rawKnowledgeBases.map((kb: any) => ({ id: kb.id, name: kb.name }));
   } catch {
-    channels.value = [];
+    allChannels.value = [];
   } finally {
     loading.value = false;
   }
@@ -940,8 +931,8 @@ async function copyUrl(channel: IMChannel) {
 
 function openCreate() {
   resetForm();
-  if (props.tenantMode && props.initialAgentId) {
-    formData.value.target_agent_id = props.initialAgentId;
+  if (filterAgentId.value) {
+    formData.value.target_agent_id = filterAgentId.value;
   }
   showCreateDialog.value = true;
 }
@@ -953,7 +944,7 @@ function openDrawer(channel: IMChannel | IMChannelOverview) {
 async function editChannel(channel: IMChannel | IMChannelOverview) {
   wizardStep.value = 0;
   let fullChannel: IMChannel | null = null;
-  if (props.tenantMode && !('credentials' in channel)) {
+  if (!('credentials' in channel)) {
     try {
       const res = await listIMChannels(channel.agent_id);
       fullChannel = (res.data || []).find((item) => item.id === channel.id) || null;
@@ -994,7 +985,7 @@ function resetForm() {
   wechatQRCode.value = '';
   wechatQRStatus.value = '';
   formData.value = {
-    target_agent_id: props.tenantMode ? (props.initialAgentId || '') : '',
+    target_agent_id: filterAgentId.value || '',
     platform: 'wecom',
     name: defaultChannelName('wecom'),
     mode: 'websocket',
@@ -1023,13 +1014,11 @@ async function handleSave() {
         knowledge_base_id: formData.value.knowledge_base_id,
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
-        ...(props.tenantMode && formData.value.target_agent_id
-          ? { agent_id: formData.value.target_agent_id }
-          : {}),
+        ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
       });
       MessagePlugin.success(t('common.updateSuccess'));
     } else {
-      const targetAgentId = props.tenantMode ? formData.value.target_agent_id : props.agentId;
+      const targetAgentId = formData.value.target_agent_id;
       if (!targetAgentId) {
         MessagePlugin.warning(t('integrations.selectAgentHint'));
         return;
@@ -1076,19 +1065,14 @@ async function handleDelete(id: string) {
 }
 
 onMounted(() => {
-  if (props.tenantMode || props.agentId) {
-    loadChannels();
-  }
+  loadChannels();
 });
 
-watch(
-  () => [props.tenantMode, props.agentId],
-  () => {
-    if (props.tenantMode || props.agentId) {
-      loadChannels();
-    }
-  },
-);
+watch(filterAgentId, (id) => {
+  if (!showCreateDialog.value && !editingChannel.value && id) {
+    formData.value.target_agent_id = id;
+  }
+});
 
 onUnmounted(() => {
   stopWeChatPolling();

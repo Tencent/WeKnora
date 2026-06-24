@@ -5633,6 +5633,9 @@ export default {
     selectAgentPlaceholder: "请选择智能体",
     selectAgentHint: "请先选择一个智能体",
     boundAgent: "绑定智能体",
+    filterByAgent: "按智能体筛选",
+    filterByAgentWithName: "按智能体筛选：{name}",
+    filterAllAgents: "全部智能体",
     manageChannel: "管理渠道",
     goToCenter: "前往集成中心",
     imOverview: {

@@ -5626,6 +5626,9 @@ export default {
     selectAgentPlaceholder: "에이전트를 선택하세요",
     selectAgentHint: "먼저 에이전트를 선택하세요",
     boundAgent: "연결된 에이전트",
+    filterByAgent: "에이전트별 필터",
+    filterByAgentWithName: "에이전트별 필터: {name}",
+    filterAllAgents: "전체 에이전트",
     manageChannel: "채널 관리",
     goToCenter: "통합 센터로 이동",
     imOverview: {

@@ -46,7 +46,7 @@
                       </a>
                     </p>
                   </div>
-                  <IMChannelPanel tenant-mode :initial-agent-id="initialAgentId" />
+                  <IMChannelPanel v-model:filter-agent-id="filterAgentId" />
                 </div>
 
                 <div v-if="currentSection === 'embed'" class="section">
@@ -54,7 +54,7 @@
                     <h2>{{ $t('agentEditor.embed.title') }}</h2>
                     <p class="section-description">{{ $t('agentEditor.embed.description') }}</p>
                   </div>
-                  <AgentEmbedChannelPanel tenant-mode :initial-agent-id="initialAgentId" />
+                  <AgentEmbedChannelPanel v-model:filter-agent-id="filterAgentId" />
                 </div>
               </div>
             </div>
@@ -77,7 +77,7 @@ const route = useRoute();
 const router = useRouter();
 
 const currentSection = ref<'im' | 'embed'>('im');
-const initialAgentId = ref('');
+const filterAgentId = ref('');
 
 const visible = computed(() => route.name === 'integrations');
 
@@ -91,13 +91,13 @@ function applyRouteQuery() {
   if (tab === 'im' || tab === 'embed') {
     currentSection.value = tab;
   }
-  initialAgentId.value = (route.query.agentId as string) || '';
+  filterAgentId.value = (route.query.agentId as string) || '';
 }
 
 function syncRouteQuery() {
   const query: Record<string, string> = { tab: currentSection.value };
-  if (initialAgentId.value) {
-    query.agentId = initialAgentId.value;
+  if (filterAgentId.value) {
+    query.agentId = filterAgentId.value;
   }
   router.replace({ path: route.path, query });
 }
@@ -116,6 +116,10 @@ watch(visible, (open) => {
 });
 
 watch(currentSection, () => {
+  if (visible.value) syncRouteQuery();
+});
+
+watch(filterAgentId, () => {
   if (visible.value) syncRouteQuery();
 });
 

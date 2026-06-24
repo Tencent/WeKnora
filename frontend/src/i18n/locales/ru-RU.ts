@@ -5448,6 +5448,9 @@ export default {
     selectAgentPlaceholder: 'Выберите агента',
     selectAgentHint: 'Сначала выберите агента',
     boundAgent: 'Привязанный агент',
+    filterByAgent: 'Фильтр по агенту',
+    filterByAgentWithName: 'Фильтр по агенту: {name}',
+    filterAllAgents: 'Все агенты',
     manageChannel: 'Управлять каналом',
     goToCenter: 'Открыть интеграции',
     imOverview: {

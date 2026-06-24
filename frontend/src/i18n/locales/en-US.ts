@@ -5615,6 +5615,9 @@ export default {
     selectAgentPlaceholder: 'Choose an agent',
     selectAgentHint: 'Please select an agent first',
     boundAgent: 'Bound agent',
+    filterByAgent: 'Filter by agent',
+    filterByAgentWithName: 'Filter by agent: {name}',
+    filterAllAgents: 'All agents',
     manageChannel: 'Manage channel',
     goToCenter: 'Open Integrations',
     imOverview: {

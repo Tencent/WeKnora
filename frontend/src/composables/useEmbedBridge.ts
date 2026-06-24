@@ -33,7 +33,12 @@ function readStoredSession(channelId: string): StoredSession | null {
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (parsed && typeof parsed.id === 'string' && typeof parsed.sig === 'string' && parsed.id) {
-      return { id: parsed.id, sig: parsed.sig }
+      const agentId = typeof parsed.agentId === 'string' ? parsed.agentId.trim() : ''
+      return {
+        id: parsed.id,
+        sig: parsed.sig,
+        ...(agentId ? { agentId } : {}),
+      }
     }
   } catch {
     // Malformed / legacy (plain-string) entry: ignore so a fresh signed

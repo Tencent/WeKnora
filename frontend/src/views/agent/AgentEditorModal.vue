@@ -79,15 +79,13 @@
                       </div>
                       <div class="setting-control">
                         <div class="integration-inline">
-                          <span class="integration-inline__stat">
-                            {{ $t('integrations.tabs.im') }} · {{ agentIMChannelCount }}
-                          </span>
+                          <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('im')">
+                            <span>{{ $t('integrations.tabs.im') }} · {{ agentIMChannelCount }}</span>
+                            <t-icon name="chevron-right" size="14px" />
+                          </button>
                           <span class="integration-inline__sep" aria-hidden="true">|</span>
-                          <span class="integration-inline__stat">
-                            {{ $t('integrations.tabs.embed') }} · {{ agentEmbedChannelCount }}
-                          </span>
-                          <button type="button" class="integration-inline__link" @click="gotoIntegrations">
-                            <span>{{ $t('integrations.agentEditor.manage') }}</span>
+                          <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('embed')">
+                            <span>{{ $t('integrations.tabs.embed') }} · {{ agentEmbedChannelCount }}</span>
                             <t-icon name="chevron-right" size="14px" />
                           </button>
                         </div>
@@ -2084,11 +2082,11 @@ async function loadAgentIntegrationCounts(agentId: string) {
   }
 }
 
-function gotoIntegrations() {
+function gotoIntegrations(tab: 'im' | 'embed') {
   const agentId = editorAgent.value?.id;
   if (!agentId) return;
   handleClose();
-  router.push({ path: '/platform/integrations', query: { agentId } });
+  router.push({ path: '/platform/integrations', query: { agentId, tab } });
 }
 
 const filteredIntentPlaceholders = computed(() => {
@@ -4285,6 +4283,22 @@ const handleSave = async () => {
   &__stat {
     font-size: 13px;
     color: var(--td-text-color-secondary);
+
+    &.integration-inline__link {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      line-height: 1;
+      color: var(--td-brand-color);
+      cursor: pointer;
+
+      &:hover {
+        opacity: 0.85;
+      }
+    }
   }
 
   &__sep {
