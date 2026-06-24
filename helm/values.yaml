@@ -221,6 +221,25 @@ docreader:
   env:
     STORAGE_TYPE: local
 
+  # -- Shared volume configuration for document parsing artifacts (images, etc.)
+  # Docreader writes to /tmp/docreader, app reads from it (read-only).
+  # In docker-compose.yml this is the "docreader-tmp" named volume.
+  sharedVolume:
+    # -- Enable shared volume for docreader artifacts
+    enabled: true
+    # -- Volume type: "emptyDir" (single-node/testing) or "pvc" (multi-node/production)
+    # For production with multiple replicas, use "pvc" with ReadWriteMany (e.g., cephfs, NFS)
+    type: emptyDir
+    # -- Size limit for emptyDir (only used when type=emptyDir)
+    sizeLimit: 5Gi
+    # -- PVC name (only used when type=pvc)
+    # If empty and type=pvc, a PVC will be created with name: <release-name>-docreader-tmp
+    pvcName: ""
+    # -- Storage class for PVC (only used when type=pvc and pvcName is empty)
+    storageClass: ""
+    # -- PVC size (only used when type=pvc and pvcName is empty)
+    size: 5Gi
+
   # -- Service configuration
   service:
     type: ClusterIP

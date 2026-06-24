@@ -148,6 +148,11 @@ spec:
           volumeMounts:
             - name: data-files
               mountPath: /data/files
+            {{- if .Values.docreader.sharedVolume.enabled }}
+            - name: docreader-tmp
+              mountPath: /tmp/docreader
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
           {{- with .Values.app.livenessProbe }}
@@ -166,6 +171,16 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if .Values.docreader.sharedVolume.enabled }}
+        - name: docreader-tmp
+          {{- if eq .Values.docreader.sharedVolume.type "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.docreader.sharedVolume.pvcName | default (printf "%s-docreader-tmp" (include "weknora.fullname" .)) }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.docreader.sharedVolume.sizeLimit | default "5Gi" }}
+          {{- end }}
+        {{- end }}
       {{- with .Values.app.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
