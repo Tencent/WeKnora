@@ -880,11 +880,15 @@ const confirmDeleteTag = (tag: any) => {
         handleTagFilterChange([...selectedTagIds.value]);
       }
       loadTags(kbId.value, true);
-      // 由于后端是异步删除文档，延迟刷新以确保看到最新数据
+      // 由于后端是异步删除文档，延迟刷新文档列表
       setTimeout(() => {
         resetPage(); // Reset page counter when reloading files after tag deletion
         loadKnowledgeFiles(kbId.value);
-      }, 500);
+      }, 800);
+      // 再次延迟刷新标签列表，确保异步删除完成后其他标签的数量正确更新
+      setTimeout(() => {
+        loadTags(kbId.value, true);
+      }, 2500);
     })
     .catch((error: any) => {
       MessagePlugin.error(error?.message || t('common.operationFailed'));
