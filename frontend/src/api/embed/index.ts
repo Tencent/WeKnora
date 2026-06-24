@@ -61,6 +61,39 @@ export type WidgetPosition = 'bottom-right' | 'bottom-left' | 'top-right' | 'top
 /** Prefix of short-lived embed session tokens minted by the backend. */
 export const EMBED_SESSION_TOKEN_PREFIX = 'ems_'
 
+/** localStorage key prefix for persisted embed chat sessions (per channel). */
+export const EMBED_CHAT_SESSION_STORAGE_PREFIX = 'weknora-embed-session:'
+
+export function embedChatSessionStorageKey(channelId: string): string {
+  return `${EMBED_CHAT_SESSION_STORAGE_PREFIX}${channelId}`
+}
+
+/** Drop a persisted embed chat session so the next load starts fresh. */
+export function clearEmbedStoredChatSession(channelId: string): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.removeItem(embedChatSessionStorageKey(channelId))
+  } catch {
+    // localStorage may be unavailable in private mode.
+  }
+}
+
+/** Clear a stored chat session when it was created under a different agent binding. */
+export function clearEmbedStoredChatSessionIfAgentMismatch(channelId: string, agentId: string): void {
+  if (typeof localStorage === 'undefined' || !channelId || !agentId) return
+  try {
+    const raw = localStorage.getItem(embedChatSessionStorageKey(channelId))
+    if (!raw) return
+    const parsed = JSON.parse(raw) as { agentId?: string }
+    if (parsed?.agentId && parsed.agentId !== agentId) {
+      localStorage.removeItem(embedChatSessionStorageKey(channelId))
+    }
+  } catch {
+    // Malformed entry — remove so bootstrap can recover.
+    localStorage.removeItem(embedChatSessionStorageKey(channelId))
+  }
+}
+
 /** Whether a token is already a short-lived session token (secure mode). */
 export function isEmbedSessionToken(token: string): boolean {
   return typeof token === 'string' && token.trim().startsWith(EMBED_SESSION_TOKEN_PREFIX)

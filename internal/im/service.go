@@ -2501,6 +2501,23 @@ func (s *Service) CreateChannel(channel *IMChannel) error {
 	return nil
 }
 
+// SetChannelAgentID validates and assigns a new agent for an existing channel.
+func (s *Service) SetChannelAgentID(ctx context.Context, channel *IMChannel, agentID string) error {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return fmt.Errorf("agent_id is required")
+	}
+	agent, err := s.agentService.GetAgentByID(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if agent == nil || agent.TenantID != channel.TenantID {
+		return fmt.Errorf("agent not found")
+	}
+	channel.AgentID = agentID
+	return nil
+}
+
 // UpdateChannel updates a channel and restarts it if needed.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) UpdateChannel(channel *IMChannel) error {

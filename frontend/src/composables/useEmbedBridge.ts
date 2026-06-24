@@ -3,6 +3,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   createEmbedSession,
+  embedChatSessionStorageKey,
   exchangeEmbedSession,
   getEmbedConfig,
   getEmbedMessageList,
@@ -19,18 +20,16 @@ import { applyEmbedLocale, readEmbedLocaleFromUrl, syncEmbedLocaleFromUrl } from
 
 // Persist the chat session id per channel so a page refresh resumes the same
 // conversation (and its history) instead of silently starting a new session.
-const EMBED_SESSION_STORAGE_PREFIX = 'weknora-embed-session:'
-
-const sessionStorageKey = (channelId: string) => `${EMBED_SESSION_STORAGE_PREFIX}${channelId}`
-
 interface StoredSession {
   id: string
   sig: string
+  /** Agent bound when the session was created; mismatch forces a new session. */
+  agentId?: string
 }
 
 function readStoredSession(channelId: string): StoredSession | null {
   try {
-    const raw = window.localStorage.getItem(sessionStorageKey(channelId))
+    const raw = window.localStorage.getItem(embedChatSessionStorageKey(channelId))
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (parsed && typeof parsed.id === 'string' && typeof parsed.sig === 'string' && parsed.id) {
@@ -46,9 +45,9 @@ function readStoredSession(channelId: string): StoredSession | null {
 function writeStoredSession(channelId: string, session: StoredSession | null) {
   try {
     if (session?.id) {
-      window.localStorage.setItem(sessionStorageKey(channelId), JSON.stringify(session))
+      window.localStorage.setItem(embedChatSessionStorageKey(channelId), JSON.stringify(session))
     } else {
-      window.localStorage.removeItem(sessionStorageKey(channelId))
+      window.localStorage.removeItem(embedChatSessionStorageKey(channelId))
     }
   } catch {
     // localStorage may be unavailable (private mode / disabled cookies).
@@ -141,15 +140,20 @@ export function useEmbedBridge(channelId: Ref<string>) {
         applyEmbedLocale(res.data.default_locale, activeLocale)
       }
 
-      // Resume a persisted session when still valid; otherwise create a fresh one.
+      // Resume a persisted session when still valid and still bound to the same
+      // agent; otherwise create a fresh one (e.g. after rebinding the channel).
+      const configAgentId = String(res.data.agent_id || '').trim()
       let resolved: StoredSession | null = null
       const stored = readStoredSession(id)
-      if (stored && (await isStoredSessionValid(id, apiToken, stored))) {
-        resolved = stored
+      const agentMatches = !stored?.agentId || !configAgentId || stored.agentId === configAgentId
+      if (stored && agentMatches && (await isStoredSessionValid(id, apiToken, stored))) {
+        resolved = { ...stored, agentId: configAgentId || stored.agentId }
       } else {
         const sessionRes = await createEmbedSession(id, apiToken)
         const newId = sessionRes?.data?.id || ''
-        if (newId) resolved = { id: newId, sig: sessionRes?.data?.sig || '' }
+        if (newId) {
+          resolved = { id: newId, sig: sessionRes?.data?.sig || '', agentId: configAgentId }
+        }
       }
       if (!resolved) {
         loadError.value = t('embedPublish.sessionFailed')
@@ -185,7 +189,8 @@ export function useEmbedBridge(channelId: Ref<string>) {
       const sessionRes = await createEmbedSession(id, apiToken)
       const newId = sessionRes?.data?.id || ''
       if (!newId) return
-      const next: StoredSession = { id: newId, sig: sessionRes?.data?.sig || '' }
+      const agentId = String(config.value?.agent_id || '').trim()
+      const next: StoredSession = { id: newId, sig: sessionRes?.data?.sig || '', agentId }
       sessionSig.value = next.sig
       sessionId.value = next.id
       writeStoredSession(id, next)

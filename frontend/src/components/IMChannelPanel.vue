@@ -35,19 +35,17 @@
                   {{ $t('agentEditor.im.disabled') }}
                 </t-tag>
               </div>
-              <p class="channel-card__subtitle">{{ channelSummary(channel) }}</p>
+              <span v-if="tenantMode && agentDisplayName(channel)" class="channel-card__agent-name">
+                {{ agentDisplayName(channel) }}
+              </span>
             </div>
             <div v-if="authStore.hasRole('admin')" class="channel-card__actions" @click.stop>
-              <t-switch
-                :value="channel.enabled"
-                size="small"
-                @change="() => handleToggle(channel)"
-              />
               <t-dropdown
                 trigger="click"
                 placement="bottom-right"
-                :options="channelMenuOptions"
-                @click="(data) => data.value === 'delete' && confirmDelete(channel.id)"
+                attach="body"
+                :options="channelMenuOptions(channel)"
+                @click="(data) => handleChannelMenuClick(data, channel)"
               >
                 <t-button
                   variant="text"
@@ -68,10 +66,15 @@
             class="channel-card channel-card--add"
             @click="openCreate"
           >
-            <span class="channel-card--add__icon" aria-hidden="true">
+            <span class="channel-card__badge" aria-hidden="true">
               <t-icon name="add" />
             </span>
-            <span class="channel-card--add__label">{{ $t('agentEditor.im.addChannel') }}</span>
+            <div class="channel-card__body">
+              <div class="channel-card__header">
+                <span class="channel-card__title">{{ $t('agentEditor.im.addChannel') }}</span>
+              </div>
+            </div>
+            <span class="channel-card__actions channel-card__actions--spacer" aria-hidden="true" />
           </button>
         </div>
       </t-loading>
@@ -125,14 +128,16 @@
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionChannel') }}</h4>
 
-          <div v-if="tenantMode && !editingChannel" class="form-item">
-            <label class="form-label required">{{ $t('integrations.selectAgent') }}</label>
-            <t-select
-              v-model="formData.target_agent_id"
-              :options="agentOptions"
-              filterable
-              :placeholder="$t('integrations.selectAgentPlaceholder')"
-            />
+          <div v-if="tenantMode" class="form-item">
+            <label class="form-label required">{{ $t('integrations.boundAgent') }}</label>
+            <div class="agent-field-row">
+              <t-select
+                v-model="formData.target_agent_id"
+                :options="agentOptions"
+                filterable
+                :placeholder="$t('integrations.selectAgentPlaceholder')"
+              />
+            </div>
           </div>
 
           <div class="form-item">
@@ -173,11 +178,8 @@
             />
             <p v-if="!editingChannel" class="form-desc">{{ $t('agentEditor.im.channelNameDefaultHint') }}</p>
           </div>
-        </section>
 
-        <section v-if="editingChannel && authStore.hasRole('admin')" class="setting-drawer__section im-drawer__section">
-          <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionStatus') }}</h4>
-          <div class="setting-row setting-row--last">
+          <div v-if="editingChannel && authStore.hasRole('admin')" class="setting-row setting-row--last">
             <div class="setting-info">
               <label>{{ $t('agentEditor.im.enabled') }}</label>
             </div>
@@ -651,7 +653,7 @@ const drawerTitle = computed(() => {
 });
 
 function validateWizardStep(step: number): boolean {
-  if (step === 0 && props.tenantMode && !editingChannel.value && !formData.value.target_agent_id) {
+  if (step === 0 && props.tenantMode && !formData.value.target_agent_id) {
     MessagePlugin.warning(t('integrations.selectAgentHint'));
     return false;
   }
@@ -696,29 +698,42 @@ const formData = ref({
   credentials: defaultCredentials(),
 });
 
-const channelMenuOptions = computed(() => ([
-  { content: t('common.delete'), value: 'delete', theme: 'error' },
-]));
+const channelMenuOptions = (channel: IMChannel | IMChannelOverview) => ([
+  {
+    content: channel.enabled ? t('common.off') : t('common.on'),
+    value: 'toggle',
+  },
+  { content: t('common.delete'), value: 'delete', theme: 'error' as const },
+]);
 
-const channelSummary = (channel: IMChannel | IMChannelOverview) => {
-  const parts = [
-    platformLabel(channel.platform),
-    channel.mode,
-    channel.output_mode === 'stream' ? t('agentEditor.im.outputStream') : t('agentEditor.im.outputFull'),
-  ];
-  if (channel.session_mode === 'thread') {
-    parts.push(t('agentEditor.im.sessionModeThread'));
+function handleChannelMenuClick(
+  data: { value?: string },
+  channel: IMChannel | IMChannelOverview,
+) {
+  if (data.value === 'toggle') {
+    void handleToggle(channel);
+    return;
   }
-  if (props.tenantMode) {
-    const agentName = agentLabel(channel.agent_id, (channel as IMChannelOverview).agent_name);
-    if (agentName) parts.unshift(agentName);
+  if (data.value === 'delete') {
+    confirmDelete(channel.id);
   }
-  return parts.join(' · ');
-};
+}
 
-function agentLabel(agentId: string, overviewName?: string): string {
-  if (overviewName) return overviewName;
-  return agents.value.find((agent) => agent.id === agentId)?.name || '';
+function agentDisplayName(channel: IMChannel | IMChannelOverview): string {
+  return agentForChannel(channel)?.name || '';
+}
+
+function agentForChannel(channel: IMChannel | IMChannelOverview): CustomAgent | undefined {
+  const found = agents.value.find((agent) => agent.id === channel.agent_id);
+  if (found) return found;
+  const overviewName = (channel as IMChannelOverview).agent_name;
+  if (!overviewName) return undefined;
+  return {
+    id: channel.agent_id,
+    name: overviewName,
+    is_builtin: false,
+    config: {},
+  };
 }
 
 function platformLabel(platform: string): string {
@@ -1007,6 +1022,9 @@ async function handleSave() {
         knowledge_base_id: formData.value.knowledge_base_id,
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
+        ...(props.tenantMode && formData.value.target_agent_id
+          ? { agent_id: formData.value.target_agent_id }
+          : {}),
       });
       MessagePlugin.success(t('common.updateSuccess'));
     } else {
@@ -1077,196 +1095,11 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="less">
+@import './css/channel-panel-list.less';
+
 .im-panel {
   display: flex;
   flex-direction: column;
-}
-
-.channels-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-
-  .channels-title {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .channels-count {
-    padding: 2px 8px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 10px;
-    font-size: 12px;
-    color: var(--td-text-color-disabled);
-  }
-}
-
-.channels-loading-wrap {
-  min-height: 80px;
-}
-
-.channels-empty {
-  padding: 32px 0;
-}
-
-.channel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-
-.channel-card {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
-  text-align: left;
-  font: inherit;
-  color: inherit;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-
-  &--clickable {
-    cursor: pointer;
-    width: 100%;
-
-    &:hover,
-    &:focus-visible {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-      outline: none;
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
-  }
-
-  &--add {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 68px;
-    border-style: dashed;
-    background: transparent;
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    width: 100%;
-
-    &:hover,
-    &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-      box-shadow: none;
-    }
-
-    &__icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-      color: var(--td-brand-color);
-      font-size: 18px;
-    }
-
-    &__label {
-      font-size: 13px;
-      font-weight: 500;
-      line-height: 1.4;
-    }
-  }
-
-  &__badge {
-    flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--td-bg-color-secondarycontainer);
-    overflow: hidden;
-  }
-
-  &__logo {
-    width: 16px;
-    height: 16px;
-    object-fit: contain;
-  }
-
-  &__body {
-    flex: 1;
-    min-width: 0;
-  }
-
-  &__header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  &__title {
-    flex: 1;
-    min-width: 0;
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
-    line-height: 1.4;
-    color: var(--td-text-color-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__subtitle {
-    margin: 2px 0 0;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--td-text-color-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__actions {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding-top: 2px;
-  }
-
-  &__more {
-    flex-shrink: 0;
-    padding: 2px;
-    opacity: 0;
-    color: var(--td-text-color-placeholder);
-    transition: opacity 0.15s ease;
-
-    &:hover,
-    &:focus-visible {
-      background: var(--td-bg-color-secondarycontainer);
-      color: var(--td-text-color-primary);
-    }
-  }
-
-  &:hover .channel-card__more,
-  &:focus-within .channel-card__more,
-  &__actions:focus-within .channel-card__more {
-    opacity: 1;
-  }
 }
 
 .drawer-platform-icon {

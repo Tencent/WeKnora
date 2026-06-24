@@ -177,6 +177,12 @@ func (s *embedChannelService) Update(
 			ch.AllowedOrigins = req.AllowedOrigins
 		}
 	}
+	if trimmed := strings.TrimSpace(req.AgentID); trimmed != "" && trimmed != ch.AgentID {
+		if _, err := s.ensureAgentOwned(ctx, tenantID, trimmed); err != nil {
+			return nil, err
+		}
+		ch.AgentID = trimmed
+	}
 	if err := s.repo.Update(ctx, ch); err != nil {
 		return nil, err
 	}
