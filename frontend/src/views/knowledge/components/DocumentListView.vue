@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 
@@ -38,9 +38,62 @@ const emit = defineEmits<{
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
   (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem): void;
+  (e: 'tag-edit', item: KnowledgeItem): void;
 }>();
 
 const { t } = useI18n();
+
+// 动态标签可见数量（根据列宽自适应）
+const TAG_EST_WIDTH = 82;
+const TAG_OVERFLOW_MIN = 32;
+const tagVisibleLimit = reactive<Record<string, number>>({});
+const tagItemTotalMap = new Map<string, number>();
+let tagChipsRO: ResizeObserver | null = null;
+
+function setupTagChipsObserver(el: Element | null, itemId: string, totalCount: number) {
+  if (!el) return;
+  const htmlEl = el as HTMLElement;
+  htmlEl.dataset.listTagItemId = itemId;
+  tagItemTotalMap.set(itemId, totalCount);
+  if (!tagChipsRO) {
+    tagChipsRO = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const target = entry.target as HTMLElement;
+        const id = target.dataset.listTagItemId;
+        if (!id) continue;
+        const w = entry.contentRect.width;
+        const total = tagItemTotalMap.get(id) ?? 0;
+        if (total <= 0) { tagVisibleLimit[id] = 99; continue; }
+        const maxFit = Math.floor((w - TAG_OVERFLOW_MIN) / TAG_EST_WIDTH);
+        const limit = Math.max(1, Math.min(maxFit, total));
+        tagVisibleLimit[id] = limit >= total ? 99 : limit;
+      }
+    });
+  }
+  tagChipsRO.observe(htmlEl);
+  requestAnimationFrame(() => {
+    const w = htmlEl.clientWidth;
+    const total = totalCount;
+    if (total <= 0) { tagVisibleLimit[itemId] = 99; return; }
+    const maxFit = Math.floor((w - TAG_OVERFLOW_MIN) / TAG_EST_WIDTH);
+    const limit = Math.max(1, Math.min(maxFit, total));
+    tagVisibleLimit[itemId] = limit >= total ? 99 : limit;
+  });
+}
+
+function getTagLimit(itemId: string): number {
+  return tagVisibleLimit[itemId] ?? 99;
+}
+
+function hasTagOverflow(itemId: string, total: number): boolean {
+  const limit = tagVisibleLimit[itemId] ?? 99;
+  return total > limit;
+}
+
+function getOverflowCount(itemId: string, total: number): number {
+  const limit = tagVisibleLimit[itemId] ?? 99;
+  return Math.max(0, total - limit);
+}
 
 const tagMap = computed(() => {
   const map: Record<string, Tag> = {};
@@ -249,11 +302,50 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
         <div class="cell cell-tag">
           <template v-if="item.tags && item.tags.length > 0">
-            <t-tag v-for="tag in item.tags" :key="tag.id" size="small" variant="light-outline" class="row-tag" :style="{ marginRight: '4px' }">
-              {{ tag.name }}
-            </t-tag>
+            <t-tooltip
+              v-if="hasTagOverflow(item.id, item.tags.length)"
+              :content="item.tags.map((t: any) => t.name).join(', ')"
+              placement="top"
+            >
+              <div
+                class="row-tag-chips"
+                :ref="(el: any) => setupTagChipsObserver(el, item.id, item.tags.length)"
+                :class="{ 'is-clickable': canEdit }"
+                @click.stop="canEdit && emit('tag-edit', item)"
+              >
+                <t-tag
+                  v-for="tag in item.tags.slice(0, getTagLimit(item.id))"
+                  :key="tag.id"
+                  size="small"
+                  variant="light-outline"
+                  class="row-tag"
+                >
+                  {{ tag.name }}
+                </t-tag>
+                <span class="row-tag-overflow">+{{ getOverflowCount(item.id, item.tags.length) }}</span>
+              </div>
+            </t-tooltip>
+            <div
+              v-else
+              class="row-tag-chips"
+              :ref="(el: any) => setupTagChipsObserver(el, item.id, item.tags.length)"
+              :class="{ 'is-clickable': canEdit }"
+              @click.stop="canEdit && emit('tag-edit', item)"
+            >
+              <t-tag
+                v-for="tag in item.tags.slice(0, getTagLimit(item.id))"
+                :key="tag.id"
+                size="small"
+                variant="light-outline"
+                class="row-tag"
+              >
+                {{ tag.name }}
+              </t-tag>
+            </div>
           </template>
-          <span v-else class="row-muted">--</span>
+          <span v-else class="row-tag-chips is-clickable" @click.stop="canEdit && emit('tag-edit', item)">
+            <span class="row-tag-add">+ {{ t('knowledgeBase.tagLabel') }}</span>
+          </span>
         </div>
 
         <div class="cell cell-source">
@@ -596,6 +688,58 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     text-overflow: ellipsis;
     max-width: 120px;
     display: inline-block;
+  }
+}
+
+.row-tag-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+
+  &.is-clickable {
+    cursor: pointer;
+  }
+}
+
+.row-tag-overflow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid var(--td-component-stroke);
+  color: var(--td-text-color-placeholder);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
+.row-tag-add {
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 999px;
+  padding: 0 6px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+    border-style: solid;
   }
 }
 

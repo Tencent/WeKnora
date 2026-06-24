@@ -44,6 +44,7 @@ import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
+import TagEditDialog from './components/TagEditDialog.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
@@ -544,6 +545,74 @@ const newTagName = ref('');
 const editingTagId = ref<string | null>(null);
 const editingTagName = ref('');
 const editingTagSubmitting = ref(false);
+// 标签编辑弹窗
+const tagEditDialogVisible = ref(false);
+const tagEditTarget = ref<KnowledgeCard | null>(null);
+
+// 动态标签可见数量（根据卡片容器宽度自适应）
+const TAG_EST_WIDTH = 82;   // 单个标签估算宽度（含间距）
+const TAG_OVERFLOW_MIN = 32; // +N 徽章预留宽度
+const tagVisibleLimit = reactive<Record<string, number>>({});
+const tagItemTotalMap = new Map<string, number>();
+let tagChipsRO: ResizeObserver | null = null;
+
+function setupTagChipsObserver(el: Element | null, itemId: string, totalCount: number) {
+  if (!el) return;
+  const htmlEl = el as HTMLElement;
+  htmlEl.dataset.tagItemId = itemId;
+  tagItemTotalMap.set(itemId, totalCount);
+  if (!tagChipsRO) {
+    tagChipsRO = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const target = entry.target as HTMLElement;
+        const id = target.dataset.tagItemId;
+        if (!id) continue;
+        const w = entry.contentRect.width;
+        const total = tagItemTotalMap.get(id) ?? 0;
+        if (total <= 0) { tagVisibleLimit[id] = 99; continue; }
+        // 计算能容纳几个标签：总宽 - 溢出徽章预留，除以单标签宽
+        const maxFit = Math.floor((w - TAG_OVERFLOW_MIN) / TAG_EST_WIDTH);
+        const limit = Math.max(1, Math.min(maxFit, total));
+        tagVisibleLimit[id] = limit >= total ? 99 : limit;
+      }
+    });
+  }
+  tagChipsRO.observe(htmlEl);
+  // 初始计算
+  requestAnimationFrame(() => {
+    const w = htmlEl.clientWidth;
+    const total = totalCount;
+    if (total <= 0) { tagVisibleLimit[itemId] = 99; return; }
+    const maxFit = Math.floor((w - TAG_OVERFLOW_MIN) / TAG_EST_WIDTH);
+    const limit = Math.max(1, Math.min(maxFit, total));
+    tagVisibleLimit[itemId] = limit >= total ? 99 : limit;
+  });
+}
+
+function getTagLimit(itemId: string): number {
+  return tagVisibleLimit[itemId] ?? 99;
+}
+
+function hasTagOverflow(itemId: string, total: number): boolean {
+  const limit = tagVisibleLimit[itemId] ?? 99;
+  return total > limit;
+}
+
+function getOverflowCount(itemId: string, total: number): number {
+  const limit = tagVisibleLimit[itemId] ?? 99;
+  return Math.max(0, total - limit);
+}
+
+function openTagEditDialog(item: KnowledgeCard) {
+  tagEditTarget.value = item;
+  tagEditDialogVisible.value = true;
+}
+
+function onTagEditConfirm(tagIds: string[]) {
+  if (tagEditTarget.value) {
+    handleKnowledgeTagChange(tagEditTarget.value.id, tagIds);
+  }
+}
 const getPageSize = () => {
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
   const itemHeight = 148;
@@ -2517,42 +2586,91 @@ async function createNewSession(value: string): Promise<void> {
                         <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
                         <div class="card-bottom-right">
                           <div v-if="tagList.length" class="card-tag-selector" @click.stop>
-                            <t-popup v-if="canEdit" v-model="item.isTagPopup" trigger="click" placement="bottom-right"
-                              overlayClassName="card-tag-popup" destroy-on-close>
-                              <template #content>
-                                <div class="tag-popup-list">
-                                  <div v-for="tag in tagList" :key="tag.id" class="tag-popup-item"
-                                    :class="{ 'is-selected': (item.tags || []).some((t: any) => t.id === tag.id) }"
-                                    @click="onPickTag(item, tag.id)">
-                                    <t-icon class="tag-popup-check"
-                                      :class="{ visible: (item.tags || []).some((t: any) => t.id === tag.id) }" name="check" />
-                                    <span class="tag-popup-name">{{ tag.name }}</span>
+                            <!-- 可编辑模式：点击打开弹窗 -->
+                            <template v-if="canEdit">
+                              <template v-if="(item.tags || []).length > 0">
+                                <t-tooltip
+                                  v-if="hasTagOverflow(item.id, (item.tags || []).length)"
+                                  :content="(item.tags || []).map((t: any) => t.name).join(', ')"
+                                  placement="top"
+                                >
+                                  <div
+                                    class="card-tag-chips"
+                                    :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
+                                    @click="openTagEditDialog(item)"
+                                  >
+                                    <t-tag
+                                      v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))"
+                                      :key="tag.id"
+                                      size="small"
+                                      variant="light-outline"
+                                      class="card-tag-chip"
+                                    >
+                                      <span class="tag-text">{{ tag.name }}</span>
+                                    </t-tag>
+                                    <span class="card-tag-overflow">+{{ getOverflowCount(item.id, (item.tags || []).length) }}</span>
                                   </div>
-                                  <template v-if="(item.tags || []).length > 0">
-                                    <div class="tag-popup-divider"></div>
-                                    <div class="tag-popup-item is-action" @click="onPickTag(item, '')">
-                                      <t-icon class="tag-popup-check" name="close" />
-                                      <span class="tag-popup-name">{{ t('knowledgeBase.tagClearAction') }}</span>
-                                    </div>
-                                  </template>
+                                </t-tooltip>
+                                <div
+                                  v-else
+                                  class="card-tag-chips"
+                                  :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
+                                  @click="openTagEditDialog(item)"
+                                >
+                                  <t-tag
+                                    v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))"
+                                    :key="tag.id"
+                                    size="small"
+                                    variant="light-outline"
+                                    class="card-tag-chip"
+                                  >
+                                    <span class="tag-text">{{ tag.name }}</span>
+                                  </t-tag>
                                 </div>
                               </template>
-                              <template v-if="(item.tags || []).length > 0">
-                                <t-tag v-for="tag in item.tags" :key="tag.id" size="small" variant="light-outline"
-                                  class="card-tag-chip" :style="{ marginRight: '4px' }">
-                                  <span class="tag-text">{{ tag.name }}</span>
-                                </t-tag>
-                              </template>
-                              <span v-else class="card-tag-add">
+                              <span v-else class="card-tag-add" @click="openTagEditDialog(item)">
                                 <t-icon name="add" size="12px" />
                                 <span>{{ t('knowledgeBase.tagLabel') }}</span>
                               </span>
-                            </t-popup>
+                            </template>
+                            <!-- 只读模式 -->
                             <template v-else-if="(item.tags || []).length > 0">
-                              <t-tag v-for="tag in item.tags" :key="tag.id" size="small" variant="light-outline"
-                                class="card-tag-chip" :style="{ marginRight: '4px' }">
-                                <span class="tag-text">{{ tag.name }}</span>
-                              </t-tag>
+                              <t-tooltip
+                                v-if="hasTagOverflow(item.id, (item.tags || []).length)"
+                                :content="(item.tags || []).map((t: any) => t.name).join(', ')"
+                                placement="top"
+                              >
+                                <div
+                                  class="card-tag-chips"
+                                  :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
+                                >
+                                  <t-tag
+                                    v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))"
+                                    :key="tag.id"
+                                    size="small"
+                                    variant="light-outline"
+                                    class="card-tag-chip"
+                                  >
+                                    <span class="tag-text">{{ tag.name }}</span>
+                                  </t-tag>
+                                  <span class="card-tag-overflow">+{{ getOverflowCount(item.id, (item.tags || []).length) }}</span>
+                                </div>
+                              </t-tooltip>
+                              <div
+                                v-else
+                                class="card-tag-chips"
+                                :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
+                              >
+                                <t-tag
+                                  v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))"
+                                  :key="tag.id"
+                                  size="small"
+                                  variant="light-outline"
+                                  class="card-tag-chip"
+                                >
+                                  <span class="tag-text">{{ tag.name }}</span>
+                                </t-tag>
+                              </div>
                             </template>
                           </div>
                           <div class="card-type">
@@ -2618,7 +2736,8 @@ async function createNewSession(value: string): Promise<void> {
                   <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
                     :can-edit="canEdit" @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll"
-                    @action="(action: any, item: any) => handleListAction(action, item)" />
+                    @action="(action: any, item: any) => handleListAction(action, item)"
+                    @tag-edit="(item: any) => openTagEditDialog(item)" />
                 </template>
                 <template v-else-if="!docListLoading">
                   <div class="doc-empty-state">
@@ -2654,6 +2773,18 @@ async function createNewSession(value: string): Promise<void> {
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
+
+  <!-- 标签编辑弹窗 -->
+  <TagEditDialog
+    :visible="tagEditDialogVisible"
+    :knowledge-name="tagEditTarget?.display_name || tagEditTarget?.file_name || tagEditTarget?.title || ''"
+    :kb-id="kbId"
+    :tag-list="tagList"
+    :selected-tags="tagEditTarget?.tags || []"
+    @update:visible="tagEditDialogVisible = $event"
+    @confirm="onTagEditConfirm"
+    @tag-created="loadTags(kbId, true)"
+  />
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
@@ -3517,6 +3648,36 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   align-items: center;
 
+  .card-tag-chips {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    cursor: pointer;
+  }
+
+  .card-tag-overflow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    border: 1px solid var(--td-component-stroke);
+    color: var(--td-text-color-placeholder);
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: var(--td-brand-color);
+      color: var(--td-brand-color);
+      background: var(--td-bg-color-secondarycontainer);
+    }
+  }
+
   :deep(.t-tag) {
     cursor: pointer;
     max-width: 120px;
@@ -3574,9 +3735,13 @@ async function createNewSession(value: string): Promise<void> {
 
 
 .card-bottom-right {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  overflow: hidden;
 }
 
 .faq-manager-wrapper {
@@ -4094,13 +4259,16 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .card-time {
+    flex-shrink: 0;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
     font-size: 12px;
     font-weight: 400;
+    white-space: nowrap;
   }
 
   .card-type {
+    flex-shrink: 0;
     color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
     font-size: 11px;
@@ -4109,6 +4277,16 @@ async function createNewSession(value: string): Promise<void> {
     background: transparent;
     letter-spacing: 0.02em;
   }
+}
+
+.card-bottom-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  overflow: hidden;
 }
 
 .knowledge-card:hover {
