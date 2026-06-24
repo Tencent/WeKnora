@@ -46,13 +46,14 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	var req struct {
-		Platform        string     `json:"platform" binding:"required"`
-		Name            string     `json:"name"`
-		Mode            string     `json:"mode"`
-		OutputMode      string     `json:"output_mode"`
-		KnowledgeBaseID string     `json:"knowledge_base_id"`
-		Credentials     types.JSON `json:"credentials"`
-		Enabled         *bool      `json:"enabled"`
+		Platform               string     `json:"platform" binding:"required"`
+		Name                   string     `json:"name"`
+		Mode                   string     `json:"mode"`
+		OutputMode             string     `json:"output_mode"`
+		KnowledgeBaseID        string     `json:"knowledge_base_id"`
+		FileProcessingStrategy string     `json:"file_processing_strategy"`
+		Credentials            types.JSON `json:"credentials"`
+		Enabled                *bool      `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -65,15 +66,16 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	channel := &im.IMChannel{
-		TenantID:        tenantID,
-		AgentID:         agentID,
-		Platform:        req.Platform,
-		Name:            req.Name,
-		Mode:            req.Mode,
-		OutputMode:      req.OutputMode,
-		KnowledgeBaseID: req.KnowledgeBaseID,
-		Credentials:     req.Credentials,
-		Enabled:         true,
+		TenantID:               tenantID,
+		AgentID:                agentID,
+		Platform:               req.Platform,
+		Name:                   req.Name,
+		Mode:                   req.Mode,
+		OutputMode:             req.OutputMode,
+		KnowledgeBaseID:        req.KnowledgeBaseID,
+		FileProcessingStrategy: im.FileProcessingStrategy(req.FileProcessingStrategy),
+		Credentials:            req.Credentials,
+		Enabled:                true,
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
@@ -190,12 +192,13 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 
 	var req struct {
-		Name            *string    `json:"name"`
-		Mode            *string    `json:"mode"`
-		OutputMode      *string    `json:"output_mode"`
-		KnowledgeBaseID *string    `json:"knowledge_base_id"`
-		Credentials     types.JSON `json:"credentials"`
-		Enabled         *bool      `json:"enabled"`
+		Name                   *string    `json:"name"`
+		Mode                   *string    `json:"mode"`
+		OutputMode             *string    `json:"output_mode"`
+		KnowledgeBaseID        *string    `json:"knowledge_base_id"`
+		FileProcessingStrategy *string    `json:"file_processing_strategy"`
+		Credentials            types.JSON `json:"credentials"`
+		Enabled                *bool      `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -213,6 +216,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 	if req.KnowledgeBaseID != nil {
 		channel.KnowledgeBaseID = *req.KnowledgeBaseID
+	}
+	if req.FileProcessingStrategy != nil {
+		channel.FileProcessingStrategy = im.FileProcessingStrategy(*req.FileProcessingStrategy)
 	}
 	if req.Credentials != nil {
 		channel.Credentials = req.Credentials

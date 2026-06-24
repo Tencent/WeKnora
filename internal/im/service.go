@@ -474,6 +474,7 @@ func buildIMQARequest(
 	customAgent *types.CustomAgent,
 	kbIDs []string,
 	quote *QuotedMessage,
+	attachments types.MessageAttachments,
 ) *types.QARequest {
 	// WebSearchEnabled: the web handler passes this per-request from the
 	// frontend toggle; for IM channels the user has no per-message toggle,
@@ -489,6 +490,7 @@ func buildIMQARequest(
 		UserMessageID:      userMessageID,
 		WebSearchEnabled:   webSearchEnabled,
 		QuotedContext:      quotedContext,
+		Attachments:        attachments,
 	}
 }
 
@@ -1094,11 +1096,18 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	logger.Debugf(ctx, "[IM] HandleMessage detail: msgid=%s filekey=%s filename=%s",
 		msg.MessageID, msg.FileKey, msg.FileName)
 
-	// ── File/Image message shortcut ──
-	// If the message is a file or image and the channel has a knowledge_base_id configured,
-	// handle it separately without entering the QA pipeline.
-	if (msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage) && channel.KnowledgeBaseID != "" {
-		return s.handleFileMessage(ctx, msg, adapter, channel)
+	// ── File/Image message handling ──
+	// Strategy "kb": upload to knowledge base (existing behavior, requires knowledge_base_id).
+	// Strategy "direct": parse file content and inject directly into the agent conversation.
+	if msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage {
+		switch channel.FileProcessingStrategy {
+		case FileProcessingStrategyDirect:
+			return s.handleFileMessageDirect(ctx, msg, adapter, channel)
+		default: // FileProcessingStrategyKB
+			if channel.KnowledgeBaseID != "" {
+				return s.handleFileMessage(ctx, msg, adapter, channel)
+			}
+		}
 	}
 
 	// ── Non-text message without text content ──
@@ -1108,7 +1117,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	if msg.Content == "" && (msg.MessageType == MessageTypeImage || msg.MessageType == MessageTypeFile) {
 		logger.Infof(ctx, "[IM] Skipping QA for non-text message without content: type=%s", msg.MessageType)
 		if err := adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: "当前渠道未配置文件知识库，无法处理图片/文件消息。请在渠道设置中配置文件知识库后再发送，或直接用文字描述您的问题。",
+			Content: "当前渠道未配置文件处理策略，无法处理图片/文件消息。请在渠道设置中配置文件处理策略后再发送，或直接用文字描述您的问题。",
 			IsFinal: true,
 		}); err != nil {
 			logger.Warnf(ctx, "[IM] Failed to send non-text hint reply: %v", err)
@@ -1947,7 +1956,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	// Run QA async
 	go func() {
 		var err error
-		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote)
+		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote, nil)
 		if req.QuotedContext != "" {
 			logger.Debugf(qaCtx, "[IM] QuotedContext set: length=%d", len(req.QuotedContext))
 		}
@@ -2158,7 +2167,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	// Run QA async
 	go func() {
 		var err error
-		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, quote)
+		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, quote, nil)
 		if req.QuotedContext != "" {
 			logger.Debugf(ctx, "[IM] QuotedContext set: length=%d", len(req.QuotedContext))
 		}
@@ -2230,19 +2239,20 @@ func (s *Service) ListChannelsByAgent(agentID string, tenantID uint64) ([]IMChan
 // tenant-scoped list endpoint; callers that need credentials must use the
 // per-agent endpoint which enforces the same tenant scope anyway.
 type ChannelWithAgent struct {
-	ID          string    `json:"id"`
-	TenantID    uint64    `json:"tenant_id"`
-	AgentID     string    `json:"agent_id"`
-	AgentName   string    `json:"agent_name"`
-	Platform    string    `json:"platform"`
-	Name        string    `json:"name"`
-	Enabled     bool      `json:"enabled"`
-	Mode        string    `json:"mode"`
-	OutputMode  string    `json:"output_mode"`
-	SessionMode string    `json:"session_mode"`
-	BotIdentity string    `json:"bot_identity"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                     string    `json:"id"`
+	TenantID               uint64    `json:"tenant_id"`
+	AgentID                string    `json:"agent_id"`
+	AgentName              string    `json:"agent_name"`
+	Platform               string    `json:"platform"`
+	Name                   string    `json:"name"`
+	Enabled                bool      `json:"enabled"`
+	Mode                   string    `json:"mode"`
+	OutputMode             string    `json:"output_mode"`
+	SessionMode            string    `json:"session_mode"`
+	FileProcessingStrategy string    `json:"file_processing_strategy"`
+	BotIdentity            string    `json:"bot_identity"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 // ListChannelsByTenant returns all non-deleted IM channels in the given tenant,
@@ -2257,7 +2267,7 @@ func (s *Service) ListChannelsByTenant(tenantID uint64) ([]ChannelWithAgent, err
 		Select(`c.id, c.tenant_id, c.agent_id,
                 COALESCE(a.name, '') AS agent_name,
                 c.platform, c.name, c.enabled, c.mode, c.output_mode,
-                c.session_mode, c.bot_identity, c.created_at, c.updated_at`).
+                c.session_mode, c.file_processing_strategy, c.bot_identity, c.created_at, c.updated_at`).
 		Joins(`LEFT JOIN custom_agents AS a
                ON a.id = c.agent_id AND a.tenant_id = c.tenant_id AND a.deleted_at IS NULL`).
 		Where("c.tenant_id = ? AND c.deleted_at IS NULL", tenantID)
@@ -2510,6 +2520,413 @@ func (s *Service) processFileToKnowledgeBase(ctx context.Context, msg *IncomingM
 	// finishes parsing + summary generation. This is intentionally decoupled
 	// from the Asynq task pipeline to avoid modifying any existing logic.
 	go s.watchAndSendSummary(ctx, kbCtx, adapter, msg, knowledge.ID, fileName, channel)
+}
+
+// textBasedFileExts is the set of file extensions whose content can be read
+// directly as UTF-8 text without requiring a document parser.
+var textBasedFileExts = map[string]bool{
+	"txt": true, "md": true, "markdown": true,
+	"csv": true, "json": true, "xml": true,
+	"yaml": true, "yml": true, "log": true,
+	"html": true, "htm": true, "css": true,
+	"js": true, "ts": true, "py": true, "go": true,
+	"java": true, "c": true, "cpp": true, "h": true,
+	"rs": true, "sh": true, "bat": true, "ps1": true,
+	"sql": true, "ini": true, "cfg": true, "toml": true,
+}
+
+// handleFileMessageDirect processes a file message by downloading it from the IM
+// platform and injecting its content directly into the agent conversation context.
+// The file is NOT persisted to any knowledge base — it is parsed on-the-fly and
+// passed as an attachment to the QA pipeline for immediate analysis.
+func (s *Service) handleFileMessageDirect(ctx context.Context, msg *IncomingMessage, adapter Adapter, channel *IMChannel) error {
+	downloader, ok := adapter.(FileDownloader)
+	if !ok {
+		logger.Infof(ctx, "[IM] Adapter for platform %s does not support file download", msg.Platform)
+		return s.sendSmartReply(ctx, adapter, msg, channel,
+			"用户尝试发送文件，但当前平台暂不支持文件消息处理。",
+			"❌ 当前平台暂不支持文件消息处理。")
+	}
+
+	if msg.MessageType == MessageTypeImage && fileExtension(msg.FileName) == "" {
+		msg.FileName = msg.FileName + ".png"
+	}
+
+	ext := fileExtension(msg.FileName)
+	if ext != "" && !supportedKBFileExts[ext] {
+		logger.Infof(ctx, "[IM] Unsupported file type for direct processing: %s (file=%s)", ext, msg.FileName)
+		return s.sendSmartReply(ctx, adapter, msg, channel,
+			fmt.Sprintf("用户上传了一个不支持的文件类型「%s」。目前支持的类型包括：PDF、Word、TXT、Markdown、Excel、CSV、PPT、图片。", ext),
+			fmt.Sprintf("❌ 不支持的文件类型「%s」。\n\n支持的类型：PDF、Word、TXT、Markdown、Excel、CSV、PPT、图片。", ext))
+	}
+
+	go s.processFileDirect(context.WithoutCancel(ctx), msg, downloader, adapter, channel)
+	return nil
+}
+
+// processFileDirect is the async worker that downloads a file from the IM
+// platform, extracts its text content, and injects it into the QA pipeline
+// as a message attachment.
+func (s *Service) processFileDirect(ctx context.Context, msg *IncomingMessage, downloader FileDownloader, adapter Adapter, channel *IMChannel) {
+	tenantID := channel.TenantID
+
+	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil {
+		logger.Errorf(ctx, "[IM] Failed to get tenant %d for direct file processing: %v", tenantID, err)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "❌ 处理文件时出现异常，请稍后再试。",
+			IsFinal: true,
+		})
+		return
+	}
+
+	reader, fileName, err := downloader.DownloadFile(ctx, msg)
+	if err != nil {
+		logger.Errorf(ctx, "[IM] Failed to download file for direct processing: %v", err)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "❌ 下载文件失败，请稍后再试。",
+			IsFinal: true,
+		})
+		return
+	}
+	defer reader.Close()
+
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		logger.Errorf(ctx, "[IM] Failed to read file content for direct processing: %v", err)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "❌ 读取文件内容失败，请稍后再试。",
+			IsFinal: true,
+		})
+		return
+	}
+
+	ext := fileExtension(fileName)
+	attachment := types.MessageAttachment{
+		FileName: fileName,
+		FileType: ext,
+		FileSize: int64(len(content)),
+	}
+
+	if textBasedFileExts[ext] {
+		textContent := string(content)
+		const maxTextContent = 50000
+		runes := []rune(textContent)
+		if len(runes) > maxTextContent {
+			attachment.Content = string(runes[:maxTextContent])
+			attachment.IsTruncated = true
+			attachment.LineCount = len(strings.Split(textContent, "\n"))
+		} else {
+			attachment.Content = textContent
+		}
+	} else {
+		attachment.Content = fmt.Sprintf("[二进制文件，类型: %s，大小: %d 字节，无法直接提取文本内容。请使用「上传至知识库」策略处理此文件。]", ext, len(content))
+	}
+
+	attachments := types.MessageAttachments{attachment}
+
+	query := msg.Content
+	if query == "" {
+		query = fmt.Sprintf("请分析以下文件「%s」的内容", fileName)
+	}
+
+	sessionCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+	sessionCtx = context.WithValue(sessionCtx, types.TenantInfoContextKey, tenant)
+
+	channelSession, err := s.resolveSession(sessionCtx, msg, tenantID, channel.AgentID, channel.ID, channel.SessionMode)
+	if err != nil {
+		logger.Errorf(ctx, "[IM] Failed to resolve session for direct file: %v", err)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "❌ 创建会话失败，请稍后再试。",
+			IsFinal: true,
+		})
+		return
+	}
+
+	session, err := s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
+	if err != nil {
+		logger.Errorf(ctx, "[IM] Failed to get session for direct file: %v", err)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "❌ 获取会话失败，请稍后再试。",
+			IsFinal: true,
+		})
+		return
+	}
+
+	var customAgent *types.CustomAgent
+	if channel.AgentID != "" {
+		agent, err := s.agentService.GetAgentByID(sessionCtx, channel.AgentID)
+		if err != nil {
+			logger.Warnf(ctx, "[IM] Failed to get agent %s for direct file: %v", channel.AgentID, err)
+		} else {
+			customAgent = agent
+		}
+	}
+
+	var kbIDs []string
+	useAgent := customAgent != nil && customAgent.IsAgentMode()
+	requestID := uuid.New().String()
+
+	userMsg, err := s.messageService.CreateMessage(sessionCtx, &types.Message{
+		SessionID:   session.ID,
+		Role:        "user",
+		Content:     query,
+		RequestID:   requestID,
+		CreatedAt:   time.Now(),
+		IsCompleted: true,
+		Channel:     "im",
+		Attachments: attachments,
+	})
+	if err != nil {
+		logger.Errorf(ctx, "[IM] Failed to create user message for direct file: %v", err)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "❌ 创建消息失败，请稍后再试。",
+			IsFinal: true,
+		})
+		return
+	}
+
+	assistantMsg, err := s.messageService.CreateMessage(sessionCtx, &types.Message{
+		SessionID:   session.ID,
+		Role:        "assistant",
+		RequestID:   requestID,
+		CreatedAt:   time.Now(),
+		IsCompleted: false,
+		Channel:     "im",
+	})
+	if err != nil {
+		logger.Errorf(ctx, "[IM] Failed to create assistant message for direct file: %v", err)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "❌ 创建消息失败，请稍后再试。",
+			IsFinal: true,
+		})
+		return
+	}
+
+	threadID := ""
+	if channel.SessionMode == string(SessionModeThread) {
+		threadID = msg.ThreadID
+	}
+	userKey := makeUserKey(channel.ID, msg.UserID, msg.ChatID, threadID)
+
+	entry := &inflightEntry{cancel: func() {}}
+	s.inflight.Store(userKey, entry)
+	defer s.inflight.Delete(userKey)
+	entry.sessionID = session.ID
+	entry.assistantMessageID = assistantMsg.ID
+	s.storeInflightMapping(ctx, userKey, session.ID, assistantMsg.ID)
+	defer s.clearInflightMapping(ctx, userKey)
+
+	streamDisabled := channel.OutputMode == "full"
+
+	if !streamDisabled {
+		if streamer, ok := adapter.(StreamSender); ok {
+			streamID, err := streamer.StartStream(ctx, msg)
+			if err == nil {
+				eventBus := event.NewEventBus()
+				var (
+					bufMu         sync.Mutex
+					buf           strings.Builder
+					answerBuilder strings.Builder
+					qaErr         error
+					done          = make(chan struct{})
+					closeOnce     sync.Once
+				)
+				closeDone := func() { closeOnce.Do(func() { close(done) }) }
+
+				eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+					data, ok := evt.Data.(event.AgentFinalAnswerData)
+					if !ok {
+						return nil
+					}
+					bufMu.Lock()
+					answerBuilder.WriteString(data.Content)
+					buf.WriteString(data.Content)
+					bufMu.Unlock()
+					if data.Done {
+						closeDone()
+					}
+					return nil
+				})
+
+				eventBus.On(event.EventError, func(_ context.Context, evt event.Event) error {
+					data, ok := evt.Data.(event.ErrorData)
+					if !ok {
+						return nil
+					}
+					bufMu.Lock()
+					qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
+					bufMu.Unlock()
+					closeDone()
+					return nil
+				})
+
+				qaCtx, qaCancel := context.WithCancel(sessionCtx)
+				defer qaCancel()
+
+				go s.watchStreamManagerStop(qaCtx, session.ID, assistantMsg.ID, qaCancel)
+
+				go func() {
+					var err error
+					req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote, attachments)
+					if useAgent {
+						err = s.sessionService.AgentQA(qaCtx, req, eventBus)
+					} else {
+						err = s.sessionService.KnowledgeQA(qaCtx, req, eventBus)
+					}
+					if err != nil {
+						logger.Errorf(ctx, "[IM] Direct file QA error: %v", err)
+						bufMu.Lock()
+						if qaErr == nil {
+							qaErr = err
+						}
+						bufMu.Unlock()
+						closeDone()
+					}
+				}()
+
+				ticker := time.NewTicker(streamFlushInterval)
+				defer ticker.Stop()
+
+			streamLoop:
+				for {
+					select {
+					case <-ticker.C:
+						bufMu.Lock()
+						chunk := buf.String()
+						buf.Reset()
+						bufMu.Unlock()
+						if chunk != "" {
+							if err := streamer.SendStreamChunk(ctx, msg, streamID, chunk); err != nil {
+								logger.Warnf(ctx, "[IM] SendStreamChunk failed for direct file: %v", err)
+							}
+						}
+					case <-done:
+						break streamLoop
+					case <-qaCtx.Done():
+						break streamLoop
+					}
+				}
+
+				bufMu.Lock()
+				chunk := buf.String()
+				buf.Reset()
+				bufMu.Unlock()
+				if chunk != "" {
+					_ = streamer.SendStreamChunk(ctx, msg, streamID, chunk)
+				}
+
+				bufMu.Lock()
+				answer := answerBuilder.String()
+				finalErr := qaErr
+				bufMu.Unlock()
+
+				if answer == "" && finalErr != nil {
+					answer = "抱歉，处理文件时出现了异常，请稍后再试。"
+				}
+				if answer == "" {
+					answer = "抱歉，我暂时无法分析这个文件。"
+				}
+
+				_ = streamer.EndStream(ctx, msg, streamID)
+
+				assistantMsg.Content = answer
+				assistantMsg.IsCompleted = true
+				_ = s.messageService.UpdateMessage(ctx, assistantMsg)
+
+				logger.Infof(ctx, "[IM] Direct file stream reply sent: file=%s answer_len=%d", fileName, len(answer))
+				return
+			}
+		}
+	}
+
+	// Non-streaming fallback
+	qaCtx, qaCancel := context.WithCancel(sessionCtx)
+	defer qaCancel()
+
+	go s.watchStreamManagerStop(qaCtx, session.ID, assistantMsg.ID, qaCancel)
+
+	req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote, attachments)
+	eventBus := event.NewEventBus()
+	var (
+		answerMu sync.Mutex
+		answer   strings.Builder
+		qaErr    error
+		done     = make(chan struct{})
+	)
+	closeOnce := sync.Once{}
+	closeDone := func() { closeOnce.Do(func() { close(done) }) }
+
+	eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentFinalAnswerData)
+		if !ok {
+			return nil
+		}
+		answerMu.Lock()
+		answer.WriteString(data.Content)
+		answerMu.Unlock()
+		if data.Done {
+			closeDone()
+		}
+		return nil
+	})
+
+	eventBus.On(event.EventError, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.ErrorData)
+		if !ok {
+			return nil
+		}
+		answerMu.Lock()
+		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
+		answerMu.Unlock()
+		closeDone()
+		return nil
+	})
+
+	go func() {
+		var err error
+		if useAgent {
+			err = s.sessionService.AgentQA(qaCtx, req, eventBus)
+		} else {
+			err = s.sessionService.KnowledgeQA(qaCtx, req, eventBus)
+		}
+		if err != nil {
+			answerMu.Lock()
+			if qaErr == nil {
+				qaErr = err
+			}
+			answerMu.Unlock()
+			closeDone()
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-qaCtx.Done():
+	}
+
+	answerMu.Lock()
+	finalAnswer := answer.String()
+	finalErr := qaErr
+	answerMu.Unlock()
+
+	if finalAnswer == "" && finalErr != nil {
+		finalAnswer = "抱歉，处理文件时出现了异常，请稍后再试。"
+	}
+	if finalAnswer == "" {
+		finalAnswer = "抱歉，我暂时无法分析这个文件。"
+	}
+
+	assistantMsg.Content = finalAnswer
+	assistantMsg.IsCompleted = true
+	_ = s.messageService.UpdateMessage(ctx, assistantMsg)
+
+	_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+		Content: cleanIMContent(ctx, finalAnswer, tenant, s.defaultFileSvc),
+		IsFinal: true,
+	})
+
+	logger.Infof(ctx, "[IM] Direct file reply sent: file=%s answer_len=%d", fileName, len(finalAnswer))
 }
 
 // sendFileResult sends a notification about the file processing result.

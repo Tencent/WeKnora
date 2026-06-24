@@ -266,6 +266,7 @@ export interface IMChannel {
   output_mode: 'stream' | 'full';
   session_mode?: 'user' | 'thread';
   knowledge_base_id?: string;
+  file_processing_strategy?: 'kb' | 'direct';
   credentials: Record<string, any>;
   created_at?: string;
   updated_at?: string;
@@ -288,6 +289,7 @@ export interface IMChannelOverview {
   mode: IMChannel['mode'];
   output_mode: IMChannel['output_mode'];
   session_mode?: IMChannel['session_mode'];
+  file_processing_strategy?: IMChannel['file_processing_strategy'];
   bot_identity: string;
   created_at: string;
   updated_at: string;
