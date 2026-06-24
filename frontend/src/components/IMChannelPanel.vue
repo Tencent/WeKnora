@@ -51,12 +51,32 @@
                   variant="text"
                   shape="square"
                   size="small"
-                  class="channel-card__more"
+                  class="channel-card__action-btn channel-card__more"
                   @click.stop
                 >
                   <template #icon><t-icon name="ellipsis" /></template>
                 </t-button>
               </t-dropdown>
+              <t-popconfirm
+                :content="$t('agentEditor.im.deleteConfirm')"
+                :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                :cancel-btn="{ content: $t('common.cancel') }"
+                placement="bottom-right"
+                @confirm="() => handleDelete(channel.id)"
+              >
+                <t-tooltip :content="$t('common.delete')" placement="top">
+                  <t-button
+                    theme="danger"
+                    shape="square"
+                    variant="text"
+                    size="small"
+                    class="channel-card__action-btn channel-card__delete"
+                    @click.stop
+                  >
+                    <template #icon><t-icon name="delete" /></template>
+                  </t-button>
+                </t-tooltip>
+              </t-popconfirm>
             </div>
           </button>
 
@@ -565,7 +585,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listAgents,
@@ -703,7 +723,6 @@ const channelMenuOptions = (channel: IMChannel | IMChannelOverview) => ([
     content: channel.enabled ? t('common.off') : t('common.on'),
     value: 'toggle',
   },
-  { content: t('common.delete'), value: 'delete', theme: 'error' as const },
 ]);
 
 function handleChannelMenuClick(
@@ -712,10 +731,6 @@ function handleChannelMenuClick(
 ) {
   if (data.value === 'toggle') {
     void handleToggle(channel);
-    return;
-  }
-  if (data.value === 'delete') {
-    confirmDelete(channel.id);
   }
 }
 
@@ -933,20 +948,6 @@ function openCreate() {
 
 function openDrawer(channel: IMChannel | IMChannelOverview) {
   void editChannel(channel);
-}
-
-function confirmDelete(id: string) {
-  const dialog = DialogPlugin.confirm({
-    header: t('common.delete'),
-    body: t('agentEditor.im.deleteConfirm'),
-    confirmBtn: { content: t('common.delete'), theme: 'danger' },
-    cancelBtn: t('common.cancel'),
-    onConfirm: async () => {
-      dialog.destroy();
-      await handleDelete(id);
-    },
-    onClose: () => dialog.destroy(),
-  });
 }
 
 async function editChannel(channel: IMChannel | IMChannelOverview) {

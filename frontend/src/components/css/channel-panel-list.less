@@ -41,6 +41,8 @@
   gap: 12px;
   height: 100%;
   box-sizing: border-box;
+  // Match two-line body (title + agent name) so the add card aligns with existing channels.
+  min-height: calc(20px + 14px * 1.4 + 4px + 12px * 1.4);
   padding: 10px 12px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
@@ -54,6 +56,12 @@
     cursor: pointer;
     width: 100%;
 
+    .channel-card__actions:not(.channel-card__actions--spacer) {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
     &:hover,
     &:focus-visible {
       border-color: var(--td-brand-color-3, var(--td-brand-color));
@@ -61,9 +69,22 @@
       outline: none;
     }
 
+    &:hover .channel-card__actions:not(.channel-card__actions--spacer),
+    &:focus-within .channel-card__actions:not(.channel-card__actions--spacer) {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
       outline-offset: 2px;
+    }
+  }
+
+  @media (hover: none) {
+    &--clickable .channel-card__actions:not(.channel-card__actions--spacer) {
+      opacity: 1;
+      pointer-events: auto;
     }
   }
 
@@ -160,21 +181,33 @@
     margin-left: auto;
 
     &--spacer {
-      width: 24px;
+      width: 52px;
       height: 24px;
     }
   }
 
-  &__more {
+  &__action-btn {
     flex-shrink: 0;
     padding: 2px;
+  }
+
+  &__more {
     color: var(--td-text-color-placeholder);
-    transition: color 0.15s ease, background 0.15s ease;
 
     &:hover,
     &:focus-visible {
       background: var(--td-bg-color-secondarycontainer);
       color: var(--td-text-color-primary);
+    }
+  }
+
+  &__delete {
+    color: var(--td-error-color);
+
+    &:hover,
+    &:focus-visible {
+      background: color-mix(in srgb, var(--td-error-color) 12%, transparent);
+      color: var(--td-error-color);
     }
   }
 }

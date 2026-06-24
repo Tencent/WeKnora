@@ -45,12 +45,32 @@
                   variant="text"
                   shape="square"
                   size="small"
-                  class="channel-card__more"
+                  class="channel-card__action-btn channel-card__more"
                   @click.stop
                 >
                   <template #icon><t-icon name="ellipsis" /></template>
                 </t-button>
               </t-dropdown>
+              <t-popconfirm
+                :content="$t('embedPublish.deleteConfirm')"
+                :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                :cancel-btn="{ content: $t('common.cancel') }"
+                placement="bottom-right"
+                @confirm="() => removeChannel(ch.id)"
+              >
+                <t-tooltip :content="$t('common.delete')" placement="top">
+                  <t-button
+                    theme="danger"
+                    shape="square"
+                    variant="text"
+                    size="small"
+                    class="channel-card__action-btn channel-card__delete"
+                    @click.stop
+                  >
+                    <template #icon><t-icon name="delete" /></template>
+                  </t-button>
+                </t-tooltip>
+              </t-popconfirm>
             </div>
           </button>
 
@@ -524,7 +544,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import EmbedChannelPreview from '@/components/EmbedChannelPreview.vue'
@@ -680,7 +700,7 @@ const defaultLocaleOptions = computed(() => ([
 ]))
 
 const channelMenuOptions = (ch: EmbedChannel) => {
-  const items: Array<{ content: string; value: string; theme?: 'error' }> = []
+  const items: Array<{ content: string; value: string }> = []
   if (isAdmin.value) {
     items.push({ content: t('embedPublish.preview'), value: 'preview' })
   }
@@ -688,9 +708,6 @@ const channelMenuOptions = (ch: EmbedChannel) => {
     content: ch.enabled ? t('common.off') : t('common.on'),
     value: 'toggle',
   })
-  if (isAdmin.value) {
-    items.push({ content: t('common.delete'), value: 'delete', theme: 'error' })
-  }
   return items
 }
 
@@ -701,10 +718,6 @@ function handleChannelMenuClick(data: { value?: string }, ch: EmbedChannel) {
   }
   if (data.value === 'toggle') {
     void toggleEnabled(ch, !ch.enabled)
-    return
-  }
-  if (data.value === 'delete') {
-    confirmRemoveChannel(ch.id)
   }
 }
 
@@ -1214,20 +1227,6 @@ const performRotate = async (id: string) => {
   } finally {
     rotating.value = false
   }
-}
-
-const confirmRemoveChannel = (id: string) => {
-  const dialog = DialogPlugin.confirm({
-    header: t('common.delete'),
-    body: t('embedPublish.deleteConfirm'),
-    confirmBtn: { content: t('common.delete'), theme: 'danger' },
-    cancelBtn: t('common.cancel'),
-    onConfirm: async () => {
-      dialog.destroy()
-      await removeChannel(id)
-    },
-    onClose: () => dialog.destroy(),
-  })
 }
 
 const removeChannel = async (id: string) => {
