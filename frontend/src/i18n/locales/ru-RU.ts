@@ -1033,7 +1033,11 @@ export default {
       addNew: 'Add New Agent',
       current: 'Current',
       goToSettings: 'Settings',
-      sharedLabel: 'Shared'
+      sharedLabel: 'Shared',
+      notReadyHint: 'Still needs: {items}',
+      notReadyStatus: 'Setup needed',
+      notReadyMissing: 'Missing: {items}',
+      configureAction: 'Configure',
     },
     builtinInfo: {
       quickAnswer: {
@@ -4239,8 +4243,8 @@ export default {
     agentNotReadyTooltip: 'Agent не готов. Пожалуйста, завершите настройку.',
     agentNotReadyDetail: 'Agent не готов. Пожалуйста, настройте следующее: {reasons}',
     agentMissingAllowedTools: 'Разрешённые инструменты',
-    agentMissingSummaryModel: 'Модель беседы (Summary Model)',
-    agentMissingRerankModel: 'Модель переранжирования (Rerank Model)',
+    agentMissingSummaryModel: 'Модель беседы',
+    agentMissingRerankModel: 'Модель переранжирования',
     goToSettings: 'Перейти к настройкам →',
     webSearch: {
       toggleOn: 'Включить веб-поиск',
@@ -4277,8 +4281,8 @@ export default {
     },
     customAgentNotReadyTooltip: 'Agent is not ready. Please finish configuration first.',
     customAgentNotReadyDetail: 'Agent is not ready. Please configure the following: {reasons}',
-    customAgentMissingSummaryModel: 'Chat Model (Summary Model)',
-    customAgentMissingRerankModel: 'Rerank Model',
+    customAgentMissingSummaryModel: 'Модель беседы',
+    customAgentMissingRerankModel: 'Модель переранжирования',
     goToAgentEditor: 'Go to configure →',
     builtinAgentNotReadyDetail: 'Built-in agent "{agentName}" is not ready. Please configure: {reasons}',
     builtinAgentSettingName: 'Intelligent Reasoning',

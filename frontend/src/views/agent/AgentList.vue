@@ -807,6 +807,7 @@
     <!-- 智能体编辑器弹窗 -->
     <AgentEditorModal :visible="editorVisible" :mode="editorMode" :agent="editingAgent"
       :initialSection="editorInitialSection"
+      :initialHighlightField="editorInitialHighlightField"
       :readOnly="editorMode === 'edit' && editingAgent != null && !canManageAgent(editingAgent as AgentWithUI)"
       @update:visible="editorVisible = $event" @success="handleEditorSuccess" />
 
@@ -1083,6 +1084,7 @@ const editorVisible = ref(false)
 const editorMode = ref<'create' | 'edit'>('create')
 const editingAgent = ref<CustomAgent | null>(null)
 const editorInitialSection = ref<string>('basic')
+const editorInitialHighlightField = ref<string>('')
 /** 当前打开三点菜单的卡片 agent.id（用于受控弹出层，避免 computed 项无持久引用导致菜单不响应） */
 const openMoreAgentId = ref<string | null>(null)
 
@@ -1142,11 +1144,12 @@ const checkAndOpenEditModal = () => {
       editingAgent.value = agent
       editorMode.value = 'edit'
       editorInitialSection.value = section || 'basic'
+      editorInitialHighlightField.value = (route.query.highlight as string) || ''
       editorVisible.value = true
     }
     // Drop the transient edit/section params but preserve other filter
     // state (scope / creator / q) so refreshing doesn't reset the view.
-    const { edit: _e, section: _s, ...rest } = route.query
+    const { edit: _e, section: _s, highlight: _h, ...rest } = route.query
     router.replace({ path: route.path, query: rest })
   }
 }
@@ -1294,6 +1297,8 @@ const handleEdit = (agent: AgentWithUI) => {
   openMoreAgentId.value = null
   editingAgent.value = agent
   editorMode.value = 'edit'
+  editorInitialSection.value = 'basic'
+  editorInitialHighlightField.value = ''
   editorVisible.value = true
 }
 
@@ -1527,6 +1532,8 @@ const formatDate = (dateStr: string) => {
 const openCreateModal = () => {
   editingAgent.value = null
   editorMode.value = 'create'
+  editorInitialSection.value = 'basic'
+  editorInitialHighlightField.value = ''
   editorVisible.value = true
 }
 

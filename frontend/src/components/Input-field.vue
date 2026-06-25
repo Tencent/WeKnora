@@ -26,6 +26,12 @@ import {
   toolsConsumeFiles,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
+import {
+  getAgentNotReadyReasonKeys,
+  resolveAgentNotReadySection,
+  resolveAgentNotReadyHighlight,
+  type AgentNotReadyReasonKey,
+} from '@/utils/agent-readiness';
 
 const route = useRoute();
 const router = useRouter();
@@ -37,6 +43,7 @@ const chatResources = useChatResourcesStore();
 const {
   agents,
   disabledOwnAgentIds,
+  allModels,
   chatModels: availableModels,
   webSearchProviders,
 } = storeToRefs(chatResources);
@@ -1608,10 +1615,14 @@ const createSession = async (val: string) => {
     return;
   }
 
+  if (!chatResources.isFresh('models')) {
+    await loadChatModels()
+  }
+
   // 发送前校验当前选中的智能体（含默认快速问答）是否已配置完成
   const agentToCheck = selectedAgent.value;
   let actualAgent = agentToCheck;
-  if (agentToCheck.is_builtin) {
+  if (agentToCheck.is_builtin && !settingsStore.selectedAgentSourceTenantId) {
     let builtin = agents.value.find(a => a.id === selectedAgentId.value);
     if (!builtin) {
       await loadAgents();
@@ -1620,11 +1631,9 @@ const createSession = async (val: string) => {
     actualAgent = builtin || agentToCheck;
   }
   const isAgentMode = actualAgent.config?.agent_mode === 'smart-reasoning';
-  const notReadyReasons = actualAgent.is_builtin
-    ? getBuiltinAgentNotReadyReasons(actualAgent, isAgentMode)
-    : getCustomAgentNotReadyReasons(actualAgent);
+  const { keys: notReadyKeys, labels: notReadyReasons } = collectAgentNotReadyReasons(actualAgent, isAgentMode);
   if (notReadyReasons.length > 0) {
-    showAgentNotReadyMessage(actualAgent, notReadyReasons);
+    showAgentNotReadyMessage(actualAgent, notReadyReasons, notReadyKeys);
     return;
   }
   // 获取@提及的知识库和文件信息
@@ -1762,14 +1771,20 @@ const toggleAgentModeSelector = () => {
   }
 }
 
-const selectAgentMode = (mode: 'quick-answer' | 'smart-reasoning') => {
+const selectAgentMode = async (mode: 'quick-answer' | 'smart-reasoning') => {
+  if (!chatResources.isFresh('models')) {
+    await loadChatModels()
+  }
+
   const builtinAgentId = mode === 'smart-reasoning' ? BUILTIN_SMART_REASONING_ID : BUILTIN_QUICK_ANSWER_ID;
   const builtinAgent = agents.value.find(a => a.id === builtinAgentId);
 
   if (builtinAgent) {
-    const notReadyReasons = getBuiltinAgentNotReadyReasons(builtinAgent, mode === 'smart-reasoning');
+    const { labels: notReadyReasons } = collectAgentNotReadyReasons(
+      builtinAgent,
+      mode === 'smart-reasoning',
+    );
     if (notReadyReasons.length > 0) {
-      showAgentNotReadyMessage(builtinAgent, notReadyReasons);
       showAgentModeSelector.value = false;
       return;
     }
@@ -1786,21 +1801,27 @@ const selectAgentMode = (mode: 'quick-answer' | 'smart-reasoning') => {
 }
 
 // 选择智能体（新版）；sourceTenantId 为共享智能体时传入
-const handleSelectAgent = (agent: CustomAgent, sourceTenantId?: string) => {
+const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) => {
+  if (!chatResources.isFresh('models')) {
+    await loadChatModels()
+  }
+
   // 根据智能体的 agent_mode 判断是否为 Agent 模式
   const isAgentType = agent.config?.agent_mode === 'smart-reasoning';
 
   // 统一检查智能体是否就绪（内置和自定义智能体使用相同逻辑）
-  const actualAgent = agent.is_builtin
+  const actualAgent = agent.is_builtin && !sourceTenantId
     ? (agents.value.find(a => a.id === agent.id) || agent)
     : agent;
 
-  const notReadyReasons = agent.is_builtin
-    ? getBuiltinAgentNotReadyReasons(actualAgent, isAgentType)
-    : getCustomAgentNotReadyReasons(actualAgent);
+  const { labels: notReadyReasons } = collectAgentNotReadyReasons(
+    actualAgent,
+    isAgentType,
+    sourceTenantId,
+  );
 
   if (notReadyReasons.length > 0) {
-    showAgentNotReadyMessage(agent, notReadyReasons);
+    showAgentModeSelector.value = false;
     return;
   }
 
@@ -1933,64 +1954,77 @@ const handleGoToWebSearchSettings = () => {
 };
 
 const handleGoToAgentSettings = (section?: string) => {
-  // 跳转到智能体列表页并打开编辑弹窗
-  if (selectedAgent.value && !selectedAgent.value.is_builtin) {
-    const query: Record<string, string> = { edit: selectedAgent.value.id };
-    if (section) {
-      query.section = section;
-    }
-    router.push({ path: '/platform/agents', query });
-  } else {
+  const agent = selectedAgent.value;
+  if (!agent) {
     router.push('/platform/agents');
+    return;
   }
+  const query: Record<string, string> = { edit: agent.id };
+  if (section) {
+    query.section = section;
+  }
+  router.push({ path: '/platform/agents', query });
 };
 
-// 获取内置智能体不就绪的原因
-const getBuiltinAgentNotReadyReasons = (agent: CustomAgent, isAgentMode: boolean): string[] => {
-  const reasons: string[] = []
-  const config = agent.config || {}
-
-  // 内置智能体会自动回退到租户的默认模型，因此不再在前端强制校验 model_id
-
-  // 检查重排模型（Rerank Model）- 仅当允许使用 knowledge_search 工具时需要
-  // 内置智能体允许重排模型为空（使用默认配置）
-  // const hasKnowledgeSearchTool = config.allowed_tools && config.allowed_tools.includes('knowledge_search')
-  // if (hasKnowledgeSearchTool) {
-  //   if (!config.rerank_model_id || config.rerank_model_id.trim() === '') {
-  //     reasons.push(t('input.customAgentMissingRerankModel'))
-  //   }
-  // }
-
-  // Agent 模式还需要检查允许的工具
-  if (isAgentMode) {
-    if (!config.allowed_tools || config.allowed_tools.length === 0) {
-      reasons.push(t('input.agentMissingAllowedTools'))
+const formatAgentNotReadyReasons = (
+  reasonKeys: AgentNotReadyReasonKey[],
+  isBuiltin: boolean,
+): string[] => {
+  return reasonKeys.map((key) => {
+    if (key === 'summary_model') {
+      return isBuiltin
+        ? t('input.agentMissingSummaryModel')
+        : t('input.customAgentMissingSummaryModel');
     }
-  }
+    if (key === 'rerank_model') {
+      return isBuiltin
+        ? t('input.agentMissingRerankModel')
+        : t('input.customAgentMissingRerankModel');
+    }
+    return t('input.agentMissingAllowedTools');
+  });
+};
 
-  return reasons
-}
+const collectAgentNotReadyReasons = (
+  agent: CustomAgent,
+  isAgentMode: boolean,
+  sourceTenantId?: string,
+): { keys: AgentNotReadyReasonKey[]; labels: string[] } => {
+  const isSharedAgent = !!(sourceTenantId || settingsStore.selectedAgentSourceTenantId);
+  const keys = getAgentNotReadyReasonKeys(agent.config, allModels.value, {
+    isAgentMode,
+    isSharedAgent,
+  });
+  return {
+    keys,
+    labels: formatAgentNotReadyReasons(keys, agent.is_builtin),
+  };
+};
 
-// 获取自定义智能体不就绪的原因（非 Agent 模式，快速回答）
-const getCustomAgentNotReadyReasons = (agent: CustomAgent): string[] => {
-  const reasons: string[] = []
-  const config = agent.config || {}
-
-  // 检查对话模型（Summary Model）
-  if (!config.model_id || config.model_id.trim() === '') {
-    reasons.push(t('input.customAgentMissingSummaryModel'))
-  }
-  // Rerank 模型不在此处强制校验：当 knowledge_search 实际命中 RAG 知识库时，
-  // 后端会优先使用 agent.rerank_model_id，未配置则回退到租户默认 rerank 模型；
-  // 仅在两者都缺失时由后端报错。这样可以避免"作用域内无 RAG KB 却被拦"的误报，
-  // 并支持后续添加 RAG KB 时的自动兜底。
-
-  return reasons
-}
+const goToAgentEditor = (
+  agent: CustomAgent,
+  section = 'model',
+  highlight?: AgentNotReadyReasonKey,
+) => {
+  router.push({
+    path: '/platform/agents',
+    query: {
+      edit: agent.id,
+      section,
+      ...(highlight ? { highlight } : {}),
+    },
+  });
+};
 
 // 显示智能体未就绪的消息（统一处理内置和自定义智能体）
-const showAgentNotReadyMessage = (agent: CustomAgent, reasons: string[]) => {
+const showAgentNotReadyMessage = (
+  agent: CustomAgent,
+  reasons: string[],
+  reasonKeys?: AgentNotReadyReasonKey[],
+) => {
   const reasonsText = reasons.join('、')
+  const section = resolveAgentNotReadySection(reasonKeys || ['summary_model'])
+  const highlight = resolveAgentNotReadyHighlight(reasonKeys || ['summary_model'])
 
   const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-width: 320px;' }, [
     h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })),
@@ -1998,7 +2032,7 @@ const showAgentNotReadyMessage = (agent: CustomAgent, reasons: string[]) => {
       href: '#',
       onClick: (e: Event) => {
         e.preventDefault();
-        router.push(`/platform/agents?edit=${agent.id}`);
+        goToAgentEditor(agent, section, highlight);
       },
       style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
       onMouseenter: (e: Event) => {
@@ -2174,7 +2208,8 @@ defineExpose({
 
           <!-- Agent 选择器下拉菜单 -->
           <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
-            :currentAgentId="selectedAgentId" :agents="enabledAgents" @close="closeAgentModeSelector"
+            :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
+            @close="closeAgentModeSelector"
             @select="handleSelectAgent" />
 
           <!-- WebSearch 开关按钮 -->
@@ -2308,18 +2343,21 @@ defineExpose({
                 </button>
               </div>
               <div class="model-selector-content">
-                <div v-for="model in availableModels" :key="model.id" class="model-option"
-                  :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
-                  <div class="model-option-main">
-                    <span class="model-option-name">{{ modelDisplayName(model) }}</span>
-                    <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
-                    <span v-if="model.source === 'remote'" class="model-badge-remote">{{ $t('input.remote') }}</span>
-                    <span v-else-if="model.parameters?.parameter_size" class="model-badge-local">
-                      {{ model.parameters.parameter_size }}
-                    </span>
-                  </div>
-                  <div v-if="model.description" class="model-option-desc">
-                    {{ model.description }}
+                <div
+                  v-for="model in availableModels"
+                  :key="model.id"
+                  class="model-option"
+                  :class="{ selected: model.id === selectedModelId }"
+                  @click="handleModelChange(model.id || '')"
+                >
+                  <div class="model-option-left">
+                    <div class="model-option-icon">
+                      <t-icon name="chat" size="14px" />
+                    </div>
+                    <div class="model-option-name-wrap">
+                      <span class="model-option-name">{{ modelDisplayName(model) }}</span>
+                      <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
+                    </div>
                   </div>
                 </div>
                 <div v-if="availableModels.length === 0" class="model-option empty">
@@ -3105,41 +3143,49 @@ const getImgSrc = (url: string) => {
 .model-selector-overlay {
   position: fixed;
   inset: 0;
-  z-index: 9998;
+  z-index: 9999;
   background: transparent;
   touch-action: none;
 }
 
 .model-selector-dropdown {
   position: fixed !important;
-  z-index: 9999;
-  background: var(--td-bg-color-container, #fff);
+  z-index: 10000;
+  background: var(--td-bg-color-container);
+  border: .5px solid var(--td-component-border);
   border-radius: 10px;
-  box-shadow: var(--td-shadow-2, 0 6px 28px rgba(15, 23, 42, 0.08));
-  border: .5px solid var(--td-component-border, #e7e9eb);
+  box-shadow: var(--td-shadow-2);
   overflow: hidden;
   display: flex;
   flex-direction: column;
   margin: 0 !important;
   padding: 0 !important;
   transform: none !important;
+  transform-origin: top left;
+  animation: modelSelectorFadeIn 0.15s ease-out;
+}
+
+@keyframes modelSelectorFadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .model-selector-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: .5px solid var(--td-component-stroke, #f0f0f0);
-  background: var(--td-bg-color-container, #fff);
+  padding: 8px 10px;
+  border-bottom: .5px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
   font-size: 12px;
   font-weight: 500;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 }
 
 .model-selector-content {
   flex: 1;
   min-height: 0;
+  max-height: 260px;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -3151,14 +3197,14 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   border: .5px solid transparent;
   background: transparent;
-  color: var(--td-brand-color, #07c05f);
+  color: var(--td-brand-color);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.12s;
 
   .add-icon {
     font-size: 14px;
@@ -3167,12 +3213,14 @@ const getImgSrc = (url: string) => {
   }
 
   &:hover {
-    color: var(--td-brand-color-hover, #05a04f);
-    background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+    color: var(--td-brand-color-hover);
+    background: var(--td-bg-color-secondarycontainer);
   }
 }
 
 .model-option {
+  display: flex;
+  align-items: center;
   padding: 6px 8px;
   cursor: pointer;
   transition: background 0.12s;
@@ -3183,21 +3231,13 @@ const getImgSrc = (url: string) => {
     margin-bottom: 0;
   }
 
-  &:hover {
-    background: var(--td-bg-color-container-hover, #f6f8f7);
-  }
-
+  &:hover,
   &.selected {
-    background: var(--td-brand-color-light, #eefdf5);
-
-    .model-option-name {
-      color: var(--td-success-color);
-      font-weight: 600;
-    }
+    background: var(--td-bg-color-secondarycontainer);
   }
 
   &.empty {
-    color: var(--td-text-color-disabled, #9aa0a6);
+    color: var(--td-text-color-placeholder);
     cursor: default;
     text-align: center;
     padding: 20px 8px;
@@ -3208,60 +3248,45 @@ const getImgSrc = (url: string) => {
   }
 }
 
-.model-option-main {
+.model-option-left {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 1px;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.model-option-icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+}
+
+.model-option-name-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
 }
 
 .model-option-name {
   font-size: 12px;
-  color: var(--td-text-color-primary, #222);
-  flex-shrink: 0;
+  color: var(--td-text-color-primary);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
   line-height: 1.4;
 }
 
 .model-option-raw-name {
-  flex: 1;
-  min-width: 0;
   font-size: 11px;
-  color: var(--td-text-color-placeholder, #b0b6bd);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-option-desc {
-  font-size: 11px;
-  color: var(--td-text-color-secondary, #8b9196);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-top: 1px;
-}
-
-.model-badge-remote,
-.model-badge-local {
-  display: inline-block;
-  padding: 1px 5px;
-  font-size: 10px;
-  border-radius: 3px;
-  font-weight: 500;
+  color: var(--td-text-color-placeholder);
   flex-shrink: 0;
-}
-
-.model-badge-remote {
-  background: rgba(16, 185, 129, 0.1);
-  color: var(--td-success-color);
-}
-
-.model-badge-local {
-  background: rgba(139, 145, 150, 0.1);
-  color: var(--td-text-color-secondary);
 }
 
 /* Agent 模式选择下拉菜单 */

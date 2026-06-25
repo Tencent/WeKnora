@@ -35,7 +35,7 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div class="content-wrapper" :class="{ 'content-wrapper--prompts': currentSection === 'prompts' }">
+              <div ref="contentWrapperRef" class="content-wrapper" :class="{ 'content-wrapper--prompts': currentSection === 'prompts' }">
                 <!-- 基础设置 -->
                 <div v-show="currentSection === 'basic'" class="section">
                   <div class="section-header">
@@ -565,7 +565,12 @@
 
                   <div class="settings-group">
                     <!-- 模型选择 -->
-                    <div class="setting-row" data-guide="agent-create-model">
+                    <div
+                      class="setting-row"
+                      data-guide="agent-create-model"
+                      data-agent-field="summary_model"
+                      :class="{ 'setting-row--field-highlight': highlightedField === 'summary_model' }"
+                    >
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
                         <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
@@ -616,7 +621,12 @@
                     </div>
 
                     <!-- ReRank 模型（启用知识库时显示） -->
-                    <div v-if="hasKnowledgeBase" class="setting-row">
+                    <div
+                      v-if="hasKnowledgeBase"
+                      class="setting-row"
+                      data-agent-field="rerank_model"
+                      :class="{ 'setting-row--field-highlight': highlightedField === 'rerank_model' }"
+                    >
                       <div class="setting-info">
                         <label>
                           {{ $t('agent.editor.rerankModel') }}
@@ -849,7 +859,11 @@
 
                   <div class="settings-group">
                     <!-- 允许的工具（按组渲染，统一网格） -->
-                    <div class="setting-row setting-row-vertical">
+                    <div
+                      class="setting-row setting-row-vertical"
+                      data-agent-field="allowed_tools"
+                      :class="{ 'setting-row--field-highlight': highlightedField === 'allowed_tools' }"
+                    >
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.allowedTools') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.selectTools') }}</p>
@@ -1380,6 +1394,7 @@ import {
   type KBCapabilities,
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
+import { type AgentNotReadyReasonKey } from '@/utils/agent-readiness';
 import { type MCPService } from '@/api/mcp-service';
 import { type SkillInfo } from '@/api/skill';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
@@ -1416,6 +1431,7 @@ const props = defineProps<{
   mode: 'create' | 'edit';
   agent?: CustomAgent | null;
   initialSection?: string;
+  initialHighlightField?: string;
   // readOnly hides the save button so a Viewer who clicks an agent
   // card to inspect its config doesn't see a "确定" that 403s on the
   // backend update endpoint. Field-level disable is intentionally NOT
@@ -1459,6 +1475,68 @@ const copyAgentId = async () => {
 };
 
 const currentSection = ref(props.initialSection || 'basic');
+const contentWrapperRef = ref<HTMLElement | null>(null);
+const highlightedField = ref<AgentNotReadyReasonKey | null>(null);
+let highlightClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+const VALID_HIGHLIGHT_FIELDS: AgentNotReadyReasonKey[] = ['summary_model', 'rerank_model', 'allowed_tools'];
+
+const sectionForHighlightField = (field: AgentNotReadyReasonKey): string => {
+  if (field === 'allowed_tools') return 'tools';
+  return 'model';
+};
+
+const FIELD_FLASH_DURATION_MS = 2400;
+
+const clearFieldHighlight = () => {
+  if (highlightClearTimer) {
+    clearTimeout(highlightClearTimer);
+    highlightClearTimer = null;
+  }
+  highlightedField.value = null;
+};
+
+const applyInitialFieldHighlight = async (field: string) => {
+  if (!VALID_HIGHLIGHT_FIELDS.includes(field as AgentNotReadyReasonKey)) return;
+
+  const targetField = field as AgentNotReadyReasonKey;
+  currentSection.value = sectionForHighlightField(targetField);
+
+  await nextTick();
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+
+  clearFieldHighlight();
+  highlightedField.value = null;
+
+  const wrapper = contentWrapperRef.value;
+  const row = wrapper?.querySelector(`[data-agent-field="${targetField}"]`) as HTMLElement | null;
+  if (row && wrapper) {
+    const rowTop = row.offsetTop;
+    const scrollTarget = rowTop - wrapper.clientHeight / 2 + row.clientHeight / 2;
+    wrapper.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'auto' });
+
+    await nextTick();
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  }
+
+  highlightedField.value = targetField;
+
+  if (row) {
+    const focusTarget = row.querySelector('.t-input, .t-select-input, input, .t-checkbox') as HTMLElement | null;
+    focusTarget?.focus({ preventScroll: true });
+  }
+
+  highlightClearTimer = setTimeout(() => {
+    if (highlightedField.value === targetField) {
+      highlightedField.value = null;
+    }
+    highlightClearTimer = null;
+  }, FIELD_FLASH_DURATION_MS);
+};
 
 const onAgentEditorFocusSection = (event: Event) => {
   const section = (event as CustomEvent<{ section?: string }>).detail?.section
@@ -2568,7 +2646,12 @@ watch(() => props.visible, async (val) => {
       }
       applyDefaultChatModelIfEmpty()
     }
+
+    if (props.initialHighlightField) {
+      await applyInitialFieldHighlight(props.initialHighlightField);
+    }
   } else {
+    clearFieldHighlight();
     agentIMChannelCount.value = 0;
     agentEmbedChannelCount.value = 0;
   }
@@ -3779,9 +3862,8 @@ const handleSave = async () => {
     return;
   }
 
-  // ReRank 模型（可选）
-  // 运行时若 rerank_model_id 为空会自动跳过 rerank，无需在保存时强制要求。
-  // 仅当用户已选择 rerank 模型时，才校验相关参数。
+  // ReRank 模型按运行范围按需使用：知识库范围为 none，或未启用
+  // knowledge_search 时不需要；其余情况由对话入口在使用前给出明确提示。
 
   // 过滤空推荐问题
   if (formData.value.config.suggested_prompts) {
@@ -4199,6 +4281,24 @@ const handleSave = async () => {
     .setting-info label {
       font-weight: 600;
     }
+  }
+
+  &.setting-row--field-highlight {
+    border-radius: 6px;
+    animation: agent-field-flash 0.8s ease-in-out 3;
+  }
+}
+
+@keyframes agent-field-flash {
+  0%,
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+
+  50% {
+    background-color: var(--td-warning-color-light, #fff7e8);
+    box-shadow: inset 0 0 0 1px rgba(237, 123, 47, 0.35);
   }
 }
 

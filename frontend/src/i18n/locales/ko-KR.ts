@@ -2116,6 +2116,10 @@ export default {
       current: "현재 선택",
       goToSettings: "설정",
       sharedLabel: "공유",
+      notReadyHint: "아직 구성 필요: {items}",
+      notReadyStatus: "구성 필요",
+      notReadyMissing: "누락: {items}",
+      configureAction: "구성",
     },
     // 내장 에이전트 정보
     builtinInfo: {
@@ -3890,13 +3894,13 @@ export default {
     agentModeDesc: "ReAct 추론 프레임워크, 다단계 사고",
     agentNotReadyTooltip: "Agent가 준비되지 않았습니다. 먼저 설정에서 구성을 완료해주세요",
     agentMissingAllowedTools: "허용된 도구",
-    agentMissingSummaryModel: "대화 모델 (Summary Model)",
-    agentMissingRerankModel: "재정렬 모델 (Rerank Model)",
+    agentMissingSummaryModel: "대화 모델",
+    agentMissingRerankModel: "재정렬 모델",
     goToSettings: "설정으로 이동 →",
     customAgentNotReadyTooltip: "에이전트가 준비되지 않았습니다. 먼저 구성을 완료하세요.",
     customAgentNotReadyDetail: "에이전트가 준비되지 않았으며 다음을 구성해야 합니다: {reasons}",
-    customAgentMissingSummaryModel: "대화 모델(요약 모델)",
-    customAgentMissingRerankModel: "리랭크 모델 (Rerank Model)",
+    customAgentMissingSummaryModel: "대화 모델",
+    customAgentMissingRerankModel: "재정렬 모델",
     goToAgentEditor: "구성으로 이동 →",
     agentNotReadyDetail:
       'Agent "{agentName}"가 준비되지 않았습니다. 다음 항목을 설정해야 합니다: {reasons}',

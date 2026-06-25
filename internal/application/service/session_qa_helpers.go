@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -48,10 +49,13 @@ func (s *sessionService) resolveKnowledgeBases(
 }
 
 // resolveChatModelID resolves the effective chat model ID for a QA request.
-// Priority:
-//  1. Request's SummaryModelID (explicit override, validated)
-//  2. Custom agent's ModelID
-//  3. KB / session / system default (via selectChatModelID)
+//
+// When an agent is selected, its model configuration must be complete and
+// valid. A request-level override may choose another valid model for this
+// request, but it must not make an unconfigured or stale agent appear usable.
+//
+// Without an agent, the legacy KB / session / system fallback remains
+// available for non-agent callers.
 func (s *sessionService) resolveChatModelID(
 	ctx context.Context,
 	req *types.QARequest,
@@ -61,6 +65,17 @@ func (s *sessionService) resolveChatModelID(
 	summaryModelID := req.SummaryModelID
 	customAgent := req.CustomAgent
 	session := req.Session
+
+	if customAgent != nil {
+		configuredModelID := customAgent.Config.ModelID
+		if configuredModelID == "" {
+			return "", fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
+		}
+		model, err := s.modelService.GetModelByID(ctx, configuredModelID)
+		if err != nil || model == nil || model.Type != types.ModelTypeKnowledgeQA {
+			return "", fmt.Errorf("configured chat model %s is unavailable for agent %s", configuredModelID, customAgent.ID)
+		}
+	}
 
 	if summaryModelID != "" {
 		if model, err := s.modelService.GetModelByID(ctx, summaryModelID); err == nil && model != nil {
