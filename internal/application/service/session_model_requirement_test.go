@@ -83,3 +83,67 @@ func TestResolveChatModelIDUsesValidConfiguredAgentModel(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "agent-chat", modelID)
 }
+
+func TestResolveChatModelIDRejectsNonChatSummaryModelOverride(t *testing.T) {
+	svc := &sessionService{
+		modelService: &stubModelService{
+			modelsByID: map[string]*types.Model{
+				"agent-chat": {
+					ID:   "agent-chat",
+					Type: types.ModelTypeKnowledgeQA,
+				},
+				"rerank-only": {
+					ID:   "rerank-only",
+					Type: types.ModelTypeRerank,
+				},
+			},
+		},
+	}
+	req := &types.QARequest{
+		Session: &types.Session{},
+		CustomAgent: &types.CustomAgent{
+			ID: "agent-1",
+			Config: types.CustomAgentConfig{
+				ModelID: "agent-chat",
+			},
+		},
+		SummaryModelID: "rerank-only",
+	}
+
+	modelID, err := svc.resolveChatModelID(context.Background(), req, nil, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "agent-chat", modelID)
+}
+
+func TestResolveChatModelIDUsesValidSummaryModelOverride(t *testing.T) {
+	svc := &sessionService{
+		modelService: &stubModelService{
+			modelsByID: map[string]*types.Model{
+				"agent-chat": {
+					ID:   "agent-chat",
+					Type: types.ModelTypeKnowledgeQA,
+				},
+				"override-chat": {
+					ID:   "override-chat",
+					Type: types.ModelTypeKnowledgeQA,
+				},
+			},
+		},
+	}
+	req := &types.QARequest{
+		Session: &types.Session{},
+		CustomAgent: &types.CustomAgent{
+			ID: "agent-1",
+			Config: types.CustomAgentConfig{
+				ModelID: "agent-chat",
+			},
+		},
+		SummaryModelID: "override-chat",
+	}
+
+	modelID, err := svc.resolveChatModelID(context.Background(), req, nil, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "override-chat", modelID)
+}

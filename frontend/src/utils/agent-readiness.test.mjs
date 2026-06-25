@@ -92,3 +92,11 @@ test('getAgentNotReadyReasonKeys requires rerank only in agent mode with KB sear
     { isAgentMode: true, isSharedAgent: false },
   ), ['summary_model', 'rerank_model'])
 })
+
+test('getAgentNotReadyReasonKeys does not treat current shared context as shared without sourceTenantId', () => {
+  assert.deepEqual(getAgentNotReadyReasonKeys(
+    { model_id: 'deleted-chat' },
+    [{ id: 'chat-1', type: 'KnowledgeQA' }],
+    { isAgentMode: false, isSharedAgent: false },
+  ), ['summary_model'])
+})

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -67,7 +68,7 @@ func (s *sessionService) resolveChatModelID(
 	session := req.Session
 
 	if customAgent != nil {
-		configuredModelID := customAgent.Config.ModelID
+		configuredModelID := strings.TrimSpace(customAgent.Config.ModelID)
 		if configuredModelID == "" {
 			return "", fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
 		}
@@ -77,16 +78,18 @@ func (s *sessionService) resolveChatModelID(
 		}
 	}
 
+	summaryModelID = strings.TrimSpace(summaryModelID)
 	if summaryModelID != "" {
-		if model, err := s.modelService.GetModelByID(ctx, summaryModelID); err == nil && model != nil {
+		if model, err := s.modelService.GetModelByID(ctx, summaryModelID); err == nil && model != nil &&
+			model.Type == types.ModelTypeKnowledgeQA {
 			logger.Infof(ctx, "Using request's summary model override: %s", summaryModelID)
 			return summaryModelID, nil
 		}
 		logger.Warnf(ctx, "Request provided invalid summary model ID %s, falling back", summaryModelID)
 	}
-	if customAgent != nil && customAgent.Config.ModelID != "" {
-		logger.Infof(ctx, "Using custom agent's model_id: %s", customAgent.Config.ModelID)
-		return customAgent.Config.ModelID, nil
+	if customAgent != nil && strings.TrimSpace(customAgent.Config.ModelID) != "" {
+		logger.Infof(ctx, "Using custom agent's model_id: %s", strings.TrimSpace(customAgent.Config.ModelID))
+		return strings.TrimSpace(customAgent.Config.ModelID), nil
 	}
 	return s.selectChatModelID(ctx, session, knowledgeBaseIDs, knowledgeIDs)
 }

@@ -32,6 +32,7 @@ import {
   resolveAgentNotReadyHighlight,
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
+import { formatLocalizedList } from '@/utils/format-list';
 
 const route = useRoute();
 const router = useRouter();
@@ -47,7 +48,7 @@ const {
   chatModels: availableModels,
   webSearchProviders,
 } = storeToRefs(chatResources);
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 let query = ref("");
 const showKbSelector = ref(false);
@@ -1631,9 +1632,18 @@ const createSession = async (val: string) => {
     actualAgent = builtin || agentToCheck;
   }
   const isAgentMode = actualAgent.config?.agent_mode === 'smart-reasoning';
-  const { keys: notReadyKeys, labels: notReadyReasons } = collectAgentNotReadyReasons(actualAgent, isAgentMode);
+  const { keys: notReadyKeys, labels: notReadyReasons } = collectAgentNotReadyReasons(
+    actualAgent,
+    isAgentMode,
+    settingsStore.selectedAgentSourceTenantId ?? undefined,
+  );
   if (notReadyReasons.length > 0) {
-    showAgentNotReadyMessage(actualAgent, notReadyReasons, notReadyKeys);
+    showAgentNotReadyMessage(
+      actualAgent,
+      notReadyReasons,
+      notReadyKeys,
+      settingsStore.selectedAgentSourceTenantId ?? undefined,
+    );
     return;
   }
   // 获取@提及的知识库和文件信息
@@ -1780,12 +1790,13 @@ const selectAgentMode = async (mode: 'quick-answer' | 'smart-reasoning') => {
   const builtinAgent = agents.value.find(a => a.id === builtinAgentId);
 
   if (builtinAgent) {
-    const { labels: notReadyReasons } = collectAgentNotReadyReasons(
+    const { keys: notReadyKeys, labels: notReadyReasons } = collectAgentNotReadyReasons(
       builtinAgent,
       mode === 'smart-reasoning',
     );
     if (notReadyReasons.length > 0) {
       showAgentModeSelector.value = false;
+      showAgentNotReadyMessage(builtinAgent, notReadyReasons, notReadyKeys);
       return;
     }
   }
@@ -1801,6 +1812,15 @@ const selectAgentMode = async (mode: 'quick-answer' | 'smart-reasoning') => {
 }
 
 // 选择智能体（新版）；sourceTenantId 为共享智能体时传入
+const handleAgentNotReady = (
+  agent: CustomAgent,
+  labels: string[],
+  keys: AgentNotReadyReasonKey[],
+  sourceTenantId?: string,
+) => {
+  showAgentNotReadyMessage(agent, labels, keys, sourceTenantId);
+};
+
 const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) => {
   if (!chatResources.isFresh('models')) {
     await loadChatModels()
@@ -1814,7 +1834,7 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
     ? (agents.value.find(a => a.id === agent.id) || agent)
     : agent;
 
-  const { labels: notReadyReasons } = collectAgentNotReadyReasons(
+  const { keys: notReadyKeys, labels: notReadyReasons } = collectAgentNotReadyReasons(
     actualAgent,
     isAgentType,
     sourceTenantId,
@@ -1822,6 +1842,7 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
 
   if (notReadyReasons.length > 0) {
     showAgentModeSelector.value = false;
+    showAgentNotReadyMessage(actualAgent, notReadyReasons, notReadyKeys, sourceTenantId);
     return;
   }
 
@@ -1990,7 +2011,7 @@ const collectAgentNotReadyReasons = (
   isAgentMode: boolean,
   sourceTenantId?: string,
 ): { keys: AgentNotReadyReasonKey[]; labels: string[] } => {
-  const isSharedAgent = !!(sourceTenantId || settingsStore.selectedAgentSourceTenantId);
+  const isSharedAgent = !!sourceTenantId;
   const keys = getAgentNotReadyReasonKeys(agent.config, allModels.value, {
     isAgentMode,
     isSharedAgent,
@@ -2005,6 +2026,7 @@ const goToAgentEditor = (
   agent: CustomAgent,
   section = 'model',
   highlight?: AgentNotReadyReasonKey,
+  sourceTenantId?: string,
 ) => {
   router.push({
     path: '/platform/agents',
@@ -2012,6 +2034,7 @@ const goToAgentEditor = (
       edit: agent.id,
       section,
       ...(highlight ? { highlight } : {}),
+      ...(sourceTenantId ? { sourceTenantId } : {}),
     },
   });
 };
@@ -2021,8 +2044,9 @@ const showAgentNotReadyMessage = (
   agent: CustomAgent,
   reasons: string[],
   reasonKeys?: AgentNotReadyReasonKey[],
+  sourceTenantId?: string,
 ) => {
-  const reasonsText = reasons.join('、')
+  const reasonsText = formatLocalizedList(reasons, locale.value)
   const section = resolveAgentNotReadySection(reasonKeys || ['summary_model'])
   const highlight = resolveAgentNotReadyHighlight(reasonKeys || ['summary_model'])
 
@@ -2032,7 +2056,7 @@ const showAgentNotReadyMessage = (
       href: '#',
       onClick: (e: Event) => {
         e.preventDefault();
-        goToAgentEditor(agent, section, highlight);
+        goToAgentEditor(agent, section, highlight, sourceTenantId);
       },
       style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
       onMouseenter: (e: Event) => {
@@ -2210,7 +2234,8 @@ defineExpose({
           <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector"
-            @select="handleSelectAgent" />
+            @select="handleSelectAgent"
+            @not-ready="handleAgentNotReady" />
 
           <!-- WebSearch 开关按钮 -->
           <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">

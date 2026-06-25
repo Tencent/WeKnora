@@ -41,7 +41,7 @@
               <span class="agent-option-name">{{ agent.name }}</span>
               <div v-if="getAgentNotReadyLabels(agent).length" class="agent-option-actions">
                 <t-tooltip
-                  :content="$t('agent.selector.notReadyHint', { items: getAgentNotReadyLabels(agent).join('、') })"
+                  :content="$t('agent.selector.notReadyHint', { items: formatNotReadyHint(agent) })"
                   placement="top"
                 >
                   <TIcon name="error-circle" size="14px" class="not-ready-icon" @click.stop />
@@ -66,7 +66,7 @@
               <span class="agent-option-name">{{ agent.name }}</span>
               <div v-if="getAgentNotReadyLabels(agent).length" class="agent-option-actions">
                 <t-tooltip
-                  :content="$t('agent.selector.notReadyHint', { items: getAgentNotReadyLabels(agent).join('、') })"
+                  :content="$t('agent.selector.notReadyHint', { items: formatNotReadyHint(agent) })"
                   placement="top"
                 >
                   <TIcon name="error-circle" size="14px" class="not-ready-icon" @click.stop />
@@ -95,7 +95,7 @@
                 class="agent-option-actions"
               >
                 <t-tooltip
-                  :content="$t('agent.selector.notReadyHint', { items: getAgentNotReadyLabels(shared.agent, String(shared.source_tenant_id)).join('、') })"
+                  :content="$t('agent.selector.notReadyHint', { items: formatNotReadyHint(shared.agent, String(shared.source_tenant_id)) })"
                   placement="top"
                 >
                   <TIcon name="error-circle" size="14px" class="not-ready-icon" @click.stop />
@@ -216,8 +216,9 @@ import {
   resolveAgentNotReadyHighlight,
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
+import { formatLocalizedList } from '@/utils/format-list';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const router = useRouter();
 const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
@@ -233,6 +234,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'select', agent: CustomAgent, sourceTenantId?: string): void;
+  (e: 'not-ready', agent: CustomAgent, labels: string[], keys: AgentNotReadyReasonKey[], sourceTenantId?: string): void;
 }>();
 
 type AgentDetailTarget = {
@@ -347,6 +349,16 @@ const getAgentNotReadyLabels = (agent: CustomAgent, sourceTenantId?: string): st
   );
 };
 
+const formatNotReadyHint = (agent: CustomAgent, sourceTenantId?: string): string => {
+  return formatLocalizedList(getAgentNotReadyLabels(agent, sourceTenantId), locale.value);
+};
+
+const emitAgentNotReady = (agent: CustomAgent, sourceTenantId?: string) => {
+  const keys = getAgentNotReadyReasonKeysFor(agent, sourceTenantId);
+  const labels = formatAgentNotReadyReasons(keys, agent.is_builtin);
+  emit('not-ready', agent, labels, keys, sourceTenantId);
+};
+
 const clearDetailHideTimer = () => {
   if (detailHideTimer) {
     clearTimeout(detailHideTimer);
@@ -418,13 +430,19 @@ const hideDetailPanel = () => {
 };
 
 const selectAgent = (agent: CustomAgent) => {
-  if (getAgentNotReadyLabels(agent).length > 0) return;
+  if (getAgentNotReadyLabels(agent).length > 0) {
+    emitAgentNotReady(agent);
+    return;
+  }
   emit('select', agent);
 };
 
 const selectSharedAgent = (shared: SharedAgentInfo) => {
   const sourceTenantId = String(shared.source_tenant_id);
-  if (getAgentNotReadyLabels(shared.agent, sourceTenantId).length > 0) return;
+  if (getAgentNotReadyLabels(shared.agent, sourceTenantId).length > 0) {
+    emitAgentNotReady(shared.agent as CustomAgent, sourceTenantId);
+    return;
+  }
   emit('select', shared.agent as CustomAgent, sourceTenantId);
 };
 
@@ -440,6 +458,7 @@ const goToSettings = (agent: CustomAgent, sourceTenantId?: string) => {
       edit: agent.id,
       section,
       ...(highlight ? { highlight } : {}),
+      ...(sourceTenantId ? { sourceTenantId } : {}),
     },
   });
 };

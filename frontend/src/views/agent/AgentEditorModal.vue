@@ -620,9 +620,9 @@
                       </div>
                     </div>
 
-                    <!-- ReRank 模型（启用知识库时显示） -->
+                    <!-- ReRank 模型（启用知识库或 knowledge_search 工具时显示） -->
                     <div
-                      v-if="hasKnowledgeBase"
+                      v-if="showRerankModelField"
                       class="setting-row"
                       data-agent-field="rerank_model"
                       :class="{ 'setting-row--field-highlight': highlightedField === 'rerank_model' }"
@@ -1394,7 +1394,7 @@ import {
   type KBCapabilities,
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
-import { type AgentNotReadyReasonKey } from '@/utils/agent-readiness';
+import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
 import { type MCPService } from '@/api/mcp-service';
 import { type SkillInfo } from '@/api/skill';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
@@ -1673,6 +1673,11 @@ const sharedKbOptions = computed(() => kbOptions.value.filter(kb => kb.shared));
 // 根据知识库配置动态计算是否有知识库能力
 const hasKnowledgeBase = computed(() => {
   return kbSelectionMode.value !== 'none';
+});
+
+const showRerankModelField = computed(() => {
+  if (!isAgentMode.value) return hasKnowledgeBase.value;
+  return hasKnowledgeBase.value || agentRequiresRerankModel(formData.value.config);
 });
 
 // 当前配置下进入到智能体作用域的知识库列表
