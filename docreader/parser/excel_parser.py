@@ -20,6 +20,7 @@ from docreader.parser.excel_convert import (
     engine_for_format,
     normalize_excel_bytes,
 )
+from docreader.parser.excel_structured import build_structured_excel_document
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
 from docreader.parser.xlsx_repair import repair_xlsx_bytes
 
@@ -86,10 +87,16 @@ class ExcelParser(BaseParser):
         start, end = 0, 0
 
         excel_file = _open_excel_file(content, file_type=self.file_type)
+        sheet_frames = [
+            (sheet_name, _read_sheet_dataframe(excel_file, sheet_name))
+            for sheet_name in excel_file.sheet_names
+        ]
+        structured_doc = build_structured_excel_document(sheet_frames)
+        if structured_doc is not None:
+            return structured_doc
         
         # Process each sheet in the Excel file
-        for excel_sheet_name in excel_file.sheet_names:
-            df = _read_sheet_dataframe(excel_file, excel_sheet_name)
+        for excel_sheet_name, df in sheet_frames:
             # Remove rows where all values are NaN (completely empty rows)
             df.dropna(how="all", inplace=True)
 

@@ -298,6 +298,71 @@ class ExcelParserTest(unittest.TestCase):
         self.assertGreater(len(document.content), 0)
         self.assertGreater(len(document.chunks), 0)
 
+    def test_parse_structured_policy_table(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Support policy"
+        ws["A1"] = (
+            "General handling guidance: acknowledge the customer first, collect "
+            "photos or videos when needed, then choose an appropriate resolution."
+        )
+        ws.merge_cells("A1:D1")
+        ws.append(["Product", "Issue type", "Issue detail", "Resolution"])
+        ws.append(["Sleeping bag", "Non-quality", "Changed mind", "No return after use"])
+        ws.append([None, "Quality", "Yellowing", "Offer replacement or compensation"])
+        ws.merge_cells("A3:A4")
+
+        bio = io.BytesIO()
+        wb.save(bio)
+
+        document = ExcelParser(file_name="policy.xlsx", file_type="xlsx").parse_into_text(
+            bio.getvalue()
+        )
+
+        self.assertEqual(document.metadata.get("parser"), "structured_excel")
+        self.assertIn("## Sheet: Support policy", document.content)
+        self.assertIn("- Product: Sleeping bag", document.content)
+        self.assertIn("- Issue type: Non-quality", document.content)
+        self.assertIn("- Issue detail: Yellowing", document.content)
+        self.assertNotIn("A: Product", document.content)
+        self.assertEqual(
+            document.content.count("General handling guidance"),
+            1,
+        )
+        record_chunks = [
+            chunk
+            for chunk in document.chunks
+            if chunk.metadata.get("kind") == "table_record"
+        ]
+        self.assertGreaterEqual(len(record_chunks), 2)
+        self.assertEqual(record_chunks[0].metadata.get("sheet"), "Support policy")
+        self.assertEqual(record_chunks[0].metadata.get("row"), 3)
+        self.assertEqual(
+            record_chunks[0].metadata.get("headers"),
+            ["Product", "Issue type", "Issue detail", "Resolution"],
+        )
+
+    def test_falls_back_when_workbook_has_unstructured_sheet(self):
+        wb = openpyxl.Workbook()
+        table = wb.active
+        table.title = "Support policy"
+        table.append(["Product", "Issue type", "Resolution"])
+        table.append(["Sleeping bag", "Non-quality", "No return after use"])
+
+        notes = wb.create_sheet("Free text")
+        notes["A1"] = "This free-form note has no table header and must still be preserved."
+
+        bio = io.BytesIO()
+        wb.save(bio)
+
+        document = ExcelParser(file_name="mixed.xlsx", file_type="xlsx").parse_into_text(
+            bio.getvalue()
+        )
+
+        self.assertNotEqual(document.metadata.get("parser"), "structured_excel")
+        self.assertIn("Product", document.content)
+        self.assertIn("This free-form note has no table header", document.content)
+
 
 if __name__ == "__main__":
     unittest.main()
