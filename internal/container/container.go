@@ -574,11 +574,13 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
+			if validationErr := validateCriticalSchemaAfterMigrationFailure(db, os.Getenv("DB_DRIVER"), err); validationErr != nil {
+				return nil, validationErr
+			}
 			logger.Warnf(
 				context.Background(),
-				"Continuing with application startup. Please run migrations manually if needed.",
+				"Database migration failed, but the critical wiki/task schema is present. Continuing with application startup.",
 			)
 		}
 
