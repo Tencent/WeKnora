@@ -417,6 +417,43 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+// IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
+const pendingReparseAck = ref<Set<string>>(new Set());
+
+const applyOptimisticBatchReparse = (ids: string[]) => {
+  const idSet = new Set(ids);
+  for (const card of cardList.value) {
+    if (!idSet.has(card.id)) continue;
+    pendingReparseAck.value.add(card.id);
+    card.parse_status = 'pending';
+    card.summary_status = undefined;
+    card.description = '';
+    delete traceAvailableById[card.id];
+    traceAvailableById[card.id] = true;
+  }
+};
+
+const syncReparseAckFromServer = (ids: string[]) => {
+  for (const id of ids) {
+    if (!pendingReparseAck.value.has(id)) continue;
+    const card = cardList.value.find((c) => c.id === id);
+    if (card && isParseInFlight(card.parse_status)) {
+      pendingReparseAck.value.delete(id);
+    }
+  }
+};
+
+const awaitBatchReparseReflection = async (ids: string[]) => {
+  const maxPolls = 30;
+  const delayMs = 400;
+  for (let i = 0; i < maxPolls && pendingReparseAck.value.size > 0; i++) {
+    await loadKnowledgeFiles(kbId.value);
+    syncReparseAckFromServer(ids);
+    applyOptimisticBatchReparse(Array.from(pendingReparseAck.value));
+    await new Promise<void>((r) => setTimeout(r, delayMs));
+  }
+  pendingReparseAck.value.clear();
+};
 
 const confirmBatchReparse = async () => {
   if (batchReparsing.value || batchDeleting.value || selectedIds.value.size === 0) return;
@@ -438,10 +475,11 @@ const confirmBatchReparse = async () => {
     const res: any = await batchReparseKnowledge(kbId.value, ids);
     if (res?.success) {
       MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
+      applyOptimisticBatchReparse(ids);
       clearSelection();
       batchMode.value = false;
-      loadKnowledgeFiles(kbId.value);
       scheduleWikiStatusProbes();
+      void awaitBatchReparseReflection(ids);
     } else {
       MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
     }
@@ -1167,13 +1205,25 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
           const index = cardList.value.findIndex(card => card.id == item.id);
           if (index == -1) return;
 
-          if (cardList.value[index].parse_status !== item.parse_status ||
+          let parseStatus = item.parse_status;
+          if (pendingReparseAck.value.has(item.id)) {
+            if (isParseInFlight(item.parse_status)) {
+              pendingReparseAck.value.delete(item.id);
+            } else {
+              parseStatus = 'pending';
+            }
+          }
+
+          if (cardList.value[index].parse_status !== parseStatus ||
             cardList.value[index].summary_status !== item.summary_status ||
             cardList.value[index].description !== item.description) {
-            shouldRefreshWikiStatus ||= shouldRefreshWikiStatusAfterKnowledgePoll(cardList.value[index], item);
+            shouldRefreshWikiStatus ||= shouldRefreshWikiStatusAfterKnowledgePoll(
+              cardList.value[index],
+              { ...item, parse_status: parseStatus },
+            );
 
             // Always update the card data
-            cardList.value[index].parse_status = item.parse_status;
+            cardList.value[index].parse_status = parseStatus;
             cardList.value[index].summary_status = item.summary_status;
             cardList.value[index].description = item.description;
             delete traceAvailableById[item.id];
