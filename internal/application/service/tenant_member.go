@@ -53,6 +53,9 @@ var (
 	// ErrInvalidTenantRole is returned when the caller passes a role
 	// value that is not one of the four defined TenantRole constants.
 	ErrInvalidTenantRole = errors.New("invalid tenant role")
+	
+	// ErrInvalidStorageQuota is returned when the storage quota is invalid (e.g. negative or less than used).
+	ErrInvalidStorageQuota = errors.New("invalid storage quota")
 
 	// ErrLastOwner is returned when an operation would leave the tenant
 	// without an active Owner. Demoting the last Owner or removing them
@@ -391,4 +394,30 @@ func (s *tenantMemberService) emitRemovalAudit(
 		TargetUserID: targetUserID,
 		Outcome:      types.AuditOutcomeSuccess,
 	})
+}
+
+// UpdateMemberStorageQuota sets the personal storage quota for a user
+// within the given tenant. quotaBytes=0 means "no individual limit".
+// Validates: quotaBytes >= 0, and if quotaBytes > 0 it must be >= the
+// user's current StorageUsed.
+func (s *tenantMemberService) UpdateMemberStorageQuota(
+	ctx context.Context,
+	userID string,
+	tenantID uint64,
+	quotaBytes int64,
+) error {
+	if quotaBytes < 0 {
+		return ErrInvalidStorageQuota
+	}
+	member, err := s.repo.Get(ctx, userID, tenantID)
+	if err != nil {
+		return err
+	}
+	if member == nil {
+		return ErrMembershipNotFound
+	}
+	if quotaBytes > 0 && quotaBytes < member.StorageUsed {
+		return ErrInvalidStorageQuota
+	}
+	return s.repo.UpdateStorageQuota(ctx, userID, tenantID, quotaBytes)
 }

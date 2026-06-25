@@ -44,3 +44,10 @@ func NewDuplicateURLError(knowledge *Knowledge) *DuplicateKnowledgeError {
 		Knowledge: knowledge,
 	}
 }
+
+// NewUserStorageQuotaExceededError creates a user storage quota exceeded error
+func NewUserStorageQuotaExceededError() *StorageQuotaExceededError {
+	return &StorageQuotaExceededError{
+		Message: "User storage quota exceeded, please contact your tenant admin to increase the storage quota",
+	}
+}

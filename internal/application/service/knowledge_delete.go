@@ -169,6 +169,12 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
 		}
+		// update user's storage usage
+		if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+			if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, userID, tenantInfo.ID, -knowledge.StorageSize); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update user storage used failed")
+			}
+		}
 		return nil
 	})
 
@@ -582,6 +588,12 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
 		}
+		// update user's storage usage
+		if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+			if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, userID, tenantInfo.ID, storageAdjust); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update user storage used failed")
+			}
+		}
 		return nil
 	})
 
@@ -678,6 +690,12 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 
 	// Delete extracted images after chunks are deleted
 	deleteExtractedImages(ctx, fileSvc, imageURLs)
+	//update user's storage usage
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, userID, tenantInfo.ID, -knowledge.StorageSize); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update user storage used failed")
+		}
+	}
 
 	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
 	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {

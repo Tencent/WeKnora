@@ -99,15 +99,22 @@ func (s *knowledgeService) cloneKnowledge(
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge create knowledge failed")
 		return
 	}
+	if err = s.CloneChunk(ctx, src, dst); err != nil {
+		logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).
+			WithField("error", err).Errorf("MoveKnowledge move chunks failed")
+		return
+	}
+
 	tenantInfo.StorageUsed += dst.StorageSize
 	if err = s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, dst.StorageSize); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge update tenant storage used failed")
 		return
 	}
-	if err = s.CloneChunk(ctx, src, dst); err != nil {
-		logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).
-			WithField("error", err).Errorf("MoveKnowledge move chunks failed")
-		return
+	//update user's storage usage
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, userID, tenantInfo.ID, dst.StorageSize); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update user storage used failed")
+		}
 	}
 	return
 }
@@ -565,6 +572,24 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			}
 		}
 
+		// check user storage quota (charge KB owner when available so async workers still enforce limits)
+		chargeUserID := knowledge.CreatorID
+		if chargeUserID == "" {
+			if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
+				chargeUserID = uid
+			}
+		}
+		if chargeUserID != "" {
+			member, err := s.tenantMemberRepo.Get(ctx, chargeUserID, tenantInfo.ID)
+			if err == nil && member != nil && member.StorageQuota > 0 && member.StorageUsed+totalStorageSize > member.StorageQuota {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = "User storage quota exceeded"
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+				return
+			}
+		}
+
 		// Check again before batch indexing (heavy operation).
 		// deleting → row is going away anyway, drop the chunks we just wrote.
 		// cancelled → user wants to keep what was already persisted, just stop.
@@ -691,6 +716,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
 	}
 	logger.GetLogger(ctx).Infof("processChunks successfully")
+
+	// update user's storage usage (charge KB owner when available so async workers still update usage)
+	chargeUserID := knowledge.CreatorID
+	if chargeUserID == "" {
+		if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
+			chargeUserID = uid
+		}
+	}
+	if chargeUserID != "" {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, chargeUserID, tenantInfo.ID, totalStorageSize); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update user storage used failed")
+		}
+	}
 }
 
 // defaultMaxInputChars is the default maximum characters used as input for summary generation.

@@ -17,6 +17,8 @@ export interface TenantMember {
   status: TenantMemberStatus
   invited_by?: string | null
   joined_at: string
+  storage_quota?: number
+  storage_used?: number
 }
 
 export interface ListMembersResponse {
@@ -150,4 +152,20 @@ export async function removeMember(
  */
 export async function leaveTenant(tenantId: number): Promise<SimpleResponse> {
   return (await post(`/api/v1/tenants/${tenantId}/leave`)) as unknown as SimpleResponse
+}
+
+/**
+ * Update a member's personal storage quota (bytes).
+ * Backend: PUT /api/v1/tenants/:id/members/:user_id/quota (Admin+).
+ * Pass 0 to remove the individual limit.
+ */
+export async function updateMemberQuota(
+  tenantId: number,
+  userId: string,
+  storageQuota: number,
+): Promise<SimpleResponse> {
+  return (await put(
+    `/api/v1/tenants/${tenantId}/members/${userId}/quota`,
+    { storage_quota: storageQuota },
+  )) as unknown as SimpleResponse
 }
