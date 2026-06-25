@@ -663,6 +663,7 @@ export default {
     summaryParentChildShort: 'Parent-child',
     summaryParserMode: 'Mode',
     summaryParserBuiltin: 'Built-in engine (default)',
+    summaryParserForceScanned: 'Scanned mode',
     summaryChunkSize: 'Chunk size',
     summaryChunkOverlap: 'Overlap',
     summaryStrategy: 'Strategy',

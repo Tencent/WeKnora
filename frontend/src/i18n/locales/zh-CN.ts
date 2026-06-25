@@ -666,6 +666,7 @@ export default {
     summaryParentChildShort: "父子分块",
     summaryParserMode: "模式",
     summaryParserBuiltin: "内置引擎（默认）",
+    summaryParserForceScanned: "扫描件解析",
     summaryChunkSize: "分块大小",
     summaryChunkOverlap: "重叠",
     summaryStrategy: "策略",

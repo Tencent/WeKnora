@@ -632,6 +632,7 @@ export default {
     summaryParentChildShort: 'Родительско-дочернее',
     summaryParserMode: 'Режим',
     summaryParserBuiltin: 'Встроенный движок (по умолчанию)',
+    summaryParserForceScanned: 'режим скана',
     summaryChunkSize: 'Размер чанка',
     summaryChunkOverlap: 'Перекрытие',
     summaryStrategy: 'Стратегия',
@@ -670,6 +671,10 @@ export default {
     asrRequiredForAudio: 'Выкл. (в партии есть аудио)',
     vlmModelSelectRequired: 'Мультимодальность включена. Выберите модель VLM.',
     asrModelSelectRequired: 'Распознавание речи включено. Выберите модель ASR.',
+    pdfForceScanned: {
+      label: 'Разбор PDF как сканированного документа',
+      description: 'Подходит для PDF с веб-печати, сканов и документов с большим числом изображений. Каждая страница будет отрендерена в изображение и обработана через OCR/VLM. Может увеличить время обработки и расходы на модели.'
+    },
     continueAdd: 'Добавить ещё',
     addMoreFiles: 'Добавить файлы',
     addMoreFolder: 'Добавить из папки',

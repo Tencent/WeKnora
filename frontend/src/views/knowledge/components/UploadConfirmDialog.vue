@@ -455,14 +455,21 @@ const hasPdf = computed(() => {
 
 function resolveEngineForExt(ext: string): string {
   const rules = uiState.value.chunkingConfig.parserEngineRules
+  let engineKey = 'builtin'
+  let name = t('uploadConfirm.summaryParserBuiltin')
   if (rules?.length) {
     for (const rule of rules) {
       if (rule.file_types.includes(ext)) {
-        return getEngineDisplayName(rule.engine)
+        engineKey = rule.engine
+        name = getEngineDisplayName(rule.engine)
+        break
       }
     }
   }
-  return t('uploadConfirm.summaryParserBuiltin')
+  if (ext === 'pdf' && uiState.value.pdfForceScanned && engineKey === 'builtin') {
+    return `${name} · ${t('uploadConfirm.summaryParserForceScanned')}`
+  }
+  return name
 }
 
 const parserOverviewValue = computed(() => {

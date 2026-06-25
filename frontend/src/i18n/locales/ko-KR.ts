@@ -668,6 +668,7 @@ export default {
     summaryParentChildShort: "부모-자식 청킹",
     summaryParserMode: "모드",
     summaryParserBuiltin: "내장 엔진(기본)",
+    summaryParserForceScanned: "스캔 문서 파싱",
     summaryChunkSize: "청크 크기",
     summaryChunkOverlap: "겹침",
     summaryStrategy: "전략",
@@ -706,6 +707,10 @@ export default {
     asrRequiredForAudio: "꺼짐(이 배치에 오디오 포함)",
     vlmModelSelectRequired: "멀티모달이 활성화되었습니다. VLM 모델을 선택하세요",
     asrModelSelectRequired: "음성 인식이 활성화되었습니다. ASR 모델을 선택하세요",
+    pdfForceScanned: {
+      label: "스캔 PDF로 파싱",
+      description: "웹 인쇄, 스캔본, 이미지 위주 PDF에 적합합니다. 모든 페이지를 이미지로 렌더링한 뒤 OCR/VLM으로 처리합니다. 처리 시간과 모델 호출 비용이 늘어날 수 있습니다."
+    },
     continueAdd: "계속 추가",
     addMoreFiles: "파일 더 추가",
     addMoreFolder: "폴더에서 더 추가",
