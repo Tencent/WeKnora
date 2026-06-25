@@ -1487,7 +1487,15 @@ const startRetryFailedPoll = (taskId: string) => {
         resetPage();
         loadKnowledgeFiles(kbId.value);
       }
-    } catch {
+    } catch (error: any) {
+      const status = Number(error?.status || error?.response?.status || 0);
+      if (status === 403 || status === 404) {
+        stopRetryFailedPoll();
+        retryFailedSubmitting.value = false;
+        retryFailedProgressVisible.value = false;
+        MessagePlugin.error(error?.message || t('knowledgeBase.retryFailedDocumentsFailed'));
+        return;
+      }
       // Keep polling; transient progress read failures should not stop the submission view.
     }
   };
