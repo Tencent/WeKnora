@@ -290,3 +290,22 @@ func (r *tenantMemberRepository) HasAnyMembers(ctx context.Context, tenantID uin
 	}
 	return true, nil
 }
+func (r *tenantMemberRepository) AdjustUserStorageUsed(ctx context.Context, userID string, tenantID uint64, delta int64) error {
+	res := r.db.WithContext(ctx).
+		Model(&types.TenantMember{}).
+		Where("user_id = ? AND tenant_id = ? AND deleted_at IS NULL", userID, tenantID).
+		UpdateColumn("storage_used", gorm.Expr("CASE WHEN storage_used + ? < 0 THEN 0 ELSE storage_used + ? END", delta, delta))
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+func (r *tenantMemberRepository) UpdateStorageQuota(ctx context.Context, userID string, tenantID uint64, quotaBytes int64) error {
+	return r.db.WithContext(ctx).
+		Model(&types.TenantMember{}).
+		Where("user_id = ? AND tenant_id = ? AND deleted_at IS NULL", userID, tenantID).
+		Update("storage_quota", quotaBytes).Error
+}

@@ -136,11 +136,13 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 	resp := make([]types.TenantMemberResponse, 0, len(members))
 	for _, m := range members {
 		row := types.TenantMemberResponse{
-			UserID:    m.UserID,
-			Role:      m.Role,
-			Status:    m.Status,
-			InvitedBy: m.InvitedBy,
-			JoinedAt:  m.JoinedAt,
+			UserID:       m.UserID,
+			Role:         m.Role,
+			Status:       m.Status,
+			InvitedBy:    m.InvitedBy,
+			JoinedAt:     m.JoinedAt,
+			StorageQuota: m.StorageQuota,
+			StorageUsed:  m.StorageUsed,
 		}
 		if u, ok := usersByID[m.UserID]; ok && u != nil {
 			row.Email = u.Email
@@ -401,5 +403,58 @@ func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type updateMemberQuotaRequest struct {
+	StorageQuota *int64 `json:"storage_quota" binding:"required"`
+}
+
+// UpdateMemberQuota godoc
+// @Summary      修改成员存储配额
+// @Description  Owner/Admin 为某位成员设置个人存储配额（0=不限制）
+// @Tags         租户成员
+// @Accept       json
+// @Produce      json
+// @Param        id        path  string  true  "租户 ID"
+// @Param        user_id   path  string  true  "用户 ID"
+// @Param        request   body  updateMemberQuotaRequest  true  "配额请求"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /tenants/{id}/members/{user_id}/quota [put]
+func (h *TenantMemberHandler) UpdateMemberQuota(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, ok := parseTenantIDFromPath(c)
+	if !ok {
+		return
+	}
+	userID := strings.TrimSpace(c.Param("user_id"))
+	if userID == "" {
+		c.Error(apperrors.NewValidationError("user_id is required"))
+		return
+	}
+
+	var req updateMemberQuotaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		return
+	}
+	if *req.StorageQuota < 0 {
+		c.Error(apperrors.NewValidationError("storage_quota must be non-negative"))
+		return
+	}
+	if err := h.memberService.UpdateMemberStorageQuota(ctx, userID, tenantID, *req.StorageQuota); err != nil {
+		switch {
+		case errors.Is(err, service.ErrMembershipNotFound):
+			c.Error(apperrors.NewNotFoundError("membership not found"))
+		case errors.Is(err, service.ErrInvalidStorageQuota):
+			c.Error(apperrors.NewValidationError(err.Error()))
+		default:
+			logger.Errorf(ctx, "UpdateMemberQuota failed: user=%s tenant=%d err=%v",
+				userID, tenantID, err)
+			c.Error(apperrors.NewInternalServerError("failed to update member quota").WithDetails(err.Error()))
+		}
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

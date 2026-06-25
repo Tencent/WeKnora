@@ -104,6 +104,13 @@ type TenantMember struct {
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	// StorageQuota is the maximum storage (bytes) this user may consume
+	// within this tenant. 0 means "no individual limit — tenant quota
+	// is the only ceiling".
+	StorageQuota int64 `json:"storage_quota" gorm:"default:0"`
+	// StorageUsed tracks how many bytes this user currently occupies
+	// within this tenant.
+	StorageUsed int64 `json:"storage_used" gorm:"default:0"`
 }
 
 // TableName binds TenantMember to the tenant_members table.
@@ -134,4 +141,6 @@ type TenantMemberResponse struct {
 	Status    TenantMemberStatus `json:"status"`
 	InvitedBy *string            `json:"invited_by,omitempty"`
 	JoinedAt  time.Time          `json:"joined_at"`
+	StorageQuota int64              `json:"storage_quota"`
+	StorageUsed  int64              `json:"storage_used"`
 }
