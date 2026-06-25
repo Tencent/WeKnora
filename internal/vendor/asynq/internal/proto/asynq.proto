@@ -1,0 +1,171 @@
+// Copyright 2020 Kentaro Hibino. All rights reserved.
+// Use of this source code is governed by a MIT license
+// that can be found in the LICENSE file.
+
+syntax = "proto3";
+package asynq;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hibiken/asynq/internal/proto";
+
+// TaskMessage is the internal representation of a task with additional
+// metadata fields.
+// Next ID: 16
+message TaskMessage {
+	// Type indicates the kind of the task to be performed.
+  string type = 1;
+
+	// Payload holds data needed to process the task.
+  bytes payload = 2;
+
+	// Headers holds additional metadata for the task.
+  map<string, string> headers = 15;
+
+	// Unique identifier for the task.
+  string id = 3;
+
+	// Name of the queue to which this task belongs.
+  string queue = 4;
+
+	// Max number of retries for this task.
+  int32 retry = 5;
+
+	// Number of times this task has been retried so far.
+  int32 retried = 6;
+
+	// Error message from the last failure.
+  string error_msg = 7;
+
+  // Time of last failure in Unix time,
+  // the number of seconds elapsed since January 1, 1970 UTC.
+  // Use zero to indicate no last failure.
+  int64 last_failed_at = 11;
+
+	// Timeout specifies timeout in seconds.
+	// Use zero to indicate no timeout.
+  int64 timeout = 8;
+
+	// Deadline specifies the deadline for the task in Unix time,
+	// the number of seconds elapsed since January 1, 1970 UTC.
+	// Use zero to indicate no deadline.
+  int64 deadline = 9;
+
+	// UniqueKey holds the redis key used for uniqueness lock for this task.
+	// Empty string indicates that no uniqueness lock was used.
+  string unique_key = 10;
+
+  // GroupKey is a name of the group used for task aggregation.
+  // This field is optional and empty value means no aggregation for the task.
+  string group_key = 14;
+
+  // Retention period specified in a number of seconds.
+  // The task will be stored in redis as a completed task until the TTL
+  // expires.
+  int64 retention = 12;
+
+  // Time when the task completed in success in Unix time,
+  // the number of seconds elapsed since January 1, 1970 UTC.
+  // This field is populated if result_ttl > 0 upon completion.
+  int64 completed_at = 13;
+};
+
+// ServerInfo holds information about a running server.
+message ServerInfo {
+  // Host machine the server is running on.
+  string host = 1;
+
+  // PID of the server process.
+  int32 pid = 2;
+
+  // Unique identifier for this server.
+  string server_id = 3;
+
+  // Maximum number of concurrency this server will use.
+  int32 concurrency = 4;
+
+  // List of queue names with their priorities.
+  // The server will consume tasks from the queues and prioritize
+  // queues with higher priority numbers.
+  map<string, int32> queues = 5;
+
+  // If set, the server will always consume tasks from a queue with higher
+  // priority.
+  bool strict_priority = 6;
+
+  // Status indicates the status of the server.
+  string status = 7;
+
+  // Time this server was started.
+  google.protobuf.Timestamp start_time = 8;
+
+  // Number of workers currently processing tasks.
+  int32 active_worker_count = 9;
+};
+
+// WorkerInfo holds information about a running worker.
+message WorkerInfo {
+  // Host matchine this worker is running on.
+  string host = 1;
+
+  // PID of the process in which this worker is running.
+  int32 pid = 2;
+
+  // ID of the server in which this worker is running.
+  string server_id = 3;
+
+  // ID of the task this worker is processing.
+  string task_id = 4;
+
+  // Type of the task this worker is processing.
+  string task_type = 5;
+
+  // Payload of the task this worker is processing.
+  bytes task_payload = 6;
+
+  // Name of the queue the task the worker is processing belongs.
+  string queue = 7;
+
+  // Time this worker started processing the task.
+  google.protobuf.Timestamp start_time = 8;
+
+  // Deadline by which the worker needs to complete processing 
+  // the task. If worker exceeds the deadline, the task will fail.
+  google.protobuf.Timestamp deadline = 9;
+};
+
+// SchedulerEntry holds information about a periodic task registered 
+// with a scheduler.
+message SchedulerEntry {
+	// Identifier of the scheduler entry.
+	string id = 1;
+
+	// Periodic schedule spec of the entry.
+	string spec = 2;
+
+	// Task type of the periodic task.
+	string task_type = 3;
+
+	// Task payload of the periodic task.
+	bytes task_payload = 4;
+
+	// Options used to enqueue the periodic task.
+	repeated string enqueue_options = 5;
+
+	// Next time the task will be enqueued.
+  google.protobuf.Timestamp next_enqueue_time = 6;
+
+	// Last time the task was enqueued.
+	// Zero time if task was never enqueued.
+  google.protobuf.Timestamp prev_enqueue_time = 7;
+};
+
+// SchedulerEnqueueEvent holds information about an enqueue event
+// by a scheduler.
+message SchedulerEnqueueEvent {
+	// ID of the task that was enqueued.
+  string task_id = 1;
+
+	// Time the task was enqueued.
+  google.protobuf.Timestamp enqueue_time = 2;
+};

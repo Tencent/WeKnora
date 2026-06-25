@@ -1,0 +1,85 @@
+# This workflow runs benchmarks against the current branch,
+# compares them to benchmarks against master,
+# and uploads the results as an artifact.
+
+name: benchstat
+
+on: [pull_request]
+
+jobs:
+  incoming:
+    runs-on: ubuntu-latest
+    if: false
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.x
+      - name: Benchmark
+        run: go test -run=^$ -bench=. -count=5 -timeout=60m ./... | tee -a new.txt
+      - name: Upload Benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-incoming
+          path: new.txt
+
+  current:
+    runs-on: ubuntu-latest
+    if: false
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.x
+      - name: Benchmark
+        run: go test -run=^$ -bench=. -count=5 -timeout=60m ./... | tee -a old.txt
+      - name: Upload Benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-current
+          path: old.txt
+
+  benchstat:
+    needs: [incoming, current]
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.x
+      - name: Install benchstat
+        run: go get -u golang.org/x/perf/cmd/benchstat
+      - name: Download Incoming
+        uses: actions/download-artifact@v4
+        with:
+          name: bench-incoming
+      - name: Download Current
+        uses: actions/download-artifact@v4
+        with:
+          name: bench-current
+      - name: Benchstat Results
+        run: benchstat old.txt new.txt | tee -a benchstat.txt
+      - name: Upload benchstat results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchstat
+          path: benchstat.txt

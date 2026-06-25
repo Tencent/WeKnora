@@ -340,3 +340,9 @@ require (
 )
 
 replace go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
+
+// Vendor patch · asynq v0.26.0 fix for recoverer wedge on undecodable task message.
+// Upstream PR: https://github.com/hibiken/asynq/pull/1140
+// Remove this `replace` and `internal/vendor/asynq` once the upstream fix lands
+// in a release and asynq is bumped above v0.26.0.
+replace github.com/hibiken/asynq => ./internal/vendor/asynq
