@@ -1117,6 +1117,12 @@ onUnmounted(() => {
     timeout = null;
   }
 });
+function stopRetryFailedPoll() {
+  if (retryFailedPollTimer) {
+    clearInterval(retryFailedPollTimer);
+    retryFailedPollTimer = null;
+  }
+}
 watch([kbId, isFAQ, canEdit], ([newKbId, newIsFAQ, newCanEdit]) => {
   stopRetryFailedPoll();
   retryFailedSubmitting.value = false;
@@ -1487,13 +1493,6 @@ const startRetryFailedPoll = (taskId: string) => {
   };
   poll();
   retryFailedPollTimer = setInterval(poll, 2000);
-};
-
-const stopRetryFailedPoll = () => {
-  if (retryFailedPollTimer) {
-    clearInterval(retryFailedPollTimer);
-    retryFailedPollTimer = null;
-  }
 };
 
 const finishRetryFailedProgress = (progress: RetryFailedDocumentsProgress) => {
