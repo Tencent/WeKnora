@@ -21,16 +21,21 @@ func (r *knowledgeRepository) SetKnowledgeTags(
 			Delete(&types.KnowledgeTagRelation{}).Error; err != nil {
 			return err
 		}
-		// Insert new relations
+		// Insert new relations (skip empty and duplicate IDs)
 		if len(tagIDs) == 0 {
 			return nil
 		}
+		seen := make(map[string]struct{}, len(tagIDs))
 		now := time.Now()
 		relations := make([]types.KnowledgeTagRelation, 0, len(tagIDs))
 		for _, tagID := range tagIDs {
 			if tagID == "" {
 				continue
 			}
+			if _, dup := seen[tagID]; dup {
+				continue
+			}
+			seen[tagID] = struct{}{}
 			relations = append(relations, types.KnowledgeTagRelation{
 				KnowledgeID: knowledgeID,
 				TagID:       tagID,

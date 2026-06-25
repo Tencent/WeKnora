@@ -261,6 +261,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 // @Param        fileName          formData  string  false  "自定义文件名"
 // @Param        metadata          formData  string  false  "元数据JSON"
 // @Param        enable_multimodel formData  bool    false  "启用多模态处理"
+// @Param        tag_ids       formData  string  false  "分类ID列表，逗号分隔"
 // @Param        process_config    formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
 // @Success      200               {object}  map[string]interface{}  "创建的知识"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
@@ -400,7 +401,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_id=string}  true  "URL请求"
+// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_ids=[]string}  true  "URL请求"
 // @Success      201      {object}  map[string]interface{}  "创建的知识"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
@@ -821,7 +822,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        id         path      string  true   "知识库ID"
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
-// @Param        tag_id        query     string  false  "标签ID筛选"
+// @Param        tag_ids       query     string  false  "标签ID筛选，逗号分隔（OR语义）"
 // @Param        keyword       query     string  false  "关键词搜索"
 // @Param        file_type     query     string  false  "文件类型筛选"
 // @Param        parse_status  query     string  false  "解析状态筛选 (pending/processing/completed/failed)"

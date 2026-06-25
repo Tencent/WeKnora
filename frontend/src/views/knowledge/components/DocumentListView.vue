@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
+import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 
 interface Tag {
   id: string;
@@ -43,57 +44,12 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-// 动态标签可见数量（根据列宽自适应）
-const TAG_EST_WIDTH = 82;
-const TAG_OVERFLOW_MIN = 32;
-const tagVisibleLimit = reactive<Record<string, number>>({});
-const tagItemTotalMap = new Map<string, number>();
-let tagChipsRO: ResizeObserver | null = null;
-
-function setupTagChipsObserver(el: Element | null, itemId: string, totalCount: number) {
-  if (!el) return;
-  const htmlEl = el as HTMLElement;
-  htmlEl.dataset.listTagItemId = itemId;
-  tagItemTotalMap.set(itemId, totalCount);
-  if (!tagChipsRO) {
-    tagChipsRO = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const target = entry.target as HTMLElement;
-        const id = target.dataset.listTagItemId;
-        if (!id) continue;
-        const w = entry.contentRect.width;
-        const total = tagItemTotalMap.get(id) ?? 0;
-        if (total <= 0) { tagVisibleLimit[id] = 99; continue; }
-        const maxFit = Math.floor((w - TAG_OVERFLOW_MIN) / TAG_EST_WIDTH);
-        const limit = Math.max(1, Math.min(maxFit, total));
-        tagVisibleLimit[id] = limit >= total ? 99 : limit;
-      }
-    });
-  }
-  tagChipsRO.observe(htmlEl);
-  requestAnimationFrame(() => {
-    const w = htmlEl.clientWidth;
-    const total = totalCount;
-    if (total <= 0) { tagVisibleLimit[itemId] = 99; return; }
-    const maxFit = Math.floor((w - TAG_OVERFLOW_MIN) / TAG_EST_WIDTH);
-    const limit = Math.max(1, Math.min(maxFit, total));
-    tagVisibleLimit[itemId] = limit >= total ? 99 : limit;
-  });
-}
-
-function getTagLimit(itemId: string): number {
-  return tagVisibleLimit[itemId] ?? 99;
-}
-
-function hasTagOverflow(itemId: string, total: number): boolean {
-  const limit = tagVisibleLimit[itemId] ?? 99;
-  return total > limit;
-}
-
-function getOverflowCount(itemId: string, total: number): number {
-  const limit = tagVisibleLimit[itemId] ?? 99;
-  return Math.max(0, total - limit);
-}
+const {
+  setupTagChipsObserver,
+  getTagLimit,
+  hasTagOverflow,
+  getOverflowCount,
+} = useTagChipsOverflow('listTagItemId');
 
 const tagMap = computed(() => {
   const map: Record<string, Tag> = {};
@@ -246,15 +202,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     <div ref="stickySentinel" class="doc-list-sticky-sentinel" aria-hidden="true"></div>
     <div class="doc-list-header" :class="{ 'is-stuck': headerStuck }" role="row">
       <div class="cell cell-check" role="columnheader" @click.stop>
-        <t-checkbox
-          class="doc-list-check"
-          size="small"
-          :checked="allSelected"
-          :indeterminate="someSelected"
-          :disabled="!items.length"
-          :title="t('knowledgeBase.selectAll')"
-          @change="onHeaderCheckboxChange"
-        />
+        <t-checkbox class="doc-list-check" size="small" :checked="allSelected" :indeterminate="someSelected"
+          :disabled="!items.length" :title="t('knowledgeBase.selectAll')" @change="onHeaderCheckboxChange" />
       </div>
       <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
       <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
@@ -266,23 +215,12 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     </div>
 
     <div class="doc-list-body">
-      <div
-        v-for="item in items"
-        :key="item.id"
-        class="doc-list-row"
-        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }"
-        :data-select-id="item.id"
-        role="row"
-        @click="emit('open', item)"
-      >
+      <div v-for="item in items" :key="item.id" class="doc-list-row"
+        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
+        role="row" @click="emit('open', item)">
         <div class="cell cell-check" @click.stop>
-          <t-checkbox
-            class="doc-list-check"
-            size="small"
-            :checked="selectedIds.has(item.id)"
-            :title="item.file_name"
-            @change="(c, ctx) => onRowCheckboxChange(item, c, ctx)"
-          />
+          <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
+            @change="(c, ctx) => onRowCheckboxChange(item, c, ctx)" />
         </div>
 
         <div class="cell cell-name">
@@ -291,54 +229,28 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
           </span>
           <div class="row-file-text">
             <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
-            <span
-              v-if="item.description"
-              class="row-file-desc"
-              :title="item.description"
-            >{{ item.description }}</span>
+            <span v-if="item.description" class="row-file-desc" :title="item.description">{{ item.description }}</span>
           </div>
         </div>
 
 
         <div class="cell cell-tag">
           <template v-if="item.tags && item.tags.length > 0">
-            <t-tooltip
-              v-if="hasTagOverflow(item.id, item.tags.length)"
-              :content="item.tags.map((t: any) => t.name).join(', ')"
-              placement="top"
-            >
-              <div
-                class="row-tag-chips"
-                :ref="(el: any) => setupTagChipsObserver(el, item.id, item.tags.length)"
-                :class="{ 'is-clickable': canEdit }"
-                @click.stop="canEdit && emit('tag-edit', item)"
-              >
-                <t-tag
-                  v-for="tag in item.tags.slice(0, getTagLimit(item.id))"
-                  :key="tag.id"
-                  size="small"
-                  variant="light-outline"
-                  class="row-tag"
-                >
+            <t-tooltip v-if="hasTagOverflow(item.id, item.tags.length)"
+              :content="item.tags.map((t: any) => t.name).join(', ')" placement="top">
+              <div class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, item.tags.length)"
+                :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
+                <t-tag v-for="tag in item.tags.slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
+                  variant="light-outline" class="row-tag">
                   {{ tag.name }}
                 </t-tag>
                 <span class="row-tag-overflow">+{{ getOverflowCount(item.id, item.tags.length) }}</span>
               </div>
             </t-tooltip>
-            <div
-              v-else
-              class="row-tag-chips"
-              :ref="(el: any) => setupTagChipsObserver(el, item.id, item.tags.length)"
-              :class="{ 'is-clickable': canEdit }"
-              @click.stop="canEdit && emit('tag-edit', item)"
-            >
-              <t-tag
-                v-for="tag in item.tags.slice(0, getTagLimit(item.id))"
-                :key="tag.id"
-                size="small"
-                variant="light-outline"
-                class="row-tag"
-              >
+            <div v-else class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, item.tags.length)"
+              :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
+              <t-tag v-for="tag in item.tags.slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
+                variant="light-outline" class="row-tag">
                 {{ tag.name }}
               </t-tag>
             </div>
@@ -359,18 +271,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
         <div class="cell cell-status">
           <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
-            <t-tag
-              v-if="statusByRow.get(item.id)!.label !== '--'"
-              size="small"
-              :theme="statusByRow.get(item.id)!.theme"
-              variant="light-outline"
-              class="row-status-tag"
-            >
+            <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
+              variant="light-outline" class="row-status-tag">
               <template v-if="statusByRow.get(item.id)!.icon" #icon>
-                <t-icon
-                  :name="statusByRow.get(item.id)!.icon!"
-                  :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }"
-                />
+                <t-icon :name="statusByRow.get(item.id)!.icon!"
+                  :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }" />
               </template>
               {{ statusByRow.get(item.id)!.label }}
             </t-tag>
@@ -383,56 +288,37 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
         </div>
 
         <div class="cell cell-actions" v-if="canEdit" @click.stop>
-          <t-popup
-            placement="bottom-right"
-            trigger="click"
-            destroy-on-close
-            :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)"
-          >
-            <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button" :aria-label="t('knowledgeBase.columnActions')">
+          <t-popup placement="bottom-right" trigger="click" destroy-on-close
+            :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)">
+            <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button"
+              :aria-label="t('knowledgeBase.columnActions')">
               <t-icon name="more" size="16px" />
             </button>
             <template #content>
               <div class="row-menu">
-                <div
-                  v-if="item.type === 'manual'"
-                  class="row-menu-item"
-                  @click.stop="handleAction('edit', item)"
-                >
+                <div v-if="item.type === 'manual'" class="row-menu-item" @click.stop="handleAction('edit', item)">
                   <t-icon class="icon" name="edit" />
                   <span>{{ t('knowledgeBase.editDocument') }}</span>
                 </div>
-                <div
-                  v-if="isParseInFlight(item)"
-                  class="row-menu-item"
-                  @click.stop="handleAction('reparse', item)"
-                >
+                <div v-if="isParseInFlight(item)" class="row-menu-item" @click.stop="handleAction('reparse', item)">
                   <t-icon class="icon" name="refresh" />
                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                 </div>
-                <t-popconfirm
-                  v-else
-                  theme="warning"
+                <t-popconfirm v-else theme="warning"
                   :content="t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || '' })"
                   :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
-                  :cancel-btn="{ content: t('common.cancel') }"
-                  placement="left"
-                  @confirm="handleAction('reparse', item)"
-                >
+                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
+                  @confirm="handleAction('reparse', item)">
                   <div class="row-menu-item" @click.stop>
                     <t-icon class="icon" name="refresh" />
                     <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                   </div>
                 </t-popconfirm>
-                <t-popconfirm
-                  v-if="canCancelParse(item)"
-                  theme="warning"
+                <t-popconfirm v-if="canCancelParse(item)" theme="warning"
                   :content="t('knowledgeBase.cancelParseConfirmBody', { title: item.file_name || item.id })"
                   :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
-                  :cancel-btn="{ content: t('common.cancel') }"
-                  placement="left"
-                  @confirm="handleAction('cancel-parse', item)"
-                >
+                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
+                  @confirm="handleAction('cancel-parse', item)">
                   <div class="row-menu-item danger" @click.stop>
                     <t-icon class="icon" name="close-circle" />
                     <span>{{ t('knowledgeBase.cancelParse') }}</span>
@@ -442,14 +328,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
                   <t-icon class="icon" name="swap" />
                   <span>{{ t('knowledgeBase.moveDocument') }}</span>
                 </div>
-                <t-popconfirm
-                  theme="warning"
+                <t-popconfirm theme="warning"
                   :content="t('knowledgeBase.confirmDeleteDocument', { fileName: item.file_name || '' })"
                   :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
-                  :cancel-btn="{ content: t('common.cancel') }"
-                  placement="left"
-                  @confirm="handleAction('delete', item)"
-                >
+                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
+                  @confirm="handleAction('delete', item)">
                   <div class="row-menu-item danger" @click.stop>
                     <t-icon class="icon" name="delete" />
                     <span>{{ t('knowledgeBase.deleteDocument') }}</span>
@@ -470,6 +353,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     opacity: 0;
     transform: translateY(6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -493,14 +377,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 .doc-list-row {
   display: grid;
   grid-template-columns:
-    44px                       // checkbox
-    minmax(260px, 2.6fr)       // name
-    minmax(100px, 0.9fr)       // tag
-    minmax(96px, 0.8fr)        // source
-    96px                       // size
-    minmax(96px, 0.7fr)        // status
-    140px                      // updated_at
-    48px;                      // actions
+    44px // checkbox
+    minmax(260px, 2.6fr) // name
+    minmax(100px, 0.9fr) // tag
+    minmax(96px, 0.8fr) // source
+    96px // size
+    minmax(96px, 0.7fr) // status
+    140px // updated_at
+    48px; // actions
   align-items: center;
   column-gap: 0;
   padding: 0 16px;
@@ -572,8 +456,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   align-items: center;
   min-width: 0;
   padding: 0 8px;
-  &:first-child { padding-left: 0; }
-  &:last-child { padding-right: 0; }
+
+  &:first-child {
+    padding-left: 0;
+  }
+
+  &:last-child {
+    padding-right: 0;
+  }
 }
 
 .cell-check {
@@ -683,6 +573,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
 .row-tag {
   max-width: 100%;
+
   :deep(.t-tag__text) {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -757,11 +648,15 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 .row-status-tag :deep(.t-icon) {
   margin-right: 2px;
 }
+
 .icon-spin {
   animation: doc-list-spin 0.9s linear infinite;
 }
+
 @keyframes doc-list-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .row-more-btn {

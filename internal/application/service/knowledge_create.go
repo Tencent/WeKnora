@@ -231,11 +231,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 
 	// Set tag relations
-	if len(tagIDs) > 0 {
-		if err := s.repo.SetKnowledgeTags(ctx, knowledge.ID, tagIDs); err != nil {
-			logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
-			return nil, err
-		}
+	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+		return nil, err
 	}
 
 	// Enqueue document processing task to Asynq
@@ -418,11 +416,9 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	}
 
 	// Set tag relations
-	if len(tagIDs) > 0 {
-		if err := s.repo.SetKnowledgeTags(ctx, knowledge.ID, tagIDs); err != nil {
-			logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
-			return nil, err
-		}
+	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+		return nil, err
 	}
 
 	// Enqueue URL processing task to Asynq
@@ -658,11 +654,9 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	}
 
 	// Set tag relations
-	if len(tagIDs) > 0 {
-		if err := s.repo.SetKnowledgeTags(ctx, knowledge.ID, tagIDs); err != nil {
-			logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
-			return nil, err
-		}
+	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, tagIDs); err != nil {
+		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+		return nil, err
 	}
 
 	// Build async task payload
@@ -813,11 +807,9 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	}
 
 	// Set tag relations
-	if len(payload.TagIDs) > 0 {
-		if err := s.repo.SetKnowledgeTags(ctx, knowledge.ID, payload.TagIDs); err != nil {
-			logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
-			return nil, err
-		}
+	if err := s.setAndAttachKnowledgeTags(ctx, tenantID, kbID, knowledge, payload.TagIDs); err != nil {
+		logger.Errorf(ctx, "Failed to set knowledge tags, knowledge ID: %s, error: %v", knowledge.ID, err)
+		return nil, err
 	}
 
 	if status == types.ManualKnowledgeStatusPublish {

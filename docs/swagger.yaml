@@ -1071,7 +1071,7 @@ definitions:
         description: ES, OpenSearch
         type: integer
       replica_number:
-        description: 'Milvus: in-memory replica count (LoadCollection)'
+        description: Milvus LoadCollection / Tencent VectorDB CreateCollection replicas
         type: integer
       replication_factor:
         description: 'Qdrant, Weaviate: number of replicas'
@@ -1257,9 +1257,12 @@ definitions:
       summary_status:
         description: Summary status for async summary generation
         type: string
-      tag_id:
-        description: Optional tag ID for categorization within a knowledge base
-        type: string
+      tags:
+        description: Tags holds the tags associated with this knowledge (populated
+          on query, not persisted directly).
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag'
+        type: array
       tenant_id:
         description: Tenant ID
         type: integer
@@ -1529,6 +1532,14 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig'
       graph_enabled:
         type: boolean
+      parser_engine_overrides:
+        additionalProperties:
+          type: string
+        description: |-
+          ParserEngineOverrides passes key-value configuration to docreader parsers
+          (e.g. pdf_force_scanned=true). Merged with tenant-level overrides in the
+          parse pipeline; per-upload values take priority on conflict.
+        type: object
       parser_engine_rules:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
@@ -1537,6 +1548,36 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
       vlm_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeTag:
+    properties:
+      color:
+        description: Optional display color
+        type: string
+      created_at:
+        description: Creation time
+        type: string
+      id:
+        description: Unique identifier of the tag (UUID)
+        type: string
+      knowledge_base_id:
+        description: Knowledge base ID that this tag belongs to
+        type: string
+      name:
+        description: Tag name, unique within the same knowledge base
+        type: string
+      seq_id:
+        description: SeqID is an auto-increment integer ID for external API usage
+        type: integer
+      sort_order:
+        description: Sort order within the same knowledge base
+        type: integer
+      tenant_id:
+        description: Tenant ID
+        type: integer
+      updated_at:
+        description: Last updated time
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ListMembersResponse:
     properties:
@@ -1633,13 +1674,42 @@ definitions:
     properties:
       api_key:
         type: string
+      auth_server_metadata_url:
+        description: |-
+          AuthServerMetadataURL optionally pins the OAuth authorization server
+          metadata URL. When empty, the server is discovered automatically from
+          the MCP URL (RFC 9728 / RFC 8414).
+        type: string
+      auth_type:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType'
+        description: |-
+          AuthType selects the authentication strategy. Empty ("") is treated as
+          none for backward compatibility with rows that pre-date this field.
       custom_headers:
         additionalProperties:
           type: string
         type: object
+      scopes:
+        description: Scopes are the OAuth scopes requested during authorization. Optional.
+        items:
+          type: string
+        type: array
       token:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.MCPAuthType:
+    enum:
+    - ""
+    - api_key
+    - bearer
+    - oauth
+    type: string
+    x-enum-varnames:
+    - MCPAuthNone
+    - MCPAuthAPIKey
+    - MCPAuthBearer
+    - MCPAuthOAuth
   github_com_Tencent_WeKnora_internal_types.MCPEnvVars:
     additionalProperties:
       type: string
@@ -1728,8 +1798,10 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides'
       status:
         type: string
-      tag_id:
-        type: string
+      tag_ids:
+        items:
+          type: string
+        type: array
       title:
         type: string
     type: object
@@ -4685,6 +4757,20 @@ definitions:
       success:
         type: boolean
     type: object
+  internal_handler.batchReparseKnowledgeRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+      kb_id:
+        type: string
+      process_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides'
+    required:
+    - ids
+    - kb_id
+    type: object
   internal_handler.createInvitationRequest:
     properties:
       email:
@@ -4752,6 +4838,13 @@ definitions:
     - password
     - token
     - username
+    type: object
+  internal_handler.resolveAncestorsRequest:
+    properties:
+      resource_ids:
+        items:
+          type: string
+        type: array
     type: object
   internal_handler.updateLastFAQImportResultDisplayStatusRequest:
     properties:
@@ -6209,14 +6302,59 @@ paths:
       summary: Pause data source
       tags:
       - DataSource
-  /datasource/{id}/resources:
-    get:
-      description: List resources available for sync in the external system
+  /datasource/{id}/resource-ancestors:
+    post:
+      consumes:
+      - application/json
+      description: Resolve the ancestor ExternalIDs that must be expanded to reveal
+        the given (possibly deeply nested) resources in a lazily-loaded picker. Used
+        to restore an existing selection when editing a data source.
       parameters:
       - description: Data source ID
         in: path
         name: id
         required: true
+        type: string
+      - description: Resource IDs to resolve
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.resolveAncestorsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                type: string
+              type: array
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Resolve resource ancestors
+      tags:
+      - DataSource
+  /datasource/{id}/resources:
+    get:
+      description: List resources available for sync in the external system. Pass
+        parent_id to lazily load the direct children of a resource (used for large
+        hierarchical sources such as Feishu wiki).
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Parent resource ExternalID; empty lists the top level
+        in: query
+        name: parent_id
         type: string
       produces:
       - application/json
@@ -7875,9 +8013,9 @@ paths:
         in: query
         name: page_size
         type: integer
-      - description: 标签ID筛选
+      - description: 标签ID筛选，逗号分隔（OR语义）
         in: query
-        name: tag_id
+        name: tag_ids
         type: string
       - description: 关键词搜索
         in: query
@@ -7950,6 +8088,10 @@ paths:
         in: formData
         name: enable_multimodel
         type: boolean
+      - description: 分类ID列表，逗号分隔
+        in: formData
+        name: tag_ids
+        type: string
       - description: 处理配置JSON（KnowledgeProcessOverrides）
         in: formData
         name: process_config
@@ -8035,8 +8177,10 @@ paths:
               type: string
             file_type:
               type: string
-            tag_id:
-              type: string
+            tag_ids:
+              items:
+                type: string
+              type: array
             title:
               type: string
             url:
@@ -8779,6 +8923,40 @@ paths:
       summary: 批量删除知识
       tags:
       - 知识管理
+  /knowledge/batch-reparse:
+    post:
+      consumes:
+      - application/json
+      description: 按 ID 列表批量重新解析单个知识库下的多个知识条目
+      parameters:
+      - description: 批量重解析请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.batchReparseKnowledgeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 任务已提交
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 批量重新解析知识
+      tags:
+      - 知识管理
   /knowledge/image/{id}/{chunk_id}:
     put:
       consumes:
@@ -8916,8 +9094,9 @@ paths:
     get:
       consumes:
       - application/json
-      description: Search knowledge files by keyword. When agent_id is set (shared
-        agent), scope is the agent's configured knowledge bases.
+      description: Search knowledge files by keyword. Pass recent=true without a keyword
+        to browse recent files. When agent_id is set (shared agent), scope is the
+        agent's configured knowledge bases.
       parameters:
       - description: Keyword to search
         in: query
@@ -8939,6 +9118,10 @@ paths:
         in: query
         name: agent_id
         type: string
+      - description: Return recent files when keyword is empty
+        in: query
+        name: recent
+        type: boolean
       produces:
       - application/json
       responses:
@@ -9860,6 +10043,82 @@ paths:
       summary: 移除 MCP 服务的单个凭据字段
       tags:
       - MCP服务
+  /mcp-services/{id}/oauth/authorize-url:
+    post:
+      consumes:
+      - application/json
+      description: 对使用 OAuth 的 MCP 服务执行发现与动态客户端注册，返回浏览器应跳转的授权地址（当前用户维度）
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '{redirect_uri: string, frontend_redirect?: string}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{authorization_url: string}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 发起 MCP OAuth 授权
+      tags:
+      - MCP服务
+  /mcp-services/{id}/oauth/status:
+    get:
+      description: 返回当前用户对指定 MCP 服务是否已完成 OAuth 授权
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{authorized: bool}'
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 查询 MCP OAuth 授权状态
+      tags:
+      - MCP服务
+  /mcp-services/{id}/oauth/token:
+    delete:
+      description: 删除当前用户对指定 MCP 服务的 OAuth 令牌
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+      security:
+      - Bearer: []
+      summary: 撤销 MCP OAuth 授权
+      tags:
+      - MCP服务
   /mcp-services/{id}/resources:
     get:
       consumes:
@@ -9990,6 +10249,28 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 获取MCP服务工具列表
+      tags:
+      - MCP服务
+  /mcp-services/oauth/callback:
+    get:
+      description: 接收授权服务器回调并完成 code 交换，随后重定向回前端
+      parameters:
+      - description: 授权码
+        in: query
+        name: code
+        type: string
+      - description: 状态参数
+        in: query
+        name: state
+        type: string
+      - description: 授权错误码
+        in: query
+        name: error
+        type: string
+      responses:
+        "302":
+          description: Found
+      summary: MCP OAuth 回调
       tags:
       - MCP服务
   /me/invitations:

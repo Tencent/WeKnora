@@ -661,6 +661,84 @@ func (s *knowledgeService) SetKnowledgeTags(ctx context.Context, knowledgeID str
 	return s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs)
 }
 
+// validateKnowledgeTagIDs ensures every tag exists and belongs to the given knowledge base.
+func (s *knowledgeService) validateKnowledgeTagIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagIDs []string,
+) error {
+	unique := make([]string, 0, len(tagIDs))
+	seen := make(map[string]struct{}, len(tagIDs))
+	for _, tagID := range tagIDs {
+		if tagID == "" {
+			continue
+		}
+		if _, dup := seen[tagID]; dup {
+			continue
+		}
+		seen[tagID] = struct{}{}
+		unique = append(unique, tagID)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+
+	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, unique)
+	if err != nil {
+		return err
+	}
+	tagMap := make(map[string]*types.KnowledgeTag, len(tags))
+	for _, tag := range tags {
+		tagMap[tag.ID] = tag
+	}
+	for _, tagID := range unique {
+		tag, ok := tagMap[tagID]
+		if !ok {
+			return werrors.NewBadRequestError(fmt.Sprintf("标签 %s 不存在", tagID))
+		}
+		if tag.KnowledgeBaseID != kbID {
+			return werrors.NewBadRequestError("标签不属于当前知识库")
+		}
+	}
+	return nil
+}
+
+// attachTagsToKnowledge populates knowledge.Tags from the join table.
+func (s *knowledgeService) attachTagsToKnowledge(ctx context.Context, knowledge *types.Knowledge) {
+	if knowledge == nil {
+		return
+	}
+	tagMap, err := s.repo.GetKnowledgeTags(ctx, []string{knowledge.ID})
+	if err != nil {
+		logger.Warnf(ctx, "Failed to load tags for knowledge %s: %v", knowledge.ID, err)
+		return
+	}
+	if tags, ok := tagMap[knowledge.ID]; ok {
+		knowledge.Tags = tags
+	}
+}
+
+// setAndAttachKnowledgeTags validates, persists, and populates tags on a knowledge entry.
+func (s *knowledgeService) setAndAttachKnowledgeTags(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	knowledge *types.Knowledge,
+	tagIDs []string,
+) error {
+	if err := s.validateKnowledgeTagIDs(ctx, tenantID, kbID, tagIDs); err != nil {
+		return err
+	}
+	if len(tagIDs) > 0 {
+		if err := s.repo.SetKnowledgeTags(ctx, knowledge.ID, tagIDs); err != nil {
+			return err
+		}
+	}
+	s.attachTagsToKnowledge(ctx, knowledge)
+	return nil
+}
+
 // GetKnowledgeTags returns tags for multiple knowledge IDs.
 func (s *knowledgeService) GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error) {
 	return s.repo.GetKnowledgeTags(ctx, knowledgeIDs)
@@ -675,16 +753,8 @@ func (s *knowledgeService) UpdateKnowledgeTag(ctx context.Context, knowledgeID s
 	}
 
 	// Validate all tag IDs
-	if len(tagIDs) > 0 {
-		for _, tagID := range tagIDs {
-			tag, err := s.tagRepo.GetByID(ctx, tenantID, tagID)
-			if err != nil {
-				return err
-			}
-			if tag.KnowledgeBaseID != knowledge.KnowledgeBaseID {
-				return werrors.NewBadRequestError("标签不属于当前知识库")
-			}
-		}
+	if err := s.validateKnowledgeTagIDs(ctx, tenantID, knowledge.KnowledgeBaseID, tagIDs); err != nil {
+		return err
 	}
 
 	return s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs)
@@ -746,12 +816,12 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 		for tagID := range tagIDSet {
 			tagIDList = append(tagIDList, tagID)
 		}
-		for _, tagID := range tagIDList {
-			tag, err := s.tagRepo.GetByID(ctx, tenantID, tagID)
-			if err != nil {
-				return err
-			}
-			tagMap[tagID] = tag
+		tags, err := s.tagRepo.GetByIDs(ctx, tenantID, tagIDList)
+		if err != nil {
+			return err
+		}
+		for _, tag := range tags {
+			tagMap[tag.ID] = tag
 		}
 	}
 
