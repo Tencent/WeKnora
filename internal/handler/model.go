@@ -1,12 +1,18 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -197,6 +203,323 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 		"success": true,
 		"data":    dto.NewModelResponses(models),
 	})
+}
+
+const (
+	modelDebugMaxInputBytes = 64 * 1024
+	modelDebugMaxFileBytes  = 20 * 1024 * 1024
+)
+
+// ModelDebugOptions contains the cross-provider parameters exposed by the
+// model debugger. Pointer fields preserve explicit zero/false values.
+type ModelDebugOptions struct {
+	SystemPrompt string   `json:"system_prompt,omitempty"`
+	Temperature  *float64 `json:"temperature,omitempty"`
+	TopP         *float64 `json:"top_p,omitempty"`
+	MaxTokens    *int     `json:"max_tokens,omitempty"`
+	Thinking     *bool    `json:"thinking,omitempty"`
+}
+
+func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
+	var opts ModelDebugOptions
+	if strings.TrimSpace(raw) == "" {
+		return opts, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &opts); err != nil {
+		return opts, fmt.Errorf("invalid options: %w", err)
+	}
+	if opts.MaxTokens != nil && (*opts.MaxTokens < 1 || *opts.MaxTokens > 8192) {
+		return opts, fmt.Errorf("max_tokens must be between 1 and 8192")
+	}
+	if opts.Temperature != nil && (*opts.Temperature < 0 || *opts.Temperature > 2) {
+		return opts, fmt.Errorf("temperature must be between 0 and 2")
+	}
+	if opts.TopP != nil && (*opts.TopP <= 0 || *opts.TopP > 1) {
+		return opts, fmt.Errorf("top_p must be greater than 0 and at most 1")
+	}
+	return opts, nil
+}
+
+func redactedDebugConfig(config map[string]string) map[string]string {
+	if len(config) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(config))
+	for key, value := range config {
+		lower := strings.ToLower(key)
+		if strings.Contains(lower, "secret") ||
+			strings.Contains(lower, "token") ||
+			strings.Contains(lower, "password") ||
+			strings.Contains(lower, "api_key") ||
+			strings.Contains(lower, "apikey") ||
+			strings.Contains(lower, "authorization") {
+			out[key] = "[REDACTED]"
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func modelDebugRequestPreview(model *types.Model, input string, documents []string, opts ModelDebugOptions, fileName string, fileSize int64) gin.H {
+	preview := gin.H{
+		"model_id":   model.ID,
+		"model_name": model.Name,
+		"model_type": model.Type,
+		"source":     model.Source,
+		"provider":   model.Parameters.Provider,
+		"input":      input,
+		"options":    opts,
+	}
+	if len(documents) > 0 {
+		preview["documents"] = documents
+	}
+	if fileName != "" {
+		preview["file"] = gin.H{"name": fileName, "size": fileSize}
+	}
+	if model.Parameters.ExtraConfig != nil {
+		preview["model_extra_config"] = redactedDebugConfig(model.Parameters.ExtraConfig)
+	}
+	if len(model.Parameters.CustomHeaders) > 0 {
+		headerNames := make([]string, 0, len(model.Parameters.CustomHeaders))
+		for name := range model.Parameters.CustomHeaders {
+			headerNames = append(headerNames, name)
+		}
+		preview["custom_header_names"] = headerNames
+	}
+	return preview
+}
+
+func writeModelDebugResult(c *gin.Context, started time.Time, request gin.H, response any, callErr error, observations gin.H) {
+	data := gin.H{
+		"ok":           callErr == nil,
+		"elapsed_ms":   time.Since(started).Milliseconds(),
+		"request":      request,
+		"raw_response": response,
+		"observations": observations,
+	}
+	if callErr != nil {
+		data["error"] = callErr.Error()
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+type modelDebugChatStreamResponse struct {
+	Content          string                 `json:"content"`
+	ReasoningContent string                 `json:"reasoning_content,omitempty"`
+	ToolCalls        []types.LLMToolCall    `json:"tool_calls,omitempty"`
+	FinishReason     string                 `json:"finish_reason,omitempty"`
+	Usage            *types.TokenUsage      `json:"usage,omitempty"`
+	StreamEvents     []types.StreamResponse `json:"stream_events"`
+}
+
+func consumeModelDebugChatStream(stream <-chan types.StreamResponse) (*modelDebugChatStreamResponse, error) {
+	result := &modelDebugChatStreamResponse{
+		StreamEvents: make([]types.StreamResponse, 0),
+	}
+	for event := range stream {
+		result.StreamEvents = append(result.StreamEvents, event)
+		switch event.ResponseType {
+		case types.ResponseTypeThinking:
+			result.ReasoningContent += event.Content
+		case types.ResponseTypeAnswer:
+			result.Content += event.Content
+			if len(event.ToolCalls) > 0 {
+				result.ToolCalls = event.ToolCalls
+			}
+			if event.FinishReason != "" {
+				result.FinishReason = event.FinishReason
+			}
+			if event.Usage != nil {
+				result.Usage = event.Usage
+			}
+		case types.ResponseTypeToolCall:
+			if len(event.ToolCalls) > 0 {
+				result.ToolCalls = event.ToolCalls
+			}
+		case types.ResponseTypeError:
+			return result, fmt.Errorf("%s", event.Content)
+		}
+	}
+	return result, nil
+}
+
+// DebugModel executes a saved model through the same service constructors used
+// by production calls and returns the complete normalized response. Credentials
+// stay server-side; the request preview contains only non-secret fields.
+func (h *ModelHandler) DebugModel(c *gin.Context) {
+	ctx := c.Request.Context()
+	started := time.Now()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		return
+	}
+
+	model, err := h.service.GetModelByID(ctx, id)
+	if err != nil {
+		if err == service.ErrModelNotFound {
+			c.Error(errors.NewNotFoundError("Model not found"))
+			return
+		}
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	input := c.PostForm("input")
+	if len(input) > modelDebugMaxInputBytes {
+		c.Error(errors.NewBadRequestError("input is too long"))
+		return
+	}
+	opts, err := parseModelDebugOptions(c.PostForm("options"))
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	var documents []string
+	if rawDocuments := c.PostForm("documents"); strings.TrimSpace(rawDocuments) != "" {
+		if err := json.Unmarshal([]byte(rawDocuments), &documents); err != nil {
+			c.Error(errors.NewBadRequestError("documents must be a JSON string array"))
+			return
+		}
+		if len(documents) > 100 {
+			c.Error(errors.NewBadRequestError("documents cannot exceed 100 items"))
+			return
+		}
+	}
+
+	var (
+		fileBytes []byte
+		fileName  string
+		fileSize  int64
+	)
+	if file, header, fileErr := c.Request.FormFile("file"); fileErr == nil {
+		defer file.Close()
+		fileName = header.Filename
+		fileSize = header.Size
+		if fileSize > modelDebugMaxFileBytes {
+			c.Error(errors.NewBadRequestError("file cannot exceed 20 MB"))
+			return
+		}
+		fileBytes, err = io.ReadAll(io.LimitReader(file, modelDebugMaxFileBytes+1))
+		if err != nil {
+			c.Error(errors.NewBadRequestError("failed to read uploaded file"))
+			return
+		}
+		if len(fileBytes) > modelDebugMaxFileBytes {
+			c.Error(errors.NewBadRequestError("file cannot exceed 20 MB"))
+			return
+		}
+		fileSize = int64(len(fileBytes))
+	}
+
+	requestPreview := modelDebugRequestPreview(model, input, documents, opts, fileName, fileSize)
+	observations := gin.H{}
+
+	switch model.Type {
+	case types.ModelTypeKnowledgeQA:
+		if strings.TrimSpace(input) == "" {
+			c.Error(errors.NewBadRequestError("query cannot be empty"))
+			return
+		}
+		instance, callErr := h.service.GetChatModel(ctx, id)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		messages := make([]chat.Message, 0, 2)
+		if strings.TrimSpace(opts.SystemPrompt) != "" {
+			messages = append(messages, chat.Message{Role: "system", Content: opts.SystemPrompt})
+		}
+		messages = append(messages, chat.Message{Role: "user", Content: input})
+		chatOpts := &chat.ChatOptions{}
+		if opts.Temperature != nil {
+			chatOpts.Temperature = *opts.Temperature
+		}
+		if opts.TopP != nil {
+			chatOpts.TopP = *opts.TopP
+		}
+		if opts.MaxTokens != nil {
+			chatOpts.MaxTokens = *opts.MaxTokens
+		}
+		chatOpts.Thinking = opts.Thinking
+		chatConfig := chat.ConfigFromModel(model, "", "")
+		thinkingControl := chat.EffectiveThinkingControl(chatConfig)
+		observations["stream"] = true
+		observations["requested_thinking"] = opts.Thinking != nil && *opts.Thinking
+		observations["thinking_control"] = thinkingControl
+		observations["thinking_parameter_sent"] = opts.Thinking != nil && thinkingControl != "none"
+
+		stream, callErr := instance.ChatStream(ctx, messages, chatOpts)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		resp, callErr := consumeModelDebugChatStream(stream)
+		if resp != nil {
+			observations["reasoning_returned"] = strings.TrimSpace(resp.ReasoningContent) != ""
+			observations["reasoning_characters"] = len([]rune(resp.ReasoningContent))
+			observations["answer_characters"] = len([]rune(resp.Content))
+		}
+		writeModelDebugResult(c, started, requestPreview, resp, callErr, observations)
+	case types.ModelTypeEmbedding:
+		if strings.TrimSpace(input) == "" {
+			c.Error(errors.NewBadRequestError("input cannot be empty"))
+			return
+		}
+		instance, callErr := h.service.GetEmbeddingModel(ctx, id)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		vector, callErr := instance.Embed(ctx, input)
+		observations["dimension"] = len(vector)
+		writeModelDebugResult(c, started, requestPreview, vector, callErr, observations)
+	case types.ModelTypeRerank:
+		if strings.TrimSpace(input) == "" || len(documents) == 0 {
+			c.Error(errors.NewBadRequestError("query and documents cannot be empty"))
+			return
+		}
+		instance, callErr := h.service.GetRerankModel(ctx, id)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		results, callErr := instance.Rerank(ctx, input, documents)
+		observations["result_count"] = len(results)
+		writeModelDebugResult(c, started, requestPreview, results, callErr, observations)
+	case types.ModelTypeVLLM:
+		if len(fileBytes) == 0 {
+			c.Error(errors.NewBadRequestError("image file is required"))
+			return
+		}
+		instance, callErr := h.service.GetVLMModel(ctx, id)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		result, callErr := instance.Predict(ctx, [][]byte{fileBytes}, input)
+		observations["answer_characters"] = len([]rune(result))
+		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
+	case types.ModelTypeASR:
+		if len(fileBytes) == 0 {
+			c.Error(errors.NewBadRequestError("audio file is required"))
+			return
+		}
+		instance, callErr := h.service.GetASRModel(ctx, id)
+		if callErr != nil {
+			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		result, callErr := instance.Transcribe(ctx, fileBytes, fileName)
+		if result != nil {
+			observations["text_characters"] = len([]rune(result.Text))
+			observations["segment_count"] = len(result.Segments)
+		}
+		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
+	default:
+		c.Error(errors.NewBadRequestError("unsupported model type"))
+	}
 }
 
 // UpdateModelRequest defines the structure for model update requests
