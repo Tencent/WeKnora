@@ -144,7 +144,7 @@ const isAgentStreamSession = () => {
     if (props.embeddedMode) {
         return !!(props.agentId && props.agentId !== 'builtin-quick-answer');
     }
-    return useSettingsStoreInstance.isAgentEnabled;
+    return useSettingsStoreInstance.isAgentStreamMode;
 };
 
 const uiStore = useUIStore();
@@ -623,8 +623,10 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     userHasScrolledUp.value = false;
     scrollToBottom(true);
 
-    // Get agent mode status from settings store
-    const agentEnabled = props.embeddedMode ? (props.agentId && props.agentId !== 'builtin-quick-answer') : useSettingsStoreInstance.isAgentEnabled;
+    // Get agent mode status from settings store (prefer selectedAgentId for builtins)
+    const agentEnabled = props.embeddedMode
+        ? (props.agentId && props.agentId !== 'builtin-quick-answer')
+        : useSettingsStoreInstance.isAgentStreamMode;
 
     // Get web search status from settings store
     const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;

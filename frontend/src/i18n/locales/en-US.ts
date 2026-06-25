@@ -1124,6 +1124,7 @@ export default {
       notReadyStatus: 'Setup needed',
       notReadyMissing: 'Missing: {items}',
       configureAction: 'Configure',
+      sharedNotReadyContact: 'Ask the sharing organization admin to finish setup',
     },
     // Built-in agent information
     builtinInfo: {
@@ -2131,6 +2132,7 @@ export default {
     customAgentMissingRerankModel: 'Rerank model',
     goToAgentEditor: 'Go to configure →',
     agentNotReadyDetail: 'Agent "{agentName}" is not ready. Please configure: {reasons}',
+    sharedAgentNotReadyDetail: 'Shared agent "{agentName}" is not ready (missing: {reasons}). Ask the sharing organization admin to finish setup.',
     builtinAgentNotReadyDetail: 'Built-in agent "{agentName}" is not ready. Please configure: {reasons}',
     builtinAgentSettingName: 'Intelligent Reasoning',
     builtinNormalSettingName: 'Quick Q&A',

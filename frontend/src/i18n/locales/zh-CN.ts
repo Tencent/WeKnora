@@ -2116,6 +2116,7 @@ export default {
       notReadyStatus: "待配置",
       notReadyMissing: "缺少 {items}",
       configureAction: "去配置",
+      sharedNotReadyContact: "请联系分享方管理员完成配置",
     },
     // 内置智能体信息
     builtinInfo: {
@@ -3912,6 +3913,7 @@ export default {
     customAgentMissingRerankModel: "重排模型",
     goToAgentEditor: "前往配置 →",
     agentNotReadyDetail: "智能体「{agentName}」未就绪，需要配置以下内容：{reasons}",
+    sharedAgentNotReadyDetail: "共享智能体「{agentName}」尚未就绪（缺少：{reasons}），请联系分享方管理员完成配置。",
     builtinAgentNotReadyDetail: "内置智能体「{agentName}」未就绪，需要配置以下内容：{reasons}",
     builtinAgentSettingName: "智能推理",
     builtinNormalSettingName: "快速问答",

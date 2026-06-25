@@ -67,11 +67,12 @@ export function getAgentNotReadyReasonKeys(
     }
   }
 
-  if (options.isAgentMode && (!config?.allowed_tools || config.allowed_tools.length === 0)) {
-    reasons.push('allowed_tools')
-  }
-
   return reasons
+}
+
+/** Shared agents are owned by another tenant; receivers cannot edit their config. */
+export function canLocallyConfigureAgent(sourceTenantId?: string): boolean {
+  return !sourceTenantId
 }
 
 /** Map missing-config reasons to the agent editor section that fixes them. */

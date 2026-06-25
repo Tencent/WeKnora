@@ -30,6 +30,7 @@ import {
   getAgentNotReadyReasonKeys,
   resolveAgentNotReadySection,
   resolveAgentNotReadyHighlight,
+  canLocallyConfigureAgent,
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
@@ -2047,25 +2048,34 @@ const showAgentNotReadyMessage = (
   sourceTenantId?: string,
 ) => {
   const reasonsText = formatLocalizedList(reasons, locale.value)
-  const section = resolveAgentNotReadySection(reasonKeys || ['summary_model'])
-  const highlight = resolveAgentNotReadyHighlight(reasonKeys || ['summary_model'])
+  const isRemoteShared = !canLocallyConfigureAgent(sourceTenantId)
 
   const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-width: 320px;' }, [
-    h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })),
-    h('a', {
-      href: '#',
-      onClick: (e: Event) => {
-        e.preventDefault();
-        goToAgentEditor(agent, section, highlight, sourceTenantId);
-      },
-      style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
-      onMouseenter: (e: Event) => {
-        (e.target as HTMLElement).style.textDecoration = 'underline';
-      },
-      onMouseleave: (e: Event) => {
-        (e.target as HTMLElement).style.textDecoration = 'none';
-      }
-    }, t('input.goToAgentEditor'))
+    h(
+      'span',
+      { style: 'color: var(--td-text-color-primary); line-height: 1.5;' },
+      isRemoteShared
+        ? t('input.sharedAgentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })
+        : t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText }),
+    ),
+    ...(isRemoteShared ? [] : [
+      h('a', {
+        href: '#',
+        onClick: (e: Event) => {
+          e.preventDefault();
+          const section = resolveAgentNotReadySection(reasonKeys || ['summary_model'])
+          const highlight = resolveAgentNotReadyHighlight(reasonKeys || ['summary_model'])
+          goToAgentEditor(agent, section, highlight, sourceTenantId);
+        },
+        style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
+        onMouseenter: (e: Event) => {
+          (e.target as HTMLElement).style.textDecoration = 'underline';
+        },
+        onMouseleave: (e: Event) => {
+          (e.target as HTMLElement).style.textDecoration = 'none';
+        }
+      }, t('input.goToAgentEditor')),
+    ]),
   ]);
 
   MessagePlugin.warning({
@@ -2233,9 +2243,7 @@ defineExpose({
           <!-- Agent 选择器下拉菜单 -->
           <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
-            @close="closeAgentModeSelector"
-            @select="handleSelectAgent"
-            @not-ready="handleAgentNotReady" />
+            @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
 
           <!-- WebSearch 开关按钮 -->
           <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
@@ -2243,7 +2251,7 @@ defineExpose({
               <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
                 <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
                 <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings')
-                  }}</a>
+                }}</a>
               </div>
               <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
                 $t('input.webSearch.toggleOn') }}</span>
@@ -2308,7 +2316,7 @@ defineExpose({
                   d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
               <span v-if="uploadedAttachments.length > 0" class="attachment-count">{{ uploadedAttachments.length
-                }}</span>
+              }}</span>
             </div>
           </t-tooltip>
 
@@ -2318,7 +2326,7 @@ defineExpose({
               <div v-if="isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
                 <span>{{ $t('input.kbDisabledByAgent') }}</span>
                 <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings')
-                  }}</a>
+                }}</a>
               </div>
               <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
                 count:
@@ -2368,13 +2376,8 @@ defineExpose({
                 </button>
               </div>
               <div class="model-selector-content">
-                <div
-                  v-for="model in availableModels"
-                  :key="model.id"
-                  class="model-option"
-                  :class="{ selected: model.id === selectedModelId }"
-                  @click="handleModelChange(model.id || '')"
-                >
+                <div v-for="model in availableModels" :key="model.id" class="model-option"
+                  :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
                   <div class="model-option-left">
                     <div class="model-option-icon">
                       <t-icon name="chat" size="14px" />
@@ -3191,8 +3194,15 @@ const getImgSrc = (url: string) => {
 }
 
 @keyframes modelSelectorFadeIn {
-  from { opacity: 0; transform: scale(0.98); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .model-selector-header {

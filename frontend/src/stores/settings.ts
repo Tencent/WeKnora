@@ -3,6 +3,7 @@ import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
 import { updateMyPreferences, type UserPreferences } from "@/api/auth";
+import { isAgentStreamAgentId, reconcileBuiltinAgentMode } from "@/utils/agent-mode";
 
 // 定义设置接口
 interface Settings {
@@ -102,10 +103,21 @@ const defaultSettings: Settings = {
   autoCheckUpdate: true,
 };
 
+/** Keep builtin agent id and isAgentEnabled in sync after localStorage reload. */
+function loadAndReconcileSettings(): Settings {
+  const loaded = JSON.parse(
+    localStorage.getItem("WeKnora_settings") || JSON.stringify(defaultSettings),
+  ) as Settings;
+  if (reconcileBuiltinAgentMode(loaded)) {
+    localStorage.setItem("WeKnora_settings", JSON.stringify(loaded));
+  }
+  return loaded;
+}
+
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
     // 从本地存储加载设置，如果没有则使用默认设置
-    settings: JSON.parse(localStorage.getItem("WeKnora_settings") || JSON.stringify(defaultSettings)) as Settings,
+    settings: loadAndReconcileSettings(),
     // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
     // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
     _defaultsSnapshot: null as Settings | null,
@@ -116,6 +128,17 @@ export const useSettingsStore = defineStore("settings", {
   getters: {
     // Agent 是否启用
     isAgentEnabled: (state) => state.settings.isAgentEnabled || false,
+
+    // 当前是否为内置快速问答（优先看 selectedAgentId，避免与 isAgentEnabled 漂移）
+    isQuickAnswerMode: (state) =>
+      (state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID) === BUILTIN_QUICK_ANSWER_ID,
+
+    // 是否走 Agent 流式管线（智能推理 / 自定义 Agent）；快速问答走 RAG 管线
+    isAgentStreamMode: (state) =>
+      isAgentStreamAgentId(
+        state.settings.selectedAgentId,
+        state.settings.isAgentEnabled || false,
+      ),
     
     // Agent 是否就绪（配置完整）
     // 需要满足：1) 配置了允许的工具 2) 设置了对话模型 3) 设置了重排模型

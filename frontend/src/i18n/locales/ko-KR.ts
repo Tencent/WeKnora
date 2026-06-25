@@ -2120,6 +2120,7 @@ export default {
       notReadyStatus: "구성 필요",
       notReadyMissing: "누락: {items}",
       configureAction: "구성",
+      sharedNotReadyContact: "공유한 조직 관리자에게 구성을 요청하세요",
     },
     // 내장 에이전트 정보
     builtinInfo: {
@@ -3904,6 +3905,8 @@ export default {
     goToAgentEditor: "구성으로 이동 →",
     agentNotReadyDetail:
       'Agent "{agentName}"가 준비되지 않았습니다. 다음 항목을 설정해야 합니다: {reasons}',
+    sharedAgentNotReadyDetail:
+      '공유 Agent "{agentName}"가 준비되지 않았습니다(누락: {reasons}). 공유한 조직 관리자에게 구성을 요청하세요.',
     builtinAgentNotReadyDetail:
       '내장 에이전트 "{agentName}"가 준비되지 않았습니다. 다음 항목을 설정해야 합니다: {reasons}',
     builtinAgentSettingName: "에이전트 추론",

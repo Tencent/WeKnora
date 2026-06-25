@@ -1,11 +1,7 @@
 <template>
   <Teleport to="body">
     <div v-if="visible" class="agent-selector-overlay" @click="$emit('close')">
-      <div
-        class="agent-selector-dropdown"
-        :style="dropdownStyle"
-        @click.stop
-      >
+      <div class="agent-selector-dropdown" :style="dropdownStyle" @click.stop>
         <div class="agent-selector-header">
           <span>{{ $t('agent.selectAgent') }}</span>
           <router-link to="/platform/agents" class="agent-selector-add" @click="$emit('close')">
@@ -18,32 +14,22 @@
           <!-- 内置智能体 -->
           <div class="agent-group">
             <div class="agent-group-title">{{ $t('agent.builtinAgents') }}</div>
-            <div
-              v-for="agent in builtinAgents"
-              :key="agent.id"
-              class="agent-option"
-              :class="{ selected: isMyAgentSelected(agent) }"
-              @mouseenter="onOptionEnter(agent, $event)"
-              @mouseleave="onOptionLeave"
-              @click="selectAgent(agent)"
-            >
-              <div
-                v-if="agent.id === BUILTIN_QUICK_ANSWER_ID || agent.id === BUILTIN_SMART_REASONING_ID"
-                class="builtin-icon"
-                :class="agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'"
-              >
-                <TIcon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
+            <div v-for="agent in builtinAgents" :key="agent.id" class="agent-option"
+              :class="{ selected: isMyAgentSelected(agent) }" @mouseenter="onOptionEnter(agent, $event)"
+              @mouseleave="onOptionLeave" @click="selectAgent(agent)">
+              <div v-if="agent.id === BUILTIN_QUICK_ANSWER_ID || agent.id === BUILTIN_SMART_REASONING_ID"
+                class="builtin-icon" :class="agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'">
+                <TIcon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'"
+                  size="13px" />
               </div>
               <div v-else-if="agent.avatar" class="builtin-avatar">{{ agent.avatar }}</div>
               <div v-else class="builtin-icon normal">
-                <TIcon name="app" size="14px" />
+                <TIcon name="app" size="13px" />
               </div>
               <span class="agent-option-name">{{ agent.name }}</span>
               <div v-if="getAgentNotReadyLabels(agent).length" class="agent-option-actions">
-                <t-tooltip
-                  :content="$t('agent.selector.notReadyHint', { items: formatNotReadyHint(agent) })"
-                  placement="top"
-                >
+                <t-tooltip :content="$t('agent.selector.notReadyHint', { items: formatNotReadyHint(agent) })"
+                  placement="top">
                   <TIcon name="error-circle" size="14px" class="not-ready-icon" @click.stop />
                 </t-tooltip>
               </div>
@@ -53,22 +39,14 @@
           <!-- 自定义智能体 -->
           <div v-if="customAgents.length > 0" class="agent-group">
             <div class="agent-group-title">{{ $t('agent.customAgents') }}</div>
-            <div
-              v-for="agent in customAgents"
-              :key="agent.id"
-              class="agent-option"
-              :class="{ selected: isMyAgentSelected(agent) }"
-              @mouseenter="onOptionEnter(agent, $event)"
-              @mouseleave="onOptionLeave"
-              @click="selectAgent(agent)"
-            >
+            <div v-for="agent in customAgents" :key="agent.id" class="agent-option"
+              :class="{ selected: isMyAgentSelected(agent) }" @mouseenter="onOptionEnter(agent, $event)"
+              @mouseleave="onOptionLeave" @click="selectAgent(agent)">
               <AgentAvatar :name="agent.name" size="small" />
               <span class="agent-option-name">{{ agent.name }}</span>
               <div v-if="getAgentNotReadyLabels(agent).length" class="agent-option-actions">
-                <t-tooltip
-                  :content="$t('agent.selector.notReadyHint', { items: formatNotReadyHint(agent) })"
-                  placement="top"
-                >
+                <t-tooltip :content="$t('agent.selector.notReadyHint', { items: formatNotReadyHint(agent) })"
+                  placement="top">
                   <TIcon name="error-circle" size="14px" class="not-ready-icon" @click.stop />
                 </t-tooltip>
               </div>
@@ -78,36 +56,26 @@
           <!-- 共享给我 -->
           <div v-if="sharedAgentsList.length > 0" class="agent-group">
             <div class="agent-group-title">{{ $t('agent.tabs.sharedToMe') }}</div>
-            <div
-              v-for="shared in sharedAgentsList"
-              :key="`${shared.agent.id}-${shared.source_tenant_id}`"
-              class="agent-option"
-              :class="{ selected: isSharedAgentSelected(shared) }"
-              @mouseenter="onSharedOptionEnter(shared, $event)"
-              @mouseleave="onOptionLeave"
-              @click="selectSharedAgent(shared)"
-            >
+            <div v-for="shared in sharedAgentsList" :key="`${shared.agent.id}-${shared.source_tenant_id}`"
+              class="agent-option" :class="{ selected: isSharedAgentSelected(shared) }"
+              @mouseenter="onSharedOptionEnter(shared, $event)" @mouseleave="onOptionLeave"
+              @click="selectSharedAgent(shared)">
               <AgentAvatar :name="shared.agent.name" size="small" />
               <span class="agent-option-name">{{ shared.agent.name }}</span>
               <span class="shared-tag">{{ $t('agent.selector.sharedLabel') }}</span>
-              <div
-                v-if="getAgentNotReadyLabels(shared.agent, String(shared.source_tenant_id)).length"
-                class="agent-option-actions"
-              >
+              <div v-if="getAgentNotReadyLabels(shared.agent, String(shared.source_tenant_id)).length"
+                class="agent-option-actions">
                 <t-tooltip
                   :content="$t('agent.selector.notReadyHint', { items: formatNotReadyHint(shared.agent, String(shared.source_tenant_id)) })"
-                  placement="top"
-                >
+                  placement="top">
                   <TIcon name="error-circle" size="14px" class="not-ready-icon" @click.stop />
                 </t-tooltip>
               </div>
             </div>
           </div>
 
-          <div
-            v-if="builtinAgents.length === 0 && customAgents.length === 0 && sharedAgentsList.length === 0"
-            class="agent-option empty"
-          >
+          <div v-if="builtinAgents.length === 0 && customAgents.length === 0 && sharedAgentsList.length === 0"
+            class="agent-option empty">
             {{ $t('agent.noAgents') }}
           </div>
         </div>
@@ -115,57 +83,41 @@
     </div>
 
     <!-- 详情浮层 -->
-    <div
-      v-if="visible && activeDetail"
-      class="agent-detail-panel"
-      :style="detailPanelStyle"
-      @mouseenter="onDetailPanelEnter"
-      @mouseleave="onDetailPanelLeave"
-      @click.stop
-    >
+    <div v-if="visible && activeDetail" ref="detailPanelRef" class="agent-detail-panel" :style="detailPanelStyle"
+      @mouseenter="onDetailPanelEnter" @mouseleave="onDetailPanelLeave" @click.stop>
       <div class="agent-detail-panel-inner">
         <div class="agent-detail-content">
           <div class="detail-header">
-            <template v-if="activeDetail.agent.id === BUILTIN_QUICK_ANSWER_ID || activeDetail.agent.id === BUILTIN_SMART_REASONING_ID">
-              <div
-                class="builtin-icon detail-icon"
-                :class="activeDetail.agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'"
-              >
-                <TIcon
-                  :name="activeDetail.agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'"
-                  size="14px"
-                />
+            <template
+              v-if="activeDetail.agent.id === BUILTIN_QUICK_ANSWER_ID || activeDetail.agent.id === BUILTIN_SMART_REASONING_ID">
+              <div class="builtin-icon detail-icon"
+                :class="activeDetail.agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'">
+                <TIcon :name="activeDetail.agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'"
+                  size="14px" />
               </div>
             </template>
-            <div v-else-if="activeDetail.agent.avatar" class="builtin-avatar detail-icon">{{ activeDetail.agent.avatar }}</div>
+            <div v-else-if="activeDetail.agent.avatar" class="builtin-avatar detail-icon">{{ activeDetail.agent.avatar
+              }}</div>
             <AgentAvatar v-else :name="activeDetail.agent.name" size="small" />
             <div class="detail-title-wrap">
               <div class="detail-title-row">
                 <span class="detail-name">{{ activeDetail.agent.name }}</span>
-                <button
-                  type="button"
-                  class="detail-header-action"
-                  :class="{ 'detail-header-action--warn': activeDetailNotReadyLabels.length }"
-                  :title="activeDetailNotReadyLabels.length
+                <button v-if="canShowDetailHeaderAction" type="button" class="detail-header-action"
+                  :class="{ 'detail-header-action--warn': activeDetailNotReadyLabels.length }" :title="activeDetailNotReadyLabels.length
                     ? $t('agent.selector.configureAction')
                     : $t('agent.selector.goToSettings')"
-                  @click="goToSettings(activeDetail.agent, activeDetail.sourceTenantId)"
-                >
-                  <TIcon
-                    :name="activeDetailNotReadyLabels.length ? 'jump' : 'setting'"
-                    size="14px"
-                  />
+                  @click="goToSettings(activeDetail.agent, activeDetail.sourceTenantId)">
+                  <TIcon :name="activeDetailNotReadyLabels.length ? 'jump' : 'setting'" size="14px" />
                 </button>
               </div>
               <span v-if="isDetailCurrent" class="detail-current">{{ $t('agent.selector.current') }}</span>
               <div v-else-if="activeDetailNotReadyLabels.length" class="detail-not-ready">
                 <TIcon name="error-circle" size="13px" class="detail-not-ready-icon" />
                 <span class="detail-not-ready-label">{{ $t('agent.selector.notReadyStatus') }}</span>
-                <span
-                  v-for="item in activeDetailNotReadyLabels"
-                  :key="item"
-                  class="detail-not-ready-item"
-                >{{ item }}</span>
+                <span v-for="item in activeDetailNotReadyLabels" :key="item" class="detail-not-ready-item">{{ item
+                  }}</span>
+                <span v-if="activeDetail.sourceTenantId && activeDetailNotReadyLabels.length"
+                  class="detail-not-ready-shared-hint">{{ $t('agent.selector.sharedNotReadyContact') }}</span>
               </div>
             </div>
           </div>
@@ -174,15 +126,23 @@
 
           <div class="detail-tags">
             <span class="detail-tag">
-              {{ activeDetail.agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.type.agent') : $t('agent.type.normal') }}
+              {{ activeDetail.agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.type.agent') :
+                $t('agent.type.normal') }}
             </span>
-            <span v-if="getKbCapability(activeDetail.agent)" class="detail-tag">{{ getKbCapability(activeDetail.agent) }}</span>
-            <span v-if="activeDetail.agent.config?.web_search_enabled" class="detail-tag">{{ $t('agent.capabilities.webSearchOn') }}</span>
-            <span v-if="getMcpCapability(activeDetail.agent)" class="detail-tag">{{ getMcpCapability(activeDetail.agent) }}</span>
-            <span v-if="activeDetail.agent.config?.multi_turn_enabled" class="detail-tag">{{ $t('agent.capabilities.multiTurn') }}</span>
+            <span v-if="getKbCapability(activeDetail.agent)" class="detail-tag">{{ getKbCapability(activeDetail.agent)
+              }}</span>
+            <span v-if="activeDetail.agent.config?.web_search_enabled" class="detail-tag">{{
+              $t('agent.capabilities.webSearchOn')
+              }}</span>
+            <span v-if="getMcpCapability(activeDetail.agent)" class="detail-tag">{{ getMcpCapability(activeDetail.agent)
+              }}</span>
+            <span v-if="activeDetail.agent.config?.multi_turn_enabled" class="detail-tag">{{
+              $t('agent.capabilities.multiTurn')
+              }}</span>
           </div>
 
-          <div v-if="activeDetail.sharedMeta?.org_name || activeDetail.sharedMeta?.shared_by_username" class="detail-meta">
+          <div v-if="activeDetail.sharedMeta?.org_name || activeDetail.sharedMeta?.shared_by_username"
+            class="detail-meta">
             <div v-if="activeDetail.sharedMeta.org_name" class="detail-meta-row">
               <img src="@/assets/img/organization-green.svg" class="detail-meta-icon" alt="" aria-hidden="true" />
               <span>{{ activeDetail.sharedMeta.org_name }}</span>
@@ -214,6 +174,7 @@ import {
   getAgentNotReadyReasonKeys,
   resolveAgentNotReadySection,
   resolveAgentNotReadyHighlight,
+  canLocallyConfigureAgent,
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
@@ -246,8 +207,13 @@ type AgentDetailTarget = {
 const dropdownStyle = ref<Record<string, string>>({});
 const activeDetail = ref<AgentDetailTarget | null>(null);
 const detailAnchorEl = ref<HTMLElement | null>(null);
+const detailPanelRef = ref<HTMLElement | null>(null);
 const detailPanelStyle = ref<Record<string, string>>({});
 let detailHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+const DETAIL_PANEL_WIDTH = 200;
+const DETAIL_BRIDGE_OVERLAP = 10;
+const DETAIL_HIDE_DELAY_MS = 400;
 
 const agentsList = computed(() => props.agents ?? []);
 
@@ -292,6 +258,13 @@ const activeDetailNotReadyLabels = computed(() => {
   const detail = activeDetail.value;
   if (!detail) return [];
   return getAgentNotReadyLabels(detail.agent, detail.sourceTenantId);
+});
+
+const canShowDetailHeaderAction = computed(() => {
+  const detail = activeDetail.value;
+  if (!detail) return false;
+  if (canLocallyConfigureAgent(detail.sourceTenantId)) return true;
+  return activeDetailNotReadyLabels.value.length === 0;
 });
 
 const getKbCapability = (agent: CustomAgent): string => {
@@ -371,34 +344,54 @@ const updateDetailPanelPosition = () => {
   if (!el || !activeDetail.value) return;
 
   const zoom = getRootZoom();
-  const rect = rectToCssPx(el.getBoundingClientRect(), zoom);
+  const rowRect = rectToCssPx(el.getBoundingClientRect(), zoom);
   const { width: vw, height: vh } = cssViewportSize(zoom);
-  const panelWidth = 200;
-  const gap = 6;
-  let left = rect.right + gap;
-  let top = rect.top;
 
-  if (left + panelWidth > vw - 8) {
-    left = Math.max(8, vw - panelWidth - 8);
+  // 向左重叠一段透明区域，避免鼠标从选项移向浮层时经过空隙触发 mouseleave
+  let left = rowRect.right - DETAIL_BRIDGE_OVERLAP;
+  if (left + DETAIL_PANEL_WIDTH > vw - 8) {
+    left = Math.max(8, vw - DETAIL_PANEL_WIDTH - 8);
   }
-  if (top + 240 > vh - 8) {
-    top = Math.max(8, vh - 248);
+
+  const panelHeight = detailPanelRef.value?.offsetHeight || 180;
+  const rowCenter = rowRect.top + rowRect.height / 2;
+  let top = rowCenter - panelHeight / 2;
+
+  const minTop = 8;
+  const maxTop = vh - panelHeight - 8;
+  if (top < minTop) {
+    top = minTop;
+  } else if (top > maxTop) {
+    // 贴近当前行：优先让浮层与 hover 行在垂直方向仍有交集
+    top = Math.min(rowRect.top, maxTop);
+    top = Math.max(minTop, Math.min(top, rowRect.bottom - panelHeight));
+    if (top + panelHeight < rowRect.top) {
+      top = rowRect.top;
+    }
+    top = Math.max(minTop, Math.min(top, maxTop));
   }
 
   detailPanelStyle.value = {
     position: 'fixed',
     left: `${Math.round(left)}px`,
     top: `${Math.round(top)}px`,
-    width: `${panelWidth}px`,
+    width: `${DETAIL_PANEL_WIDTH}px`,
     zIndex: '10002',
   };
+};
+
+const scheduleDetailPanelPosition = () => {
+  nextTick(() => {
+    updateDetailPanelPosition();
+    requestAnimationFrame(() => updateDetailPanelPosition());
+  });
 };
 
 const onOptionEnter = (agent: CustomAgent, event: MouseEvent, sourceTenantId?: string, sharedMeta?: AgentDetailTarget['sharedMeta']) => {
   clearDetailHideTimer();
   detailAnchorEl.value = event.currentTarget as HTMLElement;
   activeDetail.value = { agent, sourceTenantId, sharedMeta };
-  nextTick(() => updateDetailPanelPosition());
+  scheduleDetailPanelPosition();
 };
 
 const onSharedOptionEnter = (shared: SharedAgentInfo, event: MouseEvent) => {
@@ -412,7 +405,7 @@ const onOptionLeave = () => {
   detailHideTimer = setTimeout(() => {
     activeDetail.value = null;
     detailAnchorEl.value = null;
-  }, 300);
+  }, DETAIL_HIDE_DELAY_MS);
 };
 
 const onDetailPanelEnter = () => {
@@ -447,6 +440,9 @@ const selectSharedAgent = (shared: SharedAgentInfo) => {
 };
 
 const goToSettings = (agent: CustomAgent, sourceTenantId?: string) => {
+  if (!canLocallyConfigureAgent(sourceTenantId) && getAgentNotReadyLabels(agent, sourceTenantId).length > 0) {
+    return;
+  }
   const reasonKeys = getAgentNotReadyReasonKeysFor(agent, sourceTenantId);
   const section = reasonKeys.length > 0 ? resolveAgentNotReadySection(reasonKeys) : 'basic';
   const highlight = resolveAgentNotReadyHighlight(reasonKeys);
@@ -470,15 +466,15 @@ const updateDropdownPosition = () => {
   const rect = rectToCssPx(props.anchorEl.getBoundingClientRect(), zoom);
   const { width: vw, height: vh } = cssViewportSize(zoom);
 
-  const dropdownWidth = 240;
-  const offsetY = 8;
+  const dropdownWidth = 196;
+  const offsetY = 6;
 
   let left = Math.floor(rect.left);
   const minLeft = 16;
   const maxLeft = Math.max(16, vw - dropdownWidth - 16);
   left = Math.max(minLeft, Math.min(maxLeft, left));
 
-  const preferredDropdownHeight = 320;
+  const preferredDropdownHeight = 280;
   const minDropdownHeight = 100;
   const topMargin = 20;
   const spaceBelow = vh - rect.bottom;
@@ -520,6 +516,12 @@ watch(() => props.visible, (newVal) => {
     hideDetailPanel();
   }
 });
+
+watch(activeDetail, (detail) => {
+  if (detail) {
+    scheduleDetailPanelPosition();
+  }
+});
 </script>
 
 <style scoped lang="less">
@@ -542,7 +544,7 @@ watch(() => props.visible, (newVal) => {
   position: fixed !important;
   background: var(--td-bg-color-container);
   border: .5px solid var(--td-component-border);
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: var(--td-shadow-2);
   display: flex;
   flex-direction: column;
@@ -553,32 +555,45 @@ watch(() => props.visible, (newVal) => {
 }
 
 @keyframes agentSelectorFadeIn {
-  from { opacity: 0; transform: scale(0.98); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .agent-selector-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
   border-bottom: .5px solid var(--td-component-stroke);
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
   color: var(--td-text-color-secondary);
 }
 
 .agent-selector-add {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 6px;
+  gap: 2px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
   color: var(--td-brand-color);
   font-size: 12px;
   font-weight: 500;
+  line-height: 1;
   cursor: pointer;
   text-decoration: none;
+  flex-shrink: 0;
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -591,13 +606,13 @@ watch(() => props.visible, (newVal) => {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 6px 8px;
+  padding: 4px 0;
 }
 
 .agent-group {
   &:not(:last-child) {
-    margin-bottom: 6px;
-    padding-bottom: 6px;
+    margin-bottom: 4px;
+    padding-bottom: 4px;
     border-bottom: .5px solid var(--td-component-stroke);
   }
 }
@@ -605,23 +620,20 @@ watch(() => props.visible, (newVal) => {
 .agent-group-title {
   font-size: 11px;
   color: var(--td-text-color-placeholder);
-  padding: 4px 8px 6px;
+  padding: 6px 8px 4px;
   font-weight: 600;
+  line-height: 16px;
 }
 
 .agent-option {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  min-height: 32px;
+  padding: 0 8px;
   cursor: pointer;
   transition: background 0.12s;
-  border-radius: 6px;
-  margin-bottom: 4px;
-
-  &:last-child {
-    margin-bottom: 0;
-  }
+  border-radius: 5px;
 
   &:hover,
   &.selected {
@@ -632,11 +644,18 @@ watch(() => props.visible, (newVal) => {
     color: var(--td-text-color-placeholder);
     cursor: default;
     text-align: center;
-    padding: 20px 8px;
+    padding: 16px 8px;
+    min-height: auto;
 
     &:hover {
       background: transparent;
     }
+  }
+
+  :deep(.agent-avatar-small) {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
   }
 }
 
@@ -648,19 +667,22 @@ watch(() => props.visible, (newVal) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.4;
+  line-height: 22px;
 }
 
 .shared-tag {
   font-size: 10px;
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
+  line-height: 22px;
 }
 
 .agent-option-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
 }
 
@@ -668,16 +690,24 @@ watch(() => props.visible, (newVal) => {
   flex-shrink: 0;
   color: var(--td-warning-color, #ed7b2f);
   cursor: default;
+  display: block;
+  line-height: 1;
 }
 
 .builtin-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
   flex-shrink: 0;
+  line-height: 1;
+
+  :deep(.t-icon) {
+    display: block;
+    line-height: 1;
+  }
 
   &.normal {
     background: var(--td-brand-color-light);
@@ -699,12 +729,14 @@ watch(() => props.visible, (newVal) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: 14px;
+  line-height: 1;
   background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+  overflow: hidden;
 
   &.detail-icon {
     width: 28px;
@@ -716,6 +748,17 @@ watch(() => props.visible, (newVal) => {
 /* 详情浮层 */
 .agent-detail-panel {
   box-sizing: border-box;
+  position: relative;
+
+  // 左侧透明桥接区：承接从选项移入的鼠标，避免经过间隙时浮层消失
+  &::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 0;
+    width: 12px;
+    height: 100%;
+  }
 }
 
 .agent-detail-panel-inner {
@@ -828,6 +871,15 @@ watch(() => props.visible, (newVal) => {
   line-height: 16px;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-container);
+}
+
+.detail-not-ready-shared-hint {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
 }
 
 .detail-desc {

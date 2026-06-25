@@ -1038,6 +1038,7 @@ export default {
       notReadyStatus: 'Setup needed',
       notReadyMissing: 'Missing: {items}',
       configureAction: 'Configure',
+      sharedNotReadyContact: 'Ask the sharing organization admin to finish setup',
     },
     builtinInfo: {
       quickAnswer: {
@@ -4242,6 +4243,7 @@ export default {
     agentModeDesc: 'Многошаговое мышление, глубокий анализ',
     agentNotReadyTooltip: 'Agent не готов. Пожалуйста, завершите настройку.',
     agentNotReadyDetail: 'Agent не готов. Пожалуйста, настройте следующее: {reasons}',
+    sharedAgentNotReadyDetail: 'Общий agent «{agentName}» не готов (отсутствует: {reasons}). Обратитесь к администратору организации, которая поделилась agent.',
     agentMissingAllowedTools: 'Разрешённые инструменты',
     agentMissingSummaryModel: 'Модель беседы',
     agentMissingRerankModel: 'Модель переранжирования',
