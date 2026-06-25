@@ -193,8 +193,9 @@ func buildContentSignature(content string) string {
 }
 
 // removePartialOverlaps drops chunks whose content is largely contained within
-// a higher-scored chunk, even across different knowledge sources. This catches
-// cross-KB duplicates and near-duplicates that exact-signature dedup misses.
+// a higher-scored chunk from a different knowledge source. This catches cross-KB
+// duplicates and near-duplicates that exact-signature dedup misses without
+// dropping same-document table rows that share headers or repeated labels.
 //
 // Two thresholds are used:
 //   - Substring containment: if the normalized short text is a literal substring
@@ -237,6 +238,9 @@ func removePartialOverlaps(ctx context.Context, results []*types.SearchResult) [
 			}
 
 			a, b := entries[i], entries[j]
+			if a.result.KnowledgeID == b.result.KnowledgeID {
+				continue
+			}
 
 			shortIdx, longIdx := i, j
 			if len(a.norm) > len(b.norm) {
