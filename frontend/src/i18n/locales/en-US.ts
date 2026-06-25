@@ -700,6 +700,10 @@ export default {
     asrRequiredForAudio: 'Off (batch includes audio)',
     vlmModelSelectRequired: 'Multimodal is enabled. Please select a VLM model.',
     asrModelSelectRequired: 'Speech recognition is enabled. Please select an ASR model.',
+    pdfForceScanned: {
+      label: 'Force scanned PDF parsing',
+      description: 'Useful for web-print, scanned, or image-heavy PDFs. Every page will be rendered as an image and processed via OCR/VLM. May increase processing time and model costs.'
+    },
     continueAdd: 'Add more',
     addMoreFiles: 'Add more files',
     addMoreFolder: 'Add more from folder',

@@ -433,5 +433,72 @@ class PDFRouterIntegrationTest(unittest.TestCase):
             )
 
 
+class ForceScannedTest(unittest.TestCase):
+    """Tests for the force-scanned PDF parsing mode."""
+
+    def test_default_text_pdf_is_not_force_scanned(self):
+        """Without any override, a text PDF should NOT use scanned mode."""
+        parser = PDFParser(file_name="normal.pdf", file_type="pdf")
+        self.assertFalse(parser._force_scanned)
+
+    def test_force_scanned_via_kwarg_true(self):
+        """Per-upload override pdf_force_scanned=true enables scanned mode."""
+        parser = PDFParser(
+            file_name="test.pdf", file_type="pdf", pdf_force_scanned="true"
+        )
+        self.assertTrue(parser._force_scanned)
+
+    def test_force_scanned_via_kwarg_false(self):
+        """Per-upload override pdf_force_scanned=false disables scanned mode."""
+        parser = PDFParser(
+            file_name="test.pdf", file_type="pdf", pdf_force_scanned="false"
+        )
+        self.assertFalse(parser._force_scanned)
+
+    def test_force_scanned_via_kwarg_overrides_env(self, monkeypatch=None):
+        """Per-upload override takes priority over global env var."""
+        import docreader.parser.pdf_parser as pdf_mod
+
+        old = pdf_mod.FORCE_SCANNED_PDF
+        try:
+            pdf_mod.FORCE_SCANNED_PDF = True
+            # Explicit false override should win over env=true
+            parser = PDFParser(
+                file_name="test.pdf", file_type="pdf", pdf_force_scanned="false"
+            )
+            self.assertFalse(parser._force_scanned)
+        finally:
+            pdf_mod.FORCE_SCANNED_PDF = old
+
+    def test_force_scanned_via_env(self):
+        """Global env variable enables force scanned when no override."""
+        import docreader.parser.pdf_parser as pdf_mod
+
+        old = pdf_mod.FORCE_SCANNED_PDF
+        try:
+            pdf_mod.FORCE_SCANNED_PDF = True
+            parser = PDFParser(file_name="test.pdf", file_type="pdf")
+            self.assertTrue(parser._force_scanned)
+        finally:
+            pdf_mod.FORCE_SCANNED_PDF = old
+
+    def test_force_scanned_output_is_scanned_pdf(self):
+        """Force-scanned mode produces scanned_pdf metadata and image refs."""
+        pdf_bytes = _make_image_only_pdf(2)
+        parser = PDFParser(
+            file_name="forced.pdf", file_type="pdf", pdf_force_scanned="true"
+        )
+        doc = parser.parse_into_text(pdf_bytes)
+        self.assertEqual(doc.metadata.get("image_source_type"), "scanned_pdf")
+        self.assertEqual(doc.metadata.get("page_count"), 2)
+        self.assertEqual(doc.metadata.get("scanned_page_count"), 2)
+        self.assertEqual(doc.metadata.get("text_page_count"), 0)
+        self.assertEqual(doc.metadata.get("embedded_image_count"), 0)
+        self.assertEqual(doc.metadata.get("vector_figure_count"), 0)
+        self.assertIn("![forced_page_1.jpg]", doc.content)
+        self.assertIn("![forced_page_2.jpg]", doc.content)
+        self.assertEqual(len(doc.images), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

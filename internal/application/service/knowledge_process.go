@@ -3099,7 +3099,12 @@ func (s *knowledgeService) convert(
 	s.beginStage(ctx, knowledge.ID, types.StageDocReader, docInput)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
-	overrides := s.getParserEngineOverridesFromContext(ctx)
+	tenantOverrides := s.getParserEngineOverridesFromContext(ctx)
+	var uploadOverrides map[string]string
+	if processOverrides, err := knowledge.ProcessOverrides(); err == nil && processOverrides != nil {
+		uploadOverrides = processOverrides.ParserEngineOverrides
+	}
+	mergedOverrides := MergeParserEngineOverrides(tenantOverrides, uploadOverrides)
 
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {
@@ -3122,7 +3127,7 @@ func (s *knowledgeService) convert(
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
 
-	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
+	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, mergedOverrides)
 	if reader == nil {
 		logger.Errorf(ctx, "[convert] no doc reader for kb=%s knowledge=%s fileType=%s engine=%q isURL=%v",
 			kb.ID, knowledge.ID, fileType, parserEngine, isURL)
@@ -3140,7 +3145,7 @@ func (s *knowledgeService) convert(
 		Title:                 knowledge.Title,
 		ParserEngine:          parserEngine,
 		RequestID:             payload.RequestId,
-		ParserEngineOverrides: overrides,
+		ParserEngineOverrides: mergedOverrides,
 	}
 
 	if !isURL {

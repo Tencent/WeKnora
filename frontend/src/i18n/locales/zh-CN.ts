@@ -703,6 +703,10 @@ export default {
     asrRequiredForAudio: "未开启（本批次含音频）",
     vlmModelSelectRequired: "已启用多模态，请选择 VLM 模型",
     asrModelSelectRequired: "已启用语音识别，请选择 ASR 模型",
+    pdfForceScanned: {
+      label: "按扫描件解析 PDF",
+      description: "适用于网页打印、扫描件、图片型 PDF。开启后会逐页 OCR，解析更完整但耗时和模型调用更多。"
+    },
     continueAdd: "继续添加",
     addMoreFiles: "继续添加文件",
     addMoreFolder: "继续添加文件夹",
