@@ -2,10 +2,14 @@ import logging
 import os
 import re
 import sys
+import threading
 import traceback
 import uuid
 from concurrent import futures
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
+from urllib.parse import urlsplit
 
 import grpc
 from grpc_health.v1 import health_pb2_grpc
@@ -288,8 +292,35 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         return ListEnginesResponse(engines=engines)
 
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = urlsplit(self.path).path
+        if path not in {"/healthz", "/health"}:
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+
+        body = b'{"status":"ok","service":"docreader"}\n'
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        logger.debug("health probe: " + format, *args)
+
+
+def start_health_server(port: int) -> ThreadingHTTPServer:
+    server = ThreadingHTTPServer(("", port), HealthCheckHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("HTTP health check server started on port %d", port)
+    return server
+
+
 def main():
     config.print_config()
+    health_server = None
 
     interceptors = [AuthInterceptor()]
 
@@ -323,6 +354,7 @@ def main():
         )
 
     server.start()
+    health_server = start_health_server(CONFIG.health_port)
 
     logger.info("Server started on port %d", CONFIG.grpc_port)
     logger.info("Server is ready to accept connections")
@@ -331,6 +363,8 @@ def main():
         server.wait_for_termination()
     except KeyboardInterrupt:
         logger.info("Received termination signal, shutting down server")
+        if health_server:
+            health_server.shutdown()
         server.stop(0)
 
 
