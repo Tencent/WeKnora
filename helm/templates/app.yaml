@@ -49,6 +49,8 @@ spec:
             # Application settings
             - name: GIN_MODE
               value: {{ .Values.app.env.GIN_MODE | quote }}
+            - name: APP_ROLE
+              value: {{ .Values.app.env.APP_ROLE | quote }}
             - name: TZ
               value: {{ .Values.app.env.TZ | quote }}
             # Database configuration

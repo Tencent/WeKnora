@@ -88,6 +88,14 @@ app:
   # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
   env:
     GIN_MODE: release
+    # -- Deployment role gating which in-process background components run.
+    # "all" (default) runs everything (HTTP API + asynq worker + scheduler +
+    # retention) — identical to historical single-process behavior. "api" runs
+    # HTTP API + enqueue + scheduler but no worker, so runtime requests aren't
+    # affected by offline task load. "worker" runs the asynq worker + offline
+    # maintenance only. To split into two groups, deploy this chart twice (or
+    # add your own worker Deployment) with APP_ROLE=api and APP_ROLE=worker.
+    APP_ROLE: all
     # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
     RETRIEVE_DRIVER: postgres
     # -- Storage type: local, minio, cos, tos, s3
