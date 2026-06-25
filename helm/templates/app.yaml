@@ -99,6 +99,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: JWT_SECRET
+            {{- with .Values.app.env.JWT_ACCESS_TOKEN_TTL }}
+            - name: JWT_ACCESS_TOKEN_TTL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.app.env.JWT_REFRESH_TOKEN_TTL }}
+            - name: JWT_REFRESH_TOKEN_TTL
+              value: {{ . | quote }}
+            {{- end }}
             - name: TENANT_AES_KEY
               valueFrom:
                 secretKeyRef:
