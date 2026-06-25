@@ -916,6 +916,125 @@ type CopyKnowledgeBaseResponse struct {
 	Message  string `json:"message"`
 }
 
+type RetryFailedDocumentsResponse struct {
+	TaskID  string `json:"task_id"`
+	KBID    string `json:"kb_id"`
+	Total   int    `json:"total"`
+	Message string `json:"message"`
+}
+
+// RetryFailedDocuments godoc
+// @Summary      Retry failed documents
+// @Description  Submits single-document reparse tasks for documents in this knowledge base whose parse_status is failed. Progress tracks submission only, not final parse completion.
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "重试提交任务信息"
+// @Failure      400  {object}  errors.AppError          "请求参数错误"
+// @Failure      403  {object}  errors.AppError          "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/retry-failed-documents [post]
+func (h *KnowledgeBaseHandler) RetryFailedDocuments(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	kb, kbID, effectiveTenantID, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if kb.Type == types.KnowledgeBaseTypeFAQ {
+		c.Error(errors.NewBadRequestError("Retry failed documents is not supported for FAQ knowledge bases"))
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to retry failed documents"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	knowledgeList, err := h.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
+		c.Error(errors.NewInternalServerError("Failed to list knowledge entries").WithDetails(err.Error()))
+		return
+	}
+	knowledgeIDs := make([]string, 0, len(knowledgeList))
+	for _, knowledge := range knowledgeList {
+		if knowledge != nil && knowledge.ParseStatus == types.ParseStatusFailed {
+			knowledgeIDs = append(knowledgeIDs, knowledge.ID)
+		}
+	}
+	if len(knowledgeIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": RetryFailedDocumentsResponse{
+				KBID:    kbID,
+				Total:   0,
+				Message: "No failed documents to retry",
+			},
+		})
+		return
+	}
+
+	taskID := utils.GenerateTaskID("retry_failed_documents", effectiveTenantID, kbID)
+	payload := types.KnowledgeRetryFailedPayload{
+		TenantID:     effectiveTenantID,
+		TaskID:       taskID,
+		KBID:         kbID,
+		KnowledgeIDs: knowledgeIDs,
+	}
+	langfuse.InjectTracing(ctx, &payload)
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Errorf(ctx, "RetryFailedDocuments: failed to marshal payload: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to create task"))
+		return
+	}
+	now := time.Now().Unix()
+	initialProgress := &types.KnowledgeRetryFailedProgress{
+		TaskID:    taskID,
+		KBID:      kbID,
+		Status:    types.KBCloneStatusPending,
+		Total:     len(knowledgeIDs),
+		Message:   "Task queued, waiting to submit retry tasks...",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := h.knowledgeService.SaveKnowledgeRetryFailedProgress(ctx, initialProgress); err != nil {
+		logger.Warnf(ctx, "RetryFailedDocuments: failed to save initial progress: %v", err)
+	}
+
+	task := asynq.NewTask(types.TypeKnowledgeRetryFailed, payloadBytes,
+		asynq.TaskID(taskID), asynq.Queue(types.QueueDefault), asynq.MaxRetry(3))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		logger.Errorf(ctx, "RetryFailedDocuments: failed to enqueue task: %v", err)
+		initialProgress.Status = types.KBCloneStatusFailed
+		initialProgress.Error = err.Error()
+		initialProgress.Message = "Failed to enqueue retry failed documents task"
+		initialProgress.UpdatedAt = time.Now().Unix()
+		_ = h.knowledgeService.SaveKnowledgeRetryFailedProgress(ctx, initialProgress)
+		c.Error(errors.NewInternalServerError("Failed to enqueue task"))
+		return
+	}
+
+	logger.Infof(ctx, "Retry failed documents task enqueued: %s, asynq_id: %s, kb_id: %s, count: %d",
+		taskID, info.ID, secutils.SanitizeForLog(kbID), len(knowledgeIDs))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": RetryFailedDocumentsResponse{
+			TaskID:  taskID,
+			KBID:    kbID,
+			Total:   len(knowledgeIDs),
+			Message: "Retry failed documents task queued",
+		},
+	})
+}
+
 // CopyKnowledgeBase godoc
 // @Summary      复制知识库
 // @Description  将一个知识库的内容复制到另一个知识库（异步任务）
@@ -1113,6 +1232,56 @@ func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
 		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    progress,
+	})
+}
+
+// GetRetryFailedDocumentsProgress godoc
+// @Summary      Get retry failed documents submission progress
+// @Description  Returns progress for submitting failed-document retry tasks. It does not track final parse completion.
+// @Tags         知识库
+// @Produce      json
+// @Param        task_id  path      string                                true  "任务 ID"
+// @Success      200      {object}  types.KnowledgeRetryFailedProgress    "进度信息"
+// @Failure      404      {object}  errors.AppError                       "任务不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/retry-failed-documents/progress/{task_id} [get]
+func (h *KnowledgeBaseHandler) GetRetryFailedDocumentsProgress(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		c.Error(errors.NewBadRequestError("Task ID cannot be empty"))
+		return
+	}
+
+	progress, err := h.knowledgeService.GetKnowledgeRetryFailedProgress(ctx, taskID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(err)
+		return
+	}
+
+	if progress.KBID != "" {
+		callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+		kb, kbErr := h.service.GetKnowledgeBaseByID(ctx, progress.KBID)
+		if kbErr != nil || kb == nil || kb.TenantID != callerTenantID {
+			hasAccess := kbErr == nil && kb != nil && h.kbShareService != nil
+			if hasAccess {
+				callerTenantRole := types.TenantRoleFromContext(ctx)
+				_, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, progress.KBID, callerTenantID, callerTenantRole)
+				hasAccess = permErr == nil && isShared
+			}
+			if !hasAccess {
+				c.Error(errors.NewForbiddenError("No permission to view this task progress"))
+				return
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

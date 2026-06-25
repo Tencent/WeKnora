@@ -4,9 +4,9 @@ package types
 // router.NewAsynqServer — a task enqueued to a queue that the server does not
 // list will never be consumed.
 const (
-	QueueCritical   = "critical"
-	QueueDefault    = "default"
-	QueueLow        = "low"
+	QueueCritical = "critical"
+	QueueDefault  = "default"
+	QueueLow      = "low"
 	// QueueMultimodal isolates high-volume, slow VLM image tasks (OCR + caption)
 	// so a single large scanned PDF (hundreds–thousands of page images) cannot
 	// saturate the shared worker pool and block user-facing document parsing in
@@ -34,6 +34,7 @@ const (
 	TypeKBDelete             = "kb:delete"              // 知识库删除任务
 	TypeKnowledgeListDelete  = "knowledge:list_delete"  // 批量删除知识任务
 	TypeKnowledgeMove        = "knowledge:move"         // 知识移动任务
+	TypeKnowledgeRetryFailed = "knowledge:retry_failed" // 批量提交失败知识重试任务
 	TypeDataTableSummary     = "datatable:summary"      // 表格摘要任务
 	TypeImageMultimodal      = "image:multimodal"       // 图片多模态处理任务（OCR + VLM Caption）
 	TypeKnowledgePostProcess = "knowledge:post_process" // 知识后处理任务（统一调度）
@@ -226,6 +227,33 @@ type KnowledgeMoveProgress struct {
 	Error      string            `json:"error"`      // 错误信息
 	CreatedAt  int64             `json:"created_at"` // 任务创建时间
 	UpdatedAt  int64             `json:"updated_at"` // 最后更新时间
+}
+
+// KnowledgeRetryFailedPayload represents a KB-level task that submits single
+// knowledge reparse jobs for documents that are still failed at execution time.
+type KnowledgeRetryFailedPayload struct {
+	TracingContext
+	TenantID     uint64   `json:"tenant_id"`
+	TaskID       string   `json:"task_id"`
+	KBID         string   `json:"kb_id"`
+	KnowledgeIDs []string `json:"knowledge_ids"`
+}
+
+// KnowledgeRetryFailedProgress tracks retry-submission progress only. It does
+// not represent final document parse completion.
+type KnowledgeRetryFailedProgress struct {
+	TaskID    string            `json:"task_id"`
+	KBID      string            `json:"kb_id"`
+	Status    KBCloneTaskStatus `json:"status"`
+	Progress  int               `json:"progress"`
+	Total     int               `json:"total"`
+	Processed int               `json:"processed"`
+	Failed    int               `json:"failed"`
+	Skipped   int               `json:"skipped"`
+	Message   string            `json:"message"`
+	Error     string            `json:"error"`
+	CreatedAt int64             `json:"created_at"`
+	UpdatedAt int64             `json:"updated_at"`
 }
 
 // ManualProcessPayload represents the manual knowledge processing task payload.
