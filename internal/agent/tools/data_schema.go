@@ -17,7 +17,7 @@ var dataSchemaTool = BaseTool{
 }
 
 type DataSchemaInput struct {
-	KnowledgeID string `json:"knowledge_id" jsonschema:"id of the knowledge to query"`
+	KnowledgeID string `json:"knowledge_id" jsonschema:"exact knowledge_id from runtime_context recent_documents or pinned_documents; do not use invented aliases"`
 }
 
 type DataSchemaTool struct {
