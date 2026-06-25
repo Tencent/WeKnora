@@ -1,110 +1,67 @@
 <template>
-  <t-dialog
-    :visible="visible"
-    :header="title"
-    :footer="false"
-    width="480px"
-    :close-on-overlay-click="false"
-    destroy-on-close
-    @close="handleClose"
-  >
-    <!-- 搜索框 -->
-    <div class="tag-edit-search">
-      <t-input
-        v-model="searchQuery"
-        :placeholder="$t('knowledgeBase.tagEditSearch')"
-        clearable
-        size="medium"
-      >
-        <template #prefix-icon>
-          <t-icon name="search" />
-        </template>
-      </t-input>
-    </div>
-
-    <!-- 标签列表 -->
-    <div class="tag-edit-list">
-      <template v-if="filteredTags.length > 0">
-        <div
-          v-for="tag in filteredTags"
-          :key="tag.id"
-          class="tag-edit-item"
-          :class="{ 'is-selected': selectedSet.has(tag.id) }"
-          @click="toggleTag(tag.id)"
-        >
-          <t-checkbox
-            :checked="selectedSet.has(tag.id)"
-            :value="tag.id"
-            @change="toggleTag(tag.id)"
-            @click.stop
-          />
-          <span class="tag-edit-name">{{ tag.name }}</span>
-          <span v-if="tag.knowledge_count !== undefined" class="tag-edit-count">{{ tag.knowledge_count }}</span>
+  <t-dialog :visible="visible" :footer="false" width="400px" dialog-class-name="tag-edit-dialog"
+    :close-on-overlay-click="false" destroy-on-close @close="handleClose">
+    <template #header>
+      <div class="tag-edit-heading">
+        <div class="tag-edit-heading-row">
+          <t-icon name="discount" size="16px" class="tag-edit-heading-icon" aria-hidden="true" />
+          <span class="tag-edit-title">{{ $t('knowledgeBase.tagEditDialogHeading') }}</span>
         </div>
-      </template>
-      <template v-else>
-        <div class="tag-edit-empty">
-          <template v-if="searchQuery.trim()">
-            <p class="tag-edit-empty-text">{{ $t('knowledgeBase.tagEmptyResult') }}</p>
-            <t-button
-              variant="text"
-              theme="primary"
-              size="small"
-              :loading="creatingTag"
-              @click="handleCreateTag"
-            >
-              <t-icon name="add" />
-              {{ $t('knowledgeBase.tagCreateAction') }} "{{ searchQuery.trim() }}"
-            </t-button>
-          </template>
-          <template v-else>
-            <p class="tag-edit-empty-text">{{ $t('knowledgeBase.noTags') }}</p>
-          </template>
-        </div>
-      </template>
-    </div>
-
-    <!-- 新增标签栏 -->
-    <div class="tag-edit-new-bar">
-      <t-input
-        v-model="newTagName"
-        :placeholder="$t('knowledgeBase.tagNewPlaceholder')"
-        size="small"
-        clearable
-        :disabled="creatingTag"
-        @keydown.enter.prevent="handleAddNewTag"
-      >
-        <template #suffix>
-          <t-button
-            theme="primary"
-            variant="text"
-            size="small"
-            :loading="creatingTag"
-            :disabled="!newTagName.trim()"
-            @click="handleAddNewTag"
-          >
-            <t-icon name="add" />
-          </t-button>
-        </template>
-      </t-input>
-    </div>
-
-    <!-- 底部操作栏 -->
-    <div class="tag-edit-footer">
-      <div class="tag-edit-footer-left">
-        <span class="tag-edit-selected-count">
-          {{ $t('knowledgeBase.tagSelectedCount', { count: selectedSet.size }) }}
-        </span>
-        <t-button
-          v-if="selectedSet.size > 0"
-          variant="text"
-          size="small"
-          theme="default"
-          @click="clearAll"
-        >
-          {{ $t('knowledgeBase.tagClearAction') }}
-        </t-button>
+        <p class="tag-edit-document-name" :title="knowledgeName">{{ knowledgeName }}</p>
       </div>
+    </template>
+
+    <div class="tag-edit-body">
+      <section class="setting-drawer__section">
+        <div class="tag-edit-section-head">
+          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.tagEditSelectedSection') }}</h4>
+          <t-button v-if="selectedSet.size > 0" variant="text" size="small" theme="default" @click="clearAll">
+            {{ $t('knowledgeBase.tagClearAction') }}
+          </t-button>
+        </div>
+        <div v-if="selectedTagsList.length > 0" class="tag-edit-chips">
+          <button v-for="tag in selectedTagsList" :key="tag.id" type="button" class="tag-edit-chip is-selected"
+            :title="tag.name" @click="toggleTag(tag.id)">
+            {{ tag.name }}
+          </button>
+        </div>
+        <p v-else class="tag-edit-section-empty">{{ $t('knowledgeBase.tagEditNoSelected') }}</p>
+      </section>
+
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.tagEditAvailableSection') }}</h4>
+        <div class="tag-edit-search-bar">
+          <t-input v-model="searchQuery" :placeholder="$t('knowledgeBase.tagEditSearch')" clearable size="small">
+            <template #prefix-icon>
+              <t-icon name="search" size="14px" />
+            </template>
+          </t-input>
+        </div>
+        <div v-if="availableTagsList.length > 0" class="tag-edit-chips">
+          <button v-for="tag in availableTagsList" :key="tag.id" type="button" class="tag-edit-chip"
+            :title="tag.knowledge_count !== undefined ? `${tag.name} (${tag.knowledge_count})` : tag.name"
+            @click="toggleTag(tag.id)">
+            {{ tag.name }}
+          </button>
+        </div>
+        <div v-else class="tag-edit-section-empty tag-edit-section-empty--row">
+          <span>{{ searchQuery.trim() ? $t('knowledgeBase.tagEmptyResult') : $t('knowledgeBase.noTags') }}</span>
+          <t-button v-if="searchQuery.trim()" variant="text" theme="default" size="small" :loading="creatingTag"
+            @click="handleCreateTag">
+            {{ $t('knowledgeBase.tagCreateAction') }} “{{ searchQuery.trim() }}”
+          </t-button>
+        </div>
+        <div class="tag-edit-create-row">
+          <t-input v-model="newTagName" :placeholder="$t('knowledgeBase.tagNewPlaceholder')" size="small"
+            :maxlength="40" :disabled="creatingTag" @enter="handleAddNewTag" />
+        </div>
+      </section>
+    </div>
+
+    <div class="tag-edit-footer">
+      <span class="tag-edit-selected-count">
+        {{ $t('knowledgeBase.tagSelectedCount', { count: selectedSet.size }) }}
+      </span>
       <div class="tag-edit-footer-right">
         <t-button variant="outline" size="small" @click="handleClose">
           {{ $t('common.cancel') }}
@@ -152,11 +109,6 @@ const creatingTag = ref(false);
 const saving = ref(false);
 const newTagName = ref('');
 
-const title = computed(() => {
-  return t('knowledgeBase.tagEditDialogTitle', { name: props.knowledgeName });
-});
-
-// 初始化已选标签
 watch(
   () => props.visible,
   (val) => {
@@ -168,24 +120,21 @@ watch(
   },
 );
 
-// 过滤标签列表，按照关键字匹配，已选的排前面
-const filteredTags = computed(() => {
+const tagMap = computed(() => new Map(props.tagList.map((tag) => [tag.id, tag])));
+
+const selectedTagsList = computed(() => {
+  return Array.from(selectedSet.value)
+    .map((id) => tagMap.value.get(id))
+    .filter((tag): tag is Tag => Boolean(tag));
+});
+
+const availableTagsList = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
-  let list = props.tagList;
-  if (query) {
-    list = list.filter((tag) => (tag.name || '').toLowerCase().includes(query));
-  }
-  // 已选的排前面
-  const selected: Tag[] = [];
-  const unselected: Tag[] = [];
-  for (const tag of list) {
-    if (selectedSet.value.has(tag.id)) {
-      selected.push(tag);
-    } else {
-      unselected.push(tag);
-    }
-  }
-  return [...selected, ...unselected];
+  return props.tagList.filter((tag) => {
+    if (selectedSet.value.has(tag.id)) return false;
+    if (query && !(tag.name || '').toLowerCase().includes(query)) return false;
+    return true;
+  });
 });
 
 function toggleTag(tagId: string) {
@@ -225,10 +174,8 @@ async function handleCreateTag() {
 async function handleAddNewTag() {
   const name = newTagName.value.trim();
   if (!name) return;
-  // 检查是否已存在同名标签
   const exists = props.tagList.find((t) => t.name === name);
   if (exists) {
-    // 已存在则直接选中
     const next = new Set(selectedSet.value);
     next.add(exists.id);
     selectedSet.value = next;
@@ -267,84 +214,287 @@ function handleClose() {
 }
 </script>
 
-<style scoped>
-.tag-edit-search {
-  margin-bottom: 12px;
+<style>
+.tag-edit-dialog {
+  overflow: hidden;
+  padding: 0;
+  border-radius: 4px;
 }
 
-.tag-edit-list {
-  max-height: 320px;
-  overflow-y: auto;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
-  padding: 4px 0;
-  margin-bottom: 12px;
+.tag-edit-dialog .t-dialog__header {
+  min-height: auto;
+  padding: 20px 20px 0;
 }
 
-.tag-edit-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
+.tag-edit-dialog .t-dialog__body {
+  padding: 0 20px 20px;
 }
 
-.tag-edit-item:hover {
+.tag-edit-dialog .t-dialog__close {
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  color: var(--td-text-color-secondary);
+  transition: background 0.18s ease;
+}
+
+.tag-edit-dialog .t-dialog__close:hover {
+  color: var(--td-text-color-primary);
   background: var(--td-bg-color-container-hover);
 }
 
-.tag-edit-item.is-selected {
-  background: var(--td-brand-color-light);
+@media (max-width: 480px) {
+  .tag-edit-dialog {
+    width: calc(100vw - 24px) !important;
+  }
+}
+</style>
+
+<style scoped>
+.tag-edit-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-right: 28px;
 }
 
-.tag-edit-name {
+.tag-edit-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tag-edit-heading-icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+}
+
+.tag-edit-title {
+  color: var(--td-text-color-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  letter-spacing: 0.2px;
+}
+
+.tag-edit-document-name {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-edit-body {
+  display: flex;
+  flex-direction: column;
+  margin-top: 16px;
+}
+
+.tag-edit-body .setting-drawer__section {
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tag-edit-body .setting-drawer__section:first-child {
+  padding-top: 0;
+}
+
+.tag-edit-body .setting-drawer__section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.tag-edit-body .setting-drawer__section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 4px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-edit-body .setting-drawer__section-title::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: var(--td-brand-color);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.tag-edit-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tag-edit-section-head .setting-drawer__section-title {
+  margin-bottom: 0;
   flex: 1;
-  font-size: 14px;
+  min-width: 0;
+}
+
+.tag-edit-section-head :deep(.t-button) {
+  height: auto;
+  padding: 0;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.tag-edit-search-bar {
+  margin: 0;
+}
+
+.tag-edit-search-bar :deep(.t-input) {
+  font-size: 12px;
+  background-color: var(--td-bg-color-secondarycontainer);
+  border-color: transparent;
+  border-radius: 4px;
+  box-shadow: none !important;
+}
+
+.tag-edit-search-bar :deep(.t-input:hover),
+.tag-edit-search-bar :deep(.t-input.t-is-focused) {
+  border-color: var(--td-component-border);
+  background-color: var(--td-bg-color-container);
+  box-shadow: none !important;
+}
+
+.tag-edit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: min(120px, 24vh);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.tag-edit-chips::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tag-edit-chips::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  background: var(--td-scrollbar-color);
+}
+
+.tag-edit-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-family: var(--app-font-family);
+  font-size: 11px;
+  line-height: 22px;
+  text-align: center;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tag-edit-chip:hover {
+  border-color: var(--td-component-stroke);
+  background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
 }
 
-.tag-edit-count {
+.tag-edit-chip:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-component-stroke) 60%, transparent);
+}
+
+.tag-edit-chip.is-selected {
+  border-color: transparent;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font-weight: 500;
+}
+
+.tag-edit-chip.is-selected:hover {
+  background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 70%, var(--td-bg-color-container));
+}
+
+.tag-edit-section-empty {
+  margin: 0;
+  min-height: 22px;
   font-size: 12px;
+  line-height: 22px;
   color: var(--td-text-color-placeholder);
 }
 
-.tag-edit-empty {
-  padding: 24px 12px;
-  text-align: center;
+.tag-edit-section-empty--row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.tag-edit-empty-text {
-  margin: 0 0 8px;
-  font-size: 13px;
-  color: var(--td-text-color-placeholder);
+.tag-edit-create-row {
+  margin-top: 0;
 }
 
-.tag-edit-new-bar {
-  margin-bottom: 12px;
+.tag-edit-create-row :deep(.t-input) {
+  font-size: 12px;
+  background-color: transparent;
+  border-style: dashed;
+  border-color: var(--td-component-stroke);
+  border-radius: 4px;
+  box-shadow: none !important;
+}
+
+.tag-edit-create-row :deep(.t-input:hover),
+.tag-edit-create-row :deep(.t-input.t-is-focused) {
+  border-color: var(--td-component-border);
+  border-style: dashed;
+  background-color: var(--td-bg-color-secondarycontainer);
+  box-shadow: none !important;
 }
 
 .tag-edit-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.tag-edit-footer-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .tag-edit-selected-count {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
 }
 
 .tag-edit-footer-right {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  flex-shrink: 0;
 }
 </style>

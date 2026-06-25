@@ -22,7 +22,8 @@ CREATE INDEX IF NOT EXISTS idx_ktr_tag
 INSERT INTO knowledge_tag_relations (knowledge_id, tag_id, created_at)
 SELECT id, tag_id, updated_at
 FROM knowledges
-WHERE tag_id IS NOT NULL AND tag_id != '';
+WHERE tag_id IS NOT NULL AND tag_id != ''
+  AND deleted_at IS NULL;
 
 -- Drop the old index and column
 DROP INDEX IF EXISTS idx_knowledges_tag;

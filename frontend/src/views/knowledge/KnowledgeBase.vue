@@ -46,6 +46,7 @@ import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
+import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
@@ -567,26 +568,6 @@ const filterParams = computed(() => {
   };
 });
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
-const onPickTag = (item: any, tagId: string | number) => {
-  if (item) item.isTagPopup = false;
-  const currentTags = item?.tags || [];
-  const tagIdStr = tagId ? String(tagId) : '';
-  let updatedTags: string[];
-  if (!tagIdStr) {
-    // Clear all tags
-    updatedTags = [];
-  } else {
-    const idx = currentTags.findIndex((t: any) => t.id === tagIdStr);
-    if (idx >= 0) {
-      // Remove tag
-      updatedTags = currentTags.filter((t: any) => t.id !== tagIdStr).map((t: any) => t.id);
-    } else {
-      // Add tag
-      updatedTags = [...currentTags.map((t: any) => t.id), tagIdStr];
-    }
-  }
-  handleKnowledgeTagChange(item.id, updatedTags);
-};
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -594,12 +575,29 @@ const tagMap = computed<Record<string, any>>(() => {
   });
   return map;
 });
-const sidebarCategoryCount = computed(() => tagList.value.length);
-const filteredTags = computed(() => {
-  const query = tagSearchQuery.value.trim().toLowerCase();
-  if (!query) return tagList.value;
-  return tagList.value.filter((tag) => (tag.name || '').toLowerCase().includes(query));
+const sidebarCategoryCount = computed(() => tagTotal.value || tagList.value.length);
+const sidebarTags = computed(() => {
+  const list = tagList.value;
+  const selectedId = selectedTagIds.value[0];
+  if (!selectedId || list.some((tag) => tag.id === selectedId)) {
+    return list;
+  }
+  const selected = tagMap.value[selectedId];
+  return selected ? [selected, ...list] : list;
 });
+
+const tagChipMenuOptions = computed(() => [
+  { content: t('knowledgeBase.tagEditAction'), value: 'edit' },
+  { content: t('knowledgeBase.tagDeleteAction'), value: 'delete', theme: 'error' },
+]);
+
+const handleTagChipMenu = (data: { value: string }, tag: any) => {
+  if (data.value === 'edit') {
+    startEditTag(tag);
+  } else if (data.value === 'delete') {
+    confirmDeleteTag(tag);
+  }
+};
 
 const editingTagInputRefs = new Map<string, TagInputInstance | null>();
 const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
@@ -623,59 +621,12 @@ const editingTagSubmitting = ref(false);
 const tagEditDialogVisible = ref(false);
 const tagEditTarget = ref<KnowledgeCard | null>(null);
 
-// 动态标签可见数量（根据卡片容器宽度自适应）
-const TAG_EST_WIDTH = 82;   // 单个标签估算宽度（含间距）
-const TAG_OVERFLOW_MIN = 32; // +N 徽章预留宽度
-const tagVisibleLimit = reactive<Record<string, number>>({});
-const tagItemTotalMap = new Map<string, number>();
-let tagChipsRO: ResizeObserver | null = null;
-
-function setupTagChipsObserver(el: Element | null, itemId: string, totalCount: number) {
-  if (!el) return;
-  const htmlEl = el as HTMLElement;
-  htmlEl.dataset.tagItemId = itemId;
-  tagItemTotalMap.set(itemId, totalCount);
-  if (!tagChipsRO) {
-    tagChipsRO = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const target = entry.target as HTMLElement;
-        const id = target.dataset.tagItemId;
-        if (!id) continue;
-        const w = entry.contentRect.width;
-        const total = tagItemTotalMap.get(id) ?? 0;
-        if (total <= 0) { tagVisibleLimit[id] = 99; continue; }
-        // 计算能容纳几个标签：总宽 - 溢出徽章预留，除以单标签宽
-        const maxFit = Math.floor((w - TAG_OVERFLOW_MIN) / TAG_EST_WIDTH);
-        const limit = Math.max(1, Math.min(maxFit, total));
-        tagVisibleLimit[id] = limit >= total ? 99 : limit;
-      }
-    });
-  }
-  tagChipsRO.observe(htmlEl);
-  // 初始计算
-  requestAnimationFrame(() => {
-    const w = htmlEl.clientWidth;
-    const total = totalCount;
-    if (total <= 0) { tagVisibleLimit[itemId] = 99; return; }
-    const maxFit = Math.floor((w - TAG_OVERFLOW_MIN) / TAG_EST_WIDTH);
-    const limit = Math.max(1, Math.min(maxFit, total));
-    tagVisibleLimit[itemId] = limit >= total ? 99 : limit;
-  });
-}
-
-function getTagLimit(itemId: string): number {
-  return tagVisibleLimit[itemId] ?? 99;
-}
-
-function hasTagOverflow(itemId: string, total: number): boolean {
-  const limit = tagVisibleLimit[itemId] ?? 99;
-  return total > limit;
-}
-
-function getOverflowCount(itemId: string, total: number): number {
-  const limit = tagVisibleLimit[itemId] ?? 99;
-  return Math.max(0, total - limit);
-}
+const {
+  setupTagChipsObserver,
+  getTagLimit,
+  hasTagOverflow,
+  getOverflowCount,
+} = useTagChipsOverflow('tagItemId');
 
 function openTagEditDialog(item: KnowledgeCard) {
   tagEditTarget.value = item;
@@ -819,7 +770,6 @@ const handleTagFilterChange = (tagIds: string[]) => {
   uiStore.clearSelectedTagIds();
   tagIds.forEach(id => uiStore.toggleSelectedTagId(id));
   resetPage();
-  loadKnowledgeFiles(kbId.value);
 };
 
 const handleTagRowClick = (tagId: string) => {
@@ -831,14 +781,22 @@ const handleTagRowClick = (tagId: string) => {
     editingTagId.value = null;
     editingTagName.value = '';
   }
-  // Toggle selection
-  const idx = selectedTagIds.value.indexOf(tagId);
-  if (idx >= 0) {
-    selectedTagIds.value.splice(idx, 1);
-  } else {
-    selectedTagIds.value.push(tagId);
+  const next = selectedTagIds.value.length === 1 && selectedTagIds.value[0] === tagId
+    ? []
+    : [tagId];
+  handleTagFilterChange(next);
+};
+
+const clearTagFilter = () => {
+  if (creatingTag.value) {
+    creatingTag.value = false;
+    newTagName.value = '';
   }
-  handleTagFilterChange([...selectedTagIds.value]);
+  if (editingTagId.value) {
+    editingTagId.value = null;
+    editingTagName.value = '';
+  }
+  handleTagFilterChange([]);
 };
 
 const startCreateTag = () => {
@@ -954,15 +912,13 @@ const confirmDeleteTag = (tag: any) => {
         handleTagFilterChange([...selectedTagIds.value]);
       }
       loadTags(kbId.value, true);
-      // 由于后端是异步删除文档，延迟刷新文档列表
-      setTimeout(() => {
-        resetPage(); // Reset page counter when reloading files after tag deletion
-        loadKnowledgeFiles(kbId.value);
-      }, 800);
-      // 再次延迟刷新标签列表，确保异步删除完成后其他标签的数量正确更新
-      setTimeout(() => {
-        loadTags(kbId.value, true);
-      }, 2500);
+      void (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        if (!kbId.value) return;
+        resetPage();
+        await loadKnowledgeFiles(kbId.value);
+        await loadTags(kbId.value, true);
+      })();
     })
     .catch((error: any) => {
       MessagePlugin.error(error?.message || t('common.operationFailed'));
@@ -1083,11 +1039,11 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
 }, { immediate: true });
 
 watch(selectedTagIds, (newVal, oldVal) => {
-  if (oldVal === undefined) return
+  if (oldVal === undefined) return;
   if (kbId.value) {
     loadKnowledgeFiles(kbId.value);
   }
-});
+}, { deep: true });
 
 watch(tagSearchQuery, (newVal, oldVal) => {
   if (newVal === oldVal) return;
@@ -2279,93 +2235,74 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
               </t-input>
             </div>
-            <div class="tag-list">
-              <template v-if="tagLoading && !filteredTags.length">
-                <div v-for="n in 8" :key="'skel-tag-' + n" class="tag-list-item"
-                  style="cursor: default; pointer-events: none;">
-                  <div class="tag-list-left" style="gap: 12px; width: 100%;">
-                    <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
+            <div class="tag-sidebar-body">
+              <template v-if="tagLoading && !sidebarTags.length">
+                <div class="tag-sidebar-chips">
+                  <div v-for="n in 6" :key="'skel-tag-' + n" class="tag-sidebar-chip-skeleton">
+                    <t-skeleton animation="gradient" :row-col="[{ width: '52px', height: '26px', type: 'rect' }]" />
                   </div>
                 </div>
               </template>
               <template v-else>
-                <div v-if="creatingTag" class="tag-list-item tag-editing" @click.stop>
-                  <div class="tag-list-left">
-                    <span class="tag-hash-icon">#</span>
+                <div class="tag-sidebar-chips">
+                  <button type="button" class="tag-sidebar-chip" :class="{ active: selectedTagIds.length === 0 }"
+                    @click="clearTagFilter">
+                    {{ $t('knowledgeBase.tagFilterAll') }}
+                  </button>
+                  <template v-for="tag in sidebarTags" :key="tag.id">
+                    <div v-if="editingTagId === tag.id" class="tag-sidebar-edit-row" @click.stop>
+                      <div class="tag-edit-input">
+                        <t-input :ref="setEditingTagInputRefByTag(tag.id)" v-model="editingTagName" size="small"
+                          :maxlength="40" @enter="submitEditTag"
+                          @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelEditTag() } }" />
+                      </div>
+                      <div class="tag-inline-actions">
+                        <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
+                          :loading="editingTagSubmitting" @click.stop="submitEditTag">
+                          <t-icon name="check" size="14px" />
+                        </t-button>
+                        <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
+                          @click.stop="cancelEditTag">
+                          <t-icon name="close" size="14px" />
+                        </t-button>
+                      </div>
+                    </div>
+                    <t-dropdown v-else-if="canEdit" trigger="context-menu" placement="bottom-left"
+                      :options="tagChipMenuOptions" @click="(data: any) => handleTagChipMenu(data, tag)">
+                      <button type="button" class="tag-sidebar-chip"
+                        :class="{ active: selectedTagIds.length === 1 && selectedTagIds[0] === tag.id }"
+                        @click="handleTagRowClick(tag.id)">
+                        <span class="tag-chip-label">{{ tag.name }}</span>
+                        <span class="tag-chip-count">({{ tag.knowledge_count || 0 }})</span>
+                      </button>
+                    </t-dropdown>
+                    <button v-else type="button" class="tag-sidebar-chip"
+                      :class="{ active: selectedTagIds.length === 1 && selectedTagIds[0] === tag.id }"
+                      @click="handleTagRowClick(tag.id)">
+                      <span class="tag-chip-label">{{ tag.name }}</span>
+                      <span class="tag-chip-count">({{ tag.knowledge_count || 0 }})</span>
+                    </button>
+                  </template>
+                  <div v-if="creatingTag" class="tag-sidebar-create-row" @click.stop>
                     <div class="tag-edit-input">
                       <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40"
                         :placeholder="$t('knowledgeBase.tagNamePlaceholder')" @enter="submitCreateTag"
                         @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelCreateTag() } }" />
                     </div>
-                  </div>
-                  <div class="tag-inline-actions">
-                    <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
-                      :loading="creatingTagLoading" @click.stop="submitCreateTag">
-                      <t-icon name="check" size="16px" />
-                    </t-button>
-                    <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
-                      @click.stop="cancelCreateTag">
-                      <t-icon name="close" size="16px" />
-                    </t-button>
+                    <div class="tag-inline-actions">
+                      <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
+                        :loading="creatingTagLoading" @click.stop="submitCreateTag">
+                        <t-icon name="check" size="14px" />
+                      </t-button>
+                      <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
+                        @click.stop="cancelCreateTag">
+                        <t-icon name="close" size="14px" />
+                      </t-button>
+                    </div>
                   </div>
                 </div>
 
-                <template v-if="filteredTags.length">
-                  <div v-for="tag in filteredTags" :key="tag.id" class="tag-list-item"
-                    :class="{ active: selectedTagIds.includes(tag.id), editing: editingTagId === tag.id }"
-                    @click="handleTagRowClick(tag.id)">
-                    <div class="tag-list-left">
-                      <span class="tag-hash-icon">#</span>
-                      <template v-if="editingTagId === tag.id">
-                        <div class="tag-edit-input" @click.stop>
-                          <t-input :ref="setEditingTagInputRefByTag(tag.id)" v-model="editingTagName" size="small"
-                            :maxlength="40" @enter="submitEditTag"
-                            @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelEditTag() } }" />
-                        </div>
-                      </template>
-                      <template v-else>
-                        <span class="tag-name" :title="tag.name">{{ tag.name }}</span>
-                      </template>
-                    </div>
-                    <div class="tag-list-right">
-                      <span class="tag-count">{{ tag.knowledge_count || 0 }}</span>
-                      <template v-if="editingTagId === tag.id">
-                        <div class="tag-inline-actions" @click.stop>
-                          <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
-                            :loading="editingTagSubmitting" @click.stop="submitEditTag">
-                            <t-icon name="check" size="16px" />
-                          </t-button>
-                          <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
-                            @click.stop="cancelEditTag">
-                            <t-icon name="close" size="16px" />
-                          </t-button>
-                        </div>
-                      </template>
-                      <template v-else>
-                        <div v-if="canEdit" class="tag-more" @click.stop>
-                          <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
-                            <div class="tag-more-btn">
-                              <t-icon name="more" size="14px" />
-                            </div>
-                            <template #content>
-                              <div class="tag-menu">
-                                <div class="tag-menu-item" @click="startEditTag(tag)">
-                                  <t-icon class="menu-icon" name="edit" />
-                                  <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
-                                </div>
-                                <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
-                                  <t-icon class="menu-icon" name="delete" />
-                                  <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
-                                </div>
-                              </div>
-                            </template>
-                          </t-popup>
-                        </div>
-                      </template>
-                    </div>
-                  </div>
-                </template>
-                <div v-else class="tag-empty-state">
+                <div v-if="!creatingTag && !sidebarTags.length" class="tag-empty-state">
                   {{ $t('knowledgeBase.tagEmptyResult') }}
                 </div>
                 <div v-if="tagHasMore" class="tag-load-more">
@@ -2586,7 +2523,7 @@ async function createNewSession(value: string): Promise<void> {
                             :title="t('knowledgeStages.viewTrace')" @click.stop="handleViewTrace(index, item)"
                             @keydown.enter.stop="handleViewTrace(index, item)"
                             @keydown.space.prevent.stop="handleViewTrace(index, item)">{{
-                            inFlightCardStatusText(item) }}</span>
+                              inFlightCardStatusText(item) }}</span>
                           <button type="button" class="card-analyze-trace-btn" :title="t('knowledgeStages.viewTrace')"
                             :aria-label="t('knowledgeStages.viewTrace')" @click.stop="handleViewTrace(index, item)">
                             <t-icon name="chart-line" />
@@ -2626,41 +2563,24 @@ async function createNewSession(value: string): Promise<void> {
                             <!-- 可编辑模式：点击打开弹窗 -->
                             <template v-if="canEdit">
                               <template v-if="(item.tags || []).length > 0">
-                                <t-tooltip
-                                  v-if="hasTagOverflow(item.id, (item.tags || []).length)"
-                                  :content="(item.tags || []).map((t: any) => t.name).join(', ')"
-                                  placement="top"
-                                >
-                                  <div
-                                    class="card-tag-chips"
+                                <t-tooltip v-if="hasTagOverflow(item.id, (item.tags || []).length)"
+                                  :content="(item.tags || []).map((t: any) => t.name).join(', ')" placement="top">
+                                  <div class="card-tag-chips"
                                     :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
-                                    @click="openTagEditDialog(item)"
-                                  >
-                                    <t-tag
-                                      v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))"
-                                      :key="tag.id"
-                                      size="small"
-                                      variant="light-outline"
-                                      class="card-tag-chip"
-                                    >
+                                    @click="openTagEditDialog(item)">
+                                    <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id"
+                                      size="small" variant="light-outline" class="card-tag-chip">
                                       <span class="tag-text">{{ tag.name }}</span>
                                     </t-tag>
-                                    <span class="card-tag-overflow">+{{ getOverflowCount(item.id, (item.tags || []).length) }}</span>
+                                    <span class="card-tag-overflow">+{{ getOverflowCount(item.id, (item.tags ||
+                                      []).length) }}</span>
                                   </div>
                                 </t-tooltip>
-                                <div
-                                  v-else
-                                  class="card-tag-chips"
+                                <div v-else class="card-tag-chips"
                                   :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
-                                  @click="openTagEditDialog(item)"
-                                >
-                                  <t-tag
-                                    v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))"
-                                    :key="tag.id"
-                                    size="small"
-                                    variant="light-outline"
-                                    class="card-tag-chip"
-                                  >
+                                  @click="openTagEditDialog(item)">
+                                  <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id"
+                                    size="small" variant="light-outline" class="card-tag-chip">
                                     <span class="tag-text">{{ tag.name }}</span>
                                   </t-tag>
                                 </div>
@@ -2672,39 +2592,22 @@ async function createNewSession(value: string): Promise<void> {
                             </template>
                             <!-- 只读模式 -->
                             <template v-else-if="(item.tags || []).length > 0">
-                              <t-tooltip
-                                v-if="hasTagOverflow(item.id, (item.tags || []).length)"
-                                :content="(item.tags || []).map((t: any) => t.name).join(', ')"
-                                placement="top"
-                              >
-                                <div
-                                  class="card-tag-chips"
-                                  :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
-                                >
-                                  <t-tag
-                                    v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))"
-                                    :key="tag.id"
-                                    size="small"
-                                    variant="light-outline"
-                                    class="card-tag-chip"
-                                  >
+                              <t-tooltip v-if="hasTagOverflow(item.id, (item.tags || []).length)"
+                                :content="(item.tags || []).map((t: any) => t.name).join(', ')" placement="top">
+                                <div class="card-tag-chips"
+                                  :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)">
+                                  <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id"
+                                    size="small" variant="light-outline" class="card-tag-chip">
                                     <span class="tag-text">{{ tag.name }}</span>
                                   </t-tag>
-                                  <span class="card-tag-overflow">+{{ getOverflowCount(item.id, (item.tags || []).length) }}</span>
+                                  <span class="card-tag-overflow">+{{ getOverflowCount(item.id, (item.tags ||
+                                    []).length) }}</span>
                                 </div>
                               </t-tooltip>
-                              <div
-                                v-else
-                                class="card-tag-chips"
-                                :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
-                              >
-                                <t-tag
-                                  v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))"
-                                  :key="tag.id"
-                                  size="small"
-                                  variant="light-outline"
-                                  class="card-tag-chip"
-                                >
+                              <div v-else class="card-tag-chips"
+                                :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)">
+                                <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id"
+                                  size="small" variant="light-outline" class="card-tag-chip">
                                   <span class="tag-text">{{ tag.name }}</span>
                                 </t-tag>
                               </div>
@@ -2757,9 +2660,10 @@ async function createNewSession(value: string): Promise<void> {
                             }}</span>
                           <span v-if="(hoveredCardItem as any).channel && (hoveredCardItem as any).channel !== 'web'"
                             class="card-popover-channel">{{ getChannelLabel((hoveredCardItem as any).channel) }}</span>
-                          <span v-if="(hoveredCardItem as any).tags && (hoveredCardItem as any).tags.length > 0" class="card-popover-tag">{{
-                            (hoveredCardItem as any).tags.map((t: any) => t.name).join(', ')
-                          }}</span>
+                          <span v-if="(hoveredCardItem as any).tags && (hoveredCardItem as any).tags.length > 0"
+                            class="card-popover-tag">{{
+                              (hoveredCardItem as any).tags.map((t: any) => t.name).join(', ')
+                            }}</span>
                           <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
                         </div>
                         <div class="card-popover-hint">{{ t('knowledgeBase.clickToViewFull') }}</div>
@@ -2770,8 +2674,7 @@ async function createNewSession(value: string): Promise<void> {
                 <template v-else-if="cardList.length && viewMode === 'list'">
                   <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
                     :can-edit="canEdit" @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
-                    @toggle-all="toggleSelectAll"
-                    @action="(action: any, item: any) => handleListAction(action, item)"
+                    @toggle-all="toggleSelectAll" @action="(action: any, item: any) => handleListAction(action, item)"
                     @tag-edit="(item: any) => openTagEditDialog(item)" />
                 </template>
                 <template v-else-if="!docListLoading">
@@ -2810,16 +2713,10 @@ async function createNewSession(value: string): Promise<void> {
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
 
   <!-- 标签编辑弹窗 -->
-  <TagEditDialog
-    :visible="tagEditDialogVisible"
+  <TagEditDialog :visible="tagEditDialogVisible"
     :knowledge-name="tagEditTarget?.display_name || tagEditTarget?.file_name || tagEditTarget?.title || ''"
-    :kb-id="kbId"
-    :tag-list="tagList"
-    :selected-tags="tagEditTarget?.tags || []"
-    @update:visible="tagEditDialogVisible = $event"
-    @confirm="onTagEditConfirm"
-    @tag-created="loadTags(kbId, true)"
-  />
+    :kb-id="kbId" :tag-list="tagList" :selected-tags="tagEditTarget?.tags || []"
+    @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)" />
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
@@ -2898,7 +2795,7 @@ async function createNewSession(value: string): Promise<void> {
   border: none;
   border-right: 1px solid var(--td-component-stroke);
   box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
-  padding: 0 16px 0 0;
+  padding: 0 16px 0 4px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -2910,7 +2807,7 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 12px;
-    padding: 0 4px;
+    padding: 0;
     color: var(--td-text-color-primary);
 
     .sidebar-title {
@@ -2950,7 +2847,7 @@ async function createNewSession(value: string): Promise<void> {
 
         &:hover {
           background: var(--td-bg-color-secondarycontainer);
-          color: var(--td-brand-color);
+          color: var(--td-text-color-primary);
         }
       }
     }
@@ -2958,7 +2855,7 @@ async function createNewSession(value: string): Promise<void> {
 
   .tag-search-bar {
     margin-bottom: 12px;
-    padding: 0 4px;
+    padding: 0;
 
     :deep(.t-input) {
       font-size: 13px;
@@ -2970,305 +2867,229 @@ async function createNewSession(value: string): Promise<void> {
       &:hover,
       &:focus,
       &.t-is-focused {
-        border-color: var(--td-brand-color);
+        border-color: var(--td-component-border);
         background-color: var(--td-bg-color-container);
         box-shadow: none !important;
       }
     }
+
+    :deep(.t-input__inner) {
+      font-size: 13px;
+    }
+
+    :deep(.t-input__prefix-icon) {
+      margin-right: 0;
+    }
   }
 
-  .tag-list {
+  .tag-sidebar-body {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 8px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    scrollbar-width: none;
+    scrollbar-width: thin;
 
     &::-webkit-scrollbar {
-      display: none;
+      width: 4px;
     }
 
-    .tag-load-more {
-      padding: 8px 0 0;
-      display: flex;
-      justify-content: center;
+    &::-webkit-scrollbar-thumb {
+      border-radius: 2px;
+      background: var(--td-scrollbar-color);
+    }
+  }
 
-      :deep(.t-button) {
-        padding: 0;
-        font-size: 12px;
-        color: var(--td-success-color);
+  .tag-sidebar-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-content: flex-start;
+  }
+
+  .tag-sidebar-chip-skeleton {
+    height: 26px;
+  }
+
+  .tag-sidebar-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    max-width: 100%;
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    font-family: var(--app-font-family);
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 26px;
+    text-align: center;
+    cursor: pointer;
+    outline: none;
+    white-space: nowrap;
+    overflow: hidden;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    -webkit-font-smoothing: antialiased;
+
+    &:hover:not(.active) {
+      background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 45%, transparent);
+      color: var(--td-text-color-secondary);
+    }
+
+    &:focus-visible {
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-component-stroke) 60%, transparent);
+    }
+
+    &.active {
+      border-color: var(--td-component-stroke);
+      color: var(--td-brand-color);
+      background-color: transparent;
+      background-image: none;
+      box-shadow: none;
+
+      .tag-chip-count {
+        color: color-mix(in srgb, var(--td-brand-color) 72%, var(--td-text-color-secondary));
+      }
+
+      &:hover {
+        border-color: var(--td-component-stroke);
+        background-color: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 45%, transparent);
+        color: var(--td-brand-color);
+
+        .tag-chip-count {
+          color: color-mix(in srgb, var(--td-brand-color) 72%, var(--td-text-color-secondary));
+        }
       }
     }
+  }
 
-    .tag-list-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 8px;
-      border-radius: 6px;
+  .tag-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .tag-chip-count {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--td-text-color-placeholder);
+  }
+
+  .tag-sidebar-edit-row,
+  .tag-sidebar-create-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    min-height: 28px;
+    padding: 3px 6px;
+    border: 1px dashed var(--td-component-stroke);
+    border-radius: 4px;
+    box-sizing: border-box;
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+
+  .tag-edit-input {
+    flex: 1;
+    min-width: 0;
+
+    :deep(.t-input) {
+      font-size: 12px;
+      background-color: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      padding: 0;
+    }
+
+    :deep(.t-input__wrap) {
+      background-color: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    :deep(.t-input__inner) {
+      padding: 0;
       color: var(--td-text-color-primary);
-      cursor: pointer;
-      transition: all 0.2s ease;
-      font-family: var(--app-font-family);
-      font-size: 13px;
-      -webkit-font-smoothing: antialiased;
+    }
 
-      .tag-list-left {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-        flex: 1;
+    :deep(.t-input:hover),
+    :deep(.t-input.t-is-focused),
+    :deep(.t-input__wrap:hover),
+    :deep(.t-input__wrap.t-is-focused) {
+      border-color: transparent;
+    }
+  }
 
-        .t-icon,
-        .tag-hash-icon {
-          flex-shrink: 0;
-          color: var(--td-text-color-secondary);
-          transition: color 0.2s ease;
-        }
+  .tag-inline-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
 
-        .t-icon {
-          font-size: 16px;
-        }
+    :deep(.t-button) {
+      padding: 0 2px;
+      height: 20px;
+    }
 
-        .tag-hash-icon {
-          font-family: var(--app-font-family-mono);
-          font-size: 16px;
-          font-weight: 500;
-          width: 16px;
-          text-align: center;
-          display: inline-block;
-        }
+    :deep(.tag-action-btn) {
+      border-radius: 4px;
+      transition: all 0.15s ease;
+
+      .t-icon {
+        font-size: 14px;
       }
+    }
 
-      .tag-name {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-family: var(--app-font-family);
-        font-size: 13px;
-        font-weight: 400;
-        line-height: 1.4;
-      }
-
-      .tag-list-right {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-left: 8px;
-        flex-shrink: 0;
-      }
-
-      .tag-count {
-        font-size: 12px;
-        color: var(--td-text-color-placeholder);
-        font-weight: 400;
-        transition: all 0.2s ease;
-        text-align: right;
-        padding-left: 8px;
-        background: transparent;
-      }
+    :deep(.tag-action-btn.confirm) {
+      background: transparent;
+      color: var(--td-text-color-secondary);
 
       &:hover {
         background: var(--td-bg-color-secondarycontainer);
         color: var(--td-text-color-primary);
-
-        .tag-list-left .t-icon,
-        .tag-list-left .tag-hash-icon {
-          color: var(--td-text-color-secondary);
-        }
-
-        .tag-count {
-          color: var(--td-text-color-secondary);
-        }
-      }
-
-      &.active {
-        background: var(--td-brand-color-light);
-        color: var(--td-brand-color);
-
-        .tag-list-left .t-icon,
-        .tag-list-left .tag-hash-icon {
-          color: var(--td-brand-color);
-        }
-
-        .tag-name {
-          font-weight: 500;
-        }
-
-        .tag-count {
-          color: var(--td-brand-color);
-        }
-      }
-
-      &.editing {
-        background: transparent;
-        border: none;
-      }
-
-      &.tag-editing {
-        cursor: default;
-        padding-right: 8px;
-        background: transparent;
-        border: none;
-
-        .tag-edit-input {
-          flex: 1;
-        }
-      }
-
-      &.tag-editing .tag-edit-input {
-        width: 100%;
-      }
-
-      .tag-inline-actions {
-        display: flex;
-        gap: 4px;
-        margin-left: auto;
-
-        :deep(.t-button) {
-          padding: 0 4px;
-          height: 24px;
-        }
-
-        :deep(.tag-action-btn) {
-          border-radius: 4px;
-          transition: all 0.2s ease;
-
-          .t-icon {
-            font-size: 14px;
-          }
-        }
-
-        :deep(.tag-action-btn.confirm) {
-          background: transparent;
-          color: var(--td-text-color-secondary);
-
-          &:hover {
-            background: var(--td-bg-color-secondarycontainer);
-            color: var(--td-brand-color);
-          }
-        }
-
-        :deep(.tag-action-btn.cancel) {
-          background: transparent;
-          color: var(--td-text-color-secondary);
-
-          &:hover {
-            background: var(--td-bg-color-secondarycontainer);
-            color: var(--td-error-color);
-          }
-        }
-      }
-
-      .tag-edit-input {
-        flex: 1;
-        min-width: 0;
-        max-width: 100%;
-
-        :deep(.t-input) {
-          font-size: 13px;
-          background-color: transparent;
-          border: none;
-          border-radius: 0;
-          box-shadow: none;
-          padding: 0;
-        }
-
-        :deep(.t-input__wrap) {
-          background-color: transparent;
-          border: none;
-          border-radius: 0;
-          box-shadow: none;
-        }
-
-        :deep(.t-input__inner) {
-          padding: 0;
-          color: var(--td-text-color-primary);
-          caret-color: var(--td-brand-color);
-        }
-
-        :deep(.t-input:hover),
-        :deep(.t-input.t-is-focused),
-        :deep(.t-input__wrap:hover),
-        :deep(.t-input__wrap.t-is-focused) {
-          border-color: transparent;
-        }
-      }
-
-      .tag-more {
-        display: flex;
-        align-items: center;
-      }
-
-      .tag-more-btn {
-        width: 22px;
-        height: 22px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 4px;
-        color: var(--td-text-color-placeholder);
-        transition: all 0.2s ease;
-
-        &:hover {
-          background: var(--td-bg-color-secondarycontainer);
-          color: var(--td-text-color-secondary);
-        }
       }
     }
 
-    .tag-empty-state {
-      text-align: center;
-      padding: 10px 6px;
-      color: var(--td-text-color-placeholder);
-      font-size: 12px;
-    }
-  }
-}
+    :deep(.tag-action-btn.cancel) {
+      background: transparent;
+      color: var(--td-text-color-secondary);
 
-:deep(.tag-menu) {
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.tag-menu-item) {
-  display: flex;
-  align-items: center;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: 14px;
-  font-weight: 400;
-
-  .menu-icon {
-    margin-right: 8px;
-    font-size: 16px;
-  }
-
-  &:hover {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
-  }
-
-  &.danger {
-    color: var(--td-text-color-primary);
-
-    &:hover {
-      background: var(--td-error-color-light);
-      color: var(--td-error-color);
-
-      .menu-icon {
+      &:hover {
+        background: var(--td-bg-color-secondarycontainer);
         color: var(--td-error-color);
       }
     }
+  }
+
+  .tag-load-more {
+    display: flex;
+    justify-content: center;
+    padding-top: 2px;
+
+    :deep(.t-button) {
+      padding: 0;
+      font-size: 12px;
+      color: var(--td-text-color-placeholder);
+    }
+  }
+
+  .tag-empty-state {
+    text-align: center;
+    padding: 6px 0;
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
   }
 }
 
