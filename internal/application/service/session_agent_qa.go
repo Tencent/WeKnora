@@ -169,13 +169,13 @@ func (s *sessionService) AgentQA(
 		}
 	}
 
-	agentQuery := req.Query
+	agentQuery := s.rewriteAgentQueryIfNeeded(ctx, req, effectiveModelID, llmContext)
 	var agentImageURLs []string
 	if agentModelSupportsVision && len(req.ImageURLs) > 0 {
 		agentImageURLs = req.ImageURLs
 		logger.Infof(ctx, "Agent model supports vision, passing %d image(s) directly", len(agentImageURLs))
 	} else if req.ImageDescription != "" {
-		agentQuery = req.Query + "\n\n[用户上传图片内容]\n" + req.ImageDescription
+		agentQuery += "\n\n[用户上传图片内容]\n" + req.ImageDescription
 		logger.Infof(ctx, "Agent model does not support vision, appending image description (%d chars)", len(req.ImageDescription))
 	}
 	if req.QuotedContext != "" {

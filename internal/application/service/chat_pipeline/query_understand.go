@@ -340,6 +340,23 @@ func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw st
 	}
 }
 
+// ExtractRewriteQuery returns the rewritten query from query-understanding
+// model output. It accepts the structured JSON shape used by QueryUnderstand
+// and falls back to raw text for providers that return plain rewritten text.
+func ExtractRewriteQuery(raw string) string {
+	content := strings.TrimSpace(raw)
+	if content == "" {
+		return ""
+	}
+	if output, ok := parseStructuredQueryOutput(content); ok {
+		if rewrite := strings.TrimSpace(output.RewriteQuery); rewrite != "" {
+			return rewrite
+		}
+		return ""
+	}
+	return content
+}
+
 func parseStructuredQueryOutput(raw string) (queryUnderstandOutput, bool) {
 	content := strings.TrimSpace(raw)
 	if content == "" {
