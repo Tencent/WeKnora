@@ -107,12 +107,11 @@ func (s *knowledgeService) ProcessKnowledgeRetryFailed(ctx context.Context, t *a
 	for _, knowledgeID := range payload.KnowledgeIDs {
 		knowledge, err := s.GetKnowledgeByID(ctx, knowledgeID)
 		if err != nil && !isKnowledgeRetrySkippableLoadError(err) {
-			progress.Status = types.KBCloneStatusFailed
-			progress.Error = err.Error()
+			logger.Warnf(ctx, "ProcessKnowledgeRetryFailed: failed to load knowledge %s: %v", knowledgeID, err)
+			progress.Failed++
 			progress.Message = "Failed to load one document before retry submission"
-			progress.UpdatedAt = time.Now().Unix()
-			_ = s.saveKnowledgeRetryFailedProgress(ctx, progress)
-			return fmt.Errorf("failed to load knowledge %s for retry submission: %w", knowledgeID, err)
+			s.updateRetryFailedProgress(ctx, progress)
+			continue
 		}
 		if skip, message := shouldSkipRetryFailedKnowledge(knowledge, payload.KBID, err); skip {
 			progress.Skipped++

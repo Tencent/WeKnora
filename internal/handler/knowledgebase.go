@@ -1267,6 +1267,23 @@ func (h *KnowledgeBaseHandler) GetRetryFailedDocumentsProgress(c *gin.Context) {
 		return
 	}
 
+	if progress.KBID != "" {
+		callerTenantID, _ := c.Get(types.TenantIDContextKey.String())
+		kb, kbErr := h.service.GetKnowledgeBaseByID(ctx, progress.KBID)
+		if kbErr != nil || kb == nil || kb.TenantID != callerTenantID.(uint64) {
+			hasAccess := kbErr == nil && kb != nil && h.kbShareService != nil
+			if hasAccess {
+				callerTenantRole := types.TenantRoleFromContext(ctx)
+				_, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, progress.KBID, callerTenantID.(uint64), callerTenantRole)
+				hasAccess = permErr == nil && isShared
+			}
+			if !hasAccess {
+				c.Error(errors.NewForbiddenError("No permission to view this task progress"))
+				return
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    progress,

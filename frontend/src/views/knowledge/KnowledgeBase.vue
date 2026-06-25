@@ -1497,6 +1497,7 @@ const stopRetryFailedPoll = () => {
 };
 
 const finishRetryFailedProgress = (progress: RetryFailedDocumentsProgress) => {
+  retryFailedProgressVisible.value = false;
   const failed = progress.failed || 0;
   const skipped = progress.skipped || 0;
   const processed = progress.processed || 0;
