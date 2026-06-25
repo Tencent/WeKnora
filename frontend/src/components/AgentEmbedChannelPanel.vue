@@ -3,6 +3,7 @@
     <div class="channels-section">
       <div class="channels-header">
         <span class="channels-title">{{ $t('embedPublish.channelsTitle') }}</span>
+        <IntegrationsAgentFilter v-model="filterAgentId" :agents="agents" />
         <span class="channels-count">{{ channels.length }}</span>
       </div>
 
@@ -20,39 +21,57 @@
             @click="openDrawer(ch)"
           >
             <div class="channel-card__badge">
-              <t-icon name="internet" size="18px" />
+              <t-icon name="code" size="18px" />
             </div>
             <div class="channel-card__body">
               <div class="channel-card__header">
-                <h3 class="channel-card__title">{{ ch.name || $t('embedPublish.unnamed') }}</h3>
+                <h3 class="channel-card__title">{{ channelDisplayName(ch) }}</h3>
                 <t-tag v-if="!ch.enabled" size="small" variant="light" theme="warning">
                   {{ $t('embedPublish.disabled') }}
                 </t-tag>
               </div>
-              <p class="channel-card__subtitle">{{ channelSummary(ch) }}</p>
+              <span v-if="agentDisplayName(ch)" class="channel-card__agent-name">
+                {{ agentDisplayName(ch) }}
+              </span>
             </div>
             <div v-if="authStore.hasRole('admin')" class="channel-card__actions" @click.stop>
-              <t-switch
-                :value="ch.enabled"
-                size="small"
-                @change="(v: boolean) => toggleEnabled(ch, v)"
-              />
               <t-dropdown
                 trigger="click"
                 placement="bottom-right"
-                :options="channelMenuOptions"
-                @click="(data) => data.value === 'delete' && confirmRemoveChannel(ch.id)"
+                attach="body"
+                :options="channelMenuOptions(ch)"
+                @click="(data) => handleChannelMenuClick(data, ch)"
               >
                 <t-button
                   variant="text"
                   shape="square"
                   size="small"
-                  class="channel-card__more"
+                  class="channel-card__action-btn channel-card__more"
                   @click.stop
                 >
                   <template #icon><t-icon name="ellipsis" /></template>
                 </t-button>
               </t-dropdown>
+              <t-popconfirm
+                :content="$t('embedPublish.deleteConfirm')"
+                :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                :cancel-btn="{ content: $t('common.cancel') }"
+                placement="bottom-right"
+                @confirm="() => removeChannel(ch.id)"
+              >
+                <t-tooltip :content="$t('common.delete')" placement="top">
+                  <t-button
+                    theme="danger"
+                    shape="square"
+                    variant="text"
+                    size="small"
+                    class="channel-card__action-btn channel-card__delete"
+                    @click.stop
+                  >
+                    <template #icon><t-icon name="delete" /></template>
+                  </t-button>
+                </t-tooltip>
+              </t-popconfirm>
             </div>
           </button>
 
@@ -62,10 +81,15 @@
             class="channel-card channel-card--add"
             @click="openCreate"
           >
-            <span class="channel-card--add__icon" aria-hidden="true">
+            <span class="channel-card__badge" aria-hidden="true">
               <t-icon name="add" />
             </span>
-            <span class="channel-card--add__label">{{ $t('embedPublish.create') }}</span>
+            <div class="channel-card__body">
+              <div class="channel-card__header">
+                <span class="channel-card__title">{{ $t('embedPublish.create') }}</span>
+              </div>
+            </div>
+            <span class="channel-card__actions channel-card__actions--spacer" aria-hidden="true" />
           </button>
         </div>
       </t-loading>
@@ -73,21 +97,62 @@
 
     <SettingDrawer
       v-model:visible="showDrawer"
+      class="embed-channel-drawer"
       :title="drawerTitle"
-      :description="drawerDescription"
-      icon="internet"
+      :description="drawerStepDescription"
+      icon="code"
       storage-key="setting-drawer:embed-channel"
+      width="560px"
       :confirm-loading="saving"
+      :confirm-text="drawerConfirmText"
       :hide-footer="!isAdmin"
-      @confirm="saveForm"
+      @confirm="handleDrawerConfirm"
       @cancel="closeDrawer"
     >
+      <template v-if="wizardStep > 0" #footer-left>
+        <t-button variant="outline" @click="prevWizardStep">
+          {{ $t('datasource.back') }}
+        </t-button>
+      </template>
+
+      <div class="im-steps">
+        <button
+          v-for="(title, i) in stepTitles"
+          :key="i"
+          type="button"
+          :class="['im-step', { active: wizardStep === i, done: wizardStep > i }]"
+          @click="goToWizardStep(i)"
+        >
+          <span class="im-step-num">
+            <t-icon v-if="wizardStep > i" name="check" class="im-step-check" />
+            <template v-else>{{ i + 1 }}</template>
+          </span>
+          <span class="im-step-title">{{ title }}</span>
+        </button>
+      </div>
+
+      <!-- Step 1: Channel -->
+      <div v-if="wizardStep === 0" class="im-step-body">
       <section class="setting-drawer__section embed-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionChannel') }}</h4>
 
-        <div v-if="editingId && isAdmin" class="form-item">
-          <div class="enable-row">
-            <span class="form-label form-label--inline">{{ $t('embedPublish.enabled') }}</span>
+        <div class="form-item">
+          <label class="form-label required">{{ $t('integrations.boundAgent') }}</label>
+          <div class="agent-field-row">
+            <t-select
+              v-model="createAgentId"
+              :options="agentOptions"
+              filterable
+              :placeholder="$t('integrations.selectAgentPlaceholder')"
+            />
+          </div>
+        </div>
+
+        <div v-if="editingId && isAdmin" class="setting-row setting-row--last">
+          <div class="setting-info">
+            <label>{{ $t('embedPublish.enabled') }}</label>
+          </div>
+          <div class="setting-control">
             <t-switch v-model="editingEnabled" size="small" />
           </div>
         </div>
@@ -98,22 +163,17 @@
             v-model="form.name"
             :disabled="!isAdmin"
             :placeholder="$t('embedPublish.namePlaceholder')"
+            @focus="channelNameTouched = true"
           />
-          <p class="form-desc">{{ $t('embedPublish.nameDesc') }}</p>
-        </div>
-
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.welcomeMessage') }}</label>
-          <t-textarea
-            v-model="form.welcome_message"
-            :disabled="!isAdmin"
-            :placeholder="$t('embedPublish.welcomePlaceholder')"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-          />
+          <p v-if="!editingId" class="form-desc">{{ $t('embedPublish.nameDefaultHint') }}</p>
+          <p v-else class="form-desc">{{ $t('embedPublish.nameDesc') }}</p>
         </div>
 
       </section>
+      </div>
 
+      <!-- Step 2: Security -->
+      <div v-else-if="wizardStep === 1" class="im-step-body">
       <section class="setting-drawer__section embed-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionSecurity') }}</h4>
 
@@ -131,37 +191,49 @@
           <p v-else class="form-desc">{{ $t('embedPublish.originsHint') }}</p>
         </div>
 
-        <div class="form-grid form-grid--2">
-          <div class="form-item">
-            <label class="form-label">{{ $t('embedPublish.rateLimitLabel') }}</label>
-            <t-input-number
-              v-model="form.rate_limit_per_minute"
-              :disabled="!isAdmin"
-              :min="1"
-              :max="600"
-              theme="column"
-              class="form-number"
-            />
-            <p class="form-desc">{{ $t('embedPublish.rateLimitDesc') }}</p>
-          </div>
+        <div class="form-item">
+          <label class="form-label">{{ $t('embedPublish.rateLimitLabel') }}</label>
+          <t-input-number
+            v-model="form.rate_limit_per_minute"
+            :disabled="!isAdmin"
+            :min="1"
+            :max="600"
+            theme="column"
+            class="form-number"
+          />
+          <p class="form-desc">{{ $t('embedPublish.rateLimitDesc') }}</p>
+        </div>
 
-          <div class="form-item">
-            <label class="form-label">{{ $t('embedPublish.rateLimitDayLabel') }}</label>
-            <t-input-number
-              v-model="form.rate_limit_per_day"
-              :disabled="!isAdmin"
-              :min="1"
-              :max="1000000"
-              theme="column"
-              class="form-number"
-            />
-            <p class="form-desc">{{ $t('embedPublish.rateLimitDayDesc') }}</p>
-          </div>
+        <div class="form-item">
+          <label class="form-label">{{ $t('embedPublish.rateLimitDayLabel') }}</label>
+          <t-input-number
+            v-model="form.rate_limit_per_day"
+            :disabled="!isAdmin"
+            :min="1"
+            :max="1000000"
+            theme="column"
+            class="form-number"
+          />
+          <p class="form-desc">{{ $t('embedPublish.rateLimitDayDesc') }}</p>
         </div>
       </section>
+      </div>
 
+      <!-- Step 3: Capabilities -->
+      <div v-else-if="wizardStep === 2" class="im-step-body">
       <section class="setting-drawer__section embed-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionCapabilities') }}</h4>
+
+        <div class="form-item">
+          <label class="form-label">{{ $t('embedPublish.welcomeMessage') }}</label>
+          <t-textarea
+            v-model="form.welcome_message"
+            :disabled="!isAdmin"
+            :placeholder="$t('embedPublish.welcomePlaceholder')"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+          />
+          <p class="form-desc">{{ $t('embedPublish.welcomeMessageDesc') }}</p>
+        </div>
 
         <div class="settings-group">
           <div class="setting-row">
@@ -182,7 +254,7 @@
             <div class="setting-info">
               <label>{{ $t('embedPublish.allowWebSearch') }}</label>
               <p class="desc">{{ $t('embedPublish.allowWebSearchDesc') }}</p>
-              <p v-if="form.allow_web_search && !agentWebSearchEnabled" class="desc desc--warn">
+              <p v-if="form.allow_web_search && !agentWebSearchEnabledEffective" class="desc desc--warn">
                 {{ $t('embedPublish.agentWebSearchDisabledHint') }}
               </p>
             </div>
@@ -199,7 +271,7 @@
             <div class="setting-info">
               <label>{{ $t('embedPublish.allowFileUpload') }}</label>
               <p class="desc">{{ $t('embedPublish.allowFileUploadDesc') }}</p>
-              <p v-if="form.allow_file_upload && !agentImageUploadEnabled" class="desc desc--warn">
+              <p v-if="form.allow_file_upload && !agentImageUploadEnabledEffective" class="desc desc--warn">
                 {{ $t('embedPublish.agentImageUploadDisabledHint') }}
               </p>
             </div>
@@ -213,7 +285,10 @@
           </div>
         </div>
       </section>
+      </div>
 
+      <!-- Step 4: Appearance -->
+      <div v-else-if="wizardStep === 3" class="im-step-body">
       <section class="setting-drawer__section embed-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionAppearance') }}</h4>
 
@@ -227,47 +302,43 @@
           <p class="form-desc">{{ $t('embedPublish.pageTitleDesc') }}</p>
         </div>
 
-        <div class="form-grid form-grid--2">
-          <div class="form-item">
-            <label class="form-label">{{ $t('embedPublish.headerTitleMode') }}</label>
-            <t-select
-              v-model="form.header_title_mode"
-              :disabled="!isAdmin"
-              :options="headerTitleModeOptions"
-            />
-            <p class="form-desc">{{ $t('embedPublish.headerTitleModeDesc') }}</p>
-          </div>
-
-          <div class="form-item">
-            <label class="form-label">{{ $t('embedPublish.widgetPosition') }}</label>
-            <t-select
-              v-model="form.widget_position"
-              :disabled="!isAdmin"
-              :options="positionOptions"
-            />
-          </div>
+        <div class="form-item">
+          <label class="form-label">{{ $t('embedPublish.headerTitleMode') }}</label>
+          <t-select
+            v-model="form.header_title_mode"
+            :disabled="!isAdmin"
+            :options="headerTitleModeOptions"
+          />
+          <p class="form-desc">{{ $t('embedPublish.headerTitleModeDesc') }}</p>
         </div>
 
-        <div class="form-grid form-grid--2">
-          <div class="form-item">
-            <label class="form-label">{{ $t('embedPublish.defaultLocale') }}</label>
-            <t-select
-              v-model="form.default_locale"
-              :disabled="!isAdmin"
-              :options="defaultLocaleOptions"
-            />
-            <p class="form-desc">{{ $t('embedPublish.defaultLocaleDesc') }}</p>
-          </div>
+        <div class="form-item">
+          <label class="form-label">{{ $t('embedPublish.widgetPosition') }}</label>
+          <t-select
+            v-model="form.widget_position"
+            :disabled="!isAdmin"
+            :options="positionOptions"
+          />
+        </div>
 
-          <div class="form-item">
-            <label class="form-label">{{ $t('embedPublish.primaryColor') }}</label>
-            <t-color-picker
-              v-model="form.primary_color"
-              :disabled="!isAdmin"
-              format="HEX"
-              :color-modes="['monochrome']"
-            />
-          </div>
+        <div class="form-item">
+          <label class="form-label">{{ $t('embedPublish.defaultLocale') }}</label>
+          <t-select
+            v-model="form.default_locale"
+            :disabled="!isAdmin"
+            :options="defaultLocaleOptions"
+          />
+          <p class="form-desc">{{ $t('embedPublish.defaultLocaleDesc') }}</p>
+        </div>
+
+        <div class="form-item">
+          <label class="form-label">{{ $t('embedPublish.primaryColor') }}</label>
+          <t-color-picker
+            v-model="form.primary_color"
+            :disabled="!isAdmin"
+            format="HEX"
+            :color-modes="['monochrome']"
+          />
         </div>
 
         <div class="form-item">
@@ -286,7 +357,10 @@
           </div>
         </div>
       </section>
+      </div>
 
+      <!-- Step 5: Webhook -->
+      <div v-else-if="wizardStep === 4" class="im-step-body">
       <section class="setting-drawer__section embed-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionWebhook') }}</h4>
 
@@ -296,6 +370,7 @@
             <t-input
               v-model="form.webhook_url"
               :disabled="!isAdmin"
+              autocomplete="off"
               :placeholder="$t('embedPublish.webhookUrlPlaceholder')"
             />
             <p class="form-desc">{{ $t('embedPublish.webhookUrlDesc') }}</p>
@@ -307,6 +382,7 @@
               v-model="form.webhook_secret"
               :disabled="!isAdmin"
               type="password"
+              autocomplete="new-password"
               :placeholder="webhookSecretPlaceholder"
             />
             <p class="form-desc">{{ $t('embedPublish.webhookSecretDesc') }}</p>
@@ -318,73 +394,17 @@
         <t-icon name="info-circle" class="deploy-hint__icon" />
         <p>{{ $t('embedPublish.deployAfterSaveHint') }}</p>
       </div>
+      </div>
 
-      <section v-if="editingId" class="setting-drawer__section embed-drawer__section">
+      <!-- Step 6: Deploy (edit only) -->
+      <div v-else-if="editingId" class="im-step-body">
+      <section class="setting-drawer__section embed-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionDeploy') }}</h4>
         <p class="form-desc form-desc--block">{{ $t('embedPublish.deployIntro') }}</p>
 
-        <div class="deploy-step">
-          <span class="deploy-step__index" aria-hidden="true">1</span>
-          <div class="deploy-step__content">
-            <h5 class="deploy-step__title">{{ $t('embedPublish.channelKey') }}</h5>
-            <p class="deploy-step__desc">{{ $t('embedPublish.channelKeyDesc') }}</p>
-
-            <div v-if="drawerChannel" class="channel-key-control">
-              <t-input
-                :model-value="displayChannelKey(editingId)"
-                readonly
-                type="text"
-                class="mono-text-input channel-key-input"
-                :placeholder="tokenFor(drawerChannel) ? '' : $t('embedPublish.channelKeyUnavailable')"
-              />
-              <template v-if="tokenFor(drawerChannel)">
-                <t-button
-                  size="small"
-                  variant="text"
-                  :title="revealedTokens[editingId] ? $t('embedPublish.hideKey') : $t('embedPublish.revealKey')"
-                  @click="toggleReveal(editingId)"
-                >
-                  <t-icon :name="revealedTokens[editingId] ? 'browse-off' : 'browse'" />
-                </t-button>
-                <t-button
-                  size="small"
-                  variant="text"
-                  :title="$t('embedPublish.copyChannelKeyTitle')"
-                  @click="copyToken(drawerChannel)"
-                >
-                  <t-icon name="file-copy" />
-                </t-button>
-              </template>
-              <t-popconfirm
-                v-if="isAdmin"
-                theme="warning"
-                :content="$t('embedPublish.resetKeyConfirmBody')"
-                :confirm-btn="{ content: $t('embedPublish.resetKeyConfirmOk'), theme: 'danger' }"
-                :cancel-btn="{ content: $t('common.cancel') }"
-                @confirm="performRotate(editingId)"
-              >
-                <t-button
-                  size="small"
-                  variant="text"
-                  theme="danger"
-                  :loading="rotating"
-                  :title="$t('embedPublish.resetKeyTitle')"
-                >
-                  <t-icon name="refresh" />
-                </t-button>
-              </t-popconfirm>
-            </div>
-            <p v-if="drawerChannel && !tokenFor(drawerChannel)" class="form-desc">
-              {{ $t('embedPublish.channelKeyHint') }}
-            </p>
-          </div>
-        </div>
-
-        <div class="deploy-step">
-          <span class="deploy-step__index" aria-hidden="true">2</span>
-          <div class="deploy-step__content">
-            <h5 class="deploy-step__title">{{ $t('embedPublish.deployStepEmbed') }}</h5>
-            <p class="deploy-step__desc">{{ $t('embedPublish.deployStepEmbedDesc') }}</p>
+        <div class="deploy-block">
+          <h5 class="deploy-block__title">{{ $t('embedPublish.deployStepEmbed') }}</h5>
+          <p class="deploy-block__desc">{{ $t('embedPublish.deployStepEmbedDesc') }}</p>
 
             <t-tabs v-model="drawerSnippetTab" class="snippet-tabs">
               <t-tab-panel value="iframe" :label="$t('embedPublish.tabIframe')" />
@@ -448,10 +468,64 @@
                 <pre class="code-panel__pre">{{ secureServerExample }}</pre>
               </div>
             </template>
+        </div>
+
+        <div class="deploy-block">
+          <h5 class="deploy-block__title">{{ $t('embedPublish.channelKey') }}</h5>
+          <p class="deploy-block__desc">{{ $t('embedPublish.channelKeyDesc') }}</p>
+
+          <div v-if="drawerChannel" class="channel-key-control">
+            <t-input
+              :model-value="displayChannelKey(editingId)"
+              readonly
+              type="text"
+              class="mono-text-input channel-key-input"
+              :placeholder="tokenFor(drawerChannel) ? '' : $t('embedPublish.channelKeyUnavailable')"
+            />
+            <template v-if="tokenFor(drawerChannel)">
+              <t-button
+                size="small"
+                variant="text"
+                :title="revealedTokens[editingId] ? $t('embedPublish.hideKey') : $t('embedPublish.revealKey')"
+                @click="toggleReveal(editingId)"
+              >
+                <t-icon :name="revealedTokens[editingId] ? 'browse-off' : 'browse'" />
+              </t-button>
+              <t-button
+                size="small"
+                variant="text"
+                :title="$t('embedPublish.copyChannelKeyTitle')"
+                @click="copyToken(drawerChannel)"
+              >
+                <t-icon name="file-copy" />
+              </t-button>
+            </template>
+            <t-popconfirm
+              v-if="isAdmin"
+              theme="warning"
+              :content="$t('embedPublish.resetKeyConfirmBody')"
+              :confirm-btn="{ content: $t('embedPublish.resetKeyConfirmOk'), theme: 'danger' }"
+              :cancel-btn="{ content: $t('common.cancel') }"
+              @confirm="performRotate(editingId)"
+            >
+              <t-button
+                size="small"
+                variant="text"
+                theme="danger"
+                :loading="rotating"
+                :title="$t('embedPublish.resetKeyTitle')"
+              >
+                <t-icon name="refresh" />
+              </t-button>
+            </t-popconfirm>
           </div>
+          <p v-if="drawerChannel && !tokenFor(drawerChannel)" class="form-desc">
+            {{ $t('embedPublish.channelKeyHint') }}
+          </p>
         </div>
 
       </section>
+      </div>
     </SettingDrawer>
 
     <EmbedChannelPreview
@@ -469,14 +543,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import EmbedChannelPreview from '@/components/EmbedChannelPreview.vue'
 import {
-  listEmbedChannels,
+  listAllEmbedChannels,
   createEmbedChannel,
   updateEmbedChannel,
   deleteEmbedChannel,
@@ -488,6 +562,8 @@ import {
   buildSecureServerNodeExample,
   buildSecureServerGoExample,
   getEmbedChannelStats,
+  clearEmbedStoredChatSession,
+  clearEmbedStoredChatSessionIfAgentMismatch,
   type EmbedChannel,
   type EmbedLocaleTag,
   type HeaderTitleMode,
@@ -498,12 +574,10 @@ import {
   validateAllowedOrigins,
   type AllowedOriginsValidationError,
 } from '@/utils/embedAllowedOrigins'
+import { listAgents, type CustomAgent } from '@/api/agent'
+import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue'
 
-const props = defineProps<{
-  agentId: string
-  agentWebSearchEnabled?: boolean
-  agentImageUploadEnabled?: boolean
-}>()
+const filterAgentId = defineModel<string>('filterAgentId', { default: '' })
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -511,7 +585,12 @@ const isAdmin = computed(() => authStore.hasRole('admin'))
 
 const loading = ref(false)
 const saving = ref(false)
-const channels = ref<EmbedChannel[]>([])
+const allChannels = ref<EmbedChannel[]>([])
+const channels = computed(() => {
+  const filter = filterAgentId.value?.trim()
+  if (!filter) return allChannels.value
+  return allChannels.value.filter((ch) => ch.agent_id === filter)
+})
 const tokenByChannel = ref<Record<string, string>>({})
 const revealedTokens = reactive<Record<string, boolean>>({})
 const previewVisible = ref(false)
@@ -525,11 +604,38 @@ const rotating = ref(false)
 const showDrawer = ref(false)
 const editingId = ref('')
 const editingEnabled = ref(true)
+const wizardStep = ref(0)
 const originsText = ref('')
 const originsError = ref('')
 const drawerSnippetTab = ref<'iframe' | 'widget' | 'secure'>('iframe')
 const secureServerLangTab = ref<'node' | 'go'>('node')
 const sessionStats = ref<Record<string, number>>({})
+const agents = ref<CustomAgent[]>([])
+const createAgentId = ref('')
+const channelNameTouched = ref(false)
+
+const agentOptions = computed(() =>
+  agents.value.map((agent) => ({ label: agent.name, value: agent.id })),
+)
+
+const drawerAgentId = computed(() => {
+  if (editingId.value) {
+    return drawerChannel.value?.agent_id || ''
+  }
+  return createAgentId.value
+})
+
+const drawerAgent = computed(() =>
+  agents.value.find((agent) => agent.id === drawerAgentId.value),
+)
+
+const agentWebSearchEnabledEffective = computed(() =>
+  drawerAgent.value?.config?.web_search_enabled === true,
+)
+
+const agentImageUploadEnabledEffective = computed(() =>
+  drawerAgent.value?.config?.image_upload_enabled === true,
+)
 
 const EMBED_TOKEN_STORAGE = 'weknora_embed_publish_tokens'
 const WEKNORA_BRAND_COLOR = '#07C05F'
@@ -584,48 +690,132 @@ const defaultLocaleOptions = computed(() => ([
   { label: 'Русский', value: 'ru-RU' },
 ]))
 
-const channelMenuOptions = computed(() => ([
-  { content: t('common.delete'), value: 'delete', theme: 'error' },
-]))
+const channelMenuOptions = (ch: EmbedChannel) => {
+  const items: Array<{ content: string; value: string }> = []
+  if (isAdmin.value) {
+    items.push({ content: t('embedPublish.preview'), value: 'preview' })
+  }
+  items.push({
+    content: ch.enabled ? t('common.off') : t('common.on'),
+    value: 'toggle',
+  })
+  return items
+}
+
+function handleChannelMenuClick(data: { value?: string }, ch: EmbedChannel) {
+  if (data.value === 'preview') {
+    void openPreviewForChannel(ch)
+    return
+  }
+  if (data.value === 'toggle') {
+    void toggleEnabled(ch, !ch.enabled)
+  }
+}
+
+const drawerTitle = computed(() => {
+  if (!editingId.value) return t('embedPublish.createTitle')
+  const ch = drawerChannel.value
+  const agentId = createAgentId.value || ch?.agent_id || ''
+  return channelDisplayName({
+    id: editingId.value,
+    name: form.value.name,
+    agent_id: agentId,
+  } as EmbedChannel)
+})
+
+function defaultEmbedChannelName(agentId = createAgentId.value): string {
+  const agent = agentId ? agents.value.find((item) => item.id === agentId) : undefined
+  if (agent?.name?.trim()) {
+    return t('embedPublish.defaultChannelNameWithAgent', { agent: agent.name.trim() })
+  }
+  return t('embedPublish.defaultChannelName')
+}
+
+function resolvedEmbedChannelName(): string {
+  return form.value.name.trim() || defaultEmbedChannelName()
+}
+
+function channelDisplayName(ch: EmbedChannel): string {
+  if (ch.name?.trim()) return ch.name.trim()
+  return defaultEmbedChannelName(ch.agent_id)
+}
+
+function applyDefaultChannelNameIfNeeded() {
+  if (!editingId.value && !channelNameTouched.value) {
+    form.value.name = defaultEmbedChannelName()
+  }
+}
+
+const stepTitles = computed(() => {
+  const steps = [
+    t('embedPublish.stepChannel'),
+    t('embedPublish.stepSecurity'),
+    t('embedPublish.stepCapabilities'),
+    t('embedPublish.stepAppearance'),
+    t('embedPublish.stepWebhook'),
+  ]
+  if (editingId.value) steps.push(t('embedPublish.stepDeploy'))
+  return steps
+})
+
+const drawerStepDescription = computed(() => stepTitles.value[wizardStep.value] ?? '')
+
+const drawerConfirmText = computed(() =>
+  wizardStep.value < stepTitles.value.length - 1 ? t('common.next') : t('common.save'),
+)
+
+function validateWizardStep(step: number): boolean {
+  if (step === 0 && !createAgentId.value) {
+    MessagePlugin.warning(t('integrations.selectAgentHint'))
+    return false
+  }
+  if (step === 1) {
+    const originsValidation = validateAllowedOrigins(parseOrigins())
+    if (!originsValidation.ok) {
+      originsError.value = originsValidationMessage(originsValidation.error)
+      MessagePlugin.warning(originsError.value)
+      return false
+    }
+    originsError.value = ''
+  }
+  return true
+}
+
+function prevWizardStep() {
+  if (wizardStep.value > 0) wizardStep.value -= 1
+}
+
+function goToWizardStep(step: number) {
+  if (step < 0 || step >= stepTitles.value.length) return
+  wizardStep.value = step
+}
+
+function goToDeployStep() {
+  if (!editingId.value) return
+  wizardStep.value = stepTitles.value.length - 1
+}
+
+async function handleDrawerConfirm() {
+  if (wizardStep.value < stepTitles.value.length - 1) {
+    if (!validateWizardStep(wizardStep.value)) return
+    wizardStep.value += 1
+    return
+  }
+  await saveForm()
+}
 
 const drawerChannel = computed(() =>
   editingId.value ? channels.value.find((ch) => ch.id === editingId.value) : null)
 
-const drawerTitle = computed(() => {
-  if (!editingId.value) return t('embedPublish.createTitle')
-  return form.value.name?.trim() || t('embedPublish.unnamed')
-})
-
-const drawerDescription = computed(() => {
-  if (!editingId.value) return ''
-  const ch = drawerChannel.value
-  if (!ch) return ''
-  const parts: string[] = []
-  if (!ch.enabled) parts.push(t('embedPublish.disabled'))
-  const limit = ch.rate_limit_per_minute || 30
-  parts.push(`${t('embedPublish.rateLimit')} ${limit}${t('embedPublish.rateLimitUnit')}`)
-  const count = sessionStats.value[ch.id]
-  if (typeof count === 'number') {
-    parts.push(t('embedPublish.sessionCountLabel', { n: count }))
-  }
-  return parts.join(' · ')
-})
-
 const previewPosition = computed((): WidgetPosition =>
   (previewChannel.value?.widget_position as WidgetPosition) || 'bottom-right')
 
-const channelSummary = (ch: EmbedChannel) => {
-  const parts = [
-    `${t('embedPublish.rateLimit')} ${ch.rate_limit_per_minute || 30}${t('embedPublish.rateLimitUnit')}`,
-  ]
-  if (ch.allowed_origins?.length) {
-    parts.push(t('embedPublish.originsCount', { n: ch.allowed_origins.length }))
-  }
-  const count = sessionStats.value[ch.id]
-  if (typeof count === 'number') {
-    parts.push(t('embedPublish.sessionCountLabel', { n: count }))
-  }
-  return parts.join(' · ')
+function agentDisplayName(ch: EmbedChannel): string {
+  return agentForChannel(ch)?.name || ''
+}
+
+function agentForChannel(ch: EmbedChannel): CustomAgent | undefined {
+  return agents.value.find((agent) => agent.id === ch.agent_id)
 }
 
 const loadStoredTokens = (): Record<string, string> => {
@@ -644,13 +834,16 @@ const storeToken = (channelId: string, token: string) => {
 }
 
 const load = async () => {
-  if (!props.agentId) return
   loading.value = true
   try {
-    const res = await listEmbedChannels(props.agentId)
-    channels.value = res?.data || []
+    const [res, agentRes] = await Promise.all([
+      listAllEmbedChannels(),
+      listAgents(),
+    ])
+    allChannels.value = res?.data || []
+    agents.value = agentRes?.data || []
     tokenByChannel.value = { ...loadStoredTokens(), ...tokenByChannel.value }
-    await Promise.all(channels.value.map(async (ch) => {
+    await Promise.all(allChannels.value.map(async (ch) => {
       try {
         const statsRes = await getEmbedChannelStats(ch.id)
         if (statsRes?.data?.session_count != null) {
@@ -665,9 +858,33 @@ const load = async () => {
   }
 }
 
-watch(() => props.agentId, () => {
-  if (props.agentId) load()
-}, { immediate: true })
+watch(filterAgentId, (id) => {
+  if (!showDrawer.value && !editingId.value && id) {
+    createAgentId.value = id
+  }
+})
+
+onMounted(() => {
+  void load()
+})
+
+watch(stepTitles, (titles) => {
+  if (wizardStep.value >= titles.length) {
+    wizardStep.value = Math.max(0, titles.length - 1)
+  }
+})
+
+watch([createAgentId, () => agents.value.length], () => {
+  applyDefaultChannelNameIfNeeded()
+})
+
+watch(createAgentId, (agentId, prev) => {
+  if (!editingId.value || !agentId || agentId === prev || !previewVisible.value) return
+  const ch = drawerChannel.value
+  if (!ch) return
+  clearEmbedStoredChatSessionIfAgentMismatch(ch.id, agentId)
+  previewNonce.value += 1
+})
 
 const tokenFor = (ch: EmbedChannel) => tokenByChannel.value[ch.id] || ch.publish_token
 
@@ -754,6 +971,7 @@ const snippetScenarioHint = computed(() => {
 const fillFormFromChannel = (ch: EmbedChannel) => {
   editingId.value = ch.id
   editingEnabled.value = ch.enabled
+  createAgentId.value = ch.agent_id
   form.value = {
     name: ch.name,
     welcome_message: ch.welcome_message,
@@ -777,9 +995,13 @@ const fillFormFromChannel = (ch: EmbedChannel) => {
 }
 
 const openCreate = () => {
+  wizardStep.value = 0
+  channelNameTouched.value = false
   editingId.value = ''
   editingEnabled.value = true
+  createAgentId.value = filterAgentId.value || ''
   form.value = defaultForm()
+  applyDefaultChannelNameIfNeeded()
   originsText.value = ''
   originsError.value = ''
   drawerSnippetTab.value = 'iframe'
@@ -788,12 +1010,15 @@ const openCreate = () => {
 }
 
 const openDrawer = (ch: EmbedChannel) => {
+  channelNameTouched.value = true
   fillFormFromChannel(ch)
+  goToDeployStep()
   showDrawer.value = true
 }
 
 const closeDrawer = () => {
   showDrawer.value = false
+  wizardStep.value = 0
 }
 
 const parseOrigins = () => parseAllowedOrigins(originsText.value)
@@ -820,6 +1045,10 @@ const mapOriginsApiError = (message: string): string | null => {
 
 const saveForm = async () => {
   if (!isAdmin.value) return
+  if (!createAgentId.value) {
+    MessagePlugin.warning(t('integrations.selectAgentHint'))
+    return
+  }
   const originsValidation = validateAllowedOrigins(parseOrigins())
   if (!originsValidation.ok) {
     originsError.value = originsValidationMessage(originsValidation.error)
@@ -830,7 +1059,7 @@ const saveForm = async () => {
   saving.value = true
   try {
     const payload = {
-      name: form.value.name,
+      name: resolvedEmbedChannelName(),
       welcome_message: form.value.welcome_message,
       allowed_origins: originsValidation.origins,
       rate_limit_per_minute: form.value.rate_limit_per_minute,
@@ -846,15 +1075,32 @@ const saveForm = async () => {
       webhook_url: form.value.webhook_url || '',
       webhook_secret: form.value.webhook_secret || undefined,
       enabled: editingId.value ? editingEnabled.value : true,
+      agent_id: createAgentId.value,
     }
     if (editingId.value) {
+      const previousAgentId = drawerChannel.value?.agent_id
       const res = await updateEmbedChannel(editingId.value, payload)
       MessagePlugin.success(t('embedPublish.updated'))
+      const saved = res?.data
       await load()
-      const updated = channels.value.find((ch) => ch.id === editingId.value) ?? res?.data
-      if (updated) fillFormFromChannel(updated)
+      const updated = saved ?? channels.value.find((ch) => ch.id === editingId.value)
+      if (updated) {
+        fillFormFromChannel(updated)
+        if (previousAgentId && updated.agent_id !== previousAgentId) {
+          clearEmbedStoredChatSession(updated.id)
+          if (previewVisible.value) {
+            previewChannel.value = updated
+            previewNonce.value += 1
+          }
+        }
+      }
     } else {
-      const res = await createEmbedChannel(props.agentId, payload)
+      const targetAgentId = createAgentId.value
+      if (!targetAgentId) {
+        MessagePlugin.warning(t('integrations.selectAgentHint'))
+        return
+      }
+      const res = await createEmbedChannel(targetAgentId, payload)
       if (res?.data?.publish_token) {
         storeToken(res.data.id, res.data.publish_token)
         revealedTokens[res.data.id] = true
@@ -864,8 +1110,11 @@ const saveForm = async () => {
       }
       await load()
       if (res?.data?.id) {
-        const created = channels.value.find((ch) => ch.id === res.data.id)
-        if (created) fillFormFromChannel(created)
+        const created = channels.value.find((ch) => ch.id === res.data.id) ?? res.data
+        if (created) {
+          fillFormFromChannel(created)
+          wizardStep.value = stepTitles.value.length - 1
+        }
       }
     }
   } catch (err: any) {
@@ -885,8 +1134,22 @@ const saveForm = async () => {
 const openPreviewFromDrawer = async () => {
   const ch = drawerChannel.value
   if (!ch) return
+  const mode = drawerSnippetTab.value === 'secure' || drawerSnippetTab.value === 'widget'
+    ? 'widget'
+    : 'iframe'
+  await openPreviewForChannel(ch, { useDraft: true, mode })
+}
+
+async function openPreviewForChannel(
+  ch: EmbedChannel,
+  opts?: { useDraft?: boolean; mode?: 'iframe' | 'widget' },
+) {
   previewLoading.value = true
   try {
+    const agentId = ((opts?.useDraft ? createAgentId.value : '') || ch.agent_id)
+    if (agentId) {
+      clearEmbedStoredChatSessionIfAgentMismatch(ch.id, agentId)
+    }
     let token = tokenFor(ch)
     if (!token) {
       const res = await issueEmbedPreviewSession(ch.id)
@@ -896,12 +1159,17 @@ const openPreviewFromDrawer = async () => {
         return
       }
     }
-    previewMode.value = drawerSnippetTab.value === 'iframe' ? 'iframe' : 'widget'
-    previewChannel.value = ch
+    previewMode.value = opts?.mode ?? 'iframe'
+    previewChannel.value = {
+      ...ch,
+      agent_id: agentId || ch.agent_id,
+      primary_color: opts?.useDraft ? form.value.primary_color : ch.primary_color,
+      widget_position: (opts?.useDraft ? form.value.widget_position : ch.widget_position) as WidgetPosition,
+      default_locale: opts?.useDraft ? (form.value.default_locale || ch.default_locale) : ch.default_locale,
+    }
     previewToken.value = token
-    previewLocale.value = form.value.default_locale || ch.default_locale || ''
+    previewLocale.value = (opts?.useDraft ? form.value.default_locale : '') || ch.default_locale || ''
     previewNonce.value += 1
-    // Avoid TDesign textarea autosize recalculating on a blurred/hidden element.
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
@@ -948,20 +1216,6 @@ const performRotate = async (id: string) => {
   }
 }
 
-const confirmRemoveChannel = (id: string) => {
-  const dialog = DialogPlugin.confirm({
-    header: t('common.delete'),
-    body: t('embedPublish.deleteConfirm'),
-    confirmBtn: { content: t('common.delete'), theme: 'danger' },
-    cancelBtn: t('common.cancel'),
-    onConfirm: async () => {
-      dialog.destroy()
-      await removeChannel(id)
-    },
-    onClose: () => dialog.destroy(),
-  })
-}
-
 const removeChannel = async (id: string) => {
   await deleteEmbedChannel(id)
   const map = loadStoredTokens()
@@ -991,190 +1245,93 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 </script>
 
 <style scoped lang="less">
+@import './css/channel-panel-list.less';
+
 .embed-panel {
   display: flex;
   flex-direction: column;
 }
 
-.channels-header {
+.im-steps {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  padding-bottom: 12px;
+}
+
+.im-step {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-
-  .channels-title {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .channels-count {
-    padding: 2px 8px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 10px;
-    font-size: 12px;
-    color: var(--td-text-color-disabled);
-  }
-}
-
-.channels-loading-wrap {
-  min-height: 80px;
-}
-
-.channels-empty {
-  padding: 32px 0;
-}
-
-.channel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-
-.channel-card {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: inherit;
   text-align: left;
-  font: inherit;
-  color: inherit;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  cursor: pointer;
 
-  &--clickable {
-    cursor: pointer;
-    width: 100%;
-
-    &:hover,
-    &:focus-visible {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-      outline: none;
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
-  }
-
-  &--add {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 68px;
-    border-style: dashed;
-    background: transparent;
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    width: 100%;
-
-    &:hover,
-    &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-      box-shadow: none;
-    }
-
-    &__icon {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-      color: var(--td-brand-color);
-      font-size: 18px;
-    }
-
-    &__label {
-      font-size: 13px;
-      font-weight: 500;
-      line-height: 1.4;
-    }
-  }
-
-  &__badge {
-    flex-shrink: 0;
-    width: 36px;
-    height: 36px;
-    border-radius: 9px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-    color: var(--td-brand-color);
-  }
-
-  &__body {
-    flex: 1;
-    min-width: 0;
-  }
-
-  &__header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  &__title {
-    flex: 1;
-    min-width: 0;
-    margin: 0;
-    font-size: 14px;
-    font-weight: 600;
-    line-height: 1.4;
-    color: var(--td-text-color-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__subtitle {
-    margin: 2px 0 0;
-    font-size: 12px;
-    line-height: 1.5;
+  &:hover {
     color: var(--td-text-color-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
+}
 
-  &__actions {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding-top: 2px;
-  }
+.im-step-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-  &__more {
-    flex-shrink: 0;
-    padding: 2px;
-    opacity: 0;
-    color: var(--td-text-color-placeholder);
-    transition: opacity 0.15s ease;
+.im-step.active {
+  color: var(--td-brand-color);
+  font-weight: 500;
+}
 
-    &:hover,
-    &:focus-visible {
-      background: var(--td-bg-color-secondarycontainer);
-      color: var(--td-text-color-primary);
-    }
-  }
+.im-step.done {
+  color: var(--td-text-color-secondary);
+  font-weight: 500;
+}
 
-  &:hover .channel-card__more,
-  &:focus-within .channel-card__more,
-  &__actions:focus-within .channel-card__more {
-    opacity: 1;
-  }
+.im-step-num {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--td-component-stroke);
+  color: var(--td-text-color-placeholder);
+  background: transparent;
+}
+
+.im-step.active .im-step-num {
+  background: var(--td-brand-color);
+  color: #fff;
+  border-color: var(--td-brand-color);
+}
+
+.im-step.done .im-step-num {
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-brand-color);
+  border-color: var(--td-component-stroke);
+}
+
+.im-step-check {
+  font-size: 12px;
+}
+
+.im-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 /* ---------- Drawer form (matches ModelEditorDialog rhythm) ---------- */
@@ -1220,24 +1377,9 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   }
 }
 
-.form-grid {
-  display: grid;
-  gap: 10px 16px;
-  align-items: start;
-
-  &--2 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  @media (max-width: 520px) {
-    &--2 {
-      grid-template-columns: 1fr;
-    }
-  }
-}
-
 .form-number {
   width: 100%;
+  max-width: 200px;
 }
 
 .enable-row {
@@ -1374,34 +1516,17 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   }
 }
 
-.deploy-step {
-  display: flex;
-  gap: 12px;
-  padding: 14px 0;
+.deploy-block {
+  padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
+
+  &:first-of-type {
+    padding-top: 4px;
+  }
 
   &:last-child {
     border-bottom: none;
     padding-bottom: 0;
-  }
-
-  &__index {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--td-brand-color);
-    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  }
-
-  &__content {
-    flex: 1;
-    min-width: 0;
   }
 
   &__title {

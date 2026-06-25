@@ -189,7 +189,7 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 // ── Send reply ──
 
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
-	content := transformThinkBlocks(reply.Content)
+	content := im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal)
 
 	sessionWebhook := ""
 	if incoming.Extra != nil {
@@ -520,8 +520,8 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	return streamID, nil
 }
 
-func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
-	if content == "" {
+func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+	if fullContent == "" {
 		return nil
 	}
 
@@ -533,21 +533,19 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	}
 
 	state.mu.Lock()
-	state.content.WriteString(content)
+	state.content.Reset()
+	state.content.WriteString(fullContent)
 
-	// No card template → just accumulate, send at EndStream
 	if state.outTrackID == "" {
 		state.mu.Unlock()
 		return nil
 	}
 
-	// Throttle card updates
 	if time.Since(state.lastUpdate) < minCardUpdateInterval {
 		state.mu.Unlock()
 		return nil
 	}
 
-	fullContent := transformThinkBlocks(state.content.String())
 	state.lastUpdate = time.Now()
 	outTrackID := state.outTrackID
 	state.mu.Unlock()
@@ -555,8 +553,33 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, false); err != nil {
 		logger.Warnf(ctx, "[DingTalk] Failed to update card stream: %v", err)
 	}
-
 	return nil
+}
+
+func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+	streamsMu.Lock()
+	state, ok := dStreams[streamID]
+	streamsMu.Unlock()
+	if !ok {
+		return fmt.Errorf("unknown stream ID: %s", streamID)
+	}
+
+	state.mu.Lock()
+	state.content.Reset()
+	state.content.WriteString(finalContent)
+	outTrackID := state.outTrackID
+	state.mu.Unlock()
+
+	if outTrackID != "" {
+		if err := a.streamingUpdateCard(ctx, outTrackID, finalContent, false); err != nil {
+			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
+		}
+	}
+	return nil
+}
+
+func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
 func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
@@ -570,17 +593,17 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 	}
 
 	state.mu.Lock()
-	fullContent := transformThinkBlocks(state.content.String())
+	fullContent := state.content.String()
 	outTrackID := state.outTrackID
+	sessionWebhook := state.sessionWebhook
 	state.mu.Unlock()
 
 	if outTrackID != "" {
-		// Finalize AI card
 		if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, true); err != nil {
 			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
 		}
-	} else if state.sessionWebhook != "" {
-		if err := a.replyViaSessionWebhook(ctx, state.sessionWebhook, fullContent); err != nil {
+	} else if sessionWebhook != "" {
+		if err := a.replyViaSessionWebhook(ctx, sessionWebhook, fullContent); err != nil {
 			logger.Warnf(ctx, "[DingTalk] Failed to end stream: %v", err)
 		}
 	} else {
@@ -591,8 +614,4 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 
 	logger.Infof(ctx, "[DingTalk] Streaming ended: stream_id=%s", streamID)
 	return nil
-}
-
-func transformThinkBlocks(content string) string {
-	return im.TransformThinkBlocks(content, im.MarkdownThinkStyle)
 }

@@ -323,6 +323,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		// "must own every targeted KB" guard if the requirement
 		// surfaces.
 		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
+		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
 		k.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
 		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
@@ -635,6 +636,8 @@ func RegisterModelRoutes(
 		models.POST("", g.Admin(), handler.CreateModel)
 		// 获取模型列表 — Viewer+
 		models.GET("", g.Viewer(), handler.ListModels)
+		// 调试已保存模型会发起真实上游调用并产生费用 — Admin+
+		models.POST("/:id/debug", g.Admin(), handler.DebugModel)
 		// 获取单个模型 — Viewer+
 		models.GET("/:id", g.Viewer(), handler.GetModel)
 		// 更新模型 — Admin+

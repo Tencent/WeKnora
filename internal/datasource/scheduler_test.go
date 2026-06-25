@@ -53,6 +53,10 @@ func (r *fakeDataSourceRepo) Update(_ context.Context, ds *types.DataSource) err
 	return nil
 }
 
+func (r *fakeDataSourceRepo) UpdateSyncState(ctx context.Context, ds *types.DataSource) error {
+	return r.Update(ctx, ds)
+}
+
 func (r *fakeDataSourceRepo) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -115,6 +119,10 @@ func (r *fakeSyncLogRepo) Update(_ context.Context, log *types.SyncLog) error {
 	defer r.mu.Unlock()
 	r.logs[log.ID] = log
 	return nil
+}
+
+func (r *fakeSyncLogRepo) UpdateResult(ctx context.Context, log *types.SyncLog) error {
+	return r.Update(ctx, log)
 }
 
 func (r *fakeSyncLogRepo) CancelPendingByDataSource(_ context.Context, dsID string) error {

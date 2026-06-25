@@ -1565,20 +1565,15 @@ watch(
 
 .nav-badge {
   flex-shrink: 0;
-  min-width: 18px;
+  margin-left: 2px;
   padding: 0 6px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--td-bg-color-secondarycontainer);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 18px;
-  text-align: center;
   color: var(--td-text-color-secondary);
-
-  .nav-item.active & {
-    background: color-mix(in srgb, var(--td-brand-color) 18%, transparent);
-    color: var(--td-brand-color);
-  }
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  text-align: center;
 }
 
 .settings-content {

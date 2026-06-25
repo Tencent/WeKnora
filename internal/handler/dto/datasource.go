@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -65,7 +66,8 @@ func NewDataSourceResponse(ds *types.DataSource) *DataSourceResponse {
 			ResourceIDs: parsed.ResourceIDs,
 			Settings:    parsed.Settings,
 		}
-		configured = parsed.HasCredentials()
+		enrichRSSFeedURLsInSettings(ds.Type, parsed, cfgDTO)
+		configured = parsed.HasConfiguredCredentials(ds.Type)
 	}
 	return &DataSourceResponse{
 		ID:                   ds.ID,
@@ -92,6 +94,32 @@ func NewDataSourceResponse(ds *types.DataSource) *DataSourceResponse {
 			"credentials": {Configured: configured},
 		},
 	}
+}
+
+// enrichRSSFeedURLsInSettings copies feed_urls from credentials into settings
+// for API responses. Feed URLs are not secrets but may still live in the
+// encrypted credentials blob on rows created before they moved to settings.
+func enrichRSSFeedURLsInSettings(dsType string, parsed *types.DataSourceConfig, cfgDTO *DataSourceConfigDTO) {
+	if dsType != types.ConnectorTypeRSS || parsed == nil || cfgDTO == nil {
+		return
+	}
+	if cfgDTO.Settings != nil {
+		if v, ok := cfgDTO.Settings["feed_urls"].(string); ok && strings.TrimSpace(v) != "" {
+			return
+		}
+	}
+	raw, ok := parsed.Credentials["feed_urls"]
+	if !ok {
+		return
+	}
+	feedURLs, ok := raw.(string)
+	if !ok || strings.TrimSpace(feedURLs) == "" {
+		return
+	}
+	if cfgDTO.Settings == nil {
+		cfgDTO.Settings = make(map[string]interface{})
+	}
+	cfgDTO.Settings["feed_urls"] = feedURLs
 }
 
 func NewDataSourceResponses(dss []*types.DataSource) []*DataSourceResponse {

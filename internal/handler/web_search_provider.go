@@ -422,8 +422,9 @@ func (h *WebSearchProviderHandler) doTestSearch(ctx context.Context, providerTyp
 		return err
 	}
 	if len(results) == 0 {
-		logger.Warnf(ctx, "[WebSearch][Test] search returned 0 results — API key or configuration may be invalid")
-		return fmt.Errorf("search returned 0 results, please verify your API key and configuration")
+		err := infra_web_search.EmptyTestResultsError(providerType, searchProvider)
+		logger.Warnf(ctx, "[WebSearch][Test] %v", err)
+		return err
 	}
 	logger.Infof(ctx, "[WebSearch][Test] succeeded: type=%s, results=%d", providerType, len(results))
 	return nil

@@ -10,6 +10,10 @@ type KnowledgeProcessOverrides struct {
 	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
 	GraphEnabled             *bool                     `json:"graph_enabled,omitempty"`
 	ExtractConfig            *ExtractConfig            `json:"extract_config,omitempty"`
+	// ParserEngineOverrides passes key-value configuration to docreader parsers
+	// (e.g. pdf_force_scanned=true). Merged with tenant-level overrides in the
+	// parse pipeline; per-upload values take priority on conflict.
+	ParserEngineOverrides map[string]string `json:"parser_engine_overrides,omitempty"`
 }
 
 // EffectiveProcessConfig is the merged view used by the parse pipeline.

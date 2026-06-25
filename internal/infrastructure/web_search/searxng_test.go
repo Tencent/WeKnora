@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,5 +126,42 @@ func TestSearxngProvider_Search(t *testing.T) {
 	}
 	if got := results[0].Source; got != "searxng" {
 		t.Fatalf("unexpected source: %q", got)
+	}
+}
+
+func TestSearxngProvider_Search_EmptyWithUnresponsiveEngines(t *testing.T) {
+	utils.ResetSSRFWhitelistForTest()
+	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	defer func() {
+		os.Unsetenv("SSRF_WHITELIST")
+		utils.ResetSSRFWhitelistForTest()
+	}()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results":              []any{},
+			"unresponsive_engines": [][]string{{"google", "timeout"}},
+		})
+	}))
+	defer srv.Close()
+
+	provider, err := NewSearxngProvider(types.WebSearchProviderParameters{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("NewSearxngProvider: %v", err)
+	}
+	sp := provider.(*SearxngProvider)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results, err := sp.Search(ctx, "test", 1, false)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+	if got := sp.EmptyResultDiagnostics(); !strings.Contains(got, "google (timeout)") {
+		t.Fatalf("EmptyResultDiagnostics() = %q", got)
 	}
 }

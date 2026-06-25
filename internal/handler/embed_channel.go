@@ -67,6 +67,7 @@ type embedChannelRequest struct {
 	DefaultLocale          *string  `json:"default_locale"`
 	WebhookURL             *string  `json:"webhook_url"`
 	WebhookSecret          *string  `json:"webhook_secret"`
+	AgentID                *string  `json:"agent_id"`
 }
 
 // isProductionMode reports whether the server runs in a hardened (release) mode.
@@ -241,6 +242,9 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 		PageTitle:          req.PageTitle,
 		HeaderTitleMode:    req.HeaderTitleMode,
 		WidgetPosition:     req.WidgetPosition,
+	}
+	if req.AgentID != nil {
+		update.AgentID = strings.TrimSpace(*req.AgentID)
 	}
 	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowMemory, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
 	if err != nil {

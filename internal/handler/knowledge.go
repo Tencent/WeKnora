@@ -226,6 +226,30 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 	return info.ID, nil
 }
 
+// enqueueKnowledgeListReparse enqueues an async batch-reparse task for the
+// given knowledge IDs and returns the asynq task ID.
+func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
+	ctx context.Context, tenantID uint64, ids []string, processConfig *types.KnowledgeProcessOverrides,
+) (string, error) {
+	payload := types.KnowledgeListReparsePayload{
+		TenantID:      tenantID,
+		KnowledgeIDs:  ids,
+		ProcessConfig: processConfig,
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal payload: %w", err)
+	}
+	task := asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
+		asynq.Queue("low"), asynq.MaxRetry(3))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		return "", fmt.Errorf("enqueue task: %w", err)
+	}
+	return info.ID, nil
+}
+
 // CreateKnowledgeFromFile godoc
 // @Summary      从文件创建知识
 // @Description  上传文件并创建知识条目
@@ -1807,7 +1831,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 
 // SearchKnowledge godoc
 // @Summary      Search knowledge
-// @Description  Search knowledge files by keyword. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.
+// @Description  Search knowledge files by keyword. Pass recent=true without a keyword to browse recent files. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.
 // @Tags         Knowledge
 // @Accept       json
 // @Produce      json
@@ -1816,6 +1840,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Param        limit      query     int     false "Limit for pagination (default 20)"
 // @Param        file_types query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
 // @Param        agent_id   query     string  false "Shared agent ID (search within agent's KB scope)"
+// @Param        recent     query     bool    false "Return recent files when keyword is empty"
 // @Success      200         {object}  map[string]interface{}     "Search results"
 // @Failure      400         {object}  errors.AppError            "Invalid request"
 // @Security     Bearer
@@ -1827,18 +1852,19 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
 	}
 	// Accept both ?keyword= (legacy / upstream name) and ?query= (what most
-	// MCP / agent integrations send). Falling silently back to an unsorted
-	// listing when both are empty caused the "all queries return the same 5
-	// newest cards" footgun — return 400 instead so the caller gets a clear
-	// signal that the search wasn't query-driven.
+	// MCP / agent integrations send). Empty input is only valid for an explicit
+	// recent-file browse request; ordinary callers still get a clear 400 instead
+	// of silently receiving the same newest cards for every missing query.
 	keyword := c.Query("keyword")
 	if keyword == "" {
 		keyword = c.Query("query")
 	}
-	if strings.TrimSpace(keyword) == "" {
+	recent, _ := strconv.ParseBool(c.DefaultQuery("recent", "false"))
+	if strings.TrimSpace(keyword) == "" && !recent {
 		c.Error(errors.NewBadRequestError("missing search keyword: pass ?keyword=... or ?query=..."))
 		return
 	}
+	keyword = strings.TrimSpace(keyword)
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
@@ -2239,4 +2265,107 @@ func sliceContains(ss []string, target string) bool {
 		}
 	}
 	return false
+}
+
+type batchReparseKnowledgeRequest struct {
+	KBID          string                           `json:"kb_id" binding:"required"`
+	IDs           []string                         `json:"ids" binding:"required"`
+	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
+}
+
+// BatchReparseKnowledge godoc
+// @Summary      批量重新解析知识
+// @Description  按 ID 列表批量重新解析单个知识库下的多个知识条目
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      batchReparseKnowledgeRequest  true  "批量重解析请求"
+// @Success      200      {object}  map[string]interface{}        "任务已提交"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/batch-reparse [post]
+func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req batchReparseKnowledgeRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Errorf(ctx, "failed to parse batch reparse knowledge request: %v", err)
+		c.Error(errors.NewBadRequestError("invalid batch reparse knowledge request parameters"))
+		return
+	}
+
+	seen := make(map[string]struct{}, len(req.IDs))
+	ids := make([]string, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
+		return
+	}
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge batch, kb_id: %s, size: %d, err: %v", kbID, len(ids), err)
+		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
+		return
+	}
+	if len(knowledgeList) != len(ids) {
+		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
+		return
+	}
+	for _, k := range knowledgeList {
+		if k.KnowledgeBaseID != kbID {
+			c.Error(errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
+			return
+		}
+	}
+
+	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, ids, req.ProcessConfig)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue batch reparse task"))
+		return
+	}
+
+	logger.Infof(ctx, "Batch knowledge reparse task enqueued: %s, kb_id: %s, count: %d",
+		taskID, secutils.SanitizeForLog(kbID), len(ids))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Batch reparse task submitted",
+		"data": gin.H{
+			"task_id":       taskID,
+			"reparse_count": len(ids),
+		},
+	})
 }

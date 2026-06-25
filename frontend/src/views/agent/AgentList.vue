@@ -807,6 +807,7 @@
     <!-- 智能体编辑器弹窗 -->
     <AgentEditorModal :visible="editorVisible" :mode="editorMode" :agent="editingAgent"
       :initialSection="editorInitialSection"
+      :initialHighlightField="editorInitialHighlightField"
       :readOnly="editorMode === 'edit' && editingAgent != null && !canManageAgent(editingAgent as AgentWithUI)"
       @update:visible="editorVisible = $event" @success="handleEditorSuccess" />
 
@@ -1083,6 +1084,7 @@ const editorVisible = ref(false)
 const editorMode = ref<'create' | 'edit'>('create')
 const editingAgent = ref<CustomAgent | null>(null)
 const editorInitialSection = ref<string>('basic')
+const editorInitialHighlightField = ref<string>('')
 /** 当前打开三点菜单的卡片 agent.id（用于受控弹出层，避免 computed 项无持久引用导致菜单不响应） */
 const openMoreAgentId = ref<string | null>(null)
 
@@ -1117,7 +1119,9 @@ const fetchList = (force = false) => {
   return Promise.all([
     chatResources.fetchAgentsForList({ creator: creatorFilter.value }, force).then(applyAgentListData),
     orgStore.fetchOrganizations({ force }),
+    orgStore.fetchSharedAgents({ force }),
   ]).finally(() => { loading.value = false }).then(() => {
+    checkAndOpenEditModal()
     // 各空间智能体数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.agents?.by_organization
     if (counts) spaceAgentCountByOrg.value = { ...counts }
@@ -1125,20 +1129,42 @@ const fetchList = (force = false) => {
 }
 
 // 检查 URL 参数并打开编辑模态框
+const resolveAgentForEdit = (editId: string, sourceTenantId?: string): CustomAgent | null => {
+  const own = agents.value.find(a => a.id === editId)
+  if (own) return own
+  if (sourceTenantId) {
+    const shared = sharedAgents.value.find(
+      s => s.agent?.id === editId && String(s.source_tenant_id) === sourceTenantId,
+    )
+    if (shared?.agent) return shared.agent as CustomAgent
+  }
+  return null
+}
+
 const checkAndOpenEditModal = () => {
   const editId = route.query.edit as string
   const section = route.query.section as string
+  const sourceTenantId = route.query.sourceTenantId as string | undefined
+  if (editId && (section === 'im' || section === 'embed' || section === 'integrations')) {
+    const tab = section === 'embed' ? 'embed' : 'im'
+    router.replace({
+      path: '/platform/integrations',
+      query: { tab, agentId: editId },
+    })
+    return
+  }
   if (editId) {
-    const agent = agents.value.find(a => a.id === editId)
+    const agent = resolveAgentForEdit(editId, sourceTenantId)
     if (agent) {
       editingAgent.value = agent
       editorMode.value = 'edit'
       editorInitialSection.value = section || 'basic'
+      editorInitialHighlightField.value = (route.query.highlight as string) || ''
       editorVisible.value = true
     }
     // Drop the transient edit/section params but preserve other filter
     // state (scope / creator / q) so refreshing doesn't reset the view.
-    const { edit: _e, section: _s, ...rest } = route.query
+    const { edit: _e, section: _s, highlight: _h, sourceTenantId: _st, ...rest } = route.query
     router.replace({ path: route.path, query: rest })
   }
 }
@@ -1150,7 +1176,7 @@ const checkAndOpenEditModal = () => {
 watch(
   () => route.query.edit,
   (v) => {
-    if (v && agents.value.length > 0) {
+    if (v && (agents.value.length > 0 || sharedAgents.value.length > 0)) {
       checkAndOpenEditModal()
     }
   },
@@ -1286,6 +1312,8 @@ const handleEdit = (agent: AgentWithUI) => {
   openMoreAgentId.value = null
   editingAgent.value = agent
   editorMode.value = 'edit'
+  editorInitialSection.value = 'basic'
+  editorInitialHighlightField.value = ''
   editorVisible.value = true
 }
 
@@ -1519,6 +1547,8 @@ const formatDate = (dateStr: string) => {
 const openCreateModal = () => {
   editingAgent.value = null
   editorMode.value = 'create'
+  editorInitialSection.value = 'basic'
+  editorInitialHighlightField.value = ''
   editorVisible.value = true
 }
 

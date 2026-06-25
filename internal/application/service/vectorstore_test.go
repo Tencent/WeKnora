@@ -921,6 +921,9 @@ func (r *realKBRepo) CountByVectorStoreID(ctx context.Context, db *gorm.DB, tena
 		Count(&count).Error
 	return count, err
 }
+func (r *realKBRepo) CountByModelID(_ context.Context, _ uint64, _ string) (int64, error) {
+	return 0, nil
+}
 
 // The remaining methods are not called by the tested code paths; declare them
 // so realKBRepo satisfies interfaces.KnowledgeBaseRepository.

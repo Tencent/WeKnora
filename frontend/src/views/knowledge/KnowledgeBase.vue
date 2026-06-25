@@ -36,6 +36,7 @@ import {
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
+  batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
 } from "@/api/knowledge-base/index";
@@ -416,6 +417,79 @@ watch(viewMode, (v) => {
 const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
+const batchReparsing = ref(false);
+// IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
+const pendingReparseAck = ref<Set<string>>(new Set());
+
+const applyOptimisticBatchReparse = (ids: string[]) => {
+  const idSet = new Set(ids);
+  for (const card of cardList.value) {
+    if (!idSet.has(card.id)) continue;
+    pendingReparseAck.value.add(card.id);
+    card.parse_status = 'pending';
+    card.summary_status = undefined;
+    card.description = '';
+    delete traceAvailableById[card.id];
+    traceAvailableById[card.id] = true;
+  }
+};
+
+const syncReparseAckFromServer = (ids: string[]) => {
+  for (const id of ids) {
+    if (!pendingReparseAck.value.has(id)) continue;
+    const card = cardList.value.find((c) => c.id === id);
+    if (card && isParseInFlight(card.parse_status)) {
+      pendingReparseAck.value.delete(id);
+    }
+  }
+};
+
+const awaitBatchReparseReflection = async (ids: string[]) => {
+  const maxPolls = 30;
+  const delayMs = 400;
+  for (let i = 0; i < maxPolls && pendingReparseAck.value.size > 0; i++) {
+    await loadKnowledgeFiles(kbId.value);
+    syncReparseAckFromServer(ids);
+    applyOptimisticBatchReparse(Array.from(pendingReparseAck.value));
+    await new Promise<void>((r) => setTimeout(r, delayMs));
+  }
+  pendingReparseAck.value.clear();
+};
+
+const confirmBatchReparse = async () => {
+  if (batchReparsing.value || batchDeleting.value || selectedIds.value.size === 0) return;
+  const allIds = Array.from(selectedIds.value);
+  const ids = allIds.filter((id) => {
+    const item = cardList.value.find((c) => c.id === id);
+    return !item || !isParseInFlight(item.parse_status);
+  });
+  const skipped = allIds.length - ids.length;
+  if (ids.length === 0) {
+    MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
+    return;
+  }
+  if (skipped > 0) {
+    MessagePlugin.warning(t('knowledgeBase.batchReparseSkippedInFlight', { count: skipped }));
+  }
+  batchReparsing.value = true;
+  try {
+    const res: any = await batchReparseKnowledge(kbId.value, ids);
+    if (res?.success) {
+      MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
+      applyOptimisticBatchReparse(ids);
+      clearSelection();
+      batchMode.value = false;
+      scheduleWikiStatusProbes();
+      void awaitBatchReparseReflection(ids);
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeBase.batchReparseFailed'));
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchReparseFailed'));
+  } finally {
+    batchReparsing.value = false;
+  }
+};
 
 const selectedTagIds = ref<string[]>([]);
 const tagList = ref<any[]>([]);
@@ -1220,13 +1294,25 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
           const index = cardList.value.findIndex(card => card.id == item.id);
           if (index == -1) return;
 
-          if (cardList.value[index].parse_status !== item.parse_status ||
+          let parseStatus = item.parse_status;
+          if (pendingReparseAck.value.has(item.id)) {
+            if (isParseInFlight(item.parse_status)) {
+              pendingReparseAck.value.delete(item.id);
+            } else {
+              parseStatus = 'pending';
+            }
+          }
+
+          if (cardList.value[index].parse_status !== parseStatus ||
             cardList.value[index].summary_status !== item.summary_status ||
             cardList.value[index].description !== item.description) {
-            shouldRefreshWikiStatus ||= shouldRefreshWikiStatusAfterKnowledgePoll(cardList.value[index], item);
+            shouldRefreshWikiStatus ||= shouldRefreshWikiStatusAfterKnowledgePoll(
+              cardList.value[index],
+              { ...item, parse_status: parseStatus },
+            );
 
             // Always update the card data
-            cardList.value[index].parse_status = item.parse_status;
+            cardList.value[index].parse_status = parseStatus;
             cardList.value[index].summary_status = item.summary_status;
             cardList.value[index].description = item.description;
             delete traceAvailableById[item.id];
@@ -1956,7 +2042,7 @@ const onCardClick = (item: KnowledgeCard) => {
 };
 
 const confirmBatchDelete = async () => {
-  if (batchDeleting.value || selectedIds.value.size === 0) return;
+  if (batchDeleting.value || batchReparsing.value || selectedIds.value.size === 0) return;
   const ids = Array.from(selectedIds.value);
   const deletedIdSet = new Set(ids);
   batchDeleting.value = true;
@@ -2208,8 +2294,7 @@ async function createNewSession(value: string): Promise<void> {
                     <span class="tag-hash-icon">#</span>
                     <div class="tag-edit-input">
                       <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40"
-                        :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                        @enter="submitCreateTag"
+                        :placeholder="$t('knowledgeBase.tagNamePlaceholder')" @enter="submitCreateTag"
                         @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelCreateTag() } }" />
                     </div>
                   </div>
@@ -2326,31 +2411,19 @@ async function createNewSession(value: string): Promise<void> {
                   </t-tooltip>
                 </div>
                 <div v-if="canEdit" class="doc-filter-actions">
-                  <KbUploadSourceDropdown
-                    ref="uploadSourceRef"
-                    :accept-file-types="acceptFileTypes"
-                    :supported-file-types="[...supportedFileTypes]"
-                    include-manual
-                    trigger-icon="file-add"
-                    trigger-class="content-bar-icon-btn"
-                    data-guide="kb-detail-add-doc"
-                    :tooltip="t('knowledgeBase.addDocument')"
-                    placement="bottom-right"
-                    @files="handleUploadSourceFiles"
-                    @url="handleUploadSourceUrl"
-                    @manual="handleManualCreate"
-                  />
+                  <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
+                    :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
+                    trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
+                    :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
+                    @url="handleUploadSourceUrl" @manual="handleManualCreate" />
                 </div>
               </div>
-              <div class="doc-scroll-container" :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }" ref="knowledgeScroll"
-                @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
-                <div
-                  v-if="docMarqueeVisible"
-                  class="doc-marquee-box"
+              <div class="doc-scroll-container"
+                :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
+                ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
+                <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
-                  :style="docMarqueeBoxStyle"
-                  aria-hidden="true"
-                />
+                  :style="docMarqueeBoxStyle" aria-hidden="true" />
                 <!-- 文档骨架屏 -->
                 <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
@@ -2372,10 +2445,9 @@ async function createNewSession(value: string): Promise<void> {
                     <!-- 现有文档卡片 -->
                     <div class="knowledge-card"
                       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
-                      :data-select-id="item.id"
-                      v-for="(item, index) in cardList" :key="item.id" @click="onCardClick(item)"
-                      @mouseenter="onCardMouseEnter($event, item)" @mousemove="onCardMouseMove($event)"
-                      @mouseleave="onCardMouseLeave">
+                      :data-select-id="item.id" v-for="(item, index) in cardList" :key="item.id"
+                      @click="onCardClick(item)" @mouseenter="onCardMouseEnter($event, item)"
+                      @mousemove="onCardMouseMove($event)" @mouseleave="onCardMouseLeave">
                       <div class="card-content">
                         <div class="card-content-nav">
                           <div v-if="canEdit && batchMode" class="card-nav-check" @click.stop>
@@ -2386,8 +2458,7 @@ async function createNewSession(value: string): Promise<void> {
                           <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
                           <t-popup v-if="canEdit" v-model="item.isMore" overlayClassName="card-more"
                             :on-visible-change="(v: boolean) => onCardMoreVisibleChange(v, item)" trigger="click"
-                            destroy-on-close
-                            placement="bottom-right">
+                            destroy-on-close placement="bottom-right">
                             <div variant="outline" class="more-wrap" @click.stop="openMore(index)"
                               :class="[moreIndex == index ? 'active-more' : '']">
                               <img class="more-icon" src="@/assets/img/more.png" alt="" />
@@ -2405,31 +2476,20 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="chart-bar" />
                                   <span>{{ t('knowledgeStages.viewTrace') }}</span>
                                 </div>
-                                <div
-                                  v-if="isParseInFlight(item.parse_status)"
-                                  class="card-menu-item"
-                                  @click.stop="onReparseMenuClick(index, item)"
-                                >
+                                <div v-if="isParseInFlight(item.parse_status)" class="card-menu-item"
+                                  @click.stop="onReparseMenuClick(index, item)">
                                   <t-icon class="icon" name="refresh" />
                                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                                 </div>
-                                <div
-                                  v-else
-                                  class="card-menu-item"
-                                  @click.stop="confirmRebuildKnowledge(index, item)"
-                                >
+                                <div v-else class="card-menu-item" @click.stop="confirmRebuildKnowledge(index, item)">
                                   <t-icon class="icon" name="refresh" />
                                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                                 </div>
-                                <t-popconfirm
-                                  v-if="isParseInFlight(item.parse_status)"
-                                  theme="warning"
+                                <t-popconfirm v-if="isParseInFlight(item.parse_status)" theme="warning"
                                   :content="t('knowledgeBase.cancelParseConfirmBody', { title: item.file_name || item.title || item.id })"
                                   :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
-                                  :cancel-btn="{ content: t('common.cancel') }"
-                                  placement="left"
-                                  @confirm="confirmCancelParseKnowledge(item)"
-                                >
+                                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
+                                  @confirm="confirmCancelParseKnowledge(item)">
                                   <div class="card-menu-item danger" @click.stop>
                                     <t-icon class="icon" name="close-circle" />
                                     <span>{{ t('knowledgeBase.cancelParse') }}</span>
@@ -2445,14 +2505,11 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="queue" />
                                   <span>{{ t('menu.batchManage') }}</span>
                                 </div>
-                                <t-popconfirm
-                                  theme="warning"
+                                <t-popconfirm theme="warning"
                                   :content="t('knowledgeBase.confirmDeleteDocument', { fileName: item.file_name || '' })"
                                   :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
-                                  :cancel-btn="{ content: t('common.cancel') }"
-                                  placement="left"
-                                  @confirm="confirmDeleteKnowledge(index, item)"
-                                >
+                                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
+                                  @confirm="confirmDeleteKnowledge(index, item)">
                                   <div class="card-menu-item danger" @click.stop>
                                     <t-icon class="icon" name="delete" />
                                     <span>{{ t('knowledgeBase.deleteDocument') }}</span>
@@ -2500,7 +2557,7 @@ async function createNewSession(value: string): Promise<void> {
                                     <div class="move-mode-text">
                                       <span class="move-mode-label">{{ t('knowledgeBase.moveModeReuseVectors') }}</span>
                                       <span class="move-mode-desc">{{ t('knowledgeBase.moveModeReuseVectorsDesc')
-                                      }}</span>
+                                        }}</span>
                                     </div>
                                   </div>
                                   <div class="move-mode-item" :class="{ active: moveMode === 'reparse' }"
@@ -2523,57 +2580,33 @@ async function createNewSession(value: string): Promise<void> {
                             </template>
                           </t-popup>
                         </div>
-                        <div
-                          v-if="isParseInFlight(item.parse_status)"
-                          class="card-analyze card-analyze-trace"
-                        >
+                        <div v-if="isParseInFlight(item.parse_status)" class="card-analyze card-analyze-trace">
                           <t-icon name="loading" class="card-analyze-loading"></t-icon>
-                          <span
-                            class="card-analyze-txt card-analyze-trace-link"
-                            role="button"
-                            tabindex="0"
-                            :title="t('knowledgeStages.viewTrace')"
-                            @click.stop="handleViewTrace(index, item)"
+                          <span class="card-analyze-txt card-analyze-trace-link" role="button" tabindex="0"
+                            :title="t('knowledgeStages.viewTrace')" @click.stop="handleViewTrace(index, item)"
                             @keydown.enter.stop="handleViewTrace(index, item)"
-                            @keydown.space.prevent.stop="handleViewTrace(index, item)"
-                          >{{ inFlightCardStatusText(item) }}</span>
-                          <button
-                            type="button"
-                            class="card-analyze-trace-btn"
-                            :title="t('knowledgeStages.viewTrace')"
-                            :aria-label="t('knowledgeStages.viewTrace')"
-                            @click.stop="handleViewTrace(index, item)"
-                          >
+                            @keydown.space.prevent.stop="handleViewTrace(index, item)">{{
+                            inFlightCardStatusText(item) }}</span>
+                          <button type="button" class="card-analyze-trace-btn" :title="t('knowledgeStages.viewTrace')"
+                            :aria-label="t('knowledgeStages.viewTrace')" @click.stop="handleViewTrace(index, item)">
                             <t-icon name="chart-line" />
                           </button>
                         </div>
-                        <div
-                          v-else-if="item.parse_status === 'failed'"
-                          class="card-analyze failure card-analyze-trace"
-                        >
+                        <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure card-analyze-trace">
                           <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
-                          <span
-                            class="card-analyze-txt failure card-analyze-trace-link"
-                            role="button"
-                            tabindex="0"
-                            :title="t('knowledgeStages.viewTrace')"
-                            @click.stop="handleViewTrace(index, item)"
+                          <span class="card-analyze-txt failure card-analyze-trace-link" role="button" tabindex="0"
+                            :title="t('knowledgeStages.viewTrace')" @click.stop="handleViewTrace(index, item)"
                             @keydown.enter.stop="handleViewTrace(index, item)"
-                            @keydown.space.prevent.stop="handleViewTrace(index, item)"
-                          >{{ t('knowledgeBase.parsingFailed') }}</span>
-                          <button
-                            type="button"
-                            class="card-analyze-trace-btn"
-                            :title="t('knowledgeStages.viewTrace')"
-                            :aria-label="t('knowledgeStages.viewTrace')"
-                            @click.stop="handleViewTrace(index, item)"
-                          >
+                            @keydown.space.prevent.stop="handleViewTrace(index, item)">{{
+                              t('knowledgeBase.parsingFailed') }}</span>
+                          <button type="button" class="card-analyze-trace-btn" :title="t('knowledgeStages.viewTrace')"
+                            :aria-label="t('knowledgeStages.viewTrace')" @click.stop="handleViewTrace(index, item)">
                             <t-icon name="chart-bar" />
                           </button>
                         </div>
                         <div v-else-if="item.parse_status === 'draft'" class="card-draft">
                           <t-tag size="small" theme="warning" variant="light-outline">{{ t('knowledgeBase.draft')
-                          }}</t-tag>
+                            }}</t-tag>
                           <span class="card-draft-tip">{{ t('knowledgeBase.draftTip') }}</span>
                         </div>
                         <div
@@ -2690,9 +2723,7 @@ async function createNewSession(value: string): Promise<void> {
                       :style="{ left: cardPopoverPos.x + 'px', top: cardPopoverPos.y + 'px' }">
                       <template v-if="hoveredCardItem">
                         <div class="card-popover-title">{{ hoveredCardItem.file_name }}</div>
-                        <div
-                          v-if="isParseInFlight(hoveredCardItem.parse_status)"
-                          class="card-popover-status parsing">
+                        <div v-if="isParseInFlight(hoveredCardItem.parse_status)" class="card-popover-status parsing">
                           <KnowledgeProcessingTimeline :knowledge-id="hoveredCardItem.id"
                             :parse-status="hoveredCardItem.parse_status" :auto-poll="false" :compact="true" />
                         </div>
@@ -2723,7 +2754,7 @@ async function createNewSession(value: string): Promise<void> {
                         <div class="card-popover-meta">
                           <span class="card-popover-time">{{ t('knowledgeBase.updatedAt') }}：{{
                             formatDocTime(hoveredCardItem.updated_at)
-                          }}</span>
+                            }}</span>
                           <span v-if="(hoveredCardItem as any).channel && (hoveredCardItem as any).channel !== 'web'"
                             class="card-popover-channel">{{ getChannelLabel((hoveredCardItem as any).channel) }}</span>
                           <span v-if="(hoveredCardItem as any).tags && (hoveredCardItem as any).tags.length > 0" class="card-popover-tag">{{
@@ -2750,9 +2781,9 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
-                <DocumentBatchBar :count="selectedIds.size" :loading="batchDeleting"
-                  :visible="batchMode || selectedIds.size > 0" @cancel="handleBatchCancel"
-                  @delete="confirmBatchDelete" />
+                <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
+                  :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
+                  @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
               </div>
             </div>
           </div>

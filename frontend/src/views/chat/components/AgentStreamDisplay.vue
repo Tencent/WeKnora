@@ -1337,9 +1337,8 @@ const displayEvents = computed(() => {
 
   const result = buildFullEventList(stream);
 
-  // Quick-answer RAG: only render the final answer stream here. Pipeline steps
-  // are ephemeral UI in RagPipelineProgress and are replaced by citations or
-  // answer output — never show tool_call cards in this component.
+  // Quick-answer RAG: pipeline steps and model thinking live in RagPipelineProgress;
+  // here we only render the final answer stream.
   if (props.ragMode) {
     return result.filter((e: any) => e.type === 'answer');
   }

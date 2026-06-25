@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -221,6 +222,41 @@ type DataSourceConfig struct {
 // whether to run live-connector validation.
 func (d DataSourceConfig) HasCredentials() bool {
 	return len(d.Credentials) > 0
+}
+
+// HasConfiguredCredentials reports whether user-facing secret credentials are
+// stored. RSS feed URLs are non-secret configuration (settings); only
+// auth_headers count as credentials for that connector.
+func (d DataSourceConfig) HasConfiguredCredentials(connectorType string) bool {
+	if len(d.Credentials) == 0 {
+		return false
+	}
+	switch connectorType {
+	case ConnectorTypeRSS:
+		raw, ok := d.Credentials["auth_headers"]
+		if !ok {
+			return false
+		}
+		s, ok := raw.(string)
+		return ok && strings.TrimSpace(s) != ""
+	default:
+		return len(d.Credentials) > 0
+	}
+}
+
+// StripNonSecretCredentials removes non-secret values mistakenly stored in the
+// credentials map before persistence.
+func (d *DataSourceConfig) StripNonSecretCredentials(connectorType string) {
+	if d == nil || d.Credentials == nil {
+		return
+	}
+	switch connectorType {
+	case ConnectorTypeRSS:
+		delete(d.Credentials, "feed_urls")
+		if len(d.Credentials) == 0 {
+			d.Credentials = nil
+		}
+	}
 }
 
 // Resource represents a syncable resource (document, folder, space) from external system

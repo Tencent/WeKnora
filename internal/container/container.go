@@ -57,6 +57,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -1364,6 +1365,9 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(yuqueConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register yuque connector: %w", err))
+	}
+	if err := registry.Register(rssConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
 	}
 
 	// Future connectors will be registered here:

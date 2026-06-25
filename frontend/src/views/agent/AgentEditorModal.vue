@@ -35,7 +35,7 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div class="content-wrapper" :class="{ 'content-wrapper--prompts': currentSection === 'prompts' }">
+              <div ref="contentWrapperRef" class="content-wrapper" :class="{ 'content-wrapper--prompts': currentSection === 'prompts' }">
                 <!-- 基础设置 -->
                 <div v-show="currentSection === 'basic'" class="section">
                   <div class="section-header">
@@ -67,6 +67,27 @@
                               <t-icon name="file-copy" />
                             </t-button>
                           </t-tooltip>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 集成渠道状态（编辑模式，配置在集成中心） -->
+                    <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('integrations.agentEditor.label') }}</label>
+                        <p class="desc">{{ $t('integrations.agentEditor.desc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <div class="integration-inline">
+                          <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('im')">
+                            <span>{{ $t('integrations.tabs.im') }} · {{ agentIMChannelCount }}</span>
+                            <t-icon name="chevron-right" size="14px" />
+                          </button>
+                          <span class="integration-inline__sep" aria-hidden="true">|</span>
+                          <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('embed')">
+                            <span>{{ $t('integrations.tabs.embed') }} · {{ agentEmbedChannelCount }}</span>
+                            <t-icon name="chevron-right" size="14px" />
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -544,7 +565,12 @@
 
                   <div class="settings-group">
                     <!-- 模型选择 -->
-                    <div class="setting-row" data-guide="agent-create-model">
+                    <div
+                      class="setting-row"
+                      data-guide="agent-create-model"
+                      data-agent-field="summary_model"
+                      :class="{ 'setting-row--field-highlight': highlightedField === 'summary_model' }"
+                    >
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
                         <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
@@ -594,8 +620,13 @@
                       </div>
                     </div>
 
-                    <!-- ReRank 模型（启用知识库时显示） -->
-                    <div v-if="hasKnowledgeBase" class="setting-row">
+                    <!-- ReRank 模型（启用知识库或 knowledge_search 工具时显示） -->
+                    <div
+                      v-if="showRerankModelField"
+                      class="setting-row"
+                      data-agent-field="rerank_model"
+                      :class="{ 'setting-row--field-highlight': highlightedField === 'rerank_model' }"
+                    >
                       <div class="setting-info">
                         <label>
                           {{ $t('agent.editor.rerankModel') }}
@@ -828,7 +859,11 @@
 
                   <div class="settings-group">
                     <!-- 允许的工具（按组渲染，统一网格） -->
-                    <div class="setting-row setting-row-vertical">
+                    <div
+                      class="setting-row setting-row-vertical"
+                      data-agent-field="allowed_tools"
+                      :class="{ 'setting-row--field-highlight': highlightedField === 'allowed_tools' }"
+                    >
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.allowedTools') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.selectTools') }}</p>
@@ -1315,39 +1350,6 @@
                   v-show="currentSection === 'share'" class="section">
                   <AgentShareSettings :agent-id="editorAgent.id" :agent="editorAgent" />
                 </div>
-
-                <!-- IM集成（仅编辑模式） -->
-                <div v-if="editorMode === 'edit' && editorAgent?.id && currentSection === 'im'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agentEditor.im.title') }}</h2>
-                    <p class="section-description">
-                      {{ $t('agentEditor.im.description') }}
-                      <a href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md"
-                        target="_blank" rel="noopener noreferrer" class="doc-link">
-                        {{ $t('agentEditor.im.docLink') }}
-                        <t-icon name="link" class="link-icon" />
-                      </a>
-                    </p>
-                  </div>
-                  <div class="settings-group">
-                    <IMChannelPanel :agent-id="editorAgent.id" />
-                  </div>
-                </div>
-
-                <!-- 网页嵌入（仅编辑模式） -->
-                <div v-if="editorMode === 'edit' && editorAgent?.id && currentSection === 'embed'" class="section">
-                  <div class="section-header">
-                    <h2>{{ $t('agentEditor.embed.title') }}</h2>
-                    <p class="section-description">{{ $t('agentEditor.embed.description') }}</p>
-                  </div>
-                  <div class="settings-group">
-                    <AgentEmbedChannelPanel
-                      :agent-id="editorAgent.id"
-                      :agent-web-search-enabled="formData.config?.web_search_enabled === true"
-                      :agent-image-upload-enabled="formData.config?.image_upload_enabled === true"
-                    />
-                  </div>
-                </div>
               </div>
 
               <!-- 底部操作栏 -->
@@ -1372,6 +1374,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { useRouter } from 'vue-router';
 import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
 import {
   AGENT_EDITOR_FOCUS_SECTION_EVENT,
@@ -1382,6 +1385,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import {
   createAgent,
   updateAgent,
+  listIMChannels,
   type CustomAgent,
   type PlaceholderDefinition,
   type AgentTypePreset,
@@ -1390,6 +1394,7 @@ import {
   type KBCapabilities,
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
+import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
 import { type MCPService } from '@/api/mcp-service';
 import { type SkillInfo } from '@/api/skill';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
@@ -1403,8 +1408,7 @@ import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
-import IMChannelPanel from '@/components/IMChannelPanel.vue';
-import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue';
+import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import {
   evaluateToolRequirement,
@@ -1415,6 +1419,7 @@ import {
 
 const uiStore = useUIStore();
 const authStore = useAuthStore();
+const router = useRouter();
 const orgStore = useOrganizationStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
@@ -1426,6 +1431,7 @@ const props = defineProps<{
   mode: 'create' | 'edit';
   agent?: CustomAgent | null;
   initialSection?: string;
+  initialHighlightField?: string;
   // readOnly hides the save button so a Viewer who clicks an agent
   // card to inspect its config doesn't see a "确定" that 403s on the
   // backend update endpoint. Field-level disable is intentionally NOT
@@ -1469,10 +1475,72 @@ const copyAgentId = async () => {
 };
 
 const currentSection = ref(props.initialSection || 'basic');
+const contentWrapperRef = ref<HTMLElement | null>(null);
+const highlightedField = ref<AgentNotReadyReasonKey | null>(null);
+let highlightClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+const VALID_HIGHLIGHT_FIELDS: AgentNotReadyReasonKey[] = ['summary_model', 'rerank_model', 'allowed_tools'];
+
+const sectionForHighlightField = (field: AgentNotReadyReasonKey): string => {
+  if (field === 'allowed_tools') return 'tools';
+  return 'model';
+};
+
+const FIELD_FLASH_DURATION_MS = 2400;
+
+const clearFieldHighlight = () => {
+  if (highlightClearTimer) {
+    clearTimeout(highlightClearTimer);
+    highlightClearTimer = null;
+  }
+  highlightedField.value = null;
+};
+
+const applyInitialFieldHighlight = async (field: string) => {
+  if (!VALID_HIGHLIGHT_FIELDS.includes(field as AgentNotReadyReasonKey)) return;
+
+  const targetField = field as AgentNotReadyReasonKey;
+  currentSection.value = sectionForHighlightField(targetField);
+
+  await nextTick();
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+
+  clearFieldHighlight();
+  highlightedField.value = null;
+
+  const wrapper = contentWrapperRef.value;
+  const row = wrapper?.querySelector(`[data-agent-field="${targetField}"]`) as HTMLElement | null;
+  if (row && wrapper) {
+    const rowTop = row.offsetTop;
+    const scrollTarget = rowTop - wrapper.clientHeight / 2 + row.clientHeight / 2;
+    wrapper.scrollTo({ top: Math.max(0, scrollTarget), behavior: 'auto' });
+
+    await nextTick();
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  }
+
+  highlightedField.value = targetField;
+
+  if (row) {
+    const focusTarget = row.querySelector('.t-input, .t-select-input, input, .t-checkbox') as HTMLElement | null;
+    focusTarget?.focus({ preventScroll: true });
+  }
+
+  highlightClearTimer = setTimeout(() => {
+    if (highlightedField.value === targetField) {
+      highlightedField.value = null;
+    }
+    highlightClearTimer = null;
+  }, FIELD_FLASH_DURATION_MS);
+};
 
 const onAgentEditorFocusSection = (event: Event) => {
   const section = (event as CustomEvent<{ section?: string }>).detail?.section
-  if (section) {
+  if (section && navItems.value.some((item) => item.key === section)) {
     currentSection.value = section
   }
 }
@@ -1605,6 +1673,11 @@ const sharedKbOptions = computed(() => kbOptions.value.filter(kb => kb.shared));
 // 根据知识库配置动态计算是否有知识库能力
 const hasKnowledgeBase = computed(() => {
   return kbSelectionMode.value !== 'none';
+});
+
+const showRerankModelField = computed(() => {
+  if (!isAgentMode.value) return hasKnowledgeBase.value;
+  return hasKnowledgeBase.value || agentRequiresRerankModel(formData.value.config);
 });
 
 // 当前配置下进入到智能体作用域的知识库列表
@@ -1857,13 +1930,9 @@ const navItems = computed(() => {
   if (isAgentMode.value && skillsAvailable.value) {
     items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
   }
-  // 发布与集成（仅编辑模式）
+  // 发布（仅编辑模式）
   if (editorMode.value === 'edit' && editorAgent.value?.id && !editorAgent.value?.is_builtin && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') });
-  }
-  if (editorMode.value === 'edit' && editorAgent.value?.id) {
-    items.push({ key: 'im', icon: 'chat-message', label: t('agentEditor.im.title') });
-    items.push({ key: 'embed', icon: 'internet', label: t('agentEditor.embed.title') });
   }
   return items;
 });
@@ -1892,7 +1961,7 @@ const navGroups = computed(() => {
     {
       key: 'integration',
       label: t('agentEditor.navGroups.integration'),
-      items: pickItems(['share', 'im', 'embed']),
+      items: pickItems(['share']),
     },
   ].filter((group) => group.items.length > 0);
 });
@@ -2078,6 +2147,30 @@ watch(currentSection, (section) => {
     syncActivePromptAnchor();
   }
 });
+
+const agentIMChannelCount = ref(0);
+const agentEmbedChannelCount = ref(0);
+
+async function loadAgentIntegrationCounts(agentId: string) {
+  try {
+    const [imResp, embedResp] = await Promise.all([
+      listIMChannels(agentId),
+      listEmbedChannels(agentId),
+    ]);
+    agentIMChannelCount.value = imResp?.data?.length ?? 0;
+    agentEmbedChannelCount.value = embedResp?.data?.length ?? 0;
+  } catch {
+    agentIMChannelCount.value = 0;
+    agentEmbedChannelCount.value = 0;
+  }
+}
+
+function gotoIntegrations(tab: 'im' | 'embed') {
+  const agentId = editorAgent.value?.id;
+  if (!agentId) return;
+  handleClose();
+  router.push({ path: '/platform/integrations', query: { agentId, tab } });
+}
 
 const filteredIntentPlaceholders = computed(() => {
   if (!intentPromptPopup.value.prefix) {
@@ -2459,6 +2552,9 @@ watch(() => props.visible, async (val) => {
 
       // 补全可能缺失的字段
       agentData.config = { ...defaultFormData.config, ...agentData.config };
+      if (agentData.config.thinking == null) {
+        agentData.config.thinking = false;
+      }
 
       // 确保数组字段存在
       if (!agentData.config.suggested_prompts) agentData.config.suggested_prompts = [];
@@ -2489,6 +2585,7 @@ watch(() => props.visible, async (val) => {
       if (agentData.is_builtin) {
         fillBuiltinAgentDefaults();
       }
+      void loadAgentIntegrationCounts(agentData.id);
     } else {
       // 创建新智能体，使用系统默认值
       const newFormData = JSON.parse(JSON.stringify(defaultFormData));
@@ -2554,6 +2651,14 @@ watch(() => props.visible, async (val) => {
       }
       applyDefaultChatModelIfEmpty()
     }
+
+    if (props.initialHighlightField) {
+      await applyInitialFieldHighlight(props.initialHighlightField);
+    }
+  } else {
+    clearFieldHighlight();
+    agentIMChannelCount.value = 0;
+    agentEmbedChannelCount.value = 0;
   }
 });
 
@@ -3762,9 +3867,8 @@ const handleSave = async () => {
     return;
   }
 
-  // ReRank 模型（可选）
-  // 运行时若 rerank_model_id 为空会自动跳过 rerank，无需在保存时强制要求。
-  // 仅当用户已选择 rerank 模型时，才校验相关参数。
+  // ReRank 模型按运行范围按需使用：知识库范围为 none，或未启用
+  // knowledge_search 时不需要；其余情况由对话入口在使用前给出明确提示。
 
   // 过滤空推荐问题
   if (formData.value.config.suggested_prompts) {
@@ -3948,20 +4052,15 @@ const handleSave = async () => {
 
 .nav-badge {
   flex-shrink: 0;
-  min-width: 18px;
+  margin-left: 2px;
   padding: 0 6px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--td-bg-color-secondarycontainer);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 18px;
-  text-align: center;
   color: var(--td-text-color-secondary);
-
-  .nav-item.active & {
-    background: color-mix(in srgb, var(--td-brand-color) 18%, transparent);
-    color: var(--td-brand-color);
-  }
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  text-align: center;
 }
 
 .section--prompts {
@@ -4188,6 +4287,24 @@ const handleSave = async () => {
       font-weight: 600;
     }
   }
+
+  &.setting-row--field-highlight {
+    border-radius: 6px;
+    animation: agent-field-flash 0.8s ease-in-out 3;
+  }
+}
+
+@keyframes agent-field-flash {
+  0%,
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+
+  50% {
+    background-color: var(--td-warning-color-light, #fff7e8);
+    box-shadow: inset 0 0 0 1px rgba(237, 123, 47, 0.35);
+  }
 }
 
 .setting-info {
@@ -4258,6 +4375,62 @@ const handleSave = async () => {
 
   :deep(.t-input-number) {
     width: 120px;
+  }
+}
+
+.integration-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+
+  &__stat {
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+
+    &.integration-inline__link {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      line-height: 1;
+      color: var(--td-brand-color);
+      cursor: pointer;
+
+      &:hover {
+        opacity: 0.85;
+      }
+    }
+  }
+
+  &__sep {
+    color: var(--td-component-stroke);
+    font-size: 12px;
+  }
+
+  &__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 4px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--td-brand-color);
+    cursor: pointer;
+
+    &:hover {
+      opacity: 0.85;
+    }
+
+    :deep(.t-icon) {
+      display: block;
+    }
   }
 }
 

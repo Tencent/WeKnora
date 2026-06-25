@@ -89,17 +89,11 @@ func (s *sessionService) AgentQA(
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 
-	// Get rerank model from custom agent config (only required when knowledge_search is allowed)
+	// Get rerank model from custom agent config only when knowledge_search can
+	// actually run. A disabled KB scope makes all KB tools ineffective, so it
+	// must not force users to configure an otherwise-unused rerank model.
 	var rerankModel rerank.Reranker
-	hasKnowledgeSearchTool := false
-	for _, tool := range agentConfig.AllowedTools {
-		if tool == tools.ToolKnowledgeSearch {
-			hasKnowledgeSearchTool = true
-			break
-		}
-	}
-
-	if hasKnowledgeSearchTool {
+	if agentRequiresRerankModel(req.CustomAgent) {
 		// Rerank model is resolved purely from the agent config now.
 		// We used to fall back to ConversationConfig.RerankModelID at
 		// the tenant level, but that path encouraged "leave rerank
@@ -121,7 +115,7 @@ func (s *sessionService) AgentQA(
 			return fmt.Errorf("failed to get rerank model: %w", err)
 		}
 	} else {
-		logger.Infof(ctx, "knowledge_search tool not enabled, skipping rerank model initialization")
+		logger.Infof(ctx, "knowledge_search is unavailable for the effective agent scope, skipping rerank model initialization")
 	}
 
 	// Load multi-turn history directly from DB (the single source of truth).
