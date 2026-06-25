@@ -87,13 +87,18 @@ class ExcelParser(BaseParser):
         start, end = 0, 0
 
         excel_file = _open_excel_file(content, file_type=self.file_type)
+        structured_sheet_frames = [
+            (sheet_name, _read_sheet_dataframe_for_structured(excel_file, sheet_name))
+            for sheet_name in excel_file.sheet_names
+        ]
+        structured_doc = build_structured_excel_document(structured_sheet_frames)
+        if structured_doc is not None:
+            return structured_doc
+
         sheet_frames = [
             (sheet_name, _read_sheet_dataframe(excel_file, sheet_name))
             for sheet_name in excel_file.sheet_names
         ]
-        structured_doc = build_structured_excel_document(sheet_frames)
-        if structured_doc is not None:
-            return structured_doc
         
         # Process each sheet in the Excel file
         for excel_sheet_name, df in sheet_frames:
@@ -144,6 +149,17 @@ def _read_sheet_dataframe(excel_file: pd.ExcelFile, sheet_name: str) -> pd.DataF
     elif any(str(col).startswith("Unnamed:") for col in df.columns):
         df = excel_file.parse(sheet_name=sheet_name, header=None)
         df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
+    return df
+
+
+def _read_sheet_dataframe_for_structured(
+    excel_file: pd.ExcelFile, sheet_name: str
+) -> pd.DataFrame:
+    """Read a worksheet without consuming a possible header row."""
+    from openpyxl.utils import get_column_letter
+
+    df = excel_file.parse(sheet_name=sheet_name, header=None)
+    df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
     return df
 
 

@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 import openpyxl
 import pandas as pd
@@ -341,6 +342,30 @@ class ExcelParserTest(unittest.TestCase):
             record_chunks[0].metadata.get("headers"),
             ["Product", "Issue type", "Issue detail", "Resolution"],
         )
+
+    def test_structured_detection_keeps_header_row_for_non_openpyxl_frames(self):
+        class FakeExcelFile:
+            engine = "xlrd"
+            sheet_names = ["People"]
+
+            def parse(self, sheet_name, header=None):
+                self.last_header = header
+                if header is None:
+                    return pd.DataFrame([["Name", "Age"], ["Alice", 30], ["Bob", 40]])
+                return pd.DataFrame([["Alice", 30], ["Bob", 40]], columns=["Name", "Age"])
+
+        fake_excel = FakeExcelFile()
+        with patch("docreader.parser.excel_parser._open_excel_file", return_value=fake_excel):
+            document = ExcelParser(file_name="people.xls", file_type="xls").parse_into_text(
+                b"fake xls bytes"
+            )
+
+        self.assertEqual(document.metadata.get("parser"), "structured_excel")
+        self.assertIn("- Name: Alice", document.content)
+        self.assertIn("- Age: 30", document.content)
+        self.assertIn("- Name: Bob", document.content)
+        self.assertNotIn("- Alice: Bob", document.content)
+        self.assertNotIn("- 30: 40", document.content)
 
     def test_falls_back_when_workbook_has_unstructured_sheet(self):
         wb = openpyxl.Workbook()
