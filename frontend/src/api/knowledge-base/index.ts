@@ -120,7 +120,7 @@ export function updateKnowledgeBase(id: string, data: {
     };
   }
 }) {
-  return put(`/api/v1/knowledge-bases/${id}` , data);
+  return put(`/api/v1/knowledge-bases/${id}`, data);
 }
 
 export function rebuildKBIndex(kbId: string) {
@@ -477,4 +477,12 @@ export function knowledgeSemanticSearch(data: {
   knowledge_ids?: string[];
 }) {
   return post('/api/v1/knowledge-search', data);
+}
+
+export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: any) {
+  return post(`/api/v1/knowledge/batch-reparse`, {
+    kb_id: kbId,
+    ids,
+    process_config: processConfig
+  });
 }

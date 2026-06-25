@@ -36,6 +36,7 @@ import {
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
+  batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
 } from "@/api/knowledge-base/index";
@@ -60,7 +61,7 @@ import { formatFileSize } from '@/utils/files';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
-const { t } = useI18n();
+const { t, te } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
@@ -415,6 +416,35 @@ watch(viewMode, (v) => {
 const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
+const batchReparsing = ref(false);
+
+const confirmBatchReparse = async () => {
+  if (batchReparsing.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  batchReparsing.value = true;
+  try {
+    const res: any = await batchReparseKnowledge(kbId.value, ids);
+    if (res?.success) {
+      if (res.partial && res.failed_ids && res.failed_ids.length > 0) {
+        MessagePlugin.warning(`部分重构任务提交成功，失败 ${res.failed_ids.length} 个`);
+      } else {
+        const successMsg = te('knowledgeBase.batchReparseSuccess') 
+          ? t('knowledgeBase.batchReparseSuccess', { count: ids.length }) 
+          : `已提交 ${ids.length} 个重构任务`;
+        MessagePlugin.success(successMsg);
+      }
+      clearSelection();
+      batchMode.value = false;
+      loadKnowledgeFiles(kbId.value);
+    } else {
+      MessagePlugin.error(res?.message || '批量重建失败');
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || '批量重建失败');
+  } finally {
+    batchReparsing.value = false;
+  }
+};
 
 const selectedTagId = ref<string>('');
 const tagList = ref<any[]>([]);
@@ -2593,9 +2623,9 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
-                <DocumentBatchBar :count="selectedIds.size" :loading="batchDeleting"
+                <DocumentBatchBar :count="selectedIds.size" :loading="batchDeleting || batchReparsing"
                   :visible="batchMode || selectedIds.size > 0" @cancel="handleBatchCancel"
-                  @delete="confirmBatchDelete" />
+                  @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
               </div>
             </div>
           </div>
