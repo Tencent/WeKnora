@@ -3377,3 +3377,38 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 	}
 }
+
+// ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.
+func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *asynq.Task) error {
+	var payload types.KnowledgeListReparsePayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		logger.Errorf(ctx, "Failed to unmarshal knowledge list reparse payload: %v", err)
+		return err
+	}
+
+	logger.Infof(ctx, "Processing knowledge list reparse task for %d knowledge items", len(payload.KnowledgeIDs))
+
+	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
+		return err
+	}
+
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+
+	var failed int
+	for _, id := range payload.KnowledgeIDs {
+		if _, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig); err != nil {
+			logger.Errorf(ctx, "Failed to reparse knowledge %s: %v", id, err)
+			failed++
+		}
+	}
+
+	if failed > 0 {
+		logger.Warnf(ctx, "Knowledge list reparse completed with %d failures out of %d", failed, len(payload.KnowledgeIDs))
+	}
+	logger.Infof(ctx, "Knowledge list reparse task finished: %d submitted, %d failed",
+		len(payload.KnowledgeIDs)-failed, failed)
+	return nil
+}

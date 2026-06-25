@@ -482,10 +482,10 @@ export function knowledgeSemanticSearch(data: {
   return post('/api/v1/knowledge-search', data);
 }
 
-export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: any) {
+export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: KnowledgeProcessOverrides) {
   return post(`/api/v1/knowledge/batch-reparse`, {
     kb_id: kbId,
     ids,
-    process_config: processConfig
+    process_config: processConfig,
   });
 }

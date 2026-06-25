@@ -226,6 +226,30 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 	return info.ID, nil
 }
 
+// enqueueKnowledgeListReparse enqueues an async batch-reparse task for the
+// given knowledge IDs and returns the asynq task ID.
+func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
+	ctx context.Context, tenantID uint64, ids []string, processConfig *types.KnowledgeProcessOverrides,
+) (string, error) {
+	payload := types.KnowledgeListReparsePayload{
+		TenantID:      tenantID,
+		KnowledgeIDs:  ids,
+		ProcessConfig: processConfig,
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal payload: %w", err)
+	}
+	task := asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
+		asynq.Queue("low"), asynq.MaxRetry(3))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		return "", fmt.Errorf("enqueue task: %w", err)
+	}
+	return info.ID, nil
+}
+
 // CreateKnowledgeFromFile godoc
 // @Summary      从文件创建知识
 // @Description  上传文件并创建知识条目
@@ -2258,27 +2282,31 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 
-	var ids []string
-	seen := make(map[string]struct{})
-	for _, id := range req.IDs {
-		if id != "" {
-			if _, ok := seen[id]; !ok {
-				ids = append(ids, id)
-				seen[id] = struct{}{}
-			}
+	seen := make(map[string]struct{}, len(req.IDs))
+	ids := make([]string, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
 		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
 	}
 
 	if len(ids) == 0 {
 		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
 		return
 	}
-	if len(ids) > 200 {
-		c.Error(errors.NewBadRequestError("the number of IDs exceeds the maximum batch size of 200"))
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
 		return
 	}
 
-	_, _, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
 	if err != nil {
 		c.Error(err)
 		return
@@ -2288,45 +2316,42 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
-	knows, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge batch, kb_id: %s, size: %d, err: %v", req.KBID, len(ids), err)
+		logger.Errorf(ctx, "failed to get knowledge batch, kb_id: %s, size: %d, err: %v", kbID, len(ids), err)
 		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
 		return
 	}
-	if len(knows) != len(ids) {
+	if len(knowledgeList) != len(ids) {
 		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
 		return
 	}
-
-	for _, know := range knows {
-		if know.KnowledgeBaseID != req.KBID {
-			c.Error(errors.NewBadRequestError("some knowledge entries do not belong to the specified knowledge base"))
+	for _, k := range knowledgeList {
+		if k.KnowledgeBaseID != kbID {
+			c.Error(errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
 			return
 		}
 	}
-	var failedIDs []string
-	for _, id := range ids {
-		_, err := h.kgService.ReparseKnowledge(ctx, id, req.ProcessConfig)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to reparse knowledge %s: %v", id, err)
-			failedIDs = append(failedIDs, id)
-			continue
-		}
-	}
 
-	if len(failedIDs) > 0 {
-		c.JSON(200, gin.H{
-			"success":    len(failedIDs) < len(ids),
-			"partial":    len(failedIDs) < len(ids),
-			"message":    "Batch reparse completed with some failures",
-			"failed_ids": failedIDs,
-		})
+	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, ids, req.ProcessConfig)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue batch reparse task"))
 		return
 	}
 
-	c.JSON(200, gin.H{
+	logger.Infof(ctx, "Batch knowledge reparse task enqueued: %s, kb_id: %s, count: %d",
+		taskID, secutils.SanitizeForLog(kbID), len(ids))
+
+	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Batch reparse task submitted successfully",
+		"message": "Batch reparse task submitted",
+		"data": gin.H{
+			"task_id":       taskID,
+			"reparse_count": len(ids),
+		},
 	})
 }
