@@ -215,3 +215,22 @@ func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
 	assert.Equal(t, "updated content", saved.Content)
 }
+
+func TestGetChunkByKnowledgeIDAndIndexOnlyPrefersTextChunk(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.NewString()
+	knowledgeID := uuid.NewString()
+	imageChunk := makeChunk(kbID, knowledgeID, types.ChunkTypeImageOCR)
+	imageChunk.ChunkIndex = 7
+	textChunk := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	textChunk.ChunkIndex = 7
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{imageChunk, textChunk}))
+
+	got, err := repo.GetChunkByKnowledgeIDAndIndexOnly(ctx, knowledgeID, 7)
+	require.NoError(t, err)
+	assert.Equal(t, textChunk.ID, got.ID)
+}
