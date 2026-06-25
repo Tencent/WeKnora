@@ -1268,13 +1268,13 @@ func (h *KnowledgeBaseHandler) GetRetryFailedDocumentsProgress(c *gin.Context) {
 	}
 
 	if progress.KBID != "" {
-		callerTenantID, _ := c.Get(types.TenantIDContextKey.String())
+		callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 		kb, kbErr := h.service.GetKnowledgeBaseByID(ctx, progress.KBID)
-		if kbErr != nil || kb == nil || kb.TenantID != callerTenantID.(uint64) {
+		if kbErr != nil || kb == nil || kb.TenantID != callerTenantID {
 			hasAccess := kbErr == nil && kb != nil && h.kbShareService != nil
 			if hasAccess {
 				callerTenantRole := types.TenantRoleFromContext(ctx)
-				_, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, progress.KBID, callerTenantID.(uint64), callerTenantRole)
+				_, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, progress.KBID, callerTenantID, callerTenantRole)
 				hasAccess = permErr == nil && isShared
 			}
 			if !hasAccess {

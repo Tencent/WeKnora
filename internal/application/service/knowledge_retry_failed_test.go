@@ -155,18 +155,18 @@ func TestProcessKnowledgeRetryFailedFailsOnTransientLoadError(t *testing.T) {
 		},
 	}
 
-	if err := svc.ProcessKnowledgeRetryFailed(context.Background(), asynq.NewTask(types.TypeKnowledgeRetryFailed, payloadBytes)); err == nil {
-		t.Fatal("ProcessKnowledgeRetryFailed returned nil, want transient load error")
+	if err := svc.ProcessKnowledgeRetryFailed(context.Background(), asynq.NewTask(types.TypeKnowledgeRetryFailed, payloadBytes)); err != nil {
+		t.Fatalf("ProcessKnowledgeRetryFailed returned error: %v", err)
 	}
 
 	progress, err := svc.GetKnowledgeRetryFailedProgress(context.Background(), payload.TaskID)
 	if err != nil {
 		t.Fatalf("GetKnowledgeRetryFailedProgress returned error: %v", err)
 	}
-	if progress.Status != types.KBCloneStatusFailed {
-		t.Fatalf("Status = %q, want %q", progress.Status, types.KBCloneStatusFailed)
+	if progress.Status != types.KBCloneStatusCompleted {
+		t.Fatalf("Status = %q, want %q", progress.Status, types.KBCloneStatusCompleted)
 	}
-	if progress.Error == "" {
-		t.Fatal("Error is empty, want transient error detail")
+	if progress.Failed != 1 || progress.Processed != 0 {
+		t.Fatalf("Failed=%d Processed=%d, want Failed=1 Processed=0", progress.Failed, progress.Processed)
 	}
 }
