@@ -29,7 +29,19 @@
       </section>
 
       <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.tagEditAvailableSection') }}</h4>
+        <div class="tag-edit-section-head">
+          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.tagEditAvailableSection') }}</h4>
+          <t-button
+            v-if="canManage"
+            variant="text"
+            size="small"
+            theme="default"
+            class="tag-edit-manage-link"
+            @click="handleOpenManage"
+          >
+            {{ $t('knowledgeBase.tagManageLink') }}
+          </t-button>
+        </div>
         <div class="tag-edit-search-bar">
           <t-input v-model="searchQuery" :placeholder="$t('knowledgeBase.tagEditSearch')" clearable size="small">
             <template #prefix-icon>
@@ -93,12 +105,14 @@ const props = defineProps<{
   kbId: string;
   tagList: Tag[];
   selectedTags: Tag[];
+  canManage?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
   (e: 'confirm', tagIds: string[]): void;
   (e: 'tag-created'): void;
+  (e: 'open-manage'): void;
 }>();
 
 const { t } = useI18n();
@@ -211,6 +225,11 @@ async function handleConfirm() {
 
 function handleClose() {
   emit('update:visible', false);
+}
+
+function handleOpenManage() {
+  emit('update:visible', false);
+  emit('open-manage');
 }
 </script>
 
@@ -355,6 +374,18 @@ function handleClose() {
   font-size: 12px;
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: color 0.15s ease;
+}
+
+.tag-edit-section-head :deep(.tag-edit-manage-link.t-button:hover),
+.tag-edit-section-head :deep(.tag-edit-manage-link.t-button:focus-visible) {
+  color: var(--td-brand-color) !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  text-decoration: none;
 }
 
 .tag-edit-search-bar {

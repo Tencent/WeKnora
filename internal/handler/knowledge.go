@@ -577,9 +577,16 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	}
 
 	// Resolve knowledge and validate KB access (at least viewer)
-	knowledge, _, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
 	if err != nil {
 		c.Error(err)
+		return
+	}
+
+	// Re-fetch with tenant-scoped service so tags and other joined fields are populated.
+	if knowledge, err = h.kgService.GetKnowledgeByID(effCtx, id); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewNotFoundError("Knowledge not found"))
 		return
 	}
 

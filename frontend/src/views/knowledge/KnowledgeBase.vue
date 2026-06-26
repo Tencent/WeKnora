@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, type ComponentPublicInstance } from "vue";
+import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timeline.vue";
@@ -28,9 +28,6 @@ import {
   batchQueryKnowledge,
   listKnowledgeTags,
   updateKnowledgeTagBatch,
-  createKnowledgeBaseTag,
-  updateKnowledgeBaseTag,
-  deleteKnowledgeBaseTag,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
   reparseKnowledge,
@@ -46,6 +43,7 @@ import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
+import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
@@ -492,6 +490,19 @@ const confirmBatchReparse = async () => {
   }
 };
 
+const tagFilterPanelVisible = ref(false);
+const tagFilterTriggerHover = ref(false);
+const tagFilterCleared = ref(false);
+const tagManageDrawerVisible = ref(false);
+
+const showTagFilterClear = computed(
+  () => selectedTagIds.value.length > 0 && tagFilterTriggerHover.value,
+);
+
+const isTagFilterPlaceholder = computed(
+  () => selectedTagIds.value.length === 0 && tagFilterCleared.value,
+);
+
 const selectedTagIds = ref<string[]>([]);
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
@@ -567,7 +578,6 @@ const filterParams = computed(() => {
     end_time: end ? `${end} 23:59:59` : undefined,
   };
 });
-type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -578,45 +588,45 @@ const tagMap = computed<Record<string, any>>(() => {
 const sidebarCategoryCount = computed(() => tagTotal.value || tagList.value.length);
 const sidebarTags = computed(() => {
   const list = tagList.value;
-  const selectedId = selectedTagIds.value[0];
-  if (!selectedId || list.some((tag) => tag.id === selectedId)) {
+  const selectedIds = selectedTagIds.value;
+  if (selectedIds.length === 0) {
     return list;
   }
-  const selected = tagMap.value[selectedId];
-  return selected ? [selected, ...list] : list;
+  const missing = selectedIds
+    .filter((id) => !list.some((tag) => tag.id === id))
+    .map((id) => tagMap.value[id])
+    .filter(Boolean);
+  if (missing.length === 0) {
+    return list;
+  }
+  return [...missing, ...list];
 });
 
-const tagChipMenuOptions = computed(() => [
-  { content: t('knowledgeBase.tagEditAction'), value: 'edit' },
-  { content: t('knowledgeBase.tagDeleteAction'), value: 'delete', theme: 'error' },
-]);
-
-const handleTagChipMenu = (data: { value: string }, tag: any) => {
-  if (data.value === 'edit') {
-    startEditTag(tag);
-  } else if (data.value === 'delete') {
-    confirmDeleteTag(tag);
+const activeTagFilterLabel = computed(() => {
+  if (selectedTagIds.value.length === 0) {
+    return tagFilterCleared.value
+      ? t('knowledgeBase.tagFilterPlaceholder')
+      : t('knowledgeBase.allTags');
   }
-};
-
-const editingTagInputRefs = new Map<string, TagInputInstance | null>();
-const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
-  if (el) {
-    editingTagInputRefs.set(tagId, el);
-  } else {
-    editingTagInputRefs.delete(tagId);
+  if (selectedTagIds.value.length === 1) {
+    const id = selectedTagIds.value[0];
+    return tagMap.value[id]?.name || t('knowledgeBase.allTags');
   }
-};
-const setEditingTagInputRefByTag = (tagId: string) => (el: TagInputInstance | null) => {
-  setEditingTagInputRef(el, tagId);
-};
-const newTagInputRef = ref<TagInputInstance | null>(null);
-const creatingTag = ref(false);
-const creatingTagLoading = ref(false);
-const newTagName = ref('');
-const editingTagId = ref<string | null>(null);
-const editingTagName = ref('');
-const editingTagSubmitting = ref(false);
+  return t('knowledgeBase.tagFilterMulti', { count: selectedTagIds.value.length });
+});
+
+const activeTagFilterTitle = computed(() => {
+  if (selectedTagIds.value.length === 0) {
+    return t('knowledgeBase.tagFilterTitle');
+  }
+  const names = selectedTagIds.value
+    .map((id) => tagMap.value[id]?.name)
+    .filter(Boolean);
+  return names.length > 0 ? names.join('、') : t('knowledgeBase.tagFilterTitle');
+});
+
+const isTagFilterActive = (tagId: string) => selectedTagIds.value.includes(tagId);
+
 // 标签编辑弹窗
 const tagEditDialogVisible = ref(false);
 const tagEditTarget = ref<KnowledgeCard | null>(null);
@@ -691,6 +701,9 @@ const getKnowledgeType = (item: any) => {
 
 const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
   if (!kbIdValue) return Promise.resolve();
+  if (!isFAQ.value) {
+    docListLoading.value = true;
+  }
   return getKnowled(
     {
       page: 1,
@@ -698,7 +711,11 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
       ...filterParams.value,
     },
     kbIdValue,
-  );
+  ).finally(() => {
+    if (isCurrentKb(kbIdValue) && !isFAQ.value) {
+      docListLoading.value = false;
+    }
+  });
 };
 
 const isCurrentKb = (targetKbId: string) => targetKbId === kbId.value;
@@ -773,156 +790,52 @@ const handleTagFilterChange = (tagIds: string[]) => {
 };
 
 const handleTagRowClick = (tagId: string) => {
-  if (creatingTag.value) {
-    creatingTag.value = false;
-    newTagName.value = '';
+  const next = new Set(selectedTagIds.value);
+  if (next.has(tagId)) {
+    next.delete(tagId);
+  } else {
+    next.add(tagId);
   }
-  if (editingTagId.value) {
-    editingTagId.value = null;
-    editingTagName.value = '';
+  if (next.size > 0) {
+    tagFilterCleared.value = false;
   }
-  const next = selectedTagIds.value.length === 1 && selectedTagIds.value[0] === tagId
-    ? []
-    : [tagId];
-  handleTagFilterChange(next);
+  handleTagFilterChange([...next]);
 };
 
 const clearTagFilter = () => {
-  if (creatingTag.value) {
-    creatingTag.value = false;
-    newTagName.value = '';
-  }
-  if (editingTagId.value) {
-    editingTagId.value = null;
-    editingTagName.value = '';
-  }
+  tagFilterCleared.value = true;
   handleTagFilterChange([]);
 };
 
-const startCreateTag = () => {
-  if (!kbId.value) {
-    MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
-    return;
-  }
-  if (creatingTag.value) {
-    return;
-  }
-  editingTagId.value = null;
-  editingTagName.value = '';
-  creatingTag.value = true;
-  nextTick(() => {
-    newTagInputRef.value?.focus?.();
-    newTagInputRef.value?.select?.();
-  });
+const openTagManageDrawer = () => {
+  tagFilterPanelVisible.value = false;
+  tagManageDrawerVisible.value = true;
 };
 
-const cancelCreateTag = () => {
-  creatingTag.value = false;
-  newTagName.value = '';
+const openTagManageFromEditDialog = () => {
+  tagEditDialogVisible.value = false;
+  tagManageDrawerVisible.value = true;
 };
 
-const submitCreateTag = async () => {
-  if (!kbId.value) {
-    MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
+const onTagManageChanged = (payload?: { deletedTagId?: string }) => {
+  if (!kbId.value) return;
+  void loadTags(kbId.value, true);
+  if (payload?.deletedTagId && selectedTagIds.value.includes(payload.deletedTagId)) {
+    selectedTagIds.value = [];
+    handleTagFilterChange([]);
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
     return;
   }
-  const name = newTagName.value.trim();
-  if (!name) {
-    MessagePlugin.warning(t('knowledgeBase.tagNameRequired'));
-    return;
+  if (payload?.deletedTagId) {
+    void (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (!kbId.value) return;
+      resetPage();
+      await loadKnowledgeFiles(kbId.value);
+      await loadTags(kbId.value, true);
+    })();
   }
-  creatingTagLoading.value = true;
-  try {
-    await createKnowledgeBaseTag(kbId.value, { name });
-    MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
-    cancelCreateTag();
-    await loadTags(kbId.value, true);
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
-  } finally {
-    creatingTagLoading.value = false;
-  }
-};
-
-const startEditTag = (tag: any) => {
-  creatingTag.value = false;
-  newTagName.value = '';
-  editingTagId.value = tag.id;
-  editingTagName.value = tag.name;
-  nextTick(() => {
-    const inputRef = editingTagInputRefs.get(tag.id);
-    inputRef?.focus?.();
-    inputRef?.select?.();
-  });
-};
-
-const cancelEditTag = () => {
-  editingTagId.value = null;
-  editingTagName.value = '';
-};
-
-const submitEditTag = async () => {
-  if (!kbId.value || !editingTagId.value) {
-    return;
-  }
-  const name = editingTagName.value.trim();
-  if (!name) {
-    MessagePlugin.warning(t('knowledgeBase.tagNameRequired'));
-    return;
-  }
-  if (name === tagMap.value[editingTagId.value]?.name) {
-    cancelEditTag();
-    return;
-  }
-  editingTagSubmitting.value = true;
-  try {
-    await updateKnowledgeBaseTag(kbId.value, editingTagId.value, { name });
-    MessagePlugin.success(t('knowledgeBase.tagEditSuccess'));
-    cancelEditTag();
-    await loadTags(kbId.value, true);
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
-  } finally {
-    editingTagSubmitting.value = false;
-  }
-};
-
-const confirmDeleteTag = (tag: any) => {
-  if (!kbId.value) {
-    MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
-    return;
-  }
-  if (creatingTag.value) {
-    cancelCreateTag();
-  }
-  if (editingTagId.value) {
-    cancelEditTag();
-  }
-  const deleteDescKey = isFAQ.value ? 'knowledgeBase.tagDeleteDesc' : 'knowledgeBase.tagDeleteDescDoc';
-  const confirm = window.confirm(
-    t(deleteDescKey, { name: tag.name }) as string,
-  );
-  if (!confirm) return;
-  deleteKnowledgeBaseTag(kbId.value, tag.seq_id, { force: true })
-    .then(() => {
-      MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'));
-      if (selectedTagIds.value.includes(tag.id)) {
-        // Reset to show all entries when current tag is deleted
-        selectedTagIds.value = selectedTagIds.value.filter(id => id !== tag.id);
-        handleTagFilterChange([...selectedTagIds.value]);
-      }
-      loadTags(kbId.value, true);
-      void (async () => {
-        await new Promise((resolve) => setTimeout(resolve, 800));
-        if (!kbId.value) return;
-        resetPage();
-        await loadKnowledgeFiles(kbId.value);
-        await loadTags(kbId.value, true);
-      })();
-    })
-    .catch((error: any) => {
-      MessagePlugin.error(error?.message || t('common.operationFailed'));
-    });
 };
 
 const handleKnowledgeTagChange = async (knowledgeId: string, tagIds: string[]) => {
@@ -951,11 +864,11 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
 
     kbInfo.value = data;
     selectedTagIds.value = [];
+    tagFilterCleared.value = false;
     uiStore.clearSelectedTagIds();
     // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
     uiStore.clearSelectedTagIds();
     if (!isFAQ.value) {
-      docListLoading.value = true;
       loadKnowledgeFiles(targetKbId);
     } else {
       cardList.value = [];
@@ -2213,109 +2126,8 @@ async function createNewSession(value: string): Promise<void> {
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
-          <aside class="tag-sidebar">
-            <div class="sidebar-header">
-              <div class="sidebar-title">
-                <span>{{ $t('knowledgeBase.documentCategoryTitle') }}</span>
-                <span class="sidebar-count">({{ sidebarCategoryCount }})</span>
-              </div>
-              <div v-if="canEdit" class="sidebar-actions">
-                <t-button size="small" variant="text" class="create-tag-btn"
-                  :aria-label="$t('knowledgeBase.tagCreateAction')" :title="$t('knowledgeBase.tagCreateAction')"
-                  @click="startCreateTag">
-                  <t-icon name="add" />
-                </t-button>
-              </div>
-            </div>
-            <div class="tag-search-bar">
-              <t-input v-model.trim="tagSearchQuery" size="small"
-                :placeholder="$t('knowledgeBase.tagSearchPlaceholder')" clearable>
-                <template #prefix-icon>
-                  <t-icon name="search" size="14px" />
-                </template>
-              </t-input>
-            </div>
-            <div class="tag-sidebar-body">
-              <template v-if="tagLoading && !sidebarTags.length">
-                <div class="tag-sidebar-chips">
-                  <div v-for="n in 6" :key="'skel-tag-' + n" class="tag-sidebar-chip-skeleton">
-                    <t-skeleton animation="gradient" :row-col="[{ width: '52px', height: '26px', type: 'rect' }]" />
-                  </div>
-                </div>
-              </template>
-              <template v-else>
-                <div class="tag-sidebar-chips">
-                  <button type="button" class="tag-sidebar-chip" :class="{ active: selectedTagIds.length === 0 }"
-                    @click="clearTagFilter">
-                    {{ $t('knowledgeBase.tagFilterAll') }}
-                  </button>
-                  <template v-for="tag in sidebarTags" :key="tag.id">
-                    <div v-if="editingTagId === tag.id" class="tag-sidebar-edit-row" @click.stop>
-                      <div class="tag-edit-input">
-                        <t-input :ref="setEditingTagInputRefByTag(tag.id)" v-model="editingTagName" size="small"
-                          :maxlength="40" @enter="submitEditTag"
-                          @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelEditTag() } }" />
-                      </div>
-                      <div class="tag-inline-actions">
-                        <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
-                          :loading="editingTagSubmitting" @click.stop="submitEditTag">
-                          <t-icon name="check" size="14px" />
-                        </t-button>
-                        <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
-                          @click.stop="cancelEditTag">
-                          <t-icon name="close" size="14px" />
-                        </t-button>
-                      </div>
-                    </div>
-                    <t-dropdown v-else-if="canEdit" trigger="context-menu" placement="bottom-left"
-                      :options="tagChipMenuOptions" @click="(data: any) => handleTagChipMenu(data, tag)">
-                      <button type="button" class="tag-sidebar-chip"
-                        :class="{ active: selectedTagIds.length === 1 && selectedTagIds[0] === tag.id }"
-                        @click="handleTagRowClick(tag.id)">
-                        <span class="tag-chip-label">{{ tag.name }}</span>
-                        <span class="tag-chip-count">({{ tag.knowledge_count || 0 }})</span>
-                      </button>
-                    </t-dropdown>
-                    <button v-else type="button" class="tag-sidebar-chip"
-                      :class="{ active: selectedTagIds.length === 1 && selectedTagIds[0] === tag.id }"
-                      @click="handleTagRowClick(tag.id)">
-                      <span class="tag-chip-label">{{ tag.name }}</span>
-                      <span class="tag-chip-count">({{ tag.knowledge_count || 0 }})</span>
-                    </button>
-                  </template>
-                  <div v-if="creatingTag" class="tag-sidebar-create-row" @click.stop>
-                    <div class="tag-edit-input">
-                      <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40"
-                        :placeholder="$t('knowledgeBase.tagNamePlaceholder')" @enter="submitCreateTag"
-                        @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelCreateTag() } }" />
-                    </div>
-                    <div class="tag-inline-actions">
-                      <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
-                        :loading="creatingTagLoading" @click.stop="submitCreateTag">
-                        <t-icon name="check" size="14px" />
-                      </t-button>
-                      <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
-                        @click.stop="cancelCreateTag">
-                        <t-icon name="close" size="14px" />
-                      </t-button>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="!creatingTag && !sidebarTags.length" class="tag-empty-state">
-                  {{ $t('knowledgeBase.tagEmptyResult') }}
-                </div>
-                <div v-if="tagHasMore" class="tag-load-more">
-                  <t-button variant="text" size="small" :loading="tagLoadingMore" @click.stop="kbId && loadTags(kbId)">
-                    {{ $t('tenant.loadMore') }}
-                  </t-button>
-                </div>
-              </template>
-            </div>
-          </aside>
           <div class="tag-content">
             <div class="doc-card-area">
-              <!-- 搜索栏、筛选与添加文档 -->
               <div class="doc-filter-bar">
                 <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
                   clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
@@ -2324,15 +2136,135 @@ async function createNewSession(value: string): Promise<void> {
                     <t-icon name="search" size="16px" />
                   </template>
                 </t-input>
-                <t-select v-model="selectedFileType" :options="fileTypeOptions"
-                  :placeholder="$t('knowledgeBase.fileTypeFilter')" class="doc-type-select" clearable />
-                <t-select v-model="selectedParseStatus" :options="parseStatusOptions"
-                  :placeholder="$t('knowledgeBase.parseStatusFilter')" class="doc-type-select" clearable />
-                <t-select v-model="selectedSource" :options="sourceOptions"
-                  :placeholder="$t('knowledgeBase.sourceFilter')" class="doc-type-select" clearable />
-                <t-date-range-picker v-model="updatedTimeRange"
-                  :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
-                  :disable-date="disableFutureDate" class="doc-date-range" clearable allow-input />
+                <t-popup v-model:visible="tagFilterPanelVisible" trigger="click" placement="bottom-left"
+                  overlay-class-name="tag-filter-popup" :overlay-inner-style="{ padding: 0 }">
+                  <template #content>
+                    <div class="tag-filter-panel" @click.stop>
+                      <div class="tag-filter-panel__header">
+                        <div class="tag-filter-panel__title">
+                          <span>{{ $t('knowledgeBase.tagFilterTitle') }}</span>
+                          <span class="tag-filter-panel__count">({{ sidebarCategoryCount }})</span>
+                        </div>
+                      </div>
+                      <div class="tag-search-bar">
+                        <t-input v-model.trim="tagSearchQuery" size="small"
+                          :placeholder="$t('knowledgeBase.tagSearchPlaceholder')" clearable>
+                          <template #prefix-icon>
+                            <t-icon name="search" size="14px" />
+                          </template>
+                        </t-input>
+                      </div>
+                      <div class="tag-filter-panel__body">
+                        <template v-if="tagLoading && !sidebarTags.length">
+                          <div class="tag-filter-chips">
+                            <div v-for="n in 8" :key="'skel-tag-' + n" class="tag-filter-chip-skeleton">
+                              <t-skeleton animation="gradient"
+                                :row-col="[{ width: '56px', height: '24px', type: 'rect' }]" />
+                            </div>
+                          </div>
+                        </template>
+                        <template v-else>
+                          <div class="tag-filter-chips">
+                            <button
+                              v-for="tag in sidebarTags"
+                              :key="tag.id"
+                              type="button"
+                              class="tag-filter-chip"
+                              :class="{ active: isTagFilterActive(tag.id) }"
+                              :title="`${tag.name} (${tag.knowledge_count || 0})`"
+                              @click="handleTagRowClick(tag.id)"
+                            >
+                              <span class="tag-filter-chip__label">{{ tag.name }}</span>
+                              <span class="tag-filter-chip__count">{{ tag.knowledge_count || 0 }}</span>
+                            </button>
+                          </div>
+                          <div v-if="!sidebarTags.length" class="tag-empty-state">
+                            {{ $t('knowledgeBase.tagEmptyResult') }}
+                          </div>
+                          <div v-if="tagHasMore" class="tag-load-more">
+                            <t-button variant="text" size="small" :loading="tagLoadingMore"
+                              @click.stop="kbId && loadTags(kbId)">
+                              {{ $t('tenant.loadMore') }}
+                            </t-button>
+                          </div>
+                        </template>
+                      </div>
+                      <div v-if="canEdit" class="tag-filter-panel__footer">
+                        <t-button variant="text" size="small" class="tag-manage-link" @click="openTagManageDrawer">
+                          {{ $t('knowledgeBase.tagManageLink') }}
+                        </t-button>
+                      </div>
+                    </div>
+                  </template>
+                  <div class="doc-filter-field">
+                    <button type="button" class="doc-tag-filter-trigger doc-filter-field__control"
+                      :class="{ open: tagFilterPanelVisible, 'is-placeholder': isTagFilterPlaceholder }"
+                      :aria-label="$t('knowledgeBase.tagFilterTitle')"
+                      :title="activeTagFilterTitle"
+                      @mouseenter="tagFilterTriggerHover = true"
+                      @mouseleave="tagFilterTriggerHover = false">
+                      <span class="doc-tag-filter-trigger__prefix" aria-hidden="true">
+                        <t-icon name="discount" size="16px" />
+                      </span>
+                      <span class="doc-tag-filter-trigger__label">{{ activeTagFilterLabel }}</span>
+                      <span class="doc-tag-filter-trigger__suffix">
+                        <span
+                          v-if="showTagFilterClear"
+                          class="t-input__suffix t-input__suffix-icon t-input__clear"
+                          :aria-label="$t('common.clear')"
+                          @click.stop="clearTagFilter"
+                          @mousedown.stop
+                        >
+                          <t-icon name="close-circle-filled" class="t-input__suffix-clear" />
+                        </span>
+                        <t-icon
+                          v-else
+                          name="chevron-down"
+                          size="16px"
+                          class="doc-tag-filter-trigger__caret"
+                          :class="{ open: tagFilterPanelVisible }"
+                        />
+                      </span>
+                    </button>
+                  </div>
+                </t-popup>
+                <div class="doc-filter-field">
+                  <t-select v-model="selectedFileType" :options="fileTypeOptions"
+                    :placeholder="$t('knowledgeBase.fileTypeFilter')" class="doc-type-select doc-filter-field__control"
+                    clearable>
+                    <template #prefixIcon>
+                      <t-icon name="file" size="16px" />
+                    </template>
+                  </t-select>
+                </div>
+                <div class="doc-filter-field">
+                  <t-select v-model="selectedParseStatus" :options="parseStatusOptions"
+                    :placeholder="$t('knowledgeBase.parseStatusFilter')" class="doc-type-select doc-filter-field__control"
+                    clearable>
+                    <template #prefixIcon>
+                      <t-icon name="check-circle" size="16px" />
+                    </template>
+                  </t-select>
+                </div>
+                <div class="doc-filter-field">
+                  <t-select v-model="selectedSource" :options="sourceOptions"
+                    :placeholder="$t('knowledgeBase.sourceFilter')" class="doc-type-select doc-filter-field__control"
+                    clearable>
+                    <template #prefixIcon>
+                      <t-icon name="link" size="16px" />
+                    </template>
+                  </t-select>
+                </div>
+                <div class="doc-filter-field doc-filter-field--wide">
+                  <t-date-range-picker v-model="updatedTimeRange"
+                    :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
+                    :disable-date="disableFutureDate" class="doc-date-range doc-filter-field__control" clearable
+                    allow-input>
+                    <template #prefixIcon>
+                      <t-icon name="time" size="16px" />
+                    </template>
+                  </t-date-range-picker>
+                </div>
                 <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
                   <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
                     <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'grid' }"
@@ -2660,10 +2592,20 @@ async function createNewSession(value: string): Promise<void> {
                             }}</span>
                           <span v-if="(hoveredCardItem as any).channel && (hoveredCardItem as any).channel !== 'web'"
                             class="card-popover-channel">{{ getChannelLabel((hoveredCardItem as any).channel) }}</span>
-                          <span v-if="(hoveredCardItem as any).tags && (hoveredCardItem as any).tags.length > 0"
-                            class="card-popover-tag">{{
-                              (hoveredCardItem as any).tags.map((t: any) => t.name).join(', ')
-                            }}</span>
+                          <div
+                            v-if="(hoveredCardItem as any).tags && (hoveredCardItem as any).tags.length > 0"
+                            class="card-popover-tags"
+                          >
+                            <t-tag
+                              v-for="tag in (hoveredCardItem as any).tags"
+                              :key="tag.id"
+                              size="small"
+                              variant="light-outline"
+                              class="card-popover-tag-chip"
+                            >
+                              <span class="tag-text">{{ tag.name }}</span>
+                            </t-tag>
+                          </div>
                           <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
                         </div>
                         <div class="card-popover-hint">{{ t('knowledgeBase.clickToViewFull') }}</div>
@@ -2715,11 +2657,60 @@ async function createNewSession(value: string): Promise<void> {
   <!-- 标签编辑弹窗 -->
   <TagEditDialog :visible="tagEditDialogVisible"
     :knowledge-name="tagEditTarget?.display_name || tagEditTarget?.file_name || tagEditTarget?.title || ''"
-    :kb-id="kbId" :tag-list="tagList" :selected-tags="tagEditTarget?.tags || []"
-    @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)" />
+    :kb-id="kbId" :tag-list="tagList" :selected-tags="tagEditTarget?.tags || []" :can-manage="canEdit"
+    @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)"
+    @open-manage="openTagManageFromEditDialog" />
+
+  <KbTagManageDrawer
+    v-model:visible="tagManageDrawerVisible"
+    :kb-id="kbId"
+    :is-faq="isFAQ"
+    @changed="onTagManageChanged"
+  />
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
+.tag-filter-popup {
+  z-index: 5500 !important;
+}
+
+.tag-filter-popup .t-popup__content {
+  padding: 0 !important;
+  border-radius: 8px !important;
+  background: var(--td-bg-color-container) !important;
+  border: 0.5px solid var(--td-component-stroke) !important;
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.1) !important;
+}
+
+.tag-more-popup .tag-menu {
+  display: flex;
+  flex-direction: column;
+}
+
+.tag-more-popup .tag-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.tag-more-popup .tag-menu-item .menu-icon {
+  margin-right: 8px;
+  font-size: 16px;
+}
+
+.tag-more-popup .tag-menu-item:hover {
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+}
 </style>
 <style scoped lang="less">
 .knowledge-layout {
@@ -2788,73 +2779,44 @@ async function createNewSession(value: string): Promise<void> {
   border: none;
 }
 
-// 贴近整体系统设计语言的极简侧栏（对齐 menu 与右侧主窗口质感）
-.tag-sidebar {
-  width: 180px;
-  background: transparent;
-  border: none;
-  border-right: 1px solid var(--td-component-stroke);
-  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
-  padding: 0 16px 0 4px;
+// 标签筛选浮层：点击工具栏入口展开，不占文档列表横向空间
+.tag-filter-panel {
+  width: 320px;
+  max-width: min(320px, calc(100vw - 32px));
+  max-height: min(70vh, 480px);
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  max-height: 100%;
-  min-height: 0;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--td-text-color-primary);
 
-  .sidebar-header {
+  .tag-filter-panel__header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     padding: 0;
     color: var(--td-text-color-primary);
+  }
 
-    .sidebar-title {
-      display: flex;
-      align-items: baseline;
-      gap: 6px;
-      font-size: 14px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
+  .tag-filter-panel__title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
 
-      .sidebar-count {
-        font-size: 12px;
-        color: var(--td-text-color-placeholder);
-        font-weight: 400;
-      }
-    }
-
-    .sidebar-actions {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-
-      .create-tag-btn {
-        width: 24px;
-        height: 24px;
-        padding: 0;
-        border-radius: 4px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--td-text-color-secondary);
-        transition: all 0.2s ease;
-
-        .t-icon {
-          font-size: 16px;
-        }
-
-        &:hover {
-          background: var(--td-bg-color-secondarycontainer);
-          color: var(--td-text-color-primary);
-        }
-      }
-    }
+  .tag-filter-panel__count {
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    font-weight: 400;
   }
 
   .tag-search-bar {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     padding: 0;
 
     :deep(.t-input) {
@@ -2882,7 +2844,7 @@ async function createNewSession(value: string): Promise<void> {
     }
   }
 
-  .tag-sidebar-body {
+  .tag-filter-panel__body {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -2902,46 +2864,42 @@ async function createNewSession(value: string): Promise<void> {
     }
   }
 
-  .tag-sidebar-chips {
+  .tag-filter-chips {
     display: flex;
     flex-wrap: wrap;
+    align-items: flex-start;
     gap: 6px;
-    align-content: flex-start;
   }
 
-  .tag-sidebar-chip-skeleton {
-    height: 26px;
+  .tag-filter-chip-skeleton {
+    flex-shrink: 0;
   }
 
-  .tag-sidebar-chip {
+  .tag-filter-chip {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
     gap: 4px;
     box-sizing: border-box;
-    flex-shrink: 0;
     max-width: 100%;
-    height: 26px;
+    height: 24px;
     padding: 0 8px;
     border: 1px solid var(--td-component-stroke);
     border-radius: 4px;
     background: transparent;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 400;
-    line-height: 26px;
-    text-align: center;
+    line-height: 24px;
     cursor: pointer;
     outline: none;
-    white-space: nowrap;
-    overflow: hidden;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     -webkit-font-smoothing: antialiased;
 
     &:hover:not(.active) {
-      background: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 45%, transparent);
-      color: var(--td-text-color-secondary);
+      border-color: var(--td-component-border);
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary);
     }
 
     &:focus-visible {
@@ -2949,126 +2907,67 @@ async function createNewSession(value: string): Promise<void> {
     }
 
     &.active {
-      border-color: var(--td-component-stroke);
+      border-color: color-mix(in srgb, var(--td-brand-color) 35%, var(--td-component-stroke));
       color: var(--td-brand-color);
-      background-color: transparent;
-      background-image: none;
-      box-shadow: none;
+      font-weight: 500;
+      background-color: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
 
-      .tag-chip-count {
+      .tag-filter-chip__count {
         color: color-mix(in srgb, var(--td-brand-color) 72%, var(--td-text-color-secondary));
       }
 
       &:hover {
-        border-color: var(--td-component-stroke);
-        background-color: color-mix(in srgb, var(--td-bg-color-secondarycontainer) 45%, transparent);
-        color: var(--td-brand-color);
-
-        .tag-chip-count {
-          color: color-mix(in srgb, var(--td-brand-color) 72%, var(--td-text-color-secondary));
-        }
+        background-color: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       }
     }
   }
 
-  .tag-chip-label {
+  .tag-filter-chip__label {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    min-width: 0;
+    max-width: 120px;
   }
 
-  .tag-chip-count {
+  .tag-filter-chip__count {
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: 10px;
+    font-weight: 400;
     font-variant-numeric: tabular-nums;
     color: var(--td-text-color-placeholder);
+
+    &::before {
+      content: '·';
+      margin-right: 2px;
+      opacity: 0.65;
+    }
   }
 
-  .tag-sidebar-edit-row,
-  .tag-sidebar-create-row {
+  .tag-filter-panel__footer {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--td-component-stroke);
     display: flex;
-    align-items: center;
-    gap: 4px;
-    width: 100%;
-    min-height: 28px;
-    padding: 3px 6px;
-    border: 1px dashed var(--td-component-stroke);
-    border-radius: 4px;
-    box-sizing: border-box;
-    flex: 1 1 100%;
-    max-width: 100%;
-  }
+    justify-content: flex-start;
 
-  .tag-edit-input {
-    flex: 1;
-    min-width: 0;
-
-    :deep(.t-input) {
-      font-size: 12px;
-      background-color: transparent;
-      border: none;
-      border-radius: 0;
-      box-shadow: none;
+    :deep(.tag-manage-link.t-button) {
       padding: 0;
-    }
-
-    :deep(.t-input__wrap) {
-      background-color: transparent;
-      border: none;
-      border-radius: 0;
-      box-shadow: none;
-    }
-
-    :deep(.t-input__inner) {
-      padding: 0;
-      color: var(--td-text-color-primary);
-    }
-
-    :deep(.t-input:hover),
-    :deep(.t-input.t-is-focused),
-    :deep(.t-input__wrap:hover),
-    :deep(.t-input__wrap.t-is-focused) {
-      border-color: transparent;
-    }
-  }
-
-  .tag-inline-actions {
-    display: flex;
-    gap: 2px;
-    flex-shrink: 0;
-
-    :deep(.t-button) {
-      padding: 0 2px;
-      height: 20px;
-    }
-
-    :deep(.tag-action-btn) {
-      border-radius: 4px;
-      transition: all 0.15s ease;
-
-      .t-icon {
-        font-size: 14px;
-      }
-    }
-
-    :deep(.tag-action-btn.confirm) {
-      background: transparent;
+      height: auto;
+      min-height: 0;
+      font-size: 13px;
       color: var(--td-text-color-secondary);
+      border: none !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      transition: color 0.15s ease;
 
-      &:hover {
-        background: var(--td-bg-color-secondarycontainer);
-        color: var(--td-text-color-primary);
-      }
-    }
-
-    :deep(.tag-action-btn.cancel) {
-      background: transparent;
-      color: var(--td-text-color-secondary);
-
-      &:hover {
-        background: var(--td-bg-color-secondarycontainer);
-        color: var(--td-error-color);
+      &:hover,
+      &:focus-visible {
+        color: var(--td-brand-color) !important;
+        background: transparent !important;
+        border-color: transparent !important;
+        text-decoration: none;
       }
     }
   }
@@ -3099,7 +2998,7 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 0 0 0 16px;
+  padding: 0;
   border: none;
   overflow: hidden;
   background: transparent;
@@ -3122,19 +3021,101 @@ async function createNewSession(value: string): Promise<void> {
   align-items: center;
   flex-wrap: wrap;
 
+  .doc-filter-field {
+    width: 140px;
+    flex-shrink: 0;
+
+    &--wide {
+      width: 280px;
+    }
+
+    &__control {
+      width: 100%;
+    }
+  }
+
+  .doc-tag-filter-trigger {
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    width: 100%;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: var(--td-radius-default);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+    font-family: var(--app-font-family);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+
+    &:hover,
+    &.open {
+      background: var(--td-bg-color-secondarycontainer);
+      border-color: transparent;
+    }
+
+    &.is-placeholder {
+      color: var(--td-text-color-placeholder);
+    }
+
+    &__prefix {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      margin-right: var(--td-comp-margin-s);
+      color: var(--td-text-color-placeholder);
+    }
+
+    &__label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-align: left;
+    }
+
+    &__suffix {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      margin-left: var(--td-comp-margin-s);
+
+      :deep(.t-input__suffix) {
+        margin-left: 0;
+      }
+
+      :deep(.t-input__suffix-clear) {
+        font-size: 16px;
+      }
+    }
+
+    &__caret {
+      flex-shrink: 0;
+      color: var(--td-text-color-placeholder);
+      transition: transform 0.2s ease, color 0.2s ease;
+
+      &.open {
+        color: var(--td-brand-color);
+        transform: rotate(180deg);
+      }
+    }
+  }
+
   .doc-search-input {
     flex: 1 1 220px;
     min-width: 220px;
   }
 
   .doc-type-select {
-    width: 140px;
-    flex-shrink: 0;
+    width: 100%;
   }
 
   .doc-date-range {
-    width: 280px;
-    flex-shrink: 0;
+    width: 100%;
 
     // TDesign focuses both the outer popup reference and inner inputs, which
     // visually stacks into a "double border" — drop the inner shadow.
@@ -4263,11 +4244,33 @@ async function createNewSession(value: string): Promise<void> {
     border-radius: 4px;
   }
 
-  .card-popover-tag {
-    padding: 1px 6px;
-    background: var(--td-success-color-light);
-    color: var(--td-brand-color);
-    border-radius: 4px;
+  .card-popover-tags {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 100%;
+  }
+
+  .card-popover-tag-chip {
+    max-width: 120px;
+    height: 18px;
+    line-height: 18px;
+    border-radius: 999px;
+    border-color: var(--td-component-stroke);
+    color: var(--td-text-color-secondary);
+    padding: 0 6px;
+    background: transparent;
+
+    .tag-text {
+      display: inline-block;
+      max-width: 80px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+      font-size: 11px;
+    }
   }
 
   .card-popover-type {

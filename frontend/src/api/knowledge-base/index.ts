@@ -160,7 +160,7 @@ export function togglePinKnowledgeBase(id: string) {
 }
 
 // 知识文件 API（基于具体知识库）
-// data.tag_ids: 可选，指定知识所属的多个分类ID
+// data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function uploadKnowledgeFile(
   kbId: string,
   data: {
@@ -188,7 +188,7 @@ export function uploadKnowledgeFile(
 }
 
 // 从URL创建知识
-// data.tag_ids: 可选，指定知识所属的多个分类ID
+// data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function createKnowledgeFromURL(
   kbId: string,
   data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
@@ -197,7 +197,7 @@ export function createKnowledgeFromURL(
 }
 
 // 手工创建知识
-// data.tag_ids: 可选，指定知识所属的分类ID
+// data.tag_ids: 可选，指定知识所属的标签 ID
 export function createManualKnowledge(
   kbId: string,
   data: {
