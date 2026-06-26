@@ -296,11 +296,11 @@
                   <img src="@/assets/img/organization-green.svg" class="org-icon" alt="" aria-hidden="true" />
                   <span class="org-source-text">{{ agent.org_name }}</span>
                 </div>
-                <div v-else-if="agent.is_builtin" class="builtin-badge">
+                <div v-else-if="showAgentBuiltinBadge(agent)" class="builtin-badge">
                   <t-icon name="lock-on" size="12px" />
                   <span>{{ $t('agent.builtin') }}</span>
                 </div>
-                <ResourceOriginBadge v-else :variant="agentOriginVariant(agent)"
+                <ResourceOriginBadge v-else-if="showAgentOriginBadge(agent)" :variant="agentOriginVariant(agent)"
                   :creator-name="(agent as any).creator_name" />
               </div>
             </div>
@@ -483,11 +483,11 @@
                   </div>
                 </div>
                 <!-- 右下角：内置 / 来源徽章（我创建 / 同租户其他成员） -->
-                <div v-if="agent.is_builtin" class="builtin-badge">
+                <div v-if="showAgentBuiltinBadge(agent)" class="builtin-badge">
                   <t-icon name="lock-on" size="12px" />
                   <span>{{ $t('agent.builtin') }}</span>
                 </div>
-                <ResourceOriginBadge v-else :variant="agentOriginVariant(agent)"
+                <ResourceOriginBadge v-else-if="showAgentOriginBadge(agent)" :variant="agentOriginVariant(agent)"
                   :creator-name="(agent as any).creator_name" />
               </div>
             </div>
@@ -630,11 +630,6 @@
                       <div class="feature-badge multi-turn"><t-icon name="chat-bubble" size="16px" /></div>
                     </t-tooltip>
                   </div>
-                </div>
-                <!-- 右下角：空间图标+名称 -->
-                <div class="card-bottom-source">
-                  <img src="@/assets/img/organization-green.svg" class="org-icon" alt="" aria-hidden="true" />
-                  <span class="org-source-text">{{ shared.org_name }}</span>
                 </div>
               </div>
             </div>
@@ -839,6 +834,7 @@ import { useUIStore } from '@/stores/ui'
 import AgentAvatar from '@/components/AgentAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
+import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import { useAuthStore } from '@/stores/auth'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
@@ -1345,6 +1341,24 @@ function isMyAgent(agent: { created_by?: string }): boolean {
 // 内建 agent 走 v-else 前的 builtin 分支，到不了这里。
 function agentOriginVariant(agent: { created_by?: string }): 'mine' | 'creator' {
   return isMyAgent(agent) ? 'mine' : 'creator'
+}
+
+function showAgentOriginBadge(agent: { created_by?: string; creator_name?: string }): boolean {
+  return shouldShowResourceOriginBadge({
+    section: agentSectionOf(agent),
+    variant: agentOriginVariant(agent),
+    creatorName: (agent as any).creator_name,
+    showSectionHeaders: showShareGroupHeaders.value,
+  })
+}
+
+function showAgentBuiltinBadge(agent: { is_builtin?: boolean }): boolean {
+  if (!agent.is_builtin) return false
+  return shouldShowResourceOriginBadge({
+    section: agentSectionOf(agent),
+    variant: 'mine',
+    showSectionHeaders: showShareGroupHeaders.value,
+  })
 }
 
 // 共享 agent 的可编辑/只读分组开关，与 KB 列表逻辑保持一致：仅对
