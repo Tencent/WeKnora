@@ -171,23 +171,26 @@ The [WeKnora Mini Program](./miniprogram/README.md) provides a lightweight mobil
 
 ## ⌨️ Command-Line Interface
 
-`weknora` is the official CLI for driving the API from a terminal or AI agent.
-The command surface mirrors `gh` CLI's `<noun> <verb>` convention; output is
-human-readable by default and switches to a stable JSON envelope with `--json`.
-v0.9 ships bundled Agent Skills (`weknora-rag-search`, `weknora-shared`), adds
-`session stop`, and harmonizes auth/profile workflows (see [`cli/CHANGELOG.md`](./cli/CHANGELOG.md)).
+`weknora` is the official CLI for driving the API from a terminal or an AI
+agent. It is **agent-first**: every command emits a stable JSON envelope by
+default (with typed error codes mapped to exit codes), and `--format text`
+renders for humans. It also serves a curated MCP tool surface
+(`weknora mcp serve`) and ships bundled Agent Skills.
 
 ```bash
-weknora auth login --host https://kb.example.com
+weknora profile add prod --host https://kb.example.com --use
+weknora auth login
 weknora kb list
 weknora link --kb my-knowledge-base    # bind the current directory
 weknora doc upload notes.md
 weknora chat "summarise the design doc"
 ```
 
-See [`cli/README.md`](./cli/README.md) for install + 5-minute quickstart
-and [`cli/AGENTS.md`](./cli/AGENTS.md) for the operational contract that
-AI agents (Claude Code, Cursor, Aider, …) can rely on.
+For headless / CI use, set `WEKNORA_API_KEY` + `WEKNORA_HOST` and skip
+`auth login` entirely — no credentials written to disk.
+
+See [`cli/README.md`](./cli/README.md) for install + 5-minute quickstart and
+[`cli/AGENTS.md`](./cli/AGENTS.md) for the operational contract AI agents rely on.
 
 ## 🚀 Getting Started
 

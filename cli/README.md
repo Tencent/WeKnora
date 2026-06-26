@@ -24,8 +24,9 @@ Available Commands:
   kb          Manage knowledge bases
   link        Bind the current directory to a knowledge base
   mcp         Run weknora as a Model Context Protocol server
+  message     Inspect and manage messages inside chat sessions
   search      Search across chunks, knowledge bases, documents, or sessions
-  session     Manage chat sessions
+  session     Manage chat sessions (incl. tool-approval resolve)
   unlink      Remove the directory's knowledge-base binding
   version     Show CLI build metadata
 ```
@@ -50,8 +51,9 @@ sudo mv weknora /usr/local/bin/   # or anywhere on $PATH
 
 ### Pre-built binaries
 
-Pre-built binaries for Linux / macOS / Windows are produced by CI on each
-release. Grab the latest from the [Releases page](https://github.com/Tencent/WeKnora/releases).
+Building from source is the supported install method today. Pre-built binaries,
+`go install`, and a Homebrew formula are planned to accompany a tagged release;
+until then, use the from-source build above.
 
 ---
 
@@ -76,6 +78,7 @@ weknora link --kb my-knowledge-base
 # 5. Upload a document, then block until parsing finishes
 weknora doc upload notes.md
 weknora doc wait doc_abc                          # exit 0 completed, 1 failed, 124 --timeout, 130 ^C
+weknora doc reparse doc_abc                       # re-trigger parsing if it failed, then wait again
 
 # 6. Search
 weknora search chunks "what is reciprocal rank fusion?"
@@ -84,13 +87,22 @@ weknora search chunks "what is reciprocal rank fusion?"
 weknora chat "summarise the design doc"
 
 # 8. Manage custom agents and run them (see `weknora agent --help` / `weknora session --help`)
+weknora model list                               # discover a model id for --model
 weknora agent list
 weknora session ask --agent ag_abc "what's our q4 retention plan?"
 
 # 9. Inspect a document's chunks for RAG retrieval debug
 weknora chunk list --doc doc_xyz
 
-# 10. Health & verification verbs
+# 10. Inspect messages in a session / search across sessions
+weknora message list --session sess_abc
+weknora message search "retry policy"                      # cross-session Q&A retrieval
+
+# 11. Resolve a pending tool approval (agent run blocked on approval event)
+weknora session tool-approval resolve pend_xxx -y          # approve (after user go-ahead)
+weknora session continue-stream sess_abc --message msg_xyz # resume the blocked stream
+
+# 12. Health & verification verbs
 weknora kb status kb_abc       # fast snapshot: reachable / counts / processing flag (1 HTTP)
 weknora kb check kb_abc        # deep verify: also aggregates failed_count via doc list (1+N HTTP)
 weknora agent status ag_abc    # fast: reachable / model_id
@@ -101,10 +113,17 @@ weknora agent check ag_abc     # deep: probes every KB in the agent's scope
 
 ### Agent quick start
 
-For AI agents (Claude Code, Cursor, Gemini CLI, etc.) integrating WeKnora:
+For AI agents (any MCP-capable host) integrating WeKnora:
 
-1. Install: `brew install weknora` or `go install github.com/Tencent/WeKnora/cli@latest`
-2. Register a profile, then authenticate it (background; extract login URL for the user):
+1. Install: build from source (see [Install](#install))
+2. Authenticate. In a sandbox / CI, the **stateless** path needs no `auth login`
+   and writes nothing to disk — just set two env vars:
+   ```bash
+   export WEKNORA_API_KEY="sk-…"   # or WEKNORA_TOKEN for a bearer JWT
+   export WEKNORA_HOST="https://kb.example.com"
+   weknora kb list                 # already authenticated
+   ```
+   Or, for a persisted local profile:
    ```bash
    weknora profile add prod --host <server-url> --use
    weknora auth login
@@ -127,17 +146,19 @@ under [`skills/`](skills/) that teach an agent to drive WeKnora without trial an
 - [`weknora-rag-search`](skills/weknora-rag-search/SKILL.md) — when to use `chat`
   vs `session ask` vs `search chunks`, plus retrieval gotchas.
 
-MVP install: symlink them into your agent's skills directory (from a source checkout):
+Install them with the CLI (the skills are embedded in the binary, no checkout
+needed):
 
 ```bash
-ln -s "$PWD/skills/weknora-shared"     ~/.claude/skills/weknora-shared
-ln -s "$PWD/skills/weknora-rag-search" ~/.claude/skills/weknora-rag-search
+weknora skills install                      # writes to ~/.claude/skills
+weknora skills install --dir <agent-skills-dir> --force   # other agents / overwrite
+weknora skills list --format json           # what would be installed
 ```
 
-Each skill's frontmatter records the CLI version it was `tested_against`; a CI
-parity test (`internal/skillparity`) fails if a skill ever references a command,
-flag, or MCP tool the CLI no longer has. (A `weknora skills install` command is
-planned; for now, symlink or copy.)
+Existing files are left untouched without `--force`; `--dry-run` previews the
+file list. Each skill's frontmatter records the CLI version it was
+`tested_against`; a CI parity test (`internal/skillparity`) fails if a skill
+ever references a command, flag, or MCP tool the CLI no longer has.
 
 ---
 
@@ -188,15 +209,17 @@ changes announced in the changelog and the corresponding
 
 ### JSON output
 
-Every command supports `--format json`, emitting bare JSON for the
-resource it produces — an array for `list` / `search`, a single object
-for `view` and write outcomes:
+Every command supports `--format json`, wrapping the resource in the
+symmetric envelope `{ok, data, meta?}` — `data` is an array for `list` /
+`search`, a single object for `view` and write outcomes. `--jq` runs
+against the whole envelope, so reach into list items with `.data[]`:
 
 ```bash
-weknora kb list --format json                              # [{ "id": "kb_x", "name": "Eng" }, …]
-weknora kb view kb_x --format json                         # { "id": "kb_x", "name": "Eng", … }
-weknora kb list --format json --jq '.[] | {id, name}'      # project to listed fields
-weknora kb list --format json --jq '.[].id'                # jq over the bare data
+weknora kb list --format json                              # {"ok":true,"data":[{"id":"kb_x",…}],"meta":{"count":1,…}}
+weknora kb view kb_x --format json                         # {"ok":true,"data":{"id":"kb_x","name":"Eng",…}}
+weknora kb list --format json --jq '.data[] | {id, name}'  # project listed fields out of each item
+weknora kb list --format json --jq '.data[].id'            # ids only
+weknora kb list --format json --jq '.meta.count'           # number returned
 ```
 
 `--format ndjson` is also accepted for streaming list commands; each
@@ -240,7 +263,9 @@ wait/poll outcomes: `operation.timeout`, `operation.failed`, `operation.cancelle
 | `7`   | `server.*` / `network.*`                               | transient — retry with backoff |
 | `10`  | **`input.confirmation_required`** (high-risk write)    | ask the human, retry with `-y` only after explicit approval |
 | `124` | `operation.timeout` (e.g. `doc wait --timeout` reached) | raise `--timeout` or check the underlying job |
-| `130` | `operation.cancelled` (SIGINT / SIGTERM)               | stop, do not retry |
+| `130` | cancelled by signal — typed `operation.cancelled` errors exit 1; `main.go` promotes the process exit to 130 when the root context was signal-cancelled (SIGINT / SIGTERM) | stop, do not retry |
+
+Run `weknora exit-codes` for the machine-readable matrix (JSON); `weknora help exit-codes` for the human-readable table.
 
 **Exit 10** is the wire-level signal for "destructive write needs
 explicit confirmation". Pass `-y/--yes` on `kb delete` /
@@ -260,6 +285,11 @@ is the guard against unintended writes.
   single-shot profile overrides without disk writes.
 - `weknora mcp serve` exposes a curated read-only tool surface over
   stdio MCP for any MCP-compatible client.
+- `weknora schema` enumerates every command with its `used_for`, and
+  `weknora schema <cmd path>` (e.g. `weknora schema doc update`) prints that
+  command's full contract — `used_for`, `required_flags`, `examples`,
+  `output`, `warnings`, `risk`, and local `flags` — as the standard envelope,
+  so an agent can discover the surface without scraping `--help` prose.
 
 ---
 
@@ -345,6 +375,21 @@ weknora session continue-stream sess_abc --message msg_xyz
 # Server REPLAYS all stored events from the start, then tails new ones.
 # Agent must dedupe (by message_id or event hash) to avoid double-processing.
 ```
+
+### Tool-approval unlock chain
+
+An agent run may pause the stream on a tool-approval event until a human approves or rejects the pending tool call. The unlock sequence:
+
+```bash
+# 1. Stream pauses with a tool-approval event carrying a pending_id.
+# 2. Surface the pending tool call to the user; get explicit go-ahead.
+weknora session tool-approval resolve pend_xxx -y                      # approve
+# weknora session tool-approval resolve pend_xxx --reject --reason "..." -y  # reject
+# 3. Resume the stream — server replays + tails from where the run was blocked.
+weknora session continue-stream sess_abc --message msg_xyz
+```
+
+Pass `--modified-args '{"key":"value"}'` to replace tool arguments on approve (must be a non-empty JSON object). Never auto-pass `-y` — the approval is the exit-10 human-in-the-loop gate.
 
 Server-side buffer TTL: 1 hour for redis mode; process lifetime for memory mode (default). After TTL, expect `local.sse_stream_aborted` typed error.
 
