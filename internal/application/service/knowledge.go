@@ -26,8 +26,11 @@ var (
 	ErrInvalidFileType = errors.New("unsupported file type")
 	// ErrInvalidURL is returned when an invalid URL is provided
 	ErrInvalidURL = errors.New("invalid URL")
-	// ErrChunkNotFound is returned when a requested chunk cannot be found
-	ErrChunkNotFound = errors.New("chunk not found")
+	// ErrChunkNotFound is returned when a requested chunk cannot be found.
+	// Aliases the repository sentinel so a chunk-not-found from the repo
+	// errors.Is-matches at the service and middleware layers (a single
+	// identity instead of two string-equal-but-distinct errors).
+	ErrChunkNotFound = repository.ErrChunkNotFound
 	// ErrDuplicateFile is returned when trying to add a file that already exists
 	ErrDuplicateFile = errors.New("file already exists")
 	// ErrDuplicateURL is returned when trying to add a URL that already exists
