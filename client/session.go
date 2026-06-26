@@ -281,7 +281,7 @@ func (c *Client) KnowledgeQAStream(
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		err := newAPIError(resp.StatusCode, body)
 		debugLogger.Debug("request_error_status", "error", err)
 		return err
 	}
@@ -370,7 +370,7 @@ func (c *Client) ContinueStream(
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		return newAPIError(resp.StatusCode, body)
 	}
 
 	// Use bufio to read SSE data line by line
@@ -478,7 +478,7 @@ func (c *Client) SearchKnowledge(ctx context.Context, request *SearchKnowledgeRe
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		err := fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		err := newAPIError(resp.StatusCode, body)
 		debugLogger.Debug("request_error_status", "error", err)
 		return nil, err
 	}

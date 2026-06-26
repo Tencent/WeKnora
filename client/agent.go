@@ -94,7 +94,7 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		return newAPIError(resp.StatusCode, body)
 	}
 
 	// Process SSE stream

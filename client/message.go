@@ -104,7 +104,32 @@ func (c *Client) GetMessagesBefore(
 	return c.LoadMessages(ctx, sessionID, limit, &beforeTime)
 }
 
-// SearchMessagesRequest defines the request structure for searching messages
+// MessageSearchMode is the search strategy for SearchMessages. It mirrors the
+// server enum in internal/types/message.go.
+type MessageSearchMode string
+
+const (
+	// MessageSearchModeKeyword searches by keyword only.
+	MessageSearchModeKeyword MessageSearchMode = "keyword"
+	// MessageSearchModeVector searches by vector similarity only.
+	MessageSearchModeVector MessageSearchMode = "vector"
+	// MessageSearchModeHybrid combines keyword and vector search (server default).
+	MessageSearchModeHybrid MessageSearchMode = "hybrid"
+)
+
+// AllMessageSearchModes returns every search mode the server recognises, in a
+// stable order. Callers (CLI flag validation, docs) should use this instead of
+// re-typing the set so they can't drift from the SDK.
+func AllMessageSearchModes() []MessageSearchMode {
+	return []MessageSearchMode{
+		MessageSearchModeKeyword, MessageSearchModeVector, MessageSearchModeHybrid,
+	}
+}
+
+// SearchMessagesRequest defines the request structure for searching messages.
+// Mode is a plain string mirroring the server's request DTO; pass a
+// MessageSearchMode constant cast to string, or leave empty for the server
+// default (hybrid).
 type SearchMessagesRequest struct {
 	Query      string   `json:"query"`
 	Mode       string   `json:"mode"`

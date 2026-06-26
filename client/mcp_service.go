@@ -212,3 +212,28 @@ func (c *Client) GetMCPServiceResources(ctx context.Context, serviceID string) (
 	}
 	return result.Data, nil
 }
+
+// ResolveToolApprovalRequest is the body for resolving a pending tool-approval
+// raised during an agent run (session ask). Decision is "approve" or "reject".
+// ModifiedArgs optionally replaces the tool call arguments on approve; it must
+// be a JSON object when present.
+type ResolveToolApprovalRequest struct {
+	Decision     string          `json:"decision"`
+	Reason       string          `json:"reason,omitempty"`
+	ModifiedArgs json.RawMessage `json:"modified_args,omitempty"`
+}
+
+// ResolveToolApproval resolves a pending tool approval by id.
+// Server route: POST /api/v1/agent/tool-approvals/{pending_id}.
+func (c *Client) ResolveToolApproval(ctx context.Context, pendingID string, req *ResolveToolApprovalRequest) error {
+	path := fmt.Sprintf("/api/v1/agent/tool-approvals/%s", pendingID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, req, nil)
+	if err != nil {
+		return err
+	}
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message,omitempty"`
+	}
+	return parseResponse(resp, &response)
+}
