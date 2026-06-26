@@ -1178,6 +1178,7 @@ func RegisterEmbedChannelRoutes(r *gin.RouterGroup, embedHandler *handler.EmbedC
 	channels := r.Group("/embed-channels")
 	{
 		channels.GET("", g.Viewer(), embedHandler.ListAllEmbedChannels)
+		channels.GET("/:channel_id", g.Viewer(), embedHandler.GetEmbedChannel)
 		channels.PUT("/:channel_id", g.Admin(), embedHandler.UpdateEmbedChannel)
 		channels.DELETE("/:channel_id", g.Admin(), embedHandler.DeleteEmbedChannel)
 		channels.POST("/:channel_id/rotate-token", g.Admin(), embedHandler.RotateEmbedToken)

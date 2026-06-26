@@ -552,6 +552,7 @@ import EmbedChannelPreview from '@/components/EmbedChannelPreview.vue'
 import {
   listAllEmbedChannels,
   createEmbedChannel,
+  getEmbedChannel,
   updateEmbedChannel,
   deleteEmbedChannel,
   rotateEmbedToken,
@@ -591,7 +592,6 @@ const channels = computed(() => {
   if (!filter) return allChannels.value
   return allChannels.value.filter((ch) => ch.agent_id === filter)
 })
-const tokenByChannel = ref<Record<string, string>>({})
 const revealedTokens = reactive<Record<string, boolean>>({})
 const previewVisible = ref(false)
 const previewChannel = ref<EmbedChannel | null>(null)
@@ -637,7 +637,6 @@ const agentImageUploadEnabledEffective = computed(() =>
   drawerAgent.value?.config?.image_upload_enabled === true,
 )
 
-const EMBED_TOKEN_STORAGE = 'weknora_embed_publish_tokens'
 const WEKNORA_BRAND_COLOR = '#07C05F'
 
 function getDefaultEmbedPrimaryColor(): string {
@@ -818,19 +817,11 @@ function agentForChannel(ch: EmbedChannel): CustomAgent | undefined {
   return agents.value.find((agent) => agent.id === ch.agent_id)
 }
 
-const loadStoredTokens = (): Record<string, string> => {
-  try {
-    return JSON.parse(sessionStorage.getItem(EMBED_TOKEN_STORAGE) || '{}')
-  } catch {
-    return {}
+function mergeChannelDetail(detail: EmbedChannel) {
+  const idx = allChannels.value.findIndex((ch) => ch.id === detail.id)
+  if (idx >= 0) {
+    allChannels.value[idx] = { ...allChannels.value[idx], ...detail }
   }
-}
-
-const storeToken = (channelId: string, token: string) => {
-  const map = loadStoredTokens()
-  map[channelId] = token
-  sessionStorage.setItem(EMBED_TOKEN_STORAGE, JSON.stringify(map))
-  tokenByChannel.value = { ...tokenByChannel.value, [channelId]: token }
 }
 
 const load = async () => {
@@ -842,7 +833,6 @@ const load = async () => {
     ])
     allChannels.value = res?.data || []
     agents.value = agentRes?.data || []
-    tokenByChannel.value = { ...loadStoredTokens(), ...tokenByChannel.value }
     await Promise.all(allChannels.value.map(async (ch) => {
       try {
         const statsRes = await getEmbedChannelStats(ch.id)
@@ -886,7 +876,7 @@ watch(createAgentId, (agentId, prev) => {
   previewNonce.value += 1
 })
 
-const tokenFor = (ch: EmbedChannel) => tokenByChannel.value[ch.id] || ch.publish_token
+const tokenFor = (ch: EmbedChannel) => ch.publish_token || ''
 
 const displayChannelKey = (channelId: string) => {
   const ch = channels.value.find((c) => c.id === channelId)
@@ -1009,11 +999,19 @@ const openCreate = () => {
   showDrawer.value = true
 }
 
-const openDrawer = (ch: EmbedChannel) => {
+const openDrawer = async (ch: EmbedChannel) => {
   channelNameTouched.value = true
   fillFormFromChannel(ch)
   goToDeployStep()
   showDrawer.value = true
+  try {
+    const res = await getEmbedChannel(ch.id)
+    if (res?.data) {
+      mergeChannelDetail(res.data)
+    }
+  } catch {
+    MessagePlugin.warning(t('embedPublish.channelKeyLoadFailed'))
+  }
 }
 
 const closeDrawer = () => {
@@ -1102,7 +1100,6 @@ const saveForm = async () => {
       }
       const res = await createEmbedChannel(targetAgentId, payload)
       if (res?.data?.publish_token) {
-        storeToken(res.data.id, res.data.publish_token)
         revealedTokens[res.data.id] = true
         MessagePlugin.success(t('embedPublish.createdWithToken'))
       } else {
@@ -1112,7 +1109,8 @@ const saveForm = async () => {
       if (res?.data?.id) {
         const created = channels.value.find((ch) => ch.id === res.data.id) ?? res.data
         if (created) {
-          fillFormFromChannel(created)
+          mergeChannelDetail({ ...created, ...res.data })
+          fillFormFromChannel(allChannels.value.find((ch) => ch.id === res.data.id) ?? created)
           wizardStep.value = stepTitles.value.length - 1
         }
       }
@@ -1202,7 +1200,7 @@ const performRotate = async (id: string) => {
   try {
     const res = await rotateEmbedToken(id)
     if (res?.data?.publish_token) {
-      storeToken(id, res.data.publish_token)
+      mergeChannelDetail(res.data)
       revealedTokens[id] = true
       MessagePlugin.success(t('embedPublish.resetKeySuccess'))
     } else {
@@ -1218,9 +1216,6 @@ const performRotate = async (id: string) => {
 
 const removeChannel = async (id: string) => {
   await deleteEmbedChannel(id)
-  const map = loadStoredTokens()
-  delete map[id]
-  sessionStorage.setItem(EMBED_TOKEN_STORAGE, JSON.stringify(map))
   if (editingId.value === id) closeDrawer()
   await load()
   MessagePlugin.success(t('embedPublish.deleted'))

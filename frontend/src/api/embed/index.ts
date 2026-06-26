@@ -111,6 +111,10 @@ export async function createEmbedChannel(agentId: string, data: Partial<EmbedCha
   return post<{ success: boolean; data: EmbedChannel }>(`/api/v1/agents/${agentId}/embed-channels`, data)
 }
 
+export async function getEmbedChannel(channelId: string) {
+  return get<{ success: boolean; data: EmbedChannel }>(`/api/v1/embed-channels/${channelId}`)
+}
+
 export async function updateEmbedChannel(channelId: string, data: Partial<EmbedChannel>) {
   return put<{ success: boolean; data: EmbedChannel }>(`/api/v1/embed-channels/${channelId}`, data)
 }
