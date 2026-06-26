@@ -92,6 +92,7 @@ accepted until it expires.`,
 			"weknora --profile staging auth logout",
 			"weknora auth logout --all",
 		},
+		Output: "envelope.data is {removed: [profile names cleared]}",
 		Warnings: []string{
 			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
 			"auth logout clears local credentials for this profile; server-side session continues until expiry.",
@@ -116,9 +117,9 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 
 	// Destructive-write protocol: confirm before clearing credentials.
 	scope := fmt.Sprintf("%d profile(s) [%s]", len(targets), strings.Join(targets, ", "))
-	retryCmd := "weknora auth logout -y"
+	retryCmd := []string{"weknora", "auth", "logout", "-y"}
 	if opts.All {
-		retryCmd = "weknora auth logout --all -y"
+		retryCmd = []string{"weknora", "auth", "logout", "--all", "-y"}
 	}
 	if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "auth credentials", scope, "auth.logout", retryCmd); err != nil {
 		return err

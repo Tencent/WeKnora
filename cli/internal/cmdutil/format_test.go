@@ -236,3 +236,38 @@ func TestFromEnv_InvalidValueIgnored(t *testing.T) {
 		t.Errorf("invalid env should be ignored; got %v", o.Mode)
 	}
 }
+
+// TestResolveDefault_AppliesEnv pins that ResolveDefault honours
+// WEKNORA_FORMAT. Regression: commands call CheckFormatFlag + ResolveDefault
+// but (nearly) none called FromEnv, so the documented env var was silently
+// ignored on success output across the whole CLI until ResolveDefault folded
+// it in. This is the path every command's RunE actually takes.
+func TestResolveDefault_AppliesEnv(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "text")
+	o := &FormatOptions{} // no --format → Mode empty, as after CheckFormatFlag
+	o.ResolveDefault(false)
+	if o.Mode != FormatText {
+		t.Errorf("WEKNORA_FORMAT=text must drive ResolveDefault to text; got %v", o.Mode)
+	}
+}
+
+// TestResolveDefault_FlagBeatsEnv pins precedence: an explicit --format
+// (Mode already set) wins over WEKNORA_FORMAT.
+func TestResolveDefault_FlagBeatsEnv(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "text")
+	o := &FormatOptions{Mode: FormatJSON} // --format json supplied
+	o.ResolveDefault(false)
+	if o.Mode != FormatJSON {
+		t.Errorf("explicit --format json must beat WEKNORA_FORMAT=text; got %v", o.Mode)
+	}
+}
+
+// TestResolveDefault_NoEnvNoFlag_UsesDefault pins the fallback.
+func TestResolveDefault_NoEnvNoFlag_UsesDefault(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "")
+	o := &FormatOptions{}
+	o.ResolveDefault(false)
+	if o.Mode != DefaultFormatMode {
+		t.Errorf("no flag + no env must fall back to default %v; got %v", DefaultFormatMode, o.Mode)
+	}
+}

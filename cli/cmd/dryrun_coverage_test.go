@@ -20,12 +20,17 @@ import (
 // decision rather than silently inheriting "no preview".
 var dryRunExpectation = map[string]bool{
 	// --- mutations: MUST have --dry-run ---
-	"kb create": true, "kb edit": true, "kb delete": true, "kb pin": true, "kb unpin": true,
+	"kb create": true, "kb update": true, "kb delete": true, "kb pin": true, "kb unpin": true,
+	"kb init":      true, // binds models to a KB (state change)
+	"model create": true, "model delete": true,
 	"doc create": true, "doc upload": true, "doc fetch": true, "doc delete": true,
-	"chunk delete":   true,
-	"session delete": true, "session stop": true,
-	"agent create": true, "agent edit": true, "agent delete": true,
+	"doc reparse": true, // re-triggers server-side parsing (a state change)
+	"doc update":  true, // edits title/description server-side
+	"chunk delete": true, "message delete": true,
+	"session delete": true, "session stop": true, "session tool-approval resolve": true,
+	"agent create": true, "agent update": true, "agent delete": true,
 	"profile add": true, "profile use": true, "profile remove": true,
+	"skills install": true, // writes skill files to a local dir (state change)
 	"auth logout": true, "auth refresh": true,
 	"link": true, "unlink": true,
 	"api": true, // passthrough: dry-run previews write methods, rejected on GET
@@ -33,15 +38,21 @@ var dryRunExpectation = map[string]bool{
 	// --- exempt: no state change to preview ---
 	// reads
 	"kb list": false, "kb view": false, "kb status": false, "kb check": false,
+	"kb config": false, // read-only inspection of a KB's model config
 	"doc list": false, "doc view": false, "doc download": false,
 	"doc wait":   false, // polling read, no mutation
 	"chunk list": false, "chunk view": false,
+	"message list": false, "message search": false,
 	"session list": false, "session view": false,
 	"agent list": false, "agent view": false, "agent status": false, "agent check": false,
+	"model list": false, "model view": false,
 	"search chunks": false, "search docs": false, "search kb": false, "search sessions": false,
 	"auth list": false, "auth status": false, "auth token": false,
 	"profile list": false,
-	"doctor":       false, "version": false,
+	"skills list":  false, // read-only: lists the embedded skills
+	// read-only inspection of the resolved config; no mutation, no network.
+	"config view": false,
+	"doctor":      false, "version": false,
 	// generate / stream ops — the session-creation side effect is incidental,
 	// not a CRUD write; a no-SDK-call preview would be meaningless.
 	"chat": false, "session ask": false, "session continue-stream": false,
@@ -51,6 +62,12 @@ var dryRunExpectation = map[string]bool{
 	"auth login": false,
 	// long-running stdio server, not a one-shot command.
 	"mcp serve": false,
+	// offline read: enumerates tool metadata without any network call.
+	"mcp tools list": false,
+	// offline help topic: prints the static exit-code matrix.
+	"exit-codes": false,
+	// offline introspection: prints command contracts from the in-binary tree.
+	"schema": false,
 }
 
 func TestDryRunCoverageMatchesExpectation(t *testing.T) {

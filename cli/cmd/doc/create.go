@@ -26,11 +26,16 @@ var docCreateFields = []string{
 // CreateOptions holds CLI flag values for `doc create`.
 type CreateOptions struct {
 	Text    string // --text (required): document text content (Markdown)
-	Name    string // --name: document title
+	Title   string // --title: document title (preferred; matches `doc update --title`)
+	Name    string // --name: deprecated alias for --title
 	TagID   string // --tag-id: associate with a tag
 	Channel string // --channel: ingestion-channel tag (default "api")
 	DryRun  bool
 }
+
+// title returns the resolved document title, preferring --title over the
+// deprecated --name alias.
+func (o *CreateOptions) title() string { return cmp.Or(o.Title, o.Name) }
 
 // CreateService is the narrow SDK surface for `doc create`.
 // *sdk.Client satisfies it.
@@ -54,12 +59,12 @@ don't require a file upload or remote URL. KB resolution follows the standard
 4-level chain: --kb flag > WEKNORA_KB_ID env > .weknora/project.yaml > error.
 
   --text <content>    Document text in Markdown format (required).
-  --name <title>      Display title stored with the entry.
+  --title <title>     Display title stored with the entry (matches doc update --title).
   --tag-id <id>       Associate the new entry with a tag.
   --channel <name>    Override the ingestion-channel tag (default "api").`,
 		Example: `  weknora doc create --text "# Meeting Notes\n\nAction items: ..."
-  weknora doc create --text "$(cat notes.md)" --name "Sprint Notes" --kb my-kb
-  weknora doc create --text "API usage guide" --name "API Guide" --tag-id tag_abc`,
+  weknora doc create --text "$(cat notes.md)" --title "Sprint Notes" --kb my-kb
+  weknora doc create --text "API usage guide" --title "API Guide" --tag-id tag_abc`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -78,9 +83,9 @@ don't require a file upload or remote URL. KB resolution follows the standard
 				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
 					Action: "doc.create",
 					Args: map[string]any{
-						"text": opts.Text,
-						"name": opts.Name,
-						"kb":   kbID,
+						"text":  opts.Text,
+						"title": opts.title(),
+						"kb":    kbID,
 					},
 				}); handled {
 					return err
@@ -100,7 +105,9 @@ don't require a file upload or remote URL. KB resolution follows the standard
 	}
 	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.Text, "text", "", "Document text content in Markdown format (required)")
-	cmd.Flags().StringVar(&opts.Name, "name", "", "Document title")
+	cmd.Flags().StringVar(&opts.Title, "title", "", "Document title")
+	cmd.Flags().StringVar(&opts.Name, "name", "", "Document title (deprecated: use --title)")
+	_ = cmd.Flags().MarkDeprecated("name", "use --title instead")
 	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Tag id to associate with the new entry")
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	_ = cmd.MarkFlagRequired("text")
@@ -108,8 +115,12 @@ don't require a file upload or remote URL. KB resolution follows the standard
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Create a knowledge entry from inline Markdown text. KB resolved via --kb flag, WEKNORA_KB_ID env, or project link. Emits the created Knowledge object with its id.",
-		RequiredFlags: []string{"--text"},
-		Output:        "envelope.data is the created Knowledge object with id, knowledge_base_id, title, parse_status",
+		RequiredFlags: []string{"--text", "--kb (or WEKNORA_KB_ID / project link)"},
+		Examples: []string{
+			`weknora doc create --kb kb_eng --text "# Runbook\n\nRestart steps: ..."`,
+			`weknora doc create --kb kb_eng --text "$(cat notes.md)" --title "Sprint Notes"`,
+		},
+		Output: "envelope.data is the created Knowledge object with id, knowledge_base_id, title, parse_status",
 	})
 	return cmd
 }
@@ -123,7 +134,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		return cmdutil.NewFlagError(fmt.Errorf("--text is required"))
 	}
 	req := &sdk.CreateManualKnowledgeRequest{
-		Title:   opts.Name,
+		Title:   opts.title(),
 		Content: opts.Text,
 		TagID:   opts.TagID,
 		Channel: cmp.Or(opts.Channel, uploadChannel),
@@ -135,7 +146,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 	if fopts.WantsJSON() {
 		return fopts.Emit(iostreams.IO.Out, k, nil)
 	}
-	displayed := opts.Name
+	displayed := opts.title()
 	if displayed == "" {
 		displayed = k.Title
 	}

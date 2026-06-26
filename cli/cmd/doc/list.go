@@ -3,9 +3,7 @@ package doc
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sort"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -48,10 +46,6 @@ type ListOptions struct {
 	EndTime   string // raw RFC3339; parsed into filter.EndTime
 }
 
-// rfc3339Example is the canonical RFC3339 hint surfaced when --start-time /
-// --end-time fail to parse. Picked to match Go's reference time docs.
-const rfc3339Example = "2006-01-02T15:04:05Z"
-
 // docListStatusValues mirrors internal/types/knowledge.go ParseStatus*
 // constants - these are the values the server accepts on the
 // ?parse_status= query. Kept in sync manually since the SDK doesn't
@@ -88,6 +82,14 @@ backend storage order is not guaranteed and varies between deployments.`,
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate static input (--page-size / --limit / --status) before
+			// resolving the KB or building the client so a bad value returns
+			// input.invalid_argument (exit 5) instead of an auth error (exit 3)
+			// when the profile is unconfigured — an agent must see the real,
+			// fixable problem.
+			if err := validateListOpts(opts); err != nil {
+				return err
+			}
 			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
@@ -101,7 +103,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 	}
 	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 50, "Items per server batch (1..1000)")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (1..10000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
 	cmd.Flags().StringVar(&opts.Keyword, "keyword", "", "Server-side substring match against title / file_name (case-sensitive)")
@@ -114,12 +116,15 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:  "List documents in the resolved knowledge base. Results come with meta.count; use --limit to cap, --all-pages to walk every server page, --status/--keyword to filter server-side.",
 		Examples: []string{"weknora doc list --format json", "weknora doc list --all-pages --limit 200 --format json"},
-		Output:   "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the total returned",
+		Output:   "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the total returned; meta.total_count is the server-side total before client-side --limit truncation",
 	})
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService, kbID string) error {
+// validateListOpts checks --page-size / --limit / --status. Called from RunE
+// before the KB/client are resolved (so bad input surfaces as exit 5, not an
+// auth error) and again at the top of runList for direct callers; idempotent.
+func validateListOpts(opts *ListOptions) error {
 	if opts.PageSize < 1 || opts.PageSize > 1000 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -132,12 +137,19 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
 		}
 	}
-	if opts.Status != "" && !validDocListStatus(opts.Status) {
-		return &cmdutil.Error{
-			Code: cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--status must be one of: %s - got %q",
-				strings.Join(docListStatusValues, " | "), opts.Status),
-		}
+	// Validate + normalize --status via the shared enum helper (same exit-5
+	// path and case-insensitive normalization as every other enum flag).
+	status, err := cmdutil.ValidateEnum("status", opts.Status, docListStatusValues)
+	if err != nil {
+		return err
+	}
+	opts.Status = status
+	return nil
+}
+
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService, kbID string) error {
+	if err := validateListOpts(opts); err != nil {
+		return err
 	}
 	filter := sdk.KnowledgeListFilter{
 		ParseStatus: opts.Status,
@@ -146,26 +158,25 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		Source:      opts.Source,
 		TagID:       opts.TagID,
 	}
-	if opts.StartTime != "" {
-		t, err := time.Parse(time.RFC3339, opts.StartTime)
-		if err != nil {
-			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
-				fmt.Sprintf("--start-time must be RFC3339 (e.g. %s), got %q", rfc3339Example, opts.StartTime))
-		}
-		filter.StartTime = t
+	start, err := cmdutil.ParseTimeFlag("--start-time", opts.StartTime)
+	if err != nil {
+		return err
 	}
-	if opts.EndTime != "" {
-		t, err := time.Parse(time.RFC3339, opts.EndTime)
-		if err != nil {
-			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
-				fmt.Sprintf("--end-time must be RFC3339 (e.g. %s), got %q", rfc3339Example, opts.EndTime))
-		}
-		filter.EndTime = t
+	if start != nil {
+		filter.StartTime = *start
+	}
+	end, err := cmdutil.ParseTimeFlag("--end-time", opts.EndTime)
+	if err != nil {
+		return err
+	}
+	if end != nil {
+		filter.EndTime = *end
 	}
 
 	// Pagination is always 1-indexed internally. --all-pages walks; the
 	// non-walking path returns the first page only.
 	var items []sdk.Knowledge
+	var serverTotal int64
 	if opts.AllPages {
 		accum := make([]sdk.Knowledge, 0)
 		for page := 1; ; page++ {
@@ -173,6 +184,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			if err != nil {
 				return cmdutil.WrapHTTP(err, "list documents")
 			}
+			serverTotal = total
 			accum = append(accum, chunk...)
 			if opts.Limit > 0 && len(accum) >= opts.Limit {
 				accum = accum[:opts.Limit]
@@ -184,10 +196,11 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		}
 		items = accum
 	} else {
-		chunk, _, err := svc.ListKnowledgeWithFilter(ctx, kbID, 1, opts.PageSize, filter)
+		chunk, total, err := svc.ListKnowledgeWithFilter(ctx, kbID, 1, opts.PageSize, filter)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list documents")
 		}
+		serverTotal = total
 		items = chunk
 	}
 	if items == nil {
@@ -208,7 +221,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	if fopts.WantsJSON() {
-		meta := &output.Meta{Count: len(items), HasMore: truncated}
+		meta := &output.Meta{Count: output.IntPtr(len(items)), HasMore: truncated, TotalCount: output.IntPtr(int(serverTotal))}
 		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 
@@ -226,12 +239,6 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", k.ID, name, k.ParseStatus, formatSize(k.FileSize), updated)
 	}
 	return tw.Flush()
-}
-
-// validDocListStatus reports whether s matches one of the server-accepted
-// parse_status enum values surfaced via --status.
-func validDocListStatus(s string) bool {
-	return slices.Contains(docListStatusValues, s)
 }
 
 // formatSize renders a byte count as a short human string (KB / MB).

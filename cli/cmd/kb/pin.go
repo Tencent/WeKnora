@@ -21,10 +21,13 @@ type PinOptions struct {
 }
 
 // PinService is the narrow SDK surface this command depends on. The CLI
-// reads current state before toggling so `pin`/`unpin` are idempotent -
-// the server endpoint is only a non-idempotent toggle.
+// reads current state before toggling so `pin`/`unpin` are idempotent — the
+// server endpoint is only a toggle. Pin state is read from the LIST endpoint:
+// the single-KB GET does not carry per-user pin state (pin is a per-user
+// list-ordering preference, surfaced where the user sees it — in `kb list`),
+// so the list is the canonical source.
 type PinService interface {
-	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
+	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
 	TogglePinKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
 }
 
@@ -73,7 +76,7 @@ func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.C
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       use + " a knowledge base (idempotent: a no-op if it is already in the target state)",
 		RequiredFlags: []string{"<kb-id> (positional)"},
-		Examples:      []string{"weknora " + use + " kb_abc"},
+		Examples:      []string{"weknora kb " + use + " kb_abc"},
 		Output:        "envelope.data is the KnowledgeBase with is_pinned reflecting the new state",
 	})
 	return cmd
@@ -84,9 +87,23 @@ func runPin(ctx context.Context, opts *PinOptions, fopts *cmdutil.FormatOptions,
 	if !want {
 		verb = "unpin"
 	}
-	current, err := svc.GetKnowledgeBase(ctx, id)
+	// Read the current pin state from the list (the canonical per-user pin
+	// source); the single-KB GET doesn't carry it. This makes pin/unpin
+	// idempotent: we toggle only when the state actually needs to change.
+	kbs, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
-		return cmdutil.WrapHTTP(err, "get knowledge base %s", id)
+		return cmdutil.WrapHTTP(err, "list knowledge bases")
+	}
+	var current *sdk.KnowledgeBase
+	for i := range kbs {
+		if kbs[i].ID == id {
+			current = &kbs[i]
+			break
+		}
+	}
+	if current == nil {
+		return cmdutil.NewError(cmdutil.CodeResourceNotFound,
+			fmt.Sprintf("knowledge base not found: %s", id))
 	}
 	if current.IsPinned == want {
 		state := "pinned"

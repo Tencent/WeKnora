@@ -51,7 +51,7 @@ Default output is `--format json`: a single envelope.
 | `ok` | `true`/`false` — branch on this first (see batch/wait caveat below) |
 | `data` | success payload (object or array; absent on mutation-only success) |
 | `meta` | `count` / `has_more` / `dry_run` / `plan` … |
-| `error` | on failure: `{type, message, hint?, retry_command?, risk?}` |
+| `error` | on failure: `{type, message, hint?, retry_argv?, retryable?, risk?}` |
 | `profile` | active profile name |
 
 - `error.type` is a **stable typed code** (e.g. `local.kb_not_found`,
@@ -98,14 +98,14 @@ exits **5** (adjust the value, retry). Branch on the exit code to tell them apar
 
 ## 5. Destructive writes (exit 10) — hard rule
 
-Destructive commands (`kb/doc/chunk/session/agent delete`, `kb/agent edit`,
+Destructive commands (`kb/doc/chunk/session/agent delete`, `kb/agent update`,
 `auth logout`, `doc delete --all`, …) without `-y` exit **10** with
 `error.type = input.confirmation_required` and `error.risk = {level, action}`:
 
 ```jsonc
 {"ok":false,"error":{"type":"input.confirmation_required",
   "message":"delete knowledge base X requires explicit confirmation: re-run with -y",
-  "retry_command":"weknora kb delete X -y","risk":{"level":"destructive","action":"kb.delete"}}}
+  "retry_argv":["weknora","kb","delete","X","-y"],"risk":{"level":"destructive","action":"kb.delete"}}}
 ```
 
 **Surface this to the user and get explicit approval. Re-run with `-y` ONLY
@@ -127,14 +127,31 @@ KB=$(weknora kb create "Docs" --jq '.data.id' --format json | tr -d '"')
 weknora doc upload ./manual.pdf --kb "$KB"
 ```
 
+## 7a. Reliability patterns for long-running agent runs
+
+### Inspecting prior messages
+Use `weknora message list --session <sess-id>` to review the message history of a session (e.g., after a stream drops) before deciding whether to re-ask or continue. Use `weknora message search "<query>"` to locate a prior Q&A exchange across all sessions — prefer this over re-running an expensive query when the answer may already exist.
+
+### Tool-approval unlock
+An agent run pauses mid-stream on a tool-approval event when the server requires human sign-off before executing a tool call. The pattern:
+
+1. The stream emits a tool-approval event; capture the `pending_id`.
+2. **Surface the pending tool call to the user** (show tool name + proposed args). Do not auto-approve.
+3. After explicit user go-ahead: `weknora session tool-approval resolve <pending-id> -y` to approve, or add `--reject --reason "..."` to reject.
+4. Resume the answer: `weknora session continue-stream <sess-id> --message <msg-id>`.
+
+`--modified-args '{"key":"val"}'` replaces the tool arguments on approve (non-empty JSON object required). This is an exit-10 interaction — see §5.
+
 ## 8. Resource model & command map
 
 ```
-kb        knowledge bases   list/view/create/edit/delete/pin/unpin/status/check
-doc       documents in a KB list/view/create/upload/fetch/download/delete/wait
+kb        knowledge bases   list/view/create/update/delete/pin/unpin/status/check
+doc       documents in a KB list/view/create/upload/fetch/download/reparse/update/delete/wait
 chunk     retrieval units   list/view/delete   (RAG debug; not search)
-session   conversations     list/view/delete/ask/stop/continue-stream
-agent     custom agents     list/view/create/edit/delete/status/check
+session   conversations     list/view/delete/ask/stop/continue-stream/tool-approval resolve
+message   session messages  list/search/delete
+agent     custom agents     list/view/create/update/delete/status/check
+model     configured models list/view   (read-only; find the id for agent create --model)
 search    retrieval         chunks / docs / kb / sessions
 chat      one-shot KB RAG Q&A (streaming)
 api       raw HTTP passthrough to any server endpoint (escape hatch)
@@ -165,7 +182,7 @@ that to learn a command without scraping the human help table.
 | Mistake | Fix |
 |---|---|
 | `weknora auth login` before any profile exists | `profile add <n> --host <url> --use` first (§1) |
-| Expecting `auth login --host/--name` flags | Gone — host comes from the profile; use global `--profile` |
+| Passing `--host` or `--name` to `auth login` | `auth login` takes neither — host comes from the profile; use `profile add <n> --host <url> --use`, then `auth login` |
 | Auto-adding `-y` to clear an exit-10 | Never; get user approval first (§5) |
 | Need the raw `chat` event stream | pass `--format ndjson`; use `--format text` for a live projected transcript |
 | `search chunks "q"` → exit 1 `local.kb_id_required` | Pass `--kb <name-or-id>`, set `WEKNORA_KB_ID`, or `weknora link` the dir |

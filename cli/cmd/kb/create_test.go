@@ -138,16 +138,22 @@ func TestCreate_StorageProvider_InjectsRequest(t *testing.T) {
 	assert.Equal(t, "local", svc.got.StorageProviderConfig.Provider, "value should be lowercased + trimmed before send")
 }
 
-func TestCreate_StorageProvider_InvalidValueReturnsFlagError(t *testing.T) {
+func TestCreate_StorageProvider_InvalidValueReturnsInputError(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
 	opts := &CreateOptions{Name: "n", StorageProvider: "azure"}
 	err := runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
 	require.Error(t, err)
 
-	assert.Equal(t, 2, cmdutil.ExitCode(err), "invalid --storage-provider must exit 2 (flag validation)")
-	assert.Contains(t, err.Error(), "invalid --storage-provider")
-	assert.Nil(t, svc.got, "SDK must not be called when flag validation fails")
+	// A bad enum *value* (cobra accepted the string; the app rejected it) is an
+	// app-level input error → exit 5, consistent with every other enum flag
+	// (model --type, agent --agent-mode, message search --mode).
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Equal(t, 5, cmdutil.ExitCode(err), "invalid --storage-provider must exit 5 (app-level input validation)")
+	assert.Contains(t, err.Error(), "--storage-provider")
+	assert.Nil(t, svc.got, "SDK must not be called when input validation fails")
 }
 
 func TestCreate_StorageProvider_OmittedWhenEmpty(t *testing.T) {

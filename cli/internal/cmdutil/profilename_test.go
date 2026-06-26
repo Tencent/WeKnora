@@ -37,9 +37,9 @@ func TestValidateProfileName_RejectsEmpty(t *testing.T) {
 }
 
 // TestValidateProfileName_RejectsShellMetachars is the security-critical
-// case: anything that could break retry_command shell interpolation must be
+// case: anything that could break retry_argv shell interpolation must be
 // rejected at the entry point. If this test ever loosens, an agent that
-// exec()s retry_command becomes injectable via a malicious profile name.
+// joins-and-exec()s retry_argv becomes injectable via a malicious profile name.
 func TestValidateProfileName_RejectsShellMetachars(t *testing.T) {
 	cases := []string{
 		"evil; rm -rf /",

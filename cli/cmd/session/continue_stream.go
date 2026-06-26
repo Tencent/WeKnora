@@ -23,12 +23,14 @@ package sessioncmd
 
 import (
 	"context"
+	"errors"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/output"
+	"github.com/Tencent/WeKnora/cli/internal/sse"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -113,7 +115,7 @@ silently treated as NDJSON.`,
 	cmdutil.AddFormatFlag(cmd, continueStreamFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Resume an SSE event stream for an in-progress or completed assistant message. Produces an NDJSON event stream: init line (session_id, message_id) then raw SDK StreamResponse events.",
-		RequiredFlags: []string{"--message (message_id from prior init / agent_query event)"},
+		RequiredFlags: []string{"<session-id> (positional)", "--message (message_id from prior init / agent_query event)"},
 		Examples: []string{
 			"weknora session continue-stream sess_xyz --message msg_abc --format json",
 			"# Network-blip recovery: replay with same session_id + message_id from the original 'session ask' init event",
@@ -163,10 +165,40 @@ func runContinueStream(ctx context.Context, opts *ContinueStreamOptions, _ *cmdu
 	// 2. Open the SDK replay stream and pass each event through as a bare
 	//    NDJSON line. The SDK's StreamResponse is the source of truth for
 	//    the event vocabulary; the CLI does not reshape it.
+	var streamErrMsg string
 	cb := func(r *sdk.StreamResponse) error {
-		return output.EmitSDKEvent(w, r)
+		isErr := r != nil && r.ResponseType == sdk.ResponseTypeError
+		if isErr && streamErrMsg == "" {
+			if r.Content != "" {
+				streamErrMsg = r.Content
+			} else if r.Data != nil {
+				if e, ok := r.Data["error"].(string); ok {
+					streamErrMsg = e
+				}
+			}
+		}
+		if err := output.EmitSDKEvent(w, r); err != nil {
+			return err
+		}
+		// Stop once the error frame is emitted rather than blocking on the SDK
+		// read until the ~30s transport timeout (the server holds the stream
+		// open after the error). streamErrMsg carries the real reason.
+		if isErr {
+			return sse.ErrTerminate
+		}
+		return nil
 	}
-	if err := svc.ContinueStream(ctx, opts.SessionID, opts.MessageID, cb); err != nil {
+	err := svc.ContinueStream(ctx, opts.SessionID, opts.MessageID, cb)
+	if errors.Is(err, sse.ErrTerminate) {
+		err = nil
+	}
+	// A server-delivered error frame is the authoritative failure reason —
+	// surface it as operation.failed (exit 1) instead of the transport timeout
+	// the server's stream-close triggers afterwards. Mirrors chat / session ask.
+	if streamErrMsg != "" {
+		return cmdutil.NewError(cmdutil.CodeOperationFailed, "continue stream failed: "+streamErrMsg)
+	}
+	if err != nil {
 		// Ctrl-C / SIGTERM lineage (operator gave up on the resume).
 		if cmdutil.IsCancelled(ctx, err) {
 			return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "session continue-stream cancelled")

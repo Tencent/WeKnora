@@ -91,6 +91,12 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate static input before building the client so a bad
+			// --limit/--page-size returns input.invalid_argument (exit 5), not
+			// an auth error (exit 3).
+			if err := validateListOpts(opts); err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -100,7 +106,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Document id (SDK knowledge_id) to enumerate chunks for")
 	_ = cmd.MarkFlagRequired("doc")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return (1..1000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return — client-side cap; meta.has_more reports truncation (1..1000)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmdutil.AddFormatFlag(cmd, chunkListFields...)
@@ -113,7 +119,10 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
+// validateListOpts checks --limit / --page-size. Called from RunE before the
+// client is built (so a bad value surfaces as exit 5, not an auth error) and at
+// runList's top for direct callers; idempotent.
+func validateListOpts(opts *ListOptions) error {
 	if opts.Limit < 1 || opts.Limit > maxLimit {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -125,6 +134,13 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("--page-size must be in 1..%d, got %d", maxPageSize, opts.PageSize),
 		}
+	}
+	return nil
+}
+
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
+	if err := validateListOpts(opts); err != nil {
+		return err
 	}
 
 	var items []sdk.Chunk
@@ -163,7 +179,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	if fopts.WantsJSON() {
-		meta := &output.Meta{Count: len(items), HasMore: truncated}
+		meta := &output.Meta{Count: output.IntPtr(len(items)), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 

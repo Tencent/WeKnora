@@ -9,10 +9,20 @@
 package sse
 
 import (
+	"errors"
 	"strings"
 
 	sdk "github.com/Tencent/WeKnora/client"
 )
+
+// ErrTerminate is the sentinel a stream callback returns to stop consuming the
+// stream immediately after a terminal error frame (response_type=error). The
+// server holds the SSE connection open after such a frame, so a callback that
+// keeps returning nil blocks the SDK read until a ~30s transport timeout —
+// turning a sub-second server error into a 30s hang for the (agent) caller.
+// Callers derive the real result from the captured error message / accumulator
+// and unwrap this sentinel (errors.Is) to a clean stop.
+var ErrTerminate = errors.New("sse: stream terminated by terminal error event")
 
 // Accumulator buffers a KnowledgeQAStream callback sequence.
 //

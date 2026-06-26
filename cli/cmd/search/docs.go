@@ -172,7 +172,7 @@ done:
 		if matches == nil {
 			matches = []sdk.Knowledge{}
 		}
-		meta := &output.Meta{Count: len(matches), HasMore: truncated}
+		meta := &output.Meta{Count: output.IntPtr(len(matches)), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {

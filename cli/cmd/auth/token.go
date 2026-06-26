@@ -57,9 +57,9 @@ to see which mode each profile uses, and construct the matching HTTP header:
 			}
 			// `auth token` is a scalar scripting helper (WEKNORA_TOKEN=$(...)),
 			// so it defaults to the raw token — overriding the global json
-			// default (gh auth token does the same; cf. doc download streaming
-			// raw bytes). Explicit --format json / WEKNORA_FORMAT=json still
-			// emit the {token,mode,profile} envelope.
+			// default, the same way `doc download` streams raw bytes. Explicit
+			// --format json / WEKNORA_FORMAT=json still emit the
+			// {token,mode,profile} envelope.
 			fopts.FromEnv()
 			if fopts.Mode == "" {
 				// --jq implies JSON (it filters the envelope); without it,
@@ -83,7 +83,7 @@ to see which mode each profile uses, and construct the matching HTTP header:
 		},
 		Output: "raw token on stdout (no envelope, no trailing newline) by default; --format json emits {token, mode, profile}",
 		Warnings: []string{
-			"default output is the bare token, NOT the JSON envelope — it is a scripting helper (cf. `gh auth token`)",
+			"default output is the bare token, NOT the JSON envelope — it is a scripting helper for shell capture",
 		},
 	})
 	return cmd

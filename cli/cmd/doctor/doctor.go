@@ -132,7 +132,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 			"weknora doctor --offline",
 			"weknora doctor --no-cache --format json",
 		},
-		Output: "envelope.data is {summary:{all_passed,passed,failed,skipped}, checks:[{name,status,detail}]}",
+		Output: "envelope.data is {summary:{all_passed,passed,warned,failed,skipped}, checks:[{name,status,details,hint?}]}",
 	})
 	return cmd
 }

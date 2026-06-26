@@ -35,6 +35,24 @@ func (f *fakeCreateSvc) CreateManualKnowledge(
 	return f.resp, f.err
 }
 
+// TestCreate_TitlePreferredOverName: --title is the canonical flag; the
+// deprecated --name remains a working alias but --title wins when both are set.
+func TestCreate_TitlePreferredOverName(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "d1"}}
+	require.NoError(t, runCreate(context.Background(),
+		&CreateOptions{Text: "x", Title: "FromTitle", Name: "FromName"},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb1"))
+	assert.Equal(t, "FromTitle", svc.got.req.Title)
+
+	// --name alone still works (back-compat for the deprecated alias).
+	svc2 := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "d2"}}
+	require.NoError(t, runCreate(context.Background(),
+		&CreateOptions{Text: "x", Name: "OnlyName"},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc2, "kb1"))
+	assert.Equal(t, "OnlyName", svc2.got.req.Title)
+}
+
 func TestCreate_Success_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_manual_1", Title: "Sprint Notes"}}

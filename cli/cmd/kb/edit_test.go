@@ -119,7 +119,7 @@ func TestEdit_NotFound(t *testing.T) {
 
 func stringPtr(s string) *string { return &s }
 
-// withRootHarnessKB wraps `weknora kb edit ...` under a synthetic root cmd
+// withRootHarnessKB wraps `weknora kb update ...` under a synthetic root cmd
 // that registers the global persistent flags (mirrors addGlobalFlags in
 // cmd/root.go). Required because NewCmdEdit reads --yes and --format from the
 // persistent flag set.
@@ -132,7 +132,7 @@ func withRootHarnessKB(edit *cobra.Command, args ...string) *cobra.Command {
 	kb := &cobra.Command{Use: "kb"}
 	kb.AddCommand(edit)
 	root.AddCommand(kb)
-	root.SetArgs(append([]string{"kb", "edit"}, args...))
+	root.SetArgs(append([]string{"kb", "update"}, args...))
 	root.SetContext(context.Background())
 	root.SilenceErrors = true
 	root.SilenceUsage = true
@@ -140,7 +140,7 @@ func withRootHarnessKB(edit *cobra.Command, args ...string) *cobra.Command {
 }
 
 // TestKBEdit_RequiresConfirmation asserts that without -y (non-TTY / JSON
-// mode), kb edit returns input.confirmation_required (exit 10).
+// mode), kb update returns input.confirmation_required (exit 10).
 func TestKBEdit_RequiresConfirmation(t *testing.T) {
 	iostreams.SetForTest(t) // non-TTY
 	svc := &fakeEditSvc{
@@ -159,7 +159,7 @@ func TestKBEdit_RequiresConfirmation(t *testing.T) {
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, ce.Code)
 	assert.Equal(t, 10, cmdutil.ExitCode(err))
-	// retry command must include -y
-	assert.Contains(t, ce.RetryCommand, "-y")
-	assert.Contains(t, ce.RetryCommand, "kb_abc")
+	// retry argv must include -y
+	assert.Contains(t, ce.RetryArgv, "-y")
+	assert.Contains(t, ce.RetryArgv, "kb_abc")
 }

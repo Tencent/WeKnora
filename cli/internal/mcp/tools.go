@@ -34,8 +34,8 @@ func toolErrorResult(err error) *mcpsdk.CallToolResult {
 	if detail.Hint != "" {
 		textLine += "\nhint: " + detail.Hint
 	}
-	if detail.RetryCommand != "" {
-		textLine += "\nretry: " + detail.RetryCommand
+	if len(detail.RetryArgv) != 0 {
+		textLine += "\nretry: " + strings.Join(detail.RetryArgv, " ")
 	}
 	// StructuredContent accepts any; pass *ErrDetail directly (no round-trip).
 	return &mcpsdk.CallToolResult{

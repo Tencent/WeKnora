@@ -158,7 +158,7 @@ func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOp
 		if results == nil {
 			results = []*sdk.SearchResult{}
 		}
-		meta := &output.Meta{Count: len(results), HasMore: truncated}
+		meta := &output.Meta{Count: output.IntPtr(len(results)), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, results, meta)
 	}
 	return renderChunkResults(results, opts.KBID)

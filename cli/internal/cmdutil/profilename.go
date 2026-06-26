@@ -12,9 +12,9 @@ import (
 // keyring namespace.
 //
 // Crucially this also rejects shell metacharacters (space, `;`, `&`, `|`,
-// `$`, quotes, backticks, etc.), so the profile name remains safe to
-// interpolate into envelope.error.retry_command — an agent that exec's
-// `sh -c <retry_command>` cannot be tricked via a maliciously-named profile.
+// `$`, quotes, backticks, etc.), so the profile name remains safe to embed
+// in envelope.error.retry_argv — even an agent that joins the argv and exec's
+// `sh -c <joined>` cannot be tricked via a maliciously-named profile.
 func ValidateProfileName(name string) error {
 	if name == "" {
 		return &Error{

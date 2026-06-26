@@ -15,14 +15,18 @@ import (
 	"github.com/Tencent/WeKnora/cli/cmd/auth"
 	chatcmd "github.com/Tencent/WeKnora/cli/cmd/chat"
 	chunkcmd "github.com/Tencent/WeKnora/cli/cmd/chunk"
+	configcmd "github.com/Tencent/WeKnora/cli/cmd/config"
 	"github.com/Tencent/WeKnora/cli/cmd/doc"
 	"github.com/Tencent/WeKnora/cli/cmd/doctor"
 	"github.com/Tencent/WeKnora/cli/cmd/kb"
 	linkcmd "github.com/Tencent/WeKnora/cli/cmd/link"
+	messagecmd "github.com/Tencent/WeKnora/cli/cmd/message"
 	mcpcmd "github.com/Tencent/WeKnora/cli/cmd/mcp"
+	modelcmd "github.com/Tencent/WeKnora/cli/cmd/model"
 	profilecmd "github.com/Tencent/WeKnora/cli/cmd/profile"
 	"github.com/Tencent/WeKnora/cli/cmd/search"
 	sessioncmd "github.com/Tencent/WeKnora/cli/cmd/session"
+	skillscmd "github.com/Tencent/WeKnora/cli/cmd/skills"
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -148,6 +152,14 @@ a curated read-only MCP tool surface for AI agents.`,
 		// (build commit + date).
 		Version: fmt.Sprintf("%s (commit %s, built %s)", v, commit, date),
 		PersistentPreRunE: func(c *cobra.Command, args []string) error {
+			// Input hygiene: reject control / ANSI-escape / Bidi / zero-width
+			// characters in positional args and supplied flag values before any
+			// work. CLI inputs are untrusted (agent- or content-sourced), and a
+			// smuggled escape stored in a resource name would fire in a human's
+			// terminal on a later list/view. Returns input.invalid_argument (exit 5).
+			if err := cmdutil.CheckSafeArgs(args, c.Flags()); err != nil {
+				return err
+			}
 			// Propagate the global --profile flag (or WEKNORA_PROFILE env) into
 			// the Factory for this invocation only - single-shot override, no disk write.
 			// Flag takes precedence over env; env takes precedence over config file.
@@ -189,15 +201,21 @@ a curated read-only MCP tool surface for AI agents.`,
 	cmd.AddCommand(doctor.NewCmd(f))
 	cmd.AddCommand(kb.NewCmd(f))
 	cmd.AddCommand(profilecmd.NewCmd(f))
+	cmd.AddCommand(configcmd.NewCmd(f))
 	cmd.AddCommand(linkcmd.NewCmd(f))
 	cmd.AddCommand(linkcmd.NewCmdUnlink())
 	cmd.AddCommand(doc.NewCmd(f))
 	cmd.AddCommand(apicmd.NewCmd(f))
 	cmd.AddCommand(chatcmd.NewCmd(f))
 	cmd.AddCommand(sessioncmd.NewCmd(f))
+	cmd.AddCommand(messagecmd.NewCmd(f))
 	cmd.AddCommand(agentcmd.NewCmd(f))
+	cmd.AddCommand(modelcmd.NewCmd(f))
 	cmd.AddCommand(chunkcmd.NewCmdChunk(f))
 	cmd.AddCommand(mcpcmd.NewCmd(f))
+	cmd.AddCommand(skillscmd.NewCmd(f))
+	cmd.AddCommand(newCmdExitCodes())
+	cmd.AddCommand(newCmdSchema())
 	installUnknownSubcommandGuard(cmd)
 	return cmd
 }
@@ -289,17 +307,29 @@ func unknownSubcommandRunE(cmd *cobra.Command, args []string) error {
 	}
 	unknown := args[0]
 	available := availableSubcommandNames(cmd)
+	// Lead with a "did you mean" when there's a plausible typo, so an agent
+	// gets a single actionable fix instead of scanning the whole list.
+	hint := fmt.Sprintf("available subcommands: %s", strings.Join(available, ", "))
+	suggestions := cmdutil.SuggestClosest(unknown, available)
+	if len(suggestions) > 0 {
+		hint = fmt.Sprintf("did you mean: %s? (available: %s)",
+			strings.Join(suggestions, ", "), strings.Join(available, ", "))
+	}
+	detail := map[string]any{
+		"unknown":      unknown,
+		"command_path": cmd.CommandPath(),
+		"available":    available,
+	}
+	if len(suggestions) > 0 {
+		detail["suggestions"] = suggestions
+	}
 	return cmdutil.NewError(
 		cmdutil.CodeInputUnknownSubcommand,
 		fmt.Sprintf("unknown subcommand %q for %q", unknown, cmd.CommandPath()),
 	).
-		WithHint(fmt.Sprintf("available subcommands: %s", strings.Join(available, ", "))).
-		WithRetryCommand(cmd.CommandPath() + " --help").
-		WithDetail(map[string]any{
-			"unknown":      unknown,
-			"command_path": cmd.CommandPath(),
-			"available":    available,
-		})
+		WithHint(hint).
+		WithRetryArgv(append(strings.Fields(cmd.CommandPath()), "--help")).
+		WithDetail(detail)
 }
 
 func availableSubcommandNames(cmd *cobra.Command) []string {

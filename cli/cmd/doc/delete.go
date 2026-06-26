@@ -3,7 +3,6 @@ package doc
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -95,7 +94,7 @@ without the user's explicit go-ahead.`,
 				if opts.KB == "" {
 					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--all requires --kb=<id>").
 						WithHint("specify --kb=<uuid-or-name> to scope the delete-all operation").
-						WithRetryCommand("weknora doc delete --all --kb=<kb-id> -y")
+						WithRetryArgv([]string{"weknora", "doc", "delete", "--all", "--kb=<kb-id>", "-y"})
 				}
 				if len(args) > 0 {
 					return cmdutil.NewFlagError(fmt.Errorf("--all is exclusive with positional doc ids"))
@@ -138,7 +137,9 @@ without the user's explicit go-ahead.`,
 			if len(args) == 1 {
 				return runDelete(c.Context(), opts, fopts, cli, f.Prompter(), args[0])
 			}
-			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "document", len(args), "doc.delete", "weknora doc delete "+strings.Join(args, " ")+" -y"); err != nil {
+			batchRetry := append([]string{"weknora", "doc", "delete"}, args...)
+			batchRetry = append(batchRetry, "-y")
+			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "document", len(args), "doc.delete", batchRetry); err != nil {
 				return err
 			}
 			outcomes, runErr := cmdutil.RunBatch(c.Context(), args, func(ctx context.Context, id string) error {
@@ -171,6 +172,7 @@ without the user's explicit go-ahead.`,
 			"weknora doc delete doc_a doc_b doc_c -y",
 			"weknora doc delete --all --kb=kb_x -y --format json",
 		},
+		Output: "envelope.data shape depends on the form: a single doc id -> {id, deleted:true}; multiple doc ids -> batch envelope (top-level status success|partial|error, ok=(failures==0), data per-item [{id, ok, error?}], meta.successes/failures — read data[].ok per id, ok:true overall does not survive a partial failure / exit 1); --all --kb -> {kb_id, deleted_count}.",
 		Warnings: []string{
 			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
 			"doc delete is irreversible; loses the document + its chunks + embeddings.",
@@ -181,7 +183,7 @@ without the user's explicit go-ahead.`,
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "document", id, "doc.delete", "weknora doc delete "+id+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "document", id, "doc.delete", []string{"weknora", "doc", "delete", id, "-y"}); err != nil {
 		return err
 	}
 
@@ -201,7 +203,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOp
 // CodeInputConfirmationRequired (exit 10) with risk metadata so agents can
 // surface the risk to the user before re-invoking with -y.
 func runDeleteAll(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc AllService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "all docs in KB", opts.KB, "doc.delete_all", fmt.Sprintf("weknora doc delete --all --kb=%s -y", opts.KB)); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "all docs in KB", opts.KB, "doc.delete_all", []string{"weknora", "doc", "delete", "--all", "--kb=" + opts.KB, "-y"}); err != nil {
 		return err
 	}
 

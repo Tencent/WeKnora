@@ -82,7 +82,7 @@ Symmetric with 'session continue-stream': both key on (session_id, message_id).`
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Stop server-side generation for an in-flight assistant message (counterpart to continue-stream). The message_id comes from the init event of the chat / session ask / continue-stream stream you're stopping.",
-		RequiredFlags: []string{"--message (message_id from the init event of the stream you're stopping)"},
+		RequiredFlags: []string{"<session-id> (positional)", "--message (message_id from the init event of the stream you're stopping)"},
 		Examples:      []string{"weknora session stop sess_xyz --message msg_abc"},
 		Output:        "envelope {session_id, message_id, stopped:true}",
 	})

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -113,6 +114,13 @@ func New() *Factory {
 // credentials are available so the user gets the right hint to run
 // `weknora auth login`.
 func buildClient(f *Factory) (*sdk.Client, error) {
+	// Env-credential injection: WEKNORA_TOKEN (bearer) or WEKNORA_API_KEY, with
+	// WEKNORA_HOST (or the active profile's host), builds an ephemeral client
+	// that bypasses config.yaml + the keyring — the stateless headless / CI /
+	// agent path (no disk writes, no `auth login`).
+	if c, handled, err := buildClientFromEnv(f); handled {
+		return c, err
+	}
 	cfg, err := f.Config()
 	if err != nil {
 		return nil, err
@@ -130,7 +138,7 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 			return nil, NewError(CodeInputInvalidArgument,
 				fmt.Sprintf("profile %q not configured", profileName)).
 				WithHint("list available profiles with `weknora profile list`").
-				WithRetryCommand("weknora profile list")
+				WithRetryArgv([]string{"weknora", "profile", "list"})
 		}
 		// ProfileOverride is empty: config.CurrentProfile points at a missing entry.
 		// That's a genuinely corrupt config file.
@@ -187,6 +195,58 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	return sdk.NewClient(prof.Host, opts...), nil
 }
 
+// EnvCredential reports whether stateless env credentials are in effect and
+// which kind. Used by `auth status` / `config view` so their host / profile
+// output reflects that the env credential (and WEKNORA_HOST) — not the config
+// profile — is what actually authenticated the client. Mirrors buildClientFromEnv's
+// precedence (WEKNORA_TOKEN wins over WEKNORA_API_KEY).
+func EnvCredential() (active bool, kind string) {
+	if strings.TrimSpace(os.Getenv("WEKNORA_TOKEN")) != "" {
+		return true, "WEKNORA_TOKEN"
+	}
+	if strings.TrimSpace(os.Getenv("WEKNORA_API_KEY")) != "" {
+		return true, "WEKNORA_API_KEY"
+	}
+	return false, ""
+}
+
+// buildClientFromEnv builds an ephemeral SDK client from WEKNORA_TOKEN (bearer
+// JWT) or WEKNORA_API_KEY when either is set, bypassing config.yaml + the
+// keyring entirely — the stateless path for headless / CI / agent use. Returns
+// handled=false (fall through to the profile path) when neither var is set.
+//
+// Host resolution: WEKNORA_HOST, else the active profile's host (so env creds
+// can target an already-configured host without re-specifying it). When a token
+// is supplied, no 401→refresh transport is attached — env creds are ephemeral,
+// so a 401 propagates for the caller to supply a fresh token. WEKNORA_TOKEN
+// wins over WEKNORA_API_KEY if both are set.
+func buildClientFromEnv(f *Factory) (client *sdk.Client, handled bool, err error) {
+	token := strings.TrimSpace(os.Getenv("WEKNORA_TOKEN"))
+	apiKey := strings.TrimSpace(os.Getenv("WEKNORA_API_KEY"))
+	if token == "" && apiKey == "" {
+		return nil, false, nil
+	}
+	host := strings.TrimSpace(os.Getenv("WEKNORA_HOST"))
+	if host == "" {
+		// Best-effort fallback to the active profile's host; ignore config
+		// errors so env creds + WEKNORA_HOST stay usable with no config at all.
+		if cfg, cerr := f.Config(); cerr == nil && cfg != nil {
+			if prof, ok := cfg.Profiles[cfg.CurrentProfile]; ok {
+				host = prof.Host
+			}
+		}
+	}
+	if host == "" {
+		return nil, true, NewError(CodeInputInvalidArgument,
+			"WEKNORA_TOKEN / WEKNORA_API_KEY is set but no host is available").
+			WithHint("set WEKNORA_HOST (e.g. https://kb.example.com) or configure a profile host")
+	}
+	if token != "" {
+		return sdk.NewClient(host, sdk.WithBearerToken(token)), true, nil
+	}
+	return sdk.NewClient(host, sdk.WithAPIKey(apiKey)), true, nil
+}
+
 // AddKBFlag registers the standard `--kb` flag that ResolveKB reads. Use this
 // instead of duplicating the flag declaration in every command that scopes to
 // a knowledge base — one source of truth for flag name and help text.
@@ -212,22 +272,7 @@ func (f *Factory) ResolveKB(cmd *cobra.Command) (string, error) {
 		}
 		return ResolveKBNameToID(cmd.Context(), c, v)
 	}
-	if v := os.Getenv("WEKNORA_KB_ID"); v != "" {
-		return v, nil
-	}
-	cwd, err := os.Getwd()
-	if err == nil {
-		if path, found, derr := projectlink.Discover(cwd); derr == nil && found {
-			p, lerr := projectlink.Load(path)
-			if lerr != nil {
-				return "", Wrapf(CodeProjectLinkCorrupt, lerr, "read project link")
-			}
-			if p.KBID != "" {
-				return p.KBID, nil
-			}
-		}
-	}
-	return "", NewError(CodeKBIDRequired, "kb is required")
+	return f.resolveKBFromEnvOrLink()
 }
 
 // ResolveKBLocal mirrors ResolveKB but never calls the SDK. When --kb is a
@@ -239,6 +284,14 @@ func (f *Factory) ResolveKBLocal(cmd *cobra.Command) (string, error) {
 	if v, _ := cmd.Flags().GetString("kb"); v != "" {
 		return v, nil
 	}
+	return f.resolveKBFromEnvOrLink()
+}
+
+// resolveKBFromEnvOrLink is the shared fallback tail of ResolveKB /
+// ResolveKBLocal (which differ only in how they treat the --kb flag): it reads
+// WEKNORA_KB_ID, then the walk-up .weknora/project.yaml link, and returns
+// CodeKBIDRequired when neither is set. Never calls the SDK.
+func (f *Factory) resolveKBFromEnvOrLink() (string, error) {
 	if v := os.Getenv("WEKNORA_KB_ID"); v != "" {
 		return v, nil
 	}

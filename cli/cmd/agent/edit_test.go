@@ -250,7 +250,7 @@ func TestEdit_SystemPromptFile(t *testing.T) {
 	assert.Equal(t, "new prompt", svc.updateReq.Config.SystemPrompt)
 }
 
-// withRootHarnessAgent wraps `weknora agent edit ...` under a synthetic root
+// withRootHarnessAgent wraps `weknora agent update ...` under a synthetic root
 // cmd that registers the global persistent flags (mirrors addGlobalFlags in
 // cmd/root.go).
 func withRootHarnessAgent(edit *cobra.Command, args ...string) *cobra.Command {
@@ -262,7 +262,7 @@ func withRootHarnessAgent(edit *cobra.Command, args ...string) *cobra.Command {
 	ag := &cobra.Command{Use: "agent"}
 	ag.AddCommand(edit)
 	root.AddCommand(ag)
-	root.SetArgs(append([]string{"agent", "edit"}, args...))
+	root.SetArgs(append([]string{"agent", "update"}, args...))
 	root.SetContext(context.Background())
 	root.SilenceErrors = true
 	root.SilenceUsage = true
@@ -270,7 +270,7 @@ func withRootHarnessAgent(edit *cobra.Command, args ...string) *cobra.Command {
 }
 
 // TestAgentEdit_RequiresConfirmation asserts that without -y (non-TTY / JSON
-// mode), agent edit returns input.confirmation_required (exit 10).
+// mode), agent update returns input.confirmation_required (exit 10).
 func TestAgentEdit_RequiresConfirmation(t *testing.T) {
 	iostreams.SetForTest(t) // non-TTY
 	f := &cmdutil.Factory{
@@ -284,7 +284,7 @@ func TestAgentEdit_RequiresConfirmation(t *testing.T) {
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, ce.Code)
 	assert.Equal(t, 10, cmdutil.ExitCode(err), "exit code 10 per destructive-write protocol")
-	// retry command must include -y and the agent id
-	assert.Contains(t, ce.RetryCommand, "-y")
-	assert.Contains(t, ce.RetryCommand, "ag_abc")
+	// retry argv must include -y and the agent id
+	assert.Contains(t, ce.RetryArgv, "-y")
+	assert.Contains(t, ce.RetryArgv, "ag_abc")
 }

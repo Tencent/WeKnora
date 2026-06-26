@@ -70,6 +70,39 @@ func TestRunBatch_PartialFailure(t *testing.T) {
 	}
 }
 
+// TestRunBatch_StatusExitTriState verifies the batch tri-state exit mapping:
+// all-success → exit 0 (nil summaryErr), partial → exit 1, all-fail → exit 1
+// (operation.failed fall-through). Pairs with the envelope-status tri-state in
+// output.TestWriteBatchEnvelope_StatusTriState.
+func TestRunBatch_StatusExitTriState(t *testing.T) {
+	failIf := func(fails map[string]bool) func(context.Context, string) error {
+		return func(_ context.Context, id string) error {
+			if fails[id] {
+				return errors.New("boom")
+			}
+			return nil
+		}
+	}
+	cases := []struct {
+		name     string
+		ids      []string
+		fails    map[string]bool
+		wantExit int
+	}{
+		{"all_success", []string{"a", "b"}, nil, 0},
+		{"partial", []string{"a", "b"}, map[string]bool{"b": true}, 1},
+		{"all_fail", []string{"a", "b"}, map[string]bool{"a": true, "b": true}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, summaryErr := RunBatch(context.Background(), tc.ids, failIf(tc.fails))
+			if got := ExitCode(summaryErr); got != tc.wantExit {
+				t.Errorf("ExitCode = %d, want %d (summaryErr=%v)", got, tc.wantExit, summaryErr)
+			}
+		})
+	}
+}
+
 // TestRunBatch_ContextCancellation verifies that once the context is cancelled,
 // remaining ids are marked with the context error without calling op.
 func TestRunBatch_ContextCancellation(t *testing.T) {
