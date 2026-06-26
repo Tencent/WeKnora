@@ -4813,7 +4813,7 @@ export default {
     },
     im: {
       title: 'Интеграция IM',
-      description: 'Подключите агента к платформам мгновенных сообщений, таким как Feishu, Slack, Telegram, DingTalk и Mattermost',
+      description: 'Подключите агента к платформам мгновенных сообщений, таким как Feishu, Slack, Telegram, DingTalk, Mattermost и QQBot',
       wecom: 'WeCom',
       feishu: 'Feishu',
       slack: 'Slack',
@@ -4821,6 +4821,7 @@ export default {
       dingtalk: 'DingTalk',
       mattermost: 'Mattermost',
       wechat: 'WeChat',
+      qqbot: 'QQBot',
       addChannel: 'Добавить канал',
       channelsTitle: 'IM-каналы',
       disabled: 'Отключено',
@@ -4846,6 +4847,9 @@ export default {
       dingtalkCardTemplateId: 'ID шаблона карточки (необязательно)',
       dingtalkCardTemplateIdHint: 'Создайте шаблон AI-карточки на open-dev.dingtalk.com/fe/card для потоковой передачи с эффектом печатной машинки',
       mattermostConsole: 'Интеграции Mattermost',
+      qqbotConsole: 'QQ Open Platform',
+      qqbotAPIBaseURLHint: 'Необязательно. Оставьте пустым, чтобы использовать стандартный production API endpoint.',
+      qqbotGatewayURLHint: 'Необязательно. Оставьте пустым, чтобы автоматически получить общий WebSocket gateway.',
       mattermostModeHint: 'Mattermost поддерживает только режим Webhook (исходящий вебхук + токен бота).',
       mattermostPostToMain: 'Ответы в основной ленте канала',
       mattermostPostToMainHint:

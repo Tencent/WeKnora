@@ -492,6 +492,35 @@
           </div>
         </template>
 
+        <!-- QQBot credentials -->
+        <template v-if="formData.platform === 'qqbot'">
+          <div class="platform-link-hint">
+            <a href="https://q.qq.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+              {{ $t('agentEditor.im.qqbotConsole') }}
+              <t-icon name="link" class="link-icon" />
+            </a>
+            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+          </div>
+          <div class="form-item">
+            <label class="form-label">App ID</label>
+            <t-input v-model="formData.credentials.app_id" placeholder="QQBot App ID" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">App Secret</label>
+            <t-input v-model="formData.credentials.client_secret" type="password" placeholder="QQBot App Secret" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">API Base URL</label>
+            <t-input v-model="formData.credentials.api_base_url" placeholder="https://api.sgroup.qq.com" />
+            <p class="form-desc">{{ $t('agentEditor.im.qqbotAPIBaseURLHint') }}</p>
+          </div>
+          <div class="form-item">
+            <label class="form-label">Gateway URL</label>
+            <t-input v-model="formData.credentials.gateway_url" placeholder="wss://api.sgroup.qq.com/websocket/" />
+            <p class="form-desc">{{ $t('agentEditor.im.qqbotGatewayURLHint') }}</p>
+          </div>
+        </template>
+
         <!-- Mattermost credentials -->
         <template v-if="formData.platform === 'mattermost'">
           <div class="platform-link-hint">
@@ -604,6 +633,7 @@ import telegramLogo from '@/assets/img/im/telegram.svg';
 import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
 import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
+import qqbotLogo from '@/assets/img/im/qqbot.svg';
 
 type IMPlatform = IMChannel['platform'];
 
@@ -615,6 +645,7 @@ const PLATFORM_LOGO: Record<string, string> = {
   dingtalk: dingtalkLogo,
   mattermost: mattermostLogo,
   wechat: wechatLogo,
+  qqbot: qqbotLogo,
 };
 
 const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[platform] || '' : '');
@@ -664,6 +695,7 @@ const platformOptions = computed(() => ([
   { value: 'dingtalk' as IMPlatform, label: t('agentEditor.im.dingtalk'), logo: dingtalkLogo },
   { value: 'mattermost' as IMPlatform, label: t('agentEditor.im.mattermost'), logo: mattermostLogo },
   { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
+  { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
 ]));
 
 const drawerTitle = computed(() => {
@@ -710,7 +742,7 @@ const defaultCredentials = (): Record<string, any> => ({});
 
 const formData = ref({
   target_agent_id: '',
-  platform: 'wecom' as 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat',
+  platform: 'wecom' as IMPlatform,
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket' | 'longpoll',
   output_mode: 'stream' as 'stream' | 'full',

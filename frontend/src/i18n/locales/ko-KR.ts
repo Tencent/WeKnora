@@ -5244,7 +5244,7 @@ export default {
     },
     im: {
       title: "IM 통합",
-      description: "에이전트를 Feishu, Slack, Telegram, DingTalk, Mattermost 등 인스턴트 메시징 플랫폼에 연결",
+      description: "에이전트를 Feishu, Slack, Telegram, DingTalk, Mattermost, QQBot 등 인스턴트 메시징 플랫폼에 연결",
       wecom: "WeCom",
       feishu: "Feishu",
       slack: "Slack",
@@ -5252,6 +5252,7 @@ export default {
       dingtalk: "DingTalk",
       mattermost: "Mattermost",
       wechat: "WeChat",
+      qqbot: "QQBot",
       addChannel: "채널 추가",
       channelsTitle: "IM 채널",
       disabled: "비활성",
@@ -5277,6 +5278,9 @@ export default {
       dingtalkCardTemplateId: "카드 템플릿 ID (선택 사항)",
       dingtalkCardTemplateIdHint: "open-dev.dingtalk.com/fe/card에서 AI 카드 템플릿을 만들면 타자기 효과 스트리밍 출력이 활성화됩니다",
       mattermostConsole: "Mattermost 통합",
+      qqbotConsole: "QQ Open Platform",
+      qqbotAPIBaseURLHint: "선택 사항. 비워두면 기본 프로덕션 API 엔드포인트를 사용합니다.",
+      qqbotGatewayURLHint: "선택 사항. 비워두면 공용 WebSocket gateway를 자동으로 가져옵니다.",
       mattermostModeHint: "Mattermost는 Webhook(아웃고잉 웹훅 + 봇 토큰)만 지원합니다.",
       mattermostPostToMain: "답변을 채널 메인 타임라인에 표시",
       mattermostPostToMainHint:

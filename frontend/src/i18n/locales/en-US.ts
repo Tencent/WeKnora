@@ -5302,7 +5302,7 @@ export default {
     },
     im: {
       title: 'IM Integration',
-      description: 'Connect agent to instant messaging platforms like WeCom, Feishu, Slack, Telegram, DingTalk, Mattermost and WeChat',
+      description: 'Connect agent to instant messaging platforms like WeCom, Feishu, Slack, Telegram, DingTalk, Mattermost, WeChat and QQBot',
       feishu: 'Feishu',
       slack: 'Slack',
       telegram: 'Telegram',
@@ -5310,6 +5310,7 @@ export default {
       mattermost: 'Mattermost',
       wecom: 'WeCom',
       wechat: 'WeChat',
+      qqbot: 'QQBot',
       addChannel: 'Add Channel',
       channelsTitle: 'IM Channels',
       disabled: 'Disabled',
@@ -5335,6 +5336,9 @@ export default {
       dingtalkCardTemplateId: 'Card Template ID (optional)',
       dingtalkCardTemplateIdHint: 'Create an AI Card template at open-dev.dingtalk.com/fe/card to enable streaming output with typewriter effect',
       mattermostConsole: 'Mattermost integrations',
+      qqbotConsole: 'QQ Open Platform',
+      qqbotAPIBaseURLHint: 'Optional. Leave empty to use the default production API endpoint.',
+      qqbotGatewayURLHint: 'Optional. Leave empty to fetch the common WebSocket gateway automatically.',
       mattermostModeHint: 'Mattermost only supports Webhook mode (outgoing webhook + bot token).',
       mattermostPostToMain: 'Post replies in channel timeline',
       mattermostPostToMainHint:

@@ -66,6 +66,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/dingtalk"
 	"github.com/Tencent/WeKnora/internal/im/feishu"
 	"github.com/Tencent/WeKnora/internal/im/mattermost"
+	"github.com/Tencent/WeKnora/internal/im/qqbot"
 	"github.com/Tencent/WeKnora/internal/im/slack"
 	"github.com/Tencent/WeKnora/internal/im/telegram"
 	"github.com/Tencent/WeKnora/internal/im/wechat"
@@ -1343,6 +1344,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 	imService.RegisterAdapterFactory("dingtalk", dingtalk.NewFactory())
 	imService.RegisterAdapterFactory("mattermost", mattermost.NewFactory())
 	imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
+	imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())
 
 	// Load and start all enabled channels from database
 	if err := imService.LoadAndStartChannels(); err != nil {

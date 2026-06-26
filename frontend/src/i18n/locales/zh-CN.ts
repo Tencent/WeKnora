@@ -5250,7 +5250,7 @@ export default {
     },
     im: {
       title: "IM 集成",
-      description: "将智能体接入即时通讯平台，支持企业微信、飞书、Slack、Telegram、钉钉、Mattermost和微信",
+      description: "将智能体接入即时通讯平台，支持企业微信、飞书、Slack、Telegram、钉钉、Mattermost、微信和 QQBot",
       wecom: "企业微信",
       feishu: "飞书",
       slack: "Slack",
@@ -5258,6 +5258,7 @@ export default {
       dingtalk: "钉钉",
       mattermost: "Mattermost",
       wechat: "微信",
+      qqbot: "QQBot",
       addChannel: "添加渠道",
       channelsTitle: "IM 渠道",
       disabled: "已停用",
@@ -5283,6 +5284,9 @@ export default {
       dingtalkCardTemplateId: "卡片模板 ID（可选）",
       dingtalkCardTemplateIdHint: "在 open-dev.dingtalk.com/fe/card 创建 AI 卡片模板，启用后支持打字机效果的流式输出",
       mattermostConsole: "Mattermost 集成说明",
+      qqbotConsole: "QQ 开放平台",
+      qqbotAPIBaseURLHint: "可选，留空则使用默认正式环境 API 地址。",
+      qqbotGatewayURLHint: "可选，留空则自动获取通用 WebSocket 接入点。",
       mattermostModeHint: "Mattermost 仅支持 Webhook（出站 Webhook + Bot Token）。",
       mattermostPostToMain: "回复显示在频道主时间线",
       mattermostPostToMainHint:
