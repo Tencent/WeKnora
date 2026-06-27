@@ -104,18 +104,16 @@ func (r *ImageResolver) ResolveAndStore(
 	}
 	savedRefs := make(map[string]StoredImage)
 
-	// Process each image reference found in the markdown.
-	// The URL group supports one level of balanced parentheses so that URLs
-	// like https://example.com/item_(abc)/123 are captured in full.
-	// Allow spaces in URLs (exclude only parens and newlines) to handle
-	// filenames with spaces, e.g. "images/第 1 页.jpg".
-	imgPattern := regexp.MustCompile(`!\[(.*?)\]\(([^()\n]*(?:\([^)]*\)[^()\n]*)*)\)`)
-	matches := imgPattern.FindAllStringSubmatchIndex(markdown, -1)
+	matches := scanMarkdownImageTargets(markdown)
 
 	// Process in reverse order to preserve positions when replacing
 	for i := len(matches) - 1; i >= 0; i-- {
-		m := matches[i]
-		refPath := markdown[m[4]:m[5]] // group 2: the URL/path
+		match := matches[i]
+		rawTarget := markdown[match.TargetStart:match.TargetEnd]
+		refPath, pathStart, pathEnd, ok := splitMarkdownImageTarget(rawTarget, refMap)
+		if !ok {
+			continue
+		}
 
 		// Skip already-resolved URLs (http/https, unified /files/, or provider:// scheme)
 		if strings.HasPrefix(refPath, "http://") || strings.HasPrefix(refPath, "https://") ||
@@ -131,7 +129,9 @@ func (r *ImageResolver) ResolveAndStore(
 		images = appendStoredImage(images, stored)
 
 		// Replace in markdown
-		markdown = markdown[:m[4]] + stored.ServingURL + markdown[m[5]:]
+		absolutePathStart := match.TargetStart + pathStart
+		absolutePathEnd := match.TargetStart + pathEnd
+		markdown = markdown[:absolutePathStart] + stored.ServingURL + markdown[absolutePathEnd:]
 	}
 
 	md5, imgRelativeHTML, _ := r.ResolveRelativeHTMLImages(ctx, markdown, fileSvc, tenantID, refMap, savedRefs)

@@ -10,6 +10,8 @@ import (
 )
 
 func TestGeminiEmbedderBatchEmbedUsesNativeAPI(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+
 	var gotPath string
 	var gotAPIKey string
 	var gotReq geminiBatchEmbedRequest
@@ -66,6 +68,8 @@ func TestGeminiEmbedderBatchEmbedUsesNativeAPI(t *testing.T) {
 }
 
 func TestGeminiEmbedderBatchEmbedSendsOutputDimensionalityWhenOverrideEnabled(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+
 	var gotReq geminiBatchEmbedRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
@@ -92,6 +96,8 @@ func TestGeminiEmbedderBatchEmbedSendsOutputDimensionalityWhenOverrideEnabled(t 
 }
 
 func TestGeminiEmbedderReturnsAPIErrorBody(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 	}))

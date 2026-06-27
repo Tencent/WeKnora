@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -18,6 +19,7 @@ import (
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
 	service      interfaces.CustomAgentService
+	imService    *im.Service
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository
 	// userService 仅用于 list 接口批量回填 creator_name，作用见
 	// KnowledgeBaseHandler.userService。
@@ -27,11 +29,13 @@ type CustomAgentHandler struct {
 // NewCustomAgentHandler creates a new custom agent handler instance
 func NewCustomAgentHandler(
 	service interfaces.CustomAgentService,
+	imService *im.Service,
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
 	userService interfaces.UserService,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service:      service,
+		imService:    imService,
 		disabledRepo: disabledRepo,
 		userService:  userService,
 	}
@@ -374,6 +378,20 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Deleting custom agent, ID: %s", secutils.SanitizeForLog(id))
+
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+
+	if err := h.imService.DeleteChannelsByAgent(id, tenantID); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"agent_id": id,
+		})
+		c.Error(errors.NewInternalServerError("Failed to delete agent IM channels"))
+		return
+	}
 
 	// Delete the agent
 	err := h.service.DeleteAgent(ctx, id)

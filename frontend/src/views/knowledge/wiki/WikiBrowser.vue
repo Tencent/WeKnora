@@ -231,10 +231,31 @@
                     <span class="wiki-tab-count">{{ tab.total }}</span>
                   </div>
                 </div>
-                <div v-if="props.canEdit" class="wiki-tab-bar-actions">
-                  <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.newRootFolder')" placement="top">
+                <div class="wiki-tab-bar-actions">
+                  <div class="wiki-view-toggle" role="group"
+                    :aria-label="$t('knowledgeEditor.wikiBrowser.viewModeToggle')">
+                    <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.viewTree')" placement="top">
+                      <button type="button" class="wiki-view-toggle-btn"
+                        :class="{ active: sidebarViewMode === 'tree' }" :aria-pressed="sidebarViewMode === 'tree'"
+                        :aria-label="$t('knowledgeEditor.wikiBrowser.viewTree')" :disabled="sidebarViewSwitching"
+                        @click="switchSidebarViewMode('tree')">
+                        <t-icon name="tree-list" />
+                      </button>
+                    </t-tooltip>
+                    <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.viewList')" placement="top">
+                      <button type="button" class="wiki-view-toggle-btn"
+                        :class="{ active: sidebarViewMode === 'list' }" :aria-pressed="sidebarViewMode === 'list'"
+                        :aria-label="$t('knowledgeEditor.wikiBrowser.viewList')" :disabled="sidebarViewSwitching"
+                        @click="switchSidebarViewMode('list')">
+                        <t-icon name="view-list" />
+                      </button>
+                    </t-tooltip>
+                  </div>
+                  <t-tooltip v-if="props.canEdit" :content="$t('knowledgeEditor.wikiBrowser.newRootFolder')" placement="top">
                     <button type="button" class="wiki-tab-bar-action"
-                      :aria-label="$t('knowledgeEditor.wikiBrowser.newRootFolder')" @click="startCreateRootFolder">
+                      :disabled="sidebarViewMode !== 'tree' || sidebarViewSwitching || sidebarTabSwitching"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.newRootFolder')"
+                      @click.stop="startCreateRootFolder">
                       <t-icon name="folder-add" />
                     </button>
                   </t-tooltip>
@@ -242,7 +263,7 @@
               </div>
 
               <!-- Active-tab list -->
-              <template v-if="activeGroup">
+              <template v-if="activeGroup && sidebarViewMode === 'tree'">
                 <!-- The list container is itself the "move to root" drop target;
                    folder rows stop propagation so their own drop wins. This
                    avoids inserting/removing a drop bar during the drag, which
@@ -322,6 +343,28 @@
                 <div v-if="activeGroup.hasMore" ref="groupSentinelRef" class="wiki-group-sentinel"
                   :data-type="activeGroup.type"></div>
                 <div v-if="activeGroup.loading" class="wiki-group-loading">
+                  <t-loading size="small" />
+                </div>
+              </template>
+
+              <!-- Classic flat list. It owns a separate paged dataset because
+                   tree mode requests one directory at a time. -->
+              <template v-else-if="activeGroup">
+                <RecycleScroller class="wiki-group-scroller" :items="activeFlatPages"
+                  :item-size="WIKI_PAGE_ITEM_HEIGHT" key-field="id" :buffer="400" page-mode
+                  v-slot="{ item }">
+                  <div :class="['wiki-page-item', 'wiki-page-item--list', { active: selectedPage?.id === item.id }]"
+                    @click="selectPage(item)">
+                    <div class="wiki-page-item-title">{{ item.title }}</div>
+                    <div class="wiki-page-item-summary">{{ item.summary }}</div>
+                    <div class="wiki-page-item-meta">
+                      <span>{{ formatDate(item.updated_at) }}</span>
+                    </div>
+                  </div>
+                </RecycleScroller>
+                <div v-if="activeFlatState?.hasMore" ref="groupSentinelRef" class="wiki-group-sentinel"
+                  :data-type="activeGroup.type"></div>
+                <div v-if="activeFlatState?.loading" class="wiki-group-loading">
                   <t-loading size="small" />
                 </div>
               </template>
@@ -655,6 +698,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
@@ -743,6 +787,11 @@ interface PageTypeBucket {
   // demand so a folder with thousands of siblings doesn't arrive in one shot.
   categoryPages: Record<string, DirectoryCategoryState>
   directoryPages: Record<string, DirectoryPageState>
+  flatItems: WikiPage[]
+  flatNextPage: number
+  flatTotal: number
+  flatLoading: boolean
+  flatInitialized: boolean
 }
 interface DirectoryPageState {
   nextPage: number
@@ -1384,6 +1433,16 @@ function handleGraphDrawerClick(e: MouseEvent) {
 // ambiguous — "which list am I scrolling?" The tabbed version removes
 // that ambiguity by mounting exactly one scroller at a time.
 const activeTab = ref<string>('')
+type SidebarViewMode = 'tree' | 'list'
+const SIDEBAR_VIEW_MODE_KEY = 'weknora.wiki.sidebar.viewMode'
+function initialSidebarViewMode(): SidebarViewMode {
+  try {
+    return localStorage.getItem(SIDEBAR_VIEW_MODE_KEY) === 'list' ? 'list' : 'tree'
+  } catch {
+    return 'tree'
+  }
+}
+const sidebarViewMode = ref<SidebarViewMode>(initialSidebarViewMode())
 // Suppress visibleTabs watcher during the first sidebar load. Knowledge and
 // summary buckets load in parallel; whichever API returns first used to win
 // the race and stick on summary even though knowledge is the intended default.
@@ -1392,21 +1451,84 @@ let initialSidebarLoad = true
 // scroll position from the old tab doesn't immediately expose the new
 // tab's sentinel and cascade load-more calls.
 const pageListRef = ref<HTMLElement | null>(null)
+const sidebarViewSwitching = ref(false)
+const sidebarTabSwitching = ref(false)
 
-function setActiveTab(type: string) {
-  if (activeTab.value === type) return
+watch(sidebarViewMode, (mode) => {
+  try { localStorage.setItem(SIDEBAR_VIEW_MODE_KEY, mode) } catch { /* ignore */ }
   cancelCreateRootFolder()
-  activeTab.value = type
+  if (pageListRef.value) pageListRef.value.scrollTop = 0
+})
+
+async function switchSidebarViewMode(mode: SidebarViewMode) {
+  if (mode === sidebarViewMode.value || sidebarViewSwitching.value) return
+  sidebarViewSwitching.value = true
+  try {
+    // The flat list has its own unscoped pagination stream. Fetch its first
+    // page before swapping containers so the user never lands on an empty
+    // RecycleScroller while the request is still in flight.
+    if (mode === 'list' && activeTab.value) {
+      const ready = await loadFlatPagesForType(activeTab.value)
+      if (!ready && activeFlatPages.value.length === 0) return
+    }
+    sidebarViewMode.value = mode
+  } finally {
+    sidebarViewSwitching.value = false
+  }
+}
+
+function waitForTabData(type: string, mode: SidebarViewMode): Promise<void> {
+  const isBusy = () => {
+    const bucket = pagesByType.value[type]
+    if (!bucket) return false
+    return mode === 'list'
+      ? bucket.flatLoading
+      : bucket.loading || bucket.categoriesLoading
+  }
+  if (!isBusy()) return Promise.resolve()
+
+  return new Promise(resolve => {
+    const stop = watch(isBusy, (busy) => {
+      if (!busy) {
+        stop()
+        resolve()
+      }
+    }, { flush: 'post' })
+    // The request may finish between the initial check and watcher setup.
+    if (!isBusy()) {
+      stop()
+      resolve()
+    }
+  })
+}
+
+async function setActiveTab(type: string) {
+  if (activeTab.value === type || sidebarTabSwitching.value) return
+  sidebarTabSwitching.value = true
+  ensureBucket(type)
+  try {
+    // Initial sidebar requests run in parallel. A tab can become visible from
+    // stats before its page/folder requests finish, so prepare the target
+    // bucket before replacing the current content instead of briefly mounting
+    // an empty tree/list on the first click after refresh.
+    if (sidebarViewMode.value === 'list') {
+      await loadFlatPagesForType(type)
+    } else {
+      await Promise.all([
+        loadPagesForType(type),
+        loadCategoriesForType(type),
+      ])
+    }
+    await waitForTabData(type, sidebarViewMode.value)
+
+    cancelCreateRootFolder()
+    activeTab.value = type
+  } finally {
+    sidebarTabSwitching.value = false
+  }
   // Snap back to the top before the new list renders so the sentinel
   // has to be scrolled to, not simply appear at a retained scroll depth.
   if (pageListRef.value) pageListRef.value.scrollTop = 0
-  const bucket = pagesByType.value[type]
-  if (bucket && !bucket.categoriesInitialized && !bucket.categoriesLoading) {
-    loadCategoriesForType(type)
-  }
-  if (bucket && !bucket.initialized && !bucket.loading) {
-    loadPagesForType(type)
-  }
 }
 
 // visibleTabs mirrors groupedPages but is meant for rendering the
@@ -1422,6 +1544,21 @@ const visibleTabs = computed(() =>
 const activeGroup = computed(() => {
   if (!activeTab.value) return null
   return groupedPages.value.find(g => g.type === activeTab.value) || null
+})
+
+const activeFlatPages = computed(() => {
+  if (!activeTab.value) return []
+  return pagesByType.value[activeTab.value]?.flatItems || []
+})
+
+const activeFlatState = computed(() => {
+  if (!activeTab.value) return null
+  const bucket = pagesByType.value[activeTab.value]
+  if (!bucket) return null
+  return {
+    loading: bucket.flatLoading,
+    hasMore: !bucket.flatInitialized || bucket.flatItems.length < bucket.flatTotal,
+  }
 })
 
 function pageCategoryPath(page: WikiPage): string[] {
@@ -1623,7 +1760,7 @@ watch(visibleTabs, (tabs) => {
 // loadPagesForType prevent double-fetching.
 const groupSentinelRef = ref<HTMLElement | null>(null)
 let groupSentinelObserver: IntersectionObserver | null = null
-watch(groupSentinelRef, (el) => {
+watch([groupSentinelRef, sidebarViewMode], ([el]) => {
   if (groupSentinelObserver) {
     groupSentinelObserver.disconnect()
     groupSentinelObserver = null
@@ -1633,11 +1770,15 @@ watch(groupSentinelRef, (el) => {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue
       const type = (entry.target as HTMLElement).dataset.type
-      if (type) loadPagesForType(type)
+      if (!type) continue
+      if (sidebarViewMode.value === 'list') loadFlatPagesForType(type)
+      else loadPagesForType(type)
     }
   }, { rootMargin: '200px' })
   groupSentinelObserver.observe(el)
 }, { flush: 'post' })
+
+const WIKI_PAGE_ITEM_HEIGHT = 100
 
 // Auto-load for the "load more" rows that live INSIDE the tree (more
 // pages within an expanded directory, or more sub-folders at a level).
@@ -1803,6 +1944,54 @@ function emptyBucket(): PageTypeBucket {
     categoriesInitialized: false,
     categoryPages: {},
     directoryPages: {},
+    flatItems: [],
+    flatNextPage: 1,
+    flatTotal: 0,
+    flatLoading: false,
+    flatInitialized: false,
+  }
+}
+
+async function loadFlatPagesForType(type: string, reset = false): Promise<boolean> {
+  const bucket = ensureBucket(type)
+  if (bucket.flatLoading) return bucket.flatItems.length > 0
+  if (!reset && bucket.flatInitialized && bucket.flatItems.length >= bucket.flatTotal) return true
+
+  bucket.flatLoading = true
+  try {
+    const requestPage = reset ? 1 : bucket.flatNextPage
+    const res = await listWikiPages(props.knowledgeBaseId, {
+      page_type: tabPageTypes(type),
+      page: requestPage,
+      page_size: WIKI_SIDEBAR_PAGE_SIZE,
+      sort_by: 'wiki_path',
+      sort_order: 'asc',
+    })
+    const body: any = (res as any).data || res
+    const batch: WikiPage[] = body?.pages || []
+    if (reset) {
+      bucket.flatItems = batch
+      bucket.flatNextPage = 2
+    } else {
+      const seen = new Set(bucket.flatItems.map(page => page.id))
+      for (const page of batch) {
+        if (!seen.has(page.id)) bucket.flatItems.push(page)
+      }
+      bucket.flatNextPage += 1
+    }
+    bucket.flatTotal = Number(body?.total) || 0
+    bucket.flatInitialized = true
+
+    const seenPages = new Set(pages.value.map(page => page.id))
+    for (const page of batch) {
+      if (!seenPages.has(page.id)) pages.value.push(page)
+    }
+    return true
+  } catch (e) {
+    console.error(`Failed to load flat wiki pages of type ${type}:`, e)
+    return false
+  } finally {
+    bucket.flatLoading = false
   }
 }
 
@@ -1824,12 +2013,6 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
   const parentPath = opts.parentPath || []
   const parentKey = directoryPathKey(type, parentPath)
   const isRoot = parentPath.length === 0
-  if (opts.reset) {
-    bucket.categoryPaths = []
-    bucket.folderIdByPath = {}
-    bucket.categoriesInitialized = false
-    bucket.categoryPages = {}
-  }
 
   const parentId = isRoot ? '' : bucket.folderIdByPath[parentPath.join('/')]
   // A deeper level whose parent folder id we have not yet recorded cannot be
@@ -1838,7 +2021,7 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
 
   let state = bucket.categoryPages[parentKey]
   if (state?.loading) return
-  if (state && state.initialized) return // a level is loaded in a single request
+  if (!opts.reset && state && state.initialized) return // a level is loaded in a single request
   if (!state) {
     state = { nextPage: 1, totalPages: 1, loading: false, initialized: false }
   }
@@ -1863,14 +2046,16 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
       // knowledge view only (backend filters too — belt-and-suspenders).
       .filter(entry => type !== 'summary' || entry.count > 0)
 
-    const existing = new Map(bucket.categoryPaths.map(entry => [directoryPathKey(type, entry.path), entry]))
-    const folderIds = { ...bucket.folderIdByPath }
+    const existing = new Map((opts.reset ? [] : bucket.categoryPaths)
+      .map(entry => [directoryPathKey(type, entry.path), entry]))
+    const folderIds = opts.reset ? {} : { ...bucket.folderIdByPath }
     for (const entry of incoming) {
       existing.set(directoryPathKey(type, entry.path), { path: entry.path, count: entry.count })
       folderIds[entry.path.join('/')] = entry.id
     }
     bucket.categoryPaths = Array.from(existing.values())
     bucket.folderIdByPath = folderIds
+    if (opts.reset) bucket.categoryPages = {}
     setState({ nextPage: 2, totalPages: 1, loading: false, initialized: true })
     if (isRoot) bucket.categoriesInitialized = true
     initializeDefaultCollapsedDirectories(type, incoming.map(entry => ({
@@ -1889,9 +2074,11 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
 // rename / delete folder) so the tree reflects the new layout authoritatively
 // instead of guessing at the optimistic delta.
 async function reloadDirectoryForType(type: string) {
+  const refreshFlatList = sidebarViewMode.value === 'list' || ensureBucket(type).flatInitialized
   clearDirectoryStateForType(type)
   await loadPagesForType(type, { reset: true })
   await loadCategoriesForType(type, { reset: true })
+  if (refreshFlatList) await loadFlatPagesForType(type, true)
 }
 
 // --- Drag-and-drop: move a page or folder into a folder ------------------
@@ -2139,19 +2326,11 @@ async function loadPagesForType(type: string, opts: { reset?: boolean; categoryP
   }
   const scopedState = scopedToCategory ? bucket.directoryPages[scopedPathKey] : null
   if (scopedState?.loading || (!scopedToCategory && bucket.loading)) return
-  if (opts.reset) {
-    bucket.items = []
-    bucket.nextPage = 1
-    bucket.total = 0
-    bucket.initialized = false
-    bucket.directoryPages = {}
-    clearDirectoryStateForType(type)
-  }
   if (scopedToCategory) {
     const state = scopedState
     if (!state) return
     if (state.initialized && state.total > 0 && (state.nextPage - 1) * WIKI_SIDEBAR_PAGE_SIZE >= state.total) return
-  } else if (bucket.initialized && bucket.items.length >= bucket.total) {
+  } else if (!opts.reset && bucket.initialized && bucket.items.length >= bucket.total) {
     return
   }
 
@@ -2164,9 +2343,10 @@ async function loadPagesForType(type: string, opts: { reset?: boolean; categoryP
   else bucket.loading = true
   try {
     const currentScopedState = scopedToCategory ? bucket.directoryPages[scopedPathKey] : null
+    const requestPage = opts.reset ? 1 : (currentScopedState ? currentScopedState.nextPage : bucket.nextPage)
     const res = await listWikiPages(props.knowledgeBaseId, {
       page_type: tabPageTypes(type),
-      page: currentScopedState ? currentScopedState.nextPage : bucket.nextPage,
+      page: requestPage,
       page_size: WIKI_SIDEBAR_PAGE_SIZE,
       sort_by: 'wiki_path',
       sort_order: 'asc',
@@ -2177,15 +2357,26 @@ async function loadPagesForType(type: string, opts: { reset?: boolean; categoryP
     const batch: WikiPage[] = body?.pages || []
     const reportedTotal = Number(body?.total) || 0
 
-    const seenItems = new Set(bucket.items.map(p => p.id))
-    for (const p of batch) {
-      if (!seenItems.has(p.id)) bucket.items.push(p)
-    }
     if (!scopedToCategory) {
+      if (opts.reset) {
+        bucket.items = batch
+        bucket.nextPage = 2
+        bucket.directoryPages = {}
+        clearDirectoryStateForType(type)
+      } else {
+        const seenItems = new Set(bucket.items.map(p => p.id))
+        for (const p of batch) {
+          if (!seenItems.has(p.id)) bucket.items.push(p)
+        }
+        bucket.nextPage += 1
+      }
       bucket.total = reportedTotal
-      bucket.nextPage += 1
       bucket.initialized = true
     } else if (currentScopedState) {
+      const seenItems = new Set(bucket.items.map(p => p.id))
+      for (const p of batch) {
+        if (!seenItems.has(p.id)) bucket.items.push(p)
+      }
       bucket.directoryPages = {
         ...bucket.directoryPages,
         [scopedPathKey]: {
@@ -2509,6 +2700,9 @@ async function loadPages() {
       if (!tabValid) {
         activeTab.value = preferredDefaultTab(visibleTabs.value)
       }
+    }
+    if (sidebarViewMode.value === 'list' && activeTab.value) {
+      await loadFlatPagesForType(activeTab.value, true)
     }
 
     // Auto-select based on query string or default to the index
@@ -4395,7 +4589,7 @@ onUnmounted(() => {
 
 .wiki-tab-bar-scroll {
   display: flex;
-  gap: 4px;
+  gap: 16px;
   min-width: 0;
   flex: 1;
   overflow-x: auto;
@@ -4410,29 +4604,75 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+
+.wiki-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.wiki-view-toggle-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+
+  &.active {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  }
+
+  .t-icon {
+    font-size: 15px;
+  }
 }
 
 .wiki-tab-bar-action {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  border: none;
-  border-radius: 4px;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
-  display: flex;
+  color: var(--td-text-color-secondary);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--td-text-color-secondary);
+  flex-shrink: 0;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 
   .t-icon {
-    font-size: 16px;
+    font-size: 15px;
   }
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:disabled {
+    color: var(--td-text-color-placeholder);
+    background: transparent;
+    cursor: not-allowed;
+    opacity: 0.45;
   }
 }
 
@@ -4506,39 +4746,47 @@ onUnmounted(() => {
 .wiki-tab {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 14px;
-  font-size: 12px;
+  gap: 5px;
+  padding: 7px 2px 8px;
+  border-radius: 0;
+  font-size: 13px;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
+  position: relative;
   transition: background 0.15s, color 0.15s;
 
   &:hover {
-    background: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
     color: var(--td-brand-color);
-    font-weight: 500;
+    font-weight: 600;
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: 2px;
+      right: 2px;
+      bottom: 1px;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: var(--td-brand-color);
+    }
   }
 
   .wiki-tab-count {
     font-size: 11px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 10px;
-    padding: 0 6px;
-    line-height: 16px;
+    padding: 0;
+    line-height: 1;
     color: var(--td-text-color-placeholder);
   }
 
   &.active .wiki-tab-count {
-    background: var(--td-brand-color-1, rgba(0, 82, 217, 0.12));
     color: var(--td-brand-color);
+    font-weight: 500;
   }
 }
 
@@ -4562,6 +4810,42 @@ onUnmounted(() => {
   &.active {
     background: var(--td-brand-color-light);
   }
+}
+
+.wiki-group-scroller {
+  min-height: 60px;
+  margin: 4px 0;
+}
+
+.wiki-page-item--list {
+  height: 98px;
+  padding: 10px 2px;
+}
+
+.wiki-page-item--list .wiki-page-item-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.wiki-page-item-summary {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.wiki-page-item-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
 }
 
 .wiki-directory-item {

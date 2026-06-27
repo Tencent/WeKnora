@@ -126,4 +126,8 @@ type CustomAgentRepository interface {
 	// Returns:
 	//   - Possible errors such as record not existing, database errors, etc.
 	DeleteAgent(ctx context.Context, id string, tenantID uint64) error
+
+	// CountByModelID counts active agents in the tenant whose config references
+	// the given model ID (chat, rerank, VLM, ASR, query-understand, etc.).
+	CountByModelID(ctx context.Context, tenantID uint64, modelID string) (int64, error)
 }

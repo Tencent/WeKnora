@@ -1538,12 +1538,12 @@ watch(
   user-select: none;
 
   &:hover {
-    background-color: var(--td-bg-color-secondarycontainer-hover);
+    background-color: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background-color: rgba(7, 192, 95, 0.1);
+    background-color: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
     font-weight: 500;
   }
@@ -1565,20 +1565,15 @@ watch(
 
 .nav-badge {
   flex-shrink: 0;
-  min-width: 18px;
+  margin-left: 2px;
   padding: 0 6px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--td-bg-color-secondarycontainer);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 18px;
-  text-align: center;
   color: var(--td-text-color-secondary);
-
-  .nav-item.active & {
-    background: color-mix(in srgb, var(--td-brand-color) 18%, transparent);
-    color: var(--td-brand-color);
-  }
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  text-align: center;
 }
 
 .settings-content {

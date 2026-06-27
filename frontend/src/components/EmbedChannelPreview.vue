@@ -1,6 +1,6 @@
 <template>
   <t-drawer :visible="visible" :header="title || $t('embedPublish.preview')" size="720px" :footer="false"
-    :z-index="2600" class="embed-preview-drawer" @close="emit('update:visible', false)">
+    :z-index="2600" attach="body" class="embed-preview-drawer" @close="emit('update:visible', false)">
     <div class="preview-body">
       <template v-if="mode === 'iframe'">
         <p class="preview-hint">{{ $t('embedPublish.previewIframeHint') }}</p>

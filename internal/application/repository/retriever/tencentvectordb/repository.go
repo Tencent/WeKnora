@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -41,8 +42,21 @@ func NewTencentVectorDBRetrieveEngineRepository(
 		collectionBaseName: collectionBaseName,
 		useDimensionSuffix: shouldUseDimensionSuffix(indexCfg),
 		shardsNum:          defaultIfZero(indexCfg.GetShardsNum(1), 1),
-		replicasNum:        defaultIfZero(indexCfg.GetReplicaNumber(1), 1),
+		replicasNum:        resolveReplicaNumber(indexCfg),
 	}
+}
+
+func resolveReplicaNumber(indexCfg *types.IndexConfig) int {
+	if indexCfg != nil && indexCfg.ReplicaNumber > 0 {
+		return indexCfg.ReplicaNumber
+	}
+	if raw := strings.TrimSpace(os.Getenv(envTencentVectorDBReplicaNum)); raw != "" {
+		replicas, err := strconv.Atoi(raw)
+		if err == nil && replicas >= 0 {
+			return replicas
+		}
+	}
+	return defaultReplicaNumber
 }
 
 func (r *repository) EngineType() types.RetrieverEngineType {

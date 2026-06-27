@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -43,47 +44,116 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	return nil
 }
 
-// ListResources lists all accessible Feishu Wiki spaces and nodes as selectable resources.
-func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceConfig) ([]types.Resource, error) {
+// ListResources lists Feishu Wiki resources for selection, loading the tree
+// lazily one level at a time to avoid traversing the entire wiki up front.
+//
+//   - parentID == ""        → list all accessible wiki spaces.
+//   - parentID == spaceID   → list the top-level nodes of that space.
+//   - parentID == "spaceID:nodeToken" → list the direct children of that node.
+//
+// Eagerly recursing the whole tree here used to time out for large wikis
+// (Tencent/WeKnora#1672); the recursive walk now happens only at sync time.
+func (c *Connector) ListResources(
+	ctx context.Context, config *types.DataSourceConfig, parentID string,
+) ([]types.Resource, error) {
 	feishuConfig, err := parseFeishuConfig(config)
 	if err != nil {
 		return nil, err
 	}
 
 	client := NewClient(feishuConfig)
-	spaces, err := client.ListWikiSpaces(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list feishu wiki spaces: %w", err)
-	}
 
-	resources := make([]types.Resource, 0, len(spaces))
-	for _, space := range spaces {
-		resources = append(resources, types.Resource{
-			ExternalID:  space.SpaceID,
-			Name:        space.Name,
-			Type:        "wiki_space",
-			Description: space.Description,
-			URL:         fmt.Sprintf("https://feishu.cn/wiki/%s", space.SpaceID),
-			HasChildren: true,
-			Metadata: map[string]interface{}{
-				"visibility": space.Visibility,
-				"space_id":   space.SpaceID,
-			},
-		})
-
-		nodes, err := client.ListAllWikiNodesRecursive(ctx, space.SpaceID)
+	if parentID == "" {
+		spaces, err := client.ListWikiSpaces(ctx)
 		if err != nil {
-			var partialErr *partialWikiNodeListError
-			if !errors.As(err, &partialErr) {
-				return nil, fmt.Errorf("list feishu wiki nodes in space %s: %w", space.SpaceID, err)
-			}
+			return nil, fmt.Errorf("list feishu wiki spaces: %w", err)
 		}
-		for _, node := range nodes {
-			resources = append(resources, wikiNodeToResource(space.SpaceID, node))
+
+		resources := make([]types.Resource, 0, len(spaces))
+		for _, space := range spaces {
+			resources = append(resources, types.Resource{
+				ExternalID:  space.SpaceID,
+				Name:        space.Name,
+				Type:        "wiki_space",
+				Description: space.Description,
+				URL:         fmt.Sprintf("https://feishu.cn/wiki/%s", space.SpaceID),
+				HasChildren: true,
+				Metadata: map[string]interface{}{
+					"visibility": space.Visibility,
+					"space_id":   space.SpaceID,
+				},
+			})
+		}
+		return resources, nil
+	}
+
+	// Lazy load: list only the direct children of the given space / node.
+	spaceID, nodeToken := parseWikiResourceID(parentID)
+	nodes, err := client.ListWikiNodes(ctx, spaceID, nodeToken)
+	if err != nil {
+		return nil, fmt.Errorf("list feishu wiki nodes under %s: %w", parentID, err)
+	}
+
+	resources := make([]types.Resource, 0, len(nodes))
+	for _, node := range nodes {
+		resources = append(resources, wikiNodeToResource(spaceID, node))
+	}
+	return resources, nil
+}
+
+// ResolveResourceAncestors returns the resource IDs of every parent that has to
+// be expanded so the lazily-loaded picker can reveal each given selection. For a
+// selected node "spaceID:nodeToken" that is its space plus every intermediate
+// node up the tree; the walk uses GetWikiNode (parent_node_token) and is O(depth)
+// per selection, so it never re-traverses the whole wiki.
+func (c *Connector) ResolveResourceAncestors(
+	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+) ([]string, error) {
+	feishuConfig, err := parseFeishuConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	client := NewClient(feishuConfig)
+
+	seen := make(map[string]bool)
+	ancestors := make([]string, 0)
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ancestors = append(ancestors, id)
 		}
 	}
 
-	return resources, nil
+	for _, rid := range resourceIDs {
+		spaceID, nodeToken := parseWikiResourceID(rid)
+		if spaceID == "" || nodeToken == "" {
+			// A space-level selection is already a top-level node in the picker;
+			// there is nothing above it to reveal.
+			continue
+		}
+		// The space's direct children must be loaded to reveal the top-level node.
+		add(spaceID)
+
+		// Walk up from the selection to the top, loading each intermediate
+		// parent so the path down to the selection becomes visible.
+		current := nodeToken
+		for current != "" {
+			node, err := client.GetWikiNode(ctx, spaceID, current)
+			if err != nil {
+				// Best-effort: a broken path just stays collapsed, the rest of
+				// the selections are still revealed.
+				logger.Warnf(ctx, "[Feishu] resolve ancestors: get node %s:%s: %v", spaceID, current, err)
+				break
+			}
+			if node.ParentNodeID == "" {
+				break
+			}
+			add(makeWikiNodeResourceID(spaceID, node.ParentNodeID))
+			current = node.ParentNodeID
+		}
+	}
+
+	return ancestors, nil
 }
 
 // FetchAll performs a full sync of all documents from the specified wiki spaces.

@@ -112,6 +112,9 @@ export const useOrganizationStore = defineStore('organization', () => {
       const response = await createOrganization({ name, description })
       if (response.success && response.data) {
         organizations.value.unshift(response.data)
+        // 创建成功后重置缓存时间戳，确保后续 fetchOrganizations() 不会被 TTL 缓存跳过，
+        // 从而刷新 resource_counts 等创建接口不返回的聚合字段。
+        organizationsLoadedAt = 0
         return response.data
       } else {
         error.value = response.message || 'Failed to create organization'

@@ -124,6 +124,17 @@
                       :parser-engine-rules="uiState.chunkingConfig.parserEngineRules"
                       @update:parser-engine-rules="handleParserEngineRulesUpdate"
                     />
+                    <div v-if="hasPdf" class="kb-embedded-settings" style="margin-top: 16px;">
+                      <div class="setting-row setting-row--toggle">
+                        <div class="setting-info">
+                          <label>{{ t('uploadConfirm.pdfForceScanned.label') }}</label>
+                          <p class="desc">{{ t('uploadConfirm.pdfForceScanned.description') }}</p>
+                        </div>
+                        <div class="setting-control">
+                          <t-switch v-model="uiState.pdfForceScanned" size="medium" />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div v-show="activeSection === 'chunking'" class="section">
                     <KBChunkingSettings
@@ -290,6 +301,7 @@ interface UploadUIState {
     relations: Array<{ node1: string; node2: string; type: string }>
   }
   graphEnabled: boolean
+  pdfForceScanned: boolean
 }
 
 const props = withDefaults(defineProps<{
@@ -437,16 +449,27 @@ const batchFileExts = computed(() => {
   return [...set]
 })
 
+const hasPdf = computed(() => {
+  return batchFileExts.value.includes('pdf')
+})
+
 function resolveEngineForExt(ext: string): string {
   const rules = uiState.value.chunkingConfig.parserEngineRules
+  let engineKey = 'builtin'
+  let name = t('uploadConfirm.summaryParserBuiltin')
   if (rules?.length) {
     for (const rule of rules) {
       if (rule.file_types.includes(ext)) {
-        return getEngineDisplayName(rule.engine)
+        engineKey = rule.engine
+        name = getEngineDisplayName(rule.engine)
+        break
       }
     }
   }
-  return t('uploadConfirm.summaryParserBuiltin')
+  if (ext === 'pdf' && uiState.value.pdfForceScanned && engineKey === 'builtin') {
+    return `${name} · ${t('uploadConfirm.summaryParserForceScanned')}`
+  }
+  return name
 }
 
 const parserOverviewValue = computed(() => {
@@ -624,6 +647,7 @@ function createDefaultUIState(): UploadUIState {
       relations: [],
     },
     graphEnabled: false,
+    pdfForceScanned: false,
   }
 }
 
@@ -670,6 +694,7 @@ function initFromKbInfo(kb: any) {
       relations: kb.extract_config?.relations || [],
     },
     graphEnabled: kb.indexing_strategy?.graph_enabled ?? false,
+    pdfForceScanned: false,
   }
 }
 
@@ -677,7 +702,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
   const state = uiState.value
   const chunking = state.chunkingConfig
 
-  return {
+  const overrides: KnowledgeProcessOverrides = {
     parser_engine_rules: chunking.parserEngineRules,
     chunking_config: {
       chunk_size: chunking.chunkSize,
@@ -713,6 +738,14 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       relations: state.nodeExtractConfig.relations,
     },
   }
+
+  if (state.pdfForceScanned) {
+    overrides.parser_engine_overrides = {
+      pdf_force_scanned: 'true',
+    }
+  }
+
+  return overrides
 }
 
 function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
@@ -756,6 +789,11 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (ec.relations) s.nodeExtractConfig.relations = ec.relations
   }
   if (o.graph_enabled != null) s.graphEnabled = o.graph_enabled
+  if (o.parser_engine_overrides && o.parser_engine_overrides.pdf_force_scanned === 'true') {
+    s.pdfForceScanned = true
+  } else {
+    s.pdfForceScanned = false
+  }
 }
 
 async function loadModels() {
@@ -910,7 +948,7 @@ const handleConfirm = () => {
 .upload-confirm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2500;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;

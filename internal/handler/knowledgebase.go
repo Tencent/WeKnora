@@ -271,7 +271,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 
 // HybridSearch godoc
 // @Summary      混合搜索
-// @Description  在知识库中执行向量和关键词混合搜索
+// @Description  在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
@@ -281,6 +281,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/hybrid-search [post]
 // @Router       /knowledge-bases/{id}/hybrid-search [get]
 func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	ctx := c.Request.Context()

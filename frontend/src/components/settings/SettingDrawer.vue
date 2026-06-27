@@ -1,15 +1,15 @@
 <template>
   <teleport to="body">
     <div v-if="drawerVisible && resizable" class="setting-drawer-resize-handle"
-      :class="{ 'setting-drawer-resize-handle--active': drawerResizing }" :style="{ right: `${drawerWidthPx}px` }"
+      :class="{ 'setting-drawer-resize-handle--active': drawerResizing }"
+      :style="{ right: `${drawerWidthPx}px`, '--setting-drawer-travel': `${drawerWidthPx}px` }"
       role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
       <div class="setting-drawer-resize-line" />
     </div>
   </teleport>
-  <t-drawer v-model:visible="drawerVisible" :size="effectiveWidth" :z-index="2500" placement="right"
-    :attach="attach"
-    :destroy-on-close="destroyOnClose"
-    :class="['setting-drawer', { 'setting-drawer--resizing': drawerResizing }]">
+  <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="2500" placement="right"
+    attach="body" destroy-on-close :footer="!hideFooter"
+    :class="drawerClass">
     <!--
       Custom header. We replace TDesign's default header so we can put a leading
       icon badge and an optional subtitle (description) right next to the title,
@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, useAttrs, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
@@ -88,24 +88,9 @@ interface Props {
   confirmText?: string
   cancelText?: string
   hideFooter?: boolean
-  /**
-   * Whether to destroy the drawer body content on close. Defaults to true to
-   * match historical behavior. Heavy editors (e.g. the markdown knowledge
-   * editor) pass false so the drawer panel persists across opens — this avoids
-   * the panel being removed/re-inserted on every open, which can cause a
-   * one-frame layout flicker as it slides in.
-   */
-  destroyOnClose?: boolean
-  /**
-   * Where to render the drawer. Defaults to 'body' so the drawer escapes the
-   * app root, which carries `transform: translateZ(0)` for GPU compositing.
-   * A transformed ancestor becomes the containing block for `position: fixed`,
-   * which mis-anchors the overlay (it briefly appears mid-screen then snaps to
-   * the edge). Teleporting to <body> keeps it fixed to the viewport, matching
-   * the resize handle that is already teleported to body.
-   */
-  attach?: string
 }
+
+defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(defineProps<Props>(), {
   description: '',
@@ -119,9 +104,7 @@ const props = withDefaults(defineProps<Props>(), {
   confirmDisabled: false,
   confirmText: '',
   cancelText: '',
-  hideFooter: false,
-  destroyOnClose: true,
-  attach: 'body'
+  hideFooter: false
 })
 
 const emit = defineEmits<{
@@ -131,6 +114,12 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const attrs = useAttrs()
+
+const drawerPassthroughAttrs = computed(() => {
+  const { class: _class, ...rest } = attrs
+  return rest
+})
 
 // ---------- visibility ----------
 const drawerVisible = computed({
@@ -191,6 +180,13 @@ const persistWidth = (width: number) => {
 
 // ---------- Custom drag-resize (visible handle, same as doc-content) ----------
 const drawerResizing = ref(false)
+
+const drawerClass = computed(() => [
+  'setting-drawer',
+  attrs.class,
+  { 'setting-drawer--resizing': drawerResizing.value },
+])
+
 let resizeStartX = 0
 let resizeStartWidth = 0
 
@@ -441,6 +437,20 @@ const handleCancel = () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* The handle is teleported separately from TDesign's sliding panel. Move it
+     along the same path instead of letting it flash at the panel's final left
+     edge while the drawer is still entering from the right. */
+  animation: setting-drawer-resize-handle-in 0.28s cubic-bezier(0.38, 0, 0.24, 1) both;
+}
+
+@keyframes setting-drawer-resize-handle-in {
+  from {
+    transform: translateX(var(--setting-drawer-travel));
+  }
+
+  to {
+    transform: translateX(0);
+  }
 }
 
 .setting-drawer-resize-line {

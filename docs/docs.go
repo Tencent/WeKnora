@@ -2081,9 +2081,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/datasource/{id}/resource-ancestors": {
+            "post": {
+                "description": "Resolve the ancestor ExternalIDs that must be expanded to reveal the given (possibly deeply nested) resources in a lazily-loaded picker. Used to restore an existing selection when editing a data source.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSource"
+                ],
+                "summary": "Resolve resource ancestors",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Resource IDs to resolve",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.resolveAncestorsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/datasource/{id}/resources": {
             "get": {
-                "description": "List resources available for sync in the external system",
+                "description": "List resources available for sync in the external system. Pass parent_id to lazily load the direct children of a resource (used for large hierarchical sources such as Feishu wiki).",
                 "produces": [
                     "application/json"
                 ],
@@ -2098,6 +2154,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent resource ExternalID; empty lists the top level",
+                        "name": "parent_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4524,7 +4586,61 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "在知识库中执行向量和关键词混合搜索",
+                "description": "在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "混合搜索",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "搜索参数",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "搜索结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。",
                 "consumes": [
                     "application/json"
                 ],
@@ -4613,8 +4729,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "标签ID筛选",
-                        "name": "tag_id",
+                        "description": "标签ID筛选，逗号分隔（OR语义）",
+                        "name": "tag_ids",
                         "in": "query"
                     },
                     {
@@ -4778,6 +4894,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "分类ID列表，逗号分隔",
+                        "name": "tag_ids",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
                         "description": "处理配置JSON（KnowledgeProcessOverrides）",
                         "name": "process_config",
                         "in": "formData"
@@ -4909,8 +5031,11 @@ const docTemplate = `{
                                 "file_type": {
                                     "type": "string"
                                 },
-                                "tag_id": {
-                                    "type": "string"
+                                "tag_ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
                                 },
                                 "title": {
                                     "type": "string"
@@ -5614,6 +5739,61 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge/batch-reparse": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "按 ID 列表批量重新解析单个知识库下的多个知识条目",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "批量重新解析知识",
+                "parameters": [
+                    {
+                        "description": "批量重解析请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.batchReparseKnowledgeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "任务已提交",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge/image/{id}/{chunk_id}": {
             "put": {
                 "security": [
@@ -5839,7 +6019,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Search knowledge files by keyword. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.",
+                "description": "Search knowledge files by keyword. Pass recent=true without a keyword to browse recent files. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5879,6 +6059,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Shared agent ID (search within agent's KB scope)",
                         "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Return recent files when keyword is empty",
+                        "name": "recent",
                         "in": "query"
                     }
                 ],
@@ -6350,21 +6536,21 @@ const docTemplate = `{
                 }
             }
         },
-        "/knowledgebase/{kb_id}/wiki/categories": {
+        "/knowledgebase/{kb_id}/wiki/folders": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
                     }
                 ],
-                "description": "Retrieve direct child directories for a wiki page type and optional parent_path",
+                "description": "Retrieve the direct child folders of a parent folder (parent_id empty = root level), each with its page count and a has-children flag for the directory tree.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Wiki"
                 ],
-                "summary": "List wiki category paths",
+                "summary": "List wiki folders",
                 "parameters": [
                     {
                         "type": "string",
@@ -6375,27 +6561,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Wiki page type; comma-separated for multiple (e.g. entity,concept)",
-                        "name": "page_type",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Parent category path, slash-separated",
-                        "name": "parent_path",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Page number (1-based)",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Page size",
-                        "name": "page_size",
+                        "description": "Parent folder id (empty = root)",
+                        "name": "parent_id",
                         "in": "query"
                     }
                 ],
@@ -6403,11 +6570,183 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiCategoryPathListResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderListResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Create a new (initially empty) directory node under parent_id",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Create a wiki folder",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Folder data",
+                        "name": "folder",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledgebase/{kb_id}/wiki/folders/{folder_id}": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Rename and/or reparent a folder; the whole subtree's paths and the affected pages' cached paths are recomputed",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Rename or move a wiki folder",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Folder ID",
+                        "name": "folder_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Folder update",
+                        "name": "folder",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Delete a folder that has no pages and no child folders",
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Delete an empty wiki folder",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Folder ID",
+                        "name": "folder_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -6717,6 +7056,58 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledgebase/{kb_id}/wiki/move-page": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Relocate a page (identified by slug in the body) into a folder (folder_id empty = root); the page's cached category path is recomputed",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Move a wiki page into a folder",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Move target",
+                        "name": "move",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageMoveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7200,6 +7591,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/mcp-services/oauth/callback": {
+            "get": {
+                "description": "接收授权服务器回调并完成 code 交换，随后重定向回前端",
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "MCP OAuth 回调",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "授权码",
+                        "name": "code",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "状态参数",
+                        "name": "state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "授权错误码",
+                        "name": "error",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    }
+                }
+            }
+        },
         "/mcp-services/{id}": {
             "get": {
                 "security": [
@@ -7458,6 +7883,126 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/oauth/authorize-url": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "对使用 OAuth 的 MCP 服务执行发现与动态客户端注册，返回浏览器应跳转的授权地址（当前用户维度）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "发起 MCP OAuth 授权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP 服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "{redirect_uri: string, frontend_redirect?: string}",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "{authorization_url: string}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/oauth/status": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前用户对指定 MCP 服务是否已完成 OAuth 授权",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "查询 MCP OAuth 授权状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP 服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "{authorized: bool}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/oauth/token": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "删除当前用户对指定 MCP 服务的 OAuth 令牌",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "撤销 MCP OAuth 授权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP 服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     }
                 }
             }
@@ -14111,7 +14656,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "replica_number": {
-                    "description": "Milvus: in-memory replica count (LoadCollection)",
+                    "description": "Milvus LoadCollection / Tencent VectorDB CreateCollection replicas",
                     "type": "integer"
                 },
                 "replication_factor": {
@@ -14361,9 +14906,12 @@ const docTemplate = `{
                     "description": "Summary status for async summary generation",
                     "type": "string"
                 },
-                "tag_id": {
-                    "description": "Optional tag ID for categorization within a knowledge base",
-                    "type": "string"
+                "tags": {
+                    "description": "Tags holds the tags associated with this knowledge (populated on query, not persisted directly).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag"
+                    }
                 },
                 "tenant_id": {
                     "description": "Tenant ID",
@@ -14732,6 +15280,13 @@ const docTemplate = `{
                 "graph_enabled": {
                     "type": "boolean"
                 },
+                "parser_engine_overrides": {
+                    "description": "ParserEngineOverrides passes key-value configuration to docreader parsers\n(e.g. pdf_force_scanned=true). Merged with tenant-level overrides in the\nparse pipeline; per-upload values take priority on conflict.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "parser_engine_rules": {
                     "type": "array",
                     "items": {
@@ -14743,6 +15298,47 @@ const docTemplate = `{
                 },
                 "vlm_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeTag": {
+            "type": "object",
+            "properties": {
+                "color": {
+                    "description": "Optional display color",
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Creation time",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Unique identifier of the tag (UUID)",
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "description": "Knowledge base ID that this tag belongs to",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Tag name, unique within the same knowledge base",
+                    "type": "string"
+                },
+                "seq_id": {
+                    "description": "SeqID is an auto-increment integer ID for external API usage",
+                    "type": "integer"
+                },
+                "sort_order": {
+                    "description": "Sort order within the same knowledge base",
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "description": "Tenant ID",
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "description": "Last updated time",
+                    "type": "string"
                 }
             }
         },
@@ -14878,9 +15474,28 @@ const docTemplate = `{
                 "api_key": {
                     "type": "string"
                 },
+                "auth_server_metadata_url": {
+                    "description": "AuthServerMetadataURL optionally pins the OAuth authorization server\nmetadata URL. When empty, the server is discovered automatically from\nthe MCP URL (RFC 9728 / RFC 8414).",
+                    "type": "string"
+                },
+                "auth_type": {
+                    "description": "AuthType selects the authentication strategy. Empty (\"\") is treated as\nnone for backward compatibility with rows that pre-date this field.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
+                        }
+                    ]
+                },
                 "custom_headers": {
                     "type": "object",
                     "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "scopes": {
+                    "description": "Scopes are the OAuth scopes requested during authorization. Optional.",
+                    "type": "array",
+                    "items": {
                         "type": "string"
                     }
                 },
@@ -14888,6 +15503,21 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MCPAuthType": {
+            "type": "string",
+            "enum": [
+                "",
+                "api_key",
+                "bearer",
+                "oauth"
+            ],
+            "x-enum-varnames": [
+                "MCPAuthNone",
+                "MCPAuthAPIKey",
+                "MCPAuthBearer",
+                "MCPAuthOAuth"
+            ]
         },
         "github_com_Tencent_WeKnora_internal_types.MCPEnvVars": {
             "type": "object",
@@ -15020,8 +15650,11 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
-                "tag_id": {
-                    "type": "string"
+                "tag_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "title": {
                     "type": "string"
@@ -17163,43 +17796,6 @@ const docTemplate = `{
                 "WebSearchProviderTypeSearxng"
             ]
         },
-        "github_com_Tencent_WeKnora_internal_types.WikiCategoryPath": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer"
-                },
-                "path": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "github_com_Tencent_WeKnora_internal_types.WikiCategoryPathListResponse": {
-            "type": "object",
-            "properties": {
-                "page": {
-                    "type": "integer"
-                },
-                "page_size": {
-                    "type": "integer"
-                },
-                "paths": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiCategoryPath"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                },
-                "total_pages": {
-                    "type": "integer"
-                }
-            }
-        },
         "github_com_Tencent_WeKnora_internal_types.WikiConfig": {
             "type": "object",
             "properties": {
@@ -17245,6 +17841,127 @@ const docTemplate = `{
                 "WikiExtractionStandard",
                 "WikiExtractionExhaustive"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiFolder": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "depth": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "sort_order": {
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiFolderCreateRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiFolderListResponse": {
+            "type": "object",
+            "properties": {
+                "folders": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderNode"
+                    }
+                },
+                "parent_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiFolderNode": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "depth": {
+                    "type": "integer"
+                },
+                "has_children": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "page_count": {
+                    "type": "integer"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "sort_order": {
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "move_parent": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_types.WikiGraphData": {
             "type": "object",
@@ -17474,7 +18191,7 @@ const docTemplate = `{
                     }
                 },
                 "category_path": {
-                    "description": "CategoryPath is the directory breadcrumb that groups this page in the\nwiki browser, e.g. [\"AI\", \"LLM 应用\", \"RAG\"]. It is intentionally\nlabel-based so intermediate directory nodes do not need to be real pages.",
+                    "description": "CategoryPath is the directory breadcrumb that groups this page in the\nwiki browser, e.g. [\"AI\", \"LLM 应用\", \"RAG\"]. Derived cache of the\nfolder chain identified by FolderID.",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -17506,6 +18223,10 @@ const docTemplate = `{
                 "depth": {
                     "description": "Depth is len(CategoryPath), cached for filtering / display.",
                     "type": "integer"
+                },
+                "folder_id": {
+                    "description": "FolderID is the single source of truth for where this page sits in the\ndirectory tree — a reference to wiki_folders.id (\"\" = wiki root). The\nCategoryPath / WikiPath / Depth fields below are denormalized caches\nrecomputed from this folder's chain on every write so list/index/search\nqueries don't have to join wiki_folders.",
+                    "type": "string"
                 },
                 "id": {
                     "description": "Unique identifier (UUID)",
@@ -17541,7 +18262,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "parent_slug": {
-                    "description": "ParentSlug optionally points at the wiki page that should act as this\npage's semantic parent in the directory tree. The parent may be empty\nwhen the page is grouped only by CategoryPath.",
+                    "description": "ParentSlug optionally points at the wiki page that should act as this\npage's semantic parent in the directory tree. The parent may be empty\nwhen the page is grouped only by FolderID.",
                     "type": "string"
                 },
                 "slug": {
@@ -17653,6 +18374,20 @@ const docTemplate = `{
                 },
                 "total_pages": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageMoveRequest": {
+            "type": "object",
+            "required": [
+                "slug"
+            ],
+            "properties": {
+                "folder_id": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
                 }
             }
         },
@@ -18914,6 +19649,27 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.batchReparseKnowledgeRequest": {
+            "type": "object",
+            "required": [
+                "ids",
+                "kb_id"
+            ],
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "kb_id": {
+                    "type": "string"
+                },
+                "process_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
+                }
+            }
+        },
         "internal_handler.createInvitationRequest": {
             "type": "object",
             "required": [
@@ -19012,6 +19768,17 @@ const docTemplate = `{
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.resolveAncestorsRequest": {
+            "type": "object",
+            "properties": {
+                "resource_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

@@ -2,7 +2,7 @@ export const domPurifyForbidTags = ['script', 'style', 'object', 'embed', 'form'
 export const domPurifyForbidAttr = ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'] as const;
 
 export const domPurifyAllowedUriRegexp =
-  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos|s3|oss|ks3|obs):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|blob):|(?:local|minio|cos|tos|s3|oss|ks3|obs):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
 
 /** Shared DOMPurify security options (FORBID_*, URI scheme, DOM flags). */
 export const domPurifySecurityOptions = {
@@ -60,7 +60,7 @@ export const markdownDomPurifyConfig = {
   ],
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
-    'data-chunk-id', 'data-doc', 'data-slug', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src',
+    'data-chunk-id', 'data-doc', 'data-slug', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src', 'data-img-loading',
     'width', 'height', 'style', 'id', 'type', 'aria-label', 'data-mermaid', 'disabled',
     'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
     'stroke-dasharray', 'stroke-dashoffset', 'stroke-miterlimit', 'stroke-opacity',

@@ -371,13 +371,11 @@ type SearchParams struct {
 	DisableVectorMatch   bool    `json:"disable_vector_match"`
 }
 
-// HybridSearch performs hybrid search
-// Note: The backend route is GET but expects JSON body, which is non-standard.
-// This client uses POST with JSON body for better compatibility.
+// HybridSearch performs hybrid search.
 func (c *Client) HybridSearch(ctx context.Context, knowledgeBaseID string, params *SearchParams) ([]*SearchResult, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/hybrid-search", knowledgeBaseID)
 
-	resp, err := c.doRequest(ctx, http.MethodGet, path, params, nil)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, params, nil)
 	if err != nil {
 		return nil, err
 	}

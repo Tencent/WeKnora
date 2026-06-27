@@ -8,6 +8,29 @@ const WEB_TAG_ATTR_RE = /<web\b([^>]*?)\s*\/?>/g
 const ATTRIBUTE_REGEX = /([\w-]+)\s*=\s*"([^"]*)"/g
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Hide a citation tag while the typewriter has only emitted part of it.
+ *
+ * Without this guard, Markdown renders the leading `<` as ordinary text until
+ * the closing `>` arrives. Only the unfinished tail is removed; a complete tag
+ * continues through the normal citation pipeline.
+ */
+export function stripIncompleteCitationTag(content: string): string {
+  if (!content) return content
+
+  const start = content.lastIndexOf('<')
+  if (start < 0) return content
+
+  const tail = content.slice(start)
+  if (tail.includes('>')) return content
+
+  const isCitationPrefix = tail === '<'
+    || /^<k(?:b(?:\s[\s\S]*)?)?$/i.test(tail)
+    || /^<w(?:e(?:b(?:\s[\s\S]*)?)?)?$/i.test(tail)
+
+  return isCitationPrefix ? content.slice(0, start) : content
+}
+
 export type CitationKnowledgeRef = {
   id?: string
   knowledge_id?: string
@@ -224,26 +247,29 @@ export function joinCitationTagsToPreviousLine(content: string): string {
     )
   }
 
-  // Blank lines before citations: join to previous prose, but keep a break after lists
-  // or fenced-code delimiters (``` / ~~~ must stay on their own line).
+  // Blank lines before citations: join to the previous content. Fenced-code
+  // delimiters are the only exception because ``` / ~~~ must stay on their own line.
   result = result.replace(/\n[ \t]*\n+([ \t]*<(?:kb|web)\b)/gi, (match, kbStart, offset, full) => {
     const before = full.slice(0, offset)
-    const lastLine = before.split('\n').filter((line) => line.trim()).pop() || ''
-    const isListItem = /^\s*(\d+\.|[-*+])\s+\S/.test(lastLine)
-    if (isListItem || isFencedCodeDelimiterLine(lastLine)) {
+    const lastLine = before.split('\n').filter((line: string) => line.trim()).pop() || ''
+    if (isFencedCodeDelimiterLine(lastLine)) {
       return `\n\n${kbStart}`
     }
-    return ` ${kbStart}`
+    return ` ${kbStart.trimStart()}`
   })
 
   // Single newline before citation when it follows text or another citation (not after a blank line)
   result = result.replace(
     /(?<!\n)(<(?:kb|web)\b[^>]*?\s*\/?>|[ \t]*\S[^\n]*?)\n([ \t]*<(?:kb|web)\b)/g,
-    (match, beforePart: string, kbStart: string) => {
-      if (isFencedCodeDelimiterLine(beforePart)) {
+    (match, beforePart: string, kbStart: string, offset: number, full: string) => {
+      // Resolve the full preceding line: lazy capture + lookbehind can grab only a
+      // partial line (e.g. ``` captured as ``), which would skip the fence check.
+      const lineStart = full.lastIndexOf('\n', offset - 1) + 1
+      const fullPrevLine = full.slice(lineStart, offset + beforePart.length)
+      if (isFencedCodeDelimiterLine(fullPrevLine)) {
         return match
       }
-      return `${beforePart} ${kbStart}`
+      return `${beforePart} ${kbStart.trimStart()}`
     },
   )
 

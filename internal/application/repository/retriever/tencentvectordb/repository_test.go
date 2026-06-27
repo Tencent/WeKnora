@@ -76,7 +76,22 @@ func TestTencentVectorDBDefaultsToReplicaNumberOne(t *testing.T) {
 	assert.Equal(t, 1, repo.replicasNum)
 }
 
+func TestTencentVectorDBUsesEnvReplicaNumber(t *testing.T) {
+	t.Setenv(envTencentVectorDBReplicaNum, "0")
+	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", nil).(*repository)
+
+	assert.Equal(t, 0, repo.replicasNum)
+}
+
+func TestTencentVectorDBUsesPositiveEnvReplicaNumber(t *testing.T) {
+	t.Setenv(envTencentVectorDBReplicaNum, "3")
+	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", nil).(*repository)
+
+	assert.Equal(t, 3, repo.replicasNum)
+}
+
 func TestTencentVectorDBUsesConfiguredReplicaNumber(t *testing.T) {
+	t.Setenv(envTencentVectorDBReplicaNum, "0")
 	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", &types.IndexConfig{
 		ReplicaNumber: 2,
 	}).(*repository)

@@ -1,0 +1,250 @@
+@suggested-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+.suggested-questions-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 16px 12px;
+    max-width: 720px;
+    margin: 0 auto;
+    width: 100%;
+    min-height: 0;
+
+    &.has-questions {
+        min-height: 64px;
+    }
+}
+
+.suggested-questions-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+}
+
+.suggested-questions-title-row {
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.suggested-questions-caption {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    line-height: 1;
+}
+
+.suggested-questions-title {
+    font-size: 13px;
+    color: var(--td-text-color-placeholder);
+    font-weight: 400;
+    letter-spacing: 0.01em;
+}
+
+.suggested-questions-refresh {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    transition: color 0.2s @suggested-ease, background 0.2s @suggested-ease;
+
+    :deep(.t-icon) {
+        font-size: 12px;
+    }
+
+    &:hover:not(:disabled) {
+        color: var(--td-brand-color);
+        background: var(--td-bg-color-secondarycontainer);
+    }
+
+    &:active:not(:disabled) {
+        transform: scale(0.92);
+    }
+
+    &:disabled {
+        cursor: default;
+        opacity: 0.7;
+    }
+}
+
+.sq-refresh-spin {
+    animation: sq-refresh-rotate 0.8s linear infinite;
+}
+
+@keyframes sq-refresh-rotate {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.suggested-questions-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.suggested-question-card {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+    width: auto;
+    box-sizing: border-box;
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-container);
+    cursor: pointer;
+    overflow: hidden;
+    transition:
+        background 0.25s @suggested-ease,
+        border-color 0.25s @suggested-ease,
+        box-shadow 0.25s @suggested-ease,
+        transform 0.2s @suggested-ease;
+
+    // 左侧主题色渐隐高光，hover 时淡入，营造柔和的呼吸感
+    &::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(
+            105deg,
+            var(--td-brand-color-light) 0%,
+            transparent 55%
+        );
+        opacity: 0;
+        transition: opacity 0.25s @suggested-ease;
+        pointer-events: none;
+    }
+
+    &:not(.sq-card-skeleton):hover {
+        border-color: var(--td-brand-color-light-active, var(--td-brand-color));
+        background: var(--td-bg-color-container);
+        box-shadow: 0 3px 10px -8px rgba(0, 0, 0, 0.14);
+        transform: translateY(-1px);
+
+        &::before {
+            opacity: 0.45;
+        }
+    }
+
+    // 右侧引导箭头：默认隐藏并向左收起，hover 时滑入
+    &::after {
+        content: "›";
+        position: relative;
+        flex-shrink: 0;
+        margin-left: -2px;
+        font-size: 17px;
+        line-height: 1;
+        color: var(--td-brand-color);
+        opacity: 0;
+        transform: translateX(-6px);
+        transition:
+            opacity 0.25s @suggested-ease,
+            transform 0.25s @suggested-ease;
+    }
+
+    &:not(.sq-card-skeleton):active {
+        transform: translateY(0) scale(0.99);
+        box-shadow: 0 2px 8px -6px rgba(0, 0, 0, 0.2);
+    }
+
+    &:not(.sq-card-skeleton):hover::after {
+        opacity: 1;
+        transform: translateX(0);
+    }
+
+    &.sq-card-skeleton {
+        width: 180px;
+        max-width: 100%;
+        pointer-events: none;
+        cursor: default;
+        flex-shrink: 0;
+        border-color: transparent;
+        background: var(--td-bg-color-secondarycontainer);
+        box-shadow: none;
+
+        // 不等宽的骨架，呼应错落的标签云布局
+        &:nth-child(2n) {
+            width: 240px;
+        }
+
+        &:nth-child(3n) {
+            width: 150px;
+        }
+
+        &:nth-child(5n) {
+            width: 210px;
+        }
+
+        &::before,
+        &::after {
+            display: none;
+        }
+
+        :deep(.t-skeleton) {
+            width: 100%;
+        }
+
+        :deep(.t-skeleton__row) {
+            margin: 0;
+        }
+
+        :deep(.t-skeleton__col) {
+            border-radius: 3px;
+        }
+
+    }
+}
+
+.suggested-question-text {
+    position: relative;
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.2s @suggested-ease;
+}
+
+.suggested-question-card:not(.sq-card-skeleton):hover .suggested-question-text {
+    color: var(--td-brand-color);
+}
+
+.suggested-question-badge {
+    position: relative;
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 6px;
+    border: none;
+    background: var(--td-brand-color-light);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.6;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--td-brand-color);
+}
+

@@ -1,4 +1,4 @@
-import { get, post, put, del } from '../../utils/request';
+import { get, post, postUpload, put, del } from '../../utils/request';
 import i18n from '@/i18n'
 
 const t = (key: string) => i18n.global.t(key)
@@ -140,6 +140,47 @@ export function deleteModel(id: string): Promise<void> {
         reject(error);
       });
   });
+}
+
+export interface ModelDebugOptions {
+  system_prompt?: string
+  temperature?: number
+  top_p?: number
+  max_tokens?: number
+  thinking?: boolean
+}
+
+export interface ModelDebugResult {
+  ok: boolean
+  elapsed_ms: number
+  request: Record<string, unknown>
+  raw_response: unknown
+  observations: Record<string, unknown>
+  error?: string
+}
+
+export async function debugModel(
+  id: string,
+  data: {
+    input?: string
+    documents?: string[]
+    options?: ModelDebugOptions
+    file?: File | null
+  },
+): Promise<ModelDebugResult> {
+  const form = new FormData()
+  form.append('input', data.input || '')
+  form.append('documents', JSON.stringify(data.documents || []))
+  form.append('options', JSON.stringify(data.options || {}))
+  if (data.file) form.append('file', data.file)
+  const response: any = await postUpload(
+    `/api/v1/models/${id}/debug`,
+    form,
+    undefined,
+    { timeout: 300000 },
+  )
+  if (response?.success && response?.data) return response.data
+  throw new Error(response?.message || t('error.model.getFailed'))
 }
 
 // ----------------------------------------------------------------------------

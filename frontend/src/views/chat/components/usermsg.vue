@@ -147,6 +147,8 @@ const closePreImg = () => {
 };
 </script>
 <style scoped lang="less">
+@import '../../../components/css/chat-resource-chips.less';
+
 .user_msg_container {
     display: flex;
     flex-direction: column;
@@ -156,59 +158,11 @@ const closePreImg = () => {
 }
 
 .mentioned_items {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: flex-end;
-    max-width: 100%;
-    margin-bottom: 2px;
+    .chat-mentioned-items(flex-end);
 }
 
 .mentioned_tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    border-radius: 5px;
-    font-size: 12px;
-    font-weight: 500;
-    max-width: 200px;
-    cursor: default;
-    transition: all 0.15s;
-    background: rgba(7, 192, 95, 0.06);
-    border: 1px solid rgba(7, 192, 95, 0.2);
-    color: var(--td-text-color-primary);
-
-    &.kb-tag {
-        .tag_icon {
-            color: var(--td-brand-color);
-        }
-    }
-
-    &.faq-tag {
-        .tag_icon {
-            color: var(--td-warning-color);
-        }
-    }
-
-    &.file-tag {
-        .tag_icon {
-            color: var(--td-text-color-secondary);
-        }
-    }
-
-    .tag_icon {
-        font-size: 13px;
-        display: flex;
-        align-items: center;
-    }
-
-    .tag_name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: currentColor;
-    }
+    .chat-mentioned-tag();
 }
 
 .user_msg_container {
@@ -221,21 +175,23 @@ const closePreImg = () => {
 
 .user_msg {
     width: max-content;
-    max-width: 776px;
+    max-width: min(76%, 680px);
     display: flex;
-    padding: 10px 12px;
+    padding: 8px 12px;
     flex-direction: column;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     gap: 4px;
     flex: 1 0 0;
-    border-radius: 4px;
-    background: #8CE97F;
+    border-radius: 8px;
+    background: var(--td-bg-color-secondarycontainer);
     margin-left: auto;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-size: 16px;
-    text-align: justify;
-    word-break: break-all;
+    line-height: 1.6;
+    text-align: left;
+    word-break: break-word;
+    overflow-wrap: anywhere;
     box-sizing: border-box;
     white-space: pre-wrap;
 }
@@ -348,8 +304,8 @@ const closePreImg = () => {
 
 html[theme-mode="dark"] {
     .user_msg {
-        background: var(--td-brand-color-3);
-        color: rgba(255, 255, 255, 0.9);
+        background: var(--td-bg-color-secondarycontainer);
+        color: var(--td-text-color-primary);
     }
 }
 </style>

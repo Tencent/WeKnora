@@ -330,14 +330,53 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 }
 
 // @Summary List available resources in data source
-// @Description List resources available for sync in the external system
+// @Description List resources available for sync in the external system. Pass parent_id to lazily load the direct children of a resource (used for large hierarchical sources such as Feishu wiki).
 // @Tags DataSource
 // @Produce json
 // @Param id path string true "Data source ID"
+// @Param parent_id query string false "Parent resource ExternalID; empty lists the top level"
 // @Success 200 {object} []types.Resource
 // @Failure 400 {object} map[string]string
 // @Router /datasource/{id}/resources [get]
 func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID := h.getTenantID(c)
+	if tenantID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	id := c.Param("id")
+	parentID := c.Query("parent_id")
+
+	if _, status, msg := h.getOwnedDataSource(ctx, tenantID, id); status != http.StatusOK {
+		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+
+	resources, err := h.service.ListAvailableResources(ctx, id, parentID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if resources == nil {
+		resources = make([]types.Resource, 0)
+	}
+	c.JSON(http.StatusOK, resources)
+}
+
+// @Summary Resolve resource ancestors
+// @Description Resolve the ancestor ExternalIDs that must be expanded to reveal the given (possibly deeply nested) resources in a lazily-loaded picker. Used to restore an existing selection when editing a data source.
+// @Tags DataSource
+// @Accept json
+// @Produce json
+// @Param id path string true "Data source ID"
+// @Param request body resolveAncestorsRequest true "Resource IDs to resolve"
+// @Success 200 {object} map[string][]string
+// @Failure 400 {object} map[string]string
+// @Router /datasource/{id}/resource-ancestors [post]
+func (h *DataSourceHandler) ResolveResourceAncestors(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
@@ -352,16 +391,27 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 		return
 	}
 
-	resources, err := h.service.ListAvailableResources(ctx, id)
+	var req resolveAncestorsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ancestors, err := h.service.ResolveResourceAncestors(ctx, id, req.ResourceIDs)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if resources == nil {
-		resources = make([]types.Resource, 0)
+	if ancestors == nil {
+		ancestors = make([]string, 0)
 	}
-	c.JSON(http.StatusOK, resources)
+	c.JSON(http.StatusOK, gin.H{"ancestors": ancestors})
+}
+
+// resolveAncestorsRequest is the body for ResolveResourceAncestors.
+type resolveAncestorsRequest struct {
+	ResourceIDs []string `json:"resource_ids"`
 }
 
 // ManualSync godoc

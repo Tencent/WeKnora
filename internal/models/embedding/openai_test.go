@@ -46,6 +46,7 @@ func TestOpenAIEmbedderBatchEmbedOmitsDimensionsForFixedSizeModels(t *testing.T)
 
 func captureOpenAIEmbeddingRequest(t *testing.T, modelName string, dimensions int, supportsDimensionOverride bool) map[string]any {
 	t.Helper()
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 
 	requestBody := map[string]any{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

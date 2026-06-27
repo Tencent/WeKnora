@@ -1,6 +1,10 @@
 package datasource
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // Error definitions for datasource operations
 var (
@@ -19,10 +23,10 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 
 	// Sync errors
-	ErrSyncFailed         = errors.New("sync operation failed")
-	ErrSyncCanceled       = errors.New("sync operation was canceled")
-	ErrFetchFailed        = errors.New("failed to fetch items from source")
-	ErrResourceNotFound   = errors.New("resource not found in source system")
+	ErrSyncFailed       = errors.New("sync operation failed")
+	ErrSyncCanceled     = errors.New("sync operation was canceled")
+	ErrFetchFailed      = errors.New("failed to fetch items from source")
+	ErrResourceNotFound = errors.New("resource not found in source system")
 
 	// Knowledge base errors
 	ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")
@@ -30,3 +34,17 @@ var (
 	// Sync log errors
 	ErrSyncLogNotFound = errors.New("sync log not found")
 )
+
+// PartialFetchError indicates that some resources were fetched successfully but
+// others failed. The caller should process Items (if any), persist an updated
+// cursor when provided, and surface Details to the user as a partial sync.
+type PartialFetchError struct {
+	Details []string
+}
+
+func (e *PartialFetchError) Error() string {
+	if e == nil || len(e.Details) == 0 {
+		return "partial fetch: some resources failed"
+	}
+	return fmt.Sprintf("partial fetch: %s", strings.Join(e.Details, "; "))
+}

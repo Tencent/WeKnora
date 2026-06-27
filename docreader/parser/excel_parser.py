@@ -6,6 +6,7 @@ structured Document objects with text content and chunks. It supports multiple
 sheets and handles various Excel formats using pandas.
 """
 import logging
+import re
 from io import BytesIO
 from typing import List
 
@@ -23,6 +24,22 @@ from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
 from docreader.parser.xlsx_repair import repair_xlsx_bytes
 
 logger = logging.getLogger(__name__)
+
+# Pattern to detect Excel image function strings that should be excluded from
+# parsed text content.  WPS uses =DISPIMG("ID",mode) to embed images in cells;
+# when opened by other tools the formula may appear as plain text prefixed with
+# "_xlfn." or "=".  Office 365 uses =_xlfn.IMAGE(url, ...) similarly.
+# The _xlfn. prefix is optional — WPS may omit it (e.g. =DISPIMG("ID",1)).
+_IMAGE_FUNC_RE = re.compile(
+    r"^=?(_xlfn\.)?(DISPIMG|IMAGE)\(", re.IGNORECASE
+)
+
+
+def _is_image_function(value: object) -> bool:
+    """Return True if *value* looks like an embedded-image function string."""
+    if not isinstance(value, str):
+        return False
+    return _IMAGE_FUNC_RE.match(value) is not None
 
 
 class ExcelParser(BaseParser):
@@ -81,7 +98,7 @@ class ExcelParser(BaseParser):
                 page_content = []
                 # Build key-value pairs for non-null values
                 for k, v in row.items():
-                    if pd.notna(v):  # Skip NaN/null values
+                    if pd.notna(v) and not _is_image_function(v):
                         page_content.append(f"{k}: {v}")
                 
                 # Skip rows with no valid content

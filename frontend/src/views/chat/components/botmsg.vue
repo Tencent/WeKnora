@@ -31,7 +31,7 @@
             <!-- 直接渲染完整内容，避免切分导致的问题，样式与 thinking 一致 -->
             <!-- 只有当有实际内容时才显示包围框 -->
             <div class="content-wrapper" v-if="hasActualContent">
-                <div class="ai-markdown-template markdown-content" v-html="renderedHTML">
+                <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML">
                 </div>
             </div>
             <!-- Streaming indicator (non-Agent mode) -->
@@ -101,6 +101,8 @@ import {
 } from '@/utils/mermaidShared';
 import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
+import { useTypewriter } from '@/composables/useTypewriter';
+import { vStableHtml } from '@/directives/stableHtml';
 
 ensureMermaidInitialized();
 
@@ -170,14 +172,26 @@ const mentionedItems = computed(() => {
     return props.session?.mentioned_items || [];
 });
 
+// Smooth the streamed answer into a steady typewriter cadence (shared with the
+// Agent path). Copy/toolbar still read the full content; only display is paced.
+const answerText = computed(() => {
+    const text = props.content || props.session?.content || '';
+    return typeof text === 'string' ? text : '';
+});
+const { displayed: typedAnswer } = useTypewriter(
+    () => answerText.value,
+    () => Boolean(props.session?.is_completed),
+);
+
 // 单次渲染整个 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
 const renderedHTML = computed(() => {
-    const text = props.content || props.session?.content || '';
+    const text = typedAnswer.value;
     if (!text || typeof text !== 'string') return '';
     return renderChatMarkdown(text, {
         renderer: markdownRenderer,
         escapeMarkdown: safeMarkdownToHTML,
         sanitizeHtml: sanitizeMarkdownHTML,
+        streaming: !props.session?.is_completed,
         knowledgeReferences: props.session?.knowledge_references,
     });
 });
@@ -314,59 +328,11 @@ onBeforeUnmount(() => {
 }
 
 .mentioned_items {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: flex-start;
-    max-width: 100%;
-    margin-bottom: 2px;
+    .chat-mentioned-items();
 }
 
 .mentioned_tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 500;
-    max-width: 200px;
-    cursor: default;
-    transition: all 0.15s;
-    background: rgba(7, 192, 95, 0.06);
-    border: 1px solid rgba(7, 192, 95, 0.2);
-    color: var(--td-text-color-primary);
-
-    &.kb-tag {
-        .tag_icon {
-            color: var(--td-brand-color);
-        }
-    }
-
-    &.faq-tag {
-        .tag_icon {
-            color: var(--td-warning-color);
-        }
-    }
-
-    &.file-tag {
-        .tag_icon {
-            color: var(--td-text-color-secondary);
-        }
-    }
-
-    .tag_icon {
-        font-size: 13px;
-        display: flex;
-        align-items: center;
-    }
-
-    .tag_name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: currentColor;
-    }
+    .chat-mentioned-tag();
 }
 
 .fallback-icon-btn {
@@ -445,6 +411,10 @@ onBeforeUnmount(() => {
         border-radius: 50%;
         background: var(--td-brand-color);
         animation: typingBounce 1.4s ease-in-out infinite;
+        // Composite the dots so the bounce stays smooth and ghost-free while the
+        // answer relayouts each streamed token.
+        will-change: transform;
+        backface-visibility: hidden;
 
         &:nth-child(1) {
             animation-delay: 0s;
@@ -465,11 +435,11 @@ onBeforeUnmount(() => {
     0%,
     60%,
     100% {
-        transform: translateY(0);
+        transform: translate3d(0, 0, 0);
     }
 
     30% {
-        transform: translateY(-8px);
+        transform: translate3d(0, -6px, 0);
     }
 }
 

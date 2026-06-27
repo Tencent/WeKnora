@@ -67,6 +67,7 @@ type embedChannelRequest struct {
 	DefaultLocale          *string  `json:"default_locale"`
 	WebhookURL             *string  `json:"webhook_url"`
 	WebhookSecret          *string  `json:"webhook_secret"`
+	AgentID                *string  `json:"agent_id"`
 }
 
 // isProductionMode reports whether the server runs in a hardened (release) mode.
@@ -241,6 +242,9 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 		PageTitle:          req.PageTitle,
 		HeaderTitleMode:    req.HeaderTitleMode,
 		WidgetPosition:     req.WidgetPosition,
+	}
+	if req.AgentID != nil {
+		update.AgentID = strings.TrimSpace(*req.AgentID)
 	}
 	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowMemory, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
 	if err != nil {
@@ -597,6 +601,22 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 		return nil, err
 	}
 	return patched, nil
+}
+
+// GetEmbedChannel returns a single embed channel for management, including the
+// publish token so admins can copy deploy snippets at any time.
+func (h *EmbedChannelHandler) GetEmbedChannel(c *gin.Context) {
+	channelID := strings.TrimSpace(c.Param("channel_id"))
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	ch, err := h.embedSvc.GetOwnedChannel(c.Request.Context(), tenantID, channelID)
+	if err != nil {
+		writeEmbedMgmtError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    embedChannelResponse(ch, ch.PublishToken),
+	})
 }
 
 // GetEmbedChannelStats returns lightweight usage stats for an embed channel.

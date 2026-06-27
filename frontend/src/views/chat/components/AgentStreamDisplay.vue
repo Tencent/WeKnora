@@ -43,9 +43,9 @@
                         aria-hidden="true" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
                       <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think')
-                        }}</span>
-                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
                       }}</span>
+                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
+                        }}</span>
                     </div>
                   </div>
                   <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
@@ -243,7 +243,7 @@
                     <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
                     <span class="action-name">{{ $t('agent.think') }}</span>
                     <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number
-                      }}/{{ event.tool_data.total_thoughts }}</span>
+                    }}/{{ event.tool_data.total_thoughts }}</span>
                     <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
                       class="action-summary">{{ getThinkingSummary(event) }}</span>
                   </div>
@@ -260,7 +260,8 @@
             <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))"
               class="answer-event">
               <div v-if="event.content && event.content.trim()" class="answer-content markdown-content">
-                <div :key="event.content" v-html="renderAnswerContent(event.content)"></div>
+                <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
+                </div>
               </div>
               <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
@@ -434,7 +435,7 @@ import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
-import { getQueryText } from '@/utils/agent-tool-display';
+import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -456,6 +457,8 @@ import {
   renderMermaidToSvg,
 } from '@/utils/mermaidShared';
 import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
+import { useTypewriter } from '@/composables/useTypewriter';
+import { vStableHtml } from '@/directives/stableHtml';
 
 const getToolIconName = getAgentToolIconName;
 
@@ -478,6 +481,8 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   list_knowledge_chunks: 'agentStream.tools.listKnowledgeChunks',
   get_related_documents: 'agentStream.tools.getRelatedDocuments',
   get_document_content: 'agentStream.tools.getDocumentContent',
+  wiki_search: 'agentEditor.tools.wikiSearch',
+  wiki_read_page: 'agentEditor.tools.wikiReadPage',
   wiki_read_source_doc: 'agentStream.tools.wikiReadSourceDoc',
   todo_write: 'agentStream.tools.todoWrite',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
@@ -884,6 +889,23 @@ const activeAnswerMarkdown = computed(() => {
   return typeof active?.content === 'string' ? active.content : '';
 });
 
+// The answer event whose text is currently streaming. The template renders the
+// smoothed typewriter text for this event and the raw content for any others.
+const activeAnswerEventRef = computed(() => {
+  const stream = eventStream.value;
+  if (!stream?.length) return null;
+  const answers = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
+  return answers.find((e: any) => !e.done) ?? answers[answers.length - 1] ?? null;
+});
+
+// Smooth the streamed answer into a steady typewriter cadence (shared with the
+// non-Agent markdown path). History reloads arrive already complete and snap to
+// full instead of replaying.
+const { displayed: typedAnswer } = useTypewriter(
+  () => activeAnswerMarkdown.value,
+  () => isConversationDone.value,
+);
+
 const cacheStreamingMermaidSvg = async () => {
   if (streamingMermaidSvgCache.value) return;
   const code = extractFirstMermaidCode(activeAnswerMarkdown.value);
@@ -921,10 +943,21 @@ watch(activeAnswerMarkdown, () => {
 // Files referenced mid-stream (e.g. exported images) may only become available
 // at completion; throttling stops the chunk-by-chunk 404 spam during streaming,
 // and this final pass guarantees they load without waiting out the cooldown.
-watch(isConversationDone, (done) => {
-  if (!done) return;
+//
+// Gate this on the typewriter having fully revealed the answer: when done flips,
+// the smoothed text may still be catching up, so the <img> tag is not in the DOM
+// yet. Hydrating too early would find nothing and leave a permanent placeholder
+// (until a manual reload). Waiting for full reveal guarantees the image exists.
+const answerFullyRendered = computed(
+  () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
+);
+watch(answerFullyRendered, (ready) => {
+  if (!ready) return;
+  // Clear before this reactive update renders, so a source that returned 404
+  // mid-stream gets one real final-attempt <img> node instead of remaining
+  // suppressed by the missing-source cache.
+  clearProtectedFileFailureCache();
   nextTick(async () => {
-    clearProtectedFileFailureCache();
     await hydrateProtectedFileImages(rootElement.value);
   });
 });
@@ -1304,9 +1337,8 @@ const displayEvents = computed(() => {
 
   const result = buildFullEventList(stream);
 
-  // Quick-answer RAG: only render the final answer stream here. Pipeline steps
-  // are ephemeral UI in RagPipelineProgress and are replaced by citations or
-  // answer output — never show tool_call cards in this component.
+  // Quick-answer RAG: pipeline steps and model thinking live in RagPipelineProgress;
+  // here we only render the final answer stream.
   if (props.ragMode) {
     return result.filter((e: any) => e.type === 'answer');
   }
@@ -1649,8 +1681,15 @@ onBeforeUnmount(() => {
 });
 
 onUpdated(() => {
-  nextTick(() => {
+  nextTick(async () => {
     rebindCitations();
+    // Hydrate protected-file images (e.g. local:// exports) as soon as the
+    // typewriter reveals their <img> into the DOM, so they show in real time
+    // mid-stream instead of waiting for the turn to finish. Hydration is cheap
+    // and idempotent: blob results are cached per URL, in-flight fetches are
+    // de-duped, and failures back off for a cooldown — so a not-yet-ready file
+    // simply retries later (and the answerFullyRendered pass is the backstop).
+    await hydrateProtectedFileImages(rootElement.value);
   });
 });
 
@@ -1676,6 +1715,7 @@ const renderAgentMarkdown = (
     renderer: agentRenderer,
     escapeMarkdown,
     sanitizeHtml: sanitizeMarkdownHTML,
+    streaming: !isConversationDone.value,
     knowledgeReferences: props.session?.knowledge_references,
     cachedMermaidSvgHtml: streamingMermaidSvgCache.value,
     prepareMarkdown: prepareAgentMarkdown,
@@ -1896,12 +1936,15 @@ const getToolTitle = (event: any): string => {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
     }
+    if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
+      return `${getLocalizedToolName(event.tool_name)}...`;
+    }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
   }
 
   const toolName = event.tool_name;
-  const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search';
+  const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search' || toolName === 'wiki_search';
   const isWebSearchTool = toolName === 'web_search';
   const isGrepTool = toolName === 'grep_chunks';
 
@@ -1981,6 +2024,16 @@ const getToolTitle = (event: any): string => {
     return baseTitle;
   }
 
+  if (toolName === 'wiki_read_page') {
+    const pageLabel = String(
+      event.tool_data?.title ||
+      getWikiPageText(event.arguments) ||
+      getWikiPageText(event.tool_data)
+    ).trim();
+    const baseTitle = getToolDescription(event);
+    return pageLabel ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」` : baseTitle;
+  }
+
   // Use tool summary if available
   const summary = getToolSummary(event);
   return summary || getToolDescription(event);
@@ -2004,6 +2057,9 @@ const getToolDescription = (event: any): string => {
 
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
     return success ? t('agentStream.toolStatus.searchKb') : t('agentStream.toolStatus.searchKbFailed');
+  } else if (toolName === 'wiki_search' || toolName === 'wiki_read_page') {
+    const localizedName = getLocalizedToolName(toolName);
+    return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else if (toolName === 'web_search') {
     return success ? t('agentStream.toolStatus.webSearch') : t('agentStream.toolStatus.webSearchFailed');
   } else if (toolName === 'grep_chunks') {
@@ -2316,8 +2372,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
       .chat-citation-pills();
 
       :deep(img) {
-        min-height: 100px;
-        /* 防止流式输出时图片高度塌陷导致抖动 */
         background-color: var(--td-bg-color-secondarycontainer);
         /* 加载时的占位背景色 */
       }
@@ -2585,11 +2639,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
   0%,
   60%,
   100% {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 
   30% {
-    transform: translateY(-8px);
+    transform: translate3d(0, -5px, 0);
   }
 }
 
@@ -2926,6 +2980,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
       border-radius: 50%;
       background: var(--td-text-color-placeholder);
       animation: typingBounce 1.4s ease-in-out infinite;
+      // Composite each dot so the bounce stays smooth and ghost-free while the
+      // streaming answer relayouts every token.
+      will-change: transform;
+      backface-visibility: hidden;
 
       &:nth-child(1) {
         animation-delay: 0s;

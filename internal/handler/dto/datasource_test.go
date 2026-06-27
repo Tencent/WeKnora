@@ -53,6 +53,56 @@ func TestDataSourceResponse_NilSafe(t *testing.T) {
 	assert.Equal(t, []*DataSourceResponse{}, NewDataSourceResponses(nil))
 }
 
+func TestDataSourceResponse_RSSFeedURLsFromCredentials(t *testing.T) {
+	cfg := types.DataSourceConfig{
+		Type: types.ConnectorTypeRSS,
+		Credentials: map[string]interface{}{
+			"feed_urls": "https://example.com/a.xml\nhttps://example.com/b.xml",
+		},
+		ResourceIDs: []string{"https://example.com/a.xml"},
+	}
+	blob, _ := cfg.ToJSON()
+	ds := &types.DataSource{
+		ID:     "ds-rss",
+		Name:   "my-rss",
+		Type:   types.ConnectorTypeRSS,
+		Config: blob,
+	}
+	resp := NewDataSourceResponse(ds)
+	assert.NotNil(t, resp.Config)
+	assert.Equal(t, "https://example.com/a.xml\nhttps://example.com/b.xml", resp.Config.Settings["feed_urls"])
+	assert.False(t, resp.Credentials["credentials"].Configured)
+	body, err := json.Marshal(resp)
+	assert.NoError(t, err)
+	s := string(body)
+	assert.Contains(t, s, "https://example.com/a.xml")
+	assert.NotContains(t, s, "Bearer secret")
+}
+
+func TestDataSourceResponse_RSSAuthHeadersConfigured(t *testing.T) {
+	cfg := types.DataSourceConfig{
+		Type: types.ConnectorTypeRSS,
+		Credentials: map[string]interface{}{
+			"auth_headers": "Authorization: Bearer secret",
+		},
+		Settings: map[string]interface{}{
+			"feed_urls": "https://example.com/feed.xml",
+		},
+	}
+	blob, _ := cfg.ToJSON()
+	ds := &types.DataSource{
+		ID:     "ds-rss-auth",
+		Name:   "my-rss",
+		Type:   types.ConnectorTypeRSS,
+		Config: blob,
+	}
+	resp := NewDataSourceResponse(ds)
+	assert.True(t, resp.Credentials["credentials"].Configured)
+	body, err := json.Marshal(resp)
+	assert.NoError(t, err)
+	assert.NotContains(t, string(body), "Bearer secret")
+}
+
 func TestDataSourceResponse_NoConfig(t *testing.T) {
 	ds := &types.DataSource{ID: "x", Name: "x"}
 	body, err := json.Marshal(NewDataSourceResponse(ds))

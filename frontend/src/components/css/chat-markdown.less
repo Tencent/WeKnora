@@ -16,6 +16,21 @@
   letter-spacing: normal;
   -webkit-font-smoothing: antialiased;
 
+  // Trailing fade on the newest streamed characters: the tail is wrapped in
+  // this span (see applyStreamingTailFade) so its right edge dissolves, giving
+  // a soft "just typed" reveal that settles once streaming stops and the wrap
+  // is no longer emitted.
+  :deep(.stream-fade-tail) {
+    -webkit-mask-image: linear-gradient(to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 0.7) 30%,
+        rgba(0, 0, 0, 0) 100%);
+    mask-image: linear-gradient(to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 0.7) 30%,
+        rgba(0, 0, 0, 0) 100%);
+  }
+
   :deep(p) {
     margin: 0 0 0.25em;
     line-height: 1.625;
@@ -46,7 +61,12 @@
   }
 
   // Models often emit standalone **小节标题：** paragraphs instead of headings.
-  :deep(p:has(> strong:only-child)) {
+  // Tagged at render time (markStandaloneStrongParagraphs) rather than via
+  // `p:has(> strong:only-child)`: CSS `:only-child` ignores text nodes, so the
+  // selector matched any paragraph whose only *element* child was a <strong>,
+  // causing a visible top-margin jump mid-stream the instant one **bold** run
+  // closed inside an otherwise text-heavy paragraph.
+  :deep(p.md-strong-title) {
     margin-top: 1.25em;
     margin-bottom: 0.5em;
     line-height: 1.5;
@@ -572,6 +592,38 @@
     object-fit: contain;
     cursor: pointer;
     transition: transform 0.2s ease;
+  }
+
+  // Protected images not yet hydrated still carry the 1x1 placeholder gif.
+  // Without a fixed size width:auto/height:auto collapse it to a ~1px line that
+  // jumps to full size on load (reads as flicker during streaming). Give it a
+  // stable skeleton box so the later swap to the real image is a calm fade-in.
+  // Match both the explicit loading marker and the transparent GIF itself.
+  // During a streaming DOM patch the marker can briefly be absent while src is
+  // already the 1x1 placeholder; matching src prevents that frame becoming a
+  // tall, one-pixel vertical line in Chromium.
+  :deep(img[data-img-loading]),
+  :deep(img[data-protected-src][src^='data:image/gif;base64']) {
+    width: 260px;
+    height: 180px;
+    min-width: min(260px, 80%);
+    min-height: 180px;
+    max-width: 80%;
+    object-fit: cover;
+    cursor: default;
+    background: linear-gradient(
+      100deg,
+      var(--td-bg-color-secondarycontainer, #f3f3f3) 30%,
+      var(--td-bg-color-container-hover, #eaeaea) 50%,
+      var(--td-bg-color-secondarycontainer, #f3f3f3) 70%
+    );
+    background-size: 200% 100%;
+    animation: chat-img-skeleton 1.2s ease-in-out infinite;
+  }
+
+  @keyframes chat-img-skeleton {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
   }
 
   :deep(p:has(> img:only-child)) {

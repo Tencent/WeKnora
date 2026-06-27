@@ -8,7 +8,7 @@ import email
 import html
 import logging
 import os
-from urllib.parse import unquote, urljoin
+from urllib.parse import unquote, urljoin, urlparse
 import uuid
 from typing import Dict
 
@@ -70,8 +70,7 @@ class MHTMLParser(BaseParser):
             elif content_type.startswith("image/") and self.extract_images:
                 image_data = part.get_payload(decode=True)
                 if image_data:
-                    ext = self._image_extension(content_type)
-                    image_path = f"images/{uuid.uuid4().hex}{ext}"
+                    image_path = self._image_path_for_part(part, content_type, images)
                     images[image_path] = base64.b64encode(image_data).decode("utf-8")
                     self._add_image_aliases(image_aliases, part, image_path)
 
@@ -154,6 +153,45 @@ class MHTMLParser(BaseParser):
             "image/x-icon": ".ico",
         }.get(content_type, ".png")
 
+    @classmethod
+    def _image_path_for_part(
+        cls, part, content_type: str, images: Dict[str, str]
+    ) -> str:
+        """Choose a stable image path when the MHTML part exposes a filename."""
+        ext = cls._image_extension(content_type)
+        location = (part.get("Content-Location", "") or "").strip()
+        filename = cls._filename_from_content_location(location)
+        if not filename:
+            return f"images/{uuid.uuid4().hex}{ext}"
+
+        stem, location_ext = os.path.splitext(filename)
+        if not location_ext:
+            filename = f"{filename}{ext}"
+        image_path = f"images/{filename}"
+        if image_path not in images:
+            return image_path
+
+        suffix = 2
+        stem, location_ext = os.path.splitext(filename)
+        while True:
+            candidate = f"images/{stem}_{suffix}{location_ext}"
+            if candidate not in images:
+                return candidate
+            suffix += 1
+
+    @staticmethod
+    def _filename_from_content_location(location: str) -> str:
+        decoded = unquote(html.unescape(location.strip()))
+        if not decoded or decoded.lower().startswith("cid:"):
+            return ""
+        path = urlparse(decoded).path or decoded
+        filename = os.path.basename(path)
+        if not filename or filename in {".", ".."}:
+            return ""
+        if "/" in filename or "\\" in filename:
+            return ""
+        return filename
+
     def _html_to_markdown(
         self,
         html_content: str,
@@ -171,9 +209,7 @@ class MHTMLParser(BaseParser):
                 self._rewrite_image_sources(soup, image_aliases, base_location)
             text_fallback = soup.get_text(separator="\n", strip=True)
             markdown_text = md(str(soup), heading_style="ATX")
-            result = "\n".join(
-                line.strip() for line in markdown_text.split("\n") if line.strip()
-            )
+            result = self._normalize_markdown(markdown_text)
             if not result and text_fallback:
                 logger.warning("Markdown empty, falling back to text extraction")
                 return text_fallback
@@ -186,6 +222,71 @@ class MHTMLParser(BaseParser):
         except Exception as e:
             logger.error("HTML to Markdown conversion failed: %s", e)
             return f"```html\n{html_content}\n```"
+
+    @staticmethod
+    def _normalize_markdown(markdown_text: str) -> str:
+        text = markdown_text.replace("\r\n", "\n").replace("\r", "\n")
+        output: list[str] = []
+        pending_blank = False
+        fence_char: str | None = None
+        fence_len = 0
+
+        for line in text.split("\n"):
+            if fence_char is not None:
+                output.append(line)
+                if MHTMLParser._is_closing_fence(line, fence_char, fence_len):
+                    fence_char = None
+                    fence_len = 0
+                continue
+
+            opening = MHTMLParser._opening_fence(line)
+            if opening is not None:
+                if pending_blank and output:
+                    output.append("")
+                pending_blank = False
+                output.append(line)
+                fence_char, fence_len = opening
+                continue
+
+            if not line.strip(" \t"):
+                pending_blank = True
+                continue
+
+            if pending_blank and output:
+                output.append("")
+            pending_blank = False
+
+            trailing_spaces = len(line) - len(line.rstrip(" "))
+            if trailing_spaces >= 2:
+                line = line.rstrip(" \t") + "  "
+            else:
+                line = line.rstrip(" \t")
+            output.append(line)
+
+        return "\n".join(output).strip("\n")
+
+    @staticmethod
+    def _opening_fence(line: str) -> tuple[str, int] | None:
+        stripped = line.lstrip(" ")
+        if len(line) - len(stripped) > 3 or not stripped:
+            return None
+        fence_char = stripped[0]
+        if fence_char not in {"`", "~"}:
+            return None
+        fence_len = len(stripped) - len(stripped.lstrip(fence_char))
+        if fence_len < 3:
+            return None
+        return fence_char, fence_len
+
+    @staticmethod
+    def _is_closing_fence(line: str, fence_char: str, fence_len: int) -> bool:
+        stripped = line.lstrip(" ")
+        if len(line) - len(stripped) > 3:
+            return False
+        closing_len = len(stripped) - len(stripped.lstrip(fence_char))
+        if closing_len < fence_len:
+            return False
+        return not stripped[closing_len:].strip(" \t")
 
     @staticmethod
     def _strip_internal_links(soup: BeautifulSoup) -> None:

@@ -150,7 +150,11 @@ const setSelectionRange = (start: number, end: number) => {
     if (!textarea || activeTab.value !== 'edit') {
       return
     }
-    textarea.focus()
+    // Initialization can finish while the drawer is still sliding in. A plain
+    // focus() makes the browser scroll the transformed textarea into view,
+    // which intermittently shifts the drawer away from the right edge for a
+    // frame. Keep keyboard focus without letting it move the viewport.
+    textarea.focus({ preventScroll: true })
     textarea.setSelectionRange(start, end)
   })
 }
@@ -607,20 +611,20 @@ const handleSave = async (targetStatus: ManualStatus) => {
   saving.value = true
   savingAction.value = targetStatus
   try {
-    const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
+    const tagIdsToUpload = uiStore.selectedTagIds.length > 0 ? [...uiStore.selectedTagIds] : undefined
     const payload: {
       title: string
       content: string
       status: string
-      tag_id?: string
+      tag_ids?: string[]
       process_config?: KnowledgeProcessOverrides
     } = {
       title: form.title.trim(),
       content: form.content,
       status: targetStatus,
     }
-    if (tagIdToUpload) {
-      payload.tag_id = tagIdToUpload
+    if (tagIdsToUpload && tagIdsToUpload.length > 0) {
+      payload.tag_ids = tagIdsToUpload
     }
 
     if (targetStatus === 'publish') {
@@ -645,7 +649,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
             knowledgeId: knowledgeId.value || undefined,
             title: payload.title,
             content: payload.content,
-            tagId: tagIdToUpload,
+            tagIds: tagIdsToUpload,
           },
         })
         payload.process_config = confirmResult.processConfig
@@ -735,7 +739,6 @@ onBeforeUnmount(() => {
     :min-width="560"
     :max-width="1280"
     storage-key="setting-drawer:width:manual-markdown-editor"
-    :destroy-on-close="false"
     :hide-footer="!initialLoaded"
     :confirm-loading="saving && savingAction === 'publish'"
     :confirm-text="$t('manualEditor.actions.publish')"
@@ -1111,5 +1114,3 @@ onBeforeUnmount(() => {
   color: var(--td-text-color-placeholder);
 }
 </style>
-
-

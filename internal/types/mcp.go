@@ -43,6 +43,22 @@ type MCPService struct {
 // MCPHeaders represents HTTP headers as a map
 type MCPHeaders map[string]string
 
+// MCPAuthType enumerates the authentication strategies for an MCP service.
+type MCPAuthType string
+
+const (
+	// MCPAuthNone means no authentication (or only static custom headers).
+	MCPAuthNone MCPAuthType = ""
+	// MCPAuthAPIKey injects a static API key header (X-API-Key).
+	MCPAuthAPIKey MCPAuthType = "api_key"
+	// MCPAuthBearer injects a static Authorization: Bearer <token> header.
+	MCPAuthBearer MCPAuthType = "bearer"
+	// MCPAuthOAuth performs the MCP OAuth2 authorization-code flow
+	// (discovery + dynamic client registration + PKCE) per user. Tokens are
+	// stored per (tenant, user, service) in mcp_oauth_tokens.
+	MCPAuthOAuth MCPAuthType = "oauth"
+)
+
 // MCPAuthConfig represents authentication configuration for MCP service.
 //
 // Secret fields (APIKey, Token) are persisted in this struct but are NEVER
@@ -50,10 +66,29 @@ type MCPHeaders map[string]string
 // dto.MCPServiceResponse which omits them by construction. Credential
 // mutations happen through the dedicated /credentials subresource handled
 // by MCPCredentialsHandler.
+//
+// OAuth note: the OAuth strategy stores no secret in this struct. The
+// per-user access/refresh tokens live in mcp_oauth_tokens and the
+// dynamically registered client lives in mcp_oauth_clients. The fields here
+// (Scopes, AuthServerMetadataURL) are non-secret OAuth configuration.
 type MCPAuthConfig struct {
+	// AuthType selects the authentication strategy. Empty ("") is treated as
+	// none for backward compatibility with rows that pre-date this field.
+	AuthType      MCPAuthType       `json:"auth_type,omitempty"`
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`
 	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+	// Scopes are the OAuth scopes requested during authorization. Optional.
+	Scopes []string `json:"scopes,omitempty"`
+	// AuthServerMetadataURL optionally pins the OAuth authorization server
+	// metadata URL. When empty, the server is discovered automatically from
+	// the MCP URL (RFC 9728 / RFC 8414).
+	AuthServerMetadataURL string `json:"auth_server_metadata_url,omitempty"`
+}
+
+// IsOAuth reports whether this service uses the OAuth strategy.
+func (c *MCPAuthConfig) IsOAuth() bool {
+	return c != nil && c.AuthType == MCPAuthOAuth
 }
 
 // MCPAdvancedConfig represents advanced configuration for MCP service

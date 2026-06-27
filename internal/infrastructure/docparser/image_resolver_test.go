@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"io"
 	"mime/multipart"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -272,5 +275,326 @@ func TestResolveAndStore_MultipleFormats(t *testing.T) {
 	}
 	if strings.Contains(out, "data:image") {
 		t.Fatalf("data URI still in output after ResolveAndStore")
+	}
+}
+
+func TestResolveAndStoreMarkdownImageWithTitle(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![图片](images/test.png "图片")`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "test.png",
+				OriginalRef: "images/test.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image but got %d", len(imgs))
+	}
+	if len(svc.saved) != 1 {
+		t.Fatalf("expected SaveBytes to be called once but got %d", len(svc.saved))
+	}
+	if !strings.Contains(out, `![图片](local://test/`) || !strings.Contains(out, ` "图片")`) {
+		t.Fatalf("markdown image title was not preserved around stored URL: %s", out)
+	}
+	if strings.Contains(out, "images/test.png") {
+		t.Fatalf("original image path was not replaced: %s", out)
+	}
+}
+
+func TestResolveAndStoreMarkdownImageWithSingleQuotedTitle(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![图片](images/test.png '图片')`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "test.png",
+				OriginalRef: "images/test.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 || len(svc.saved) != 1 {
+		t.Fatalf("expected one stored image, got imgs=%d saved=%d", len(imgs), len(svc.saved))
+	}
+	if !strings.Contains(out, `![图片](local://test/`) || !strings.Contains(out, ` '图片')`) {
+		t.Fatalf("markdown image title was not preserved around stored URL: %s", out)
+	}
+}
+
+func TestResolveAndStoreMarkdownImageWithSpacedFilename(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![](images/第 1 页.png)`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "第 1 页.png",
+				OriginalRef: "images/第 1 页.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 || len(svc.saved) != 1 {
+		t.Fatalf("expected one stored image, got imgs=%d saved=%d", len(imgs), len(svc.saved))
+	}
+	if !strings.Contains(out, `![](local://test/`) {
+		t.Fatalf("spaced filename path was not replaced: %s", out)
+	}
+}
+
+func TestResolveAndStoreMarkdownImageTitleContainingRightParen(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![图片](images/test.png "阶段 1) 图片")`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "test.png",
+				OriginalRef: "images/test.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 || len(svc.saved) != 1 {
+		t.Fatalf("expected one stored image, got imgs=%d saved=%d", len(imgs), len(svc.saved))
+	}
+	if !strings.Contains(out, `![图片](local://test/`) || !strings.Contains(out, ` "阶段 1) 图片")`) {
+		t.Fatalf("right-paren title was not preserved around stored URL: %s", out)
+	}
+}
+
+func TestResolveAndStoreMarkdownImageWithMultilineTitle(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: "![图片](images/test.png\n  \"图片说明\")",
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "test.png",
+				OriginalRef: "images/test.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 || len(svc.saved) != 1 {
+		t.Fatalf("expected one stored image, got imgs=%d saved=%d", len(imgs), len(svc.saved))
+	}
+	if !strings.Contains(out, "![图片](local://test/") || !strings.Contains(out, "\n  \"图片说明\")") {
+		t.Fatalf("multiline title was not preserved around stored URL: %s", out)
+	}
+}
+
+func TestResolveAndStoreMarkdownImageWithAngleDestination(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![图片](<images/第 1 页 (测试).png> "阶段 1) 图片")`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "第 1 页 (测试).png",
+				OriginalRef: "images/第 1 页 (测试).png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 || len(svc.saved) != 1 {
+		t.Fatalf("expected one stored image, got imgs=%d saved=%d", len(imgs), len(svc.saved))
+	}
+	if !strings.Contains(out, `![图片](<local://test/`) || !strings.Contains(out, `> "阶段 1) 图片")`) {
+		t.Fatalf("angle destination wrapper or title was not preserved: %s", out)
+	}
+}
+
+func TestResolveAndStoreDuplicateReferencesStoreOnce(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: strings.Join([]string{
+			`![图片](images/test.png "第一处")`,
+			`![图片](images/test.png "第二处")`,
+		}, "\n\n"),
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "test.png",
+				OriginalRef: "images/test.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.saved) != 1 {
+		t.Fatalf("expected duplicate references to save once but got %d", len(svc.saved))
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected one stored image record but got %d", len(imgs))
+	}
+	if strings.Count(out, "local://test/") != 2 {
+		t.Fatalf("expected both markdown references to be replaced: %s", out)
+	}
+	if !strings.Contains(out, `"第一处"`) || !strings.Contains(out, `"第二处"`) {
+		t.Fatalf("duplicate reference titles were not preserved: %s", out)
+	}
+}
+
+func TestResolveAndStoreUnknownReferenceUnchanged(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: `![图片](images/missing.png "图片")`,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "test.png",
+				OriginalRef: "images/test.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.saved) != 0 || len(imgs) != 0 {
+		t.Fatalf("unknown reference should not be saved, got imgs=%d saved=%d", len(imgs), len(svc.saved))
+	}
+	if out != result.MarkdownContent {
+		t.Fatalf("unknown reference changed: %s", out)
+	}
+}
+
+func TestResolveAndStoreSharedMHTMLContract(t *testing.T) {
+	type contractImage struct {
+		Filename        string `json:"filename"`
+		OriginalRef     string `json:"original_ref"`
+		MimeType        string `json:"mime_type"`
+		ImageDataBase64 string `json:"image_data_base64"`
+	}
+	var contract struct {
+		MarkdownContent string          `json:"markdown_content"`
+		Images          []contractImage `json:"images"`
+	}
+
+	contractPath := filepath.Join("..", "..", "..", "testdata", "mhtml", "titled-image-contract.json")
+	raw, err := os.ReadFile(contractPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	if len(contract.Images) != 1 {
+		t.Fatalf("expected one contract image but got %d", len(contract.Images))
+	}
+
+	imageContract := contract.Images[0]
+	imageData, err := base64.StdEncoding.DecodeString(imageContract.ImageDataBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &types.ReadResult{
+		MarkdownContent: contract.MarkdownContent,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    imageContract.Filename,
+				OriginalRef: imageContract.OriginalRef,
+				MimeType:    imageContract.MimeType,
+				ImageData:   imageData,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.saved) != 1 {
+		t.Fatalf("expected SaveBytes once but got %d", len(svc.saved))
+	}
+	if !bytes.Equal(svc.saved[0], imageData) {
+		t.Fatal("stored image bytes do not match contract fixture")
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected one stored image record but got %d", len(imgs))
+	}
+	if imgs[0].OriginalRef != imageContract.OriginalRef || imgs[0].MimeType != imageContract.MimeType {
+		t.Fatalf("unexpected stored image metadata: %#v", imgs[0])
+	}
+	if strings.Contains(out, imageContract.OriginalRef) {
+		t.Fatalf("original image path remained in output: %s", out)
+	}
+	if !strings.Contains(out, `![图片](local://test/`) {
+		t.Fatalf("stored URL missing from markdown: %s", out)
+	}
+	if !strings.Contains(out, `"阶段 1) 图片"`) {
+		t.Fatalf("image title was not preserved: %s", out)
+	}
+	if !strings.Contains(out, "| 赛季制建立 | BP、Rank |\n\n![图片](local://test/") {
+		t.Fatalf("table-to-image block boundary changed: %s", out)
+	}
+	if !strings.Contains(out, `"阶段 1) 图片")`+"\n\n高机动性身法与独特枪械反馈") {
+		t.Fatalf("image-to-body block boundary changed: %s", out)
+	}
+	if !strings.Contains(out, "alpha  \nbeta") {
+		t.Fatalf("markdown hard break changed: %s", out)
+	}
+	if !strings.Contains(out, "```\nline1\n\n\nline2\n```") {
+		t.Fatalf("fenced code blank lines changed: %s", out)
 	}
 }

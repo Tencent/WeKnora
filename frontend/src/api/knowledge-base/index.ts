@@ -120,7 +120,7 @@ export function updateKnowledgeBase(id: string, data: {
     };
   }
 }) {
-  return put(`/api/v1/knowledge-bases/${id}` , data);
+  return put(`/api/v1/knowledge-bases/${id}`, data);
 }
 
 export function rebuildKBIndex(kbId: string) {
@@ -160,12 +160,12 @@ export function togglePinKnowledgeBase(id: string) {
 }
 
 // 知识文件 API（基于具体知识库）
-// data.tag_id: 可选，指定知识所属的分类ID
+// data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function uploadKnowledgeFile(
   kbId: string,
   data: {
     file: File
-    tag_id?: string
+    tag_ids?: string[]
     fileName?: string
     process_config?: KnowledgeProcessOverrides | string
     [key: string]: any
@@ -176,7 +176,9 @@ export function uploadKnowledgeFile(
   Object.keys(data).forEach(key => {
     const value = data[key];
     if (value === undefined) return;
-    if (key === 'process_config' && value && typeof value !== 'string') {
+    if (key === 'tag_ids' && Array.isArray(value)) {
+      formData.append(key, value.join(','));
+    } else if (key === 'process_config' && value && typeof value !== 'string') {
       formData.append(key, JSON.stringify(value));
     } else {
       formData.append(key, value);
@@ -186,23 +188,23 @@ export function uploadKnowledgeFile(
 }
 
 // 从URL创建知识
-// data.tag_id: 可选，指定知识所属的分类ID
+// data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function createKnowledgeFromURL(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_id?: string; process_config?: KnowledgeProcessOverrides },
+  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
 
 // 手工创建知识
-// data.tag_id: 可选，指定知识所属的分类ID
+// data.tag_ids: 可选，指定知识所属的标签 ID
 export function createManualKnowledge(
   kbId: string,
   data: {
     title: string
     content: string
     status: string
-    tag_id?: string
+    tag_ids?: string[]
     process_config?: KnowledgeProcessOverrides
   },
 ) {
@@ -214,7 +216,7 @@ export function listKnowledgeFiles(
   params: {
     page: number;
     page_size: number;
-    tag_id?: string;
+    tag_ids?: string;
     keyword?: string;
     file_type?: string;
     parse_status?: string;
@@ -226,7 +228,7 @@ export function listKnowledgeFiles(
   const query = new URLSearchParams();
   query.append('page', String(params.page));
   query.append('page_size', String(params.page_size));
-  if (params.tag_id) query.append('tag_id', params.tag_id);
+  if (params.tag_ids) query.append('tag_ids', params.tag_ids);
   if (params.keyword) query.append('keyword', params.keyword);
   if (params.file_type) query.append('file_type', params.file_type);
   if (params.parse_status) query.append('parse_status', params.parse_status);
@@ -331,7 +333,7 @@ export function deleteKnowledgeBaseTag(kbId: string, tagSeqId: number, params?: 
   return del(`/api/v1/knowledge-bases/${kbId}/tags/${tagSeqId}${forceQuery}`);
 }
 
-export function updateKnowledgeTagBatch(data: { updates: Record<string, string | null> }) {
+export function updateKnowledgeTagBatch(data: { updates: Record<string, string[]> }) {
   return put(`/api/v1/knowledge/tags`, data);
 }
 
@@ -458,16 +460,19 @@ export function searchKnowledge(
   offset = 0,
   limit = 20,
   fileTypes?: string[],
-  options?: { agent_id?: string }
+  options?: { agent_id?: string; recent?: boolean }
 ) {
   const query = new URLSearchParams();
-  query.set('keyword', keyword);
+  if (keyword) {
+    query.set('keyword', keyword);
+  }
   query.set('offset', String(offset));
   query.set('limit', String(limit));
   if (fileTypes && fileTypes.length > 0) {
     query.set('file_types', fileTypes.join(','));
   }
   if (options?.agent_id) query.set('agent_id', options.agent_id);
+  if (options?.recent) query.set('recent', 'true');
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }
 
@@ -477,4 +482,12 @@ export function knowledgeSemanticSearch(data: {
   knowledge_ids?: string[];
 }) {
   return post('/api/v1/knowledge-search', data);
+}
+
+export function batchReparseKnowledge(kbId: string, ids: string[], processConfig?: KnowledgeProcessOverrides) {
+  return post(`/api/v1/knowledge/batch-reparse`, {
+    kb_id: kbId,
+    ids,
+    process_config: processConfig,
+  });
 }

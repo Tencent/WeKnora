@@ -95,8 +95,19 @@ export function validateCredentials(type: string, credentials: Record<string, an
   return post('/api/v1/datasource/validate-credentials', { type, credentials })
 }
 
-export function listResources(id: string) {
-  return get(`/api/v1/datasource/${id}/resources`, { timeout: 120000 })
+// listResources lists selectable resources for a data source. Pass parentId to
+// lazily load the direct children of a resource (e.g. expanding a Feishu wiki
+// space/node), which avoids traversing the whole tree up front.
+export function listResources(id: string, parentId?: string) {
+  const query = parentId ? `?parent_id=${encodeURIComponent(parentId)}` : ''
+  return get(`/api/v1/datasource/${id}/resources${query}`, { timeout: 120000 })
+}
+
+// resolveResourceAncestors returns the ExternalIDs of every parent that must be
+// expanded to reveal the given (possibly deeply nested) selections in a lazily
+// loaded picker. Used when editing a data source to restore an existing selection.
+export function resolveResourceAncestors(id: string, resourceIds: string[]) {
+  return post(`/api/v1/datasource/${id}/resource-ancestors`, { resource_ids: resourceIds }, { timeout: 120000 })
 }
 
 export function triggerSync(id: string) {

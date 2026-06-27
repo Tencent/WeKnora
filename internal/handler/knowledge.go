@@ -226,6 +226,30 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 	return info.ID, nil
 }
 
+// enqueueKnowledgeListReparse enqueues an async batch-reparse task for the
+// given knowledge IDs and returns the asynq task ID.
+func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
+	ctx context.Context, tenantID uint64, ids []string, processConfig *types.KnowledgeProcessOverrides,
+) (string, error) {
+	payload := types.KnowledgeListReparsePayload{
+		TenantID:      tenantID,
+		KnowledgeIDs:  ids,
+		ProcessConfig: processConfig,
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal payload: %w", err)
+	}
+	task := asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
+		asynq.Queue("low"), asynq.MaxRetry(3))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		return "", fmt.Errorf("enqueue task: %w", err)
+	}
+	return info.ID, nil
+}
+
 // CreateKnowledgeFromFile godoc
 // @Summary      从文件创建知识
 // @Description  上传文件并创建知识条目
@@ -237,6 +261,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 // @Param        fileName          formData  string  false  "自定义文件名"
 // @Param        metadata          formData  string  false  "元数据JSON"
 // @Param        enable_multimodel formData  bool    false  "启用多模态处理"
+// @Param        tag_ids       formData  string  false  "分类ID列表，逗号分隔"
 // @Param        process_config    formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
 // @Success      200               {object}  map[string]interface{}  "创建的知识"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
@@ -336,17 +361,13 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		}
 	}
 
-	// 获取分类ID（如果提供），用于知识分类管理
-	tagID := c.PostForm("tag_id")
-	// 过滤特殊值，空字符串或 "__untagged__" 表示未分类
-	if tagID == "__untagged__" || tagID == "" {
-		tagID = ""
-	}
+	// 获取分类ID列表（如果提供），逗号分隔，用于知识多标签分类管理
+	tagIDs := parseCommaSeparatedTagIDs(c.PostForm("tag_ids"))
 
 	channel := c.PostForm("channel")
 
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagID, channel, processOverrides)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
@@ -380,7 +401,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_id=string}  true  "URL请求"
+// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_ids=[]string}  true  "URL请求"
 // @Success      201      {object}  map[string]interface{}  "创建的知识"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
@@ -412,7 +433,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		FileType         string                           `json:"file_type"`
 		EnableMultimodel *bool                            `json:"enable_multimodel"`
 		Title            string                           `json:"title"`
-		TagID            string                           `json:"tag_id"`
+		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
 	}
@@ -443,7 +464,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 
 	// Create knowledge entry from the URL
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagID, req.Channel, req.ProcessConfig,
+		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
@@ -556,9 +577,16 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	}
 
 	// Resolve knowledge and validate KB access (at least viewer)
-	knowledge, _, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
 	if err != nil {
 		c.Error(err)
+		return
+	}
+
+	// Re-fetch with tenant-scoped service so tags and other joined fields are populated.
+	if knowledge, err = h.kgService.GetKnowledgeByID(effCtx, id); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewNotFoundError("Knowledge not found"))
 		return
 	}
 
@@ -801,7 +829,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        id         path      string  true   "知识库ID"
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
-// @Param        tag_id        query     string  false  "标签ID筛选"
+// @Param        tag_ids       query     string  false  "标签ID筛选，逗号分隔（OR语义）"
 // @Param        keyword       query     string  false  "关键词搜索"
 // @Param        file_type     query     string  false  "文件类型筛选"
 // @Param        parse_status  query     string  false  "解析状态筛选 (pending/processing/completed/failed)"
@@ -837,7 +865,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	}
 
 	filter := types.KnowledgeListFilter{
-		TagID:       c.Query("tag_id"),
+		TagIDs:      parseCommaSeparatedTagIDs(c.Query("tag_ids")),
 		Keyword:     c.Query("keyword"),
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
@@ -862,9 +890,9 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_id=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
-		secutils.SanitizeForLog(filter.TagID),
+		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
 		secutils.SanitizeForLog(filter.Keyword),
 		secutils.SanitizeForLog(filter.FileType),
 		secutils.SanitizeForLog(filter.ParseStatus),
@@ -1673,8 +1701,8 @@ func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 }
 
 type knowledgeTagBatchRequest struct {
-	Updates map[string]*string `json:"updates" binding:"required,min=1"`
-	KBID    string             `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
+	Updates map[string][]string `json:"updates" binding:"required,min=1"`
+	KBID    string              `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
 }
 
 // UpdateKnowledgeTagBatch godoc
@@ -1811,7 +1839,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 
 // SearchKnowledge godoc
 // @Summary      Search knowledge
-// @Description  Search knowledge files by keyword. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.
+// @Description  Search knowledge files by keyword. Pass recent=true without a keyword to browse recent files. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.
 // @Tags         Knowledge
 // @Accept       json
 // @Produce      json
@@ -1820,6 +1848,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Param        limit      query     int     false "Limit for pagination (default 20)"
 // @Param        file_types query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
 // @Param        agent_id   query     string  false "Shared agent ID (search within agent's KB scope)"
+// @Param        recent     query     bool    false "Return recent files when keyword is empty"
 // @Success      200         {object}  map[string]interface{}     "Search results"
 // @Failure      400         {object}  errors.AppError            "Invalid request"
 // @Security     Bearer
@@ -1831,18 +1860,19 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
 	}
 	// Accept both ?keyword= (legacy / upstream name) and ?query= (what most
-	// MCP / agent integrations send). Falling silently back to an unsorted
-	// listing when both are empty caused the "all queries return the same 5
-	// newest cards" footgun — return 400 instead so the caller gets a clear
-	// signal that the search wasn't query-driven.
+	// MCP / agent integrations send). Empty input is only valid for an explicit
+	// recent-file browse request; ordinary callers still get a clear 400 instead
+	// of silently receiving the same newest cards for every missing query.
 	keyword := c.Query("keyword")
 	if keyword == "" {
 		keyword = c.Query("query")
 	}
-	if strings.TrimSpace(keyword) == "" {
+	recent, _ := strconv.ParseBool(c.DefaultQuery("recent", "false"))
+	if strings.TrimSpace(keyword) == "" && !recent {
 		c.Error(errors.NewBadRequestError("missing search keyword: pass ?keyword=... or ?query=..."))
 		return
 	}
+	keyword = strings.TrimSpace(keyword)
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
@@ -2198,6 +2228,24 @@ func resolveAgentAllowedKBIDs(agent *types.CustomAgent) []string {
 	}
 }
 
+// parseCommaSeparatedTagIDs splits a comma-separated string of tag IDs and
+// filters out empty strings and the "__untagged__" sentinel value.
+func parseCommaSeparatedTagIDs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" || p == "__untagged__" {
+			continue
+		}
+		result = append(result, p)
+	}
+	return result
+}
+
 // parseFilterTime parses a query-string timestamp accepted by knowledge list
 // filters. It supports RFC3339, RFC3339 with milliseconds, and the date-only
 // "2006-01-02" form (interpreted at start of day in the local timezone).
@@ -2225,4 +2273,107 @@ func sliceContains(ss []string, target string) bool {
 		}
 	}
 	return false
+}
+
+type batchReparseKnowledgeRequest struct {
+	KBID          string                           `json:"kb_id" binding:"required"`
+	IDs           []string                         `json:"ids" binding:"required"`
+	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
+}
+
+// BatchReparseKnowledge godoc
+// @Summary      批量重新解析知识
+// @Description  按 ID 列表批量重新解析单个知识库下的多个知识条目
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      batchReparseKnowledgeRequest  true  "批量重解析请求"
+// @Success      200      {object}  map[string]interface{}        "任务已提交"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/batch-reparse [post]
+func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req batchReparseKnowledgeRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Errorf(ctx, "failed to parse batch reparse knowledge request: %v", err)
+		c.Error(errors.NewBadRequestError("invalid batch reparse knowledge request parameters"))
+		return
+	}
+
+	seen := make(map[string]struct{}, len(req.IDs))
+	ids := make([]string, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
+		return
+	}
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge batch, kb_id: %s, size: %d, err: %v", kbID, len(ids), err)
+		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
+		return
+	}
+	if len(knowledgeList) != len(ids) {
+		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
+		return
+	}
+	for _, k := range knowledgeList {
+		if k.KnowledgeBaseID != kbID {
+			c.Error(errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
+			return
+		}
+	}
+
+	taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, ids, req.ProcessConfig)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue batch knowledge reparse task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue batch reparse task"))
+		return
+	}
+
+	logger.Infof(ctx, "Batch knowledge reparse task enqueued: %s, kb_id: %s, count: %d",
+		taskID, secutils.SanitizeForLog(kbID), len(ids))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Batch reparse task submitted",
+		"data": gin.H{
+			"task_id":       taskID,
+			"reparse_count": len(ids),
+		},
+	})
 }

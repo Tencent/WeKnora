@@ -9,6 +9,7 @@ import {
   validateConnection,
   validateCredentials,
   listResources,
+  resolveResourceAncestors,
   deleteDataSource,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
@@ -17,6 +18,7 @@ import {
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
+import { getDatasourceIconUrl } from './datasourceIcons'
 
 const props = defineProps<{
   kbId: string
@@ -101,8 +103,56 @@ function cancelReplaceCredentials() {
   replaceCredentialsMode.value = false
   pendingRemoveCredentials.value = false
   form.value.config.credentials = {}
+  rssAuthHeaders.value = []
   testResult.value = credentialsConfigured.value ? 'success' : ''
   testErrorMsg.value = ''
+}
+
+interface CustomHeaderItem {
+  key: string
+  value: string
+}
+
+const rssAuthHeaders = ref<CustomHeaderItem[]>([])
+
+function serializeAuthHeaders(items: CustomHeaderItem[]): string {
+  return items
+    .filter(h => h.key.trim())
+    .map(h => `${h.key.trim()}: ${h.value}`)
+    .join('\n')
+}
+
+function syncRssAuthHeadersToCredentials() {
+  if (form.value.type !== 'rss') return
+  const serialized = serializeAuthHeaders(rssAuthHeaders.value)
+  if (serialized) {
+    form.value.config.credentials.auth_headers = serialized
+  } else {
+    delete form.value.config.credentials.auth_headers
+  }
+}
+
+// Feed URLs may still live in credentials on older rows (not returned by the
+// API). The backend copies them into settings on read; fall back to the
+// selected feed resource IDs when settings are still empty.
+function hydrateRssFeedUrlsFromConfig(config: { settings?: Record<string, any>; resource_ids?: string[] }) {
+  const settings = config.settings || {}
+  if (String(settings.feed_urls || '').trim()) {
+    return { ...settings }
+  }
+  const ids = config.resource_ids || []
+  if (ids.length === 0) {
+    return { ...settings }
+  }
+  return { ...settings, feed_urls: ids.join('\n') }
+}
+
+function addRssAuthHeader() {
+  rssAuthHeaders.value.push({ key: '', value: '' })
+}
+
+function removeRssAuthHeader(idx: number) {
+  rssAuthHeaders.value.splice(idx, 1)
 }
 
 function needsConnectionTest(): boolean {
@@ -136,6 +186,15 @@ const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
 const selectedResourceIds = ref<string[]>([])
 const expandedResourceIds = ref(new Set<string>())
+// Lazy loading: parents whose children have already been fetched, and parents
+// currently being fetched. Used to load hierarchical sources (e.g. Feishu wiki)
+// one level at a time instead of traversing the whole tree up front (#1672).
+const loadedChildrenIds = ref(new Set<string>())
+const loadingChildrenIds = ref(new Set<string>())
+// True when the initial listing already returned the whole tree (connectors like
+// Notion populate parent_id on the first call). In that case expanding a node
+// never needs an extra request.
+const treeFullyLoaded = ref(false)
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
@@ -188,9 +247,51 @@ const checkStates = computed(() => {
 
 function toggleExpand(id: string) {
   const next = new Set(expandedResourceIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
+  if (next.has(id)) {
+    next.delete(id)
+    expandedResourceIds.value = next
+    return
+  }
+  next.add(id)
   expandedResourceIds.value = next
+  void ensureChildrenLoaded(id)
+}
+
+// ensureChildrenLoaded fetches the direct children of a node on demand. It is a
+// no-op when the connector already delivered the whole tree in one call (e.g.
+// Notion) or when this node's children have already been fetched.
+async function ensureChildrenLoaded(id: string) {
+  if (!tempDsId.value) return
+  if (loadedChildrenIds.value.has(id) || loadingChildrenIds.value.has(id)) return
+  if (treeFullyLoaded.value) {
+    loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
+    return
+  }
+
+  loadingChildrenIds.value = new Set(loadingChildrenIds.value).add(id)
+  try {
+    const res = await listResources(tempDsId.value, id)
+    const children: Resource[] = res?.data || res || []
+    if (children.length > 0) {
+      const existing = new Set(resources.value.map(r => r.external_id))
+      const merged = resources.value.slice()
+      for (const c of children) {
+        if (!existing.has(c.external_id)) merged.push(c)
+      }
+      resources.value = merged
+    }
+    loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+    // Collapse again so the user can retry the expand.
+    const next = new Set(expandedResourceIds.value)
+    next.delete(id)
+    expandedResourceIds.value = next
+  } finally {
+    const s = new Set(loadingChildrenIds.value)
+    s.delete(id)
+    loadingChildrenIds.value = s
+  }
 }
 
 const visibleTree = computed(() => {
@@ -237,7 +338,16 @@ interface ConnectorDef {
   permissionDocUrl: string
   permissionPageUrl: string
   requiredPermissions: string[]
-  fields: { key: string; labelKey: string; placeholder: string; secret?: boolean; optional?: boolean; hintKey?: string }[]
+  fields: {
+    key: string
+    labelKey: string
+    placeholder: string
+    secret?: boolean
+    optional?: boolean
+    hintKey?: string
+    multiline?: boolean
+    fieldType?: 'custom_headers'
+  }[]
 }
 
 const connectorDefs = computed<ConnectorDef[]>(() => [
@@ -284,6 +394,17 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://www.yuque.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
+  {
+    type: 'rss',
+    available: true,
+    docUrl: '',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
+    ],
+  },
 ])
 
 
@@ -310,6 +431,11 @@ watch(visible, async (v) => {
   pendingRemoveCredentials.value = false
   resources.value = []
   selectedResourceIds.value = []
+  expandedResourceIds.value = new Set()
+  loadedChildrenIds.value = new Set()
+  loadingChildrenIds.value = new Set()
+  treeFullyLoaded.value = false
+  rssAuthHeaders.value = []
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -319,13 +445,16 @@ watch(visible, async (v) => {
     credentialsConfigured.value = false
     refreshCredentialsStatus()
     testResult.value = credentialsConfigured.value ? 'success' : ''
+    const editConfig = props.dataSource.config || {}
     form.value = {
       name: props.dataSource.name,
       type: props.dataSource.type,
       config: {
         credentials: {},
-        resource_ids: props.dataSource.config?.resource_ids || [],
-        settings: props.dataSource.config?.settings || {},
+        resource_ids: editConfig.resource_ids || [],
+        settings: props.dataSource.type === 'rss'
+          ? hydrateRssFeedUrlsFromConfig(editConfig)
+          : (editConfig.settings || {}),
       },
       sync_schedule: props.dataSource.sync_schedule,
       sync_mode: props.dataSource.sync_mode,
@@ -360,19 +489,45 @@ watch(
   { deep: true },
 )
 
+watch(
+  rssAuthHeaders,
+  () => {
+    syncRssAuthHeadersToCredentials()
+    if (needsConnectionTest()) {
+      testResult.value = ''
+      testErrorMsg.value = ''
+    }
+  },
+  { deep: true },
+)
+
+watch(
+  () => form.value.config.settings.feed_urls,
+  () => {
+    if (needsConnectionTest()) {
+      testResult.value = ''
+      testErrorMsg.value = ''
+    }
+  },
+)
+
 function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
+  form.value.config.credentials = {}
+  rssAuthHeaders.value = []
   step.value = 1
 }
 
 // --- Test connection (stateless, no DB write) ---
 async function testConnection() {
+  syncRssAuthHeadersToCredentials()
+  if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
     const fields = currentDef.value?.fields || []
     for (const f of fields) {
-      if (f.optional) continue
+      if (f.optional || f.fieldType === 'custom_headers') continue
       if (!form.value.config.credentials[f.key]) {
         MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
         return
@@ -391,7 +546,12 @@ async function testConnection() {
       } as any)
       await validateConnection(tempDsId.value)
     } else {
-      await validateCredentials(form.value.type, form.value.config.credentials)
+      const creds = { ...form.value.config.credentials }
+      if (form.value.type === 'rss') {
+        // validate-credentials is credentials-only; feed URLs live in settings.
+        creds.feed_urls = form.value.config.settings.feed_urls
+      }
+      await validateCredentials(form.value.type, creds)
     }
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))
@@ -424,13 +584,55 @@ async function loadResources() {
 
     const res = await listResources(tempDsId.value)
     resources.value = res?.data || res || []
+    // Any parent that already arrived with children (connectors returning the
+    // full tree, e.g. Notion) needs no further lazy fetch.
+    const parentsWithChildren = new Set<string>()
+    for (const r of resources.value) {
+      if (r.parent_id) parentsWithChildren.add(r.parent_id)
+    }
+    loadedChildrenIds.value = parentsWithChildren
+    loadingChildrenIds.value = new Set<string>()
+    // If any resource already has a parent, the connector returned the whole tree
+    // up front, so per-node lazy fetching is unnecessary.
+    treeFullyLoaded.value = parentsWithChildren.size > 0
+    // Auto-expand top-level nodes whose children are already loaded; lazy nodes
+    // (children not yet fetched) stay collapsed until the user expands them.
     expandedResourceIds.value = new Set(
-      resources.value.filter(r => !r.parent_id && r.has_children).map(r => r.external_id),
+      resources.value
+        .filter(r => !r.parent_id && r.has_children && parentsWithChildren.has(r.external_id))
+        .map(r => r.external_id),
     )
+    // When editing a lazily-loaded source, reveal pre-existing selections that
+    // live below the (not-yet-loaded) tree so they are visible and checked.
+    if (isEdit.value && !treeFullyLoaded.value) {
+      const loaded = new Set(resources.value.map(r => r.external_id))
+      const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+      if (hidden.length > 0) void revealExistingSelections(hidden)
+    }
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
   loadingResources.value = false
+}
+
+// revealExistingSelections asks the backend which ancestors must be expanded to
+// surface the current (possibly deeply nested) selection, then loads each level
+// so the saved selection becomes visible and correctly checked in the tree.
+async function revealExistingSelections(hiddenIds: string[]) {
+  if (!tempDsId.value || hiddenIds.length === 0) return
+  try {
+    const res = await resolveResourceAncestors(tempDsId.value, hiddenIds)
+    const ancestors: string[] = res?.data?.ancestors || res?.ancestors || []
+    if (ancestors.length === 0) return
+    const expanded = new Set(expandedResourceIds.value)
+    for (const id of ancestors) expanded.add(id)
+    expandedResourceIds.value = expanded
+    // Load each ancestor level (children include the next ancestor / the
+    // selection itself); calls are independent and dedup on merge.
+    await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  }
 }
 
 function getDescendantIds(id: string): string[] {
@@ -503,14 +705,25 @@ function toggleResource(id: string) {
   selectedResourceIds.value = [...cover]
 }
 
+function validateRssFeedUrls(): boolean {
+  if (form.value.type !== 'rss') return true
+  if (!String(form.value.config.settings.feed_urls || '').trim()) {
+    MessagePlugin.warning(`${t('datasource.field.feedUrls')} ${t('datasource.isRequired')}`)
+    return false
+  }
+  return true
+}
+
 function validateStep1Fields(): boolean {
+  syncRssAuthHeadersToCredentials()
+  if (!validateRssFeedUrls()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
 
   const fields = currentDef.value?.fields || []
   for (const f of fields) {
-    if (f.optional) continue
+    if (f.optional || f.fieldType === 'custom_headers') continue
     if (!form.value.config.credentials[f.key]) {
       MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
       return false
@@ -559,6 +772,7 @@ function buildConfigPayload(): Record<string, unknown> {
 // the whole submit on failure so we don't leave the row partially saved.
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
   if (!isEdit.value || !replaceCredentialsMode.value) return true
+  syncRssAuthHeadersToCredentials()
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
   )
@@ -568,6 +782,7 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
     credentialsConfigured.value = true
     replaceCredentialsMode.value = false
     form.value.config.credentials = {}
+    rssAuthHeaders.value = []
     return true
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('credential.saveFailed'))
@@ -621,10 +836,9 @@ async function handleSubmit() {
     }
 
     emit('saved')
-    // The data source is now finalized (created/updated above). Clear tempDsId
-    // so the visible-watcher's create-mode cleanup does NOT delete the source
-    // we just saved. The cleanup must only fire when the user cancels/closes
-    // without saving, leaving a stray temp row.
+    // Clear before close — otherwise the visible watcher treats the just-saved
+    // row as an abandoned temp draft and DELETEs it (loadResources creates the
+    // row early at step 2 with tempDsId).
     tempDsId.value = ''
     visible.value = false
   } catch (e: any) {
@@ -670,9 +884,12 @@ function resourceIconName(r: Resource): string {
 }
 
 function expandAllNodes() {
-  expandedResourceIds.value = new Set(
-    resources.value.filter(r => r.has_children).map(r => r.external_id),
-  )
+  const expandable = resources.value.filter(r => r.has_children)
+  expandedResourceIds.value = new Set(expandable.map(r => r.external_id))
+  // Lazily load children of any expanded node that hasn't been fetched yet.
+  for (const r of expandable) {
+    void ensureChildrenLoaded(r.external_id)
+  }
 }
 
 function collapseAllNodes() {
@@ -726,6 +943,7 @@ const drawerConfirmText = computed(() => {
     v-model:visible="visible"
     :title="drawerTitle"
     :description="drawerDescription"
+    :class="form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer'"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
     :confirm-loading="submitting || (step === 1 && testing)"
@@ -734,8 +952,12 @@ const drawerConfirmText = computed(() => {
     @confirm="handleDrawerConfirm"
     @cancel="handleClose"
   >
-    <template v-if="form.type" #headerIcon>
-      <DataSourceTypeIcon :type="form.type" :size="20" />
+    <template v-if="form.type && getDatasourceIconUrl(form.type)" #headerIcon>
+      <img
+        :src="getDatasourceIconUrl(form.type)"
+        :alt="form.type"
+        class="datasource-header-icon__img"
+      >
     </template>
 
     <template v-if="step === 1" #footer-left>
@@ -783,7 +1005,10 @@ const drawerConfirmText = computed(() => {
         :key="i"
         :class="['ds-step', { active: step === i, done: step > i }]"
       >
-        <span class="ds-step-num">{{ step > i ? '&#10003;' : i + 1 }}</span>
+        <span class="ds-step-num">
+          <t-icon v-if="step > i" name="check" class="ds-step-check" />
+          <template v-else>{{ i + 1 }}</template>
+        </span>
         <span class="ds-step-title">{{ title }}</span>
       </div>
     </div>
@@ -811,10 +1036,10 @@ const drawerConfirmText = computed(() => {
     </section>
 
     <!-- Step 1: Credentials -->
-    <section v-if="step === 1" class="setting-drawer__section">
+    <template v-if="step === 1">
       <div
         v-if="currentDef && currentDef.requiredPermissions.length > 0"
-        class="ds-setup-guide"
+        class="ds-setup-guide ds-setup-guide--standalone"
       >
         <button
           type="button"
@@ -874,29 +1099,48 @@ const drawerConfirmText = computed(() => {
         </div>
       </div>
 
-      <div class="form-item">
-        <label class="form-label">{{ t('datasource.nameLabel') }}</label>
-        <t-input v-model="form.name" :placeholder="t('datasource.namePlaceholder')" />
-      </div>
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.sectionBasic') }}</h4>
 
-      <div v-if="currentDef?.docUrl" class="inline-alert">
-        <t-icon name="info-circle-filled" class="inline-alert__icon" />
-        <span class="inline-alert__text">{{ t('datasource.docHint') }}</span>
-        <a
-          :href="currentDef.docUrl"
-          target="_blank"
-          rel="noopener"
-          class="inline-alert__action doc-link"
-        >
-          {{ t('datasource.openDoc') }}
-          <t-icon name="link" class="link-icon" />
-        </a>
-      </div>
+        <div v-if="currentDef?.docUrl" class="inline-alert">
+          <t-icon name="info-circle-filled" class="inline-alert__icon" />
+          <span class="inline-alert__text">{{ t('datasource.docHint') }}</span>
+          <a
+            :href="currentDef.docUrl"
+            target="_blank"
+            rel="noopener"
+            class="inline-alert__action doc-link"
+          >
+            {{ t('datasource.openDoc') }}
+            <t-icon name="link" class="link-icon" />
+          </a>
+        </div>
 
-      <div class="form-item">
-        <label class="form-label">{{ t('datasource.credentialsLabel') }}</label>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.nameLabel') }}</label>
+          <t-input v-model="form.name" :placeholder="t('datasource.namePlaceholder')" />
+        </div>
+      </section>
 
-        <template v-if="isEdit && credentialsConfigured && !replaceCredentialsMode">
+      <section v-if="form.type === 'rss'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.field.feedUrls') }}</h4>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.field.feedUrls') }}</label>
+          <t-textarea
+            v-model="form.config.settings.feed_urls"
+            placeholder="https://example.com/feed.xml"
+            :autosize="{ minRows: 2, maxRows: 6 }"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.field.feedUrlsHint') }}</p>
+        </div>
+      </section>
+
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
+
+        <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">
           <div
             class="credential-faux-input"
             :class="{ 'is-confirm-remove': pendingRemoveCredentials }"
@@ -935,54 +1179,103 @@ const drawerConfirmText = computed(() => {
               </div>
             </template>
           </div>
-        </template>
+        </div>
 
         <div
           v-else-if="isEdit && !credentialsConfigured && !replaceCredentialsMode"
-          class="credential-faux-input is-empty"
-          @click="enterReplaceCredentials"
+          class="form-item"
         >
-          <t-icon name="lock-on" class="credential-status-icon muted" />
-          <span class="credential-faux-text muted">{{ t('credential.unconfigured') }}</span>
-          <div class="credential-actions">
-            <t-button size="small" variant="text" theme="primary" @click.stop="enterReplaceCredentials">
-              {{ t('credential.configure') }}
-            </t-button>
+          <div
+            class="credential-faux-input is-empty"
+            @click="enterReplaceCredentials"
+          >
+            <t-icon name="lock-on" class="credential-status-icon muted" />
+            <span class="credential-faux-text muted">{{ t('credential.unconfigured') }}</span>
+            <div class="credential-actions">
+              <t-button size="small" variant="text" theme="primary" @click.stop="enterReplaceCredentials">
+                {{ t('credential.configure') }}
+              </t-button>
+            </div>
           </div>
         </div>
 
-        <div v-else-if="credentialsInputVisible" class="credential-edit">
+        <template v-else-if="credentialsInputVisible">
           <div
             v-for="field in currentDef?.fields || []"
             :key="field.key"
-            class="credential-field"
+            class="form-item"
           >
-            <label
-              v-if="(currentDef?.fields?.length || 0) > 1"
-              class="credential-field-label"
-            >
-              {{ t(field.labelKey) }}
-              <span v-if="!field.optional" class="required-mark">*</span>
-            </label>
-            <t-input
-              v-model="form.config.credentials[field.key]"
-              :placeholder="field.placeholder || t('credential.inputPlaceholder')"
-              :type="field.secret ? 'password' : 'text'"
-              autocomplete="off"
-              spellcheck="false"
-            >
-              <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
-            </t-input>
-            <p v-if="field.hintKey" class="form-desc">{{ t(field.hintKey) }}</p>
+            <template v-if="field.fieldType === 'custom_headers'">
+              <div class="custom-headers-header">
+                <label class="form-label" style="margin-bottom: 0;">{{ t(field.labelKey) }}</label>
+                <t-button variant="text" size="small" theme="primary" @click="addRssAuthHeader">
+                  <template #icon><t-icon name="add" /></template>
+                  {{ t('model.editor.customHeadersAdd') }}
+                </t-button>
+              </div>
+              <p v-if="field.hintKey" class="form-desc custom-headers-desc">{{ t(field.hintKey) }}</p>
+              <div v-if="rssAuthHeaders.length > 0" class="custom-headers-list">
+                <div v-for="(item, idx) in rssAuthHeaders" :key="idx" class="custom-header-row">
+                  <t-input
+                    v-model="item.key"
+                    :placeholder="t('model.editor.customHeadersKeyPlaceholder')"
+                    class="custom-header-key"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <t-input
+                    v-model="item.value"
+                    :placeholder="t('model.editor.customHeadersValuePlaceholder')"
+                    class="custom-header-value"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <t-button
+                    variant="text"
+                    shape="square"
+                    size="small"
+                    class="custom-header-remove"
+                    :aria-label="t('common.delete')"
+                    @click="removeRssAuthHeader(idx)"
+                  >
+                    <t-icon name="close" />
+                  </t-button>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <label class="form-label" :class="{ required: !field.optional }">
+                {{ t(field.labelKey) }}
+              </label>
+              <t-textarea
+                v-if="field.multiline"
+                v-model="form.config.credentials[field.key]"
+                :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+                :autosize="{ minRows: 2, maxRows: 6 }"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <t-input
+                v-else
+                v-model="form.config.credentials[field.key]"
+                :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+                :type="field.secret ? 'password' : 'text'"
+                autocomplete="off"
+                spellcheck="false"
+              >
+                <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+              <p v-if="field.hintKey" class="form-desc">{{ t(field.hintKey) }}</p>
+            </template>
           </div>
           <div v-if="isEdit && replaceCredentialsMode" class="credential-edit-actions">
             <t-button size="small" variant="text" @click="cancelReplaceCredentials">
               {{ t('common.cancel') }}
             </t-button>
           </div>
-        </div>
-      </div>
-    </section>
+        </template>
+      </section>
+    </template>
 
     <!-- Step 2: Select resources -->
     <section v-if="step === 2" class="setting-drawer__section ds-resource-section">
@@ -1027,7 +1320,9 @@ const drawerConfirmText = computed(() => {
                 : t('knowledgeStages.expandBranch')"
               @click.stop="toggleExpand(r.external_id)"
             >
+              <t-loading v-if="loadingChildrenIds.has(r.external_id)" size="12px" />
               <t-icon
+                v-else
                 :name="expandedResourceIds.has(r.external_id) ? 'chevron-down' : 'chevron-right'"
                 size="12px"
               />
@@ -1182,7 +1477,7 @@ const drawerConfirmText = computed(() => {
 @import './datasource-surface.less';
 .ds-steps {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   margin-bottom: 20px;
   border-bottom: 1px solid var(--td-component-stroke);
   padding-bottom: 14px;
@@ -1191,22 +1486,32 @@ const drawerConfirmText = computed(() => {
 .ds-step {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: var(--td-text-color-placeholder);
 }
 
+.ds-step-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ds-step.active {
   color: var(--td-brand-color);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .ds-step.done {
   color: var(--td-text-color-secondary);
+  font-weight: 500;
 }
 
 .ds-step-num {
+  flex-shrink: 0;
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -1214,7 +1519,10 @@ const drawerConfirmText = computed(() => {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  border: 1px solid currentColor;
+  font-weight: 600;
+  border: 1px solid var(--td-component-stroke);
+  color: var(--td-text-color-placeholder);
+  background: transparent;
 }
 
 .ds-step.active .ds-step-num {
@@ -1224,9 +1532,13 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-step.done .ds-step-num {
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-success-color);
-  border-color: color-mix(in srgb, var(--td-success-color) 35%, var(--td-component-stroke));
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+  color: var(--td-brand-color);
+  border-color: transparent;
+}
+
+.ds-step-check {
+  font-size: 14px;
 }
 
 .ds-loading-center {
@@ -1322,6 +1634,10 @@ const drawerConfirmText = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.ds-setup-guide--standalone {
+  margin-bottom: 4px;
 }
 
 .ds-setup-guide__toggle {
@@ -1496,25 +1812,6 @@ const drawerConfirmText = computed(() => {
   margin: 0 2px;
 }
 
-.credential-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.credential-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.credential-field-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--td-text-color-primary);
-  line-height: 1.4;
-}
-
 .credential-edit-actions {
   display: flex;
   justify-content: flex-end;
@@ -1527,7 +1824,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .form-item {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .form-item--flat {
@@ -1546,11 +1843,15 @@ const drawerConfirmText = computed(() => {
   font-weight: 500;
   margin-bottom: 6px;
   color: var(--td-text-color-primary);
-}
+  line-height: 1.4;
 
-.required-mark {
-  color: var(--td-error-color);
-  margin-left: 2px;
+  &.required::before {
+    content: '*';
+    color: var(--td-error-color);
+    margin-right: 4px;
+    font-weight: 500;
+    line-height: 1;
+  }
 }
 
 .form-desc {
@@ -1838,6 +2139,55 @@ const drawerConfirmText = computed(() => {
   gap: 16px;
 }
 
+.custom-headers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.custom-headers-desc {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+.custom-headers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .custom-header-key {
+    flex: 0 0 38%;
+  }
+
+  .custom-header-value {
+    flex: 1;
+  }
+
+  .custom-header-remove {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: var(--td-text-color-placeholder);
+    border-radius: 6px;
+    transition: all 0.18s ease;
+
+    &:hover {
+      background: var(--td-error-color-light);
+      color: var(--td-error-color);
+    }
+  }
+}
+
 .ds-empty-retry {
   padding: 0;
   border: none;
@@ -1901,5 +2251,22 @@ const drawerConfirmText = computed(() => {
   border-color: var(--td-component-stroke);
   color: var(--td-text-color-primary);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+</style>
+
+<!--
+  Drawer header logo — same white badge as list cards / StorageEngineSettings.
+-->
+<style lang="less">
+.datasource-editor-drawer .setting-drawer__header-icon:has(.datasource-header-icon__img) {
+  background: var(--td-bg-color-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+}
+
+.datasource-header-icon__img {
+  display: block;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
 }
 </style>

@@ -20,6 +20,7 @@ import { buildQueryWithHostContext } from '@/utils/embedContext'
 import { fileToDataURI } from '@/utils/embedFile'
 import { useI18n } from 'vue-i18n'
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler'
+import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize'
 
 export function useEmbedChatSession(options: {
   sessionId: Ref<string>
@@ -90,6 +91,8 @@ export function useEmbedChatSession(options: {
     scrollToBottom(true)
   }
 
+  useStickyBottomOnResize(scrollContainer, userHasScrolledUp, scrollToBottom)
+
   const debounce = <T extends (...args: never[]) => void>(fn: T, delay: number) => {
     let timer: ReturnType<typeof setTimeout>
     return (...args: Parameters<T>) => {
@@ -115,6 +118,8 @@ export function useEmbedChatSession(options: {
     shouldShowGlobalTypingIndicator,
     handleMsgList,
     processStreamChunk,
+    prepareForNewOutgoingMessage,
+    markInFlightAssistantStopped,
   } = useChatStreamHandler({
     messagesList,
     loading,
@@ -149,8 +154,22 @@ export function useEmbedChatSession(options: {
 
   const debouncedScrollTop = debounce(onChatScrollTop, 500)
 
+  let lastScrollTop = 0
   const handleScroll = () => {
-    userHasScrolledUp.value = !isNearBottom()
+    const el = scrollContainer.value
+    if (el) {
+      const currentTop = el.scrollTop
+      // Only an actual upward scroll detaches from the live edge. Content that
+      // grows after a chunk (images, diagrams) keeps scrollTop fixed and would
+      // otherwise fire a stale scroll event that falsely marks the user as
+      // scrolled up, killing the auto-follow during streaming.
+      if (currentTop < lastScrollTop - 1) {
+        userHasScrolledUp.value = !isNearBottom()
+      } else if (isNearBottom()) {
+        userHasScrolledUp.value = false
+      }
+      lastScrollTop = currentTop
+    }
     debouncedScrollTop()
   }
 
@@ -203,6 +222,7 @@ export function useEmbedChatSession(options: {
 
   const handleStopGeneration = () => {
     stopStream()
+    markInFlightAssistantStopped(currentAssistantMessageId.value)
     const messageId = currentAssistantMessageId.value
     if (messageId) {
       stopEmbedSession(
@@ -221,6 +241,8 @@ export function useEmbedChatSession(options: {
     value: string,
     opts: { webSearchEnabled?: boolean; imageFiles?: File[]; attachmentFiles?: File[] } = {},
   ) => {
+    stopStream()
+    prepareForNewOutgoingMessage()
     const outboundQuery = buildQueryWithHostContext(value, options.hostContext?.value)
     const visitorWebSearchEnabled = opts.webSearchEnabled ?? false
     const imageFiles = (options.allowFileUpload ? opts.imageFiles : undefined) || []

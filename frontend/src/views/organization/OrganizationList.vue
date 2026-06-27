@@ -161,7 +161,7 @@
                     $t('organization.settings.pendingReview') }}</span>
                 </t-tooltip>
               </div>
-              <div class="bottom-right">
+              <div v-if="showOrgRelationTag(org)" class="bottom-right">
                 <div class="relation-role-tag" :class="org.is_owner ? 'owner' : (org.my_role || '')">
                   <t-icon :name="org.is_owner ? 'usergroup-add' : 'usergroup'" size="14px" />
                   <span>{{ org.is_owner ? $t('organization.owner') : (org.my_role ?
@@ -557,6 +557,7 @@ import { useI18n } from 'vue-i18n'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
+import { shouldShowOrgRelationTag } from '@/utils/card-list-badge'
 
 interface OrgWithUI extends Organization {
   showMore?: boolean
@@ -808,6 +809,14 @@ const orgSectionCounts = computed<Record<OrgSectionKey, number>>(() => {
   filteredOrganizations.value.forEach(o => { c[orgSectionOf(o)]++ })
   return c
 })
+
+function showOrgRelationTag(org: { is_owner?: boolean; my_role?: string }): boolean {
+  return shouldShowOrgRelationTag({
+    spaceSelection: spaceSelection.value,
+    isOwner: !!org.is_owner,
+    myRole: org.my_role,
+  })
+}
 
 const emptyStateTitle = computed(() => {
   if (spaceSelection.value === 'created') return t('organization.emptyCreated')
