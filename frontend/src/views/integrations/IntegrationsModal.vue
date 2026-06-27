@@ -3,12 +3,6 @@
     <Transition name="modal">
       <div v-if="visible" class="settings-overlay" @click.self="handleClose">
         <div class="settings-modal">
-          <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-
           <div class="settings-container">
             <div class="settings-sidebar">
               <div class="sidebar-header">
@@ -22,14 +16,20 @@
                   :class="['nav-item', { active: currentSection === item.key }]"
                   @click="currentSection = item.key"
                 >
-                  <t-icon :name="item.icon" class="nav-icon" />
+                  <span v-if="item.emoji" class="nav-emoji" role="img" :aria-label="item.label">{{ item.emoji }}</span>
+                  <t-icon v-else :name="item.icon" class="nav-icon" />
                   <span class="nav-label">{{ item.label }}</span>
                 </div>
               </div>
             </div>
 
             <div class="settings-content">
-              <div class="content-wrapper">
+              <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </button>
+              <div class="content-wrapper" :class="{ 'content-wrapper--landing': isLandingSection }">
                 <div v-if="currentSection === 'im'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.im.title') }}</h2>
@@ -56,6 +56,9 @@
                   </div>
                   <AgentEmbedChannelPanel v-model:filter-agent-id="filterAgentId" />
                 </div>
+
+                <ChromeExtensionLanding v-if="currentSection === 'chrome'" />
+                <ClawSkillLanding v-if="currentSection === 'claw'" />
               </div>
             </div>
           </div>
@@ -71,25 +74,37 @@ import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import IMChannelPanel from '@/components/IMChannelPanel.vue';
 import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue';
+import ChromeExtensionLanding from '@/views/integrations/ChromeExtensionLanding.vue';
+import ClawSkillLanding from '@/views/integrations/ClawSkillLanding.vue';
+
+type IntegrationTab = 'im' | 'embed' | 'chrome' | 'claw';
+
+const INTEGRATION_TABS: IntegrationTab[] = ['im', 'embed', 'chrome', 'claw'];
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 
-const currentSection = ref<'im' | 'embed'>('im');
+const currentSection = ref<IntegrationTab>('im');
 const filterAgentId = ref('');
 
 const visible = computed(() => route.name === 'integrations');
 
+const isLandingSection = computed(
+  () => currentSection.value === 'chrome' || currentSection.value === 'claw',
+);
+
 const navItems = computed(() => [
   { key: 'im' as const, icon: 'chat-message', label: t('integrations.tabs.im') },
   { key: 'embed' as const, icon: 'code', label: t('integrations.tabs.embed') },
+  { key: 'chrome' as const, icon: 'extension', label: t('integrations.tabs.chrome') },
+  { key: 'claw' as const, icon: '', emoji: '🦞', label: t('integrations.tabs.claw') },
 ]);
 
 function applyRouteQuery() {
   const tab = route.query.tab as string;
-  if (tab === 'im' || tab === 'embed') {
-    currentSection.value = tab;
+  if (INTEGRATION_TABS.includes(tab as IntegrationTab)) {
+    currentSection.value = tab as IntegrationTab;
   }
   filterAgentId.value = (route.query.agentId as string) || '';
 }
@@ -157,14 +172,23 @@ watch(
   overflow: hidden;
 }
 
+.settings-content {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .close-btn {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 12px;
+  right: 12px;
   width: 32px;
   height: 32px;
   border: none;
-  background: transparent;
+  background: var(--td-bg-color-container);
   border-radius: 6px;
   cursor: pointer;
   display: flex;
@@ -173,10 +197,23 @@ watch(
   color: var(--td-text-color-secondary);
   transition: all 0.2s ease;
   z-index: 10;
+  box-shadow: 0 0 0 1px var(--td-component-stroke);
 
   &:hover {
     background: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
+  }
+}
+
+.content-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 28px;
+
+  &--landing {
+    padding-top: 44px;
+    padding-right: 52px;
+    padding-bottom: 20px;
   }
 }
 
@@ -257,26 +294,21 @@ watch(
   flex-shrink: 0;
 }
 
+.nav-emoji {
+  margin-right: 8px;
+  font-size: 15px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
 .nav-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.settings-content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.content-wrapper {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 28px 28px;
 }
 
 .section-header {

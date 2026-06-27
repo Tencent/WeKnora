@@ -5712,10 +5712,12 @@ export default {
   },
   integrations: {
     title: "发布集成",
-    subtitle: "将智能体发布到 IM 平台与网站",
+    subtitle: "将智能体发布到 IM、网站、浏览器与 AI 助手",
     tabs: {
       im: "IM 集成",
       embed: "网页嵌入",
+      chrome: "Chrome 插件",
+      claw: "Claw Skill",
     },
     manageSectionTitle: "渠道配置",
     manageSectionDesc: "选择智能体后，可创建或编辑该智能体下的集成渠道",
@@ -5743,6 +5745,118 @@ export default {
       label: "发布渠道",
       desc: "将智能体发布到 IM 平台或网站，在集成中心统一管理",
       manage: "管理",
+    },
+    chrome: {
+      title: "知识管理助手",
+      subtitle:
+        "配合 WeKnora 自建服务使用：在任意网页侧边栏提问、剪藏内容、Markdown 速记，将浏览中的知识沉淀到你的知识库。",
+      capabilitiesTitle: "核心能力",
+      capabilities: {
+        qa: {
+          title: "知识库智能问答",
+          desc: "侧边栏对话面板，支持多知识库切换与快速/深度/精确三种回答模式，边浏览边提问不打断工作流。",
+        },
+        clip: {
+          title: "网页内容一键采集",
+          desc: "保存页面 URL、AI 智能剪藏正文，或手动框选区域，精准写入指定知识库。",
+        },
+        notes: {
+          title: "Markdown 速记",
+          desc: "内置 Markdown 编辑器，随时记录灵感与笔记，一键保存到知识库。",
+        },
+        shortcuts: {
+          title: "高效快捷键",
+          desc: "可自定义快捷键快速提问、打开侧边栏等操作，提升日常效率。",
+        },
+      },
+      scenariosTitle: "适用场景",
+      scenarios: {
+        research: "日常资料调研",
+        learning: "学习笔记整理",
+        tech: "技术资料收集",
+        work: "工作知识沉淀",
+      },
+      stepsTitle: "配置步骤",
+      steps: {
+        api: {
+          title: "获取 API 凭证",
+          desc: "在「设置 → API 信息」中复制 API Key 与 API 地址。",
+        },
+        port: {
+          title: "桌面版配置固定端口（推荐）",
+          desc: "使用 WeKnora 桌面版时，在 API 信息中设置固定端口（如 37841），避免每次启动后地址变化导致插件断连。",
+        },
+        install: {
+          title: "安装 Chrome 插件",
+          desc: "前往 Chrome 应用商店安装「知识管理助手」。",
+        },
+        connect: {
+          title: "在插件中完成连接",
+          desc: "打开插件设置，选择「企业/开发者」模式，填入服务 API 地址与 API Key。下方为当前服务地址。",
+        },
+      },
+      openApiSettings: "打开 API 信息",
+      copy: "复制",
+      copySuccess: "已复制 API 地址",
+      installCta: "前往 Chrome 应用商店",
+      installCtaHint: "官方扩展 · 将在新标签页打开",
+      storeMeta: "Chrome 应用商店 · v1.0.0",
+    },
+    claw: {
+      title: "WeKnora Skill",
+      subtitle:
+        "通过 WeKnora REST API 导入文档并执行混合检索（向量 + 关键词）。适用于上传文件/URL/Markdown 到知识库、跨库检索与浏览知识内容。",
+      capabilitiesTitle: "Skill 能力",
+      capabilities: {
+        upload: {
+          title: "上传文件",
+          desc: "将 PDF、Word、Excel 等文档上传至知识库，自动解析与向量化。",
+        },
+        url: {
+          title: "导入网页",
+          desc: "通过 URL 抓取网页内容并写入知识库，支持解析状态轮询。",
+        },
+        manual: {
+          title: "写入 Markdown",
+          desc: "以 Markdown 形式创建或编辑知识条目，适合会议记录与结构化笔记。",
+        },
+        search: {
+          title: "混合检索",
+          desc: "单库 hybrid-search 与跨库 knowledge-search，结合向量与关键词召回。",
+        },
+        browse: {
+          title: "浏览知识库",
+          desc: "列出知识库与条目、查看详情，管理已导入的知识内容。",
+        },
+      },
+      stepsTitle: "配置步骤",
+      steps: {
+        api: {
+          title: "获取 API 凭证",
+          desc: "在「设置 → API 信息」中复制 API Key 与 API 地址。",
+        },
+        env: {
+          title: "配置环境变量",
+          desc: "在终端或 ~/.zshrc、~/.bashrc 中设置 WEKNORA_BASE_URL 与 WEKNORA_API_KEY。下方示例已填入当前 API 地址，请将 API Key 替换为实际值。",
+        },
+        install: {
+          title: "安装 Skill",
+          desc: "在已安装 OpenClaw CLI 的环境中执行下方命令，或前往 ClawHub 页面按指引安装。",
+        },
+        verify: {
+          title: "验证连接",
+          desc: "安装后让 Agent 列出知识库或执行一次检索，确认 API 凭证与网络可达。",
+        },
+      },
+      openApiSettings: "打开 API 信息",
+      copy: "复制",
+      copyEnvSuccess: "已复制环境变量示例",
+      copyCmdSuccess: "已复制安装命令",
+      ecosystemNote:
+        "Skill 托管于 ClawHub（{'@'}lyingbug/weknora），完整 API 说明与版本历史请参见 ClawHub 页面。",
+      installCta: "前往 ClawHub",
+      installCtaHint: "安装 WeKnora Skill · 将在新标签页打开",
+      hubMeta: "ClawHub · {'@'}lyingbug/weknora · MIT-0",
     },
   },
   imOverview: {
