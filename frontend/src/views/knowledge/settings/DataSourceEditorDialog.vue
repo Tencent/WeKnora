@@ -621,6 +621,11 @@ async function handleSubmit() {
     }
 
     emit('saved')
+    // The data source is now finalized (created/updated above). Clear tempDsId
+    // so the visible-watcher's create-mode cleanup does NOT delete the source
+    // we just saved. The cleanup must only fire when the user cancels/closes
+    // without saving, leaving a stray temp row.
+    tempDsId.value = ''
     visible.value = false
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.saveFailed'))
