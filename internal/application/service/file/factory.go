@@ -134,13 +134,13 @@ func NewFileServiceFromStorageConfig(
 		if sec.OSS.UseTempBucket && sec.OSS.TempBucketName != "" {
 			svc, err = NewOssFileServiceWithTempBucket(
 				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
-				sec.OSS.BucketName, pathPrefix,
+				sec.OSS.BucketName, sec.OSS.SignatureVersion, pathPrefix,
 				sec.OSS.TempBucketName, sec.OSS.TempRegion,
 			)
 		} else {
 			svc, err = NewOssFileService(
 				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
-				sec.OSS.BucketName, pathPrefix,
+				sec.OSS.BucketName, sec.OSS.SignatureVersion, pathPrefix,
 			)
 		}
 		return svc, p, err
