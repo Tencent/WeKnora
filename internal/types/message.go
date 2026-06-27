@@ -219,6 +219,12 @@ type Message struct {
 	// KnowledgeID links this message to a Knowledge entry in the chat history knowledge base
 	// Used for vector search indexing: when set, the message content has been indexed as a Knowledge passage
 	KnowledgeID string `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`
+	// FeedbackType is the current user's feedback for assistant messages.
+	FeedbackType string `json:"feedback_type,omitempty" gorm:"-"`
+	// FeedbackReasonCode is the current user's dislike reason code, when present.
+	FeedbackReasonCode string `json:"feedback_reason_code,omitempty" gorm:"-"`
+	// FeedbackReasonText is the current user's private dislike reason text, when present.
+	FeedbackReasonText string `json:"feedback_reason_text,omitempty" gorm:"-"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp

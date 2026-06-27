@@ -215,3 +215,48 @@ func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
 	assert.Equal(t, "updated content", saved.Content)
 }
+
+func TestListPagedChunksByKnowledgeID_FeedbackFilters(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	lowRate := 0.2
+	highRate := 0.9
+	low := makeChunk(kbID, knowledgeID, string(types.ChunkTypeText))
+	low.PositiveRate = &lowRate
+	low.LikeCount = 1
+	low.DislikeCount = 4
+	low.NeedsOptimization = true
+	high := makeChunk(kbID, knowledgeID, string(types.ChunkTypeText))
+	high.PositiveRate = &highRate
+	high.LikeCount = 9
+	high.DislikeCount = 1
+	neutral := makeChunk(kbID, knowledgeID, string(types.ChunkTypeText))
+	neutral.PositiveRate = nil
+	require.NoError(t, db.Create([]*types.Chunk{low, high, neutral}).Error)
+
+	maxRate := 0.5
+	chunks, total, err := repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 10},
+		[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
+		&types.ChunkFeedbackFilter{MaxPositiveRate: &maxRate},
+	)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, chunks, 1)
+	require.Equal(t, low.ID, chunks[0].ID)
+
+	needsOptimization := true
+	chunks, total, err = repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, knowledgeID, &types.Pagination{Page: 1, PageSize: 10},
+		[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
+		&types.ChunkFeedbackFilter{NeedsOptimization: &needsOptimization},
+	)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, chunks, 1)
+	require.Equal(t, low.ID, chunks[0].ID)
+}

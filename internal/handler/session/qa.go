@@ -729,7 +729,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
+				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, true)
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventAgentComplete,
 					SessionID: sessionID,
@@ -742,6 +742,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 	// Execute QA asynchronously
 	go func() {
+		var serviceErr error
 		defer func() {
 			if r := recover(); r != nil {
 				buf := make([]byte, 10240)
@@ -765,7 +766,8 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 					context.WithoutCancel(streamCtx.asyncCtx),
 					types.TenantIDContextKey, reqCtx.session.TenantID,
 				)
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
+				saveChunkRefs := serviceErr == nil && streamCtx.asyncCtx.Err() == nil
+				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, saveChunkRefs)
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}
 		}()
@@ -776,7 +778,6 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		// Build QA request and invoke the appropriate service
 		qaReq := reqCtx.buildQARequest()
 
-		var serviceErr error
 		var stageName string
 		if mode == qaModeNormal {
 			stageName = "knowledge_qa_execution"
@@ -937,10 +938,27 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 
 // completeAssistantMessage marks an assistant message as complete, updates it,
 // and asynchronously indexes the Q&A pair into the chat history knowledge base.
-func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage *types.Message, userQuery string) {
+func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage *types.Message, userQuery string, saveChunkRefs bool) {
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true
 	_ = h.messageService.UpdateMessage(ctx, assistantMessage)
+
+	if saveChunkRefs && h.messageFeedbackService != nil && userQuery != "" && !assistantMessage.IsFallback && len(assistantMessage.KnowledgeReferences) > 0 {
+		bgCtx := context.WithoutCancel(ctx)
+		go func() {
+			sessionTenantID, ok := types.SessionTenantIDFromContext(bgCtx)
+			if !ok || sessionTenantID == 0 {
+				sessionTenantID, _ = types.TenantIDFromContext(bgCtx)
+			}
+			if sessionTenantID == 0 {
+				logger.Warnf(bgCtx, "skip saving message chunk refs: tenant missing for message %s", assistantMessage.ID)
+				return
+			}
+			if err := h.messageFeedbackService.SaveMessageChunkRefs(bgCtx, sessionTenantID, nil, assistantMessage); err != nil {
+				logger.Warnf(bgCtx, "save message chunk refs failed for message %s: %v", assistantMessage.ID, err)
+			}
+		}()
+	}
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.

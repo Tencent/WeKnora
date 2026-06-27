@@ -59,6 +59,30 @@ type MessageService interface {
 	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
 }
 
+// MessageFeedbackService manages answer feedback and chunk attribution.
+type MessageFeedbackService interface {
+	SaveMessageChunkRefs(ctx context.Context, sessionTenantID uint64, searchTargets types.SearchTargets, message *types.Message) error
+	SetMessageFeedback(ctx context.Context, sessionID, messageID string, req types.MessageFeedbackRequest) (*types.MessageFeedbackResponse, error)
+	AttachFeedbackToMessages(ctx context.Context, sessionTenantID uint64, userID string, messages []*types.Message) error
+	GetChunkFeedbackStats(ctx context.Context, chunkID string) (*types.ChunkFeedbackStats, error)
+	GetChunkWeightLogs(ctx context.Context, chunkID string, limit int) ([]*types.ChunkWeightLog, error)
+	ResetChunkFeedback(ctx context.Context, chunkID string) (*types.ChunkFeedbackStats, error)
+}
+
+// MessageFeedbackRepository stores feedback, attribution, and weight logs.
+type MessageFeedbackRepository interface {
+	SaveMessageChunkRefs(ctx context.Context, refs []*types.MessageChunkRef) error
+	GetMessageChunkRefs(ctx context.Context, sessionTenantID uint64, messageID string) ([]*types.MessageChunkRef, error)
+	GetFeedbacksByMessageIDs(ctx context.Context, sessionTenantID uint64, userID string, messageIDs []string) ([]*types.MessageFeedback, error)
+	UpsertMessageFeedback(ctx context.Context, feedback *types.MessageFeedback) error
+	RecalculateChunkFeedback(ctx context.Context, chunkTenantID uint64, chunkID string) (*types.ChunkFeedbackStats, error)
+	CreateChunkWeightLog(ctx context.Context, log *types.ChunkWeightLog) error
+	GetChunkFeedbackStats(ctx context.Context, chunkTenantID uint64, chunkID string) (*types.ChunkFeedbackStats, error)
+	GetChunkWeightLogs(ctx context.Context, chunkTenantID uint64, chunkID string, limit int) ([]*types.ChunkWeightLog, error)
+	ResetChunkFeedback(ctx context.Context, chunkTenantID uint64, chunkID string, resetAt time.Time) error
+	WithTransaction(ctx context.Context, fn func(repo MessageFeedbackRepository) error) error
+}
+
 // MessageRepository defines the message repository interface
 type MessageRepository interface {
 	// CreateMessage creates a message

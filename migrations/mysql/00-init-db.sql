@@ -147,6 +147,12 @@ CREATE TABLE chunks (
     image_info TEXT,
     relation_chunks JSON,
     indirect_relation_chunks JSON,
+    like_count BIGINT NOT NULL DEFAULT 0,
+    dislike_count BIGINT NOT NULL DEFAULT 0,
+    positive_rate DOUBLE NULL,
+    recall_weight DOUBLE NOT NULL DEFAULT 1.0,
+    needs_optimization BOOLEAN NOT NULL DEFAULT FALSE,
+    feedback_reset_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -155,3 +161,59 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+
+CREATE TABLE message_chunk_refs (
+    id VARCHAR(36) PRIMARY KEY,
+    session_tenant_id BIGINT NOT NULL,
+    chunk_tenant_id BIGINT NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    chunk_type VARCHAR(32) NOT NULL DEFAULT '',
+    match_type INTEGER NOT NULL DEFAULT 0,
+    score DOUBLE NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_message_chunk_refs_session_msg_chunk (session_tenant_id, message_id, chunk_id),
+    KEY idx_message_chunk_refs_message_id (message_id),
+    KEY idx_message_chunk_refs_chunk_id (chunk_id),
+    KEY idx_message_chunk_refs_session_id (session_id),
+    KEY idx_message_chunk_refs_kb_id (knowledge_base_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE message_feedbacks (
+    id VARCHAR(36) PRIMARY KEY,
+    session_tenant_id BIGINT NOT NULL,
+    user_id VARCHAR(36) NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    feedback_type VARCHAR(16) NOT NULL DEFAULT 'none',
+    reason_code VARCHAR(64) NOT NULL DEFAULT '',
+    reason_text TEXT NOT NULL,
+    feedback_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_message_feedbacks_current (session_tenant_id, user_id, message_id),
+    KEY idx_message_feedbacks_user_id (user_id),
+    KEY idx_message_feedbacks_session_id (session_id),
+    KEY idx_message_feedbacks_message_id (message_id),
+    KEY idx_message_feedbacks_feedback_at (feedback_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE chunk_weight_logs (
+    id VARCHAR(36) PRIMARY KEY,
+    chunk_tenant_id BIGINT NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    old_weight DOUBLE NOT NULL,
+    new_weight DOUBLE NOT NULL,
+    source VARCHAR(32) NOT NULL,
+    source_message_id VARCHAR(36) NOT NULL DEFAULT '',
+    source_feedback_id VARCHAR(36) NOT NULL DEFAULT '',
+    reason TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_chunk_weight_logs_chunk_created (chunk_tenant_id, chunk_id, created_at),
+    KEY idx_chunk_weight_logs_source_message (source_message_id),
+    KEY idx_chunk_weight_logs_source_feedback (source_feedback_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
