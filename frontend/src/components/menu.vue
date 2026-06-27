@@ -259,7 +259,7 @@ import telegramLogo from '@/assets/img/im/telegram.svg';
 import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
 import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
-import qqbotLogo from '@/assets/img/im/qqbot.svg';
+import qqbotLogo from '@/assets/img/im/qqbot.png';
 
 const PLATFORM_LOGO: Record<string, string> = {
     wecom: wecomLogo,

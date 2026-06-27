@@ -13,21 +13,12 @@
         </div>
 
         <div v-else-if="!loading" class="channel-grid">
-          <button
-            v-for="channel in channels"
-            :key="channel.id"
-            type="button"
-            class="channel-card channel-card--clickable"
-            @click="openDrawer(channel)"
-          >
+          <button v-for="channel in channels" :key="channel.id" type="button"
+            class="channel-card channel-card--clickable" @click="openDrawer(channel)">
             <div class="channel-card__badge" :class="`channel-card__badge--${channel.platform}`">
-              <img
-                v-if="platformLogo(channel.platform)"
-                :src="platformLogo(channel.platform)"
-                :alt="platformLabel(channel.platform)"
-                class="channel-card__logo"
-              />
-              <t-icon v-else name="chat-message" size="18px" />
+              <img v-if="platformLogo(channel.platform)" :src="platformLogo(channel.platform)"
+                :alt="platformLabel(channel.platform)" class="channel-card__logo" />
+              <t-icon v-else name="chat-message" size="22px" />
             </div>
             <div class="channel-card__body">
               <div class="channel-card__header">
@@ -41,39 +32,20 @@
               </span>
             </div>
             <div v-if="authStore.hasRole('admin')" class="channel-card__actions" @click.stop>
-              <t-dropdown
-                trigger="click"
-                placement="bottom-right"
-                attach="body"
-                :options="channelMenuOptions(channel)"
-                @click="(data) => handleChannelMenuClick(data, channel)"
-              >
-                <t-button
-                  variant="text"
-                  shape="square"
-                  size="small"
-                  class="channel-card__action-btn channel-card__more"
-                  @click.stop
-                >
+              <t-dropdown trigger="click" placement="bottom-right" attach="body" :options="channelMenuOptions(channel)"
+                @click="(data) => handleChannelMenuClick(data, channel)">
+                <t-button variant="text" shape="square" size="small" class="channel-card__action-btn channel-card__more"
+                  @click.stop>
                   <template #icon><t-icon name="ellipsis" /></template>
                 </t-button>
               </t-dropdown>
-              <t-popconfirm
-                :content="$t('agentEditor.im.deleteConfirm')"
+              <t-popconfirm :content="$t('agentEditor.im.deleteConfirm')"
                 :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
-                :cancel-btn="{ content: $t('common.cancel') }"
-                placement="bottom-right"
-                @confirm="() => handleDelete(channel.id)"
-              >
+                :cancel-btn="{ content: $t('common.cancel') }" placement="bottom-right"
+                @confirm="() => handleDelete(channel.id)">
                 <t-tooltip :content="$t('common.delete')" placement="top">
-                  <t-button
-                    theme="danger"
-                    shape="square"
-                    variant="text"
-                    size="small"
-                    class="channel-card__action-btn channel-card__delete"
-                    @click.stop
-                  >
+                  <t-button theme="danger" shape="square" variant="text" size="small"
+                    class="channel-card__action-btn channel-card__delete" @click.stop>
                     <template #icon><t-icon name="delete" /></template>
                   </t-button>
                 </t-tooltip>
@@ -81,12 +53,8 @@
             </div>
           </button>
 
-          <button
-            v-if="authStore.hasRole('admin')"
-            type="button"
-            class="channel-card channel-card--add"
-            @click="openCreate"
-          >
+          <button v-if="authStore.hasRole('admin')" type="button" class="channel-card channel-card--add"
+            @click="openCreate">
             <span class="channel-card__badge" aria-hidden="true">
               <t-icon name="add" />
             </span>
@@ -101,26 +69,13 @@
       </t-loading>
     </div>
 
-    <SettingDrawer
-      v-model:visible="showCreateDialog"
-      class="im-channel-drawer"
-      :title="drawerTitle"
-      :description="drawerStepDescription"
-      storage-key="setting-drawer:im-channel"
-      width="560px"
-      :confirm-loading="saving"
-      :confirm-text="drawerConfirmText"
-      :hide-footer="!authStore.hasRole('admin')"
-      @confirm="handleDrawerConfirm"
-      @cancel="resetForm"
-    >
+    <SettingDrawer v-model:visible="showCreateDialog" class="im-channel-drawer" :title="drawerTitle"
+      :description="drawerStepDescription" storage-key="setting-drawer:im-channel" width="560px"
+      :confirm-loading="saving" :confirm-text="drawerConfirmText" :hide-footer="!authStore.hasRole('admin')"
+      @confirm="handleDrawerConfirm" @cancel="resetForm">
       <template #headerIcon>
-        <img
-          v-if="platformLogo(formData.platform)"
-          :src="platformLogo(formData.platform)"
-          :alt="platformLabel(formData.platform)"
-          class="drawer-platform-icon"
-        />
+        <img v-if="platformLogo(formData.platform)" :src="platformLogo(formData.platform)"
+          :alt="platformLabel(formData.platform)" class="drawer-platform-icon" />
         <t-icon v-else name="chat-message" />
       </template>
 
@@ -131,11 +86,8 @@
       </template>
 
       <div class="im-steps">
-        <div
-          v-for="(title, i) in stepTitles"
-          :key="i"
-          :class="['im-step', { active: wizardStep === i, done: wizardStep > i }]"
-        >
+        <div v-for="(title, i) in stepTitles" :key="i"
+          :class="['im-step', { active: wizardStep === i, done: wizardStep > i }]">
           <span class="im-step-num">
             <t-icon v-if="wizardStep > i" name="check" class="im-step-check" />
             <template v-else>{{ i + 1 }}</template>
@@ -152,36 +104,20 @@
           <div class="form-item">
             <label class="form-label required">{{ $t('integrations.boundAgent') }}</label>
             <div class="agent-field-row">
-              <t-select
-                v-model="formData.target_agent_id"
-                :options="agentOptions"
-                filterable
-                :placeholder="$t('integrations.selectAgentPlaceholder')"
-              />
+              <t-select v-model="formData.target_agent_id" :options="agentOptions" filterable
+                :placeholder="$t('integrations.selectAgentPlaceholder')" />
             </div>
           </div>
 
           <div class="form-item">
             <label class="form-label required">{{ $t('agentEditor.im.platform') }}</label>
-            <t-select
-              v-model="formData.platform"
-              :disabled="!!editingChannel"
-              class="im-platform-select"
-              @change="onPlatformChange"
-            >
+            <t-select v-model="formData.platform" :disabled="!!editingChannel" class="im-platform-select"
+              @change="onPlatformChange">
               <template v-if="platformLogo(formData.platform)" #prefixIcon>
-                <img
-                  :src="platformLogo(formData.platform)"
-                  :alt="platformLabel(formData.platform)"
-                  class="im-platform-select-prefix"
-                />
+                <img :src="platformLogo(formData.platform)" :alt="platformLabel(formData.platform)"
+                  class="im-platform-select-prefix" />
               </template>
-              <t-option
-                v-for="item in platformOptions"
-                :key="item.value"
-                :value="item.value"
-                :label="item.label"
-              >
+              <t-option v-for="item in platformOptions" :key="item.value" :value="item.value" :label="item.label">
                 <div class="im-platform-select-option">
                   <img :src="item.logo" :alt="item.label" class="im-platform-select-option__icon" />
                   <span>{{ item.label }}</span>
@@ -192,11 +128,8 @@
 
           <div class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.channelName') }}</label>
-            <t-input
-              v-model="formData.name"
-              :placeholder="$t('agentEditor.im.channelNamePlaceholder')"
-              @focus="channelNameTouched = true"
-            />
+            <t-input v-model="formData.name" :placeholder="$t('agentEditor.im.channelNamePlaceholder')"
+              @focus="channelNameTouched = true" />
             <p v-if="!editingChannel" class="form-desc">{{ $t('agentEditor.im.channelNameDefaultHint') }}</p>
           </div>
 
@@ -219,46 +152,33 @@
           <div class="form-item">
             <label class="form-label required">{{ $t('agentEditor.im.mode') }}</label>
             <div class="option-chips">
-              <button
-                type="button"
-                class="option-chip"
+              <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.mode === 'websocket' }"
-                :disabled="formData.platform === 'mattermost'"
-                @click="formData.mode = 'websocket'"
-              >
+                :disabled="formData.platform === 'mattermost'" @click="formData.mode = 'websocket'">
                 WebSocket
               </button>
-              <button
-                type="button"
-                class="option-chip"
-                :class="{ 'option-chip--active': formData.mode === 'webhook' }"
-                @click="formData.mode = 'webhook'"
-              >
+              <button type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
+                @click="formData.mode = 'webhook'">
                 Webhook
               </button>
             </div>
             <p class="form-desc">
-              {{ formData.platform === 'mattermost' ? $t('agentEditor.im.mattermostModeHint') : $t('agentEditor.im.modeHint') }}
+              {{ formData.platform === 'mattermost' ? $t('agentEditor.im.mattermostModeHint') :
+                $t('agentEditor.im.modeHint') }}
             </p>
           </div>
 
           <div class="form-item">
             <label class="form-label required">{{ $t('agentEditor.im.outputMode') }}</label>
             <div class="option-chips">
-              <button
-                type="button"
-                class="option-chip"
+              <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.output_mode === 'stream' }"
-                @click="formData.output_mode = 'stream'"
-              >
+                @click="formData.output_mode = 'stream'">
                 {{ $t('agentEditor.im.outputStream') }}
               </button>
-              <button
-                type="button"
-                class="option-chip"
+              <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.output_mode === 'full' }"
-                @click="formData.output_mode = 'full'"
-              >
+                @click="formData.output_mode = 'full'">
                 {{ $t('agentEditor.im.outputFull') }}
               </button>
             </div>
@@ -270,21 +190,14 @@
           <div class="form-item">
             <label class="form-label required">{{ $t('agentEditor.im.sessionMode') }}</label>
             <div class="option-chips">
-              <button
-                type="button"
-                class="option-chip"
+              <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.session_mode === 'user' }"
-                @click="formData.session_mode = 'user'"
-              >
+                @click="formData.session_mode = 'user'">
                 {{ $t('agentEditor.im.sessionModeUser') }}
               </button>
-              <button
-                type="button"
-                class="option-chip"
+              <button type="button" class="option-chip"
                 :class="{ 'option-chip--active': formData.session_mode === 'thread' }"
-                :disabled="!platformSupportsThread(formData.platform)"
-                @click="formData.session_mode = 'thread'"
-              >
+                :disabled="!platformSupportsThread(formData.platform)" @click="formData.session_mode = 'thread'">
                 {{ $t('agentEditor.im.sessionModeThread') }}
               </button>
             </div>
@@ -292,16 +205,14 @@
           </div>
         </section>
 
-        <section v-if="editingChannel && formData.mode === 'webhook'" class="setting-drawer__section im-drawer__section">
+        <section v-if="editingChannel && formData.mode === 'webhook'"
+          class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionCallback') }}</h4>
           <div class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.callbackUrl') }}</label>
             <div class="callback-url-control">
-              <t-input
-                :model-value="getCallbackUrl(editingChannel)"
-                readonly
-                class="mono-text-input callback-url-input"
-              />
+              <t-input :model-value="getCallbackUrl(editingChannel)" readonly
+                class="mono-text-input callback-url-input" />
               <t-button size="small" variant="text" :title="$t('common.copy')" @click="copyUrl(editingChannel)">
                 <t-icon name="file-copy" />
               </t-button>
@@ -316,12 +227,8 @@
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionKnowledge') }}</h4>
           <div class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.fileKnowledgeBase') }}</label>
-            <t-select
-              v-model="formData.knowledge_base_id"
-              :placeholder="$t('agentEditor.im.fileKnowledgeBasePlaceholder')"
-              clearable
-              filterable
-            >
+            <t-select v-model="formData.knowledge_base_id"
+              :placeholder="$t('agentEditor.im.fileKnowledgeBasePlaceholder')" clearable filterable>
               <t-option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id" :label="kb.name" />
             </t-select>
             <p class="form-desc">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
@@ -334,277 +241,280 @@
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionCredentials') }}</h4>
           <div class="drawer-form">
-        <!-- WeCom credentials -->
-        <template v-if="formData.platform === 'wecom'">
-          <div class="platform-link-hint">
-            <a href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
-              {{ $t('agentEditor.im.wecomConsole') }}
-              <t-icon name="link" class="link-icon" />
-            </a>
-            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-          </div>
-          <template v-if="formData.mode === 'websocket'">
-            <div class="form-item">
-              <label class="form-label">Bot ID</label>
-              <t-input v-model="formData.credentials.bot_id" placeholder="Bot ID" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">Bot Secret</label>
-              <t-input v-model="formData.credentials.bot_secret" type="password" placeholder="Bot Secret" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">WebSocket Endpoint</label>
-              <t-input v-model="formData.credentials.ws_endpoint" placeholder="wss://openws.work.weixin.qq.com" />
-              <p class="form-desc">{{ $t('agentEditor.im.wecomWSEndpointHint') }}</p>
-            </div>
-          </template>
-          <template v-else>
-            <div class="form-item">
-              <label class="form-label">Corp ID</label>
-              <t-input v-model="formData.credentials.corp_id" placeholder="Corp ID" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">Agent Secret</label>
-              <t-input v-model="formData.credentials.agent_secret" type="password" placeholder="Agent Secret" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">Token</label>
-              <t-input v-model="formData.credentials.token" placeholder="Token" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">EncodingAESKey</label>
-              <t-input v-model="formData.credentials.encoding_aes_key" placeholder="EncodingAESKey" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">Corp Agent ID</label>
-              <t-input-number v-model="formData.credentials.corp_agent_id" placeholder="Corp Agent ID" style="width: 100%;" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">API Base URL</label>
-              <t-input v-model="formData.credentials.api_base_url" placeholder="https://qyapi.weixin.qq.com" />
-              <p class="form-desc">{{ $t('agentEditor.im.wecomAPIBaseURLHint') }}</p>
-            </div>
-          </template>
-        </template>
-
-        <!-- Feishu credentials -->
-        <template v-if="formData.platform === 'feishu'">
-          <div class="platform-link-hint">
-            <a href="https://open.feishu.cn/" target="_blank" rel="noopener noreferrer" class="doc-link">
-              {{ $t('agentEditor.im.feishuConsole') }}
-              <t-icon name="link" class="link-icon" />
-            </a>
-            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-          </div>
-          <div class="form-item">
-            <label class="form-label">App ID</label>
-            <t-input v-model="formData.credentials.app_id" placeholder="App ID" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">App Secret</label>
-            <t-input v-model="formData.credentials.app_secret" type="password" placeholder="App Secret" />
-          </div>
-          <template v-if="formData.mode === 'webhook'">
-            <div class="form-item">
-              <label class="form-label">Verification Token</label>
-              <t-input v-model="formData.credentials.verification_token" placeholder="Verification Token" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">Encrypt Key</label>
-              <t-input v-model="formData.credentials.encrypt_key" type="password" placeholder="Encrypt Key" />
-            </div>
-          </template>
-        </template>
-
-        <!-- Slack credentials -->
-        <template v-if="formData.platform === 'slack'">
-          <div class="platform-link-hint">
-            <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" class="doc-link">
-              {{ $t('agentEditor.im.slackConsole') }}
-              <t-icon name="link" class="link-icon" />
-            </a>
-            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-          </div>
-          <template v-if="formData.mode === 'websocket'">
-            <div class="form-item">
-              <label class="form-label">App Token</label>
-              <t-input v-model="formData.credentials.app_token" type="password" placeholder="xapp-..." />
-            </div>
-            <div class="form-item">
-              <label class="form-label">Bot Token</label>
-              <t-input v-model="formData.credentials.bot_token" type="password" placeholder="xoxb-..." />
-            </div>
-          </template>
-          <template v-else>
-            <div class="form-item">
-              <label class="form-label">Bot Token</label>
-              <t-input v-model="formData.credentials.bot_token" type="password" placeholder="xoxb-..." />
-            </div>
-            <div class="form-item">
-              <label class="form-label">Signing Secret</label>
-              <t-input v-model="formData.credentials.signing_secret" type="password" placeholder="Signing Secret" />
-            </div>
-          </template>
-        </template>
-
-        <!-- Telegram credentials -->
-        <template v-if="formData.platform === 'telegram'">
-          <div class="platform-link-hint">
-            <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" class="doc-link">
-              {{ $t('agentEditor.im.telegramConsole') }}
-              <t-icon name="link" class="link-icon" />
-            </a>
-            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-          </div>
-          <div class="form-item">
-            <label class="form-label">Bot Token</label>
-            <t-input v-model="formData.credentials.bot_token" type="password" placeholder="123456789:AABBccdd..." />
-          </div>
-          <template v-if="formData.mode === 'webhook'">
-            <div class="form-item">
-              <label class="form-label">Secret Token</label>
-              <t-input v-model="formData.credentials.secret_token" type="password" placeholder="Secret Token (optional)" />
-            </div>
-          </template>
-        </template>
-
-        <!-- DingTalk credentials -->
-        <template v-if="formData.platform === 'dingtalk'">
-          <div class="platform-link-hint">
-            <a href="https://open.dingtalk.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
-              {{ $t('agentEditor.im.dingtalkConsole') }}
-              <t-icon name="link" class="link-icon" />
-            </a>
-            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-          </div>
-          <div class="form-item">
-            <label class="form-label">Client ID (AppKey)</label>
-            <t-input v-model="formData.credentials.client_id" placeholder="Client ID / AppKey" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">Client Secret (AppSecret)</label>
-            <t-input v-model="formData.credentials.client_secret" type="password" placeholder="Client Secret / AppSecret" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">{{ $t('agentEditor.im.dingtalkCardTemplateId') }}</label>
-            <t-input v-model="formData.credentials.card_template_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.schema" />
-            <p class="form-desc">{{ $t('agentEditor.im.dingtalkCardTemplateIdHint') }}</p>
-          </div>
-        </template>
-
-        <!-- QQBot credentials -->
-        <template v-if="formData.platform === 'qqbot'">
-          <div class="platform-link-hint">
-            <a href="https://q.qq.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
-              {{ $t('agentEditor.im.qqbotConsole') }}
-              <t-icon name="link" class="link-icon" />
-            </a>
-            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-          </div>
-          <div class="form-item">
-            <label class="form-label">App ID</label>
-            <t-input v-model="formData.credentials.app_id" placeholder="QQBot App ID" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">App Secret</label>
-            <t-input v-model="formData.credentials.client_secret" type="password" placeholder="QQBot App Secret" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">API Base URL</label>
-            <t-input v-model="formData.credentials.api_base_url" placeholder="https://api.sgroup.qq.com" />
-            <p class="form-desc">{{ $t('agentEditor.im.qqbotAPIBaseURLHint') }}</p>
-          </div>
-          <div class="form-item">
-            <label class="form-label">Gateway URL</label>
-            <t-input v-model="formData.credentials.gateway_url" placeholder="wss://api.sgroup.qq.com/websocket/" />
-            <p class="form-desc">{{ $t('agentEditor.im.qqbotGatewayURLHint') }}</p>
-          </div>
-        </template>
-
-        <!-- Mattermost credentials -->
-        <template v-if="formData.platform === 'mattermost'">
-          <div class="platform-link-hint">
-            <a href="https://developers.mattermost.com/integrate/webhooks/outgoing/" target="_blank" rel="noopener noreferrer" class="doc-link">
-              {{ $t('agentEditor.im.mattermostConsole') }}
-              <t-icon name="link" class="link-icon" />
-            </a>
-            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-          </div>
-          <div class="form-item">
-            <label class="form-label">Site URL</label>
-            <t-input v-model="formData.credentials.site_url" placeholder="https://mattermost.example.com" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">Bot Token</label>
-            <t-input v-model="formData.credentials.bot_token" type="password" placeholder="Bot Token" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">Outgoing Webhook Token</label>
-            <t-input v-model="formData.credentials.outgoing_token" type="password" placeholder="Token from Outgoing Webhook" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">Bot User ID</label>
-            <t-input v-model="formData.credentials.bot_user_id" placeholder="Optional — filter bot self-messages" />
-          </div>
-          <div class="settings-group">
-            <div class="setting-row setting-row--last">
-              <div class="setting-info">
-                <label>{{ $t('agentEditor.im.mattermostPostToMain') }}</label>
-                <p class="desc">{{ $t('agentEditor.im.mattermostPostToMainHint') }}</p>
+            <!-- WeCom credentials -->
+            <template v-if="formData.platform === 'wecom'">
+              <div class="platform-link-hint">
+                <a href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.wecomConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
               </div>
-              <div class="setting-control">
-                <t-switch
-                  :value="!!formData.credentials.post_to_main"
-                  size="small"
-                  @change="(v: boolean) => { formData.credentials.post_to_main = v }"
-                />
+              <template v-if="formData.mode === 'websocket'">
+                <div class="form-item">
+                  <label class="form-label">Bot ID</label>
+                  <t-input v-model="formData.credentials.bot_id" placeholder="Bot ID" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Bot Secret</label>
+                  <t-input v-model="formData.credentials.bot_secret" type="password" placeholder="Bot Secret" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">WebSocket Endpoint</label>
+                  <t-input v-model="formData.credentials.ws_endpoint" placeholder="wss://openws.work.weixin.qq.com" />
+                  <p class="form-desc">{{ $t('agentEditor.im.wecomWSEndpointHint') }}</p>
+                </div>
+              </template>
+              <template v-else>
+                <div class="form-item">
+                  <label class="form-label">Corp ID</label>
+                  <t-input v-model="formData.credentials.corp_id" placeholder="Corp ID" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Agent Secret</label>
+                  <t-input v-model="formData.credentials.agent_secret" type="password" placeholder="Agent Secret" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Token</label>
+                  <t-input v-model="formData.credentials.token" placeholder="Token" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">EncodingAESKey</label>
+                  <t-input v-model="formData.credentials.encoding_aes_key" placeholder="EncodingAESKey" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Corp Agent ID</label>
+                  <t-input-number v-model="formData.credentials.corp_agent_id" placeholder="Corp Agent ID"
+                    style="width: 100%;" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">API Base URL</label>
+                  <t-input v-model="formData.credentials.api_base_url" placeholder="https://qyapi.weixin.qq.com" />
+                  <p class="form-desc">{{ $t('agentEditor.im.wecomAPIBaseURLHint') }}</p>
+                </div>
+              </template>
+            </template>
+
+            <!-- Feishu credentials -->
+            <template v-if="formData.platform === 'feishu'">
+              <div class="platform-link-hint">
+                <a href="https://open.feishu.cn/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.feishuConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
               </div>
-            </div>
-          </div>
-        </template>
-        <!-- WeChat credentials (QR code binding) -->
-        <template v-if="formData.platform === 'wechat'">
-          <p class="form-desc">{{ $t('agentEditor.im.wechatHint') }}</p>
+              <div class="form-item">
+                <label class="form-label">App ID</label>
+                <t-input v-model="formData.credentials.app_id" placeholder="App ID" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">App Secret</label>
+                <t-input v-model="formData.credentials.app_secret" type="password" placeholder="App Secret" />
+              </div>
+              <template v-if="formData.mode === 'webhook'">
+                <div class="form-item">
+                  <label class="form-label">Verification Token</label>
+                  <t-input v-model="formData.credentials.verification_token" placeholder="Verification Token" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Encrypt Key</label>
+                  <t-input v-model="formData.credentials.encrypt_key" type="password" placeholder="Encrypt Key" />
+                </div>
+              </template>
+            </template>
 
-          <!-- Already bound state -->
-          <div v-if="wechatBound" class="wechat-bound-status">
-            <t-icon name="check-circle-filled" class="bound-icon" />
-            <span>{{ $t('agentEditor.im.wechatBindSuccess') }}</span>
-            <t-button size="small" variant="outline" theme="default" @click="startWeChatBinding">
-              {{ $t('agentEditor.im.wechatRebind') }}
-            </t-button>
-          </div>
+            <!-- Slack credentials -->
+            <template v-if="formData.platform === 'slack'">
+              <div class="platform-link-hint">
+                <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.slackConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <template v-if="formData.mode === 'websocket'">
+                <div class="form-item">
+                  <label class="form-label">App Token</label>
+                  <t-input v-model="formData.credentials.app_token" type="password" placeholder="xapp-..." />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Bot Token</label>
+                  <t-input v-model="formData.credentials.bot_token" type="password" placeholder="xoxb-..." />
+                </div>
+              </template>
+              <template v-else>
+                <div class="form-item">
+                  <label class="form-label">Bot Token</label>
+                  <t-input v-model="formData.credentials.bot_token" type="password" placeholder="xoxb-..." />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Signing Secret</label>
+                  <t-input v-model="formData.credentials.signing_secret" type="password" placeholder="Signing Secret" />
+                </div>
+              </template>
+            </template>
 
-          <!-- QR code binding flow -->
-          <div v-else class="wechat-qr-section">
-            <!-- Initial state: show bind button -->
-            <div v-if="!wechatQRImgUrl" class="wechat-bind-action">
-              <t-button theme="default" variant="outline" :loading="wechatLoading" @click="startWeChatBinding">
-                <template #icon><t-icon name="scan" /></template>
-                {{ $t('agentEditor.im.wechatScanBind') }}
-              </t-button>
-            </div>
+            <!-- Telegram credentials -->
+            <template v-if="formData.platform === 'telegram'">
+              <div class="platform-link-hint">
+                <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.telegramConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Bot Token</label>
+                <t-input v-model="formData.credentials.bot_token" type="password" placeholder="123456789:AABBccdd..." />
+              </div>
+              <template v-if="formData.mode === 'webhook'">
+                <div class="form-item">
+                  <label class="form-label">Secret Token</label>
+                  <t-input v-model="formData.credentials.secret_token" type="password"
+                    placeholder="Secret Token (optional)" />
+                </div>
+              </template>
+            </template>
 
-            <!-- QR code displayed -->
-            <div v-else class="wechat-qr-display">
-              <div class="qr-container">
-                <img :src="wechatQRImgUrl" alt="WeChat QR Code" class="qr-image" />
-                <div v-if="wechatQRStatus === 'expired'" class="qr-expired-overlay" @click="startWeChatBinding">
-                  <t-icon name="refresh" class="refresh-icon" />
-                  <span>{{ $t('agentEditor.im.wechatQRExpired') }}</span>
+            <!-- DingTalk credentials -->
+            <template v-if="formData.platform === 'dingtalk'">
+              <div class="platform-link-hint">
+                <a href="https://open.dingtalk.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.dingtalkConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Client ID (AppKey)</label>
+                <t-input v-model="formData.credentials.client_id" placeholder="Client ID / AppKey" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Client Secret (AppSecret)</label>
+                <t-input v-model="formData.credentials.client_secret" type="password"
+                  placeholder="Client Secret / AppSecret" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.dingtalkCardTemplateId') }}</label>
+                <t-input v-model="formData.credentials.card_template_id"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.schema" />
+                <p class="form-desc">{{ $t('agentEditor.im.dingtalkCardTemplateIdHint') }}</p>
+              </div>
+            </template>
+
+            <!-- QQBot credentials -->
+            <template v-if="formData.platform === 'qqbot'">
+              <div class="platform-link-hint">
+                <a href="https://q.qq.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.qqbotConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">App ID</label>
+                <t-input v-model="formData.credentials.app_id" placeholder="QQBot App ID" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">App Secret</label>
+                <t-input v-model="formData.credentials.client_secret" type="password" placeholder="QQBot App Secret" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">API Base URL</label>
+                <t-input v-model="formData.credentials.api_base_url" placeholder="https://api.sgroup.qq.com" />
+                <p class="form-desc">{{ $t('agentEditor.im.qqbotAPIBaseURLHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Gateway URL</label>
+                <t-input v-model="formData.credentials.gateway_url" placeholder="wss://api.sgroup.qq.com/websocket/" />
+                <p class="form-desc">{{ $t('agentEditor.im.qqbotGatewayURLHint') }}</p>
+              </div>
+            </template>
+
+            <!-- Mattermost credentials -->
+            <template v-if="formData.platform === 'mattermost'">
+              <div class="platform-link-hint">
+                <a href="https://developers.mattermost.com/integrate/webhooks/outgoing/" target="_blank"
+                  rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.mattermostConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Site URL</label>
+                <t-input v-model="formData.credentials.site_url" placeholder="https://mattermost.example.com" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Bot Token</label>
+                <t-input v-model="formData.credentials.bot_token" type="password" placeholder="Bot Token" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Outgoing Webhook Token</label>
+                <t-input v-model="formData.credentials.outgoing_token" type="password"
+                  placeholder="Token from Outgoing Webhook" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Bot User ID</label>
+                <t-input v-model="formData.credentials.bot_user_id" placeholder="Optional — filter bot self-messages" />
+              </div>
+              <div class="settings-group">
+                <div class="setting-row setting-row--last">
+                  <div class="setting-info">
+                    <label>{{ $t('agentEditor.im.mattermostPostToMain') }}</label>
+                    <p class="desc">{{ $t('agentEditor.im.mattermostPostToMainHint') }}</p>
+                  </div>
+                  <div class="setting-control">
+                    <t-switch :value="!!formData.credentials.post_to_main" size="small"
+                      @change="(v: boolean) => { formData.credentials.post_to_main = v }" />
+                  </div>
                 </div>
               </div>
-              <p class="qr-hint">
-                <template v-if="wechatQRStatus === 'scaned'">
-                  {{ $t('agentEditor.im.wechatBinding') }}
-                </template>
-                <template v-else>
-                  {{ $t('agentEditor.im.wechatScanning') }}
-                </template>
-              </p>
-            </div>
-          </div>
-        </template>
+            </template>
+            <!-- WeChat credentials (QR code binding) -->
+            <template v-if="formData.platform === 'wechat'">
+              <p class="form-desc">{{ $t('agentEditor.im.wechatHint') }}</p>
+
+              <!-- Already bound state -->
+              <div v-if="wechatBound" class="wechat-bound-status">
+                <t-icon name="check-circle-filled" class="bound-icon" />
+                <span>{{ $t('agentEditor.im.wechatBindSuccess') }}</span>
+                <t-button size="small" variant="outline" theme="default" @click="startWeChatBinding">
+                  {{ $t('agentEditor.im.wechatRebind') }}
+                </t-button>
+              </div>
+
+              <!-- QR code binding flow -->
+              <div v-else class="wechat-qr-section">
+                <!-- Initial state: show bind button -->
+                <div v-if="!wechatQRImgUrl" class="wechat-bind-action">
+                  <t-button theme="default" variant="outline" :loading="wechatLoading" @click="startWeChatBinding">
+                    <template #icon><t-icon name="scan" /></template>
+                    {{ $t('agentEditor.im.wechatScanBind') }}
+                  </t-button>
+                </div>
+
+                <!-- QR code displayed -->
+                <div v-else class="wechat-qr-display">
+                  <div class="qr-container">
+                    <img :src="wechatQRImgUrl" alt="WeChat QR Code" class="qr-image" />
+                    <div v-if="wechatQRStatus === 'expired'" class="qr-expired-overlay" @click="startWeChatBinding">
+                      <t-icon name="refresh" class="refresh-icon" />
+                      <span>{{ $t('agentEditor.im.wechatQRExpired') }}</span>
+                    </div>
+                  </div>
+                  <p class="qr-hint">
+                    <template v-if="wechatQRStatus === 'scaned'">
+                      {{ $t('agentEditor.im.wechatBinding') }}
+                    </template>
+                    <template v-else>
+                      {{ $t('agentEditor.im.wechatScanning') }}
+                    </template>
+                  </p>
+                </div>
+              </div>
+            </template>
           </div>
         </section>
       </div>
@@ -633,7 +543,7 @@ import telegramLogo from '@/assets/img/im/telegram.svg';
 import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
 import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
-import qqbotLogo from '@/assets/img/im/qqbot.svg';
+import qqbotLogo from '@/assets/img/im/qqbot.png';
 
 type IMPlatform = IMChannel['platform'];
 

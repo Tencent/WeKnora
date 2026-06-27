@@ -13,15 +13,10 @@
         </div>
 
         <div v-else-if="!loading" class="channel-grid">
-          <button
-            v-for="ch in channels"
-            :key="ch.id"
-            type="button"
-            class="channel-card channel-card--clickable"
-            @click="openDrawer(ch)"
-          >
+          <button v-for="ch in channels" :key="ch.id" type="button" class="channel-card channel-card--clickable"
+            @click="openDrawer(ch)">
             <div class="channel-card__badge">
-              <t-icon name="code" size="18px" />
+              <t-icon name="code" size="22px" />
             </div>
             <div class="channel-card__body">
               <div class="channel-card__header">
@@ -35,39 +30,20 @@
               </span>
             </div>
             <div v-if="authStore.hasRole('admin')" class="channel-card__actions" @click.stop>
-              <t-dropdown
-                trigger="click"
-                placement="bottom-right"
-                attach="body"
-                :options="channelMenuOptions(ch)"
-                @click="(data) => handleChannelMenuClick(data, ch)"
-              >
-                <t-button
-                  variant="text"
-                  shape="square"
-                  size="small"
-                  class="channel-card__action-btn channel-card__more"
-                  @click.stop
-                >
+              <t-dropdown trigger="click" placement="bottom-right" attach="body" :options="channelMenuOptions(ch)"
+                @click="(data) => handleChannelMenuClick(data, ch)">
+                <t-button variant="text" shape="square" size="small" class="channel-card__action-btn channel-card__more"
+                  @click.stop>
                   <template #icon><t-icon name="ellipsis" /></template>
                 </t-button>
               </t-dropdown>
-              <t-popconfirm
-                :content="$t('embedPublish.deleteConfirm')"
+              <t-popconfirm :content="$t('embedPublish.deleteConfirm')"
                 :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
-                :cancel-btn="{ content: $t('common.cancel') }"
-                placement="bottom-right"
-                @confirm="() => removeChannel(ch.id)"
-              >
+                :cancel-btn="{ content: $t('common.cancel') }" placement="bottom-right"
+                @confirm="() => removeChannel(ch.id)">
                 <t-tooltip :content="$t('common.delete')" placement="top">
-                  <t-button
-                    theme="danger"
-                    shape="square"
-                    variant="text"
-                    size="small"
-                    class="channel-card__action-btn channel-card__delete"
-                    @click.stop
-                  >
+                  <t-button theme="danger" shape="square" variant="text" size="small"
+                    class="channel-card__action-btn channel-card__delete" @click.stop>
                     <template #icon><t-icon name="delete" /></template>
                   </t-button>
                 </t-tooltip>
@@ -75,12 +51,8 @@
             </div>
           </button>
 
-          <button
-            v-if="authStore.hasRole('admin')"
-            type="button"
-            class="channel-card channel-card--add"
-            @click="openCreate"
-          >
+          <button v-if="authStore.hasRole('admin')" type="button" class="channel-card channel-card--add"
+            @click="openCreate">
             <span class="channel-card__badge" aria-hidden="true">
               <t-icon name="add" />
             </span>
@@ -95,20 +67,10 @@
       </t-loading>
     </div>
 
-    <SettingDrawer
-      v-model:visible="showDrawer"
-      class="embed-channel-drawer"
-      :title="drawerTitle"
-      :description="drawerStepDescription"
-      icon="code"
-      storage-key="setting-drawer:embed-channel"
-      width="560px"
-      :confirm-loading="saving"
-      :confirm-text="drawerConfirmText"
-      :hide-footer="!isAdmin"
-      @confirm="handleDrawerConfirm"
-      @cancel="closeDrawer"
-    >
+    <SettingDrawer v-model:visible="showDrawer" class="embed-channel-drawer" :title="drawerTitle"
+      :description="drawerStepDescription" icon="code" storage-key="setting-drawer:embed-channel" width="560px"
+      :confirm-loading="saving" :confirm-text="drawerConfirmText" :hide-footer="!isAdmin" @confirm="handleDrawerConfirm"
+      @cancel="closeDrawer">
       <template v-if="wizardStep > 0" #footer-left>
         <t-button variant="outline" @click="prevWizardStep">
           {{ $t('datasource.back') }}
@@ -116,13 +78,8 @@
       </template>
 
       <div class="im-steps">
-        <button
-          v-for="(title, i) in stepTitles"
-          :key="i"
-          type="button"
-          :class="['im-step', { active: wizardStep === i, done: wizardStep > i }]"
-          @click="goToWizardStep(i)"
-        >
+        <button v-for="(title, i) in stepTitles" :key="i" type="button"
+          :class="['im-step', { active: wizardStep === i, done: wizardStep > i }]" @click="goToWizardStep(i)">
           <span class="im-step-num">
             <t-icon v-if="wizardStep > i" name="check" class="im-step-check" />
             <template v-else>{{ i + 1 }}</template>
@@ -133,278 +90,205 @@
 
       <!-- Step 1: Channel -->
       <div v-if="wizardStep === 0" class="im-step-body">
-      <section class="setting-drawer__section embed-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionChannel') }}</h4>
+        <section class="setting-drawer__section embed-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionChannel') }}</h4>
 
-        <div class="form-item">
-          <label class="form-label required">{{ $t('integrations.boundAgent') }}</label>
-          <div class="agent-field-row">
-            <t-select
-              v-model="createAgentId"
-              :options="agentOptions"
-              filterable
-              :placeholder="$t('integrations.selectAgentPlaceholder')"
-            />
+          <div class="form-item">
+            <label class="form-label required">{{ $t('integrations.boundAgent') }}</label>
+            <div class="agent-field-row">
+              <t-select v-model="createAgentId" :options="agentOptions" filterable
+                :placeholder="$t('integrations.selectAgentPlaceholder')" />
+            </div>
           </div>
-        </div>
 
-        <div v-if="editingId && isAdmin" class="setting-row setting-row--last">
-          <div class="setting-info">
-            <label>{{ $t('embedPublish.enabled') }}</label>
+          <div v-if="editingId && isAdmin" class="setting-row setting-row--last">
+            <div class="setting-info">
+              <label>{{ $t('embedPublish.enabled') }}</label>
+            </div>
+            <div class="setting-control">
+              <t-switch v-model="editingEnabled" size="small" />
+            </div>
           </div>
-          <div class="setting-control">
-            <t-switch v-model="editingEnabled" size="small" />
+
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.name') }}</label>
+            <t-input v-model="form.name" :disabled="!isAdmin" :placeholder="$t('embedPublish.namePlaceholder')"
+              @focus="channelNameTouched = true" />
+            <p v-if="!editingId" class="form-desc">{{ $t('embedPublish.nameDefaultHint') }}</p>
+            <p v-else class="form-desc">{{ $t('embedPublish.nameDesc') }}</p>
           </div>
-        </div>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.name') }}</label>
-          <t-input
-            v-model="form.name"
-            :disabled="!isAdmin"
-            :placeholder="$t('embedPublish.namePlaceholder')"
-            @focus="channelNameTouched = true"
-          />
-          <p v-if="!editingId" class="form-desc">{{ $t('embedPublish.nameDefaultHint') }}</p>
-          <p v-else class="form-desc">{{ $t('embedPublish.nameDesc') }}</p>
-        </div>
-
-      </section>
+        </section>
       </div>
 
       <!-- Step 2: Security -->
       <div v-else-if="wizardStep === 1" class="im-step-body">
-      <section class="setting-drawer__section embed-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionSecurity') }}</h4>
+        <section class="setting-drawer__section embed-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionSecurity') }}</h4>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.allowedOrigins') }}</label>
-          <t-textarea
-            v-model="originsText"
-            :disabled="!isAdmin"
-            :placeholder="$t('embedPublish.originsPlaceholder')"
-            :status="originsError ? 'error' : 'default'"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            @change="originsError = ''"
-          />
-          <p v-if="originsError" class="form-desc form-desc--error">{{ originsError }}</p>
-          <p v-else class="form-desc">{{ $t('embedPublish.originsHint') }}</p>
-        </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.allowedOrigins') }}</label>
+            <t-textarea v-model="originsText" :disabled="!isAdmin" :placeholder="$t('embedPublish.originsPlaceholder')"
+              :status="originsError ? 'error' : 'default'" :autosize="{ minRows: 2, maxRows: 4 }"
+              @change="originsError = ''" />
+            <p v-if="originsError" class="form-desc form-desc--error">{{ originsError }}</p>
+            <p v-else class="form-desc">{{ $t('embedPublish.originsHint') }}</p>
+          </div>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.rateLimitLabel') }}</label>
-          <t-input-number
-            v-model="form.rate_limit_per_minute"
-            :disabled="!isAdmin"
-            :min="1"
-            :max="600"
-            theme="column"
-            class="form-number"
-          />
-          <p class="form-desc">{{ $t('embedPublish.rateLimitDesc') }}</p>
-        </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.rateLimitLabel') }}</label>
+            <t-input-number v-model="form.rate_limit_per_minute" :disabled="!isAdmin" :min="1" :max="600" theme="column"
+              class="form-number" />
+            <p class="form-desc">{{ $t('embedPublish.rateLimitDesc') }}</p>
+          </div>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.rateLimitDayLabel') }}</label>
-          <t-input-number
-            v-model="form.rate_limit_per_day"
-            :disabled="!isAdmin"
-            :min="1"
-            :max="1000000"
-            theme="column"
-            class="form-number"
-          />
-          <p class="form-desc">{{ $t('embedPublish.rateLimitDayDesc') }}</p>
-        </div>
-      </section>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.rateLimitDayLabel') }}</label>
+            <t-input-number v-model="form.rate_limit_per_day" :disabled="!isAdmin" :min="1" :max="1000000"
+              theme="column" class="form-number" />
+            <p class="form-desc">{{ $t('embedPublish.rateLimitDayDesc') }}</p>
+          </div>
+        </section>
       </div>
 
       <!-- Step 3: Capabilities -->
       <div v-else-if="wizardStep === 2" class="im-step-body">
-      <section class="setting-drawer__section embed-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionCapabilities') }}</h4>
+        <section class="setting-drawer__section embed-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionCapabilities') }}</h4>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.welcomeMessage') }}</label>
-          <t-textarea
-            v-model="form.welcome_message"
-            :disabled="!isAdmin"
-            :placeholder="$t('embedPublish.welcomePlaceholder')"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-          />
-          <p class="form-desc">{{ $t('embedPublish.welcomeMessageDesc') }}</p>
-        </div>
-
-        <div class="settings-group">
-          <div class="setting-row">
-            <div class="setting-info">
-              <label>{{ $t('embedPublish.showSuggestedQuestions') }}</label>
-              <p class="desc">{{ $t('embedPublish.showSuggestedQuestionsDesc') }}</p>
-            </div>
-            <div class="setting-control">
-              <t-switch
-                v-model="form.show_suggested_questions"
-                :disabled="!isAdmin"
-                size="small"
-              />
-            </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.welcomeMessage') }}</label>
+            <t-textarea v-model="form.welcome_message" :disabled="!isAdmin"
+              :placeholder="$t('embedPublish.welcomePlaceholder')" :autosize="{ minRows: 2, maxRows: 4 }" />
+            <p class="form-desc">{{ $t('embedPublish.welcomeMessageDesc') }}</p>
           </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <label>{{ $t('embedPublish.allowWebSearch') }}</label>
-              <p class="desc">{{ $t('embedPublish.allowWebSearchDesc') }}</p>
-              <p v-if="form.allow_web_search && !agentWebSearchEnabledEffective" class="desc desc--warn">
-                {{ $t('embedPublish.agentWebSearchDisabledHint') }}
-              </p>
+          <div class="settings-group">
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('embedPublish.showSuggestedQuestions') }}</label>
+                <p class="desc">{{ $t('embedPublish.showSuggestedQuestionsDesc') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-switch v-model="form.show_suggested_questions" :disabled="!isAdmin" size="small" />
+              </div>
             </div>
-            <div class="setting-control">
-              <t-switch
-                v-model="form.allow_web_search"
-                :disabled="!isAdmin"
-                size="small"
-              />
-            </div>
-          </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <label>{{ $t('embedPublish.allowFileUpload') }}</label>
-              <p class="desc">{{ $t('embedPublish.allowFileUploadDesc') }}</p>
-              <p v-if="form.allow_file_upload && !agentImageUploadEnabledEffective" class="desc desc--warn">
-                {{ $t('embedPublish.agentImageUploadDisabledHint') }}
-              </p>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('embedPublish.allowWebSearch') }}</label>
+                <p class="desc">{{ $t('embedPublish.allowWebSearchDesc') }}</p>
+                <p v-if="form.allow_web_search && !agentWebSearchEnabledEffective" class="desc desc--warn">
+                  {{ $t('embedPublish.agentWebSearchDisabledHint') }}
+                </p>
+              </div>
+              <div class="setting-control">
+                <t-switch v-model="form.allow_web_search" :disabled="!isAdmin" size="small" />
+              </div>
             </div>
-            <div class="setting-control">
-              <t-switch
-                v-model="form.allow_file_upload"
-                :disabled="!isAdmin"
-                size="small"
-              />
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('embedPublish.allowFileUpload') }}</label>
+                <p class="desc">{{ $t('embedPublish.allowFileUploadDesc') }}</p>
+                <p v-if="form.allow_file_upload && !agentImageUploadEnabledEffective" class="desc desc--warn">
+                  {{ $t('embedPublish.agentImageUploadDisabledHint') }}
+                </p>
+              </div>
+              <div class="setting-control">
+                <t-switch v-model="form.allow_file_upload" :disabled="!isAdmin" size="small" />
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
       </div>
 
       <!-- Step 4: Appearance -->
       <div v-else-if="wizardStep === 3" class="im-step-body">
-      <section class="setting-drawer__section embed-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionAppearance') }}</h4>
+        <section class="setting-drawer__section embed-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionAppearance') }}</h4>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.pageTitle') }}</label>
-          <t-input
-            v-model="form.page_title"
-            :disabled="!isAdmin"
-            :placeholder="$t('embedPublish.pageTitlePlaceholder')"
-          />
-          <p class="form-desc">{{ $t('embedPublish.pageTitleDesc') }}</p>
-        </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.pageTitle') }}</label>
+            <t-input v-model="form.page_title" :disabled="!isAdmin"
+              :placeholder="$t('embedPublish.pageTitlePlaceholder')" />
+            <p class="form-desc">{{ $t('embedPublish.pageTitleDesc') }}</p>
+          </div>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.headerTitleMode') }}</label>
-          <t-select
-            v-model="form.header_title_mode"
-            :disabled="!isAdmin"
-            :options="headerTitleModeOptions"
-          />
-          <p class="form-desc">{{ $t('embedPublish.headerTitleModeDesc') }}</p>
-        </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.headerTitleMode') }}</label>
+            <t-select v-model="form.header_title_mode" :disabled="!isAdmin" :options="headerTitleModeOptions" />
+            <p class="form-desc">{{ $t('embedPublish.headerTitleModeDesc') }}</p>
+          </div>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.widgetPosition') }}</label>
-          <t-select
-            v-model="form.widget_position"
-            :disabled="!isAdmin"
-            :options="positionOptions"
-          />
-        </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.widgetPosition') }}</label>
+            <t-select v-model="form.widget_position" :disabled="!isAdmin" :options="positionOptions" />
+          </div>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.defaultLocale') }}</label>
-          <t-select
-            v-model="form.default_locale"
-            :disabled="!isAdmin"
-            :options="defaultLocaleOptions"
-          />
-          <p class="form-desc">{{ $t('embedPublish.defaultLocaleDesc') }}</p>
-        </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.defaultLocale') }}</label>
+            <t-select v-model="form.default_locale" :disabled="!isAdmin" :options="defaultLocaleOptions" />
+            <p class="form-desc">{{ $t('embedPublish.defaultLocaleDesc') }}</p>
+          </div>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.primaryColor') }}</label>
-          <t-color-picker
-            v-model="form.primary_color"
-            :disabled="!isAdmin"
-            format="HEX"
-            :color-modes="['monochrome']"
-          />
-        </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.primaryColor') }}</label>
+            <t-color-picker v-model="form.primary_color" :disabled="!isAdmin" format="HEX"
+              :color-modes="['monochrome']" />
+          </div>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('embedPublish.widgetPreview') }}</label>
-          <div class="widget-preview" :class="`pos-${form.widget_position}`">
-            <div class="preview-surface">
-              <button
-                type="button"
-                class="preview-launcher"
-                :style="{ background: form.primary_color || defaultPrimaryColor }"
-                aria-hidden="true"
-              >
-                <t-icon name="chat" />
-              </button>
+          <div class="form-item">
+            <label class="form-label">{{ $t('embedPublish.widgetPreview') }}</label>
+            <div class="widget-preview" :class="`pos-${form.widget_position}`">
+              <div class="preview-surface">
+                <button type="button" class="preview-launcher"
+                  :style="{ background: form.primary_color || defaultPrimaryColor }" aria-hidden="true">
+                  <t-icon name="chat" />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
       </div>
 
       <!-- Step 5: Webhook -->
       <div v-else-if="wizardStep === 4" class="im-step-body">
-      <section class="setting-drawer__section embed-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionWebhook') }}</h4>
+        <section class="setting-drawer__section embed-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionWebhook') }}</h4>
 
-        <div class="settings-group">
-          <div class="settings-group__field">
-            <label class="form-label">{{ $t('embedPublish.webhookUrl') }}</label>
-            <t-input
-              v-model="form.webhook_url"
-              :disabled="!isAdmin"
-              autocomplete="off"
-              :placeholder="$t('embedPublish.webhookUrlPlaceholder')"
-            />
-            <p class="form-desc">{{ $t('embedPublish.webhookUrlDesc') }}</p>
-          </div>
+          <div class="settings-group">
+            <div class="settings-group__field">
+              <label class="form-label">{{ $t('embedPublish.webhookUrl') }}</label>
+              <t-input v-model="form.webhook_url" :disabled="!isAdmin" autocomplete="off"
+                :placeholder="$t('embedPublish.webhookUrlPlaceholder')" />
+              <p class="form-desc">{{ $t('embedPublish.webhookUrlDesc') }}</p>
+            </div>
 
-          <div class="settings-group__field">
-            <label class="form-label">{{ $t('embedPublish.webhookSecret') }}</label>
-            <t-input
-              v-model="form.webhook_secret"
-              :disabled="!isAdmin"
-              type="password"
-              autocomplete="new-password"
-              :placeholder="webhookSecretPlaceholder"
-            />
-            <p class="form-desc">{{ $t('embedPublish.webhookSecretDesc') }}</p>
+            <div class="settings-group__field">
+              <label class="form-label">{{ $t('embedPublish.webhookSecret') }}</label>
+              <t-input v-model="form.webhook_secret" :disabled="!isAdmin" type="password" autocomplete="new-password"
+                :placeholder="webhookSecretPlaceholder" />
+              <p class="form-desc">{{ $t('embedPublish.webhookSecretDesc') }}</p>
+            </div>
           </div>
+        </section>
+
+        <div v-if="!editingId" class="deploy-hint" role="note">
+          <t-icon name="info-circle" class="deploy-hint__icon" />
+          <p>{{ $t('embedPublish.deployAfterSaveHint') }}</p>
         </div>
-      </section>
-
-      <div v-if="!editingId" class="deploy-hint" role="note">
-        <t-icon name="info-circle" class="deploy-hint__icon" />
-        <p>{{ $t('embedPublish.deployAfterSaveHint') }}</p>
-      </div>
       </div>
 
       <!-- Step 6: Deploy (edit only) -->
       <div v-else-if="editingId" class="im-step-body">
-      <section class="setting-drawer__section embed-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionDeploy') }}</h4>
-        <p class="form-desc form-desc--block">{{ $t('embedPublish.deployIntro') }}</p>
+        <section class="setting-drawer__section embed-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('embedPublish.sectionDeploy') }}</h4>
+          <p class="form-desc form-desc--block">{{ $t('embedPublish.deployIntro') }}</p>
 
-        <div class="deploy-block">
-          <h5 class="deploy-block__title">{{ $t('embedPublish.deployStepEmbed') }}</h5>
-          <p class="deploy-block__desc">{{ $t('embedPublish.deployStepEmbedDesc') }}</p>
+          <div class="deploy-block">
+            <h5 class="deploy-block__title">{{ $t('embedPublish.deployStepEmbed') }}</h5>
+            <p class="deploy-block__desc">{{ $t('embedPublish.deployStepEmbedDesc') }}</p>
 
             <t-tabs v-model="drawerSnippetTab" class="snippet-tabs">
               <t-tab-panel value="iframe" :label="$t('embedPublish.tabIframe')" />
@@ -430,13 +314,8 @@
                   {{ drawerSnippetTab === 'iframe' ? $t('embedPublish.embedCode') : $t('embedPublish.widgetCode') }}
                 </span>
                 <div class="code-panel__actions">
-                  <t-button
-                    v-if="drawerSnippetTab !== 'secure'"
-                    size="small"
-                    variant="text"
-                    :loading="previewLoading"
-                    @click="openPreviewFromDrawer"
-                  >
+                  <t-button v-if="drawerSnippetTab !== 'secure'" size="small" variant="text" :loading="previewLoading"
+                    @click="openPreviewFromDrawer">
                     <template #icon><t-icon name="browse" /></template>
                     {{ $t('embedPublish.preview') }}
                   </t-button>
@@ -468,77 +347,49 @@
                 <pre class="code-panel__pre">{{ secureServerExample }}</pre>
               </div>
             </template>
-        </div>
-
-        <div class="deploy-block">
-          <h5 class="deploy-block__title">{{ $t('embedPublish.channelKey') }}</h5>
-          <p class="deploy-block__desc">{{ $t('embedPublish.channelKeyDesc') }}</p>
-
-          <div v-if="drawerChannel" class="channel-key-control">
-            <t-input
-              :model-value="displayChannelKey(editingId)"
-              readonly
-              type="text"
-              class="mono-text-input channel-key-input"
-              :placeholder="tokenFor(drawerChannel) ? '' : $t('embedPublish.channelKeyUnavailable')"
-            />
-            <template v-if="tokenFor(drawerChannel)">
-              <t-button
-                size="small"
-                variant="text"
-                :title="revealedTokens[editingId] ? $t('embedPublish.hideKey') : $t('embedPublish.revealKey')"
-                @click="toggleReveal(editingId)"
-              >
-                <t-icon :name="revealedTokens[editingId] ? 'browse-off' : 'browse'" />
-              </t-button>
-              <t-button
-                size="small"
-                variant="text"
-                :title="$t('embedPublish.copyChannelKeyTitle')"
-                @click="copyToken(drawerChannel)"
-              >
-                <t-icon name="file-copy" />
-              </t-button>
-            </template>
-            <t-popconfirm
-              v-if="isAdmin"
-              theme="warning"
-              :content="$t('embedPublish.resetKeyConfirmBody')"
-              :confirm-btn="{ content: $t('embedPublish.resetKeyConfirmOk'), theme: 'danger' }"
-              :cancel-btn="{ content: $t('common.cancel') }"
-              @confirm="performRotate(editingId)"
-            >
-              <t-button
-                size="small"
-                variant="text"
-                theme="danger"
-                :loading="rotating"
-                :title="$t('embedPublish.resetKeyTitle')"
-              >
-                <t-icon name="refresh" />
-              </t-button>
-            </t-popconfirm>
           </div>
-          <p v-if="drawerChannel && !tokenFor(drawerChannel)" class="form-desc">
-            {{ $t('embedPublish.channelKeyHint') }}
-          </p>
-        </div>
 
-      </section>
+          <div class="deploy-block">
+            <h5 class="deploy-block__title">{{ $t('embedPublish.channelKey') }}</h5>
+            <p class="deploy-block__desc">{{ $t('embedPublish.channelKeyDesc') }}</p>
+
+            <div v-if="drawerChannel" class="channel-key-control">
+              <t-input :model-value="displayChannelKey(editingId)" readonly type="text"
+                class="mono-text-input channel-key-input"
+                :placeholder="tokenFor(drawerChannel) ? '' : $t('embedPublish.channelKeyUnavailable')" />
+              <template v-if="tokenFor(drawerChannel)">
+                <t-button size="small" variant="text"
+                  :title="revealedTokens[editingId] ? $t('embedPublish.hideKey') : $t('embedPublish.revealKey')"
+                  @click="toggleReveal(editingId)">
+                  <t-icon :name="revealedTokens[editingId] ? 'browse-off' : 'browse'" />
+                </t-button>
+                <t-button size="small" variant="text" :title="$t('embedPublish.copyChannelKeyTitle')"
+                  @click="copyToken(drawerChannel)">
+                  <t-icon name="file-copy" />
+                </t-button>
+              </template>
+              <t-popconfirm v-if="isAdmin" theme="warning" :content="$t('embedPublish.resetKeyConfirmBody')"
+                :confirm-btn="{ content: $t('embedPublish.resetKeyConfirmOk'), theme: 'danger' }"
+                :cancel-btn="{ content: $t('common.cancel') }" @confirm="performRotate(editingId)">
+                <t-button size="small" variant="text" theme="danger" :loading="rotating"
+                  :title="$t('embedPublish.resetKeyTitle')">
+                  <t-icon name="refresh" />
+                </t-button>
+              </t-popconfirm>
+            </div>
+            <p v-if="drawerChannel && !tokenFor(drawerChannel)" class="form-desc">
+              {{ $t('embedPublish.channelKeyHint') }}
+            </p>
+          </div>
+
+        </section>
       </div>
     </SettingDrawer>
 
-    <EmbedChannelPreview
-      v-model:visible="previewVisible"
-      :channel-id="previewChannel?.id || ''"
-      :token="previewToken"
-      :mode="previewMode"
-      :title="previewChannel?.name || $t('embedPublish.preview')"
-      :primary-color="previewChannel?.primary_color"
-      :position="previewPosition"
-      :refresh-key="previewNonce"
-      :locale="previewLocale"
-    />
+    <EmbedChannelPreview v-model:visible="previewVisible" :channel-id="previewChannel?.id || ''" :token="previewToken"
+      :mode="previewMode" :title="previewChannel?.name || $t('embedPublish.preview')"
+      :primary-color="previewChannel?.primary_color" :position="previewPosition" :refresh-key="previewNonce"
+      :locale="previewLocale" />
   </div>
 </template>
 
@@ -1678,8 +1529,24 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   }
 }
 
-.pos-bottom-right .preview-launcher { right: 10px; bottom: 10px; }
-.pos-bottom-left .preview-launcher { left: 10px; bottom: 10px; }
-.pos-top-right .preview-launcher { left: auto; right: 10px; top: 10px; }
-.pos-top-left .preview-launcher { left: 10px; top: 10px; }
+.pos-bottom-right .preview-launcher {
+  right: 10px;
+  bottom: 10px;
+}
+
+.pos-bottom-left .preview-launcher {
+  left: 10px;
+  bottom: 10px;
+}
+
+.pos-top-right .preview-launcher {
+  left: auto;
+  right: 10px;
+  top: 10px;
+}
+
+.pos-top-left .preview-launcher {
+  left: 10px;
+  top: 10px;
+}
 </style>
