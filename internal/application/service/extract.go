@@ -343,11 +343,11 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		if fbID != "" && fbID != p.ModelID && isTransientLLMError(ctx, err) {
 			if fbModel, fbErr := s.modelService.GetChatModel(ctx, fbID); fbErr == nil && fbModel != nil {
 				select {
-				case wikiFallbackSem <- struct{}{}:
+				case <-wikiFallbackTokens:
 					var fbGraph *types.GraphData
 					var fbErr2 error
 					func() {
-						defer func() { <-wikiFallbackSem }()
+						defer func() { wikiFallbackTokens <- struct{}{} }()
 						fbExtractor := chatpipeline.NewExtractor(fbModel, template)
 						fbGraph, fbErr2 = fbExtractor.Extract(ctx, chunk.Content)
 					}()

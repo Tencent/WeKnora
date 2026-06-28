@@ -361,6 +361,10 @@ export interface SystemSettingItem {
    * Frontend renders a t-select instead of t-input when this is non-empty.
    */
   enum?: string[]
+  /** Lower bound for int settings (from registry Min). Absent means no lower limit. */
+  min?: number
+  /** Upper bound for int settings (from registry Max). Absent means no upper limit. */
+  max?: number
 }
 
 /**

@@ -91,6 +91,10 @@ type settingSpec struct {
 	// (e.g. asynq worker pool size). The UI shows a restart badge; the
 	// service persists the flag on first write.
 	RequiresRestart bool
+	// Min and Max constrain the allowed numeric range for int settings.
+	// Forwarded to the UI as guardrails; nil means no constraint.
+	Min *int64
+	Max *int64
 }
 
 // registry pins the set of legal keys. Expanding it is a deliberate,
@@ -175,11 +179,46 @@ var registry = map[string]settingSpec{
 		Default:         int64(32),
 		Category:        "worker",
 		RequiresRestart: true,
+		Min:             i64p(1),
+		Max:             i64p(64),
 		Description: "异步任务 worker 并发数（asynq 线程池大小）。" +
 			"文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
 			"修改后需重启服务进程方可生效。",
 	},
+	// wiki.fallback_concurrency caps how many enrichment fallback-model calls
+	// run at once. When the primary long-output model cannot finish a call, the
+	// work degrades to the configured fallback model; this bounds how many such
+	// degraded calls run concurrently so a rate-limited fallback is not
+	// overwhelmed. Applied live — the limiter resizes on change, no restart.
+	"wiki.fallback_concurrency": {
+		Type:     "int",
+		EnvName:  "WEKNORA_WIKI_FALLBACK_CONCURRENCY",
+		Default:  int64(6),
+		Category: "worker",
+		Min:      i64p(1),
+		Max:      i64p(12),
+		Description: "兜底模型并发上限。主力模型产长内容失败时会降级到兜底模型处理，" +
+			"此值控制最多同时处理几个：调高可更快消化积压，过高可能拖垮兜底服务。" +
+			"修改后立即生效。",
+	},
+	// wiki.primary_max_attempts is how many times the primary long-output model
+	// is tried before a call degrades to the fallback model. Lower = degrade
+	// sooner. Applied live (no restart). Mirrors WEKNORA_WIKI_PRIMARY_MAX_ATTEMPTS.
+	"wiki.primary_max_attempts": {
+		Type:     "int",
+		EnvName:  "WEKNORA_WIKI_PRIMARY_MAX_ATTEMPTS",
+		Default:  int64(3),
+		Category: "worker",
+		Min:      i64p(1),
+		Max:      i64p(3),
+		Description: "主模型尝试次数。主模型连续失败达到此次数后，本次调用自动改用兜底模型。" +
+			"值越小越早切到兜底。范围 1-3，修改后立即生效。",
+	},
 }
+
+// i64p returns a pointer to the given int64 value.
+// Used for initialising Min/Max in the registry without verbose temp variables.
+func i64p(v int64) *int64 { return &v }
 
 // systemSettingService wires the repository, audit log, and (P2)
 // the Redis client + an in-memory cache. Cache strategy is "preload
@@ -284,6 +323,8 @@ func (s *systemSettingService) preload(ctx context.Context) {
 	// the subsystem doesn't lag the cache by a full request cycle.
 	// Add new bridges here as more env vars get migrated.
 	s.applySSRFWhitelist(ctx)
+	s.applyWikiFallbackConcurrency(ctx)
+	s.applyWikiPrimaryMaxAttempts(ctx)
 }
 
 // encodeDefault produces the JSONB encoding for a spec's built-in
@@ -375,6 +416,10 @@ func (s *systemSettingService) dispatchSideEffects(ctx context.Context, changedK
 	switch changedKey {
 	case "ssrf.whitelist":
 		s.applySSRFWhitelist(ctx)
+	case "wiki.fallback_concurrency":
+		s.applyWikiFallbackConcurrency(ctx)
+	case "wiki.primary_max_attempts":
+		s.applyWikiPrimaryMaxAttempts(ctx)
 	}
 }
 
@@ -401,6 +446,26 @@ func (s *systemSettingService) applySSRFWhitelist(ctx context.Context) {
 	utils.SetSSRFWhitelistFromRaw(merged)
 	logger.Infof(ctx, "[system_settings] SSRF whitelist applied (%d primary entries, extra=%v)",
 		len(list), extra != "")
+}
+
+// applyWikiFallbackConcurrency resolves wiki.fallback_concurrency via the
+// 3-tier resolver and pushes it to the live fallback limiter, so a change in
+// the UI resizes the in-flight cap without a restart. Called at preload, after
+// Update (this replica's edit), and after reload (peer's edit via pubsub).
+func (s *systemSettingService) applyWikiFallbackConcurrency(ctx context.Context) {
+	n := s.GetInt(ctx, "wiki.fallback_concurrency", "WEKNORA_WIKI_FALLBACK_CONCURRENCY", int64(defaultWikiFallbackConcurrency))
+	setWikiFallbackConcurrency(int(n))
+	logger.Infof(ctx, "[system_settings] wiki fallback concurrency applied: %d", n)
+}
+
+// applyWikiPrimaryMaxAttempts resolves wiki.primary_max_attempts via the 3-tier
+// resolver and pushes it to the live primary-attempt budget, so a change in the
+// UI takes effect without a restart. Called at preload, after Update, and after
+// reload (peer's edit via pubsub).
+func (s *systemSettingService) applyWikiPrimaryMaxAttempts(ctx context.Context) {
+	n := s.GetInt(ctx, "wiki.primary_max_attempts", "WEKNORA_WIKI_PRIMARY_MAX_ATTEMPTS", int64(defaultWikiPrimaryMaxAttempts))
+	setWikiPrimaryMaxAttempts(int(n))
+	logger.Infof(ctx, "[system_settings] wiki primary max attempts applied: %d", n)
 }
 
 // publishChange fans the change out to peers. Best-effort: a Redis
@@ -613,6 +678,8 @@ func (s *systemSettingService) List(ctx context.Context) ([]*types.SystemSetting
 		spec := registry[key]
 		if row := byKey[key]; row != nil {
 			row.Enum = spec.Enum
+			row.Min = spec.Min
+			row.Max = spec.Max
 			if isBootstrapDefaultRow(row, spec) {
 				row.Value = s.fallbackJSONForSpec(key, spec)
 			}
@@ -676,6 +743,8 @@ func (s *systemSettingService) virtualSetting(key string, spec settingSpec) *typ
 		RequiresRestart: spec.RequiresRestart,
 		LastModifiedBy:  "",
 		Enum:            spec.Enum,
+		Min:             spec.Min,
+		Max:             spec.Max,
 	}
 }
 

@@ -33,14 +33,85 @@ import (
 // naturally expires.
 var ErrWikiIngestConcurrent = errors.New("concurrent wiki task active")
 
-// wikiFallbackSem bounds concurrent fallback-model LLM calls. The fallback
-// (per-KB WikiConfig.SynthesisFallbackModelID) is typically a heavily
-// rate-limited model invoked ONLY to rescue the few long-output wiki calls
-// that hit a timeout on the primary model's upstream gateway. Capping
-// concurrency keeps the fallback from tripping its own rate limit; the buffer
-// size is the max in-flight fallback calls process-wide. 2 is deliberately
-// small — the fallback is a safety net, not a throughput path.
-var wikiFallbackSem = make(chan struct{}, 2)
+// wikiFallbackTokens is a RESIZABLE counting semaphore bounding concurrent
+// fallback-model calls. The fallback (per-KB WikiConfig.SynthesisFallbackModelID)
+// rescues long-output calls the primary model cannot finish; capping concurrency
+// keeps a rate-limited fallback from being overwhelmed. It is a buffered channel
+// pre-filled with wikiFallbackCur tokens — acquire receives a token, release
+// returns it. The live limit comes from the wiki.fallback_concurrency system
+// setting (SystemSettingService pushes it at preload and on every change via
+// setWikiFallbackConcurrency), so the cap is retunable from the UI without a
+// restart. The channel cap is a hard process-wide ceiling.
+const wikiFallbackMaxConcurrency = 32
+const defaultWikiFallbackConcurrency = 6
+
+var (
+	wikiFallbackTokens = make(chan struct{}, wikiFallbackMaxConcurrency)
+	wikiFallbackMu     sync.Mutex
+	wikiFallbackCur    int
+)
+
+func init() { setWikiFallbackConcurrency(defaultWikiFallbackConcurrency) }
+
+// setWikiFallbackConcurrency resizes the fallback limiter to n (clamped to
+// [1, wikiFallbackMaxConcurrency]). Growing adds tokens immediately; shrinking
+// drains the surplus in the background so a settings update never blocks waiting
+// for in-flight fallback calls to finish.
+func setWikiFallbackConcurrency(n int) {
+	if n < 1 {
+		n = 1
+	}
+	if n > wikiFallbackMaxConcurrency {
+		n = wikiFallbackMaxConcurrency
+	}
+	wikiFallbackMu.Lock()
+	delta := n - wikiFallbackCur
+	wikiFallbackCur = n
+	if delta > 0 {
+		for i := 0; i < delta; i++ {
+			wikiFallbackTokens <- struct{}{}
+		}
+	}
+	wikiFallbackMu.Unlock()
+	if delta < 0 {
+		go func(d int) {
+			for i := 0; i < d; i++ {
+				<-wikiFallbackTokens
+			}
+		}(-delta)
+	}
+}
+
+// defaultWikiPrimaryMaxAttempts is how many times the primary long-output model
+// is tried before a call degrades to the fallback model.
+const defaultWikiPrimaryMaxAttempts = 3
+
+// wikiPrimaryMax is the live primary-attempt budget, fed by the
+// wiki.primary_max_attempts system setting (applied at preload + on change) so
+// it can be retuned from the UI without a restart. Guarded by its own mutex.
+var (
+	wikiPrimaryMaxMu sync.Mutex
+	wikiPrimaryMax   = defaultWikiPrimaryMaxAttempts
+)
+
+func getWikiPrimaryMaxAttempts() int {
+	wikiPrimaryMaxMu.Lock()
+	defer wikiPrimaryMaxMu.Unlock()
+	return wikiPrimaryMax
+}
+
+// setWikiPrimaryMaxAttempts sets the primary attempt budget (clamped to [1, 3]).
+func setWikiPrimaryMaxAttempts(n int) {
+	if n < 1 {
+		n = 1
+	}
+	if n > 3 {
+		n = 3
+	}
+	wikiPrimaryMaxMu.Lock()
+	wikiPrimaryMax = n
+	wikiPrimaryMaxMu.Unlock()
+}
 
 type wikiFallbackModelKeyT struct{}
 
@@ -1832,7 +1903,8 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 	thinking := false
 
 	var lastErr error
-	for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
+	primaryMax := getWikiPrimaryMaxAttempts()
+	for attempt := 1; attempt <= primaryMax; attempt++ {
 		response, err := chatModel.Chat(ctx, []chat.Message{
 			{Role: "user", Content: prompt},
 		}, &chat.ChatOptions{
@@ -1844,13 +1916,21 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		}
 		lastErr = err
 
+		// A gateway timeout on a long-output call is deterministic, not a blip:
+		// retrying the primary just runs into the same timeout again. With a
+		// fallback model configured, skip the remaining primary attempts and
+		// degrade to it immediately (saves the wasted primary retries).
+		if isGatewayTimeout(err) && wikiFallbackModelFromContext(ctx) != "" {
+			break
+		}
+
 		// Abort immediately on non-retryable errors (4xx except 408/429,
 		// parse/marshal failures, tool-side bugs, etc.). Retrying a
 		// hard "invalid arguments" error just wastes the model's budget.
 		if !isTransientLLMError(ctx, err) {
 			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
-		if attempt == wikiLLMMaxAttempts {
+		if attempt == primaryMax {
 			break
 		}
 
@@ -1878,8 +1958,8 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 			return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
 		}
 		select {
-		case wikiFallbackSem <- struct{}{}:
-			defer func() { <-wikiFallbackSem }()
+		case <-wikiFallbackTokens:
+			defer func() { wikiFallbackTokens <- struct{}{} }()
 		case <-ctx.Done():
 			return "", fmt.Errorf("wiki fallback aborted waiting for slot: %w", ctx.Err())
 		}
@@ -1926,6 +2006,18 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 //   - Substring matches on the error text for common transport failures
 //     ("timeout", "connection reset", "EOF") that providers surface
 //     without a structured status code.
+// isGatewayTimeout reports whether err is the upstream gateway's timeout — the
+// deterministic failure mode for long-output calls that exceed the gateway's
+// per-request limit. Separated from the general transient check so
+// the caller can skip pointless primary retries and degrade straight away.
+func isGatewayTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "status 504") || strings.Contains(s, "gateway timeout")
+}
+
 func isTransientLLMError(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
