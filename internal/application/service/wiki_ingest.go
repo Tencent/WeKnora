@@ -33,6 +33,30 @@ import (
 // naturally expires.
 var ErrWikiIngestConcurrent = errors.New("concurrent wiki task active")
 
+// wikiFallbackSem bounds concurrent fallback-model LLM calls. The fallback
+// (per-KB WikiConfig.SynthesisFallbackModelID) is typically a heavily
+// rate-limited model invoked ONLY to rescue the few long-output wiki calls
+// that hit a timeout on the primary model's upstream gateway. Capping
+// concurrency keeps the fallback from tripping its own rate limit; the buffer
+// size is the max in-flight fallback calls process-wide. 2 is deliberately
+// small — the fallback is a safety net, not a throughput path.
+var wikiFallbackSem = make(chan struct{}, 2)
+
+type wikiFallbackModelKeyT struct{}
+
+// withWikiFallbackModel stashes the per-KB fallback model id on the context so
+// generateWithTemplate (the single LLM entry point for all wiki calls) can
+// switch to it when the primary model exhausts retries with a transient error.
+func withWikiFallbackModel(ctx context.Context, modelID string) context.Context {
+	return context.WithValue(ctx, wikiFallbackModelKeyT{}, modelID)
+}
+
+// wikiFallbackModelFromContext returns the per-KB fallback model id, or "".
+func wikiFallbackModelFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(wikiFallbackModelKeyT{}).(string)
+	return v
+}
+
 const (
 	// maxContentForWiki limits the document content sent to LLM for wiki generation
 	maxContentForWiki = 32768
@@ -1839,6 +1863,51 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		case <-time.After(backoff):
 		}
 	}
+
+	// Primary model exhausted its retries with a transient error (typically an
+	// upstream gateway timeout on a long-output call). If a per-KB fallback
+	// model is configured, retry THIS call on it — only the failing call
+	// switches, so fallback volume stays tiny. A fallback reached via a gateway
+	// without that timeout can finish long-output calls the primary can't.
+	// Concurrency is capped by wikiFallbackSem so a rate-limited fallback
+	// isn't overwhelmed.
+	if fbID := wikiFallbackModelFromContext(ctx); fbID != "" && isTransientLLMError(ctx, lastErr) {
+		fbModel, fbErr := s.modelService.GetChatModel(ctx, fbID)
+		if fbErr != nil || fbModel == nil {
+			logger.Warnf(ctx, "wiki ingest: fallback model %s unavailable (%v), giving up", fbID, fbErr)
+			return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
+		}
+		select {
+		case wikiFallbackSem <- struct{}{}:
+			defer func() { <-wikiFallbackSem }()
+		case <-ctx.Done():
+			return "", fmt.Errorf("wiki fallback aborted waiting for slot: %w", ctx.Err())
+		}
+		logger.Infof(ctx, "wiki ingest: primary exhausted (%v), falling back to model %s", lastErr, fbID)
+		for fbAttempt := 1; fbAttempt <= wikiLLMMaxAttempts; fbAttempt++ {
+			response, err := fbModel.Chat(ctx, []chat.Message{
+				{Role: "user", Content: prompt},
+			}, &chat.ChatOptions{
+				Temperature: 0.3,
+				Thinking:    &thinking,
+			})
+			if err == nil {
+				logger.Infof(ctx, "wiki ingest: fallback model %s succeeded on attempt %d", fbID, fbAttempt)
+				return unmaskImageURLs(response.Content, urlMap), nil
+			}
+			lastErr = err
+			if !isTransientLLMError(ctx, err) || fbAttempt == wikiLLMMaxAttempts {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return "", fmt.Errorf("wiki fallback aborted during backoff: %w", ctx.Err())
+			case <-time.After(wikiLLMBackoffBase << (fbAttempt - 1)):
+			}
+		}
+		return "", fmt.Errorf("LLM call failed after primary+fallback attempts: %w", lastErr)
+	}
+
 	return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
 }
 

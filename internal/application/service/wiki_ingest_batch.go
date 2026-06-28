@@ -211,6 +211,14 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "get_chat_model_failed"
 		return fmt.Errorf("wiki ingest: get chat model: %w", err)
 	}
+	// Stash the optional per-KB fallback model id on the context so
+	// generateWithTemplate (the single LLM entry point for all wiki calls) can
+	// switch to it per-call when the primary exhausts retries on a transient
+	// transient gateway error on long-output calls. Skip if unset or same as primary.
+	if kb.WikiConfig != nil && kb.WikiConfig.SynthesisFallbackModelID != "" &&
+		kb.WikiConfig.SynthesisFallbackModelID != synthesisModelID {
+		ctx = withWikiFallbackModel(ctx, kb.WikiConfig.SynthesisFallbackModelID)
+	}
 
 	// Resolve per-KB tunables once. WikiConfig.IngestBatchSize /
 	// IngestMapParallel / IngestReduceParallel let operators on

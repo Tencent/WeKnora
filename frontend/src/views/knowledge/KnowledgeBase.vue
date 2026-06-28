@@ -31,6 +31,7 @@ import {
   uploadKnowledgeFile,
   createKnowledgeFromURL,
   reparseKnowledge,
+  resumeEnrichmentKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
   batchReparseKnowledge,
@@ -1866,6 +1867,24 @@ const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrid
   }
 };
 
+// Resume-enrichment: precisely re-drive only the missing graph chunks + wiki
+// for a failed/finalizing doc, WITHOUT clearing existing chunks/vectors/graph
+// /wiki (unlike reparse which re-embeds the whole doc). Backend skips already
+// -done work and only fills the gaps.
+const submitResumeEnrichment = async (id: string) => {
+  try {
+    await resumeEnrichmentKnowledge(id);
+    delete traceAvailableById[id];
+    traceAvailableById[id] = true;
+    MessagePlugin.success(t('knowledgeBase.resumeSubmitted'));
+    resetPage();
+    loadKnowledgeFiles(kbId.value);
+    scheduleWikiStatusProbes();
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.resumeFailed'));
+  }
+};
+
 const handleScroll = () => {
   if (isFAQ.value) return;
   if (docListLoading.value) return;
@@ -2042,12 +2061,13 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete',
+  action: 'edit' | 'reparse' | 'resume' | 'cancel-parse' | 'move' | 'delete',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
+  if (action === 'resume') return submitResumeEnrichment(item.id);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);

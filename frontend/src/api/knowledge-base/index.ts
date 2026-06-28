@@ -257,6 +257,12 @@ export function reparseKnowledge(id: string, data?: { process_config?: Knowledge
   return post(`/api/v1/knowledge/${id}/reparse`, data);
 }
 
+// 续接增强:仅对 failed/finalizing 的文档,精确补未完成的图谱 chunk + wiki,
+// 不清空已落库的切片/向量/图谱/wiki,已完成的略过。区别于 reparse(整篇重嵌)。
+export function resumeEnrichmentKnowledge(id: string) {
+  return post(`/api/v1/knowledge/${id}/resume-enrichment`);
+}
+
 export function cancelKnowledgeParse(id: string) {
   return post(`/api/v1/knowledge/${id}/cancel-parse`);
 }

@@ -329,8 +329,42 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if err != nil {
-		handleErr = err
-		return err
+		// Graph entity/relation extraction shares wiki's long-output failure
+		// mode: a large chunk can make the LLM emit output long enough to hit
+		// an upstream gateway timeout. If the KB configures a fallback model
+		// (WikiConfig.SynthesisFallbackModelID, reused as the KB's long-output
+		// LLM safety net), retry THIS chunk on it before giving up. Shares
+		// wikiFallbackSem so the (often rate-limited) fallback model isn't
+		// overwhelmed when many chunks fail at once under load.
+		fbID := ""
+		if kb.WikiConfig != nil {
+			fbID = kb.WikiConfig.SynthesisFallbackModelID
+		}
+		if fbID != "" && fbID != p.ModelID && isTransientLLMError(ctx, err) {
+			if fbModel, fbErr := s.modelService.GetChatModel(ctx, fbID); fbErr == nil && fbModel != nil {
+				select {
+				case wikiFallbackSem <- struct{}{}:
+					var fbGraph *types.GraphData
+					var fbErr2 error
+					func() {
+						defer func() { <-wikiFallbackSem }()
+						fbExtractor := chatpipeline.NewExtractor(fbModel, template)
+						fbGraph, fbErr2 = fbExtractor.Extract(ctx, chunk.Content)
+					}()
+					if fbErr2 == nil {
+						logger.Infof(ctx, "graph extract: chunk %s primary failed (%v), fell back to %s OK", p.ChunkID, err, fbID)
+						graph, err = fbGraph, nil
+					} else {
+						logger.Warnf(ctx, "graph extract: chunk %s fallback %s also failed: %v", p.ChunkID, fbID, fbErr2)
+					}
+				case <-ctx.Done():
+				}
+			}
+		}
+		if err != nil {
+			handleErr = err
+			return err
+		}
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
