@@ -293,9 +293,53 @@ func (h *HousekeepingService) filterOutQueued(
 			skipped++
 			continue
 		}
+		// Asynq holds nothing for this row, but the wiki enrichment
+		// pipeline runs on the task_pending_ops table, NOT asynq: a
+		// document that has finished graph extraction and is only waiting
+		// its turn in the wiki ingest backlog has no asynq task yet is NOT
+		// orphaned. The asynq-only probe above is blind to that substrate
+		// and would false-kill such a row once it sits in finalizing past
+		// the stale threshold; consult the pending-ops table before
+		// treating the row as stuck.
+		if hasWiki, werr := h.hasPendingEnrichmentOp(ctx, k); werr != nil {
+			// Fail safe toward keep-as-queued here (the asynq probe fails
+			// the other way, toward recover): a missed kill merely leaves
+			// the row in finalizing for a later resume, whereas a false
+			// kill on a transient DB hiccup is exactly the regression this
+			// guard exists to prevent.
+			logger.Warnf(ctx,
+				"[Housekeeping] wiki pending-op probe failed for %s: %v (will fail safe and keep as queued)", k.ID, werr)
+			skipped++
+			continue
+		} else if hasWiki {
+			skipped++
+			continue
+		}
 		out = append(out, k)
 	}
 	return out, skipped
+}
+
+// hasPendingEnrichmentOp reports whether the knowledge still has a wiki
+// ingest operation waiting in the task_pending_ops queue. Wiki synthesis
+// is not an asynq task -- it is drained from task_pending_ops by the wiki
+// batch trigger -- so the asynq TaskInspector cannot see it. Without this
+// check the sweep treats a row that is legitimately backlogged behind
+// wiki as orphaned and marks it failed (observed at scale: documents
+// finish graph extraction, then sit in finalizing waiting for the wiki
+// backlog and get recovered as "stuck"). The op's dedup_key is the
+// knowledge ID (see the wiki ingest enqueue path), so this is an indexed
+// point lookup.
+func (h *HousekeepingService) hasPendingEnrichmentOp(ctx context.Context, k types.Knowledge) (bool, error) {
+	var n int64
+	if err := h.db.WithContext(ctx).
+		Table("task_pending_ops").
+		Where("task_type = ? AND scope = ? AND scope_id = ? AND dedup_key = ?",
+			types.TypeWikiIngest, types.TaskScopeKnowledgeBase, k.KnowledgeBaseID, k.ID).
+		Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // parseHeartbeatTime accepts the timestamp formats Postgres and SQLite

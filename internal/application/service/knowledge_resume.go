@@ -85,18 +85,29 @@ func (s *knowledgeService) ResumeEnrichment(
 	// attempt's completion state, not the fresh (empty) one.
 	doneGraphChunks := map[string]bool{}
 	wikiAlreadyDone := false
+	// Scan EVERY prior attempt, not just the latest. Graph extraction is
+	// idempotent and keyed by chunk_id; a wiki span once done stays valid.
+	// Restart-driven retries open fresh attempts (crash recovery, or a prior
+	// resume, bumps the counter), so a chunk extracted at attempt 3 leaves its
+	// done span at attempt 3 while the latest attempt may be 5 or 6. Reading
+	// only the latest attempt would treat all that completed work as missing
+	// and re-run the entire graph stage on every resume -- the multi-day waste
+	// this resume path exists to avoid. Matching by chunk_id keeps a genuine
+	// reparse (which mints new chunk IDs) correctly re-running.
 	if latest := s.tracker().LatestAttempt(ctx, existing.ID); latest > 0 {
-		for _, sp := range s.tracker().ListAttemptSpans(ctx, existing.ID, latest) {
-			if sp.Status != types.SpanStatusDone {
-				continue
-			}
-			if sp.Name == wikiSpanName {
-				wikiAlreadyDone = true
-				continue
-			}
-			if strings.HasPrefix(sp.Name, graphChunkSpanPrefix) && sp.Input != nil {
-				if cid, ok := sp.Input["chunk_id"].(string); ok && cid != "" {
-					doneGraphChunks[cid] = true
+		for attempt := 1; attempt <= latest; attempt++ {
+			for _, sp := range s.tracker().ListAttemptSpans(ctx, existing.ID, attempt) {
+				if sp.Status != types.SpanStatusDone {
+					continue
+				}
+				if sp.Name == wikiSpanName {
+					wikiAlreadyDone = true
+					continue
+				}
+				if strings.HasPrefix(sp.Name, graphChunkSpanPrefix) && sp.Input != nil {
+					if cid, ok := sp.Input["chunk_id"].(string); ok && cid != "" {
+						doneGraphChunks[cid] = true
+					}
 				}
 			}
 		}

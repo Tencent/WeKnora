@@ -114,6 +114,14 @@ func stuckKnowledgeParseQuery(db *gorm.DB, distributed bool, staleCutoff time.Ti
 		})
 	if distributed {
 		q = q.Where("updated_at < ?", staleCutoff)
+		// A finalizing/processing row that still has a wiki ingest op queued in
+		// task_pending_ops is NOT orphaned: the wiki pipeline survives a restart
+		// in the DB and drains it. Failing it here is the restart-time twin of
+		// the housekeeping false-kill -- it nukes every document that finished
+		// graph extraction and is only waiting in the wiki backlog (the dominant
+		// stall during a large backfill). Exclude those so a restart no longer
+		// fails the whole in-flight set.
+		q = q.Where("NOT EXISTS (SELECT 1 FROM task_pending_ops o WHERE o.task_type = ? AND o.dedup_key = knowledges.id)", types.TypeWikiIngest)
 	}
 	return q
 }
