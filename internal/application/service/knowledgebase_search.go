@@ -247,10 +247,14 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
-	if len(deduplicatedChunks) > params.MatchCount {
-		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
+	// Limit to MatchCount; 0 means "no explicit limit" — use over-retrieval floor (50).
+	effectiveMatchCount := params.MatchCount
+	if effectiveMatchCount <= 0 {
+		effectiveMatchCount = 50
 	}
-
+	if len(deduplicatedChunks) > effectiveMatchCount {
+		deduplicatedChunks = deduplicatedChunks[:effectiveMatchCount]
+	}
 	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
 }
 
