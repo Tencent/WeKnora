@@ -1,52 +1,36 @@
 <template>
-  <div class="oauth-card" :class="cardClass">
-    <!-- Status strip -->
-    <div class="oauth-strip">
-      <span class="oauth-strip-icon">
-        <t-icon v-if="!resolved" name="lock-on" />
-        <t-icon v-else-if="authorized" name="check-circle-filled" />
-        <t-icon v-else name="close-circle-filled" />
-      </span>
-      <span class="oauth-strip-text">
-        <template v-if="!resolved">{{ $t('agentStream.mcpOAuth.banner') }}</template>
-        <template v-else-if="authorized">{{ $t('agentStream.mcpOAuth.authorizedTag') }}</template>
-        <template v-else-if="timedOut">{{ $t('agentStream.mcpOAuth.timedOutTag') }}</template>
-        <template v-else>{{ $t('agentStream.mcpOAuth.canceledTag') }}</template>
-      </span>
-      <span v-if="!resolved && secondsLeft >= 0" class="oauth-strip-timer" :class="timerClass">
-        <t-icon name="time" />
-        {{ formatCountdown(secondsLeft) }}
-      </span>
-    </div>
-
-    <!-- Identity row -->
-    <div class="oauth-identity">
-      <span class="ident-service">{{ serviceName }}</span>
-      <template v-if="mcpToolName">
-        <t-icon name="chevron-right" class="ident-sep" />
-        <span class="ident-tool">{{ mcpToolName }}</span>
-      </template>
-    </div>
-
-    <div v-if="!resolved" class="oauth-desc">{{ $t('agentStream.mcpOAuth.desc') }}</div>
-
-    <!-- Footer (pending) -->
-    <div v-if="!resolved" class="oauth-footer">
-      <span class="oauth-spacer" />
-      <t-button
-        theme="primary"
-        size="small"
-        :loading="authorizing"
-        :disabled="authorizing"
-        @click="authorize"
-      >
-        {{ $t('agentStream.mcpOAuth.authorize') }}
-      </t-button>
-    </div>
-
-    <!-- Footer (resolved) -->
-    <div v-else class="oauth-resolved-footer">
-      <span v-if="resolveReason" class="oauth-resolved-reason">{{ resolveReason }}</span>
+  <div class="action-card interaction-inline" :class="cardClass">
+    <div class="action-header no-results">
+      <div class="action-title">
+        <t-icon class="action-title-icon" :name="headerIcon" />
+        <span class="action-name">{{ titleLine }}</span>
+        <span v-if="!resolved" class="inline-actions">
+          <button
+            type="button"
+            class="inline-action"
+            :disabled="canceling || authorizing"
+            @click="skip"
+          >
+            {{ $t('agentStream.mcpOAuth.skip') }}
+          </button>
+          <span class="inline-dot">·</span>
+          <button
+            type="button"
+            class="inline-action is-primary"
+            :disabled="authorizing || canceling"
+            @click="authorize"
+          >
+            {{ $t('agentStream.mcpOAuth.authorize') }}
+          </button>
+        </span>
+        <span
+          v-if="!resolved && secondsLeft >= 0"
+          class="action-timer"
+          :class="timerClass"
+        >
+          {{ formatCountdown(secondsLeft) }}
+        </span>
+      </div>
     </div>
   </div>
 </template>
@@ -56,6 +40,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
+  cancelMCPOAuth,
   getMCPOAuthAuthorizeURL,
   getMCPOAuthStatus,
   resolveMCPOAuth,
@@ -79,6 +64,7 @@ const props = defineProps<{
 const { t } = useI18n()
 
 const authorizing = ref(false)
+const canceling = ref(false)
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | null = null
 let poll: ReturnType<typeof setInterval> | null = null
@@ -100,15 +86,37 @@ const timerClass = computed(() => {
   return ''
 })
 
+const headerIcon = computed(() => {
+  if (!props.resolved) return 'lock-on'
+  if (props.authorized) return 'check-circle'
+  return 'close-circle'
+})
+
+const targetLabel = computed(() => (
+  props.mcpToolName
+    ? t('agentStream.mcpOAuth.targetWithTool', { service: props.serviceName, tool: props.mcpToolName })
+    : props.serviceName
+))
+
+const titleLine = computed(() => {
+  if (!props.resolved) {
+    return t('agentStream.mcpOAuth.waiting', { target: targetLabel.value })
+  }
+  if (props.authorized) {
+    return t('agentStream.mcpOAuth.resolvedAuthorized', { target: targetLabel.value })
+  }
+  if (props.timedOut) return t('agentStream.mcpOAuth.resolvedTimedOut', { target: targetLabel.value })
+  return t('agentStream.mcpOAuth.resolvedCanceled', { target: targetLabel.value })
+})
+
 const cardClass = computed(() => ({
-  'is-resolved': !!props.resolved,
-  'is-authorized': !!props.resolved && !!props.authorized,
-  'is-failed': !!props.resolved && !props.authorized,
-  'is-pending': !props.resolved,
+  'action-pending': !props.resolved,
+  'action-success': !!props.resolved && !!props.authorized,
+  'action-error': !!props.resolved && !props.authorized,
 }))
 
 function formatCountdown(s: number): string {
-  if (s < 60) return t('agentStream.mcpOAuth.countdown', { seconds: s })
+  if (s < 60) return t('agentStream.mcpOAuth.countdownShort', { seconds: s })
   const m = Math.floor(s / 60)
   const r = s % 60
   return `${m}:${r.toString().padStart(2, '0')}`
@@ -118,6 +126,19 @@ function stopPoll() {
   if (poll) {
     clearInterval(poll)
     poll = null
+  }
+}
+
+const skip = async () => {
+  if (props.resolved || canceling.value) return
+  canceling.value = true
+  try {
+    await cancelMCPOAuth(props.pendingId)
+  } catch (e: any) {
+    const msg = e?.response?.data?.error?.message || e?.message || t('agentStream.mcpOAuth.skipFailed')
+    MessagePlugin.error(msg)
+  } finally {
+    canceling.value = false
   }
 }
 
@@ -137,7 +158,6 @@ const authorize = async () => {
       return
     }
     const popup = window.open(authUrl, 'mcp_oauth', 'width=600,height=720')
-    // Poll until the user authorizes (status flips) or closes the popup.
     poll = window.setInterval(async () => {
       const closed = !popup || popup.closed
       let ok = false
@@ -150,7 +170,7 @@ const authorize = async () => {
         stopPoll()
         try { popup?.close() } catch { /* cross-origin close may throw */ }
         try {
-          await resolveMCPOAuth(props.pendingId, { service_id: props.serviceId })
+          await resolveMCPOAuth(props.pendingId, { service_id: props.serviceId, decision: 'authorize' })
           MessagePlugin.success(t('agentStream.mcpOAuth.authorizedToast'))
         } catch (e: any) {
           const msg = e?.response?.data?.error?.message || e?.message || t('agentStream.mcpOAuth.resumeFailed')
@@ -182,151 +202,5 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="less">
-@warning-rgb: 237, 122, 11;
-@success-rgb: 7, 192, 95;
-@danger-rgb: 232, 80, 91;
-
-.oauth-card {
-  --strip-color: var(--td-brand-color);
-  --strip-rgb: 0, 82, 217;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
-  overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 3px;
-    background: var(--strip-color);
-    transition: background-color 0.2s ease;
-  }
-
-  &.is-authorized {
-    --strip-color: var(--td-success-color);
-    --strip-rgb: @success-rgb;
-    opacity: 0.94;
-  }
-
-  &.is-failed {
-    --strip-color: var(--td-error-color);
-    --strip-rgb: @danger-rgb;
-    opacity: 0.94;
-  }
-}
-
-.oauth-strip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 12px 7px 14px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--strip-color);
-  background: rgba(var(--strip-rgb), 0.06);
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  .oauth-strip-icon {
-    display: inline-flex;
-    align-items: center;
-    .t-icon {
-      font-size: 14px;
-    }
-  }
-  .oauth-strip-text {
-    flex: 1;
-    color: var(--strip-color);
-  }
-  .oauth-strip-timer {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.04);
-    color: var(--td-text-color-secondary);
-    font-variant-numeric: tabular-nums;
-    font-weight: 500;
-
-    .t-icon {
-      font-size: 12px;
-    }
-    &.timer-warning {
-      color: var(--td-warning-color);
-      background: rgba(@warning-rgb, 0.1);
-    }
-    &.timer-critical {
-      color: var(--td-error-color);
-      background: rgba(@danger-rgb, 0.12);
-      animation: timerPulse 1.2s ease-in-out infinite;
-    }
-  }
-}
-
-.oauth-identity {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 12px 6px 14px;
-  font-size: 13px;
-  flex-wrap: wrap;
-
-  .ident-service {
-    color: var(--td-text-color-secondary);
-    font-weight: 500;
-  }
-  .ident-sep {
-    color: var(--td-text-color-placeholder);
-    font-size: 12px;
-  }
-  .ident-tool {
-    color: var(--td-brand-color);
-    font-weight: 600;
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-    font-size: 13px;
-  }
-}
-
-.oauth-desc {
-  padding: 0 12px 4px 14px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--td-text-color-secondary);
-}
-
-.oauth-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px 12px 14px;
-}
-
-.oauth-spacer {
-  flex: 1;
-}
-
-.oauth-resolved-footer {
-  padding: 6px 12px 10px 14px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-
-  .oauth-resolved-reason {
-    color: var(--td-text-color-secondary);
-  }
-
-  &:empty {
-    display: none;
-  }
-}
-
-@keyframes timerPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
+@import './agent-interaction-card.less';
 </style>

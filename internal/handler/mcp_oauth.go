@@ -211,6 +211,8 @@ type resolveMCPOAuthBody struct {
 	// ServiceID is the MCP service the pending prompt belongs to; used to
 	// verify the user actually holds a token before resuming the agent.
 	ServiceID string `json:"service_id" binding:"required"`
+	// Decision is "authorize" (default) or "cancel" when the user skips OAuth.
+	Decision string `json:"decision"`
 }
 
 // ResolveMCPOAuth resumes an agent run that paused on an in-conversation OAuth
@@ -257,6 +259,43 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 		return
 	}
 
+	decision := strings.TrimSpace(strings.ToLower(body.Decision))
+	if decision == "" {
+		decision = "authorize"
+	}
+
+	switch decision {
+	case "cancel", "reject", "skip":
+		if err := h.gate.Resolve(tenantID, userID, pendingID, approval.Decision{
+			Approved: false,
+			Reason:   "user canceled",
+		}); err != nil {
+			switch {
+			case stderrors.Is(err, approval.ErrPendingNotFound):
+				c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
+			case stderrors.Is(err, approval.ErrAlreadyResolved):
+				c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
+			case stderrors.Is(err, approval.ErrTenantMismatch):
+				c.Error(errors.NewBadRequestError("tenant mismatch"))
+			case stderrors.Is(err, approval.ErrUserMismatch):
+				c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
+			default:
+				logger.ErrorWithFields(ctx, err, map[string]interface{}{
+					"pending_id": secutils.SanitizeForLog(pendingID),
+				})
+				c.Error(errors.NewInternalServerError(err.Error()))
+			}
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true})
+		return
+	case "authorize":
+		// continue below
+	default:
+		c.Error(errors.NewBadRequestError("decision must be authorize or cancel"))
+		return
+	}
+
 	// Only resume once the user genuinely holds a token; otherwise the retry
 	// would just fail again with another authorization-required error.
 	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, userID, serviceID)
@@ -270,6 +309,57 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 	}
 
 	if err := h.gate.Resolve(tenantID, userID, pendingID, approval.Decision{Approved: true}); err != nil {
+		switch {
+		case stderrors.Is(err, approval.ErrPendingNotFound):
+			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
+		case stderrors.Is(err, approval.ErrAlreadyResolved):
+			c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
+		case stderrors.Is(err, approval.ErrTenantMismatch):
+			c.Error(errors.NewBadRequestError("tenant mismatch"))
+		case stderrors.Is(err, approval.ErrUserMismatch):
+			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
+		default:
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"pending_id": secutils.SanitizeForLog(pendingID),
+			})
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// CancelMCPOAuth lets the user skip an in-conversation OAuth prompt without
+// completing authorization. This unblocks the paused agent with a denial.
+//
+// CancelMCPOAuth godoc
+// @Summary      跳过对话内 MCP OAuth 授权
+// @Description  用户主动跳过 OAuth 授权，解除 Agent 阻塞
+// @Tags         MCP服务
+// @Produce      json
+// @Param        pending_id  path  string  true  "待授权 ID"
+// @Success      200         {object}  map[string]interface{}
+// @Failure      404         {object}  errors.AppError
+// @Security     Bearer
+// @Router       /agent/mcp-oauth-resolutions/{pending_id}/cancel [post]
+func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
+	ctx := c.Request.Context()
+	pendingID := c.Param("pending_id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	userID, _ := types.UserIDFromContext(ctx)
+	if tenantID == 0 || strings.TrimSpace(userID) == "" {
+		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+	if h.gate == nil {
+		c.Error(errors.NewInternalServerError("OAuth gate is not configured"))
+		return
+	}
+
+	if err := h.gate.Resolve(tenantID, userID, pendingID, approval.Decision{
+		Approved: false,
+		Reason:   "user canceled",
+	}); err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):
 			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))

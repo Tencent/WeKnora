@@ -226,7 +226,11 @@ export async function resolveToolApproval(
 // the token exists before unblocking the paused tool call.
 export async function resolveMCPOAuth(
   pendingId: string,
-  body: { service_id: string }
+  body: { service_id: string; decision?: 'authorize' | 'cancel' }
 ): Promise<void> {
   await post(`/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}`, body)
+}
+
+export async function cancelMCPOAuth(pendingId: string): Promise<void> {
+  await post(`/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}/cancel`, {})
 }

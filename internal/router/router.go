@@ -890,6 +890,7 @@ func RegisterMCPServiceRoutes(
 		// Resume an agent run paused on an in-conversation MCP OAuth prompt.
 		// Same tenant-member (Viewer+) gating rationale as tool-approvals.
 		agentTool.POST("/mcp-oauth-resolutions/:pending_id", g.Viewer(), oauthHandler.ResolveMCPOAuth)
+		agentTool.POST("/mcp-oauth-resolutions/:pending_id/cancel", g.Viewer(), oauthHandler.CancelMCPOAuth)
 	}
 }
 
