@@ -39,6 +39,15 @@ func (r *createKnowledgeFileRepoStub) CreateKnowledge(ctx context.Context, knowl
 	return r.createErr
 }
 
+// GetKnowledgeTags is invoked by setAndAttachKnowledgeTags after create even
+// when no tags were supplied; a fresh knowledge has none, so return empty.
+func (r *createKnowledgeFileRepoStub) GetKnowledgeTags(
+	ctx context.Context,
+	knowledgeIDs []string,
+) (map[string][]*types.KnowledgeTag, error) {
+	return map[string][]*types.KnowledgeTag{}, nil
+}
+
 type createKnowledgeFileKBServiceStub struct {
 	interfaces.KnowledgeBaseService
 

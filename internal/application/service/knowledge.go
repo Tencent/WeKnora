@@ -489,7 +489,15 @@ func (s *knowledgeService) GetKnowledgeByIDOnly(ctx context.Context, id string) 
 // KB row itself is not returned so callers can't accidentally widen
 // their scope past "needed the creator id".
 func (s *knowledgeService) GetOwningKBCreatorID(ctx context.Context, knowledgeID string) (string, error) {
-	knowledge, err := s.GetKnowledgeByID(ctx, knowledgeID)
+	// Resolve via the repository directly: ownership only needs the
+	// knowledge -> kb_id link, so we deliberately skip the service-level
+	// GetKnowledgeByID (which also eagerly loads tags) to keep this lookup
+	// minimal and tenant-scoped.
+	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		return "", werrors.NewUnauthorizedError("Tenant ID not found in context")
+	}
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
 		return "", err
 	}
