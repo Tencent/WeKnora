@@ -286,9 +286,9 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if prefix == "" {
 			continue
 		}
-		display := svc.Name
+		display := sanitizeMustUseField(svc.Name)
 		if display == "" {
-			display = svc.ID
+			display = sanitizeMustUseField(svc.ID)
 		}
 		lines = append(lines, fmt.Sprintf("Must use MCP tools whose names start with %s (@%s) to answer the question below.", prefix, display))
 	}
@@ -296,7 +296,8 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if skill == nil || skill.Name == "" {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("Must call read_skill(skill_name=\"%s\") for @Skill \"%s\" before answering.", skill.Name, skill.Name))
+		name := sanitizeMustUseField(skill.Name)
+		lines = append(lines, fmt.Sprintf("Must call read_skill(skill_name=\"%s\") for @Skill \"%s\" before answering.", name, name))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -304,25 +305,58 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 	return "<must_use>\n" + strings.Join(lines, "\n") + "\n</must_use>"
 }
 
-// mcpToolNamePrefix returns the shared prefix for an MCP service's registered tools
-// (e.g. mcp_iwiki_ from mcp_iwiki_getdocument).
+// sanitizeMustUseField strips newlines and angle brackets so an MCP/skill name
+// cannot break out of the <must_use> block or inject extra instruction lines.
+func sanitizeMustUseField(s string) string {
+	replacer := strings.NewReplacer("\n", " ", "\r", " ", "<", " ", ">", " ")
+	return strings.TrimSpace(replacer.Replace(s))
+}
+
+// mcpToolNamePrefix returns the shared prefix for an MCP service's registered
+// tools (e.g. mcp_iwiki_ from mcp_iwiki_getdocument). Tool names are
+// mcp_{sanitized_service_name}_{tool}, and the service slug itself may contain
+// underscores (sanitizeName turns spaces/hyphens into "_"), so we take the
+// longest common prefix across the service's tools and trim it back to the last
+// segment boundary instead of naively cutting at the first underscore.
 func mcpToolNamePrefix(svc *PinnedMCPServiceInfo) string {
 	if svc == nil || len(svc.ToolNames) == 0 {
 		return ""
 	}
 	const head = "mcp_"
+	var mcpNames []string
 	for _, toolName := range svc.ToolNames {
-		if !strings.HasPrefix(toolName, head) {
-			continue
+		if strings.HasPrefix(toolName, head) {
+			mcpNames = append(mcpNames, toolName)
 		}
-		rest := toolName[len(head):]
-		idx := strings.Index(rest, "_")
-		if idx <= 0 {
-			continue
-		}
-		return head + rest[:idx+1]
 	}
-	return ""
+	if len(mcpNames) == 0 {
+		return ""
+	}
+	prefix := mcpNames[0]
+	for _, name := range mcpNames[1:] {
+		prefix = commonStringPrefix(prefix, name)
+	}
+	// Trim to the last underscore so the hint names the service prefix
+	// (mcp_{service}_) rather than a partial tool name.
+	if idx := strings.LastIndex(prefix, "_"); idx >= len(head)-1 {
+		prefix = prefix[:idx+1]
+	}
+	if len(prefix) <= len(head) {
+		return ""
+	}
+	return prefix
+}
+
+func commonStringPrefix(a, b string) string {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	i := 0
+	for i < n && a[i] == b[i] {
+		i++
+	}
+	return a[:i]
 }
 
 // RenderUserTurnContent builds the user-turn payload for the current LLM call
