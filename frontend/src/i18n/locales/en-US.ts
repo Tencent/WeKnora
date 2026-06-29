@@ -4465,6 +4465,14 @@ export default {
     addEnvVar: 'Add Environment Variable',
     enableService: 'Enable Service',
     authConfig: 'Authentication',
+    authType: 'Auth Method',
+    authTypeNone: 'None / Custom Header',
+    authTypeApiKey: 'API Key / Token',
+    authTypeOAuth: 'OAuth 2.0 (authorize on first connect)',
+    oauthAuthorizeHint: 'Clicking "Authorize" saves the current config first, then starts authorization (each user authorizes individually).',
+    apiKeyHeader: 'Header Name',
+    apiKeyHeaderDesc: 'Defaults to X-API-Key. For Bearer, set Authorization and put "Bearer <token>" in the value below; for raw-token services use Authorization with the raw token.',
+    credentialValue: 'Secret / Token',
     apiKey: 'API Key',
     bearerToken: 'Bearer Token',
     optional: 'Optional',
@@ -4484,7 +4492,8 @@ export default {
       created: 'MCP service created',
       updated: 'MCP service updated',
       createFailed: 'Failed to create MCP service',
-      updateFailed: 'Failed to update MCP service'
+      updateFailed: 'Failed to update MCP service',
+      oauthRequired: 'This server requires OAuth. Switched to OAuth 2.0 — save, then click "Authorize".'
     },
     customHeaders: {
       label: 'Custom Headers (optional)',

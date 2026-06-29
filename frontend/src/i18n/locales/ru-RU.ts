@@ -4113,6 +4113,14 @@ export default {
     addEnvVar: 'Добавить переменную',
     enableService: 'Включить сервис',
     authConfig: 'Аутентификация',
+    authType: 'Способ аутентификации',
+    authTypeNone: 'Нет / Свой заголовок',
+    authTypeApiKey: 'API Key / Token',
+    authTypeOAuth: 'OAuth 2.0 (авторизация при первом подключении)',
+    oauthAuthorizeHint: 'Нажатие «Авторизоваться» сначала сохранит текущую конфигурацию, затем запустит авторизацию (каждый пользователь авторизуется отдельно).',
+    apiKeyHeader: 'Имя заголовка',
+    apiKeyHeaderDesc: 'По умолчанию X-API-Key. Для Bearer укажите Authorization и впишите "Bearer <token>" в значение ниже; для «сырого» токена используйте Authorization и сам токен.',
+    credentialValue: 'Секрет / Токен',
     apiKey: 'API Key',
     bearerToken: 'Bearer Token',
     optional: 'Необязательно',
@@ -4132,7 +4140,8 @@ export default {
       created: 'Сервис MCP создан',
       updated: 'Сервис MCP обновлён',
       createFailed: 'Не удалось создать сервис MCP',
-      updateFailed: 'Не удалось обновить сервис MCP'
+      updateFailed: 'Не удалось обновить сервис MCP',
+      oauthRequired: 'Сервис требует OAuth. Переключено на OAuth 2.0 — сохраните и нажмите «Авторизоваться».'
     },
     customHeaders: {
       label: 'Пользовательские заголовки (необязательно)',

@@ -6,6 +6,10 @@
       <span>{{ result.success ? $t('mcp.testResult.connectionSuccess') : $t('mcp.testResult.connectionFailed') }}</span>
     </div>
     <p v-if="result.message" class="mtr-message">{{ result.message }}</p>
+    <div v-if="result.success && result.description" class="mtr-service-desc">
+      <span>{{ $t('mcp.testResult.descriptionLabel') }}</span>
+      <p>{{ result.description }}</p>
+    </div>
 
     <template v-if="result.success">
       <!-- 工具列表 -->
@@ -211,6 +215,29 @@ const formatSchema = (schema: any): string => {
   color: var(--td-text-color-secondary);
   line-height: 1.6;
   word-break: break-word;
+}
+
+.mtr-service-desc {
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  span {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-primary);
+    font-size: 13px;
+    line-height: 1.6;
+    word-break: break-word;
+  }
 }
 
 /* 分组 */

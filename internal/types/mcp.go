@@ -74,8 +74,15 @@ const (
 type MCPAuthConfig struct {
 	// AuthType selects the authentication strategy. Empty ("") is treated as
 	// none for backward compatibility with rows that pre-date this field.
-	AuthType      MCPAuthType       `json:"auth_type,omitempty"`
-	APIKey        string            `json:"api_key,omitempty"`
+	AuthType MCPAuthType `json:"auth_type,omitempty"`
+	APIKey   string      `json:"api_key,omitempty"`
+	// APIKeyHeader is the header name that carries APIKey when AuthType is
+	// api_key. Empty defaults to "X-API-Key". This is non-secret structural
+	// config (the secret is APIKey), so it is not encrypted and is safe to echo
+	// back in responses. It lets services that expect the key in a different
+	// header (e.g. the raw token directly in "Authorization") work without
+	// resorting to plaintext custom headers.
+	APIKeyHeader  string            `json:"api_key_header,omitempty"`
 	Token         string            `json:"token,omitempty"`
 	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
 	// Scopes are the OAuth scopes requested during authorization. Optional.
@@ -146,10 +153,16 @@ type MCPResource struct {
 
 // MCPTestResult represents the result of testing an MCP service connection
 type MCPTestResult struct {
-	Success   bool           `json:"success"`
-	Message   string         `json:"message,omitempty"`
-	Tools     []*MCPTool     `json:"tools,omitempty"`
-	Resources []*MCPResource `json:"resources,omitempty"`
+	Success     bool   `json:"success"`
+	Message     string `json:"message,omitempty"`
+	Description string `json:"description,omitempty"`
+	// OAuthRequired is true when the connection failed because the server
+	// requires OAuth authorization (RFC 9728), even though the service was not
+	// configured for OAuth. The UI uses it to guide the user to switch the auth
+	// strategy to OAuth.
+	OAuthRequired bool           `json:"oauth_required,omitempty"`
+	Tools         []*MCPTool     `json:"tools,omitempty"`
+	Resources     []*MCPResource `json:"resources,omitempty"`
 }
 
 // BeforeCreate is a GORM hook that runs before creating a new MCP service
@@ -317,4 +330,3 @@ func GetDefaultAdvancedConfig() *MCPAdvancedConfig {
 // compile-time invariant of the DTO instead of a runtime call that handlers
 // must remember to make. Builtin-service field stripping is also implemented
 // there.
-
