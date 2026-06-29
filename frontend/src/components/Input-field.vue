@@ -313,13 +313,14 @@ const agentAllowedTools = computed<string[]>(() => {
   return currentAgentConfig.value?.allowed_tools || [];
 });
 
-const normalizeMCPSelectionMode = (mode?: string): 'all' | 'selected' | 'none' => {
+type SelectionMode = 'all' | 'selected' | 'none';
+const normalizeSelectionMode = (mode?: string): SelectionMode => {
   return mode === 'all' || mode === 'selected' || mode === 'none' ? mode : 'none';
 };
 
-const agentMCPSelectionMode = computed<'all' | 'selected' | 'none'>(() => {
+const agentMCPSelectionMode = computed<SelectionMode>(() => {
   if (!settingsStore.isAgentStreamMode || !hasAgentConfig.value) return 'none';
-  return normalizeMCPSelectionMode(currentAgentConfig.value?.mcp_selection_mode);
+  return normalizeSelectionMode(currentAgentConfig.value?.mcp_selection_mode);
 });
 
 const agentMCPServiceIds = computed<string[]>(() => {
@@ -335,13 +336,9 @@ const isMCPAllowedByAgent = (service: MCPService) => {
   return true;
 };
 
-const normalizeSkillsSelectionMode = (mode?: string): 'all' | 'selected' | 'none' => {
-  return mode === 'all' || mode === 'selected' || mode === 'none' ? mode : 'none';
-};
-
-const agentSkillsSelectionMode = computed<'all' | 'selected' | 'none'>(() => {
+const agentSkillsSelectionMode = computed<SelectionMode>(() => {
   if (!settingsStore.isAgentStreamMode || !hasAgentConfig.value) return 'none';
-  return normalizeSkillsSelectionMode(currentAgentConfig.value?.skills_selection_mode);
+  return normalizeSelectionMode(currentAgentConfig.value?.skills_selection_mode);
 });
 
 const agentSelectedSkills = computed<string[]>(() => {

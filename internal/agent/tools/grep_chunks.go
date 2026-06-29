@@ -319,6 +319,31 @@ func (t *GrepChunksTool) listKnowledgeIDsByTags(
 	return ids, err
 }
 
+// scopeClause builds the SQL predicate restricting chunks to the active scope.
+// Specific knowledge IDs and full-KB (kb, tenant) pairs are OR'd together so a
+// turn that mentions both an entire KB and a tag/file in another KB searches
+// every requested scope. Returns ("", nil) when no usable scope exists.
+func scopeClause(kbIDs, knowledgeIDs []string, kbTenantMap map[string]uint64) (string, []interface{}) {
+	var clauses []string
+	var args []interface{}
+	if len(knowledgeIDs) > 0 {
+		clauses = append(clauses, "chunks.knowledge_id IN ?")
+		args = append(args, knowledgeIDs)
+	}
+	for _, kbID := range kbIDs {
+		tenantID := kbTenantMap[kbID]
+		if tenantID == 0 {
+			continue
+		}
+		clauses = append(clauses, "(chunks.knowledge_base_id = ? AND chunks.tenant_id = ?)")
+		args = append(args, kbID, tenantID)
+	}
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return "(" + strings.Join(clauses, " OR ") + ")", args
+}
+
 // searchChunks performs the database search using regex queries.
 func (t *GrepChunksTool) searchChunks(
 	ctx context.Context,
@@ -343,26 +368,16 @@ func (t *GrepChunksTool) searchChunks(
 		Where("chunks.deleted_at IS NULL").
 		Where("knowledges.deleted_at IS NULL")
 
-	if len(knowledgeIDs) > 0 {
-		query = query.Where("chunks.knowledge_id IN ?", knowledgeIDs)
-		logger.Infof(ctx, "[Tool][GrepChunks] Filtering by %d specific knowledge IDs", len(knowledgeIDs))
-	} else if len(kbIDs) > 0 {
-		var conditions []string
-		var args []interface{}
-		for _, kbID := range kbIDs {
-			tenantID := kbTenantMap[kbID]
-			if tenantID > 0 {
-				conditions = append(conditions, "(chunks.knowledge_base_id = ? AND chunks.tenant_id = ?)")
-				args = append(args, kbID, tenantID)
-			}
-		}
-		if len(conditions) > 0 {
-			query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
-		} else {
-			logger.Warnf(ctx, "[Tool][GrepChunks] No valid KB-tenant pairs found")
-			return nil, nil
-		}
+	// Combine specific knowledge IDs (incl. tag-resolved docs) and full-KB scopes
+	// with OR so that mixing @KB with @tag/@file searches BOTH, mirroring
+	// knowledge_search's concurrent fan-out instead of dropping one side.
+	scopeSQL, scopeArgs := scopeClause(kbIDs, knowledgeIDs, kbTenantMap)
+	if scopeSQL == "" {
+		logger.Warnf(ctx, "[Tool][GrepChunks] No valid scope (kb-tenant pairs / knowledge IDs)")
+		return nil, nil
 	}
+	logger.Infof(ctx, "[Tool][GrepChunks] Scope: %d knowledge IDs, %d KBs", len(knowledgeIDs), len(kbIDs))
+	query = query.Where(scopeSQL, scopeArgs...)
 
 	// For MySQL/SQLite REGEXP case-insensitivity we rely on the column's default
 	// collation (utf8mb4_general_ci etc.) OR the driver's REGEXP implementation,

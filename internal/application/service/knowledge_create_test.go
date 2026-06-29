@@ -136,7 +136,7 @@ func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T)
 		nil,
 		nil,
 		"",
-		"",
+		nil,
 		"",
 		nil,
 	)
@@ -167,7 +167,7 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 		nil,
 		nil,
 		"",
-		"",
+		nil,
 		"",
 		nil,
 	)
@@ -201,7 +201,7 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 		nil,
 		nil,
 		"",
-		"",
+		nil,
 		"",
 		nil,
 	)
@@ -239,7 +239,7 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 		map[string]string{"source": "test"},
 		nil,
 		"",
-		"",
+		nil,
 		"",
 		overrides,
 	)

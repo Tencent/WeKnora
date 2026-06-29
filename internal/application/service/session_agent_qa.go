@@ -249,46 +249,12 @@ func (s *sessionService) buildAgentConfig(
 	} else {
 		agentConfig.AllowedTools = tools.DefaultAllowedTools()
 	}
-	if len(req.SkillNames) > 0 {
-		skillsMode := customAgent.Config.SkillsSelectionMode
-		if skillsMode == "none" || skillsMode == "" {
-			logger.Warnf(ctx, "Ignoring @skill mention: agent skills selection is disabled (mode=%s)", skillsMode)
-		} else if agentConfig.SkillsEnabled {
-			switch skillsMode {
-			case "selected":
-				agentConfig.AllowedSkills = intersectPreservingRequestOrder(req.SkillNames, agentConfig.AllowedSkills)
-				if len(agentConfig.AllowedSkills) == 0 {
-					agentConfig.SkillsEnabled = false
-				}
-			case "all":
-				agentConfig.AllowedSkills = dedupPreservingOrder(req.SkillNames)
-			}
-			logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v", req.SkillNames, agentConfig.AllowedSkills)
-		}
-	}
-	if len(req.MCPServiceIDs) > 0 {
-		if agentConfig.MCPSelectionMode == "none" {
-			logger.Warnf(ctx, "Ignoring @MCP mention: agent MCP selection is disabled (mode=none)")
-		} else {
-			mentioned := dedupPreservingOrder(req.MCPServiceIDs)
-			isSharedAgent := req.Session != nil && req.Session.TenantID != customAgent.TenantID
-			effectiveMCP, mcpMode := resolvePerRequestMCPScope(
-				mentioned,
-				customAgent.Config.MCPServices,
-				agentConfig.MCPSelectionMode,
-				isSharedAgent,
-			)
-			if len(effectiveMCP) > 0 {
-				agentConfig.MCPSelectionMode = mcpMode
-				agentConfig.MCPServices = effectiveMCP
-			} else if len(mentioned) > 0 {
-				logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
-					req.MCPServiceIDs, customAgent.Config.MCPServices, isSharedAgent)
-			}
-			logger.Infof(ctx, "Applied per-request @MCP scope: requested=%v mode=%s effective=%v",
-				req.MCPServiceIDs, agentConfig.MCPSelectionMode, agentConfig.MCPServices)
-		}
-	}
+	// Apply per-turn @Skill / @MCP scope. Each helper narrows the agent's
+	// whitelist to the mentioned items and records the pinned set used for the
+	// <must_use> hint, keeping all scope logic in one place per resource type.
+	isSharedAgent := req.Session != nil && req.Session.TenantID != customAgent.TenantID
+	applyPerRequestSkillScope(ctx, agentConfig, customAgent.Config.SkillsSelectionMode, req.SkillNames)
+	applyPerRequestMCPScope(ctx, agentConfig, customAgent.Config.MCPServices, isSharedAgent, req.MCPServiceIDs)
 
 	// Use custom agent's system prompt if specified
 	if customAgent.Config.SystemPrompt != "" {
@@ -340,18 +306,73 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
 	}
 
-	if len(agentConfig.MCPServices) > 0 && len(req.MCPServiceIDs) > 0 {
-		agentConfig.PinnedMCPServiceIDs = intersectPreservingRequestOrder(req.MCPServiceIDs, agentConfig.MCPServices)
-	}
-	if len(req.SkillNames) > 0 && agentConfig.SkillsEnabled {
-		if len(agentConfig.AllowedSkills) > 0 {
-			agentConfig.PinnedSkillNames = intersectPreservingRequestOrder(req.SkillNames, agentConfig.AllowedSkills)
-		} else if customAgent.Config.SkillsSelectionMode == "all" {
-			agentConfig.PinnedSkillNames = dedupPreservingOrder(req.SkillNames)
-		}
-	}
-
 	return agentConfig, nil
+}
+
+// applyPerRequestSkillScope narrows the agent's skill whitelist to the @Skill
+// mentions for this turn and records the pinned set for the <must_use> hint.
+// It is a no-op when no skills were mentioned or skills are disabled.
+func applyPerRequestSkillScope(
+	ctx context.Context,
+	agentConfig *types.AgentConfig,
+	skillsMode string,
+	requested []string,
+) {
+	if len(requested) == 0 {
+		return
+	}
+	if skillsMode == "none" || skillsMode == "" {
+		logger.Warnf(ctx, "Ignoring @skill mention: agent skills selection is disabled (mode=%s)", skillsMode)
+		return
+	}
+	if !agentConfig.SkillsEnabled {
+		return
+	}
+	switch skillsMode {
+	case "selected":
+		agentConfig.AllowedSkills = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
+		if len(agentConfig.AllowedSkills) == 0 {
+			agentConfig.SkillsEnabled = false
+		}
+	case "all":
+		agentConfig.AllowedSkills = dedupPreservingOrder(requested)
+	}
+	if agentConfig.SkillsEnabled && len(agentConfig.AllowedSkills) > 0 {
+		agentConfig.PinnedSkillNames = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
+	}
+	logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v pinned=%v",
+		requested, agentConfig.AllowedSkills, agentConfig.PinnedSkillNames)
+}
+
+// applyPerRequestMCPScope narrows the agent's MCP services to the @MCP mentions
+// for this turn and records the pinned set for the <must_use> hint. It is a
+// no-op when no services were mentioned or MCP selection is disabled.
+func applyPerRequestMCPScope(
+	ctx context.Context,
+	agentConfig *types.AgentConfig,
+	agentPresetMCPs []string,
+	isSharedAgent bool,
+	requested []string,
+) {
+	if len(requested) == 0 {
+		return
+	}
+	if agentConfig.MCPSelectionMode == "none" {
+		logger.Warnf(ctx, "Ignoring @MCP mention: agent MCP selection is disabled (mode=none)")
+		return
+	}
+	mentioned := dedupPreservingOrder(requested)
+	effective, mode := resolvePerRequestMCPScope(mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent)
+	if len(effective) == 0 {
+		logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
+			requested, agentPresetMCPs, isSharedAgent)
+		return
+	}
+	agentConfig.MCPSelectionMode = mode
+	agentConfig.MCPServices = effective
+	agentConfig.PinnedMCPServiceIDs = intersectPreservingRequestOrder(requested, agentConfig.MCPServices)
+	logger.Infof(ctx, "Applied per-request @MCP scope: requested=%v mode=%s effective=%v",
+		requested, agentConfig.MCPSelectionMode, agentConfig.MCPServices)
 }
 
 // resolvePerRequestMCPScope narrows MCP registration for a per-turn @mention.
