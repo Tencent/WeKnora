@@ -5062,6 +5062,18 @@ export default {
       submitFailed: "提交失败",
       userRejected: "用户拒绝",
     },
+    mcpOAuth: {
+      banner: "该 MCP 服务需要 OAuth 授权后才能调用",
+      desc: "点击授权将打开新窗口完成登录，授权成功后会自动继续本次工具调用。",
+      authorize: "去授权",
+      countdown: "剩余约 {seconds} 秒",
+      authorizedTag: "已授权",
+      timedOutTag: "授权超时",
+      canceledTag: "已取消",
+      authorizedToast: "授权成功，正在继续",
+      startFailed: "发起授权失败",
+      resumeFailed: "恢复执行失败，请重试",
+    },
     tools: {
       searchKnowledge: "知识库检索",
       grepChunks: "搜索关键词",

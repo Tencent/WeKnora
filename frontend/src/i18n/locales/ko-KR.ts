@@ -5066,6 +5066,18 @@ export default {
       submitFailed: '제출 실패',
       userRejected: '사용자 거부',
     },
+    mcpOAuth: {
+      banner: '이 MCP 서비스는 OAuth 인증 후에 사용할 수 있습니다',
+      desc: '인증을 누르면 새 창에서 로그인합니다. 인증이 완료되면 이 도구 호출이 자동으로 계속됩니다.',
+      authorize: '인증하기',
+      countdown: '약 {seconds}초 남음',
+      authorizedTag: '인증됨',
+      timedOutTag: '인증 시간 초과',
+      canceledTag: '취소됨',
+      authorizedToast: '인증 성공, 계속 진행 중',
+      startFailed: '인증 시작 실패',
+      resumeFailed: '실행 재개 실패, 다시 시도하세요',
+    },
     tools: {
       searchKnowledge: '지식베이스 검색',
       grepChunks: '텍스트 패턴 검색',

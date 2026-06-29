@@ -220,3 +220,13 @@ export async function resolveToolApproval(
 ): Promise<void> {
   await post(`/api/v1/agent/tool-approvals/${encodeURIComponent(pendingId)}`, body)
 }
+
+// Resume an agent run that paused on an in-conversation MCP OAuth prompt.
+// Call after the per-user authorization popup completes; the backend verifies
+// the token exists before unblocking the paused tool call.
+export async function resolveMCPOAuth(
+  pendingId: string,
+  body: { service_id: string }
+): Promise<void> {
+  await post(`/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}`, body)
+}

@@ -237,3 +237,31 @@ type ToolApprovalResolvedData struct {
 	TimedOut  bool   `json:"timed_out,omitempty"`
 	Canceled  bool   `json:"canceled,omitempty"`
 }
+
+// MCPOAuthRequiredData is emitted when an OAuth-enabled MCP service is invoked
+// during a conversation but the current user has not authorized it yet. The
+// UI surfaces an "Authorize" card; the agent pauses until the user authorizes.
+type MCPOAuthRequiredData struct {
+	PendingID          string `json:"pending_id"`
+	TenantID           uint64 `json:"tenant_id"`
+	SessionID          string `json:"session_id"`
+	AssistantMessageID string `json:"assistant_message_id"`
+	ServiceID          string `json:"service_id"`
+	ServiceName        string `json:"service_name"`
+	MCPToolName        string `json:"mcp_tool_name"`
+	TimeoutSeconds     int    `json:"timeout_seconds"`
+	RequestedAtUnix    int64  `json:"requested_at"`
+	ToolCallID         string `json:"tool_call_id"`
+	RequestID          string `json:"request_id,omitempty"`
+}
+
+// MCPOAuthResolvedData confirms the outcome of an in-conversation OAuth prompt
+// (authorized / timeout / cancel).
+type MCPOAuthResolvedData struct {
+	PendingID  string `json:"pending_id"`
+	ServiceID  string `json:"service_id"`
+	Authorized bool   `json:"authorized"`
+	Reason     string `json:"reason,omitempty"`
+	TimedOut   bool   `json:"timed_out,omitempty"`
+	Canceled   bool   `json:"canceled,omitempty"`
+}

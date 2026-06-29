@@ -1,9 +1,11 @@
 package handler
 
 import (
+	stderrors "errors"
 	"net/http"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -21,6 +23,7 @@ type MCPOAuthHandler struct {
 	oauth      *mcp.OAuthManager
 	mcpManager *mcp.MCPManager
 	svc        interfaces.MCPServiceService
+	gate       *approval.Gate
 }
 
 // NewMCPOAuthHandler constructs the handler.
@@ -28,8 +31,9 @@ func NewMCPOAuthHandler(
 	oauth *mcp.OAuthManager,
 	mcpManager *mcp.MCPManager,
 	svc interfaces.MCPServiceService,
+	gate *approval.Gate,
 ) *MCPOAuthHandler {
-	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc}
+	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate}
 }
 
 type mcpOAuthAuthorizeRequest struct {
@@ -201,4 +205,87 @@ func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
 	// Recycle any cached connections so a subsequent call re-authorizes.
 	_ = h.mcpManager.CloseClient(serviceID)
 	c.Status(http.StatusNoContent)
+}
+
+type resolveMCPOAuthBody struct {
+	// ServiceID is the MCP service the pending prompt belongs to; used to
+	// verify the user actually holds a token before resuming the agent.
+	ServiceID string `json:"service_id" binding:"required"`
+}
+
+// ResolveMCPOAuth resumes an agent run that paused on an in-conversation OAuth
+// prompt. The frontend calls this once the per-user authorization popup has
+// completed; the backend verifies a token now exists for (tenant, user,
+// service) before unblocking, so a premature/failed authorization does not
+// resume the tool into another failure.
+//
+// ResolveMCPOAuth godoc
+// @Summary      完成对话内 MCP OAuth 授权
+// @Description  用户在对话中完成 OAuth 授权后调用，校验令牌存在后恢复被暂停的 Agent 工具调用
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        pending_id  path  string                  true  "待授权 ID"
+// @Param        request     body  map[string]interface{}  true  "{service_id: string}"
+// @Success      200         {object}  map[string]interface{}
+// @Failure      400         {object}  errors.AppError
+// @Failure      409         {object}  errors.AppError  "用户尚未完成授权"
+// @Security     Bearer
+// @Router       /agent/mcp-oauth-resolutions/{pending_id} [post]
+func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
+	ctx := c.Request.Context()
+	pendingID := c.Param("pending_id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	userID, _ := types.UserIDFromContext(ctx)
+	if tenantID == 0 || strings.TrimSpace(userID) == "" {
+		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+	if h.gate == nil {
+		c.Error(errors.NewInternalServerError("OAuth gate is not configured"))
+		return
+	}
+
+	var body resolveMCPOAuthBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	serviceID := strings.TrimSpace(body.ServiceID)
+	if serviceID == "" {
+		c.Error(errors.NewValidationError("service_id is required"))
+		return
+	}
+
+	// Only resume once the user genuinely holds a token; otherwise the retry
+	// would just fail again with another authorization-required error.
+	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, userID, serviceID)
+	if err != nil {
+		c.Error(errors.NewInternalServerError("failed to verify authorization: " + err.Error()))
+		return
+	}
+	if !authorized {
+		c.Error(errors.NewConflictError("authorization not completed yet for this MCP service"))
+		return
+	}
+
+	if err := h.gate.Resolve(tenantID, userID, pendingID, approval.Decision{Approved: true}); err != nil {
+		switch {
+		case stderrors.Is(err, approval.ErrPendingNotFound):
+			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
+		case stderrors.Is(err, approval.ErrAlreadyResolved):
+			c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
+		case stderrors.Is(err, approval.ErrTenantMismatch):
+			c.Error(errors.NewBadRequestError("tenant mismatch"))
+		case stderrors.Is(err, approval.ErrUserMismatch):
+			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
+		default:
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"pending_id": secutils.SanitizeForLog(pendingID),
+			})
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }

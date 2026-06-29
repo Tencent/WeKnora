@@ -88,6 +88,15 @@
                   :resolve-reason="event.resolve_reason" />
               </div>
 
+              <!-- MCP OAuth in-conversation authorization prompt -->
+              <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
+                <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
+                  :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
+                  :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
+                  :resolved="event.resolved" :authorized="event.authorized"
+                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out" :canceled="event.canceled" />
+              </div>
+
               <!-- Tool Call Event (non-thinking) -->
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
                 <div class="action-card" :class="{
@@ -232,6 +241,15 @@
                 :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
                 :approved="event.approved" :resolve-reason="event.resolve_reason" />
+            </div>
+
+            <!-- MCP OAuth in-conversation authorization prompt -->
+            <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
+              <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
+                :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
+                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
+                :authorized="event.authorized" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                :canceled="event.canceled" />
             </div>
 
             <!-- Thinking Tool Call -->
@@ -419,6 +437,7 @@ import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
+import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -1404,6 +1423,9 @@ const getEventKey = (event: any, index: number): string => {
   if (event.tool_call_id) return `tool-${event.tool_call_id}`;
   if (event.type === 'tool_approval_required' && event.pending_id) {
     return `approval-${event.pending_id}`;
+  }
+  if (event.type === 'mcp_oauth_required' && event.pending_id) {
+    return `mcp-oauth-${event.pending_id}`;
   }
   return `event-${index}-${event.type || 'unknown'}`;
 };

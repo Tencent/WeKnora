@@ -5049,6 +5049,18 @@ export default {
       submitFailed: 'Submit failed',
       userRejected: 'User rejected',
     },
+    mcpOAuth: {
+      banner: 'This MCP service requires OAuth authorization before it can be used',
+      desc: 'Authorizing opens a new window to sign in. The tool call resumes automatically once authorization succeeds.',
+      authorize: 'Authorize',
+      countdown: 'About {seconds}s remaining',
+      authorizedTag: 'Authorized',
+      timedOutTag: 'Authorization timed out',
+      canceledTag: 'Canceled',
+      authorizedToast: 'Authorized, resuming',
+      startFailed: 'Failed to start authorization',
+      resumeFailed: 'Failed to resume execution, please retry',
+    },
     tools: {
       searchKnowledge: 'Knowledge Search',
       grepChunks: 'Text Pattern Search',
