@@ -1,21 +1,36 @@
 <template>
-  <div class="action-card interaction-inline" :class="cardClass">
+  <div class="action-card interaction-inline" :class="{ 'action-pending': !resolved }">
     <div class="action-header no-results">
       <div class="action-title">
         <t-icon class="action-title-icon" :name="headerIcon" />
-        <span class="action-name">{{ titleLine }}</span>
-        <span
-          v-if="!resolved && secondsLeft >= 0"
-          class="action-timer"
-          :class="timerClass"
-        >
-          {{ formatCountdown(secondsLeft) }}
-        </span>
+        <span class="action-name">{{ mainTitle }}</span>
       </div>
     </div>
 
-    <div v-if="!resolved" class="interaction-panel">
-      <div v-if="!isJsonValid || argsDirty" class="interaction-args-meta">
+    <div class="interaction-status-summary">
+      <div class="results-summary-text">
+        <span v-if="resolved" class="status-label">{{ statusLine }}</span>
+        <span v-if="!resolved" class="inline-actions">
+          <button type="button" class="inline-action" :disabled="submitting" @click.stop="submit('reject')">
+            {{ $t('agentStream.toolApproval.reject') }}
+          </button>
+          <span class="inline-dot">·</span>
+          <button type="button" class="inline-action is-primary" :disabled="submitting || !isJsonValid"
+            @click.stop="submit('approve')">
+            {{ $t('agentStream.toolApproval.approve') }}
+          </button>
+        </span>
+        <template v-if="!resolved && secondsLeft >= 0">
+          <span class="inline-dot">·</span>
+          <span class="action-timer" :class="timerClass">
+            {{ formatCountdown(secondsLeft) }}
+          </span>
+        </template>
+      </div>
+    </div>
+
+    <div v-if="!resolved && !argsExpanded && (!isJsonValid || argsDirty)" class="interaction-status-summary">
+      <div class="results-summary-text">
         <span v-if="!isJsonValid" class="args-status args-invalid">
           <t-icon name="error-circle" />
           {{ $t('agentStream.toolApproval.invalidJson') }}
@@ -24,37 +39,32 @@
           {{ $t('agentStream.toolApproval.argsModified') }}
         </span>
       </div>
-      <t-textarea
-        v-model="argsText"
-        class="interaction-args-input"
-        :autosize="{ minRows: 2, maxRows: 8 }"
-        placeholder="{}"
-      />
-      <div class="interaction-panel-actions">
-        <button
-          type="button"
-          class="inline-action"
-          :disabled="submitting"
-          @click="submit('reject')"
-        >
-          {{ $t('agentStream.toolApproval.reject') }}
-        </button>
-        <span class="inline-dot">·</span>
-        <button
-          type="button"
-          class="inline-action is-primary"
-          :disabled="submitting || !isJsonValid"
-          @click="submit('approve')"
-        >
-          {{ $t('agentStream.toolApproval.approve') }}
-        </button>
+    </div>
+
+    <div v-if="hasArgs" class="interaction-status-summary is-clickable" @click="toggleArgs">
+      <div class="results-summary-text args-toggle-row">
+        <span>{{ $t('agentStream.toolApproval.argsLabel') }}</span>
+        <t-icon class="args-toggle-icon" :name="argsExpanded ? 'chevron-down' : 'chevron-right'" />
       </div>
     </div>
 
-    <div v-else-if="argsText" class="interaction-panel">
-      <div class="detail-output-wrapper">
-        <div class="detail-output">{{ argsText }}</div>
+    <div v-if="hasArgs && argsExpanded" class="action-details">
+      <div v-if="!resolved && (!isJsonValid || argsDirty)" class="interaction-args-meta">
+        <span v-if="!isJsonValid" class="args-status args-invalid">
+          <t-icon name="error-circle" />
+          {{ $t('agentStream.toolApproval.invalidJson') }}
+        </span>
+        <span v-else-if="argsDirty" class="args-status args-dirty">
+          {{ $t('agentStream.toolApproval.argsModified') }}
+        </span>
       </div>
+
+      <div v-if="!resolved" class="interaction-args-block">
+        <t-textarea v-model="argsText" class="interaction-args-input" :autosize="{ minRows: 2, maxRows: 8 }"
+          placeholder="{}" @click.stop />
+      </div>
+
+      <div v-else class="interaction-args-preview">{{ argsText }}</div>
     </div>
   </div>
 </template>
@@ -90,9 +100,12 @@ function formatJson(raw: string): string {
 
 const initialArgs = formatJson(props.argsJson || '{}')
 const argsText = ref(initialArgs)
+const argsExpanded = ref(false)
 const submitting = ref(false)
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | null = null
+
+const hasArgs = computed(() => argsText.value.trim().length > 0)
 
 const isJsonValid = computed(() => {
   if (!argsText.value.trim()) return true
@@ -136,17 +149,25 @@ const targetLabel = computed(() => (
   })
 ))
 
-const titleLine = computed(() => {
-  if (!props.resolved) return t('agentStream.toolApproval.waiting', { target: targetLabel.value })
-  if (props.approved) return t('agentStream.toolApproval.resolvedApproved', { target: targetLabel.value })
-  return t('agentStream.toolApproval.resolvedRejected', { target: targetLabel.value })
+const mainTitle = computed(() => {
+  if (!props.resolved) {
+    return t('agentStream.toolApproval.waiting', { target: targetLabel.value })
+  }
+  return t('agentStream.toolApproval.titleWithTarget', {
+    service: props.serviceName,
+    tool: props.mcpToolName,
+  })
 })
 
-const cardClass = computed(() => ({
-  'action-pending': !props.resolved,
-  'action-success': !!props.resolved && !!props.approved,
-  'action-error': !!props.resolved && !props.approved,
-}))
+const statusLine = computed(() => {
+  if (!props.resolved) return t('agentStream.toolApproval.waitingStatus')
+  if (props.approved) return t('agentStream.toolApproval.approvedTag')
+  return t('agentStream.toolApproval.rejectedTag')
+})
+
+function toggleArgs() {
+  argsExpanded.value = !argsExpanded.value
+}
 
 function formatCountdown(s: number): string {
   if (s < 60) return t('agentStream.toolApproval.countdownShort', { seconds: s })
@@ -174,6 +195,7 @@ const submit = async (decision: 'approve' | 'reject') => {
       try {
         modified = JSON.parse(argsText.value || '{}') as Record<string, unknown>
       } catch {
+        argsExpanded.value = true
         MessagePlugin.error(t('agentStream.toolApproval.invalidJson'))
         return
       }

@@ -5036,6 +5036,7 @@ export default {
     toolApproval: {
       banner: 'This MCP tool requires human approval. Review parameters before execution.',
       waiting: 'Awaiting review · {target}',
+      waitingStatus: 'Awaiting review',
       targetWithTool: '{service} › {tool}',
       titleWithTarget: 'Review · {service} › {tool}',
       resolvedApproved: 'Approved · {target}',
@@ -5058,6 +5059,7 @@ export default {
     mcpOAuth: {
       banner: 'This MCP service requires OAuth authorization before it can be used',
       waiting: 'Awaiting authorization · {target}',
+      waitingStatus: 'Awaiting authorization',
       targetWithTool: '{service} › {tool}',
       titleWithService: 'OAuth · {service}',
       titleWithTool: 'OAuth · {service} › {tool}',

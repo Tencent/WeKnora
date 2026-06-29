@@ -4553,6 +4553,7 @@ export default {
     toolApproval: {
       banner: 'Этот инструмент MCP требует подтверждения. Проверьте параметры.',
       waiting: 'Ожидание проверки · {target}',
+      waitingStatus: 'Ожидание проверки',
       targetWithTool: '{service} › {tool}',
       titleWithTarget: 'Проверка · {service} › {tool}',
       resolvedApproved: 'Подтверждено · {target}',
@@ -4575,6 +4576,7 @@ export default {
     mcpOAuth: {
       banner: 'Этот MCP-сервис требует авторизации OAuth перед использованием',
       waiting: 'Ожидание авторизации · {target}',
+      waitingStatus: 'Ожидание авторизации',
       targetWithTool: '{service} › {tool}',
       titleWithService: 'OAuth · {service}',
       titleWithTool: 'OAuth · {service} › {tool}',

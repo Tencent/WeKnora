@@ -5049,6 +5049,7 @@ export default {
     toolApproval: {
       banner: "该 MCP 工具已标记为「需人工审核」，确认参数后再执行",
       waiting: "等待审核 · {target}",
+      waitingStatus: "等待审核",
       targetWithTool: "{service} › {tool}",
       titleWithTarget: "人工审核 · {service} › {tool}",
       resolvedApproved: "已通过 · {target}",
@@ -5071,6 +5072,7 @@ export default {
     mcpOAuth: {
       banner: "该 MCP 服务需要 OAuth 授权后才能调用",
       waiting: "等待授权 · {target}",
+      waitingStatus: "等待授权",
       targetWithTool: "{service} › {tool}",
       titleWithService: "OAuth 授权 · {service}",
       titleWithTool: "OAuth 授权 · {service} › {tool}",

@@ -5053,6 +5053,7 @@ export default {
     toolApproval: {
       banner: '이 MCP 도구는 수동 승인이 필요합니다. 실행 전 매개변수를 확인하세요.',
       waiting: '승인 대기 · {target}',
+      waitingStatus: '승인 대기',
       targetWithTool: '{service} › {tool}',
       titleWithTarget: '검토 · {service} › {tool}',
       resolvedApproved: '승인됨 · {target}',
@@ -5075,6 +5076,7 @@ export default {
     mcpOAuth: {
       banner: '이 MCP 서비스는 OAuth 인증 후에 사용할 수 있습니다',
       waiting: '인증 대기 · {target}',
+      waitingStatus: '인증 대기',
       targetWithTool: '{service} › {tool}',
       titleWithService: 'OAuth · {service}',
       titleWithTool: 'OAuth · {service} › {tool}',

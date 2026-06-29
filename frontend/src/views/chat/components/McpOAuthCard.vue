@@ -1,35 +1,30 @@
 <template>
-  <div class="action-card interaction-inline" :class="cardClass">
+  <div class="action-card interaction-inline" :class="{ 'action-pending': !resolved }">
     <div class="action-header no-results">
       <div class="action-title">
         <t-icon class="action-title-icon" :name="headerIcon" />
-        <span class="action-name">{{ titleLine }}</span>
+        <span class="action-name">{{ mainTitle }}</span>
+      </div>
+    </div>
+    <div class="interaction-status-summary">
+      <div class="results-summary-text">
+        <span v-if="resolved" class="status-label">{{ statusLine }}</span>
         <span v-if="!resolved" class="inline-actions">
-          <button
-            type="button"
-            class="inline-action"
-            :disabled="canceling || authorizing"
-            @click="skip"
-          >
+          <button type="button" class="inline-action" :disabled="canceling || authorizing" @click="skip">
             {{ $t('agentStream.mcpOAuth.skip') }}
           </button>
           <span class="inline-dot">·</span>
-          <button
-            type="button"
-            class="inline-action is-primary"
-            :disabled="authorizing || canceling"
-            @click="authorize"
-          >
+          <button type="button" class="inline-action is-primary" :disabled="authorizing || canceling"
+            @click="authorize">
             {{ $t('agentStream.mcpOAuth.authorize') }}
           </button>
         </span>
-        <span
-          v-if="!resolved && secondsLeft >= 0"
-          class="action-timer"
-          :class="timerClass"
-        >
-          {{ formatCountdown(secondsLeft) }}
-        </span>
+        <template v-if="!resolved && secondsLeft >= 0">
+          <span class="inline-dot">·</span>
+          <span class="action-timer" :class="timerClass">
+            {{ formatCountdown(secondsLeft) }}
+          </span>
+        </template>
       </div>
     </div>
   </div>
@@ -98,22 +93,21 @@ const targetLabel = computed(() => (
     : props.serviceName
 ))
 
-const titleLine = computed(() => {
+const mainTitle = computed(() => {
   if (!props.resolved) {
     return t('agentStream.mcpOAuth.waiting', { target: targetLabel.value })
   }
-  if (props.authorized) {
-    return t('agentStream.mcpOAuth.resolvedAuthorized', { target: targetLabel.value })
-  }
-  if (props.timedOut) return t('agentStream.mcpOAuth.resolvedTimedOut', { target: targetLabel.value })
-  return t('agentStream.mcpOAuth.resolvedCanceled', { target: targetLabel.value })
+  return props.mcpToolName
+    ? t('agentStream.mcpOAuth.titleWithTool', { service: props.serviceName, tool: props.mcpToolName })
+    : t('agentStream.mcpOAuth.titleWithService', { service: props.serviceName })
 })
 
-const cardClass = computed(() => ({
-  'action-pending': !props.resolved,
-  'action-success': !!props.resolved && !!props.authorized,
-  'action-error': !!props.resolved && !props.authorized,
-}))
+const statusLine = computed(() => {
+  if (!props.resolved) return t('agentStream.mcpOAuth.waitingStatus')
+  if (props.authorized) return t('agentStream.mcpOAuth.authorizedTag')
+  if (props.timedOut) return t('agentStream.mcpOAuth.timedOutTag')
+  return t('agentStream.mcpOAuth.canceledTag')
+})
 
 function formatCountdown(s: number): string {
   if (s < 60) return t('agentStream.mcpOAuth.countdownShort', { seconds: s })
