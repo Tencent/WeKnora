@@ -576,9 +576,18 @@ export const useSettingsStore = defineStore("settings", {
           // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件映射。
         }
         if (Array.isArray(state.mentioned_items)) {
-          this.settings.selectedTags = state.mentioned_items
+          const fromMentions = state.mentioned_items
             .filter(item => item.type === "tag" && item.id && item.kb_id)
             .map(item => ({ id: item.id, name: item.name || item.id, kbId: item.kb_id!, kbName: item.kb_name }));
+          const covered = new Set(fromMentions.map(t => t.id));
+          const orphanTagIds = (state.tag_ids || []).filter(id => id && !covered.has(id));
+          if (orphanTagIds.length > 0 && Array.isArray(state.knowledge_base_ids) && state.knowledge_base_ids.length === 1) {
+            const kbId = state.knowledge_base_ids[0];
+            orphanTagIds.forEach(id => {
+              fromMentions.push({ id, name: id, kbId, kbName: undefined });
+            });
+          }
+          this.settings.selectedTags = fromMentions;
         } else if (Array.isArray(state.tag_ids)) {
           const existing = this.settings.selectedTags || [];
           this.settings.selectedTags = existing.filter(tag => state.tag_ids?.includes(tag.id));

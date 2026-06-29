@@ -170,8 +170,9 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 func TestBuildMustUseBlock_MCPAndSkills(t *testing.T) {
 	block := buildMustUseBlock(
 		[]*PinnedMCPServiceInfo{{
-			ID:   "mcp-1",
-			Name: "ChemDB",
+			ID:        "mcp-1",
+			Name:      "ChemDB",
+			ToolNames: []string{"mcp_chemdb_search"},
 		}},
 		[]*PinnedSkillInfo{{
 			Name: "data-analysis",
@@ -180,14 +181,14 @@ func TestBuildMustUseBlock_MCPAndSkills(t *testing.T) {
 
 	assert.Contains(t, block, "<must_use>")
 	assert.NotContains(t, block, "<runtime_context")
-	assert.Contains(t, block, "<instruction>REQUIRED this turn")
-	assert.Contains(t, block, "FIRST tool round")
-	assert.Contains(t, block, "read_skill")
-	assert.Contains(t, block, `<mcp name="ChemDB"`)
-	assert.Contains(t, block, `<skill name="data-analysis"`)
+	assert.NotContains(t, block, "<instruction>")
+	assert.Contains(t, block, "Must use MCP tools whose names start with mcp_chemdb_")
+	assert.Contains(t, block, "@ChemDB")
+	assert.Contains(t, block, `Must call read_skill(skill_name="data-analysis")`)
+	assert.Contains(t, block, `@Skill "data-analysis"`)
 }
 
-func TestBuildMustUseBlock_MCPToolNames(t *testing.T) {
+func TestBuildMustUseBlock_MCPToolPrefixOnly(t *testing.T) {
 	block := buildMustUseBlock(
 		[]*PinnedMCPServiceInfo{{
 			ID:        "mcp-1",
@@ -196,5 +197,30 @@ func TestBuildMustUseBlock_MCPToolNames(t *testing.T) {
 		}},
 		nil,
 	)
-	assert.Contains(t, block, `tools="mcp_iwiki_aisearchdocument, mcp_iwiki_getdocument"`)
+	assert.Contains(t, block, "mcp_iwiki_")
+	assert.NotContains(t, block, "aisearchdocument")
+	assert.NotContains(t, block, `tools="`)
+}
+
+func TestBuildMustUseBlock_SkipsMCPWithoutTools(t *testing.T) {
+	block := buildMustUseBlock(
+		[]*PinnedMCPServiceInfo{{
+			ID:   "mcp-1",
+			Name: "DisabledMCP",
+		}},
+		[]*PinnedSkillInfo{{Name: "data-analysis"}},
+	)
+	assert.Contains(t, block, `Must call read_skill(skill_name="data-analysis")`)
+	assert.NotContains(t, block, "DisabledMCP")
+}
+
+func TestRenderUserTurnContent_IncludesScopeBlocks(t *testing.T) {
+	engine := &AgentEngine{
+		knowledgeBasesInfo: []*KnowledgeBaseInfo{{ID: "kb-1", Name: "Docs"}},
+		pinnedSkills:       []*PinnedSkillInfo{{Name: "analysis"}},
+	}
+	out := engine.RenderUserTurnContent("sess-1", "hello")
+	assert.Contains(t, out, "<runtime_context")
+	assert.Contains(t, out, "<must_use>")
+	assert.Contains(t, out, "hello")
 }

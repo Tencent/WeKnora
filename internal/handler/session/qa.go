@@ -247,7 +247,11 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	//      had memory enabled in practice, keep that behaviour.
 	enableMemory := h.resolveEnableMemory(ctx, request.EnableMemory)
 
-	tagScopes := tagScopesFromMentionedItems(request.MentionedItems)
+	tagScopes := mergeTagScopesFromRequestIDs(
+		tagScopesFromMentionedItems(request.MentionedItems),
+		dedupRequestStrings(request.TagIDs),
+		secutils.SanitizeForLogArray(kbIDs),
+	)
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))

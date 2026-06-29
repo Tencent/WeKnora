@@ -206,19 +206,10 @@ func escapeXMLAttr(s string) string {
 }
 
 // buildRuntimeContextBlock builds a metadata block with current time, session
-// info, and the *active retrieval scope for this turn*. The scope snapshot is
-// critical for multi-turn correctness: when the user switches their @mention
-// to a different KB or document between turns, earlier turns still carry
-// their own scope snapshot in history, so the model can see the scope change
-// and avoid reusing last turn's answer against the new scope.
-//
-// The detailed bound-KB metadata (capabilities, recent documents, summaries)
-// also lives here — it is turn state, not instructions, so it belongs next
-// to the user query rather than baked into the system prompt. Keeping it in
-// the user message keeps the system prompt stable/cacheable and lets the
-// model see exactly which KBs were in scope at the time of each historical
-// turn. Per-turn @mentioned MCP/Skill requirements are emitted separately via
-// buildMustUseBlock (sibling to runtime_context in the user message).
+// info, and the *active retrieval scope for this turn only*. It is injected
+// into the current user message for the LLM call and is not persisted into
+// conversation history — replayed user turns keep bare Content so stale scope
+// snapshots do not steer follow-up questions.
 //
 // Per-turn communication_instruction and answer_instruction remind the model
 // not to leak internal tool names or IDs in user-visible text, and to end the
@@ -283,42 +274,64 @@ func buildRuntimeContextBlock(
 	return sb.String()
 }
 
-// buildMustUseBlock emits per-turn @mentioned MCP/Skill requirements as a
-// sibling envelope outside runtime_context.
+// buildMustUseBlock emits a short per-turn hint when the user @mentioned MCP/Skill.
+// Tool names are not listed here — they are already in the function-calling schema.
 func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkillInfo) string {
-	if len(mcpServices) == 0 && len(skills) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("<must_use>\n")
-	sb.WriteString("  <instruction>REQUIRED this turn: the user @selected these capabilities. ")
-	sb.WriteString("For EACH listed MCP service you MUST call at least one tool from its tools= list ")
-	sb.WriteString("in your FIRST tool round (before grep_chunks / knowledge_search / wiki_search). ")
-	sb.WriteString("For EACH listed skill call read_skill(skill_name=...) before your final answer. ")
-	sb.WriteString("The @mention means the user wants that source — do not answer using only local KB retrieval when an MCP service is listed.</instruction>\n")
+	var lines []string
 	for _, svc := range mcpServices {
 		if svc == nil {
 			continue
 		}
-		name := svc.Name
-		if name == "" {
-			name = svc.ID
+		prefix := mcpToolNamePrefix(svc)
+		if prefix == "" {
+			continue
 		}
-		if len(svc.ToolNames) > 0 {
-			fmt.Fprintf(&sb, "  <mcp name=\"%s\" tools=\"%s\" />\n",
-				escapeXMLAttr(name), escapeXMLAttr(strings.Join(svc.ToolNames, ", ")))
-		} else {
-			fmt.Fprintf(&sb, "  <mcp name=\"%s\" />\n", escapeXMLAttr(name))
+		display := svc.Name
+		if display == "" {
+			display = svc.ID
 		}
+		lines = append(lines, fmt.Sprintf("Must use MCP tools whose names start with %s (@%s) to answer the question below.", prefix, display))
 	}
 	for _, skill := range skills {
 		if skill == nil || skill.Name == "" {
 			continue
 		}
-		fmt.Fprintf(&sb, "  <skill name=\"%s\" />\n", escapeXMLAttr(skill.Name))
+		lines = append(lines, fmt.Sprintf("Must call read_skill(skill_name=\"%s\") for @Skill \"%s\" before answering.", skill.Name, skill.Name))
 	}
-	sb.WriteString("</must_use>")
-	return sb.String()
+	if len(lines) == 0 {
+		return ""
+	}
+	return "<must_use>\n" + strings.Join(lines, "\n") + "\n</must_use>"
+}
+
+// mcpToolNamePrefix returns the shared prefix for an MCP service's registered tools
+// (e.g. mcp_iwiki_ from mcp_iwiki_getdocument).
+func mcpToolNamePrefix(svc *PinnedMCPServiceInfo) string {
+	if svc == nil || len(svc.ToolNames) == 0 {
+		return ""
+	}
+	const head = "mcp_"
+	for _, toolName := range svc.ToolNames {
+		if !strings.HasPrefix(toolName, head) {
+			continue
+		}
+		rest := toolName[len(head):]
+		idx := strings.Index(rest, "_")
+		if idx <= 0 {
+			continue
+		}
+		return head + rest[:idx+1]
+	}
+	return ""
+}
+
+// RenderUserTurnContent builds the user-turn payload for the current LLM call
+// (runtime_context + must_use + query). Used by Execute and finalize paths only;
+// not written to rendered_content / history.
+func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
+	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
+	return composeUserTurnContent(runtimeCtx, mustUse, query)
 }
 
 func composeUserTurnContent(parts ...string) string {
@@ -491,11 +504,8 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 		}
 	}
 
-	// Build user message with runtime context safety tag.
-	// The runtime context carries a per-turn scope snapshot so that multi-turn
-	// history preserves the (kb, pinned docs) that each earlier turn ran under;
-	// this is what lets the model detect a scope switch instead of silently
-	// answering the new question against last turn's retrieval.
+	// Build user message with per-turn scope envelopes (current turn only).
+	// Historical user messages in llmContext stay as bare Content from the DB.
 	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	userMsg := chat.Message{

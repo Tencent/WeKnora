@@ -98,6 +98,42 @@ func tagScopesFromMentionedItems(items []MentionedItemRequest) []types.TagScope 
 	return scopes
 }
 
+// mergeTagScopesFromRequestIDs supplements tag scopes built from mentioned_items
+// with bare tag_ids when the client did not send kb_id on each tag mention.
+// Orphan tag IDs are attached to the sole knowledge_base_id when unambiguous.
+func mergeTagScopesFromRequestIDs(scopes []types.TagScope, tagIDs, kbIDs []string) []types.TagScope {
+	if len(tagIDs) == 0 {
+		return scopes
+	}
+	covered := make(map[string]bool)
+	for _, scope := range scopes {
+		for _, id := range scope.TagIDs {
+			covered[id] = true
+		}
+	}
+	orphan := make([]string, 0, len(tagIDs))
+	for _, id := range tagIDs {
+		if id != "" && !covered[id] {
+			orphan = append(orphan, id)
+		}
+	}
+	if len(orphan) == 0 {
+		return scopes
+	}
+	if len(kbIDs) != 1 {
+		return scopes
+	}
+	kbID := kbIDs[0]
+	for i, scope := range scopes {
+		if scope.KnowledgeBaseID == kbID {
+			merged := append(append([]string(nil), scope.TagIDs...), orphan...)
+			scopes[i].TagIDs = dedupRequestStrings(merged)
+			return scopes
+		}
+	}
+	return append(scopes, types.TagScope{KnowledgeBaseID: kbID, TagIDs: dedupRequestStrings(orphan)})
+}
+
 func mentionedIDsByType(items []MentionedItemRequest, itemType string) []string {
 	seen := make(map[string]bool)
 	result := make([]string, 0)

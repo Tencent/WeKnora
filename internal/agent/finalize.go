@@ -32,10 +32,11 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 
 	// Build messages with all context
 	systemPrompt := e.buildSystemPrompt(ctx)
+	userTurn := e.RenderUserTurnContent(sessionID, query)
 
 	messages := []chat.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: query},
+		{Role: "user", Content: userTurn},
 	}
 
 	// Add all tool call results as context

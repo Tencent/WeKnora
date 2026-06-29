@@ -655,9 +655,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
 
-    // Get selected MCP services from settings store (if available)
-    const selectedMcpServiceIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedMCPServices || []);
-    const requestMcpServiceIds = mcpServiceIds.length > 0 ? mcpServiceIds : selectedMcpServiceIds;
+    const requestMcpServiceIds = agentEnabled ? mcpServiceIds : [];
+    const requestSkillNames = agentEnabled ? skillNames : [];
 
     await startStream({
         session_id: session_id.value,
@@ -669,7 +668,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         enable_memory: enableMemoryOverride,
         summary_model_id: modelId,
         mcp_service_ids: requestMcpServiceIds,
-        skill_names: skillNames,
+        skill_names: requestSkillNames,
         tag_ids: tagIds,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,

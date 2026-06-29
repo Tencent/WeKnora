@@ -126,20 +126,24 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	// bounded so the LLM context stays small regardless of regex breadth.
 	const limit = 30
 
-	kbIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
 	kbTenantMap := t.searchTargets.GetKBTenantMap()
-
-	var allowedKnowledgeIDs []string
-	for _, target := range t.searchTargets {
-		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
-			allowedKnowledgeIDs = append(allowedKnowledgeIDs, target.KnowledgeIDs...)
-		}
+	fullKBIDs, knowledgeIDs, err := t.resolveGrepScope(ctx)
+	if err != nil {
+		logger.Errorf(ctx, "[Tool][GrepChunks] Failed to resolve search scope: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to resolve search scope: %v", err),
+		}, err
+	}
+	kbIDsForMeta := fullKBIDs
+	if len(kbIDsForMeta) == 0 {
+		kbIDsForMeta = t.searchTargets.GetAllKnowledgeBaseIDs()
 	}
 
 	logger.Infof(ctx, "[Tool][GrepChunks] Queries: %v, Limit: %d, KBs: %v, KnowledgeIDs: %v",
-		queries, limit, kbIDs, allowedKnowledgeIDs)
+		queries, limit, fullKBIDs, knowledgeIDs)
 
-	results, err := t.searchChunks(ctx, queries, kbIDs, allowedKnowledgeIDs, kbTenantMap)
+	results, err := t.searchChunks(ctx, queries, fullKBIDs, knowledgeIDs, kbTenantMap)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Search failed: %v", err)
 		return &types.ToolResult{
@@ -217,7 +221,7 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			"result_count":       len(chunkResults),
 			"document_count":     documentCount,
 			"total_matches":      len(finalResults),
-			"knowledge_base_ids": kbIDs,
+			"knowledge_base_ids": kbIDsForMeta,
 			"limit":              limit,
 			"max_results":        limit, // legacy alias
 			"display_type":       "grep_results",
@@ -252,6 +256,67 @@ func (t *GrepChunksTool) regexOperatorForDialect() string {
 		// that understands the REGEXP keyword.
 		return "REGEXP"
 	}
+}
+
+// resolveGrepScope splits search targets into full-KB IDs vs specific knowledge IDs.
+// Tag-scoped targets are resolved to knowledge IDs so grep_chunks honors @tag scope.
+func (t *GrepChunksTool) resolveGrepScope(ctx context.Context) (fullKBIDs, knowledgeIDs []string, err error) {
+	seenKB := make(map[string]bool)
+	seenKnowledge := make(map[string]bool)
+	for _, target := range t.searchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
+		switch {
+		case len(target.KnowledgeIDs) > 0:
+			for _, kid := range target.KnowledgeIDs {
+				if kid != "" && !seenKnowledge[kid] {
+					seenKnowledge[kid] = true
+					knowledgeIDs = append(knowledgeIDs, kid)
+				}
+			}
+		case len(target.TagIDs) > 0:
+			tenantID := target.TenantID
+			if tenantID == 0 {
+				tenantID = t.searchTargets.GetTenantIDForKB(target.KnowledgeBaseID)
+			}
+			tagKnowledgeIDs, listErr := t.listKnowledgeIDsByTags(ctx, target.KnowledgeBaseID, tenantID, target.TagIDs)
+			if listErr != nil {
+				return nil, nil, listErr
+			}
+			for _, kid := range tagKnowledgeIDs {
+				if kid != "" && !seenKnowledge[kid] {
+					seenKnowledge[kid] = true
+					knowledgeIDs = append(knowledgeIDs, kid)
+				}
+			}
+		default:
+			if !seenKB[target.KnowledgeBaseID] {
+				seenKB[target.KnowledgeBaseID] = true
+				fullKBIDs = append(fullKBIDs, target.KnowledgeBaseID)
+			}
+		}
+	}
+	return fullKBIDs, knowledgeIDs, nil
+}
+
+func (t *GrepChunksTool) listKnowledgeIDsByTags(
+	ctx context.Context,
+	kbID string,
+	tenantID uint64,
+	tagIDs []string,
+) ([]string, error) {
+	if len(tagIDs) == 0 {
+		return nil, nil
+	}
+	var ids []string
+	err := t.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Joins("JOIN knowledge_tag_relations ktr ON knowledges.id = ktr.knowledge_id").
+		Where("knowledges.tenant_id = ? AND knowledges.knowledge_base_id = ? AND ktr.tag_id IN ? AND knowledges.deleted_at IS NULL",
+			tenantID, kbID, tagIDs).
+		Distinct("knowledges.id").
+		Pluck("knowledges.id", &ids).Error
+	return ids, err
 }
 
 // searchChunks performs the database search using regex queries.

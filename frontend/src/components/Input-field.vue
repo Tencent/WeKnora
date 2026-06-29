@@ -289,6 +289,9 @@ const isKnowledgeBaseDisabledByAgent = computed(() => {
   return agentKBSelectionMode.value === 'none';
 });
 const isMentionDisabled = computed(() => {
+  if (settingsStore.isAgentStreamMode && isKnowledgeBaseDisabledByAgent.value) {
+    return agentMCPSelectionMode.value === 'none' && agentSkillsSelectionMode.value === 'none';
+  }
   return isKnowledgeBaseLockedByAgent.value && !settingsStore.isAgentStreamMode;
 });
 
@@ -353,6 +356,30 @@ const isSkillAllowedByAgent = (skillName: string) => {
   if (mode === 'selected') return agentSelectedSkills.value.includes(skillName);
   return true;
 };
+
+// 切换智能体时清理不允许的 MCP / Skill @mention
+watch([selectedAgentId, agentMCPSelectionMode, agentSkillsSelectionMode], ([newAgentId], [oldAgentId]) => {
+  if (settingsStore._isApplyingSessionState) return;
+  if (newAgentId === oldAgentId || oldAgentId === undefined) return;
+
+  const mcpMode = agentMCPSelectionMode.value;
+  if (mcpMode === 'none') {
+    settingsStore.settings.selectedMCPServices = [];
+  } else if (mcpMode === 'selected') {
+    const allowed = new Set(agentMCPServiceIds.value);
+    settingsStore.settings.selectedMCPServices = (settingsStore.settings.selectedMCPServices || [])
+      .filter(id => allowed.has(id));
+  }
+
+  const skillsMode = agentSkillsSelectionMode.value;
+  if (skillsMode === 'none') {
+    settingsStore.settings.selectedSkills = [];
+  } else if (skillsMode === 'selected') {
+    const allowed = new Set(agentSelectedSkills.value);
+    settingsStore.settings.selectedSkills = (settingsStore.settings.selectedSkills || [])
+      .filter(name => allowed.has(name));
+  }
+});
 
 // 从 KB 对象里抽能力位，优先用 backend 显式的 capabilities 字段；否则回退到 indexing_strategy，
 // 最后拿 kb.type === 'faq' 兜底。shared / owned / agent-scope 三路的 KB 响应结构一致。
@@ -519,7 +546,9 @@ const selectedFiles = computed(() => {
 });
 
 const skillMentionItems = computed<MentionItem[]>(() => {
-  return selectedSkillNames.value.map((name: string) => {
+  return selectedSkillNames.value
+    .filter((name: string) => isSkillAllowedByAgent(name))
+    .map((name: string) => {
     const skill = editorResources.skills.find(s => s.name === name);
     return {
       id: name,
@@ -1237,7 +1266,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     mentionGroupCounts.value.kb = kbItems.length;
 
     const tagKeyword = q.trim();
-    const tagSources = availableKbs.slice(0, 20);
+    const tagSources = availableKbs;
     try {
       const tagResults = await Promise.all(tagSources.map(async (kb: any) => {
         const res: any = await listKnowledgeTags(kb.id, { page: 1, page_size: 20, keyword: tagKeyword || undefined });
@@ -1252,6 +1281,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         }));
       }));
       tagItems = tagResults.flat();
+      mentionGroupCounts.value.tag = tagItems.length;
     } catch (e) {
       console.error('[Mention] listKnowledgeTags error:', e);
       tagItems = [];
