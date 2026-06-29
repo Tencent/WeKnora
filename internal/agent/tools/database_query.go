@@ -255,21 +255,13 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions
 func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint64) (string, error) {
-	kbIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
-	var knowledgeIDs []string
-	for _, target := range t.searchTargets {
-		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
-			knowledgeIDs = append(knowledgeIDs, target.KnowledgeIDs...)
-		}
-	}
-
 	securedSQL, validationResult, err := utils.ValidateAndSecureSQL(
 		sqlQuery,
 		utils.WithSecurityDefaults(tenantID),
 		utils.WithSoftDeleteFilter("knowledge_bases", "knowledges", "chunks"),
 		utils.WithHiddenKBFilter(),
 		utils.WithInjectionRiskCheck(),
-		utils.WithSearchScopeFilter(kbIDs, knowledgeIDs),
+		utils.WithSearchScopes(searchScopesFromTargets(t.searchTargets)),
 	)
 	if err != nil {
 		return "", err
@@ -284,6 +276,21 @@ func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint6
 	}
 
 	return securedSQL, nil
+}
+
+func searchScopesFromTargets(searchTargets types.SearchTargets) []utils.SearchScope {
+	scopes := make([]utils.SearchScope, 0, len(searchTargets))
+	for _, target := range searchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
+		scopes = append(scopes, utils.SearchScope{
+			KnowledgeBaseID: target.KnowledgeBaseID,
+			KnowledgeIDs:    append([]string(nil), target.KnowledgeIDs...),
+			TagIDs:          append([]string(nil), target.TagIDs...),
+		})
+	}
+	return scopes
 }
 
 // formatQueryResults formats query results into readable text

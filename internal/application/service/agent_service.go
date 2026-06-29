@@ -440,6 +440,9 @@ func (s *agentService) registerTools(
 			if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
 				scope.KnowledgeIDs = append([]string(nil), target.KnowledgeIDs...)
 			}
+			if len(target.TagIDs) > 0 {
+				scope.TagIDs = append([]string(nil), target.TagIDs...)
+			}
 			wikiScopes = append(wikiScopes, scope)
 		}
 	}
@@ -611,9 +614,9 @@ func (s *agentService) registerTools(
 
 		// Wiki tools — only registered when wiki KBs are detected
 		case tools.ToolWikiReadPage:
-			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, wikiScopes)
+			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, s.knowledgeService, wikiScopes)
 		case tools.ToolWikiSearch:
-			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, wikiScopes)
+			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, s.knowledgeService, wikiScopes)
 		case tools.ToolWikiReadSourceDoc:
 			toolToRegister = tools.NewWikiReadSourceDocTool(s.knowledgeService, s.chunkService)
 		case tools.ToolWikiFlagIssue:
