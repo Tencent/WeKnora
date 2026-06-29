@@ -151,7 +151,7 @@ func (s *agentService) CreateAgentEngine(
 	chatModel chat.Chat,
 	rerankModel rerank.Reranker,
 	eventBus *event.EventBus,
-	sessionID string,
+	sessionID, assistantMessageID string,
 ) (interfaces.AgentEngine, error) {
 	logger.Infof(ctx, "Creating agent engine with custom EventBus")
 
@@ -171,7 +171,7 @@ func (s *agentService) CreateAgentEngine(
 	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
-	s.registerMCPTools(ctx, toolRegistry, config)
+	s.registerMCPTools(ctx, toolRegistry, config, eventBus, sessionID, assistantMessageID)
 
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
@@ -231,6 +231,8 @@ func (s *agentService) registerMCPTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
 	config *types.AgentConfig,
+	eventBus *event.EventBus,
+	sessionID, assistantMessageID string,
 ) {
 	tenantID := uint64(0)
 	if tid, ok := types.TenantIDFromContext(ctx); ok {
@@ -278,10 +280,24 @@ func (s *agentService) registerMCPTools(
 		}
 	}
 	if len(enabledServices) > 0 {
-		if err := tools.RegisterMCPTools(ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate); err != nil {
+		var regCtx *tools.MCPOAuthSession
+		if eventBus != nil && sessionID != "" && assistantMessageID != "" {
+			regCtx = &tools.MCPOAuthSession{
+				EventBus:           eventBus,
+				SessionID:          sessionID,
+				AssistantMessageID: assistantMessageID,
+				ApprovalCtx:        ctx,
+			}
+		}
+		registered, err := tools.RegisterMCPTools(
+			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate, regCtx,
+		)
+		if err != nil {
 			logger.Warnf(ctx, "Failed to register MCP tools: %v", err)
+		} else if registered == 0 {
+			logger.Warnf(ctx, "No MCP tools registered from %d enabled service(s)", len(enabledServices))
 		} else {
-			logger.Infof(ctx, "Registered MCP tools from %d enabled services", len(enabledServices))
+			logger.Infof(ctx, "Registered %d MCP tool(s) from %d enabled service(s)", registered, len(enabledServices))
 		}
 	}
 }

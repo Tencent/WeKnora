@@ -149,6 +149,7 @@ func (s *sessionService) AgentQA(
 		rerankModel,
 		eventBus,
 		sessionID,
+		req.AssistantMessageID,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create agent engine: %v", err)

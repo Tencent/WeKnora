@@ -12,7 +12,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
-	mcpclient "github.com/mark3labs/mcp-go/client"
 )
 
 type MCPInput = map[string]any
@@ -175,51 +174,47 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	}
 
 	isStdio := t.service.TransportType == types.MCPTransportStdio
+	meta, _ := ToolExecFromContext(ctx)
+	oauthSess := oauthSessionFromToolExec(ctx, meta)
+	toolCallID := ""
+	if meta != nil {
+		toolCallID = meta.ToolCallID
+	}
 
-	// connectAndCall performs get-client + call-tool, including the existing
-	// stale-session reconnection retry. Factored out so an in-conversation
-	// OAuth authorization prompt can replay the whole sequence once after the
-	// user authorizes.
-	connectAndCall := func(ctx context.Context) (*mcp.CallToolResult, error) {
-		client, err := t.mcpManager.GetOrCreateClient(ctx, t.service)
+	connectAndCall := func(callCtx context.Context) (*mcp.CallToolResult, error) {
+		client, err := getOrCreateMCPClientWithOAuthRetry(
+			callCtx, t.mcpManager, t.service, t.gate, oauthSess, t.mcpTool.Name, toolCallID,
+		)
 		if err != nil {
 			return nil, err
 		}
-		// For stdio transport, ensure connection is released after use.
 		if isStdio {
 			defer func() {
 				if derr := client.Disconnect(); derr != nil {
-					logger.GetLogger(ctx).Warnf("Failed to disconnect stdio MCP client: %v", derr)
+					logger.GetLogger(callCtx).Warnf("Failed to disconnect stdio MCP client: %v", derr)
 				} else {
-					logger.GetLogger(ctx).Infof("Stdio MCP client disconnected after tool execution")
+					logger.GetLogger(callCtx).Infof("Stdio MCP client disconnected after tool execution")
 				}
 			}()
 		}
 
-		// Call the tool via MCP (with one reconnection retry on failure)
-		result, err := client.CallTool(ctx, t.mcpTool.Name, input)
+		result, err := client.CallTool(callCtx, t.mcpTool.Name, input)
 		if err != nil && !isStdio {
-			logger.GetLogger(ctx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
+			logger.GetLogger(callCtx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
 			_ = client.Disconnect()
 
-			client, err = t.mcpManager.GetOrCreateClient(ctx, t.service)
+			client, err = getOrCreateMCPClientWithOAuthRetry(
+				callCtx, t.mcpManager, t.service, t.gate, oauthSess, t.mcpTool.Name, toolCallID,
+			)
 			if err != nil {
 				return nil, err
 			}
-			result, err = client.CallTool(ctx, t.mcpTool.Name, input)
+			result, err = client.CallTool(callCtx, t.mcpTool.Name, input)
 		}
 		return result, err
 	}
 
 	result, err := connectAndCall(ctx)
-	if err != nil {
-		// When an OAuth-enabled service has not been authorized by this user,
-		// pause and prompt them to authorize in the chat, then retry once.
-		if retryCtx, cancel, ok := t.waitForOAuthAndRetry(ctx, err); ok {
-			defer cancel()
-			result, err = connectAndCall(retryCtx)
-		}
-	}
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("MCP tool call failed: %v", err)
 		return &types.ToolResult{
@@ -383,114 +378,6 @@ func extractContentText(content []mcp.ContentItem) string {
 	return strings.Join(textParts, "\n")
 }
 
-// oauthWaiter is the subset of the approval gate used to pause the agent while
-// the user completes an MCP OAuth authorization. Declared locally (and accessed
-// via a type assertion) so the broader MCPApproval interface — and its test
-// fakes — need not change.
-type oauthWaiter interface {
-	RequestOAuthAndWait(ctx context.Context, req approval.OAuthPendingRequest) (approval.Decision, error)
-}
-
-// waitForOAuthAndRetry blocks for user authorization when err indicates an
-// OAuth-enabled MCP service has not been authorized by the current user. It
-// emits an "authorize" prompt to the chat (via the gate) and waits until the
-// user authorizes, the wait times out, or the request is canceled.
-//
-// It returns (retryCtx, cancel, true) only when the user authorized in time, in
-// which case the caller should replay the tool call using retryCtx (a fresh
-// timeout budget, since the wait may have consumed the original per-tool ctx)
-// and must defer cancel. In all other cases it returns (ctx, noop, false) and
-// the caller surfaces the original error.
-func (t *MCPTool) waitForOAuthAndRetry(
-	ctx context.Context, err error,
-) (context.Context, context.CancelFunc, bool) {
-	noop := func() {}
-	if !t.service.AuthConfig.IsOAuth() || !isAuthorizationRequired(err) {
-		return ctx, noop, false
-	}
-	ow, ok := t.gate.(oauthWaiter)
-	if !ok || ow == nil {
-		return ctx, noop, false
-	}
-	meta, ok := ToolExecFromContext(ctx)
-	if !ok || meta == nil || meta.EventBus == nil {
-		return ctx, noop, false
-	}
-
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	// Wait on the round-level ctx (no per-tool timeout) so authorization can
-	// legitimately take longer than the per-tool exec budget; user-stop /
-	// request cancel still propagates because it is a child of the request ctx.
-	waitCtx := ctx
-	if meta.ApprovalCtx != nil {
-		waitCtx = meta.ApprovalCtx
-	}
-
-	decision, waitErr := ow.RequestOAuthAndWait(waitCtx, approval.OAuthPendingRequest{
-		TenantID:           tenantID,
-		UserID:             meta.UserID,
-		SessionID:          meta.SessionID,
-		AssistantMessageID: meta.AssistantMessageID,
-		RequestID:          meta.RequestID,
-		EventBus:           meta.EventBus,
-		ServiceID:          t.service.ID,
-		ServiceName:        t.service.Name,
-		MCPToolName:        t.mcpTool.Name,
-		ToolCallID:         meta.ToolCallID,
-	})
-	if waitErr != nil || !decision.Approved {
-		return ctx, noop, false
-	}
-
-	// Drop any stale (token-less) cached connection so the retry rebuilds the
-	// client with the freshly stored token.
-	_ = t.mcpManager.CloseClient(t.service.ID)
-
-	// Re-derive a fresh tool-exec ctx; the authorization wait likely consumed
-	// the per-tool budget the engine applied to ctx (mirrors the approval gate).
-	if meta.ApprovalCtx != nil {
-		freshTimeout := meta.ExecTimeout
-		if freshTimeout <= 0 {
-			freshTimeout = 60 * time.Second
-		}
-		freshCtx, cancel := context.WithTimeout(meta.ApprovalCtx, freshTimeout)
-		return freshCtx, cancel, true
-	}
-	return ctx, noop, true
-}
-
-// oauthAwareConnectError turns a low-level MCP connect/call error into a
-// message the agent (and ultimately the user) can act on. For OAuth services
-// that have not been authorized — or whose token expired and could not be
-// refreshed — the underlying library surfaces an authorization-required error;
-// we translate that into an explicit instruction to authorize, instead of an
-// opaque "connection failed".
-func oauthAwareConnectError(service *types.MCPService, err error) string {
-	if service.AuthConfig.IsOAuth() && isAuthorizationRequired(err) {
-		return fmt.Sprintf(
-			"MCP service %q requires OAuth authorization. Please open the service settings "+
-				"and click \"Authorize\" to grant access, then retry.",
-			service.Name,
-		)
-	}
-	return fmt.Sprintf("Failed to connect to MCP service: %v", err)
-}
-
-// isAuthorizationRequired reports whether err indicates the OAuth flow has not
-// been completed (no valid token / 401).
-func isAuthorizationRequired(err error) bool {
-	if err == nil {
-		return false
-	}
-	if mcpclient.IsOAuthAuthorizationRequiredError(err) || mcpclient.IsAuthorizationRequiredError(err) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "authorization required") ||
-		strings.Contains(msg, "no valid token") ||
-		strings.Contains(msg, "401")
-}
-
 // sanitizeName sanitizes a name to create a valid identifier
 func sanitizeName(name string) string {
 	// Replace invalid characters with underscores
@@ -509,16 +396,19 @@ func sanitizeName(name string) string {
 	return result.String()
 }
 
-// RegisterMCPTools registers MCP tools from given services
+// RegisterMCPTools registers MCP tools from given services. It returns the
+// number of tools registered. oauthSess enables in-conversation OAuth when tool
+// discovery requires authorization.
 func RegisterMCPTools(
 	ctx context.Context,
 	registry *ToolRegistry,
 	services []*types.MCPService,
 	mcpManager *mcp.MCPManager,
 	gate approval.MCPApproval,
-) error {
+	oauthSess *MCPOAuthSession,
+) (int, error) {
 	if len(services) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	// Use provided context, but don't add timeout here
@@ -533,13 +423,17 @@ func RegisterMCPTools(
 		defer cancel()
 	}
 
+	registered := 0
+	regOAuth := oauthSessionForRegistration(ctx, oauthSess, listToolsTimeout)
 	for _, service := range services {
 		if !service.Enabled {
 			continue
 		}
 
-		// Get or create client (this may take time, but has its own timeout)
-		client, err := mcpManager.GetOrCreateClient(ctx, service)
+		toolCallID := "mcp-register-" + service.ID
+		client, err := getOrCreateMCPClientWithOAuthRetry(
+			ctx, mcpManager, service, gate, regOAuth, "", toolCallID,
+		)
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("Failed to create MCP client for service %s: %v", service.Name, err)
 			continue
@@ -565,7 +459,9 @@ func RegisterMCPTools(
 			logger.GetLogger(ctx).Warnf("Failed to list tools from MCP service %s (will retry with fresh connection): %v", service.Name, err)
 			_ = client.Disconnect()
 
-			client, err = mcpManager.GetOrCreateClient(ctx, service)
+			client, err = getOrCreateMCPClientWithOAuthRetry(
+				ctx, mcpManager, service, gate, regOAuth, "", toolCallID,
+			)
 			if err != nil {
 				logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client for service %s: %v", service.Name, err)
 				continue
@@ -597,11 +493,12 @@ func RegisterMCPTools(
 			}
 
 			registry.RegisterTool(tool)
+			registered++
 			logger.GetLogger(ctx).Infof("Registered MCP tool: %s from service: %s", toolName, service.Name)
 		}
 	}
 
-	return nil
+	return registered, nil
 }
 
 // MCPToolNamesByServiceID returns registered MCP tool names grouped by service ID.
