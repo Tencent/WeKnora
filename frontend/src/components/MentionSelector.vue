@@ -1,154 +1,258 @@
 <template>
-  <div v-if="visible" class="mention-menu" :style="style" ref="menuRef" @click.stop @scroll="onScroll">
-    <!-- Knowledge Bases Group -->
-    <div v-if="kbItems.length > 0" class="mention-group">
-      <div class="mention-group-header">{{ $t('common.knowledgeBase') }}</div>
-      <t-popup
-        v-for="(item, index) in kbItems"
-        :key="item.id"
-        placement="right-start"
-        trigger="hover"
-        :show-arrow="false"
-        :delay="[320, 80]"
-        :disabled="isScrolling"
-        :overlay-class-name="'mention-detail-popup'"
-        :overlay-inner-class-name="'mention-detail-popup-wrap'"
-        @visible-change="(v: boolean) => v && fetchKbDetail(item)"
-      >
-        <div
-          class="mention-item"
-          :class="{ active: index === activeIndex }"
-          @click="$emit('select', item)"
-          @mouseenter="$emit('update:activeIndex', index)"
+  <div v-if="visible" class="mention-menu" :style="style" ref="menuRef" @click.stop>
+    <div class="mention-list" ref="listRef" @scroll="onScroll">
+      <template v-if="!currentGroupType && !isFlatMode">
+        <button
+          v-for="(group, index) in groupRows"
+          :key="group.type"
+          type="button"
+          class="mention-group-entry"
+          :class="{ active: index === groupActiveIndex }"
+          @click.stop="enterGroup(group.type)"
+          @mouseenter="groupActiveIndex = index"
         >
-          <div class="icon-wrap">
-            <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
-              <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
+          <span class="mention-group-entry__icon">
+            <t-icon :name="group.icon" />
+          </span>
+          <span class="mention-group-entry__label">{{ group.label }}</span>
+          <span class="mention-group-entry__count">{{ formatGroupCount(group) }}</span>
+          <t-icon class="mention-group-entry__arrow" name="chevron-right" />
+        </button>
+        <div v-if="groupRows.length === 0 && !loading" class="empty">
+          {{ emptyHint || $t('common.noResult') }}
+        </div>
+      </template>
+
+      <template v-else>
+        <button v-if="!isFlatMode" type="button" class="mention-back-row" @click.stop="leaveGroup">
+          <t-icon name="chevron-left" />
+          <span>{{ currentGroup?.label }}</span>
+        </button>
+
+      <div
+        v-if="isFlatMode && groupTabs.length > 1 && kbItems.length > 0"
+        class="mention-group-header"
+      >
+        {{ $t('common.knowledgeBase') }}
+      </div>
+      <!-- Knowledge Bases Group -->
+      <div v-if="(isFlatMode || currentGroupType === 'kb') && kbItems.length > 0" class="mention-group" data-group-type="kb">
+        <t-popup
+          v-for="(item, index) in kbItems"
+          :key="item.id"
+          placement="right-start"
+          trigger="hover"
+          :show-arrow="false"
+          :delay="[320, 80]"
+          :disabled="isScrolling"
+          :overlay-class-name="'mention-detail-popup'"
+          :overlay-inner-class-name="'mention-detail-popup-wrap'"
+          @visible-change="(v: boolean) => v && fetchKbDetail(item)"
+        >
+          <div
+            class="mention-item"
+            :class="{ active: index === activeIndex }"
+            @click="$emit('select', item)"
+            @mouseenter="$emit('update:activeIndex', index)"
+          >
+            <div class="icon-wrap">
+              <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
+                <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
+              </div>
+            </div>
+            <div class="item-main">
+              <span class="name">{{ item.name }}</span>
+              <span class="count">{{ item.count || 0 }}</span>
             </div>
           </div>
-          <div class="item-main">
-            <span class="name">{{ item.name }}</span>
-            <span class="count">{{ item.count || 0 }}</span>
-          </div>
-        </div>
-        <template #content>
-          <div class="mention-detail-content">
-            <template v-if="detailCache[item.id]?.loading">
-              <div class="detail-loading"><t-loading size="small" /></div>
-            </template>
-            <template v-else-if="detailCache[item.id]?.error">
-              <div class="detail-error">{{ detailCache[item.id].error }}</div>
-            </template>
-            <template v-else-if="detailCache[item.id]?.data">
-              <div class="detail-header">
-                <span class="detail-name">{{ detailCache[item.id].data.name }}</span>
-                <span class="detail-type-badge" :class="detailCache[item.id].data.type === 'faq' ? 'faq' : 'doc'">
-                  {{ detailCache[item.id].data.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument') }}
-                </span>
-              </div>
-              <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
-              <div class="detail-meta">
-                <span v-if="detailCache[item.id].data.type === 'faq'">
-                  {{ $t('mentionDetail.faqCount', { count: detailCache[item.id].data.chunk_count ?? detailCache[item.id].data.count ?? 0 }) }}
-                </span>
-                <span v-else>
-                  {{ $t('mentionDetail.kbCount', { count: detailCache[item.id].data.knowledge_count ?? detailCache[item.id].data.count ?? 0 }) }}
-                </span>
-                <span v-if="detailCache[item.id].data.org_name || item.orgName" class="detail-org">
-                  <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
-                  <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
-                  <span 
-                    class="detail-value clickable"
-                    @click.stop="handleOrgClick(detailCache[item.id].data.org_name || item.orgName)"
-                  >
-                    {{ detailCache[item.id].data.org_name || item.orgName }}
+          <template #content>
+            <div class="mention-detail-content">
+              <template v-if="detailCache[item.id]?.loading">
+                <div class="detail-loading"><t-loading size="small" /></div>
+              </template>
+              <template v-else-if="detailCache[item.id]?.error">
+                <div class="detail-error">{{ detailCache[item.id].error }}</div>
+              </template>
+              <template v-else-if="detailCache[item.id]?.data">
+                <div class="detail-header">
+                  <span class="detail-name">{{ detailCache[item.id].data.name }}</span>
+                  <span class="detail-type-badge" :class="detailCache[item.id].data.type === 'faq' ? 'faq' : 'doc'">
+                    {{ detailCache[item.id].data.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument') }}
                   </span>
-                </span>
-                <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
-                  {{ $t('mentionDetail.readOnlyFromAgent') }}
-                </span>
-              </div>
-            </template>
-          </div>
-        </template>
-      </t-popup>
-    </div>
-    
-    <!-- Files Group -->
-    <div v-if="fileItems.length > 0" class="mention-group">
-      <div class="mention-group-header">{{ $t('common.file') }}</div>
-      <t-popup
-        v-for="(item, index) in fileItems"
-        :key="item.id"
-        placement="right-start"
-        trigger="hover"
-        :show-arrow="false"
-        :delay="[320, 80]"
-        :disabled="isScrolling"
-        :overlay-class-name="'mention-detail-popup'"
-        :overlay-inner-class-name="'mention-detail-popup-wrap'"
-        @visible-change="(v: boolean) => v && fetchFileDetail(item)"
-      >
+                </div>
+                <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
+                <div class="detail-meta">
+                  <span v-if="detailCache[item.id].data.type === 'faq'">
+                    {{ $t('mentionDetail.faqCount', { count: detailCache[item.id].data.chunk_count ?? detailCache[item.id].data.count ?? 0 }) }}
+                  </span>
+                  <span v-else>
+                    {{ $t('mentionDetail.kbCount', { count: detailCache[item.id].data.knowledge_count ?? detailCache[item.id].data.count ?? 0 }) }}
+                  </span>
+                  <span v-if="detailCache[item.id].data.org_name || item.orgName" class="detail-org">
+                    <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
+                    <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
+                    <span
+                      class="detail-value clickable"
+                      @click.stop="handleOrgClick(detailCache[item.id].data.org_name || item.orgName)"
+                    >
+                      {{ detailCache[item.id].data.org_name || item.orgName }}
+                    </span>
+                  </span>
+                  <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
+                    {{ $t('mentionDetail.readOnlyFromAgent') }}
+                  </span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </t-popup>
+      </div>
+
+      <template v-for="group in activeExtraGroups" :key="group.type">
         <div
-          class="mention-item"
-          :class="{ active: (kbItems.length + index) === activeIndex }"
-          @click="$emit('select', item)"
-          @mouseenter="$emit('update:activeIndex', kbItems.length + index)"
+          v-if="isFlatMode && groupTabs.length > 1"
+          class="mention-group-header"
         >
-          <div class="icon-wrap">
-            <div class="icon file-icon">
-              <t-icon name="file" />
+          {{ group.label }}
+        </div>
+        <div class="mention-group" :data-group-type="group.type">
+        <t-popup
+          v-for="(item, index) in group.items"
+          :key="`${item.type}:${item.id}`"
+          placement="right-start"
+          trigger="hover"
+          :show-arrow="false"
+          :delay="[320, 80]"
+          :disabled="isScrolling"
+          :overlay-class-name="'mention-detail-popup'"
+          :overlay-inner-class-name="'mention-detail-popup-wrap'"
+        >
+          <div
+            class="mention-item"
+            :class="{ active: group.offset + index === activeIndex }"
+            @click="$emit('select', item)"
+            @mouseenter="$emit('update:activeIndex', group.offset + index)"
+          >
+            <div class="icon-wrap">
+              <div class="icon" :class="`${item.type}-icon`">
+                <t-icon :name="group.icon" />
+              </div>
+            </div>
+            <div class="item-main">
+              <span class="name">{{ item.name }}</span>
             </div>
           </div>
-          <span class="name">{{ item.name }}</span>
-        </div>
-        <template #content>
-          <div class="mention-detail-content">
-            <template v-if="detailCache[item.id]?.loading">
-              <div class="detail-loading"><t-loading size="small" /></div>
-            </template>
-            <template v-else-if="detailCache[item.id]?.error">
-              <div class="detail-error">{{ detailCache[item.id].error }}</div>
-            </template>
-            <template v-else-if="detailCache[item.id]?.data">
+          <template #content>
+            <div class="mention-detail-content">
               <div class="detail-header">
-                <span class="detail-name">{{ detailCache[item.id].data.title || detailCache[item.id].data.file_name || item.name }}</span>
+                <span class="detail-name">{{ item.name }}</span>
               </div>
-              <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
+              <p v-if="item.description" class="detail-desc">{{ item.description }}</p>
               <div class="detail-meta">
-                <span v-if="detailCache[item.id].data.knowledge_base_name || item.kbName" class="detail-kb">
+                <span v-if="item.kbName" class="detail-kb">
                   <t-icon name="folder" class="detail-icon" />
                   <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
-                  <span 
+                  <span
                     class="detail-value clickable"
-                    @click.stop="handleKbClick(detailCache[item.id].data.knowledge_base_id || (item as any).kbId)"
+                    @click.stop="handleKbClick(item.kbId)"
                   >
-                    {{ detailCache[item.id].data.knowledge_base_name || item.kbName }}
+                    {{ item.kbName }}
                   </span>
                 </span>
-                <span v-if="item.orgName" class="detail-org">
-                  <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
-                  <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
-                  <span 
-                    class="detail-value clickable"
-                    @click.stop="handleOrgClick(item.orgName)"
-                  >
-                    {{ item.orgName }}
-                  </span>
+                <span v-if="item.serviceName" class="detail-kb">
+                  <t-icon name="tools" class="detail-icon" />
+                  <span class="detail-label">MCP：</span>
+                  <span class="detail-value">{{ item.serviceName }}</span>
                 </span>
               </div>
-            </template>
-          </div>
-        </template>
-      </t-popup>
-      <!-- Loading indicator -->
-      <div v-if="loading" class="loading-more">
-        <t-loading size="small" />
+            </div>
+          </template>
+        </t-popup>
+        </div>
+      </template>
+
+      <div
+        v-if="isFlatMode && groupTabs.length > 1 && fileItems.length > 0"
+        class="mention-group-header"
+      >
+        {{ $t('common.file') }}
       </div>
-    </div>
-    
-    <div v-if="items.length === 0 && !loading" class="empty">
-      {{ emptyHint || $t('common.noResult') }}
+      <!-- Files Group -->
+      <div v-if="(isFlatMode || currentGroupType === 'file') && fileItems.length > 0" class="mention-group" data-group-type="file">
+        <t-popup
+          v-for="(item, index) in fileItems"
+          :key="item.id"
+          placement="right-start"
+          trigger="hover"
+          :show-arrow="false"
+          :delay="[320, 80]"
+          :disabled="isScrolling"
+          :overlay-class-name="'mention-detail-popup'"
+          :overlay-inner-class-name="'mention-detail-popup-wrap'"
+          @visible-change="(v: boolean) => v && fetchFileDetail(item)"
+        >
+          <div
+            class="mention-item"
+            :class="{ active: (fileGroupOffset + index) === activeIndex }"
+            @click="$emit('select', item)"
+            @mouseenter="$emit('update:activeIndex', fileGroupOffset + index)"
+          >
+            <div class="icon-wrap">
+              <div class="icon file-icon">
+                <t-icon name="file" />
+              </div>
+            </div>
+            <span class="name">{{ item.name }}</span>
+          </div>
+          <template #content>
+            <div class="mention-detail-content">
+              <template v-if="detailCache[item.id]?.loading">
+                <div class="detail-loading"><t-loading size="small" /></div>
+              </template>
+              <template v-else-if="detailCache[item.id]?.error">
+                <div class="detail-error">{{ detailCache[item.id].error }}</div>
+              </template>
+              <template v-else-if="detailCache[item.id]?.data">
+                <div class="detail-header">
+                  <span class="detail-name">{{ detailCache[item.id].data.title || detailCache[item.id].data.file_name || item.name }}</span>
+                </div>
+                <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
+                <div class="detail-meta">
+                  <span v-if="detailCache[item.id].data.knowledge_base_name || item.kbName" class="detail-kb">
+                    <t-icon name="folder" class="detail-icon" />
+                    <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
+                    <span
+                      class="detail-value clickable"
+                      @click.stop="handleKbClick(detailCache[item.id].data.knowledge_base_id || (item as any).kbId)"
+                    >
+                      {{ detailCache[item.id].data.knowledge_base_name || item.kbName }}
+                    </span>
+                  </span>
+                  <span v-if="item.orgName" class="detail-org">
+                    <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
+                    <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
+                    <span
+                      class="detail-value clickable"
+                      @click.stop="handleOrgClick(item.orgName)"
+                    >
+                      {{ item.orgName }}
+                    </span>
+                  </span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </t-popup>
+        <!-- Loading indicator -->
+        <div v-if="loading" class="loading-more">
+          <t-loading size="small" />
+        </div>
+      </div>
+
+      <div v-if="items.length === 0 && !loading" class="empty">
+        {{ emptyHint || $t('common.noResult') }}
+      </div>
+      </template>
     </div>
   </div>
 </template>
@@ -156,32 +260,42 @@
 <script setup lang="ts">
 import { computed, watch, ref, nextTick, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
+import type { MentionItem, MentionItemType } from '@/types/mention';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
 
 const props = defineProps<{
   visible: boolean;
   style: any;
-  items: Array<{ id: string; name: string; type: 'kb' | 'file'; kbType?: 'document' | 'faq'; count?: number; kbName?: string; orgName?: string; kbId?: string }>;
+  items: MentionItem[];
   activeIndex: number;
   hasMore?: boolean;
   loading?: boolean;
   // 空态下替换默认 "无结果" 文案，用于给上游（如"被智能体工具兼容性过滤掉了"）透传具体原因
   emptyHint?: string;
+  // 输入 @ 后的筛选关键词；非空时平铺展示匹配项，不再要求进入二级目录
+  query?: string;
+  // 分组入口展示用的总数（如文件搜索的 total），避免仅用首屏已加载条数
+  groupCounts?: Partial<Record<MentionItemType, number>>;
 }>();
 
 const emit = defineEmits(['select', 'update:activeIndex', 'loadMore']);
 
 const router = useRouter();
+const { t } = useI18n();
 const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
 const menuRef = ref<HTMLElement | null>(null);
+const listRef = ref<HTMLElement | null>(null);
 const detailCache = ref<Record<string, DetailState>>({});
 const isScrolling = ref(false);
+const currentGroupType = ref<MentionItemType | null>(null);
+const groupActiveIndex = ref(0);
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 onBeforeUnmount(() => {
@@ -197,6 +311,135 @@ const agentIdForDetail = computed(() => {
 
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
+
+const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
+  { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
+  { type: 'tag', label: '标签', icon: 'tag' },
+  { type: 'mcp', label: 'MCP', icon: 'tools' },
+  { type: 'skill', label: 'Skills', icon: 'bookmark' },
+  { type: 'file', label: t('common.file'), icon: 'file' },
+]);
+
+const mentionGroups = computed(() => {
+  let offset = 0;
+  return mentionGroupDefs.value.map(def => {
+    const items = props.items.filter(item => item.type === def.type);
+    const loadedCount = items.length;
+    const count = props.groupCounts?.[def.type] ?? loadedCount;
+    const group = { ...def, items, offset, count, loadedCount };
+    offset += items.length;
+    return group;
+  });
+});
+
+const formatGroupCount = (group: { type: MentionItemType; count: number; loadedCount: number }) => {
+  if (props.groupCounts?.[group.type] != null) {
+    return props.groupCounts[group.type]!;
+  }
+  if (group.type === 'file' && props.hasMore) {
+    return `${group.loadedCount}+`;
+  }
+  return group.count;
+};
+
+const groupTabs = computed(() => mentionGroups.value.filter(group => group.count > 0));
+const groupRows = computed(() => groupTabs.value);
+const isFlatMode = computed(() => (props.query ?? '').trim().length > 0);
+const currentGroup = computed(() => mentionGroups.value.find(group => group.type === currentGroupType.value));
+const extraGroups = computed(() => mentionGroups.value.filter(group =>
+  group.type !== 'kb' && group.type !== 'file' && group.count > 0
+));
+const activeExtraGroups = computed(() => {
+  if (isFlatMode.value) return extraGroups.value;
+  return extraGroups.value.filter(group => group.type === currentGroupType.value);
+});
+const fileGroupOffset = computed(() => mentionGroups.value.find(group => group.type === 'file')?.offset || 0);
+
+const enterGroup = (type: MentionItemType) => {
+  const group = mentionGroups.value.find(item => item.type === type && item.count > 0);
+  if (!group || !listRef.value) return;
+
+  currentGroupType.value = type;
+  emit('update:activeIndex', group.offset);
+
+  nextTick(() => {
+    if (!listRef.value) return;
+    listRef.value.scrollTo({
+      top: 0,
+    });
+  });
+};
+
+const leaveGroup = () => {
+  if (isFlatMode.value) return false;
+  if (!currentGroupType.value) return false;
+  const rowIndex = groupRows.value.findIndex(group => group.type === currentGroupType.value);
+  groupActiveIndex.value = Math.max(0, rowIndex);
+  currentGroupType.value = null;
+  nextTick(() => {
+    if (listRef.value) listRef.value.scrollTop = 0;
+  });
+  return true;
+};
+
+const updateActiveGroupFromIndex = (index: number) => {
+  const group = groupTabs.value.find(item => index >= item.offset && index < item.offset + item.count);
+  if (group) currentGroupType.value = group.type;
+};
+
+watch(groupTabs, (groups) => {
+  if (groupActiveIndex.value >= groups.length) {
+    groupActiveIndex.value = Math.max(0, groups.length - 1);
+  }
+});
+
+const moveActive = (delta: number) => {
+  if (isFlatMode.value) {
+    const next = Math.min(props.items.length - 1, Math.max(0, props.activeIndex + delta));
+    emit('update:activeIndex', next);
+    scrollToItem(next);
+    return;
+  }
+
+  if (!currentGroupType.value) {
+    const maxIndex = Math.max(0, groupRows.value.length - 1);
+    groupActiveIndex.value = Math.min(maxIndex, Math.max(0, groupActiveIndex.value + delta));
+    return;
+  }
+
+  const group = currentGroup.value;
+  if (!group) return;
+  const currentLocalIndex = props.activeIndex - group.offset;
+  const nextLocalIndex = Math.min(group.count - 1, Math.max(0, currentLocalIndex + delta));
+  emit('update:activeIndex', group.offset + nextLocalIndex);
+  scrollToItem(nextLocalIndex);
+};
+
+const confirmActive = () => {
+  if (isFlatMode.value) {
+    const item = props.items[props.activeIndex];
+    if (item) emit('select', item);
+    return;
+  }
+
+  if (!currentGroupType.value) {
+    const group = groupRows.value[groupActiveIndex.value];
+    if (group) enterGroup(group.type);
+    return;
+  }
+
+  const group = currentGroup.value;
+  if (!group) return;
+  const localIndex = props.activeIndex - group.offset;
+  const item = group.items[localIndex];
+  if (item) emit('select', item);
+};
+
+defineExpose({
+  moveActive,
+  confirmActive,
+  leaveGroup,
+});
 
 async function fetchKbDetail(item: { id: string }) {
   if (detailCache.value[item.id]?.data || detailCache.value[item.id]?.loading) return;
@@ -251,33 +494,51 @@ const onScroll = (e: Event) => {
 
   const target = e.target as HTMLElement;
   const { scrollTop, scrollHeight, clientHeight } = target;
-  if (scrollHeight - scrollTop - clientHeight < 50 && props.hasMore && !props.loading) {
+  if ((currentGroupType.value === 'file' || isFlatMode.value) && scrollHeight - scrollTop - clientHeight < 50 && props.hasMore && !props.loading) {
     emit('loadMore');
   }
 };
 
 watch(() => props.activeIndex, (newIndex) => {
-  scrollToItem(newIndex);
+  if (isFlatMode.value) {
+    scrollToItem(newIndex);
+    return;
+  }
+  if (currentGroupType.value) {
+    updateActiveGroupFromIndex(newIndex);
+    const group = currentGroup.value;
+    if (group) scrollToItem(newIndex - group.offset);
+  }
+});
+
+watch(isFlatMode, (flat) => {
+  if (flat) {
+    currentGroupType.value = null;
+    nextTick(() => {
+      if (listRef.value) listRef.value.scrollTop = 0;
+    });
+  }
 });
 
 watch(() => props.visible, (newVisible) => {
   if (newVisible) {
     nextTick(() => {
-      if (menuRef.value) menuRef.value.scrollTop = 0;
-      scrollToItem(props.activeIndex);
+      if (listRef.value) listRef.value.scrollTop = 0;
+      currentGroupType.value = null;
+      groupActiveIndex.value = 0;
     });
   }
 });
 
 const scrollToItem = (index: number) => {
   nextTick(() => {
-    if (!menuRef.value) return;
+    if (!listRef.value) return;
     
-    const items = menuRef.value.querySelectorAll('.mention-item');
+    const items = listRef.value.querySelectorAll('.mention-item');
     if (!items || items.length <= index) return;
     
     const activeItem = items[index] as HTMLElement;
-    const menu = menuRef.value;
+    const menu = listRef.value;
     
     if (activeItem) {
       const menuRect = menu.getBoundingClientRect();
@@ -304,12 +565,100 @@ const scrollToItem = (index: number) => {
   border: 1px solid var(--td-component-stroke, #e7e9eb);
   border-radius: var(--td-radius-extraLarge, 12px);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04);
-  width: 288px;
-  max-height: 344px;
-  overflow-y: auto;
+  width: 220px;
+  max-height: 388px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  padding: 6px 0;
+}
+
+.mention-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.mention-group-entry,
+.mention-back-row {
+  width: calc(100% - 12px);
+  min-height: 32px;
+  margin: 1px 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--td-radius-medium, 6px);
+  background: transparent;
+  color: var(--td-text-color-primary, #333);
+  font-family: var(--app-font-family);
+  font-size: var(--td-font-size-body-medium, 14px);
+  font-weight: 400;
+  line-height: 20px;
+  cursor: pointer;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s ease;
+}
+
+.mention-group-entry:hover,
+.mention-group-entry.active,
+.mention-back-row:hover {
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+}
+
+.mention-group-entry__icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-secondary, #666);
+  font-size: 16px;
+}
+
+.mention-group-entry__label,
+.mention-back-row span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.mention-group-entry__count {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  color: var(--td-text-color-placeholder, #999);
+  font-size: var(--td-font-size-mark-small, 12px);
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.mention-group-entry__arrow {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 16px;
+}
+
+.mention-back-row {
+  min-height: 30px;
+  margin-bottom: 4px;
+  color: var(--td-text-color-secondary, #666);
+  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+  border-radius: 0;
+}
+
+.mention-back-row span {
+  font-size: var(--td-font-size-body-medium, 14px);
 }
 
 .mention-group {
@@ -332,8 +681,8 @@ const scrollToItem = (index: number) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 40px;
-  padding: 7px 10px;
+  min-height: 32px;
+  padding: 4px 8px;
   margin: 1px 6px;
   box-sizing: border-box;
   cursor: pointer;
@@ -417,7 +766,7 @@ const scrollToItem = (index: number) => {
 }
 
 .name {
-  font-weight: 500;
+  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

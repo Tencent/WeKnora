@@ -4,12 +4,12 @@
             <!-- 显示@的知识库和文件（非 Agent 模式下显示） -->
             <div v-if="!session.isAgentMode && mentionedItems && mentionedItems.length > 0" class="mentioned_items">
                 <span v-for="item in mentionedItems" :key="item.id" class="mentioned_tag" :class="[
-                    item.type === 'kb' ? (item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag') : 'file-tag'
+                    mentionTagClass(item)
                 ]">
                     <span class="tag_icon">
                         <t-icon v-if="item.type === 'kb'"
                             :name="item.kb_type === 'faq' ? 'chat-bubble-help' : 'folder'" />
-                        <t-icon v-else name="file" />
+                        <t-icon v-else :name="mentionTagIcon(item)" />
                     </span>
                     <span class="tag_name">{{ item.name }}</span>
                 </span>
@@ -105,6 +105,18 @@ import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
 
 ensureMermaidInitialized();
+
+const mentionTagClass = (item) => {
+    if (item.type === 'kb') return item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag';
+    return `${item.type || 'file'}-tag`;
+};
+
+const mentionTagIcon = (item) => {
+    if (item.type === 'tag') return 'tag';
+    if (item.type === 'mcp') return 'tools';
+    if (item.type === 'skill') return 'bookmark';
+    return 'file';
+};
 
 const emit = defineEmits(['scroll-bottom'])
 const { t } = useI18n()

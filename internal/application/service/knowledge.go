@@ -857,10 +857,10 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 
 // SearchKnowledge searches knowledge items by keyword across the tenant and shared knowledge bases.
 // fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
-func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error) {
+func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
 	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
 	if !ok {
-		return nil, false, werrors.NewUnauthorizedError("Tenant ID not found in context")
+		return nil, false, 0, werrors.NewUnauthorizedError("Tenant ID not found in context")
 	}
 
 	scopes := make([]types.KnowledgeSearchScope, 0)
@@ -896,15 +896,15 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 	}
 
 	if len(scopes) == 0 {
-		return nil, false, nil
+		return nil, false, 0, nil
 	}
 	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 }
 
 // SearchKnowledgeForScopes searches knowledge within the given scopes (e.g. for shared agent context).
-func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error) {
+func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
 	if len(scopes) == 0 {
-		return nil, false, nil
+		return nil, false, 0, nil
 	}
 	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 }

@@ -147,3 +147,54 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 		assert.Equal(t, "thinking", out[2].ReasoningContent)
 	})
 }
+
+func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
+	block := buildRuntimeContextBlock(
+		"sess-1",
+		nil,
+		[]*SelectedDocumentInfo{{
+			KnowledgeID: "kid-1",
+			Title:       "Report.pdf",
+			FileType:    "pdf",
+		}},
+	)
+
+	assert.Contains(t, block, "<pinned_documents")
+	assert.Contains(t, block, `knowledge_id="kid-1"`)
+	assert.Contains(t, block, `title="Report.pdf"`)
+	assert.Contains(t, block, `file_type="pdf"`)
+	assert.Contains(t, block, "list_knowledge_chunks")
+	assert.NotContains(t, block, "<must_use>")
+}
+
+func TestBuildMustUseBlock_MCPAndSkills(t *testing.T) {
+	block := buildMustUseBlock(
+		[]*PinnedMCPServiceInfo{{
+			ID:   "mcp-1",
+			Name: "ChemDB",
+		}},
+		[]*PinnedSkillInfo{{
+			Name: "data-analysis",
+		}},
+	)
+
+	assert.Contains(t, block, "<must_use>")
+	assert.NotContains(t, block, "<runtime_context")
+	assert.Contains(t, block, "<instruction>REQUIRED this turn")
+	assert.Contains(t, block, "FIRST tool round")
+	assert.Contains(t, block, "read_skill")
+	assert.Contains(t, block, `<mcp name="ChemDB"`)
+	assert.Contains(t, block, `<skill name="data-analysis"`)
+}
+
+func TestBuildMustUseBlock_MCPToolNames(t *testing.T) {
+	block := buildMustUseBlock(
+		[]*PinnedMCPServiceInfo{{
+			ID:        "mcp-1",
+			Name:      "iwiki",
+			ToolNames: []string{"mcp_iwiki_aisearchdocument", "mcp_iwiki_getdocument"},
+		}},
+		nil,
+	)
+	assert.Contains(t, block, `tools="mcp_iwiki_aisearchdocument, mcp_iwiki_getdocument"`)
+}

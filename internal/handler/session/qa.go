@@ -31,6 +31,10 @@ type qaRequestContext struct {
 	assistantMessage  *types.Message
 	knowledgeBaseIDs  []string
 	knowledgeIDs      []string
+	tagScopes         []types.TagScope
+	tagIDs            []string
+	mcpServiceIDs     []string
+	skillNames        []string
 	summaryModelID    string
 	webSearchEnabled  bool
 	enableMemory      bool // Whether memory feature is enabled
@@ -59,6 +63,9 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		CustomAgent:        rc.customAgent,
 		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
 		KnowledgeIDs:       rc.knowledgeIDs,
+		TagScopes:          rc.tagScopes,
+		MCPServiceIDs:      rc.mcpServiceIDs,
+		SkillNames:         rc.skillNames,
 		ImageURLs:          imageURLs,
 		ImageDescription:   imageDescription,
 		UserMessageID:      rc.userMessageID,
@@ -240,6 +247,11 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	//      had memory enabled in practice, keep that behaviour.
 	enableMemory := h.resolveEnableMemory(ctx, request.EnableMemory)
 
+	tagScopes := tagScopesFromMentionedItems(request.MentionedItems)
+	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
+	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
+	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
+
 	// Build request context
 	reqCtx := &qaRequestContext{
 		ctx:         ctx,
@@ -259,6 +271,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		},
 		knowledgeBaseIDs:  secutils.SanitizeForLogArray(kbIDs),
 		knowledgeIDs:      secutils.SanitizeForLogArray(knowledgeIDs),
+		tagScopes:         tagScopes,
+		tagIDs:            secutils.SanitizeForLogArray(tagIDs),
+		mcpServiceIDs:     secutils.SanitizeForLogArray(mcpServiceIDs),
+		skillNames:        secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:    secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:  request.WebSearchEnabled,
 		enableMemory:      enableMemory,
@@ -887,6 +903,10 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		ModelID:          reqCtx.summaryModelID,
 		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:     reqCtx.knowledgeIDs,
+		TagIDs:           reqCtx.tagIDs,
+		MCPServiceIDs:    reqCtx.mcpServiceIDs,
+		SkillNames:       reqCtx.skillNames,
+		MentionedItems:   reqCtx.mentionedItems,
 		WebSearchEnabled: reqCtx.webSearchEnabled,
 	}
 

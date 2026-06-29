@@ -7,7 +7,8 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
@@ -18,6 +19,7 @@ import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 import { type ModelConfig } from '@/api/model';
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
+import { useEditorResourcesStore } from '@/stores/editorResources';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
@@ -34,6 +36,7 @@ import {
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
+import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
 
 const route = useRoute();
 const router = useRouter();
@@ -42,6 +45,7 @@ const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
 const chatResources = useChatResourcesStore();
+const editorResources = useEditorResourcesStore();
 const {
   agents,
   disabledOwnAgentIds,
@@ -284,6 +288,9 @@ const isKnowledgeBaseDisabledByAgent = computed(() => {
   if (!hasAgentConfig.value) return false;
   return agentKBSelectionMode.value === 'none';
 });
+const isMentionDisabled = computed(() => {
+  return isKnowledgeBaseLockedByAgent.value && !settingsStore.isAgentStreamMode;
+});
 
 // 智能体配置的模型 ID
 const agentModelId = computed(() => {
@@ -302,6 +309,50 @@ const agentAllowedTools = computed<string[]>(() => {
   if (!hasAgentConfig.value) return [];
   return currentAgentConfig.value?.allowed_tools || [];
 });
+
+const normalizeMCPSelectionMode = (mode?: string): 'all' | 'selected' | 'none' => {
+  return mode === 'all' || mode === 'selected' || mode === 'none' ? mode : 'none';
+};
+
+const agentMCPSelectionMode = computed<'all' | 'selected' | 'none'>(() => {
+  if (!settingsStore.isAgentStreamMode || !hasAgentConfig.value) return 'none';
+  return normalizeMCPSelectionMode(currentAgentConfig.value?.mcp_selection_mode);
+});
+
+const agentMCPServiceIds = computed<string[]>(() => {
+  if (agentMCPSelectionMode.value !== 'selected') return [];
+  return currentAgentConfig.value?.mcp_services || [];
+});
+
+const isMCPAllowedByAgent = (service: MCPService) => {
+  if (!settingsStore.isAgentStreamMode || !service.enabled) return false;
+  const mode = agentMCPSelectionMode.value;
+  if (mode === 'none') return false;
+  if (mode === 'selected') return agentMCPServiceIds.value.includes(service.id);
+  return true;
+};
+
+const normalizeSkillsSelectionMode = (mode?: string): 'all' | 'selected' | 'none' => {
+  return mode === 'all' || mode === 'selected' || mode === 'none' ? mode : 'none';
+};
+
+const agentSkillsSelectionMode = computed<'all' | 'selected' | 'none'>(() => {
+  if (!settingsStore.isAgentStreamMode || !hasAgentConfig.value) return 'none';
+  return normalizeSkillsSelectionMode(currentAgentConfig.value?.skills_selection_mode);
+});
+
+const agentSelectedSkills = computed<string[]>(() => {
+  if (agentSkillsSelectionMode.value !== 'selected') return [];
+  return currentAgentConfig.value?.selected_skills || [];
+});
+
+const isSkillAllowedByAgent = (skillName: string) => {
+  if (!settingsStore.isAgentStreamMode || !editorResources.skillsAvailable) return false;
+  const mode = agentSkillsSelectionMode.value;
+  if (mode === 'none') return false;
+  if (mode === 'selected') return agentSelectedSkills.value.includes(skillName);
+  return true;
+};
 
 // 从 KB 对象里抽能力位，优先用 backend 显式的 capabilities 字段；否则回退到 indexing_strategy，
 // 最后拿 kb.type === 'faq' 兜底。shared / owned / agent-scope 三路的 KB 响应结构一致。
@@ -366,16 +417,19 @@ const isModelLockedByAgent = computed(() => {
 // Mention related state
 const showMention = ref(false);
 const mentionQuery = ref("");
-const mentionItems = ref<Array<{ id: string; name: string; type: 'kb' | 'file'; kbType?: 'document' | 'faq'; count?: number; kbName?: string; orgName?: string; kbId?: string }>>([]);
+const mentionItems = ref<MentionItem[]>([]);
 /** 文件 ID -> 知识库 ID（用于批量查询时传 kb_id，支持共享知识库下的文档） */
 const fileIdToKbId = ref<Record<string, string>>({});
+const mcpServices = ref<MCPService[]>([]);
 const mentionActiveIndex = ref(0);
 const mentionStyle = ref<Record<string, string>>({});
 const textareaRef = ref<any>(null); // Ref to t-textarea component
+const mentionSelectorRef = ref<any>(null);
 const mentionStartPos = ref(0);
 const isComposing = ref(false);
 const isMentionTriggeredByButton = ref(false);
 const mentionHasMore = ref(false);
+const mentionGroupCounts = ref<Partial<Record<MentionItemType, number>>>({});
 // 当前 @ 会话可见的 KB ID 集合（含工具兼容性过滤），分页加载文件时复用，
 // 避免 append 请求把不兼容 KB 的文件漏进来。`null` 表示"不受限制"（非智能体场景）
 const mentionAllowedKbIds = ref<Set<string> | null>(null);
@@ -417,6 +471,9 @@ const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
+const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
+const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
+const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
 // 已就绪的知识库（来自租户级缓存）
 const knowledgeBases = computed(() => chatResources.validKnowledgeBases);
@@ -461,6 +518,33 @@ const selectedFiles = computed(() => {
   });
 });
 
+const skillMentionItems = computed<MentionItem[]>(() => {
+  return selectedSkillNames.value.map((name: string) => {
+    const skill = editorResources.skills.find(s => s.name === name);
+    return {
+      id: name,
+      name: skill?.name || name,
+      type: 'skill' as const,
+      skillName: name,
+      description: skill?.description || '',
+    };
+  });
+});
+
+const selectedMCPItems = computed<MentionItem[]>(() => {
+  return selectedMCPServiceIds.value
+    .map((id: string) => mcpServices.value.find(service => service.id === id))
+    .filter((svc): svc is MCPService => !!svc && isMCPAllowedByAgent(svc))
+    .map((svc) => {
+      return {
+        id: svc.id,
+        name: svc.name,
+        type: 'mcp' as const,
+        description: svc.description || '',
+      };
+    });
+});
+
 // 合并所有选中项（用于输入框内显示）
 // 现在智能体配置的知识库也在 store 中，统一从 selectedKbs 获取
 const allSelectedItems = computed(() => {
@@ -501,17 +585,47 @@ const allSelectedItems = computed(() => {
   // 智能体配置的放在前面
   const agentConfiguredKbs = allKbs.filter(kb => kb.isAgentConfigured);
   const userSelectedKbs = allKbs.filter(kb => !kb.isAgentConfigured);
+  const tags = selectedTags.value.map((tag: any) => ({
+    id: tag.id,
+    name: tag.name,
+    type: 'tag' as const,
+    kbId: tag.kbId,
+    kbName: tag.kbName,
+    description: tag.kbName || '',
+    isAgentConfigured: false,
+  }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files];
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
-const removeSelectedItem = (item: { id: string; type: 'kb' | 'file'; isAgentConfigured?: boolean }) => {
+const removeSelectedItem = (item: MentionItem) => {
   if (item.type === 'kb') {
     settingsStore.removeKnowledgeBase(item.id);
-  } else {
+  } else if (item.type === 'file') {
     settingsStore.removeFile(item.id);
+  } else if (item.type === 'tag') {
+    settingsStore.removeTag(item.id, item.kbId);
+  } else if (item.type === 'mcp') {
+    settingsStore.removeMCPService(item.id);
+  } else if (item.type === 'skill') {
+    settingsStore.removeSkill(item.skillName || item.id);
   }
+};
+
+const getMentionIcon = (item: MentionItem) => {
+  switch (item.type) {
+    case 'file': return 'file';
+    case 'tag': return 'tag';
+    case 'mcp': return 'tools';
+    case 'skill': return 'bookmark';
+    default: return 'folder';
+  }
+};
+
+const getMentionChipClass = (item: MentionItem) => {
+  if (item.type === 'kb') return item.kbType === 'faq' ? 'mention-chip--faq' : 'mention-chip--kb';
+  return `mention-chip--${item.type}`;
 };
 
 // 使用 computed 从 store 读取，并通过 setter 同步回 store
@@ -634,6 +748,15 @@ const loadFiles = async () => {
     }
   } catch (e) {
     console.error("Failed to load files", e);
+  }
+};
+
+const loadMCPServices = async () => {
+  try {
+    mcpServices.value = await listMCPServices();
+  } catch (error) {
+    console.error('Failed to load MCP services:', error);
+    mcpServices.value = [];
   }
 };
 
@@ -1000,6 +1123,9 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
   // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该租户下的知识库，否则使用本租户 + 共享给自己的
   let kbItems: any[] = [];
+  let tagItems: MentionItem[] = [];
+  let mcpItems: MentionItem[] = [];
+  let skillItems: MentionItem[] = [];
   if (!append) {
     let availableKbs: any[];
     const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
@@ -1088,14 +1214,81 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     const kbs = availableKbs.filter((kb: any) =>
       !q || (kb.name && kb.name.toLowerCase().includes(q.toLowerCase()))
     );
-    kbItems = kbs.map((kb: any) => ({
-      id: kb.id,
-      name: kb.name,
-      type: 'kb' as const,
-      kbType: kb.type || 'document',
-      count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
-      orgName: kb.org_name || sharedAgentOrgName.value || undefined
+    kbItems = await Promise.all(kbs.map(async (kb: any) => {
+      const kbType = kb.type || 'document';
+      let count = kbType === 'faq' ? Number(kb.chunk_count || 0) : Number(kb.knowledge_count || 0);
+      if (!count) {
+        const detail = await chatResources.fetchKnowledgeBaseById(kb.id);
+        if (detail) {
+          count = detail.type === 'faq'
+            ? Number(detail.chunk_count || 0)
+            : Number(detail.knowledge_count || 0);
+        }
+      }
+      return {
+        id: kb.id,
+        name: kb.name,
+        type: 'kb' as const,
+        kbType: kbType === 'faq' ? 'faq' as const : 'document' as const,
+        count,
+        orgName: kb.org_name || sharedAgentOrgName.value || undefined
+      };
     }));
+    mentionGroupCounts.value.kb = kbItems.length;
+
+    const tagKeyword = q.trim();
+    const tagSources = availableKbs.slice(0, 20);
+    try {
+      const tagResults = await Promise.all(tagSources.map(async (kb: any) => {
+        const res: any = await listKnowledgeTags(kb.id, { page: 1, page_size: 20, keyword: tagKeyword || undefined });
+        const payload = res?.data ?? res;
+        const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : []);
+        return list.map((tag: any) => ({
+          id: tag.id,
+          name: tag.name,
+          type: 'tag' as const,
+          kbId: kb.id,
+          kbName: kb.name,
+        }));
+      }));
+      tagItems = tagResults.flat();
+    } catch (e) {
+      console.error('[Mention] listKnowledgeTags error:', e);
+      tagItems = [];
+    }
+
+    const mcpMode = agentMCPSelectionMode.value;
+    if (mcpMode !== 'none') {
+      mcpItems = mcpServices.value
+        .filter(service => isMCPAllowedByAgent(service))
+        .filter(service => !q || service.name?.toLowerCase().includes(q.toLowerCase()) || (service.description || '').toLowerCase().includes(q.toLowerCase()))
+        .map(service => ({
+          id: service.id,
+          name: service.name,
+          type: 'mcp' as const,
+          description: service.description || '',
+        }));
+    }
+
+    const skillsMode = agentSkillsSelectionMode.value;
+    if (skillsMode !== 'none') {
+      await editorResources.ensureSkills();
+      skillItems = editorResources.skills
+        .filter(skill => isSkillAllowedByAgent(skill.name))
+        .map(skill => ({
+          id: skill.name,
+          name: skill.name,
+          type: 'skill' as const,
+          skillName: skill.name,
+          description: skill.description || '',
+        }))
+        .filter(skill => {
+          if (!q) return true;
+          const keyword = q.toLowerCase();
+          return skill.name.toLowerCase().includes(keyword)
+            || (skill.description || '').toLowerCase().includes(keyword);
+        });
+    }
   }
 
   // Fetch Files from API
@@ -1131,6 +1324,8 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       console.log('[Mention] searchKnowledge response:', res);
       if (res.data && Array.isArray(res.data)) {
         let files = res.data;
+        const rawTotal = typeof res.total === 'number' ? res.total : undefined;
+        const apiPageSize = res.data.length;
         // 按当前 @ 会话的兼容 KB 集合过滤：
         //   - 非智能体场景：`mentionAllowedKbIds` 为 null，跳过；
         //   - 智能体场景（含 shared agent）：'selected' 会把 ID 收敛到用户勾的 KB，
@@ -1163,6 +1358,14 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
             orgName: fileOrgName || undefined
           };
         });
+        if (!append) {
+          const clientFiltered = !!mentionAllowedKbIds.value && fileItems.length < apiPageSize;
+          if (!clientFiltered && rawTotal != null) {
+            mentionGroupCounts.value.file = rawTotal;
+          } else {
+            delete mentionGroupCounts.value.file;
+          }
+        }
       }
       mentionHasMore.value = res.has_more || false;
       mentionOffset.value += fileItems.length;
@@ -1180,9 +1383,9 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
   } else {
-    mentionItems.value = [...kbItems, ...fileItems];
+    mentionItems.value = [...kbItems, ...tagItems, ...mcpItems, ...skillItems, ...fileItems];
   }
-  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length });
+  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
 
   // Only reset index if query changed or explicitly requested
   if (resetIndex || q !== lastMentionQuery) {
@@ -1263,11 +1466,7 @@ const onInput = (val: string | InputEvent) => {
   } else {
     if (textBeforeCursor.endsWith('@')) {
       // 如果智能体禁用了知识库，不触发 @ 菜单
-      if (isKnowledgeBaseDisabledByAgent.value) {
-        return;
-      }
-      // 如果智能体锁定了知识库且不允许用户选择，也不触发 @ 菜单
-      if (isKnowledgeBaseLockedByAgent.value) {
+      if (isMentionDisabled.value) {
         return;
       }
 
@@ -1336,8 +1535,8 @@ const onCompositionEnd = (e: CompositionEvent) => {
 };
 
 const triggerMention = () => {
-  // 如果智能体锁定或禁用了知识库，不允许打开选择器
-  if (isKnowledgeBaseLockedByAgent.value) {
+  // 如果当前没有任何可提及资源，不允许打开选择器
+  if (isMentionDisabled.value) {
     const msgKey = isKnowledgeBaseDisabledByAgent.value ? 'input.kbDisabledByAgent' : 'input.kbLockedByAgent';
     MessagePlugin.warning(t(msgKey));
     return;
@@ -1401,6 +1600,14 @@ const onMentionSelect = (item: any) => {
     if (!fileList.value.find(f => f.id === item.id)) {
       fileList.value.push({ id: item.id, name: item.name });
     }
+  } else if (item.type === 'tag') {
+    if (item.kbId) {
+      settingsStore.addTag({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
+    }
+  } else if (item.type === 'mcp') {
+    settingsStore.addMCPService(item.id);
+  } else if (item.type === 'skill') {
+    settingsStore.addSkill(item.skillName || item.id);
   }
 
   const textarea = getTextareaEl();
@@ -1505,6 +1712,7 @@ onMounted(() => {
     loadWebSearchConfig(),
     loadChatModels(),
     loadAgents(),
+    loadMCPServices(),
   ]);
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
@@ -1595,7 +1803,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: any[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
   (e: 'stop-generation'): void;
 }>();
 
@@ -1648,11 +1856,15 @@ const createSession = async (val: string) => {
     return;
   }
   // 获取@提及的知识库和文件信息
-  const mentionedItems = allSelectedItems.value.map(item => ({
+  const mentionedItems: MentionRequestItem[] = allSelectedItems.value.map(item => ({
     id: item.id,
     name: item.name,
     type: item.type,
-    kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined
+    kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined,
+    kb_id: item.kbId,
+    kb_name: item.kbName,
+    service_id: item.serviceId,
+    skill_name: item.skillName,
   }));
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
@@ -1897,22 +2109,23 @@ const onKeydown = (val: string, event: { e: { preventDefault(): unknown; keyCode
   if (showMention.value) {
     if (event.e.keyCode === 38) { // Up
       event.e.preventDefault();
-      mentionActiveIndex.value = Math.max(0, mentionActiveIndex.value - 1);
+      mentionSelectorRef.value?.moveActive(-1);
       return;
     }
     if (event.e.keyCode === 40) { // Down
       event.e.preventDefault();
-      mentionActiveIndex.value = Math.min(mentionItems.value.length - 1, mentionActiveIndex.value + 1);
+      mentionSelectorRef.value?.moveActive(1);
       return;
     }
     if (event.e.keyCode === 13) { // Enter
       event.e.preventDefault();
-      if (mentionItems.value[mentionActiveIndex.value]) {
-        onMentionSelect(mentionItems.value[mentionActiveIndex.value]);
-      }
+      mentionSelectorRef.value?.confirmActive();
       return;
     }
     if (event.e.keyCode === 27) { // Esc
+      if (mentionSelectorRef.value?.leaveGroup()) {
+        return;
+      }
       showMention.value = false;
       return;
     }
@@ -2196,14 +2409,14 @@ defineExpose({
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
       <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
-        <span v-for="item in allSelectedItems" :key="item.id" class="mention-chip" :class="[
-          item.type === 'kb' ? (item.kbType === 'faq' ? 'mention-chip--faq' : 'mention-chip--kb') : 'mention-chip--file',
+        <span v-for="item in allSelectedItems" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
+          getMentionChipClass(item),
           { 'mention-chip--agent': item.isAgentConfigured }
         ]">
           <span class="mention-chip__icon-wrap" :class="{ 'has-org': item.org_name }">
             <span class="mention-chip__icon">
               <t-icon v-if="item.type === 'kb'" :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
-              <t-icon v-else name="file" />
+              <t-icon v-else :name="getMentionIcon(item)" />
             </span>
             <span v-if="item.org_name" class="mention-chip__org-badge">
               <img :src="getImgSrc(item.type === 'file' ? 'organization-grey.svg' : 'organization-green.svg')"
@@ -2323,7 +2536,7 @@ defineExpose({
           <!-- @ 知识库/文件选择按钮 -->
           <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
-              <div v-if="isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
+              <div v-if="isMentionDisabled && isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
                 <span>{{ $t('input.kbDisabledByAgent') }}</span>
                 <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings')
                 }}</a>
@@ -2335,7 +2548,7 @@ defineExpose({
             </template>
             <div ref="atButtonRef" class="control-btn kb-btn" data-guide="chat-kb-mention" :class="{
               'active': allSelectedItems.length > 0,
-              'disabled': isKnowledgeBaseDisabledByAgent
+              'disabled': isMentionDisabled
             }" @click.stop @mousedown.prevent="triggerMention">
               <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
                 class="control-icon at-icon">
@@ -2418,8 +2631,8 @@ defineExpose({
 
     <!-- Mention Selector -->
     <Teleport to="body">
-      <MentionSelector :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
-        :loading="mentionLoading" :emptyHint="mentionEmptyHint" v-model:activeIndex="mentionActiveIndex"
+      <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
+        :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
 
@@ -2608,6 +2821,24 @@ const getImgSrc = (url: string) => {
 
 .mention-chip--file .mention-chip__icon-wrap {
   color: var(--td-text-color-secondary, #6b7280);
+}
+
+.mention-chip--tag,
+.mention-chip--mcp,
+.mention-chip--tool {
+  color: var(--td-text-color-primary);
+}
+
+.mention-chip--tag .mention-chip__icon-wrap {
+  color: #9f7aea;
+}
+
+.mention-chip--mcp .mention-chip__icon-wrap {
+  color: #0f766e;
+}
+
+.mention-chip--tool .mention-chip__icon-wrap {
+  color: #b7791f;
 }
 
 /* 智能体预配置：虚线边框区分 */

@@ -31,17 +31,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	})
 
 	// Build messages with all context
-	language := types.LanguageNameFromContext(ctx)
-	systemPrompt := BuildSystemPromptWithOptions(
-		e.knowledgeBasesInfo,
-		e.config.WebSearchEnabled,
-		e.selectedDocs,
-		&BuildSystemPromptOptions{
-			Language: language,
-			Config:   e.appConfig,
-		},
-		e.systemPromptTemplate,
-	)
+	systemPrompt := e.buildSystemPrompt(ctx)
 
 	messages := []chat.Message{
 		{Role: "system", Content: systemPrompt},

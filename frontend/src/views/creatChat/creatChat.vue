@@ -139,13 +139,7 @@ const fetchSuggestedQuestions = async () => {
     try {
         const agentId = settingsStore.selectedAgentId;
         if (!agentId) return;
-        const selectedKBs = settingsStore.getSelectedKnowledgeBases();
-        const selectedFiles = settingsStore.getSelectedFiles();
-        const res = await getSuggestedQuestions(agentId, {
-            knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
-            knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
-            limit: 6,
-        });
+        const res = await getSuggestedQuestions(agentId, settingsStore.getSuggestedQuestionsParams(6));
         if (fetchId === suggestedQuestionsFetchId) {
             sqCardsRevealed.value = false;
             sqRenderKey.value++;
@@ -169,10 +163,19 @@ const debouncedFetch = () => {
     debounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
 };
 
-// 监听 Agent / 知识库 / 文件切换
-watch(() => settingsStore.selectedAgentId, debouncedFetch);
-watch(() => settingsStore.settings.selectedKnowledgeBases, debouncedFetch, { deep: true });
-watch(() => settingsStore.settings.selectedFiles, debouncedFetch, { deep: true });
+// 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention
+watch(
+    () => ({
+        agentId: settingsStore.selectedAgentId,
+        kbs: settingsStore.settings.selectedKnowledgeBases,
+        files: settingsStore.settings.selectedFiles,
+        tags: settingsStore.settings.selectedTags,
+        mcps: settingsStore.settings.selectedMCPServices,
+        skills: settingsStore.settings.selectedSkills,
+    }),
+    debouncedFetch,
+    { deep: true },
+);
 
 onMounted(() => { fetchSuggestedQuestions(); });
 

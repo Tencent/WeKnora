@@ -24,10 +24,14 @@ type History struct {
 
 // MentionedItem represents a mentioned knowledge base or file
 type MentionedItem struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Type   string `json:"type"`    // "kb" for knowledge base, "file" for file
-	KBType string `json:"kb_type"` // "document" or "faq" (only for kb type)
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill"
+	KBType    string `json:"kb_type"`    // "document" or "faq" (only for kb type)
+	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag mentions
+	KBName    string `json:"kb_name"`    // Display name for parent KB
+	ServiceID string `json:"service_id"` // Parent MCP service for MCP tool mentions
+	SkillName string `json:"skill_name"` // Preloaded agent skill name
 }
 
 // MessageImage represents an image attached to a chat message
@@ -211,7 +215,7 @@ type Message struct {
 	// Empty for non-retrieval intents or assistant messages.
 	RenderedContent string `json:"-" gorm:"type:text;column:rendered_content;default:''"`
 	// Channel indicates the source channel of this message (e.g., "web", "api", "im")
-	Channel string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"` 
+	Channel string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"`
 	// KnowledgeID links this message to a Knowledge entry in the chat history knowledge base
 	// Used for vector search indexing: when set, the message content has been indexed as a Knowledge passage
 	KnowledgeID string `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`

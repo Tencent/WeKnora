@@ -217,7 +217,8 @@ func escapeXMLAttr(s string) string {
 // to the user query rather than baked into the system prompt. Keeping it in
 // the user message keeps the system prompt stable/cacheable and lets the
 // model see exactly which KBs were in scope at the time of each historical
-// turn.
+// turn. Per-turn @mentioned MCP/Skill requirements are emitted separately via
+// buildMustUseBlock (sibling to runtime_context in the user message).
 //
 // Per-turn communication_instruction and answer_instruction remind the model
 // not to leak internal tool names or IDs in user-visible text, and to end the
@@ -232,7 +233,7 @@ func buildRuntimeContextBlock(
 	docs []*SelectedDocumentInfo,
 ) string {
 	var sb strings.Builder
-	sb.WriteString("<runtime_context note=\"turn metadata; follow communication_instruction and answer_instruction\">\n")
+	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
 	fmt.Fprintf(&sb, "  <current_time>%s</current_time>\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&sb, "  <session>%s</session>\n", escapeXMLAttr(sessionID))
 
@@ -261,11 +262,18 @@ func buildRuntimeContextBlock(
 			if title == "" {
 				title = d.KnowledgeID
 			}
-			fmt.Fprintf(&sb, "    <document knowledge_id=\"%s\" title=\"%s\" />\n",
-				escapeXMLAttr(d.KnowledgeID), escapeXMLAttr(title))
+			if d.FileType != "" {
+				fmt.Fprintf(&sb, "    <document knowledge_id=\"%s\" title=\"%s\" file_type=\"%s\" />\n",
+					escapeXMLAttr(d.KnowledgeID), escapeXMLAttr(title), escapeXMLAttr(d.FileType))
+			} else {
+				fmt.Fprintf(&sb, "    <document knowledge_id=\"%s\" title=\"%s\" />\n",
+					escapeXMLAttr(d.KnowledgeID), escapeXMLAttr(title))
+			}
 		}
 		sb.WriteString("  </pinned_documents>\n")
-		sb.WriteString("  <note>The pinned-document set above is authoritative for THIS turn. If an earlier turn in this conversation analysed a different document, do NOT reuse that analysis — re-query against the current scope.</note>\n")
+		sb.WriteString("  <note>The pinned-document set above is authoritative for THIS turn. ")
+		sb.WriteString("Prioritize retrieving content from these documents (e.g. list_knowledge_chunks with the knowledge_id). ")
+		sb.WriteString("If an earlier turn analysed a different document, do NOT reuse that analysis — re-query against the current scope.</note>\n")
 	}
 
 	sb.WriteString("  <communication_instruction>Do not use internal tool names or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n")
@@ -273,6 +281,54 @@ func buildRuntimeContextBlock(
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
+}
+
+// buildMustUseBlock emits per-turn @mentioned MCP/Skill requirements as a
+// sibling envelope outside runtime_context.
+func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkillInfo) string {
+	if len(mcpServices) == 0 && len(skills) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<must_use>\n")
+	sb.WriteString("  <instruction>REQUIRED this turn: the user @selected these capabilities. ")
+	sb.WriteString("For EACH listed MCP service you MUST call at least one tool from its tools= list ")
+	sb.WriteString("in your FIRST tool round (before grep_chunks / knowledge_search / wiki_search). ")
+	sb.WriteString("For EACH listed skill call read_skill(skill_name=...) before your final answer. ")
+	sb.WriteString("The @mention means the user wants that source — do not answer using only local KB retrieval when an MCP service is listed.</instruction>\n")
+	for _, svc := range mcpServices {
+		if svc == nil {
+			continue
+		}
+		name := svc.Name
+		if name == "" {
+			name = svc.ID
+		}
+		if len(svc.ToolNames) > 0 {
+			fmt.Fprintf(&sb, "  <mcp name=\"%s\" tools=\"%s\" />\n",
+				escapeXMLAttr(name), escapeXMLAttr(strings.Join(svc.ToolNames, ", ")))
+		} else {
+			fmt.Fprintf(&sb, "  <mcp name=\"%s\" />\n", escapeXMLAttr(name))
+		}
+	}
+	for _, skill := range skills {
+		if skill == nil || skill.Name == "" {
+			continue
+		}
+		fmt.Fprintf(&sb, "  <skill name=\"%s\" />\n", escapeXMLAttr(skill.Name))
+	}
+	sb.WriteString("</must_use>")
+	return sb.String()
+}
+
+func composeUserTurnContent(parts ...string) string {
+	nonEmpty := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			nonEmpty = append(nonEmpty, part)
+		}
+	}
+	return strings.Join(nonEmpty, "\n\n")
 }
 
 // listToolNames returns tool.function names for logging
@@ -441,9 +497,10 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 	// this is what lets the model detect a scope switch instead of silently
 	// answering the new question against last turn's retrieval.
 	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	userMsg := chat.Message{
 		Role:    "user",
-		Content: runtimeCtx + "\n\n" + currentQuery,
+		Content: composeUserTurnContent(runtimeCtx, mustUse, currentQuery),
 		Images:  imageURLs,
 	}
 	messages = append(messages, userMsg)

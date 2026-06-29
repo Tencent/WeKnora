@@ -36,7 +36,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; enable_memory?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; method: string; url: string; embed_token?: string; embed_session_sig?: string }) => {
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; enable_memory?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; method: string; url: string; embed_token?: string; embed_session_sig?: string }) => {
     const myGeneration = ++streamGeneration
     // 重置状态
     output.value = '';
@@ -114,6 +114,12 @@ export function useStream() {
       // Include mcp_service_ids if provided (for Agent mode)
       if (params.mcp_service_ids !== undefined && params.mcp_service_ids.length > 0) {
         postBody.mcp_service_ids = params.mcp_service_ids;
+      }
+      if (params.skill_names !== undefined && params.skill_names.length > 0) {
+        postBody.skill_names = params.skill_names;
+      }
+      if (params.tag_ids !== undefined && params.tag_ids.length > 0) {
+        postBody.tag_ids = params.tag_ids;
       }
       // Include mentioned_items if provided (for displaying @mentions in chat)
       if (params.mentioned_items !== undefined && params.mentioned_items.length > 0) {

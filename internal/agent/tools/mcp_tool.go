@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -518,6 +519,30 @@ func RegisterMCPTools(
 	}
 
 	return nil
+}
+
+// MCPToolNamesByServiceID returns registered MCP tool names grouped by service ID.
+func MCPToolNamesByServiceID(registry *ToolRegistry) map[string][]string {
+	if registry == nil {
+		return nil
+	}
+	out := make(map[string][]string)
+	for _, name := range registry.ListTools() {
+		tool, err := registry.GetTool(name)
+		if err != nil {
+			continue
+		}
+		mcpTool, ok := tool.(*MCPTool)
+		if !ok || mcpTool.service == nil {
+			continue
+		}
+		sid := mcpTool.service.ID
+		out[sid] = append(out[sid], name)
+	}
+	for sid := range out {
+		sort.Strings(out[sid])
+	}
+	return out
 }
 
 // GetMCPToolsInfo returns information about available MCP tools

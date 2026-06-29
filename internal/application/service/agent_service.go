@@ -43,6 +43,46 @@ func dedupStrings(in []string) []string {
 	return out
 }
 
+// agentHasKnowledgeScope reports whether the agent has any KB retrieval scope for
+// this turn. Tag-only @mentions populate SearchTargets (with TagIDs) but leave
+// KnowledgeBases / KnowledgeIDs empty — those must still count as in-scope.
+func agentHasKnowledgeScope(config *types.AgentConfig) bool {
+	if config == nil {
+		return false
+	}
+	if len(config.KnowledgeBases) > 0 || len(config.KnowledgeIDs) > 0 {
+		return true
+	}
+	return len(config.SearchTargets) > 0
+}
+
+// knowledgeBaseIDsForPrompt returns KB IDs to show in runtime_context metadata.
+// Prefer explicit KnowledgeBases; fall back to deduped IDs from SearchTargets.
+func knowledgeBaseIDsForPrompt(config *types.AgentConfig) []string {
+	if config == nil {
+		return nil
+	}
+	if len(config.KnowledgeBases) > 0 {
+		return config.KnowledgeBases
+	}
+	if len(config.SearchTargets) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(config.SearchTargets))
+	out := make([]string, 0, len(config.SearchTargets))
+	for _, target := range config.SearchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
+		if _, ok := seen[target.KnowledgeBaseID]; ok {
+			continue
+		}
+		seen[target.KnowledgeBaseID] = struct{}{}
+		out = append(out, target.KnowledgeBaseID)
+	}
+	return out
+}
+
 // agentService implements agent-related business logic
 type agentService struct {
 	cfg                   *config.Config
@@ -149,6 +189,12 @@ func (s *agentService) CreateAgentEngine(
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
+	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
+	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
+	engine.SetPinnedMentions(
+		pinnedMCP,
+		s.resolvePinnedSkillInfos(config),
+	)
 
 	// Set VLM image describer for MCP tool result image analysis.
 	// When an MCP tool returns images, the engine uses VLM to generate text descriptions
@@ -206,7 +252,11 @@ func (s *agentService) registerMCPTools(
 	var mcpServices []*types.MCPService
 	var err error
 
-	if mcpMode == "selected" && len(config.MCPServices) > 0 {
+	if mcpMode == "selected" {
+		if len(config.MCPServices) == 0 {
+			logger.Infof(ctx, "MCP services disabled by agent config (mode: selected, no services)")
+			return
+		}
 		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list selected MCP services: %v", err)
@@ -241,11 +291,12 @@ func (s *agentService) resolveKBAndDocInfos(
 	ctx context.Context,
 	config *types.AgentConfig,
 ) ([]*agent.KnowledgeBaseInfo, []*agent.SelectedDocumentInfo) {
-	kbInfos, err := s.getKnowledgeBaseInfos(ctx, config.KnowledgeBases)
+	kbIDs := knowledgeBaseIDsForPrompt(config)
+	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get knowledge base details, using IDs only: %v", err)
-		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(config.KnowledgeBases))
-		for _, kbID := range config.KnowledgeBases {
+		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(kbIDs))
+		for _, kbID := range kbIDs {
 			kbInfos = append(kbInfos, &agent.KnowledgeBaseInfo{
 				ID:          kbID,
 				Name:        kbID,
@@ -393,8 +444,8 @@ func (s *agentService) registerTools(
 		}
 	}
 
-	// Filter out knowledge base tools if no knowledge bases or knowledge IDs are configured
-	hasKnowledge := len(config.KnowledgeBases) > 0 || len(config.KnowledgeIDs) > 0
+	// Filter out knowledge base tools if no knowledge scope is configured for this turn.
+	hasKnowledge := agentHasKnowledgeScope(config)
 	if !hasKnowledge {
 		filteredTools := make([]string, 0)
 		kbTools := map[string]bool{
@@ -798,4 +849,105 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 
 	logger.Infof(ctx, "Loaded %d selected documents metadata for prompt", len(selectedDocs))
 	return selectedDocs, nil
+}
+
+func (s *agentService) resolvePinnedMCPServiceInfos(
+	ctx context.Context,
+	config *types.AgentConfig,
+) []*agent.PinnedMCPServiceInfo {
+	if len(config.PinnedMCPServiceIDs) == 0 || s.mcpServiceService == nil {
+		return nil
+	}
+	tenantID := uint64(0)
+	if tid, ok := types.TenantIDFromContext(ctx); ok {
+		tenantID = tid
+	}
+	if tenantID == 0 {
+		return fallbackPinnedMCPInfos(config.PinnedMCPServiceIDs)
+	}
+
+	services, err := s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.PinnedMCPServiceIDs)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve pinned MCP services: %v", err)
+		return fallbackPinnedMCPInfos(config.PinnedMCPServiceIDs)
+	}
+	byID := make(map[string]*types.MCPService, len(services))
+	for _, svc := range services {
+		if svc != nil {
+			byID[svc.ID] = svc
+		}
+	}
+	result := make([]*agent.PinnedMCPServiceInfo, 0, len(config.PinnedMCPServiceIDs))
+	for _, id := range config.PinnedMCPServiceIDs {
+		if id == "" {
+			continue
+		}
+		if svc, ok := byID[id]; ok {
+			result = append(result, &agent.PinnedMCPServiceInfo{
+				ID:          svc.ID,
+				Name:        svc.Name,
+				Description: svc.Description,
+			})
+			continue
+		}
+		result = append(result, &agent.PinnedMCPServiceInfo{ID: id, Name: id})
+	}
+	return result
+}
+
+func (s *agentService) attachPinnedMCPToolNames(
+	registry *tools.ToolRegistry,
+	pinned []*agent.PinnedMCPServiceInfo,
+) {
+	if registry == nil || len(pinned) == 0 {
+		return
+	}
+	byService := tools.MCPToolNamesByServiceID(registry)
+	for _, info := range pinned {
+		if info == nil || info.ID == "" {
+			continue
+		}
+		info.ToolNames = append([]string(nil), byService[info.ID]...)
+	}
+}
+
+func fallbackPinnedMCPInfos(ids []string) []*agent.PinnedMCPServiceInfo {
+	result := make([]*agent.PinnedMCPServiceInfo, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		result = append(result, &agent.PinnedMCPServiceInfo{ID: id, Name: id})
+	}
+	return result
+}
+
+func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*agent.PinnedSkillInfo {
+	if len(config.PinnedSkillNames) == 0 {
+		return nil
+	}
+
+	descByName := make(map[string]string)
+	if len(config.SkillDirs) > 0 {
+		loader := skills.NewLoader(config.SkillDirs)
+		if metadata, err := loader.DiscoverSkills(); err == nil {
+			for _, meta := range metadata {
+				if meta != nil {
+					descByName[meta.Name] = meta.Description
+				}
+			}
+		}
+	}
+
+	result := make([]*agent.PinnedSkillInfo, 0, len(config.PinnedSkillNames))
+	for _, name := range config.PinnedSkillNames {
+		if name == "" {
+			continue
+		}
+		result = append(result, &agent.PinnedSkillInfo{
+			Name:        name,
+			Description: descByName[name],
+		})
+	}
+	return result
 }

@@ -624,9 +624,9 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 	keyword string,
 	offset, limit int,
 	fileTypes []string,
-) ([]*types.Knowledge, bool, error) {
+) ([]*types.Knowledge, bool, int64, error) {
 	if len(scopes) == 0 {
-		return nil, false, nil
+		return nil, false, 0, nil
 	}
 
 	type KnowledgeWithKBName struct {
@@ -709,13 +709,18 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 		}
 	}
 
+	var total int64
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, false, 0, err
+	}
+
 	var results []KnowledgeWithKBName
 	err := query.Order("knowledges.created_at DESC").
 		Offset(offset).
 		Limit(limit + 1).
 		Scan(&results).Error
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 
 	hasMore := len(results) > limit
@@ -729,7 +734,7 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 		k.KnowledgeBaseName = r.KnowledgeBaseName
 		knowledges[i] = &k
 	}
-	return knowledges, hasMore, nil
+	return knowledges, hasMore, total, nil
 }
 
 // ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics)

@@ -275,13 +275,7 @@ const fetchSuggestedQuestions = async () => {
     try {
         const agentId = useSettingsStoreInstance.selectedAgentId;
         if (!agentId) return;
-        const selectedKBs = useSettingsStoreInstance.getSelectedKnowledgeBases();
-        const selectedFiles = useSettingsStoreInstance.getSelectedFiles();
-        const res = await getSuggestedQuestions(agentId, {
-            knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
-            knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
-            limit: 6,
-        });
+        const res = await getSuggestedQuestions(agentId, useSettingsStoreInstance.getSuggestedQuestionsParams(6));
         if (fetchId === suggestedQuestionsFetchId) {
             suggestedQuestions.value = res?.data?.questions || [];
         }
@@ -312,18 +306,16 @@ const debouncedFetchSuggestions = () => {
     suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestionsIfNeeded(); }, 300);
 };
 
-// 监听 Agent / 知识库 / 文件切换，重新获取推荐问题
+// 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention，重新获取推荐问题
 watch(
-    () => useSettingsStoreInstance.selectedAgentId,
-    debouncedFetchSuggestions,
-);
-watch(
-    () => useSettingsStoreInstance.settings.selectedKnowledgeBases,
-    debouncedFetchSuggestions,
-    { deep: true },
-);
-watch(
-    () => useSettingsStoreInstance.settings.selectedFiles,
+    () => ({
+        agentId: useSettingsStoreInstance.selectedAgentId,
+        kbs: useSettingsStoreInstance.settings.selectedKnowledgeBases,
+        files: useSettingsStoreInstance.settings.selectedFiles,
+        tags: useSettingsStoreInstance.settings.selectedTags,
+        mcps: useSettingsStoreInstance.settings.selectedMCPServices,
+        skills: useSettingsStoreInstance.settings.selectedSkills,
+    }),
     debouncedFetchSuggestions,
     { deep: true },
 );
@@ -654,6 +646,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
+    const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
+    const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
+    const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
 
     // Get selected agent ID (backend resolves shared agent and its tenant from share relation)
     const selectedAgentId = props.embeddedMode ? props.agentId : (useSettingsStoreInstance.selectedAgentId || '');
@@ -661,7 +656,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
 
     // Get selected MCP services from settings store (if available)
-    const mcpServiceIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedMCPServices || []);
+    const selectedMcpServiceIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedMCPServices || []);
+    const requestMcpServiceIds = mcpServiceIds.length > 0 ? mcpServiceIds : selectedMcpServiceIds;
 
     await startStream({
         session_id: session_id.value,
@@ -672,7 +668,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         web_search_enabled: webSearchEnabled,
         enable_memory: enableMemoryOverride,
         summary_model_id: modelId,
-        mcp_service_ids: mcpServiceIds,
+        mcp_service_ids: requestMcpServiceIds,
+        skill_names: skillNames,
+        tag_ids: tagIds,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,

@@ -245,6 +245,37 @@ func (s *sessionService) buildAgentConfig(
 	} else {
 		agentConfig.AllowedTools = tools.DefaultAllowedTools()
 	}
+	if len(req.SkillNames) > 0 && agentConfig.SkillsEnabled && customAgent != nil {
+		switch customAgent.Config.SkillsSelectionMode {
+		case "selected":
+			agentConfig.AllowedSkills = intersectPreservingRequestOrder(req.SkillNames, agentConfig.AllowedSkills)
+			if len(agentConfig.AllowedSkills) == 0 {
+				agentConfig.SkillsEnabled = false
+			}
+		case "all":
+			agentConfig.AllowedSkills = dedupPreservingOrder(req.SkillNames)
+		}
+		logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v", req.SkillNames, agentConfig.AllowedSkills)
+	}
+	if len(req.MCPServiceIDs) > 0 {
+		mentioned := dedupPreservingOrder(req.MCPServiceIDs)
+		switch agentConfig.MCPSelectionMode {
+		case "selected":
+			narrowed := intersectPreservingRequestOrder(mentioned, customAgent.Config.MCPServices)
+			if len(narrowed) > 0 {
+				agentConfig.MCPServices = narrowed
+			} else {
+				// Explicit @mention outside agent preset — still honor user intent.
+				agentConfig.MCPServices = mentioned
+			}
+		default:
+			// "all", "none", or unset: per-request @mention narrows registration.
+			agentConfig.MCPSelectionMode = "selected"
+			agentConfig.MCPServices = mentioned
+		}
+		logger.Infof(ctx, "Applied per-request @MCP scope: requested=%v mode=%s effective=%v",
+			req.MCPServiceIDs, agentConfig.MCPSelectionMode, agentConfig.MCPServices)
+	}
 
 	// Use custom agent's system prompt if specified
 	if customAgent.Config.SystemPrompt != "" {
@@ -273,15 +304,19 @@ func (s *sessionService) buildAgentConfig(
 	logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, req.Session.ID)
 
 	// Log knowledge bases if present
-	if len(agentConfig.KnowledgeBases) > 0 {
-		logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
-			len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
+	if len(agentConfig.KnowledgeBases) > 0 || len(req.TagScopes) > 0 {
+		if len(agentConfig.KnowledgeBases) > 0 {
+			logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
+				len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
+		} else {
+			logger.Infof(ctx, "Agent configured with %d tag-scoped search target(s)", len(req.TagScopes))
+		}
 	} else {
 		logger.Infof(ctx, "No knowledge bases specified for agent, running in pure agent mode")
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets for agent: %v", err)
 	}
@@ -292,7 +327,46 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
 	}
 
+	if len(req.MCPServiceIDs) > 0 {
+		agentConfig.PinnedMCPServiceIDs = dedupPreservingOrder(req.MCPServiceIDs)
+	}
+	if len(req.SkillNames) > 0 {
+		agentConfig.PinnedSkillNames = dedupPreservingOrder(req.SkillNames)
+	}
+
 	return agentConfig, nil
+}
+
+func intersectPreservingRequestOrder(requested []string, allowed []string) []string {
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		if value != "" {
+			allowedSet[value] = true
+		}
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, value := range requested {
+		if value == "" || seen[value] || !allowedSet[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func dedupPreservingOrder(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 // configureSkillsFromAgent configures skills settings in AgentConfig based on CustomAgentConfig
