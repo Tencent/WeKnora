@@ -76,10 +76,7 @@ import IMChannelPanel from '@/components/IMChannelPanel.vue';
 import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue';
 import ChromeExtensionLanding from '@/views/integrations/ChromeExtensionLanding.vue';
 import ClawSkillLanding from '@/views/integrations/ClawSkillLanding.vue';
-
-type IntegrationTab = 'im' | 'embed' | 'chrome' | 'claw';
-
-const INTEGRATION_TABS: IntegrationTab[] = ['im', 'embed', 'chrome', 'claw'];
+import { INTEGRATION_PREVIEW_ITEMS, INTEGRATION_TABS, type IntegrationTab } from '@/config/integrations';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -94,12 +91,14 @@ const isLandingSection = computed(
   () => currentSection.value === 'chrome' || currentSection.value === 'claw',
 );
 
-const navItems = computed(() => [
-  { key: 'im' as const, icon: 'chat-message', label: t('integrations.tabs.im') },
-  { key: 'embed' as const, icon: 'code', label: t('integrations.tabs.embed') },
-  { key: 'chrome' as const, icon: 'extension', label: t('integrations.tabs.chrome') },
-  { key: 'claw' as const, icon: '', emoji: '🦞', label: t('integrations.tabs.claw') },
-]);
+const navItems = computed(() =>
+  INTEGRATION_PREVIEW_ITEMS.map((item) => ({
+    key: item.key,
+    icon: item.icon.type === 'icon' ? item.icon.name : '',
+    emoji: item.icon.type === 'emoji' ? item.icon.value : undefined,
+    label: t(`integrations.tabs.${item.key}`),
+  })),
+);
 
 function applyRouteQuery() {
   const tab = route.query.tab as string;

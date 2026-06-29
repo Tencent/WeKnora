@@ -94,6 +94,15 @@
                                     class="menu-pending-badge"
                                     :title="t('organization.settings.pendingJoinRequestsBadge')">{{
                                         orgStore.totalPendingJoinRequestCount }}</span>
+                                <span v-if="item.path === 'integrations'" class="integration-preview"
+                                    aria-hidden="true">
+                                    <span v-for="(preview, idx) in integrationPreviewItems" :key="preview.key"
+                                        class="integration-preview__item" :style="{ zIndex: idx + 1 }">
+                                        <t-icon v-if="preview.icon.type === 'icon'" :name="preview.icon.name"
+                                            size="13px" />
+                                        <span v-else class="integration-preview__emoji">{{ preview.icon.value }}</span>
+                                    </span>
+                                </span>
                             </template>
                         </div>
                     </div>
@@ -248,8 +257,10 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
+import { INTEGRATION_PREVIEW_ITEMS } from '@/config/integrations';
 
 const chatResources = useChatResourcesStore();
+const integrationPreviewItems = INTEGRATION_PREVIEW_ITEMS;
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
 // visually consistent with the channels admin view.
 import wecomLogo from '@/assets/img/im/wecom.svg';
@@ -1885,6 +1896,48 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     line-height: 18px;
     text-align: center;
     flex-shrink: 0;
+}
+
+.integration-preview {
+    display: inline-flex;
+    align-items: center;
+    margin-left: auto;
+    flex-shrink: 0;
+    width: 0;
+    overflow: hidden;
+    pointer-events: none;
+
+    .menu_item:hover & {
+        width: auto;
+    }
+
+    &__item {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: var(--td-bg-color-container);
+        border: 2px solid var(--td-bg-color-sidebar);
+        box-sizing: border-box;
+        color: var(--td-text-color-primary);
+
+        &:not(:first-child) {
+            margin-left: -5px;
+        }
+
+        :deep(.t-icon) {
+            display: block;
+        }
+    }
+
+    &__emoji {
+        font-size: 12px;
+        line-height: 1;
+    }
 }
 
 .menu_box {
