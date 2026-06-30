@@ -5763,6 +5763,8 @@ export default {
       directWarning: 'Direct user ID trusts the caller-supplied header. Use only for trusted server-to-server calls.',
       signedRecommended: 'Recommended for user-facing apps: your backend signs a short-lived HS256 JWT for the external user.',
       directHeader: 'User ID header',
+      requireDirectHeader: 'Require user ID header',
+      requireDirectHeaderDesc: 'When enabled, API Key requests without the user ID header are rejected; when disabled they fall back to the tenant principal.',
       tokenHeader: 'Token header',
       hmacSecret: 'HMAC secret',
       secretConfigured: 'Secret configured; enter a new value to rotate',

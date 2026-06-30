@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,4 +122,54 @@ func TestResolveAPIPrincipalSignedTokenRejectsExpired(t *testing.T) {
 		t.Fatalf("resolveAPIPrincipal error = nil, want error")
 	}
 	_ = p
+}
+
+func TestResolveAPIPrincipalDirectHeaderRequired(t *testing.T) {
+	_, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode:                types.APIPrincipalModeDirect,
+			RequireDirectHeader: true,
+		},
+	}, http.Header{})
+	if !errors.Is(err, errMissingDirectHeader) {
+		t.Fatalf("resolveAPIPrincipal error = %v, want errMissingDirectHeader", err)
+	}
+}
+
+func TestResolveAPIPrincipalDirectHeaderRejectsInvalidUserID(t *testing.T) {
+	header := http.Header{}
+	header.Set("X-External-User-ID", strings.Repeat("a", maxExternalUserIDLen+1))
+
+	_, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode: types.APIPrincipalModeDirect,
+		},
+	}, header)
+	if !errors.Is(err, errInvalidExternalUserID) {
+		t.Fatalf("resolveAPIPrincipal error = %v, want errInvalidExternalUserID", err)
+	}
+}
+
+func TestResolveAPIPrincipalSignedTokenRejectsLongLifetime(t *testing.T) {
+	secret := "test-secret"
+	header := http.Header{}
+	header.Set("X-External-User-Token", signedExternalUserToken(t, secret, jwt.MapClaims{
+		"sub":       "external-u1",
+		"tenant_id": float64(7),
+		"aud":       "weknora",
+		"exp":       time.Now().Add(48 * time.Hour).Unix(),
+	}))
+
+	_, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+		ID: 7,
+		APIPrincipalConfig: &types.APIPrincipalConfig{
+			Mode:       types.APIPrincipalModeSignedToken,
+			HMACSecret: secret,
+		},
+	}, header)
+	if err == nil {
+		t.Fatalf("resolveAPIPrincipal error = nil, want error")
+	}
 }

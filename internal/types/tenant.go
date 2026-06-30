@@ -232,7 +232,11 @@ type APIPrincipalConfig struct {
 	Mode                  APIPrincipalMode `json:"mode"`
 	DirectHeaderName      string           `json:"direct_header_name,omitempty"`
 	SignedTokenHeaderName string           `json:"signed_token_header_name,omitempty"`
-	HMACSecret            string           `json:"hmac_secret,omitempty"`
+	// RequireDirectHeader, when true in direct_header mode, rejects API-key
+	// requests that omit the configured user-id header instead of falling
+	// back to the tenant-level principal.
+	RequireDirectHeader bool   `json:"require_direct_header,omitempty"`
+	HMACSecret          string `json:"hmac_secret,omitempty"`
 }
 
 func (c *APIPrincipalConfig) Value() (driver.Value, error) {

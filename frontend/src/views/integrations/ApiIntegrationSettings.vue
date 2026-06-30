@@ -75,6 +75,9 @@
             <div v-if="form.mode === 'direct_header'" class="field-grid">
               <label>{{ $t('integrations.api.directHeader') }}</label>
               <t-input v-model="form.direct_header_name" class="mono-input" />
+              <label>{{ $t('integrations.api.requireDirectHeader') }}</label>
+              <t-switch v-model="form.require_direct_header" />
+              <p class="field-hint span-all">{{ $t('integrations.api.requireDirectHeaderDesc') }}</p>
             </div>
 
             <div v-if="form.mode === 'signed_token'" class="field-grid">
@@ -139,6 +142,7 @@ const form = reactive({
   mode: 'tenant' as APIPrincipalMode,
   direct_header_name: 'X-External-User-ID',
   signed_token_header_name: 'X-External-User-Token',
+  require_direct_header: false,
 })
 
 const apiBaseUrl = computed(() => {
@@ -197,6 +201,7 @@ async function load() {
     form.mode = cfgResp.data.mode || 'tenant'
     form.direct_header_name = cfgResp.data.direct_header_name || 'X-External-User-ID'
     form.signed_token_header_name = cfgResp.data.signed_token_header_name || 'X-External-User-Token'
+    form.require_direct_header = cfgResp.data.require_direct_header === true
     secretInput.value = ''
   } catch (err: any) {
     error.value = err?.message || t('integrations.api.loadFailed')
@@ -219,6 +224,7 @@ async function save() {
       mode: form.mode,
       direct_header_name: form.direct_header_name.trim(),
       signed_token_header_name: form.signed_token_header_name.trim(),
+      require_direct_header: form.require_direct_header,
     }
     if (secretInput.value.trim()) {
       payload.hmac_secret = secretInput.value.trim()
@@ -323,6 +329,14 @@ onMounted(load)
   label {
     color: var(--td-text-color-secondary);
     font-size: 13px;
+  }
+
+  .field-hint.span-all {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+    line-height: 1.5;
   }
 }
 

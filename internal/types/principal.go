@@ -8,7 +8,6 @@ import (
 const (
 	PrincipalWebUser         = "web_user"
 	PrincipalAPITenant       = "api_tenant"
-	PrincipalAPIUser         = "api_user"
 	PrincipalAPIExternalUser = "api_external_user"
 	PrincipalIMUser          = "im_user"
 	PrincipalEmbedChannel    = "embed_channel"

@@ -5774,6 +5774,8 @@ export default {
       directWarning: "직접 사용자 ID 모드는 요청 헤더를 신뢰합니다. 신뢰된 서버 간 호출에만 사용하세요.",
       signedRecommended: "사용자 대상 앱에는 권장됩니다. 비즈니스 백엔드가 외부 사용자용 단기 HS256 JWT를 서명합니다.",
       directHeader: "사용자 ID 헤더",
+      requireDirectHeader: "사용자 ID 헤더 필수",
+      requireDirectHeaderDesc: "켜면 사용자 ID 헤더가 없는 API Key 요청을 거부하고, 끄면 테넌트 Principal로 처리합니다.",
       tokenHeader: "토큰 헤더",
       hmacSecret: "HMAC secret",
       secretConfigured: "Secret configured; enter a new value to rotate",
