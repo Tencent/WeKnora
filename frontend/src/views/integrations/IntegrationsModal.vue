@@ -84,11 +84,18 @@ import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue';
 import ApiIntegrationSettings from '@/views/integrations/ApiIntegrationSettings.vue';
 import ChromeExtensionLanding from '@/views/integrations/ChromeExtensionLanding.vue';
 import ClawSkillLanding from '@/views/integrations/ClawSkillLanding.vue';
-import { INTEGRATION_PREVIEW_ITEMS, INTEGRATION_TABS, type IntegrationTab } from '@/config/integrations';
+import {
+  INTEGRATION_PREVIEW_ITEMS,
+  INTEGRATION_TAB_MIN_ROLE,
+  INTEGRATION_TABS,
+  type IntegrationTab,
+} from '@/config/integrations';
+import { useAuthStore } from '@/stores/auth';
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
 
 const currentSection = ref<IntegrationTab>('im');
 const filterAgentId = ref('');
@@ -99,19 +106,34 @@ const isLandingSection = computed(
   () => currentSection.value === 'chrome' || currentSection.value === 'claw',
 );
 
+function canSeeTab(tab: IntegrationTab): boolean {
+  const min = INTEGRATION_TAB_MIN_ROLE[tab];
+  if (!min) return true;
+  if (authStore.canAccessAllTenants) return true;
+  return authStore.hasRole(min);
+}
+
 const navItems = computed(() =>
-  INTEGRATION_PREVIEW_ITEMS.map((item) => ({
-    key: item.key,
-    icon: item.icon.type === 'icon' ? item.icon.name : '',
-    emoji: item.icon.type === 'emoji' ? item.icon.value : undefined,
-    label: t(`integrations.tabs.${item.key}`),
-  })),
+  INTEGRATION_PREVIEW_ITEMS
+    .filter((item) => canSeeTab(item.key))
+    .map((item) => ({
+      key: item.key,
+      icon: item.icon.type === 'icon' ? item.icon.name : '',
+      emoji: item.icon.type === 'emoji' ? item.icon.value : undefined,
+      label: t(`integrations.tabs.${item.key}`),
+    })),
 );
 
 function applyRouteQuery() {
   const tab = route.query.tab as string;
-  if (INTEGRATION_TABS.includes(tab as IntegrationTab)) {
+  if (INTEGRATION_TABS.includes(tab as IntegrationTab) && canSeeTab(tab as IntegrationTab)) {
     currentSection.value = tab as IntegrationTab;
+  } else if (INTEGRATION_TABS.includes(tab as IntegrationTab)) {
+    currentSection.value = navItems.value[0]?.key ?? 'im';
+    if (visible.value) syncRouteQuery();
+  } else if (navItems.value.length > 0 && !canSeeTab(currentSection.value)) {
+    currentSection.value = navItems.value[0].key;
+    if (visible.value) syncRouteQuery();
   }
   filterAgentId.value = (route.query.agentId as string) || '';
 }
