@@ -64,6 +64,30 @@ export const EMBED_SESSION_TOKEN_PREFIX = 'ems_'
 /** localStorage key prefix for persisted embed chat sessions (per channel). */
 export const EMBED_CHAT_SESSION_STORAGE_PREFIX = 'weknora-embed-session:'
 
+/** localStorage key prefix for anonymous embed visitor ids (per channel). */
+export const EMBED_VISITOR_STORAGE_PREFIX = 'weknora-embed-visitor:'
+
+export function embedVisitorStorageKey(channelId: string): string {
+  return `${EMBED_VISITOR_STORAGE_PREFIX}${channelId}`
+}
+
+/** Stable anonymous id for this browser on the given channel. */
+export function getOrCreateEmbedVisitorId(channelId: string): string {
+  if (typeof localStorage === 'undefined' || !channelId) {
+    return crypto.randomUUID()
+  }
+  const key = embedVisitorStorageKey(channelId)
+  try {
+    const existing = localStorage.getItem(key)?.trim()
+    if (existing) return existing
+    const id = crypto.randomUUID()
+    localStorage.setItem(key, id)
+    return id
+  } catch {
+    return crypto.randomUUID()
+  }
+}
+
 export function embedChatSessionStorageKey(channelId: string): string {
   return `${EMBED_CHAT_SESSION_STORAGE_PREFIX}${channelId}`
 }
@@ -195,6 +219,95 @@ export async function stopEmbedSession(
     'X-Embed-Session': sessionSig,
   }
   return post(`/api/v1/embed/${channelId}/sessions/${sessionId}/stop`, { message_id: messageId }, { headers })
+}
+
+function embedSessionHeaders(token: string, sessionSig: string, visitorId?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Embed ${token}`,
+    'X-Embed-Session': sessionSig,
+  }
+  const visitor = visitorId?.trim()
+  if (visitor) headers['X-Embed-Visitor'] = visitor
+  return headers
+}
+
+export async function resolveEmbedMCPOAuth(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  sessionSig: string,
+  visitorId: string,
+  pendingId: string,
+  body: { service_id: string; decision?: 'authorize' | 'cancel' },
+): Promise<void> {
+  await post(
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}`,
+    body,
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+}
+
+export async function cancelEmbedMCPOAuth(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  sessionSig: string,
+  visitorId: string,
+  pendingId: string,
+): Promise<void> {
+  await post(
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}/cancel`,
+    {},
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+}
+
+export async function getEmbedMCPOAuthAuthorizeURL(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  sessionSig: string,
+  visitorId: string,
+  serviceId: string,
+  body: { redirect_uri: string; frontend_redirect?: string },
+): Promise<string> {
+  const response: any = await post(
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-services/${encodeURIComponent(serviceId)}/oauth/authorize-url`,
+    body,
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+  return (response.data ?? response)?.authorization_url ?? ''
+}
+
+export async function getEmbedMCPOAuthStatus(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  sessionSig: string,
+  visitorId: string,
+  serviceId: string,
+): Promise<boolean> {
+  const response: any = await get(
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/mcp-services/${encodeURIComponent(serviceId)}/oauth/status`,
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+  return Boolean((response.data ?? response)?.authorized)
+}
+
+export async function resolveEmbedToolApproval(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  sessionSig: string,
+  visitorId: string,
+  pendingId: string,
+  body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string },
+): Promise<void> {
+  await post(
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/tool-approvals/${encodeURIComponent(pendingId)}`,
+    body,
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
 }
 
 export async function getEmbedMessageList(

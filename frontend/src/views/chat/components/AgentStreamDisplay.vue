@@ -85,7 +85,7 @@
                   :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
                   :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
                   :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
-                  :resolve-reason="event.resolve_reason" />
+                  :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
               </div>
 
               <!-- MCP OAuth in-conversation authorization prompt -->
@@ -94,7 +94,8 @@
                   :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
                   :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
                   :resolved="event.resolved" :authorized="event.authorized"
-                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out" :canceled="event.canceled" />
+                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out" :canceled="event.canceled"
+                  v-bind="embedAuthProps" />
               </div>
 
               <!-- Tool Call Event (non-thinking) -->
@@ -240,7 +241,7 @@
               <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
                 :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
-                :approved="event.approved" :resolve-reason="event.resolve_reason" />
+                :approved="event.approved" :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
             </div>
 
             <!-- MCP OAuth in-conversation authorization prompt -->
@@ -249,7 +250,7 @@
                 :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
                 :authorized="event.authorized" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
-                :canceled="event.canceled" />
+                :canceled="event.canceled" v-bind="embedAuthProps" />
             </div>
 
             <!-- Thinking Tool Call -->
@@ -727,8 +728,19 @@ const props = defineProps<{
   embeddedMode?: boolean;
   embedChannelId?: string;
   embedToken?: string;
+  embedSessionSig?: string;
+  embedVisitorId?: string;
   ragMode?: boolean;
 }>();
+
+const embedAuthProps = computed(() => ({
+  embeddedMode: props.embeddedMode,
+  embedChannelId: props.embedChannelId,
+  embedToken: props.embedToken,
+  embedSessionId: props.sessionId,
+  embedSessionSig: props.embedSessionSig,
+  embedVisitorId: props.embedVisitorId,
+}));
 
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),

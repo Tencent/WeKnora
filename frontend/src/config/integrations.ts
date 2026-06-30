@@ -18,7 +18,7 @@ export const INTEGRATION_PREVIEW_ITEMS: Array<{
 }> = [
   { key: 'im', icon: { type: 'icon', name: 'chat-message' } },
   { key: 'embed', icon: { type: 'icon', name: 'code' } },
-  { key: 'api', icon: { type: 'icon', name: 'api' } },
+  { key: 'api', icon: { type: 'icon', name: 'server' } },
   { key: 'chrome', icon: { type: 'icon', name: 'extension' } },
   { key: 'claw', icon: { type: 'emoji', value: '🦞' } },
 ]

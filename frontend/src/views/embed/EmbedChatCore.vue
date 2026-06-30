@@ -66,6 +66,8 @@
               :embedded-mode="true"
               :embed-channel-id="channelId"
               :embed-token="token"
+              :embed-session-sig="sessionSig"
+              :embed-visitor-id="visitorId"
             />
           </div>
         </div>
@@ -113,6 +115,7 @@ import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
 const props = defineProps<{
   sessionId: string
   sessionSig: string
+  visitorId: string
   channelId: string
   token: string
   agentId: string
@@ -135,6 +138,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const sessionIdRef = toRef(props, 'sessionId')
 const sessionSigRef = toRef(props, 'sessionSig')
+const visitorIdRef = toRef(props, 'visitorId')
 const suggestedQuestions = ref<SuggestedQuestion[]>([])
 const suggestedLoading = ref(false)
 const hostContextRef = ref<Record<string, unknown>>(props.hostContext || {})
@@ -189,6 +193,7 @@ const {
 } = useEmbedChatSession({
   sessionId: sessionIdRef,
   sessionSig: sessionSigRef,
+  visitorId: visitorIdRef,
   channelId: props.channelId,
   token: props.token,
   agentId: props.agentId,
