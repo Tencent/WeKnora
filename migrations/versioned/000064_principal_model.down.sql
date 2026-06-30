@@ -1,3 +1,11 @@
+-- Migration: 000064_principal_model (down)
+
+ALTER TABLE sessions
+    ALTER COLUMN user_id TYPE VARCHAR(36);
+
+ALTER TABLE tenants
+    DROP COLUMN IF EXISTS api_principal_config;
+
 DROP INDEX IF EXISTS idx_mcp_oauth_tokens_principal;
 DROP INDEX IF EXISTS idx_mcp_oauth_tokens_tenant_principal_svc;
 
