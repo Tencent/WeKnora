@@ -69,8 +69,7 @@ func sessionUserIDForLookup(ctx context.Context) string {
 		// Shared-agent pipelines resolve the session owner tenant first; keep that internal lookup tenant-scoped.
 		return ""
 	}
-	userID, _ := types.UserIDFromContext(ctx)
-	return userID
+	return types.SessionOwnerIDFromContext(ctx)
 }
 
 // CreateMessage creates a new message within an existing session

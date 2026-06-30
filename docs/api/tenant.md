@@ -364,10 +364,11 @@ curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-k
 
 Principal **仅**用于按终端用户隔离以下能力：
 
+- **对话 Session**（创建、列表、读取按外部用户分开；`仅租户` 模式仍共用租户级 Session）
 - **MCP OAuth** 访问令牌（同一租户下不同外部用户各自授权，token 互不共用）
-- 对话内 MCP OAuth 提示、MCP 工具审批等与 Principal 绑定的流程
+- 对话内 MCP OAuth 提示、MCP 工具审批等与终端用户绑定的流程
 
-Principal **不会**缩小 API Key 的 API 权限：`X-API-Key` 认证仍授予租户内 **Admin** 角色，知识库、会话、Agent 等接口**不按**外部用户做 RBAC 隔离。若需要全链路 per-user 权限控制，须在业务侧自行鉴权，不能仅依赖本配置。
+Principal **不会**缩小 API Key 的 API 权限：`X-API-Key` 认证仍授予租户内 **Admin** 角色，知识库、Agent 配置等接口**不按**外部用户做 RBAC 隔离。
 
 ### 模式与安全假设
 

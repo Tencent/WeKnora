@@ -1164,6 +1164,11 @@ func RegisterEmbedPublicRoutes(
 		embed.GET("/messages/:session_id/load", embedHandler.EmbedLoadMessages)
 		embed.POST("/sessions/:session_id/stop", embedHandler.EmbedStopSession)
 		embed.POST("/sessions/:session_id/events", embedHandler.EmbedRelayWebhookEvent)
+		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id", embedHandler.EmbedResolveMCPOAuth)
+		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id/cancel", embedHandler.EmbedCancelMCPOAuth)
+		embed.POST("/sessions/:session_id/mcp-services/:id/oauth/authorize-url", embedHandler.EmbedMCPOAuthAuthorizeURL)
+		embed.GET("/sessions/:session_id/mcp-services/:id/oauth/status", embedHandler.EmbedMCPOAuthStatus)
+		embed.POST("/sessions/:session_id/tool-approvals/:pending_id", embedHandler.EmbedResolveToolApproval)
 		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
 		// injects the channel's tenant, and the handler enforces that the
 		// requested path belongs to that tenant.

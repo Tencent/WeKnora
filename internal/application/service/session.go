@@ -19,8 +19,7 @@ import (
 )
 
 func sessionUserIDFromContext(ctx context.Context) string {
-	userID, _ := types.UserIDFromContext(ctx)
-	return userID
+	return types.SessionOwnerIDFromContext(ctx)
 }
 
 // generateEventID generates a unique event ID with type suffix for better traceability
@@ -134,6 +133,32 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 	return session, nil
 }
 
+// GetSessionByID loads a session by tenant and id without user scoping.
+func (s *sessionService) GetSessionByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error) {
+	if id == "" {
+		return nil, stderrors.New("session id is required")
+	}
+	if tenantID == 0 {
+		return nil, stderrors.New("tenant id is required")
+	}
+	return s.sessionRepo.GetByID(ctx, tenantID, id)
+}
+
+// SetSessionOwnerID assigns sessions.user_id for the given session row.
+func (s *sessionService) SetSessionOwnerID(ctx context.Context, tenantID uint64, sessionID, ownerID string) error {
+	if sessionID == "" || ownerID == "" || tenantID == 0 {
+		return stderrors.New("tenant id, session id and owner id are required")
+	}
+	affected, err := s.sessionRepo.SetOwnerID(ctx, tenantID, sessionID, ownerID)
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return apperrors.ErrSessionNotFound
+	}
+	return nil
+}
+
 // GetSessionsByTenant retrieves all sessions for the current tenant
 func (s *sessionService) GetSessionsByTenant(ctx context.Context) ([]*types.Session, error) {
 	// Get tenant ID from context
@@ -186,7 +211,7 @@ func (s *sessionService) ListSessions(
 		query = &types.SessionListQuery{}
 	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
-	if uid, ok := types.UserIDFromContext(ctx); ok {
+	if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
 		query.UserID = uid
 	}
 

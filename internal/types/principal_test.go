@@ -32,3 +32,42 @@ func TestPrincipalStorageID(t *testing.T) {
 		t.Fatalf("StorageID() = %q", got)
 	}
 }
+
+func TestSessionOwnerIDFromContextUsesAPIExternalPrincipal(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), Principal{
+		Type: PrincipalAPIExternalUser,
+		ID:   "7:alice",
+	})
+	ctx = context.WithValue(ctx, UserIDContextKey, "system-7")
+
+	if got := SessionOwnerIDFromContext(ctx); got != "api_external_user:7:alice" {
+		t.Fatalf("SessionOwnerIDFromContext() = %q", got)
+	}
+}
+
+func TestSessionOwnerIDFromContextFallsBackToUserID(t *testing.T) {
+	ctx := context.WithValue(context.Background(), UserIDContextKey, "system-7")
+
+	if got := SessionOwnerIDFromContext(ctx); got != "system-7" {
+		t.Fatalf("SessionOwnerIDFromContext() = %q", got)
+	}
+}
+
+func TestSessionOwnerIDFromContextUsesEmbedSessionPrincipal(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), EmbedSessionPrincipal(10000, "ch1", "sess1"))
+	ctx = context.WithValue(ctx, UserIDContextKey, "embed-ch1")
+
+	if got := SessionOwnerIDFromContext(ctx); got != "embed_session:10000:ch1:sess1" {
+		t.Fatalf("SessionOwnerIDFromContext() = %q", got)
+	}
+}
+
+func TestMCPOAuthPrincipalMapsEmbedSessionToVisitor(t *testing.T) {
+	sess := EmbedSessionPrincipal(10000, "ch1", "sess1")
+	ctx := WithEmbedVisitorID(context.Background(), "visitor-abc")
+	got := MCPOAuthPrincipalFromContext(WithPrincipal(ctx, sess))
+	want := "embed_visitor:10000:ch1:visitor-abc"
+	if got.StorageID() != want {
+		t.Fatalf("MCPOAuthPrincipalFromContext() = %q, want %q", got.StorageID(), want)
+	}
+}

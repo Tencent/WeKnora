@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -14,6 +15,11 @@ import (
 // clientRegistrationName is sent as client_name during dynamic client
 // registration (RFC 7591).
 const clientRegistrationName = "WeKnora"
+
+// oauthCallbackTimeout bounds token exchange after the browser lands on the
+// public callback route. The Gin request context is canceled once the client
+// receives the redirect, so CompleteAuthorization must detach from it.
+const oauthCallbackTimeout = 60 * time.Second
 
 // OAuthManager orchestrates the MCP OAuth2 authorization-code flow:
 // discovery, dynamic client registration, the authorize redirect, and the
@@ -143,6 +149,9 @@ func (m *OAuthManager) StartAuthorization(
 func (m *OAuthManager) CompleteAuthorization(
 	ctx context.Context, state, code string,
 ) (frontendRedirect string, err error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthCallbackTimeout)
+	defer cancel()
+
 	st, err := m.states.Take(ctx, state)
 	if err != nil {
 		return "", err

@@ -36,10 +36,14 @@ func NewMCPOAuthHandler(
 	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate}
 }
 
-func mcpOAuthPrincipalFromContext(ctx *gin.Context) (types.Principal, string) {
-	principal, _ := types.PrincipalFromContext(ctx.Request.Context())
-	principal = principal.Normalize()
-	return principal, principal.StorageID()
+func mcpOAuthPrincipalsFromContext(ctx *gin.Context) (tokenPrincipal types.Principal, gateUserID string) {
+	raw, _ := types.PrincipalFromContext(ctx.Request.Context())
+	raw = raw.Normalize()
+	tokenPrincipal = types.MCPOAuthPrincipalFromContext(ctx.Request.Context())
+	if raw.Valid() {
+		gateUserID = raw.StorageID()
+	}
+	return tokenPrincipal, gateUserID
 }
 
 type mcpOAuthAuthorizeRequest struct {
@@ -69,7 +73,7 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	principal, _ := mcpOAuthPrincipalFromContext(c)
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
 	if tenantID == 0 || !principal.Valid() {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
@@ -169,7 +173,7 @@ func (h *MCPOAuthHandler) Status(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	principal, _ := mcpOAuthPrincipalFromContext(c)
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
 	if tenantID == 0 || !principal.Valid() {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
@@ -198,7 +202,7 @@ func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := c.Param("id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	principal, _ := mcpOAuthPrincipalFromContext(c)
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
 	if tenantID == 0 || !principal.Valid() {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
@@ -244,7 +248,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 	ctx := c.Request.Context()
 	pendingID := c.Param("pending_id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	principal, gateUserID := mcpOAuthPrincipalFromContext(c)
+	principal, gateUserID := mcpOAuthPrincipalsFromContext(c)
 	if tenantID == 0 || !principal.Valid() || gateUserID == "" {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
@@ -352,7 +356,7 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 	ctx := c.Request.Context()
 	pendingID := c.Param("pending_id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	_, gateUserID := mcpOAuthPrincipalFromContext(c)
+	_, gateUserID := mcpOAuthPrincipalsFromContext(c)
 	if tenantID == 0 || strings.TrimSpace(gateUserID) == "" {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return

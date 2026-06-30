@@ -116,9 +116,10 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		Description: request.Description,
 	}
 	// Attach the calling user as the session owner when available.
-	// API-key / legacy callers without a user id fall back to tenant-level visibility.
-	if userID, ok := types.UserIDFromContext(ctx); ok {
-		createdSession.UserID = userID
+	// API-key callers scope sessions per external user when configured;
+	// otherwise they fall back to the synthetic tenant user.
+	if ownerID := types.SessionOwnerIDFromContext(ctx); ownerID != "" {
+		createdSession.UserID = ownerID
 	}
 
 	// Call service to create session
