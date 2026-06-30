@@ -16,6 +16,8 @@ const (
 	UserContextKey ContextKey = "User"
 	// UserIDContextKey is the context key for user ID
 	UserIDContextKey ContextKey = "UserID"
+	// PrincipalContextKey is the context key for the terminal caller principal.
+	PrincipalContextKey ContextKey = "Principal"
 	// TenantRoleContextKey is the context key for the caller's TenantRole
 	// in the currently active tenant (loaded by the auth middleware from
 	// the tenant_members table). See TenantRoleFromContext.

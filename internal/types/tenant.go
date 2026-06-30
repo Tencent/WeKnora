@@ -116,6 +116,8 @@ type Tenant struct {
 	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:jsonb"`
 	// Retrieval config: global search/retrieval parameters shared by knowledge search and message search
 	RetrievalConfig *RetrievalConfig `yaml:"retrieval_config" json:"retrieval_config" gorm:"type:jsonb"`
+	// API principal config: controls how X-API-Key requests map to terminal principals.
+	APIPrincipalConfig *APIPrincipalConfig `yaml:"api_principal_config" json:"-" gorm:"type:jsonb"`
 	// Creation time
 	CreatedAt time.Time `yaml:"created_at"          json:"created_at"`
 	// Last updated time
@@ -213,6 +215,59 @@ type CredentialsConfig struct {
 type WeKnoraCloudCredentials struct {
 	AppID     string `json:"app_id"`
 	AppSecret string `json:"app_secret"`
+}
+
+type APIPrincipalMode string
+
+const (
+	APIPrincipalModeTenant      APIPrincipalMode = "tenant"
+	APIPrincipalModeDirect      APIPrincipalMode = "direct_header"
+	APIPrincipalModeSignedToken APIPrincipalMode = "signed_token"
+)
+
+// APIPrincipalConfig controls how tenant API-key requests map to terminal
+// principals. Direct header mode is low-assurance and should only be used for
+// trusted server-to-server calls; signed-token mode verifies the user claim.
+type APIPrincipalConfig struct {
+	Mode                  APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string           `json:"direct_header_name,omitempty"`
+	SignedTokenHeaderName string           `json:"signed_token_header_name,omitempty"`
+	HMACSecret            string           `json:"hmac_secret,omitempty"`
+}
+
+func (c *APIPrincipalConfig) Value() (driver.Value, error) {
+	if c == nil {
+		return nil, nil
+	}
+	cp := *c
+	if cp.HMACSecret != "" {
+		if key := utils.GetAESKey(); key != nil {
+			if encrypted, err := utils.EncryptAESGCM(cp.HMACSecret, key); err == nil {
+				cp.HMACSecret = encrypted
+			}
+		}
+	}
+	return json.Marshal(&cp)
+}
+
+func (c *APIPrincipalConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	if err := json.Unmarshal(b, c); err != nil {
+		return err
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(c.HMACSecret); ok {
+		c.HMACSecret = plain
+	} else {
+		log.Printf("[crypto] tenant api_principal_config.hmac_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.HMACSecret = ""
+	}
+	return nil
 }
 
 // GetWeKnoraCloud returns the WeKnoraCloud credentials, or nil if not configured.

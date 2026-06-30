@@ -17,6 +17,22 @@ export interface TenantInfo {
   updated_at: string
 }
 
+export type APIPrincipalMode = 'tenant' | 'direct_header' | 'signed_token'
+
+export interface APIPrincipalConfig {
+  mode: APIPrincipalMode
+  direct_header_name: string
+  signed_token_header_name: string
+  has_hmac_secret: boolean
+}
+
+export interface UpdateAPIPrincipalConfigPayload {
+  mode: APIPrincipalMode
+  direct_header_name?: string
+  signed_token_header_name?: string
+  hmac_secret?: string
+}
+
 // 搜索租户参数
 export interface SearchTenantsParams {
   keyword?: string
@@ -66,6 +82,35 @@ export async function resetTenantApiKey(
     return {
       success: false,
       message: error.message || t('error.tenant.resetApiKeyFailed'),
+    }
+  }
+}
+
+export async function getAPIPrincipalConfig(
+  tenantId: number,
+): Promise<{ success: boolean; data?: APIPrincipalConfig; message?: string }> {
+  try {
+    const response = await get(`/api/v1/tenants/${tenantId}/api-principal-config`)
+    return response as unknown as { success: boolean; data?: APIPrincipalConfig; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.getApiPrincipalConfigFailed'),
+    }
+  }
+}
+
+export async function updateAPIPrincipalConfig(
+  tenantId: number,
+  payload: UpdateAPIPrincipalConfigPayload,
+): Promise<{ success: boolean; data?: APIPrincipalConfig; message?: string }> {
+  try {
+    const response = await put(`/api/v1/tenants/${tenantId}/api-principal-config`, payload)
+    return response as unknown as { success: boolean; data?: APIPrincipalConfig; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.updateApiPrincipalConfigFailed'),
     }
   }
 }

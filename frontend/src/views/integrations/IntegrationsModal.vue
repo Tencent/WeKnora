@@ -57,6 +57,7 @@
                   <AgentEmbedChannelPanel v-model:filter-agent-id="filterAgentId" />
                 </div>
 
+                <ApiIntegrationSettings v-if="currentSection === 'api'" />
                 <ChromeExtensionLanding v-if="currentSection === 'chrome'" />
                 <ClawSkillLanding v-if="currentSection === 'claw'" />
               </div>
@@ -74,6 +75,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import IMChannelPanel from '@/components/IMChannelPanel.vue';
 import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue';
+import ApiIntegrationSettings from '@/views/integrations/ApiIntegrationSettings.vue';
 import ChromeExtensionLanding from '@/views/integrations/ChromeExtensionLanding.vue';
 import ClawSkillLanding from '@/views/integrations/ClawSkillLanding.vue';
 import { INTEGRATION_PREVIEW_ITEMS, INTEGRATION_TABS, type IntegrationTab } from '@/config/integrations';

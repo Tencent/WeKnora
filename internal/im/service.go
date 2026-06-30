@@ -468,9 +468,13 @@ func formatQuotedContext(quote *QuotedMessage) string {
 // knowledge bases be merged and resolved correctly, since the shared-KB code
 // gates on a non-empty UserID. Viewer is the least privilege sufficient to
 // retrieve shared KBs.
-func withIMIdentity(ctx context.Context, tenantID uint64) context.Context {
+func withIMIdentity(ctx context.Context, tenantID uint64, channelID string, msg *IncomingMessage) context.Context {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, fmt.Sprintf("system-%d", tenantID))
+	if msg != nil {
+		principalID := fmt.Sprintf("%d:%s:%s:%s", tenantID, channelID, msg.Platform, msg.UserID)
+		ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalIMUser, ID: principalID})
+	}
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
 	return ctx
 }
@@ -1263,7 +1267,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		return fmt.Errorf("get tenant: %w", err)
 	}
 	sessionCtx := context.WithValue(ctx, types.TenantInfoContextKey, tenant)
-	sessionCtx = withIMIdentity(sessionCtx, tenantID)
+	sessionCtx = withIMIdentity(sessionCtx, tenantID, channelID, msg)
 
 	// 2. Resolve or create a WeKnora session
 	channelSession, err := s.resolveSession(sessionCtx, msg, tenantID, agentID, channelID, channel.SessionMode)

@@ -96,6 +96,25 @@ type updateTenantRequest struct {
 	Description *string `json:"description" binding:"omitempty,max=512"`
 }
 
+type apiPrincipalConfigRequest struct {
+	Mode                  types.APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string                 `json:"direct_header_name"`
+	SignedTokenHeaderName string                 `json:"signed_token_header_name"`
+	HMACSecret            *string                `json:"hmac_secret"`
+}
+
+type apiPrincipalConfigResponse struct {
+	Mode                  types.APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string                 `json:"direct_header_name"`
+	SignedTokenHeaderName string                 `json:"signed_token_header_name"`
+	HasHMACSecret         bool                   `json:"has_hmac_secret"`
+}
+
+const (
+	defaultAPIPrincipalDirectHeader = "X-External-User-ID"
+	defaultAPIPrincipalTokenHeader  = "X-External-User-Token"
+)
+
 // defaultMaxOwnedTenantsPerUser is the cap applied when
 // config.Tenant.MaxOwnedPerUser is left at zero. Picked to comfortably
 // cover legitimate "personal + a couple of side-projects" use while
@@ -507,6 +526,127 @@ func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
 		"data": gin.H{
 			"api_key": apiKey,
 		},
+	})
+}
+
+func apiPrincipalConfigForResponse(cfg *types.APIPrincipalConfig) apiPrincipalConfigResponse {
+	if cfg == nil {
+		cfg = &types.APIPrincipalConfig{}
+	}
+	mode := cfg.Mode
+	if mode == "" {
+		mode = types.APIPrincipalModeTenant
+	}
+	directHeader := strings.TrimSpace(cfg.DirectHeaderName)
+	if directHeader == "" {
+		directHeader = defaultAPIPrincipalDirectHeader
+	}
+	tokenHeader := strings.TrimSpace(cfg.SignedTokenHeaderName)
+	if tokenHeader == "" {
+		tokenHeader = defaultAPIPrincipalTokenHeader
+	}
+	return apiPrincipalConfigResponse{
+		Mode:                  mode,
+		DirectHeaderName:      directHeader,
+		SignedTokenHeaderName: tokenHeader,
+		HasHMACSecret:         strings.TrimSpace(cfg.HMACSecret) != "",
+	}
+}
+
+// GetAPIPrincipalConfig returns the tenant API-key principal mapping config.
+func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		return
+	}
+	tenant, err := h.service.GetTenantByID(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    apiPrincipalConfigForResponse(tenant.APIPrincipalConfig),
+	})
+}
+
+// UpdateAPIPrincipalConfig updates how tenant API-key requests resolve principals.
+func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		return
+	}
+	var req apiPrincipalConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if req.Mode == "" {
+		req.Mode = types.APIPrincipalModeTenant
+	}
+	switch req.Mode {
+	case types.APIPrincipalModeTenant, types.APIPrincipalModeDirect, types.APIPrincipalModeSignedToken:
+	default:
+		c.Error(errors.NewValidationError("mode must be tenant, direct_header, or signed_token"))
+		return
+	}
+
+	tenant, err := h.service.GetTenantByID(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+		}
+		return
+	}
+
+	existingSecret := ""
+	if tenant.APIPrincipalConfig != nil {
+		existingSecret = tenant.APIPrincipalConfig.HMACSecret
+	}
+	hmacSecret := existingSecret
+	if req.HMACSecret != nil {
+		hmacSecret = strings.TrimSpace(*req.HMACSecret)
+	}
+	cfg := &types.APIPrincipalConfig{
+		Mode:                  req.Mode,
+		DirectHeaderName:      strings.TrimSpace(req.DirectHeaderName),
+		SignedTokenHeaderName: strings.TrimSpace(req.SignedTokenHeaderName),
+		HMACSecret:            hmacSecret,
+	}
+	if cfg.DirectHeaderName == "" {
+		cfg.DirectHeaderName = defaultAPIPrincipalDirectHeader
+	}
+	if cfg.SignedTokenHeaderName == "" {
+		cfg.SignedTokenHeaderName = defaultAPIPrincipalTokenHeader
+	}
+	if cfg.Mode == types.APIPrincipalModeSignedToken && strings.TrimSpace(cfg.HMACSecret) == "" {
+		c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
+		return
+	}
+	tenant.APIPrincipalConfig = cfg
+
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError("Failed to update API principal config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    apiPrincipalConfigForResponse(updatedTenant.APIPrincipalConfig),
 	})
 }
 
