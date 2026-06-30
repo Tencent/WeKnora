@@ -242,6 +242,7 @@ type SuggestedQuestion struct {
 type SuggestedQuestionsRequest struct {
 	KnowledgeBaseIDs []string // Optional: override agent's KB scope
 	KnowledgeIDs     []string // Optional: limit to specific knowledge items
+	TagIDs           []string // Optional: limit to knowledge items under these tags
 	Limit            int      // Optional: max questions to return (default 6)
 }
 
@@ -268,6 +269,9 @@ func (c *Client) GetSuggestedQuestions(ctx context.Context, agentID string, requ
 		}
 		if len(request.KnowledgeIDs) > 0 {
 			query.Set("knowledge_ids", strings.Join(request.KnowledgeIDs, ","))
+		}
+		if len(request.TagIDs) > 0 {
+			query.Set("tag_ids", strings.Join(request.TagIDs, ","))
 		}
 		if request.Limit > 0 {
 			query.Set("limit", strconv.Itoa(request.Limit))

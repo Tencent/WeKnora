@@ -69,3 +69,21 @@ export function resolveThinkingControl(
   }
   return defaultThinkingControl(provider, modelName)
 }
+
+/** Whether the debug drawer should expose Think on/off for this saved model. */
+export function modelSupportsThinking(model: {
+  type: string
+  source: string
+  name: string
+  parameters: {
+    provider?: string
+    extra_config?: { thinking_control?: string }
+  }
+}): boolean {
+  if (model.type !== 'KnowledgeQA' || model.source !== 'remote') return false
+  return resolveThinkingControl(
+    model.parameters.extra_config?.thinking_control,
+    model.parameters.provider || '',
+    model.name || '',
+  ) !== 'none'
+}

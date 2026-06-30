@@ -278,3 +278,29 @@ func TestValidateProcessOverrides_COSIncompleteForImage(t *testing.T) {
 	err := ValidateProcessOverrides(ctx, kb, &types.KnowledgeProcessOverrides{}, []string{"png"})
 	require.Error(t, err)
 }
+
+func TestMergeParserEngineOverrides(t *testing.T) {
+	t.Parallel()
+
+	// 1. Both nil/empty
+	merged := MergeParserEngineOverrides(nil, nil)
+	require.Empty(t, merged)
+
+	// 2. Tenant only
+	merged = MergeParserEngineOverrides(map[string]string{"k1": "v1"}, nil)
+	require.Equal(t, map[string]string{"k1": "v1"}, merged)
+
+	// 3. Upload only
+	merged = MergeParserEngineOverrides(nil, map[string]string{"k2": "v2"})
+	require.Equal(t, map[string]string{"k2": "v2"}, merged)
+
+	// 4. Overlap priority (upload override should take priority over tenant config)
+	tenant := map[string]string{"k1": "tenant_val", "k2": "v2"}
+	upload := map[string]string{"k1": "upload_val", "k3": "v3"}
+	merged = MergeParserEngineOverrides(tenant, upload)
+	require.Equal(t, map[string]string{
+		"k1": "upload_val",
+		"k2": "v2",
+		"k3": "v3",
+	}, merged)
+}

@@ -185,6 +185,9 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	if err = wg.Wait(); err != nil {
 		return err
 	}
+	if err := s.repo.DeleteKnowledgeTagRelations(ctx, id); err != nil {
+		logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", id, err)
+	}
 	// Delete the knowledge entry itself from the database
 	return s.repo.DeleteKnowledge(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
 }
@@ -600,6 +603,11 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 
 	if err = wg.Wait(); err != nil {
 		return err
+	}
+	for _, knowledgeID := range ids {
+		if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledgeID); err != nil {
+			logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", knowledgeID, err)
+		}
 	}
 	// 6. Delete the knowledge entry itself from the database
 	return s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids)

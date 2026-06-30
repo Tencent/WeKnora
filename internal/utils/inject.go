@@ -144,6 +144,15 @@ type sqlValidator struct {
 	enableSearchScopeFilter bool
 	searchScopeKBIDs        []string
 	searchScopeKnowledgeIDs []string
+	searchScopes            []SearchScope
+}
+
+// SearchScope describes one allowed knowledge scope for SQL query injection.
+// Empty KnowledgeIDs and TagIDs means the whole KB is in scope.
+type SearchScope struct {
+	KnowledgeBaseID string
+	KnowledgeIDs    []string
+	TagIDs          []string
 }
 
 // ParseSQL parses a SQL statement using pg_query_go and extracts table names, select fields, and where fields
@@ -630,6 +639,18 @@ func WithSearchScopeFilter(kbIDs []string, knowledgeIDs []string) SQLValidationO
 	}
 }
 
+// WithSearchScopes restricts queries using structured OR scopes. Each scope can
+// represent a full KB, specific documents, or a tag-constrained KB.
+func WithSearchScopes(scopes []SearchScope) SQLValidationOption {
+	return func(v *sqlValidator) {
+		if len(scopes) == 0 {
+			return
+		}
+		v.enableSearchScopeFilter = true
+		v.searchScopes = append([]SearchScope(nil), scopes...)
+	}
+}
+
 // WithSecurityDefaults applies a comprehensive set of security validations
 func WithSecurityDefaults(tenantID uint64) SQLValidationOption {
 	return func(v *sqlValidator) {
@@ -1015,7 +1036,13 @@ func (v *sqlValidator) injectHiddenKBFilter(sql string, tablesInQuery map[string
 // and (optionally) specific knowledge documents.
 func (v *sqlValidator) injectSearchScopeConditions(sql string, tablesInQuery map[string]string) string {
 	if !v.enableSearchScopeFilter || len(v.searchScopeKBIDs) == 0 {
-		return sql
+		if len(v.searchScopes) == 0 {
+			return sql
+		}
+	}
+
+	if len(v.searchScopes) > 0 {
+		return v.injectStructuredSearchScopeConditions(sql, tablesInQuery)
 	}
 
 	quotedKBIDs := quoteStringSlice(v.searchScopeKBIDs)
@@ -1048,6 +1075,116 @@ func (v *sqlValidator) injectSearchScopeConditions(sql string, tablesInQuery map
 	}
 
 	return InjectAndConditions(sql, strings.Join(conditions, " AND "))
+}
+
+func (v *sqlValidator) injectStructuredSearchScopeConditions(sql string, tablesInQuery map[string]string) string {
+	var conditions []string
+
+	if alias, ok := tablesInQuery["knowledge_bases"]; ok {
+		if cond := buildKnowledgeBaseScopeCondition(alias, v.searchScopes); cond != "" {
+			conditions = append(conditions, cond)
+		}
+	}
+	if alias, ok := tablesInQuery["knowledges"]; ok {
+		if cond := buildKnowledgeScopeCondition(alias, v.searchScopes); cond != "" {
+			conditions = append(conditions, cond)
+		}
+	}
+	if alias, ok := tablesInQuery["chunks"]; ok {
+		if cond := buildChunkScopeCondition(alias, v.searchScopes); cond != "" {
+			conditions = append(conditions, cond)
+		}
+	}
+
+	if len(conditions) == 0 {
+		return sql
+	}
+	return InjectAndConditions(sql, strings.Join(conditions, " AND "))
+}
+
+func buildKnowledgeBaseScopeCondition(alias string, scopes []SearchScope) string {
+	kbIDs := uniqueScopeKBIDs(scopes)
+	if len(kbIDs) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s.id IN (%s)", alias, strings.Join(quoteStringSlice(kbIDs), ", "))
+}
+
+func buildKnowledgeScopeCondition(alias string, scopes []SearchScope) string {
+	clauses := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" {
+			continue
+		}
+		kbID := quoteString(scope.KnowledgeBaseID)
+		switch {
+		case len(scope.KnowledgeIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND %s.id IN (%s))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
+			))
+		case len(scope.TagIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.id AND ktr.tag_id IN (%s)))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+			))
+		default:
+			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
+		}
+	}
+	return joinOrClauses(clauses)
+}
+
+func buildChunkScopeCondition(alias string, scopes []SearchScope) string {
+	clauses := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" {
+			continue
+		}
+		kbID := quoteString(scope.KnowledgeBaseID)
+		switch {
+		case len(scope.KnowledgeIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND %s.knowledge_id IN (%s))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
+			))
+		case len(scope.TagIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.knowledge_id AND ktr.tag_id IN (%s)))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+			))
+		default:
+			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
+		}
+	}
+	return joinOrClauses(clauses)
+}
+
+func uniqueScopeKBIDs(scopes []SearchScope) []string {
+	seen := make(map[string]bool, len(scopes))
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" || seen[scope.KnowledgeBaseID] {
+			continue
+		}
+		seen[scope.KnowledgeBaseID] = true
+		out = append(out, scope.KnowledgeBaseID)
+	}
+	return out
+}
+
+func joinOrClauses(clauses []string) string {
+	if len(clauses) == 0 {
+		return ""
+	}
+	if len(clauses) == 1 {
+		return clauses[0]
+	}
+	return "(" + strings.Join(clauses, " OR ") + ")"
+}
+
+func quoteString(s string) string {
+	return quoteStringSlice([]string{s})[0]
 }
 
 func quoteStringSlice(ss []string) []string {

@@ -34,8 +34,10 @@ type PromptsCapability struct {
 
 // ServerInfo represents information about the server
 type ServerInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // CallToolResult represents the result of tools/call request

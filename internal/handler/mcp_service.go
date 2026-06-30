@@ -303,6 +303,11 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		if authType, ok := authConfig["auth_type"].(string); ok {
 			service.AuthConfig.AuthType = types.MCPAuthType(authType)
 		}
+		// api_key_header is non-secret structural config (header name for the
+		// api_key strategy); flows through the main PUT like custom_headers.
+		if apiKeyHeader, ok := authConfig["api_key_header"].(string); ok {
+			service.AuthConfig.APIKeyHeader = apiKeyHeader
+		}
 		if scopes, ok := authConfig["scopes"].([]interface{}); ok {
 			list := make([]string, 0, len(scopes))
 			for _, s := range scopes {

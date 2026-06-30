@@ -246,6 +246,7 @@ export const useAuthStore = defineStore('auth', () => {
         if (parsed && typeof parsed === 'object') {
           parsed.selectedAgentId = BUILTIN_QUICK_ANSWER_ID
           parsed.selectedAgentSourceTenantId = null
+          parsed.isAgentEnabled = false
           if (parsed.conversationModels && typeof parsed.conversationModels === 'object') {
             parsed.conversationModels.summaryModelId = ''
             parsed.conversationModels.rerankModelId = ''

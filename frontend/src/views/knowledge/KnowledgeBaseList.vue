@@ -279,7 +279,7 @@
                     </t-tooltip>
                   </div>
                 </div>
-                <div v-if="!authStore.isLiteMode" class="bottom-right">
+                <div v-if="!authStore.isLiteMode && showKbOriginBadge(kb)" class="bottom-right">
                   <ResourceOriginBadge :variant="kbOriginVariant(kb)" :creator-name="kb.creator_name" />
                 </div>
               </div>
@@ -504,7 +504,7 @@
                     </t-tooltip>
                   </div>
                 </div>
-                <div v-if="!authStore.isLiteMode" class="bottom-right">
+                <div v-if="!authStore.isLiteMode && showKbOriginBadge(kb)" class="bottom-right">
                   <ResourceOriginBadge :variant="kbOriginVariant(kb)" :creator-name="kb.creator_name" />
                 </div>
               </div>
@@ -603,15 +603,6 @@
                       </div>
                     </t-tooltip>
                   </div>
-                </div>
-                <div class="bottom-right">
-                  <t-tooltip :content="shared.org_name" placement="top">
-                    <div class="org-source">
-                      <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt=""
-                        aria-hidden="true" />
-                      <span>{{ shared.org_name }}</span>
-                    </div>
-                  </t-tooltip>
                 </div>
               </div>
             </div>
@@ -783,6 +774,7 @@ import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
+import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import ContextualGuide from '@/components/ContextualGuide.vue'
 import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
@@ -1359,6 +1351,15 @@ function isMyKb(kb: { creator_id?: string }): boolean {
 //     resourceOrigin.tenant 文案（"本空间"），不会出现空标签。
 function kbOriginVariant(kb: { creator_id?: string }): 'mine' | 'creator' {
   return isMyKb(kb) ? 'mine' : 'creator'
+}
+
+function showKbOriginBadge(kb: { creator_id?: string; creator_name?: string }): boolean {
+  return shouldShowResourceOriginBadge({
+    section: kbSectionOf(kb),
+    variant: kbOriginVariant(kb),
+    creatorName: kb.creator_name,
+    showSectionHeaders: showShareGroupHeaders.value,
+  })
 }
 
 // 通过 ID 处理设置（用于全部 Tab 下的知识库）

@@ -129,6 +129,12 @@ const router = createRouter({
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
+          path: "integrations",
+          name: "integrations",
+          component: () => import("../views/platform/RoutePlaceholder.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
           path: "creatChat",
           name: "globalCreatChat",
           component: () => import("../views/creatChat/creatChat.vue"),

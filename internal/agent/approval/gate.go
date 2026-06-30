@@ -104,6 +104,21 @@ type MCPApproval interface {
 	RequestAndWait(ctx context.Context, req PendingRequest) (Decision, error)
 }
 
+// OAuthPendingRequest carries everything needed to prompt the user to authorize
+// an OAuth-enabled MCP service mid-conversation and block until they do.
+type OAuthPendingRequest struct {
+	TenantID           uint64
+	UserID             string // session owner; required for Resolve authorization
+	SessionID          string
+	AssistantMessageID string
+	RequestID          string
+	EventBus           *event.EventBus
+	ServiceID          string
+	ServiceName        string
+	MCPToolName        string
+	ToolCallID         string
+}
+
 var _ MCPApproval = (*Gate)(nil)
 
 // Gate coordinates wait/resolve for MCP tool approvals.
@@ -386,6 +401,112 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 		return d, nil
 	case <-timer.C:
 		d = Decision{Approved: false, Reason: "approval timeout", TimedOut: true}
+		_ = w.deliver(d)
+		d = <-w.ch
+		emitResolved(d)
+		return d, nil
+	case <-ctx.Done():
+		d = Decision{Approved: false, Reason: "request canceled", ContextCanceled: true}
+		_ = w.deliver(d)
+		d = <-w.ch
+		emitResolved(d)
+		return d, nil
+	}
+}
+
+// RequestOAuthAndWait emits an "MCP OAuth required" UI event, then blocks
+// until the user authorizes (delivered via Resolve), the wait times out, or
+// the request ctx is canceled. A returned Decision.Approved==true means the
+// user completed authorization and the tool call should be retried.
+//
+// Unlike RequestAndWait this does NOT consult the approval checker — it is
+// driven reactively by an authorization-required error from the MCP transport.
+func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest) (Decision, error) {
+	if g == nil {
+		return Decision{}, fmt.Errorf("oauth gate: nil gate")
+	}
+	if req.EventBus == nil {
+		return Decision{}, fmt.Errorf("oauth gate: EventBus is nil")
+	}
+
+	pendingID := uuid.New().String()
+	w := &waiter{
+		ch:       make(chan Decision, 1),
+		tenantID: req.TenantID,
+		userID:   req.UserID,
+	}
+
+	g.mu.Lock()
+	g.pending[pendingID] = w
+	g.mu.Unlock()
+
+	defer func() {
+		g.mu.Lock()
+		delete(g.pending, pendingID)
+		g.mu.Unlock()
+	}()
+
+	timeoutSec := int(g.timeout / time.Second)
+	if timeoutSec < 1 {
+		timeoutSec = 1
+	}
+
+	if err := req.EventBus.Emit(ctx, event.Event{
+		ID:        pendingID + "-mcp-oauth-required",
+		Type:      event.EventMCPOAuthRequired,
+		SessionID: req.SessionID,
+		Data: event.MCPOAuthRequiredData{
+			PendingID:          pendingID,
+			TenantID:           req.TenantID,
+			SessionID:          req.SessionID,
+			AssistantMessageID: req.AssistantMessageID,
+			ServiceID:          req.ServiceID,
+			ServiceName:        req.ServiceName,
+			MCPToolName:        req.MCPToolName,
+			TimeoutSeconds:     timeoutSec,
+			RequestedAtUnix:    time.Now().Unix(),
+			ToolCallID:         req.ToolCallID,
+			RequestID:          req.RequestID,
+		},
+		Metadata: map[string]interface{}{
+			"assistant_message_id": req.AssistantMessageID,
+			"pending_id":           pendingID,
+		},
+		RequestID: req.RequestID,
+	}); err != nil {
+		return Decision{}, fmt.Errorf("emit mcp oauth required: %w", err)
+	}
+
+	emitResolved := func(d Decision) {
+		_ = req.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
+			ID:        pendingID + "-mcp-oauth-resolved",
+			Type:      event.EventMCPOAuthResolved,
+			SessionID: req.SessionID,
+			Data: event.MCPOAuthResolvedData{
+				PendingID:  pendingID,
+				ServiceID:  req.ServiceID,
+				Authorized: d.Approved,
+				Reason:     d.Reason,
+				TimedOut:   d.TimedOut,
+				Canceled:   d.ContextCanceled,
+			},
+			Metadata: map[string]interface{}{
+				"assistant_message_id": req.AssistantMessageID,
+			},
+			RequestID: req.RequestID,
+		})
+	}
+
+	timer := time.NewTimer(g.timeout)
+	defer timer.Stop()
+
+	var d Decision
+	select {
+	case d = <-w.ch:
+		emitResolved(d)
+		return d, nil
+	case <-timer.C:
+		d = Decision{Approved: false, Reason: "authorization timeout", TimedOut: true}
 		_ = w.deliver(d)
 		d = <-w.ch
 		emitResolved(d)

@@ -88,8 +88,8 @@ const (
 // KnowledgeListFilter aggregates optional filters for listing knowledge entries
 // under a knowledge base. Empty / zero fields mean "no filter on that dimension".
 type KnowledgeListFilter struct {
-	// TagID filters by tag_id when non-empty.
-	TagID string
+	// TagIDs filters by multiple tags (OR semantics: match any of the given tags).
+	TagIDs []string
 	// Keyword performs a LIKE match on file_name / title when non-empty.
 	Keyword string
 	// FileType filters by file_type, or by type for the special values "manual" / "url".
@@ -116,8 +116,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	// Optional tag ID for categorization within a knowledge base
-	TagID string `json:"tag_id"             gorm:"type:varchar(36);index"`
+	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
+	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge
 	Type string `json:"type"`
 	// Title of the knowledge
@@ -208,7 +208,7 @@ type ManualKnowledgePayload struct {
 	Title         string                     `json:"title"`
 	Content       string                     `json:"content"`
 	Status        string                     `json:"status"`
-	TagID         string                     `json:"tag_id"`
+	TagIDs        []string                   `json:"tag_ids"`
 	Channel       string                     `json:"channel"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }

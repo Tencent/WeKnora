@@ -3,11 +3,11 @@
         <!-- 显示@的知识库和文件 -->
         <div v-if="mentioned_items && mentioned_items.length > 0" class="mentioned_items">
             <span v-for="item in mentioned_items" :key="item.id" class="mentioned_tag" :class="[
-                item.type === 'kb' ? (item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag') : 'file-tag'
+                mentionTagClass(item)
             ]">
                 <span class="tag_icon">
                     <t-icon v-if="item.type === 'kb'" :name="item.kb_type === 'faq' ? 'chat-bubble-help' : 'folder'" />
-                    <t-icon v-else name="file" />
+                    <t-icon v-else :name="mentionTagIcon(item)" />
                 </span>
                 <span class="tag_name">{{ item.name }}</span>
             </span>
@@ -50,6 +50,18 @@ import picturePreview from '@/components/picture-preview.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
+
+const mentionTagClass = (item) => {
+    if (item.type === 'kb') return item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag';
+    return `${item.type || 'file'}-tag`;
+};
+
+const mentionTagIcon = (item) => {
+    if (item.type === 'tag') return 'tag';
+    if (item.type === 'mcp') return 'tools';
+    if (item.type === 'skill') return 'bookmark';
+    return 'file';
+};
 
 const props = defineProps({
     content: {
@@ -147,6 +159,8 @@ const closePreImg = () => {
 };
 </script>
 <style scoped lang="less">
+@import '../../../components/css/chat-resource-chips.less';
+
 .user_msg_container {
     display: flex;
     flex-direction: column;
@@ -156,59 +170,11 @@ const closePreImg = () => {
 }
 
 .mentioned_items {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: flex-end;
-    max-width: 100%;
-    margin-bottom: 2px;
+    .chat-mentioned-items(flex-end);
 }
 
 .mentioned_tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    border-radius: 5px;
-    font-size: 12px;
-    font-weight: 500;
-    max-width: 200px;
-    cursor: default;
-    transition: all 0.15s;
-    background: rgba(7, 192, 95, 0.06);
-    border: 1px solid rgba(7, 192, 95, 0.2);
-    color: var(--td-text-color-primary);
-
-    &.kb-tag {
-        .tag_icon {
-            color: var(--td-brand-color);
-        }
-    }
-
-    &.faq-tag {
-        .tag_icon {
-            color: var(--td-warning-color);
-        }
-    }
-
-    &.file-tag {
-        .tag_icon {
-            color: var(--td-text-color-secondary);
-        }
-    }
-
-    .tag_icon {
-        font-size: 13px;
-        display: flex;
-        align-items: center;
-    }
-
-    .tag_name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: currentColor;
-    }
+    .chat-mentioned-tag();
 }
 
 .user_msg_container {

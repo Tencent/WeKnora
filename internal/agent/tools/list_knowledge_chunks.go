@@ -133,6 +133,19 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 			Error:   fmt.Sprintf("Knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
 		}, fmt.Errorf("knowledge base not in search targets")
 	}
+	allowed, err := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
+	if err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to validate knowledge scope: %v", err),
+		}, err
+	}
+	if !allowed {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Knowledge %s is not within the current @mention scope", knowledge.ID),
+		}, fmt.Errorf("knowledge not in search target scope")
+	}
 
 	// Use the knowledge's actual tenant_id for chunk query (supports cross-tenant shared KB)
 	effectiveTenantID := knowledge.TenantID
@@ -295,6 +308,19 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 			Success: false,
 			Error:   fmt.Sprintf("knowledge base %s is not accessible", chunk.KnowledgeBaseID),
 		}, fmt.Errorf("knowledge base not in search targets")
+	}
+	allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
+	if scopeErr != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to validate chunk scope: %v", scopeErr),
+		}, scopeErr
+	}
+	if !allowed {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("chunk %s is not within the current @mention scope", chunk.ID),
+		}, fmt.Errorf("chunk not in search target scope")
 	}
 
 	chunks := []*types.Chunk{chunk}

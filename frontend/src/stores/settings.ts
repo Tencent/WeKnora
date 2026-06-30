@@ -3,6 +3,7 @@ import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
 import { updateMyPreferences, type UserPreferences } from "@/api/auth";
+import { isAgentStreamAgentId, reconcileBuiltinAgentMode } from "@/utils/agent-mode";
 
 // 定义设置接口
 interface Settings {
@@ -14,6 +15,9 @@ interface Settings {
   selectedKnowledgeBases: string[];  // 当前选中的知识库ID列表
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
+  selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
+  selectedMCPServices: string[];
+  selectedSkills: string[];
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
   webSearchEnabled: boolean;  // 网络搜索是否启用
@@ -80,6 +84,9 @@ const defaultSettings: Settings = {
   selectedKnowledgeBases: [],  // 默认为空数组
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
+  selectedTags: [],
+  selectedMCPServices: [],
+  selectedSkills: [],
   modelConfig: {
     chatModels: [],
     embeddingModels: [],
@@ -102,10 +109,25 @@ const defaultSettings: Settings = {
   autoCheckUpdate: true,
 };
 
+/** Keep builtin agent id and isAgentEnabled in sync after localStorage reload. */
+function loadAndReconcileSettings(): Settings {
+  const loaded = JSON.parse(
+    localStorage.getItem("WeKnora_settings") || JSON.stringify(defaultSettings),
+  ) as Settings;
+  loaded.selectedTags ||= [];
+  loaded.selectedMCPServices ||= [];
+  loaded.selectedSkills ||= loaded.selectedTools || [];
+  loaded.selectedFileKbMap ||= {};
+  if (reconcileBuiltinAgentMode(loaded)) {
+    localStorage.setItem("WeKnora_settings", JSON.stringify(loaded));
+  }
+  return loaded;
+}
+
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
     // 从本地存储加载设置，如果没有则使用默认设置
-    settings: JSON.parse(localStorage.getItem("WeKnora_settings") || JSON.stringify(defaultSettings)) as Settings,
+    settings: loadAndReconcileSettings(),
     // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
     // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
     _defaultsSnapshot: null as Settings | null,
@@ -116,6 +138,17 @@ export const useSettingsStore = defineStore("settings", {
   getters: {
     // Agent 是否启用
     isAgentEnabled: (state) => state.settings.isAgentEnabled || false,
+
+    // 当前是否为内置快速问答（优先看 selectedAgentId，避免与 isAgentEnabled 漂移）
+    isQuickAnswerMode: (state) =>
+      (state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID) === BUILTIN_QUICK_ANSWER_ID,
+
+    // 是否走 Agent 流式管线（智能推理 / 自定义 Agent）；快速问答走 RAG 管线
+    isAgentStreamMode: (state) =>
+      isAgentStreamAgentId(
+        state.settings.selectedAgentId,
+        state.settings.isAgentEnabled || false,
+      ),
     
     // Agent 是否就绪（配置完整）
     // 需要满足：1) 配置了允许的工具 2) 设置了对话模型 3) 设置了重排模型
@@ -383,6 +416,53 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
+    addTag(tag: { id: string; name: string; kbId: string; kbName?: string }) {
+      if (!this.settings.selectedTags) this.settings.selectedTags = [];
+      if (!this.settings.selectedTags.some(t => t.id === tag.id && t.kbId === tag.kbId)) {
+        this.settings.selectedTags.push(tag);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeTag(tagId: string, kbId?: string) {
+      if (!this.settings.selectedTags) return;
+      this.settings.selectedTags = this.settings.selectedTags.filter(t => !(t.id === tagId && (!kbId || t.kbId === kbId)));
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearTags() {
+      this.settings.selectedTags = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    addMCPService(serviceId: string) {
+      if (!this.settings.selectedMCPServices) this.settings.selectedMCPServices = [];
+      if (!this.settings.selectedMCPServices.includes(serviceId)) {
+        this.settings.selectedMCPServices.push(serviceId);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeMCPService(serviceId: string) {
+      if (!this.settings.selectedMCPServices) return;
+      this.settings.selectedMCPServices = this.settings.selectedMCPServices.filter(id => id !== serviceId);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    addSkill(skillName: string) {
+      if (!this.settings.selectedSkills) this.settings.selectedSkills = [];
+      if (!this.settings.selectedSkills.includes(skillName)) {
+        this.settings.selectedSkills.push(skillName);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeSkill(skillName: string) {
+      if (!this.settings.selectedSkills) return;
+      this.settings.selectedSkills = this.settings.selectedSkills.filter(name => name !== skillName);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
     setFileKbMap(updates: Record<string, string>) {
       if (!this.settings.selectedFileKbMap) this.settings.selectedFileKbMap = {};
       Object.assign(this.settings.selectedFileKbMap, updates);
@@ -396,6 +476,22 @@ export const useSettingsStore = defineStore("settings", {
     
     getSelectedFiles(): string[] {
       return this.settings.selectedFiles || [];
+    },
+
+    /** Scope for suggested-questions API (KB / file / tag @mentions). */
+    getSuggestedQuestionsParams(limit = 6) {
+      const selectedKBs = this.getSelectedKnowledgeBases();
+      const selectedFiles = this.getSelectedFiles();
+      const tags = this.settings.selectedTags || [];
+      const tagIds = [...new Set(tags.map((t) => t.id).filter(Boolean))];
+      const tagKbIds = [...new Set(tags.map((t) => t.kbId).filter(Boolean))];
+      const kbIds = [...new Set([...selectedKBs, ...tagKbIds])];
+      return {
+        knowledge_base_ids: kbIds.length > 0 ? kbIds : undefined,
+        knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
+        tag_ids: tagIds.length > 0 ? tagIds : undefined,
+        limit,
+      };
     },
     
     // 选择智能体（sourceTenantId 仅在使用共享智能体时传入）
@@ -415,6 +511,9 @@ export const useSettingsStore = defineStore("settings", {
       this.settings.selectedKnowledgeBases = [];
       this.settings.selectedFiles = [];
       this.settings.selectedFileKbMap = {};
+      this.settings.selectedTags = [];
+      this.settings.selectedMCPServices = [];
+      this.settings.selectedSkills = [];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
@@ -476,6 +575,37 @@ export const useSettingsStore = defineStore("settings", {
           // selectedFileKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
           // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件映射。
         }
+        if (Array.isArray(state.mentioned_items)) {
+          const fromMentions = state.mentioned_items
+            .filter(item => item.type === "tag" && item.id && item.kb_id)
+            .map(item => ({ id: item.id, name: item.name || item.id, kbId: item.kb_id!, kbName: item.kb_name }));
+          const covered = new Set(fromMentions.map(t => t.id));
+          const orphanTagIds = (state.tag_ids || []).filter(id => id && !covered.has(id));
+          if (orphanTagIds.length > 0 && Array.isArray(state.knowledge_base_ids) && state.knowledge_base_ids.length === 1) {
+            const kbId = state.knowledge_base_ids[0];
+            orphanTagIds.forEach(id => {
+              fromMentions.push({ id, name: id, kbId, kbName: undefined });
+            });
+          }
+          this.settings.selectedTags = fromMentions;
+        } else if (Array.isArray(state.tag_ids)) {
+          const existing = this.settings.selectedTags || [];
+          this.settings.selectedTags = existing.filter(tag => state.tag_ids?.includes(tag.id));
+        }
+        if (Array.isArray(state.mcp_service_ids)) {
+          this.settings.selectedMCPServices = [...state.mcp_service_ids];
+        } else if (Array.isArray(state.mentioned_items)) {
+          this.settings.selectedMCPServices = state.mentioned_items
+            .filter(item => item.type === "mcp" && item.id)
+            .map(item => item.id);
+        }
+        if (Array.isArray(state.skill_names)) {
+          this.settings.selectedSkills = [...state.skill_names];
+        } else if (Array.isArray(state.mentioned_items)) {
+          this.settings.selectedSkills = state.mentioned_items
+            .filter(item => item.type === "skill" && item.id)
+            .map(item => item.skill_name || item.id);
+        }
         if (typeof state.web_search_enabled === "boolean") {
           this.settings.webSearchEnabled = state.web_search_enabled;
         }
@@ -503,6 +633,16 @@ export interface SessionLastRequestStatePayload {
   model_id?: string;
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
+  tag_ids?: string[];
+  mcp_service_ids?: string[];
+  skill_names?: string[];
+  mentioned_items?: Array<{
+    id: string;
+    name?: string;
+    type: string;
+    kb_id?: string;
+    kb_name?: string;
+    skill_name?: string;
+  }>;
   web_search_enabled?: boolean;
 }
- 

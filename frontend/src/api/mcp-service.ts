@@ -19,6 +19,10 @@ export interface MCPService {
     // optional-property typing remains so create-mode payloads can still
     // carry them in the initial POST body.
     api_key?: string
+    // Header name carrying api_key when auth_type is "api_key". Non-secret;
+    // empty defaults to "X-API-Key". Lets services expecting the key in a
+    // different header (e.g. raw token in "Authorization") work.
+    api_key_header?: string
     token?: string
     custom_headers?: Record<string, string>
     // OAuth-only, non-secret configuration.
@@ -69,6 +73,10 @@ export interface MCPResource {
 export interface MCPTestResult {
   success: boolean
   message?: string
+  description?: string
+  // Set when the server requires OAuth (RFC 9728) but the service was not
+  // configured for it — the UI guides the user to switch to OAuth 2.0.
+  oauth_required?: boolean
   tools?: MCPTool[]
   resources?: MCPResource[]
 }
@@ -213,3 +221,16 @@ export async function resolveToolApproval(
   await post(`/api/v1/agent/tool-approvals/${encodeURIComponent(pendingId)}`, body)
 }
 
+// Resume an agent run that paused on an in-conversation MCP OAuth prompt.
+// Call after the per-user authorization popup completes; the backend verifies
+// the token exists before unblocking the paused tool call.
+export async function resolveMCPOAuth(
+  pendingId: string,
+  body: { service_id: string; decision?: 'authorize' | 'cancel' }
+): Promise<void> {
+  await post(`/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}`, body)
+}
+
+export async function cancelMCPOAuth(pendingId: string): Promise<void> {
+  await post(`/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}/cancel`, {})
+}

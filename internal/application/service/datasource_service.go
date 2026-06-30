@@ -696,13 +696,13 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
 	// Auto-tag: find or create a tag for this data source so synced items are easily identifiable
-	autoTagID := ""
+	autoTagIDs := []string{}
 	autoTagName := ds.Name
 	if autoTag, tagErr := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, autoTagName); tagErr != nil {
 		logger.Warnf(ctx, "failed to find/create auto-tag %q: %v (proceeding without tag)", autoTagName, tagErr)
 	} else if autoTag != nil {
-		autoTagID = autoTag.ID
-		logger.Infof(ctx, "using auto-tag %q (id=%s) for data source sync", autoTagName, autoTagID)
+		autoTagIDs = append(autoTagIDs, autoTag.ID)
+		logger.Infof(ctx, "using auto-tag %q (id=%s) for data source sync", autoTagName, autoTag.ID)
 	}
 
 	for _, item := range items {
@@ -729,7 +729,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			continue
 		}
 
-		isUpdate, err := s.ingestItem(ctx, ds, &item, autoTagID)
+		isUpdate, err := s.ingestItem(ctx, ds, &item, autoTagIDs)
 		if err != nil {
 			// Duplicate file/URL is not a failure — count as skipped
 			var dupErr *types.DuplicateKnowledgeError
@@ -886,7 +886,7 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //   - Has URL only      → CreateKnowledgeFromURL  (让 WeKnora 下载并解析)
 //
 // Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
-func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagID string) (bool, error) {
+func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
 	channel := ds.Type // e.g. "feishu", "notion"
 
 	metadata := map[string]string{
@@ -929,7 +929,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			metadata,
 			nil,           // use KB default for multimodal
 			item.FileName, // customFileName — must include extension for file-type validation
-			tagID,         // auto-tag from data source
+			tagIDs,        // auto-tag from data source
 			channel,
 			nil,
 		)
@@ -946,7 +946,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			"",  // auto-detect file type
 			nil, // use KB default for multimodal
 			item.Title,
-			tagID, // auto-tag from data source
+			tagIDs, // auto-tag from data source
 			channel,
 			nil,
 		)

@@ -8,7 +8,7 @@
     </div>
   </teleport>
   <t-drawer v-model:visible="drawerVisible" v-bind="drawerPassthroughAttrs" :size="effectiveWidth" :z-index="2500" placement="right"
-    attach="body" destroy-on-close
+    attach="body" destroy-on-close :footer="!hideFooter"
     :class="drawerClass">
     <!--
       Custom header. We replace TDesign's default header so we can put a leading

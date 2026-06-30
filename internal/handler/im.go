@@ -14,7 +14,7 @@ import (
 // validIMPlatforms is the set of supported IM platforms.
 var validIMPlatforms = map[string]bool{
 	"wecom": true, "feishu": true, "slack": true, "telegram": true, "dingtalk": true, "mattermost": true,
-	"wechat": true,
+	"wechat": true, "qqbot": true,
 }
 
 // IMHandler handles IM platform callback requests and channel CRUD.
@@ -60,7 +60,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	if !validIMPlatforms[req.Platform] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack', 'telegram', 'dingtalk', 'mattermost' or 'wechat'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack', 'telegram', 'dingtalk', 'mattermost', 'wechat' or 'qqbot'"})
 		return
 	}
 
@@ -196,6 +196,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		KnowledgeBaseID *string    `json:"knowledge_base_id"`
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
+		AgentID         *string    `json:"agent_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -219,6 +220,16 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
+	}
+	if req.AgentID != nil {
+		newAgentID := strings.TrimSpace(*req.AgentID)
+		if newAgentID != "" && newAgentID != channel.AgentID {
+			if err := h.imService.SetChannelAgentID(c.Request.Context(), channel, newAgentID); err != nil {
+				logger.Errorf(c.Request.Context(), "[IM] Update channel agent failed: %v", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "agent not found"})
+				return
+			}
+		}
 	}
 
 	if err := h.imService.UpdateChannel(channel); err != nil {

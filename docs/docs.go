@@ -2081,9 +2081,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/datasource/{id}/resource-ancestors": {
+            "post": {
+                "description": "Resolve the ancestor ExternalIDs that must be expanded to reveal the given (possibly deeply nested) resources in a lazily-loaded picker. Used to restore an existing selection when editing a data source.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "DataSource"
+                ],
+                "summary": "Resolve resource ancestors",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Data source ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Resource IDs to resolve",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.resolveAncestorsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/datasource/{id}/resources": {
             "get": {
-                "description": "List resources available for sync in the external system",
+                "description": "List resources available for sync in the external system. Pass parent_id to lazily load the direct children of a resource (used for large hierarchical sources such as Feishu wiki).",
                 "produces": [
                     "application/json"
                 ],
@@ -2098,6 +2154,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Parent resource ExternalID; empty lists the top level",
+                        "name": "parent_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4667,8 +4729,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "标签ID筛选",
-                        "name": "tag_id",
+                        "description": "标签ID筛选，逗号分隔（OR语义）",
+                        "name": "tag_ids",
                         "in": "query"
                     },
                     {
@@ -4832,6 +4894,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "分类ID列表，逗号分隔",
+                        "name": "tag_ids",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
                         "description": "处理配置JSON（KnowledgeProcessOverrides）",
                         "name": "process_config",
                         "in": "formData"
@@ -4963,8 +5031,11 @@ const docTemplate = `{
                                 "file_type": {
                                     "type": "string"
                                 },
-                                "tag_id": {
-                                    "type": "string"
+                                "tag_ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
                                 },
                                 "title": {
                                     "type": "string"
@@ -5668,6 +5739,61 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge/batch-reparse": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "按 ID 列表批量重新解析单个知识库下的多个知识条目",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "批量重新解析知识",
+                "parameters": [
+                    {
+                        "description": "批量重解析请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.batchReparseKnowledgeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "任务已提交",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge/image/{id}/{chunk_id}": {
             "put": {
                 "security": [
@@ -5893,7 +6019,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Search knowledge files by keyword. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.",
+                "description": "Search knowledge files by keyword. Pass recent=true without a keyword to browse recent files. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5933,6 +6059,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Shared agent ID (search within agent's KB scope)",
                         "name": "agent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Return recent files when keyword is empty",
+                        "name": "recent",
                         "in": "query"
                     }
                 ],
@@ -7459,6 +7591,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/mcp-services/oauth/callback": {
+            "get": {
+                "description": "接收授权服务器回调并完成 code 交换，随后重定向回前端",
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "MCP OAuth 回调",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "授权码",
+                        "name": "code",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "状态参数",
+                        "name": "state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "授权错误码",
+                        "name": "error",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    }
+                }
+            }
+        },
         "/mcp-services/{id}": {
             "get": {
                 "security": [
@@ -7717,6 +7883,126 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/oauth/authorize-url": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "对使用 OAuth 的 MCP 服务执行发现与动态客户端注册，返回浏览器应跳转的授权地址（当前用户维度）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "发起 MCP OAuth 授权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP 服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "{redirect_uri: string, frontend_redirect?: string}",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "{authorization_url: string}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/oauth/status": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前用户对指定 MCP 服务是否已完成 OAuth 授权",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "查询 MCP OAuth 授权状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP 服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "{authorized: bool}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/oauth/token": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "删除当前用户对指定 MCP 服务的 OAuth 令牌",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "撤销 MCP OAuth 授权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP 服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     }
                 }
             }
@@ -14370,7 +14656,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "replica_number": {
-                    "description": "Milvus: in-memory replica count (LoadCollection)",
+                    "description": "Milvus LoadCollection / Tencent VectorDB CreateCollection replicas",
                     "type": "integer"
                 },
                 "replication_factor": {
@@ -14620,9 +14906,12 @@ const docTemplate = `{
                     "description": "Summary status for async summary generation",
                     "type": "string"
                 },
-                "tag_id": {
-                    "description": "Optional tag ID for categorization within a knowledge base",
-                    "type": "string"
+                "tags": {
+                    "description": "Tags holds the tags associated with this knowledge (populated on query, not persisted directly).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag"
+                    }
                 },
                 "tenant_id": {
                     "description": "Tenant ID",
@@ -14991,6 +15280,13 @@ const docTemplate = `{
                 "graph_enabled": {
                     "type": "boolean"
                 },
+                "parser_engine_overrides": {
+                    "description": "ParserEngineOverrides passes key-value configuration to docreader parsers\n(e.g. pdf_force_scanned=true). Merged with tenant-level overrides in the\nparse pipeline; per-upload values take priority on conflict.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "parser_engine_rules": {
                     "type": "array",
                     "items": {
@@ -15002,6 +15298,47 @@ const docTemplate = `{
                 },
                 "vlm_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeTag": {
+            "type": "object",
+            "properties": {
+                "color": {
+                    "description": "Optional display color",
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Creation time",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Unique identifier of the tag (UUID)",
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "description": "Knowledge base ID that this tag belongs to",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Tag name, unique within the same knowledge base",
+                    "type": "string"
+                },
+                "seq_id": {
+                    "description": "SeqID is an auto-increment integer ID for external API usage",
+                    "type": "integer"
+                },
+                "sort_order": {
+                    "description": "Sort order within the same knowledge base",
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "description": "Tenant ID",
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "description": "Last updated time",
+                    "type": "string"
                 }
             }
         },
@@ -15137,9 +15474,28 @@ const docTemplate = `{
                 "api_key": {
                     "type": "string"
                 },
+                "auth_server_metadata_url": {
+                    "description": "AuthServerMetadataURL optionally pins the OAuth authorization server\nmetadata URL. When empty, the server is discovered automatically from\nthe MCP URL (RFC 9728 / RFC 8414).",
+                    "type": "string"
+                },
+                "auth_type": {
+                    "description": "AuthType selects the authentication strategy. Empty (\"\") is treated as\nnone for backward compatibility with rows that pre-date this field.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
+                        }
+                    ]
+                },
                 "custom_headers": {
                     "type": "object",
                     "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "scopes": {
+                    "description": "Scopes are the OAuth scopes requested during authorization. Optional.",
+                    "type": "array",
+                    "items": {
                         "type": "string"
                     }
                 },
@@ -15147,6 +15503,21 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MCPAuthType": {
+            "type": "string",
+            "enum": [
+                "",
+                "api_key",
+                "bearer",
+                "oauth"
+            ],
+            "x-enum-varnames": [
+                "MCPAuthNone",
+                "MCPAuthAPIKey",
+                "MCPAuthBearer",
+                "MCPAuthOAuth"
+            ]
         },
         "github_com_Tencent_WeKnora_internal_types.MCPEnvVars": {
             "type": "object",
@@ -15279,8 +15650,11 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
-                "tag_id": {
-                    "type": "string"
+                "tag_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "title": {
                     "type": "string"
@@ -19275,6 +19649,27 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.batchReparseKnowledgeRequest": {
+            "type": "object",
+            "required": [
+                "ids",
+                "kb_id"
+            ],
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "kb_id": {
+                    "type": "string"
+                },
+                "process_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
+                }
+            }
+        },
         "internal_handler.createInvitationRequest": {
             "type": "object",
             "required": [
@@ -19373,6 +19768,17 @@ const docTemplate = `{
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.resolveAncestorsRequest": {
+            "type": "object",
+            "properties": {
+                "resource_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

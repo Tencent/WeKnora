@@ -9,11 +9,12 @@ import (
 
 // mockStreamSender is a test double that records streaming calls.
 type mockStreamSender struct {
-	mu       sync.Mutex
-	started  bool
-	streamID string
-	chunks   []string
-	ended    bool
+	mu            sync.Mutex
+	started       bool
+	streamID      string
+	updates       []string
+	finalContent  string
+	ended         bool
 }
 
 func (m *mockStreamSender) StartStream(_ context.Context, _ *IncomingMessage) (string, error) {
@@ -24,10 +25,17 @@ func (m *mockStreamSender) StartStream(_ context.Context, _ *IncomingMessage) (s
 	return m.streamID, nil
 }
 
-func (m *mockStreamSender) SendStreamChunk(_ context.Context, _ *IncomingMessage, _ string, content string) error {
+func (m *mockStreamSender) UpdateStreamContent(_ context.Context, _ *IncomingMessage, _ string, fullContent string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.chunks = append(m.chunks, content)
+	m.updates = append(m.updates, fullContent)
+	return nil
+}
+
+func (m *mockStreamSender) FinalizeStream(_ context.Context, _ *IncomingMessage, _ string, finalContent string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.finalContent = finalContent
 	return nil
 }
 
@@ -38,11 +46,11 @@ func (m *mockStreamSender) EndStream(_ context.Context, _ *IncomingMessage, _ st
 	return nil
 }
 
-func (m *mockStreamSender) getChunks() []string {
+func (m *mockStreamSender) getUpdates() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]string, len(m.chunks))
-	copy(out, m.chunks)
+	out := make([]string, len(m.updates))
+	copy(out, m.updates)
 	return out
 }
 
@@ -56,7 +64,6 @@ func TestStreamSenderInterface(t *testing.T) {
 		Content:  "hello",
 	}
 
-	// Start stream
 	streamID, err := mock.StartStream(ctx, incoming)
 	if err != nil {
 		t.Fatalf("StartStream failed: %v", err)
@@ -65,41 +72,43 @@ func TestStreamSenderInterface(t *testing.T) {
 		t.Fatal("expected non-empty stream ID")
 	}
 
-	// Send chunks
-	chunks := []string{"Hello", ", ", "world", "!"}
-	for _, c := range chunks {
-		if err := mock.SendStreamChunk(ctx, incoming, streamID, c); err != nil {
-			t.Fatalf("SendStreamChunk failed: %v", err)
+	// Replace-based updates send the full visible content each time.
+	updates := []string{"Hello", "Hello, world", "Hello, world!"}
+	for _, content := range updates {
+		if err := mock.UpdateStreamContent(ctx, incoming, streamID, content); err != nil {
+			t.Fatalf("UpdateStreamContent failed: %v", err)
 		}
 	}
 
-	// End stream
+	if err := mock.FinalizeStream(ctx, incoming, streamID, "Hello, world!"); err != nil {
+		t.Fatalf("FinalizeStream failed: %v", err)
+	}
 	if err := mock.EndStream(ctx, incoming, streamID); err != nil {
 		t.Fatalf("EndStream failed: %v", err)
 	}
 
-	// Verify
 	if !mock.started {
 		t.Error("expected stream to be started")
 	}
 	if !mock.ended {
 		t.Error("expected stream to be ended")
 	}
-
-	got := mock.getChunks()
-	if len(got) != len(chunks) {
-		t.Fatalf("expected %d chunks, got %d", len(chunks), len(got))
+	if mock.finalContent != "Hello, world!" {
+		t.Errorf("finalContent = %q, want %q", mock.finalContent, "Hello, world!")
 	}
-	for i, want := range chunks {
+
+	got := mock.getUpdates()
+	if len(got) != len(updates) {
+		t.Fatalf("expected %d updates, got %d", len(updates), len(got))
+	}
+	for i, want := range updates {
 		if got[i] != want {
-			t.Errorf("chunk[%d] = %q, want %q", i, got[i], want)
+			t.Errorf("update[%d] = %q, want %q", i, got[i], want)
 		}
 	}
 }
 
 func TestStreamFlushBatching(t *testing.T) {
-	// Simulate the batching behavior: multiple writes within one flush interval
-	// should be combined into a single chunk.
 	mock := &mockStreamSender{}
 
 	ctx := context.Background()
@@ -111,24 +120,22 @@ func TestStreamFlushBatching(t *testing.T) {
 
 	streamID, _ := mock.StartStream(ctx, incoming)
 
-	// Simulate buffer: accumulate content then flush as one chunk
 	var buf string
 	tokens := []string{"Hello", " ", "world", "!"}
 	for _, tok := range tokens {
 		buf += tok
 	}
 
-	// Single flush
-	if err := mock.SendStreamChunk(ctx, incoming, streamID, buf); err != nil {
-		t.Fatalf("SendStreamChunk failed: %v", err)
+	if err := mock.UpdateStreamContent(ctx, incoming, streamID, buf); err != nil {
+		t.Fatalf("UpdateStreamContent failed: %v", err)
 	}
 
-	got := mock.getChunks()
+	got := mock.getUpdates()
 	if len(got) != 1 {
-		t.Fatalf("expected 1 batched chunk, got %d", len(got))
+		t.Fatalf("expected 1 batched update, got %d", len(got))
 	}
 	if got[0] != "Hello world!" {
-		t.Errorf("batched chunk = %q, want %q", got[0], "Hello world!")
+		t.Errorf("batched update = %q, want %q", got[0], "Hello world!")
 	}
 }
 

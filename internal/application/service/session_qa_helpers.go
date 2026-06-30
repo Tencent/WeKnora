@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -24,7 +26,7 @@ func (s *sessionService) resolveKnowledgeBases(
 	knowledgeIDs = req.KnowledgeIDs
 	customAgent := req.CustomAgent
 
-	hasExplicitMention := len(kbIDs) > 0 || len(knowledgeIDs) > 0
+	hasExplicitMention := len(kbIDs) > 0 || len(knowledgeIDs) > 0 || len(req.TagScopes) > 0
 	if customAgent != nil {
 		logger.Infof(ctx, "KB resolution: hasExplicitMention=%v, RetrieveKBOnlyWhenMentioned=%v, KBSelectionMode=%s",
 			hasExplicitMention, customAgent.Config.RetrieveKBOnlyWhenMentioned, customAgent.Config.KBSelectionMode)
@@ -36,6 +38,7 @@ func (s *sessionService) resolveKnowledgeBases(
 		// to prevent users from injecting KB/knowledge IDs outside the agent's configured range.
 		if customAgent != nil && req.Session != nil && req.Session.TenantID != customAgent.TenantID {
 			kbIDs, knowledgeIDs = s.restrictMentionsToAgentScope(ctx, customAgent, req.Session.TenantID, kbIDs, knowledgeIDs)
+			req.TagScopes = s.restrictTagScopesToAgentScope(ctx, customAgent, req.Session.TenantID, req.TagScopes)
 		}
 	} else if customAgent != nil && customAgent.Config.RetrieveKBOnlyWhenMentioned {
 		kbIDs = nil
@@ -47,11 +50,39 @@ func (s *sessionService) resolveKnowledgeBases(
 	return kbIDs, knowledgeIDs
 }
 
+func (s *sessionService) restrictTagScopesToAgentScope(
+	ctx context.Context,
+	agent *types.CustomAgent,
+	sessionTenantID uint64,
+	tagScopes []types.TagScope,
+) []types.TagScope {
+	if len(tagScopes) == 0 {
+		return nil
+	}
+	allowedKBIDs := s.resolveKnowledgeBasesFromAgent(ctx, agent, sessionTenantID)
+	allowedSet := make(map[string]bool, len(allowedKBIDs))
+	for _, id := range allowedKBIDs {
+		allowedSet[id] = true
+	}
+	filtered := make([]types.TagScope, 0, len(tagScopes))
+	for _, scope := range tagScopes {
+		if allowedSet[scope.KnowledgeBaseID] {
+			filtered = append(filtered, scope)
+			continue
+		}
+		logger.Warnf(ctx, "Blocking @mentioned tag scope for KB %s: not in shared agent's allowed scope", scope.KnowledgeBaseID)
+	}
+	return filtered
+}
+
 // resolveChatModelID resolves the effective chat model ID for a QA request.
-// Priority:
-//  1. Request's SummaryModelID (explicit override, validated)
-//  2. Custom agent's ModelID
-//  3. KB / session / system default (via selectChatModelID)
+//
+// When an agent is selected, its model configuration must be complete and
+// valid. A request-level override may choose another valid model for this
+// request, but it must not make an unconfigured or stale agent appear usable.
+//
+// Without an agent, the legacy KB / session / system fallback remains
+// available for non-agent callers.
 func (s *sessionService) resolveChatModelID(
 	ctx context.Context,
 	req *types.QARequest,
@@ -62,16 +93,29 @@ func (s *sessionService) resolveChatModelID(
 	customAgent := req.CustomAgent
 	session := req.Session
 
+	if customAgent != nil {
+		configuredModelID := strings.TrimSpace(customAgent.Config.ModelID)
+		if configuredModelID == "" {
+			return "", fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
+		}
+		model, err := s.modelService.GetModelByID(ctx, configuredModelID)
+		if err != nil || model == nil || model.Type != types.ModelTypeKnowledgeQA {
+			return "", fmt.Errorf("configured chat model %s is unavailable for agent %s", configuredModelID, customAgent.ID)
+		}
+	}
+
+	summaryModelID = strings.TrimSpace(summaryModelID)
 	if summaryModelID != "" {
-		if model, err := s.modelService.GetModelByID(ctx, summaryModelID); err == nil && model != nil {
+		if model, err := s.modelService.GetModelByID(ctx, summaryModelID); err == nil && model != nil &&
+			model.Type == types.ModelTypeKnowledgeQA {
 			logger.Infof(ctx, "Using request's summary model override: %s", summaryModelID)
 			return summaryModelID, nil
 		}
 		logger.Warnf(ctx, "Request provided invalid summary model ID %s, falling back", summaryModelID)
 	}
-	if customAgent != nil && customAgent.Config.ModelID != "" {
-		logger.Infof(ctx, "Using custom agent's model_id: %s", customAgent.Config.ModelID)
-		return customAgent.Config.ModelID, nil
+	if customAgent != nil && strings.TrimSpace(customAgent.Config.ModelID) != "" {
+		logger.Infof(ctx, "Using custom agent's model_id: %s", strings.TrimSpace(customAgent.Config.ModelID))
+		return strings.TrimSpace(customAgent.Config.ModelID), nil
 	}
 	return s.selectChatModelID(ctx, session, knowledgeBaseIDs, knowledgeIDs)
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -172,8 +173,10 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	}
 
 	preAuthType := types.MCPAuthNone
+	preAPIKeyHeader := ""
 	if existing.AuthConfig != nil {
 		preAuthType = existing.AuthConfig.AuthType
+		preAPIKeyHeader = existing.AuthConfig.APIKeyHeader
 	}
 
 	// CustomHeaders flows through main PUT (it's structural, not a secret) —
@@ -194,6 +197,11 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		// auth_type / scopes. (Empty/absent is treated as "no change".)
 		if service.AuthConfig.AuthType != types.MCPAuthNone {
 			existing.AuthConfig.AuthType = service.AuthConfig.AuthType
+		}
+		// APIKeyHeader is non-secret; empty means "use default X-API-Key", so a
+		// partial PUT that omits it is treated as no-change (mirrors scopes).
+		if service.AuthConfig.APIKeyHeader != "" {
+			existing.AuthConfig.APIKeyHeader = service.AuthConfig.APIKeyHeader
 		}
 		if service.AuthConfig.Scopes != nil {
 			existing.AuthConfig.Scopes = service.AuthConfig.Scopes
@@ -282,7 +290,9 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	if !maps.Equal(currHeaders, preHeaders) {
 		configChanged = true
 	}
-	if existing.AuthConfig != nil && existing.AuthConfig.AuthType != preAuthType {
+	if existing.AuthConfig != nil &&
+		(existing.AuthConfig.AuthType != preAuthType ||
+			existing.AuthConfig.APIKeyHeader != preAPIKeyHeader) {
 		configChanged = true
 	}
 	name := secutils.SanitizeForLog(existing.Name)
@@ -335,6 +345,26 @@ func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint6
 }
 
 // TestMCPService tests the connection to an MCP service and returns available tools/resources
+// mcpTestFailure builds a failed MCPTestResult, upgrading a generic connection
+// error into an explicit "OAuth required" signal when the server answered with
+// an RFC 9728 OAuth challenge. This lets the UI guide the user to switch the
+// auth strategy to OAuth instead of showing a bare 401.
+func mcpTestFailure(err error, prefix string) *types.MCPTestResult {
+	var oerr *mcp.OAuthRequiredError
+	if errors.As(err, &oerr) {
+		return &types.MCPTestResult{
+			Success:       false,
+			OAuthRequired: true,
+			Message: "This MCP server requires OAuth authorization. " +
+				"Switch the auth method to OAuth 2.0 and authorize.",
+		}
+	}
+	return &types.MCPTestResult{
+		Success: false,
+		Message: fmt.Sprintf("%s: %v", prefix, err),
+	}
+}
+
 func (s *mcpServiceService) TestMCPService(
 	ctx context.Context,
 	tenantID uint64,
@@ -375,20 +405,14 @@ func (s *mcpServiceService) TestMCPService(
 	defer cancel()
 
 	if err := client.Connect(testCtx); err != nil {
-		return &types.MCPTestResult{
-			Success: false,
-			Message: fmt.Sprintf("Connection failed: %v", err),
-		}, nil
+		return mcpTestFailure(err, "Connection failed"), nil
 	}
 	defer client.Disconnect()
 
 	// Initialize
 	initResult, err := client.Initialize(testCtx)
 	if err != nil {
-		return &types.MCPTestResult{
-			Success: false,
-			Message: fmt.Sprintf("Initialization failed: %v", err),
-		}, nil
+		return mcpTestFailure(err, "Initialization failed"), nil
 	}
 
 	// List tools
@@ -412,8 +436,9 @@ func (s *mcpServiceService) TestMCPService(
 			initResult.ServerInfo.Name,
 			initResult.ServerInfo.Version,
 		),
-		Tools:     tools,
-		Resources: resources,
+		Description: initResult.ServerInfo.Description,
+		Tools:       tools,
+		Resources:   resources,
 	}, nil
 }
 
@@ -584,4 +609,3 @@ func (s *mcpServiceService) GetMCPServiceResources(
 
 	return resources, nil
 }
-

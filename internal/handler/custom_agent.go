@@ -559,6 +559,15 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
+	var tagIDs []string
+	if tagIDsStr := strings.TrimSpace(c.Query("tag_ids")); tagIDsStr != "" {
+		for _, id := range strings.Split(tagIDsStr, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				tagIDs = append(tagIDs, trimmed)
+			}
+		}
+	}
+
 	limit := 6
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
@@ -566,10 +575,10 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, limit: %d",
-		secutils.SanitizeForLog(id), kbIDs, limit)
+	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagIDs: %v, limit: %d",
+		secutils.SanitizeForLog(id), kbIDs, tagIDs, limit)
 
-	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, limit)
+	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagIDs, limit)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,

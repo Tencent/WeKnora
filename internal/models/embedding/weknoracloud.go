@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
 )
@@ -42,16 +43,23 @@ func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
 	if config.ExtraConfig != nil {
 		remoteModelName = strings.TrimSpace(config.ExtraConfig["remote_model_name"])
 	}
+	baseURL := strings.TrimRight(config.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = provider.WeKnoraCloudBaseURL
+	}
+	if err := validateEmbeddingBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 	return &WeKnoraCloudEmbedder{
 		modelName:                 config.ModelName,
 		remoteModelName:           remoteModelName,
 		modelID:                   config.ModelID,
 		appID:                     config.AppID,
 		apiKey:                    config.AppSecret,
-		baseURL:                   strings.TrimRight(config.BaseURL, "/"),
+		baseURL:                   baseURL,
 		dimensions:                config.Dimensions,
 		supportsDimensionOverride: config.SupportsDimensionOverride,
-		client:                    &http.Client{Timeout: 60 * time.Second},
+		client:                    newEmbeddingHTTPClient(60 * time.Second),
 	}, nil
 }
 

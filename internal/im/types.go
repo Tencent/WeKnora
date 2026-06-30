@@ -140,6 +140,10 @@ func (ch *IMChannel) computeBotIdentity() string {
 		if botID := str("ilink_bot_id"); botID != "" {
 			return "wechat:" + botID
 		}
+	case "qqbot":
+		if appID := str("app_id"); appID != "" {
+			return "qqbot:" + appID
+		}
 	}
 	return ""
 }

@@ -36,13 +36,14 @@ export default function (knowledgeBaseId?: string) {
     error_message: "",
     chunkLoading: false,
     chunkLoadError: "",
+    tags: [] as Array<{ id: string; name: string; color?: string }>,
   });
   let knowledgeListGeneration = 0;
   const getKnowled = (
     query: {
       page: number;
       page_size: number;
-      tag_id?: string;
+      tag_ids?: string;
       keyword?: string;
       file_type?: string;
       parse_status?: string;
@@ -153,11 +154,11 @@ export default function (knowledgeBaseId?: string) {
       return;
     }
     
-    // 获取当前选中的分类ID
+    // 获取当前选中的标签 ID
     const uiStore = useUIStore();
-    const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined;
-    
-    uploadKnowledgeFile(currentKbId, { file, tag_id: tagIdToUpload })
+    const tagIdsToUpload = uiStore.selectedTagIds.length > 0 ? [...uiStore.selectedTagIds] : undefined;
+
+    uploadKnowledgeFile(currentKbId, { file, tag_ids: tagIdsToUpload })
       .then((result: any) => {
         if (result.success) {
           MessagePlugin.info(t('knowledgeBase.uploadSuccess'));
@@ -189,6 +190,7 @@ export default function (knowledgeBaseId?: string) {
       parse_status: "",
       error_message: "",
       chunkLoadError: "",
+      tags: item?.tags ? [...item.tags] : [],
     });
     getKnowledgeDetails(item.id)
       .then((result: any) => {
@@ -206,6 +208,7 @@ export default function (knowledgeBaseId?: string) {
             summary_status: data.summary_status || '',
             parse_status: data.parse_status || '',
             error_message: data.error_message || '',
+            tags: data.tags?.length ? data.tags : (item?.tags || []),
           });
         }
       })
