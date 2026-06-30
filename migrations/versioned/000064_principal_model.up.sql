@@ -1,3 +1,6 @@
+-- Migration: 000064_principal_model
+-- Description: Principal-based identity for MCP OAuth, tenant API config, and session ownership.
+
 DO $$ BEGIN RAISE NOTICE '[Migration 000064] Adding principal columns to MCP OAuth tokens...'; END $$;
 
 ALTER TABLE mcp_oauth_tokens
@@ -27,3 +30,17 @@ CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_principal
     ON mcp_oauth_tokens(principal_type, principal_id);
 
 DO $$ BEGIN RAISE NOTICE '[Migration 000064] MCP OAuth principal columns ready'; END $$;
+
+DO $$ BEGIN RAISE NOTICE '[Migration 000064] Adding tenant API principal config...'; END $$;
+
+ALTER TABLE tenants
+    ADD COLUMN IF NOT EXISTS api_principal_config JSONB;
+
+DO $$ BEGIN RAISE NOTICE '[Migration 000064] tenant API principal config ready'; END $$;
+
+DO $$ BEGIN RAISE NOTICE '[Migration 000064] Widening sessions.user_id to VARCHAR(512)'; END $$;
+
+ALTER TABLE sessions
+    ALTER COLUMN user_id TYPE VARCHAR(512);
+
+DO $$ BEGIN RAISE NOTICE '[Migration 000064] principal model migration complete'; END $$;
