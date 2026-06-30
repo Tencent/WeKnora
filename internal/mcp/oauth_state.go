@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,12 +23,13 @@ const oauthStateTTL = 10 * time.Minute
 // authorization server — hence server-side storage rather than encoding it
 // into the state parameter.
 type OAuthState struct {
-	TenantID     uint64 `json:"tenant_id"`
-	UserID       string `json:"user_id"`
-	ServiceID    string `json:"service_id"`
-	CodeVerifier string `json:"code_verifier"`
-	ClientID     string `json:"client_id"`
-	RedirectURI  string `json:"redirect_uri"`
+	TenantID     uint64          `json:"tenant_id"`
+	UserID       string          `json:"user_id"`
+	Principal    types.Principal `json:"principal"`
+	ServiceID    string          `json:"service_id"`
+	CodeVerifier string          `json:"code_verifier"`
+	ClientID     string          `json:"client_id"`
+	RedirectURI  string          `json:"redirect_uri"`
 	// FrontendRedirect is where the backend callback redirects the browser
 	// after completing (or failing) the exchange.
 	FrontendRedirect string `json:"frontend_redirect"`

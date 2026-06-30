@@ -65,7 +65,8 @@ func oauthSessionForRegistration(ctx context.Context, sess *MCPOAuthSession, ret
 	}
 	userID := sess.UserID
 	if userID == "" {
-		userID, _ = types.UserIDFromContext(ctx)
+		principal, _ := types.PrincipalFromContext(ctx)
+		userID = principal.StorageID()
 	}
 	requestID := sess.RequestID
 	if requestID == "" {
@@ -141,7 +142,8 @@ func waitForMCPOAuthAuthorization(
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	userID := sess.UserID
 	if userID == "" {
-		userID, _ = types.UserIDFromContext(ctx)
+		principal, _ := types.PrincipalFromContext(ctx)
+		userID = principal.StorageID()
 	}
 	requestID := sess.RequestID
 	if requestID == "" {

@@ -553,6 +553,12 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 		c.JSON(http.StatusForbidden, gin.H{"error": "session signature invalid"})
 		return apperrors.NewForbiddenError("session signature invalid")
 	}
+	principal := types.Principal{
+		Type: types.PrincipalEmbedSession,
+		ID:   fmt.Sprintf("%d:%s:%s", ch.TenantID, ch.ID, sessionID),
+	}
+	c.Set(types.PrincipalContextKey.String(), principal)
+	c.Request = c.Request.WithContext(types.WithPrincipal(c.Request.Context(), principal))
 	return nil
 }
 

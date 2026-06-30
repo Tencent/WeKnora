@@ -52,9 +52,12 @@ type ClientConfig struct {
 	Service *types.MCPService
 
 	// OAuth wiring (only used when Service.AuthConfig.AuthType == oauth).
-	// The token store is scoped to (TenantID, UserID, Service.ID) so each
-	// user connects with their own access/refresh token.
+	// The token store is scoped to (TenantID, Principal, Service.ID) so each
+	// identity connects with its own access/refresh token.
 	TenantID  uint64
+	Principal types.Principal
+	// UserID is kept for compatibility with older call sites/tests. New code
+	// should pass Principal.
 	UserID    string
 	OAuthRepo interfaces.MCPOAuthRepository
 }
@@ -236,13 +239,17 @@ func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.
 	if config.OAuthRepo == nil {
 		return transport.OAuthConfig{}, false, fmt.Errorf("OAuth repository is required for OAuth MCP services")
 	}
-	if config.UserID == "" {
-		return transport.OAuthConfig{}, false, fmt.Errorf("user context is required to connect to an OAuth MCP service")
+	principal := config.Principal.Normalize()
+	if !principal.Valid() && config.UserID != "" {
+		principal = types.Principal{Type: types.PrincipalWebUser, ID: config.UserID}.Normalize()
+	}
+	if !principal.Valid() {
+		return transport.OAuthConfig{}, false, fmt.Errorf("principal context is required to connect to an OAuth MCP service")
 	}
 
 	oauthCfg := transport.OAuthConfig{
 		Scopes:                svc.AuthConfig.Scopes,
-		TokenStore:            newDBTokenStore(config.OAuthRepo, config.TenantID, config.UserID, svc.ID),
+		TokenStore:            newDBTokenStore(config.OAuthRepo, config.TenantID, principal, svc.ID),
 		PKCEEnabled:           true,
 		AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		HTTPClient:            httpClient,

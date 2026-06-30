@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -16,6 +17,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+)
+
+const (
+	defaultExternalUserIDHeader    = "X-External-User-ID"
+	defaultExternalUserTokenHeader = "X-External-User-Token"
 )
 
 // 无需认证的API列表
@@ -40,7 +47,7 @@ var noAuthAPI = map[string][]string{
 	// redirects the browser here without a WeKnora bearer token. The request
 	// is authenticated by the opaque, single-use `state` parameter instead.
 	"/api/v1/mcp-oauth/callback": {"GET"},
-	"/api/v1/auth/refresh":            {"POST"},
+	"/api/v1/auth/refresh":       {"POST"},
 	// IM platforms (Feishu, Slack, etc.) commonly issue a HEAD request
 	// before GET to validate Content-Type / Content-Length when rendering
 	// image previews — both verbs must be allowed for image links to work.
@@ -181,8 +188,11 @@ func Auth(
 				ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 				ctx = context.WithValue(ctx, types.UserContextKey, user)
 				ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+				principal := types.Principal{Type: types.PrincipalWebUser, ID: user.ID}
+				ctx = types.WithPrincipal(ctx, principal)
 				ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
 				ctx = context.WithValue(ctx, types.SystemAdminContextKey, user.IsSystemAdmin)
+				c.Set(types.PrincipalContextKey.String(), principal)
 				c.Request = c.Request.WithContext(ctx)
 				c.Next()
 				return
@@ -259,10 +269,20 @@ func Auth(
 			// 平台管理必须走交互式 JWT 登录，留下可追责的人类身份。
 			c.Set(types.UserContextKey.String(), user)
 			c.Set(types.UserIDContextKey.String(), user.ID)
+			principal, principalErr := resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
+			if principalErr != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": "Unauthorized: invalid external user token",
+				})
+				c.Abort()
+				return
+			}
+			c.Set(types.PrincipalContextKey.String(), principal)
 			c.Set(types.TenantRoleContextKey.String(), types.TenantRoleAdmin)
 			c.Set(types.SystemAdminContextKey.String(), false)
 			ctx = context.WithValue(ctx, types.UserContextKey, user)
 			ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+			ctx = types.WithPrincipal(ctx, principal)
 			ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
 			ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
 
@@ -274,6 +294,124 @@ func Auth(
 		// 没有提供任何认证信息
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication"})
 		c.Abort()
+	}
+}
+
+func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.Header) (types.Principal, error) {
+	tenantID := uint64(0)
+	if tenant != nil {
+		tenantID = tenant.ID
+	}
+	fallback := types.Principal{
+		Type: types.PrincipalAPITenant,
+		ID:   strconv.FormatUint(tenantID, 10),
+	}
+	if tenant == nil || tenantID == 0 {
+		return fallback, nil
+	}
+	cfg := tenant.APIPrincipalConfig
+	if cfg == nil || cfg.Mode == "" || cfg.Mode == types.APIPrincipalModeTenant {
+		return fallback, nil
+	}
+	switch cfg.Mode {
+	case types.APIPrincipalModeDirect:
+		name := strings.TrimSpace(cfg.DirectHeaderName)
+		if name == "" {
+			name = defaultExternalUserIDHeader
+		}
+		externalUserID := strings.TrimSpace(header.Get(name))
+		if externalUserID == "" {
+			return fallback, nil
+		}
+		return types.Principal{
+			Type: types.PrincipalAPIExternalUser,
+			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
+		}, nil
+	case types.APIPrincipalModeSignedToken:
+		name := strings.TrimSpace(cfg.SignedTokenHeaderName)
+		if name == "" {
+			name = defaultExternalUserTokenHeader
+		}
+		externalUserID, err := verifyExternalUserJWT(header.Get(name), tenantID, cfg.HMACSecret)
+		if err != nil || externalUserID == "" {
+			logger.Warnf(ctx, "invalid external user token for tenant=%d: %v", tenantID, err)
+			return types.Principal{}, fmt.Errorf("invalid external user token: %w", err)
+		}
+		return types.Principal{
+			Type: types.PrincipalAPIExternalUser,
+			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
+		}, nil
+	default:
+		return fallback, nil
+	}
+}
+
+func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (string, error) {
+	tokenString = strings.TrimSpace(tokenString)
+	secret = strings.TrimSpace(secret)
+	if tokenString == "" {
+		return "", errors.New("missing external user token")
+	}
+	if secret == "" {
+		return "", errors.New("external user token secret is not configured")
+	}
+	claims := jwt.MapClaims{}
+	parser := jwt.NewParser(jwt.WithAudience("weknora"), jwt.WithExpirationRequired())
+	token, err := parser.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(secret), nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if token == nil || !token.Valid {
+		return "", errors.New("invalid external user token")
+	}
+	if got := principalTenantIDFromClaims(claims); got != tenantID {
+		return "", fmt.Errorf("tenant mismatch: got %d want %d", got, tenantID)
+	}
+	sub, _ := claims["sub"].(string)
+	sub = strings.TrimSpace(sub)
+	if sub == "" {
+		return "", errors.New("missing subject")
+	}
+	return sub, nil
+}
+
+func principalTenantIDFromClaims(claims jwt.MapClaims) uint64 {
+	v, ok := claims["tenant_id"]
+	if !ok {
+		return 0
+	}
+	switch t := v.(type) {
+	case float64:
+		if t <= 0 {
+			return 0
+		}
+		return uint64(t)
+	case int64:
+		if t <= 0 {
+			return 0
+		}
+		return uint64(t)
+	case uint64:
+		return t
+	case json.Number:
+		n, err := strconv.ParseUint(t.String(), 10, 64)
+		if err != nil {
+			return 0
+		}
+		return n
+	case string:
+		n, err := strconv.ParseUint(strings.TrimSpace(t), 10, 64)
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
+		return 0
 	}
 }
 

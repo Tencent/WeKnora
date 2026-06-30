@@ -389,7 +389,7 @@ func (s *mcpServiceService) TestMCPService(
 	if service.AuthConfig.IsOAuth() {
 		config.OAuthRepo = s.oauthRepo
 		config.TenantID, _ = types.TenantIDFromContext(ctx)
-		config.UserID, _ = types.UserIDFromContext(ctx)
+		config.Principal, _ = types.PrincipalFromContext(ctx)
 	}
 
 	client, err := mcp.NewMCPClient(config)

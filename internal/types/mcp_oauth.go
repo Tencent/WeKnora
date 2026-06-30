@@ -68,23 +68,25 @@ func (m *MCPOAuthClient) encryptSecret() {
 	}
 }
 
-// MCPOAuthToken stores a per-user OAuth token for an MCP service. The agent
-// connects to the MCP server on behalf of the invoking user, so tokens are
-// isolated by (tenant_id, user_id, service_id).
+// MCPOAuthToken stores a per-principal OAuth token for an MCP service. The
+// agent connects to the MCP server on behalf of the invoking principal, so
+// tokens are isolated by (tenant_id, principal_type, principal_id, service_id).
 //
 // AccessToken and RefreshToken are encrypted at rest (AES-256-GCM) when
 // SYSTEM_AES_KEY is configured.
 type MCPOAuthToken struct {
-	ID           string    `json:"id"            gorm:"type:varchar(36);primaryKey"`
-	TenantID     uint64    `json:"tenant_id"     gorm:"not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_user_svc"`
-	UserID       string    `json:"user_id"       gorm:"type:varchar(64);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_user_svc;index"`
-	ServiceID    string    `json:"service_id"    gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_user_svc;index"`
-	AccessToken  string    `json:"-"             gorm:"type:text"`
-	RefreshToken string    `json:"-"             gorm:"type:text"`
-	TokenType    string    `json:"token_type"    gorm:"type:varchar(32)"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID            string    `json:"id"            gorm:"type:varchar(36);primaryKey"`
+	TenantID      uint64    `json:"tenant_id"     gorm:"not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc"`
+	UserID        string    `json:"user_id"       gorm:"type:varchar(512);not null;index"`
+	PrincipalType string    `json:"principal_type" gorm:"type:varchar(32);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"`
+	PrincipalID   string    `json:"principal_id"   gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"`
+	ServiceID     string    `json:"service_id"    gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_oauth_tokens_tenant_principal_svc;index"`
+	AccessToken   string    `json:"-"             gorm:"type:text"`
+	RefreshToken  string    `json:"-"             gorm:"type:text"`
+	TokenType     string    `json:"token_type"    gorm:"type:varchar(32)"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // TableName pins the table name (see MCPOAuthClient.TableName); the default

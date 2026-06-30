@@ -56,9 +56,25 @@ func (r *mcpOAuthRepository) DeleteClient(ctx context.Context, tenantID uint64, 
 func (r *mcpOAuthRepository) GetToken(
 	ctx context.Context, tenantID uint64, userID, serviceID string,
 ) (*types.MCPOAuthToken, error) {
+	return r.GetTokenForPrincipal(ctx, tenantID, types.Principal{
+		Type: types.PrincipalWebUser,
+		ID:   userID,
+	}, serviceID)
+}
+
+func (r *mcpOAuthRepository) GetTokenForPrincipal(
+	ctx context.Context, tenantID uint64, principal types.Principal, serviceID string,
+) (*types.MCPOAuthToken, error) {
+	principal = principal.Normalize()
+	if !principal.Valid() {
+		return nil, nil
+	}
 	var token types.MCPOAuthToken
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND user_id = ? AND service_id = ?", tenantID, userID, serviceID).
+		Where(
+			"tenant_id = ? AND principal_type = ? AND principal_id = ? AND service_id = ?",
+			tenantID, principal.Type, principal.ID, serviceID,
+		).
 		First(&token).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -70,12 +86,31 @@ func (r *mcpOAuthRepository) GetToken(
 }
 
 func (r *mcpOAuthRepository) SaveToken(ctx context.Context, token *types.MCPOAuthToken) error {
+	if token.PrincipalType == "" || token.PrincipalID == "" {
+		token.PrincipalType = types.PrincipalWebUser
+		token.PrincipalID = token.UserID
+	}
+	return r.SaveTokenForPrincipal(ctx, token)
+}
+
+func (r *mcpOAuthRepository) SaveTokenForPrincipal(ctx context.Context, token *types.MCPOAuthToken) error {
+	if token.PrincipalType == "" || token.PrincipalID == "" {
+		return nil
+	}
+	if token.UserID == "" {
+		token.UserID = (types.Principal{Type: token.PrincipalType, ID: token.PrincipalID}).StorageID()
+	}
 	token.UpdatedAt = time.Now()
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "tenant_id"}, {Name: "user_id"}, {Name: "service_id"}},
+			Columns: []clause.Column{
+				{Name: "tenant_id"},
+				{Name: "principal_type"},
+				{Name: "principal_id"},
+				{Name: "service_id"},
+			},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"access_token", "refresh_token", "token_type", "expires_at", "updated_at",
+				"user_id", "access_token", "refresh_token", "token_type", "expires_at", "updated_at",
 			}),
 		}).
 		Create(token).Error
@@ -84,7 +119,23 @@ func (r *mcpOAuthRepository) SaveToken(ctx context.Context, token *types.MCPOAut
 func (r *mcpOAuthRepository) DeleteToken(
 	ctx context.Context, tenantID uint64, userID, serviceID string,
 ) error {
+	return r.DeleteTokenForPrincipal(ctx, tenantID, types.Principal{
+		Type: types.PrincipalWebUser,
+		ID:   userID,
+	}, serviceID)
+}
+
+func (r *mcpOAuthRepository) DeleteTokenForPrincipal(
+	ctx context.Context, tenantID uint64, principal types.Principal, serviceID string,
+) error {
+	principal = principal.Normalize()
+	if !principal.Valid() {
+		return nil
+	}
 	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND user_id = ? AND service_id = ?", tenantID, userID, serviceID).
+		Where(
+			"tenant_id = ? AND principal_type = ? AND principal_id = ? AND service_id = ?",
+			tenantID, principal.Type, principal.ID, serviceID,
+		).
 		Delete(&types.MCPOAuthToken{}).Error
 }

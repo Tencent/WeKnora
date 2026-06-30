@@ -3,9 +3,9 @@ export const CHROME_EXTENSION_URL =
 
 export const CLAWHUB_SKILL_URL = 'https://clawhub.ai/lyingbug/weknora'
 
-export type IntegrationTab = 'im' | 'embed' | 'chrome' | 'claw'
+export type IntegrationTab = 'im' | 'embed' | 'api' | 'chrome' | 'claw'
 
-export const INTEGRATION_TABS: IntegrationTab[] = ['im', 'embed', 'chrome', 'claw']
+export const INTEGRATION_TABS: IntegrationTab[] = ['im', 'embed', 'api', 'chrome', 'claw']
 
 export type IntegrationPreviewIcon =
   | { type: 'icon'; name: string }
@@ -18,6 +18,7 @@ export const INTEGRATION_PREVIEW_ITEMS: Array<{
 }> = [
   { key: 'im', icon: { type: 'icon', name: 'chat-message' } },
   { key: 'embed', icon: { type: 'icon', name: 'code' } },
+  { key: 'api', icon: { type: 'icon', name: 'api' } },
   { key: 'chrome', icon: { type: 'icon', name: 'extension' } },
   { key: 'claw', icon: { type: 'emoji', value: '🦞' } },
 ]
