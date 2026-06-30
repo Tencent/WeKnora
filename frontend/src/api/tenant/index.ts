@@ -25,6 +25,7 @@ export interface APIPrincipalConfig {
   signed_token_header_name: string
   require_direct_header: boolean
   has_hmac_secret: boolean
+  hmac_secret?: string
 }
 
 export interface UpdateAPIPrincipalConfigPayload {
@@ -33,6 +34,19 @@ export interface UpdateAPIPrincipalConfigPayload {
   signed_token_header_name?: string
   require_direct_header?: boolean
   hmac_secret?: string
+}
+
+export interface CreateAPIPrincipalTestTokenPayload {
+  external_user_id: string
+  expires_in_seconds?: number
+}
+
+export interface APIPrincipalTestToken {
+  token: string
+  header_name: string
+  expires_in_seconds: number
+  expires_at_unix: number
+  external_user_id: string
 }
 
 // 搜索租户参数
@@ -113,6 +127,21 @@ export async function updateAPIPrincipalConfig(
     return {
       success: false,
       message: error.message || t('error.tenant.updateApiPrincipalConfigFailed'),
+    }
+  }
+}
+
+export async function createAPIPrincipalTestToken(
+  tenantId: number,
+  payload: CreateAPIPrincipalTestTokenPayload,
+): Promise<{ success: boolean; data?: APIPrincipalTestToken; message?: string }> {
+  try {
+    const response = await post(`/api/v1/tenants/${tenantId}/api-principal-test-token`, payload)
+    return response as unknown as { success: boolean; data?: APIPrincipalTestToken; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.createApiPrincipalTestTokenFailed'),
     }
   }
 }
