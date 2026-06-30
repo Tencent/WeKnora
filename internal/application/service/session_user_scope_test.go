@@ -20,6 +20,15 @@ func testSessionScopeContext(tenantID uint64, userID string) context.Context {
 	return ctx
 }
 
+func testAPISessionScopeContext(tenantID uint64, externalUserID string) context.Context {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "system-7")
+	return types.WithPrincipal(ctx, types.Principal{
+		Type: types.PrincipalAPIExternalUser,
+		ID:   externalUserID,
+	})
+}
+
 func newTestSessionService(t *testing.T) (*sessionService, *gorm.DB) {
 	t.Helper()
 
@@ -94,4 +103,40 @@ func TestUpdateSessionIsScopedToCurrentUserAndAllowsNoOp(t *testing.T) {
 		Description: aliceSession.Description,
 	})
 	require.NoError(t, err)
+}
+
+func TestGetSessionIsScopedToAPIExternalUser(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	aliceSession := &types.Session{
+		TenantID: 1,
+		UserID:   "api_external_user:7:alice",
+		Title:    "alice api session",
+	}
+	require.NoError(t, db.Create(aliceSession).Error)
+	bobSession := &types.Session{
+		TenantID: 1,
+		UserID:   "api_external_user:7:bob",
+		Title:    "bob api session",
+	}
+	require.NoError(t, db.Create(bobSession).Error)
+	tenantSession := &types.Session{
+		TenantID: 1,
+		UserID:   "system-7",
+		Title:    "tenant api session",
+	}
+	require.NoError(t, db.Create(tenantSession).Error)
+
+	_, err := svc.GetSession(testAPISessionScopeContext(1, "7:alice"), bobSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+
+	got, err := svc.GetSession(testAPISessionScopeContext(1, "7:alice"), aliceSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, aliceSession.ID, got.ID)
+
+	_, err = svc.GetSession(testAPISessionScopeContext(1, "7:alice"), tenantSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+
+	got, err = svc.GetSession(testSessionScopeContext(1, "system-7"), tenantSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, tenantSession.ID, got.ID)
 }

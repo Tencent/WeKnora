@@ -99,8 +99,8 @@ func (s *sessionService) KnowledgeQA(
 		len(searchTargets),
 	)
 
-	// Get UserID from context
-	userID, _ := types.UserIDFromContext(ctx)
+	// Scope memory and pipeline attribution to the same owner as the session.
+	userID := types.SessionOwnerIDFromContext(ctx)
 
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
@@ -734,7 +734,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Create default retrieval parameters — prefer tenant RetrievalConfig, fallback to built-in defaults
-	userID, _ := types.UserIDFromContext(ctx)
+	userID := types.SessionOwnerIDFromContext(ctx)
 
 	// Load tenant-level retrieval config (nil is safe — GetEffective* methods handle nil receiver)
 	var rc *types.RetrievalConfig

@@ -1,10 +1,12 @@
 package logger
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
 )
 
@@ -162,5 +164,16 @@ func TestLevelColorFor(t *testing.T) {
 		if got := levelColorFor(lvl); got != want {
 			t.Errorf("levelColorFor(%v) = %q, want %q", lvl, got, want)
 		}
+	}
+}
+
+func TestCloneContextPreservesPrincipal(t *testing.T) {
+	t.Parallel()
+
+	ctx := types.WithPrincipal(context.Background(), types.EmbedSessionPrincipal(10000, "ch1", "sess1"))
+	cloned := CloneContext(ctx)
+
+	if got := types.SessionOwnerIDFromContext(cloned); got != "embed_session:10000:ch1:sess1" {
+		t.Fatalf("SessionOwnerIDFromContext(cloned) = %q", got)
 	}
 }

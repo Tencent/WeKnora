@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     agent_config TEXT DEFAULT NULL,
     context_config TEXT DEFAULT NULL,
     agent_id VARCHAR(36),
-    user_id VARCHAR(36),
+    user_id VARCHAR(512),
     is_pinned BOOLEAN NOT NULL DEFAULT 0,
     pinned_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
