@@ -257,10 +257,17 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
-import { INTEGRATION_PREVIEW_ITEMS } from '@/config/integrations';
+import { INTEGRATION_PREVIEW_ITEMS, INTEGRATION_TAB_MIN_ROLE } from '@/config/integrations';
 
 const chatResources = useChatResourcesStore();
-const integrationPreviewItems = INTEGRATION_PREVIEW_ITEMS;
+const integrationPreviewItems = computed(() =>
+    INTEGRATION_PREVIEW_ITEMS.filter((item) => {
+        const min = INTEGRATION_TAB_MIN_ROLE[item.key];
+        if (!min) return true;
+        if (authStore.canAccessAllTenants) return true;
+        return authStore.hasRole(min);
+    }),
+);
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
 // visually consistent with the channels admin view.
 import wecomLogo from '@/assets/img/im/wecom.svg';
