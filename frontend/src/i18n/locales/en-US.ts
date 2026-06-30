@@ -5739,13 +5739,13 @@ export default {
     tabs: {
       im: 'IM Integration',
       embed: 'Web Embed',
-      api: 'API Key',
+      api: 'API Integration',
       chrome: 'Chrome Extension',
       claw: 'Claw Skill',
     },
     api: {
-      title: 'API Key Integration',
-      subtitle: 'Use the tenant API key for server-side integrations, and choose how API requests identify the terminal user.',
+      title: 'API Integration',
+      subtitle: 'Integrate via REST API and configure how requests identify end users.',
       loading: 'Loading API integration settings...',
       retry: 'Retry',
       copy: 'Copy',
@@ -5757,9 +5757,9 @@ export default {
       apiKeyDesc: 'The API key is still tenant-level. User identity is supplied by the principal mode below.',
       principalMode: 'User identity mode',
       principalModeDesc:
-        'Controls how X-API-Key requests map to a principal. Today this principal only isolates MCP OAuth and related flows; it does not reduce the tenant-admin API scope of the API key.',
+        'Choose how API requests identify the end user. This identity scopes both conversation sessions and MCP tool authorization per user, without reducing the API key\'s tenant-admin access.',
       principalScope:
-        'Principal isolation applies to MCP OAuth tokens and in-chat MCP authorization only. The API key still has tenant-admin API access; knowledge bases, sessions, and other resources are not isolated per external user.',
+        'End-user identity isolates conversation sessions and MCP tool authorization (OAuth) per user. The API key can still access all knowledge bases in the tenant; API permissions are not split per external user.',
       modeTenant: 'Tenant only',
       modeDirect: 'Direct user ID',
       modeSigned: 'Signed token',
@@ -5767,13 +5767,25 @@ export default {
       directWarningDetail:
         'Anyone with the API key can change the user ID header to impersonate another external user and reuse or hijack that user\'s MCP OAuth authorization. Do not use this from browsers or untrusted clients; use Signed token for end-user apps.',
       signedRecommended: 'Recommended for user-facing apps: your backend signs a short-lived HS256 JWT for the external user.',
+      signedFlowDetail:
+        'Keep the HMAC secret only on WeKnora and your trusted backend—never put it in requests or ship it to browsers. The request header carries the JWT string signed with that secret (it changes on each issuance or after expiry), not the secret itself. JWT must include sub (external user ID), tenant_id, aud=weknora, and exp (max 24h lifetime).',
       directHeader: 'User ID header',
       requireDirectHeader: 'Require user ID header',
-      requireDirectHeaderDesc: 'When enabled, API Key requests without the user ID header are rejected; when disabled they fall back to the tenant principal.',
+      requireDirectHeaderDesc:
+        'When enabled, API Key requests without the user ID header are rejected; when disabled, all requests are treated as the whole tenant with no per-user distinction.',
       tokenHeader: 'Token header',
+      tokenHeaderDesc: 'Clients send the backend-signed JWT; header name is configurable.',
       hmacSecret: 'HMAC secret',
+      hmacSecretDesc: 'Same secret stored in WeKnora; used only on your backend to sign JWTs—never send it as a request header.',
       secretConfigured: 'Secret configured; enter a new value to rotate',
       generateSecret: 'Generate secret',
+      tokenSignExample: 'Backend JWT signing example (Go)',
+      signedRequestStep0:
+        '# 0. Sign JWT on your backend (HS256, aud=weknora, sub=user id, tenant_id={tenantId}, exp<=24h)',
+      signedRequestStep0Hint: '#    Put the JWT in {headerName} — not the HMAC secret',
+      requestExampleCreateSession: '# 1. Create a session',
+      requestExampleAgentChat: '# 2. Agent chat (SSE; replace <session_id> with the id from step 1)',
+      requestExampleJwtPlaceholder: '<JWT signed by your backend>',
       requestExample: 'Request example',
       loadFailed: 'Failed to load API integration settings',
       saveFailed: 'Failed to save API integration settings',

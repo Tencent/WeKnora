@@ -7,6 +7,7 @@ import {
   exchangeEmbedSession,
   getEmbedConfig,
   getEmbedMessageList,
+  getOrCreateEmbedVisitorId,
   isEmbedSessionToken,
   onEmbedHostContext,
   onEmbedHostLocale,
@@ -85,6 +86,7 @@ export function useEmbedBridge(channelId: Ref<string>) {
   const config = ref<EmbedChannelPublicConfig | null>(null)
   const sessionId = ref('')
   const sessionSig = ref('')
+  const visitorId = ref('')
   const loadError = ref('')
   const awaitingToken = ref(false)
   const bootstrapping = ref(false)
@@ -109,6 +111,7 @@ export function useEmbedBridge(channelId: Ref<string>) {
     awaitingToken.value = false
     bootstrapping.value = true
     token.value = embedToken
+    visitorId.value = getOrCreateEmbedVisitorId(id)
 
     try {
       let apiToken = embedToken
@@ -254,6 +257,7 @@ export function useEmbedBridge(channelId: Ref<string>) {
     config,
     sessionId,
     sessionSig,
+    visitorId,
     loadError,
     awaitingToken,
     bootstrapping,

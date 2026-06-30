@@ -57,7 +57,13 @@
                   <AgentEmbedChannelPanel v-model:filter-agent-id="filterAgentId" />
                 </div>
 
-                <ApiIntegrationSettings v-if="currentSection === 'api'" />
+                <div v-if="currentSection === 'api'" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('integrations.api.title') }}</h2>
+                    <p class="section-description">{{ $t('integrations.api.subtitle') }}</p>
+                  </div>
+                  <ApiIntegrationSettings />
+                </div>
                 <ChromeExtensionLanding v-if="currentSection === 'chrome'" />
                 <ClawSkillLanding v-if="currentSection === 'claw'" />
               </div>
@@ -212,7 +218,6 @@ watch(
   padding: 24px 28px 28px;
 
   &--landing {
-    padding-top: 44px;
     padding-right: 52px;
     padding-bottom: 20px;
   }
