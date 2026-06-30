@@ -5769,11 +5769,15 @@ export default {
       apiKey: "租户 API Key",
       apiKeyDesc: "API Key 仍按租户级管理；终端用户身份由下方模式提供。",
       principalMode: "用户身份模式",
-      principalModeDesc: "决定 X-API-Key 请求如何映射为 Principal，用于 OAuth MCP token 和其他按用户隔离的能力。",
+      principalModeDesc: "决定 X-API-Key 请求如何映射为 Principal。当前 Principal 仅用于按用户隔离 MCP OAuth 等能力，不会缩小 API Key 的租户管理员权限。",
+      principalScope:
+        "Principal 仅隔离 MCP OAuth 令牌与对话内 MCP 授权；API Key 仍拥有租户内管理员级 API 权限，知识库、会话等资源不会按外部用户隔离。",
       modeTenant: "仅租户",
       modeDirect: "直接传用户 ID",
       modeSigned: "签名 Token",
-      directWarning: "直接传用户 ID 会信任调用方请求头，仅建议用于可信服务端到服务端调用。",
+      directWarning: "直接传用户 ID 会信任调用方请求头，仅适用于可信服务端到服务端调用。",
+      directWarningDetail:
+        "任何持有 API Key 的调用方都可以通过修改用户 ID 请求头冒充其他外部用户，从而共用或劫持其 MCP OAuth 授权。请勿用于浏览器或不可信客户端；面向终端用户请使用「签名 Token」。",
       signedRecommended: "推荐给面向用户的应用：业务方后端为外部用户签发短期 HS256 JWT。",
       directHeader: "用户 ID 请求头",
       requireDirectHeader: "必须携带用户 ID",

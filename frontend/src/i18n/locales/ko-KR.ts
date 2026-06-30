@@ -5767,11 +5767,16 @@ export default {
       apiKey: "테넌트 API Key",
       apiKeyDesc: "API Key는 계속 테넌트 단위입니다. 사용자 ID는 아래 모드로 전달합니다.",
       principalMode: "사용자 ID 모드",
-      principalModeDesc: "X-API-Key 요청을 Principal로 매핑하는 방식입니다. OAuth MCP 토큰 및 사용자별 기능에 사용됩니다.",
+      principalModeDesc:
+        "X-API-Key 요청을 Principal로 매핑하는 방식입니다. 현재 Principal은 MCP OAuth 등 사용자별 기능만 분리하며, API Key의 테넌트 관리자 권한은 줄이지 않습니다.",
+      principalScope:
+        "Principal 분리는 MCP OAuth 토큰과 대화 내 MCP 인증에만 적용됩니다. API Key는 여전히 테넌트 관리자 API 권한을 가지며, 지식베이스·세션 등은 외부 사용자별로 분리되지 않습니다.",
       modeTenant: "테넌트만",
       modeDirect: "사용자 ID 직접 전달",
       modeSigned: "서명 토큰",
       directWarning: "직접 사용자 ID 모드는 요청 헤더를 신뢰합니다. 신뢰된 서버 간 호출에만 사용하세요.",
+      directWarningDetail:
+        "API Key를 가진 호출자는 사용자 ID 헤더를 바꿔 다른 외부 사용자를 가장하고 해당 사용자의 MCP OAuth 인증을 공유하거나 탈취할 수 있습니다. 브라우저나 신뢰할 수 없는 클라이언트에는 사용하지 마세요. 최종 사용자 앱에는 서명 토큰을 사용하세요.",
       signedRecommended: "사용자 대상 앱에는 권장됩니다. 비즈니스 백엔드가 외부 사용자용 단기 HS256 JWT를 서명합니다.",
       directHeader: "사용자 ID 헤더",
       requireDirectHeader: "사용자 ID 헤더 필수",

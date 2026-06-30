@@ -55,6 +55,8 @@
             <p>{{ $t('integrations.api.principalModeDesc') }}</p>
           </div>
           <div class="mode-panel">
+            <t-alert theme="info" :message="$t('integrations.api.principalScope')" />
+
             <t-radio-group v-model="form.mode">
               <t-radio-button value="tenant">{{ $t('integrations.api.modeTenant') }}</t-radio-button>
               <t-radio-button value="direct_header">{{ $t('integrations.api.modeDirect') }}</t-radio-button>
@@ -64,8 +66,10 @@
             <t-alert
               v-if="form.mode === 'direct_header'"
               theme="warning"
-              :message="$t('integrations.api.directWarning')"
-            />
+            >
+              <template #message>{{ $t('integrations.api.directWarning') }}</template>
+              {{ $t('integrations.api.directWarningDetail') }}
+            </t-alert>
             <t-alert
               v-if="form.mode === 'signed_token'"
               theme="success"
