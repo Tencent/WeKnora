@@ -356,6 +356,29 @@ curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-k
 }
 ```
 
+## API Key Principal：隔离边界与安全说明
+
+`api-principal-config` 控制 `X-API-Key` 请求如何映射为终端 **Principal**。请先理解以下边界，再选择模式。
+
+### Principal 隔离范围（当前实现）
+
+Principal **仅**用于按终端用户隔离以下能力：
+
+- **MCP OAuth** 访问令牌（同一租户下不同外部用户各自授权，token 互不共用）
+- 对话内 MCP OAuth 提示、MCP 工具审批等与 Principal 绑定的流程
+
+Principal **不会**缩小 API Key 的 API 权限：`X-API-Key` 认证仍授予租户内 **Admin** 角色，知识库、会话、Agent 等接口**不按**外部用户做 RBAC 隔离。若需要全链路 per-user 权限控制，须在业务侧自行鉴权，不能仅依赖本配置。
+
+### 模式与安全假设
+
+| mode | 适用场景 | 安全假设 |
+| ---- | -------- | -------- |
+| `tenant` | 无 per-user MCP 需求 | 全租户共用一个 MCP OAuth 身份 |
+| `direct_header` | 仅可信服务端到服务端 | 用户 ID 来自调用方请求头，**可被持有 API Key 的任意调用方伪造**（冒充其他外部用户并共用/劫持其 MCP OAuth 授权）。面向终端用户或不可信客户端时**禁止**使用；若必须使用，请开启 `require_direct_header` 并确保 API Key 仅保存在可信后端 |
+| `signed_token` | 面向终端用户的集成（**推荐**） | 由业务后端使用 `hmac_secret` 为外部用户签发短期 HS256 JWT；无效或缺失 token 返回 401，**不回退**为租户级 Principal |
+
+`direct_header` 模式下，若未携带用户 ID 请求头：`require_direct_header=false` 时回退为租户级 Principal；`require_direct_header=true` 时返回 401。
+
 ## GET `/tenants/:id/api-principal-config` - 获取 API Key 用户身份配置
 
 返回租户级 API Key 请求如何映射为终端 Principal 的配置。**需要 Owner 权限**。

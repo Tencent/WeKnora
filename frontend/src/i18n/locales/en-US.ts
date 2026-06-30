@@ -5756,11 +5756,16 @@ export default {
       apiKey: 'Tenant API Key',
       apiKeyDesc: 'The API key is still tenant-level. User identity is supplied by the principal mode below.',
       principalMode: 'User identity mode',
-      principalModeDesc: 'Controls how X-API-Key requests map to a principal for OAuth MCP tokens and other per-user features.',
+      principalModeDesc:
+        'Controls how X-API-Key requests map to a principal. Today this principal only isolates MCP OAuth and related flows; it does not reduce the tenant-admin API scope of the API key.',
+      principalScope:
+        'Principal isolation applies to MCP OAuth tokens and in-chat MCP authorization only. The API key still has tenant-admin API access; knowledge bases, sessions, and other resources are not isolated per external user.',
       modeTenant: 'Tenant only',
       modeDirect: 'Direct user ID',
       modeSigned: 'Signed token',
       directWarning: 'Direct user ID trusts the caller-supplied header. Use only for trusted server-to-server calls.',
+      directWarningDetail:
+        'Anyone with the API key can change the user ID header to impersonate another external user and reuse or hijack that user\'s MCP OAuth authorization. Do not use this from browsers or untrusted clients; use Signed token for end-user apps.',
       signedRecommended: 'Recommended for user-facing apps: your backend signs a short-lived HS256 JWT for the external user.',
       directHeader: 'User ID header',
       requireDirectHeader: 'Require user ID header',
