@@ -4,10 +4,6 @@
     :subtitle="$t('integrations.claw.subtitle')"
     variant="claw"
   >
-    <template #icon>
-      <span role="img" :aria-label="$t('common.clawhubSkill')">🦞</span>
-    </template>
-
     <template #actions>
       <IntegrationExternalCta
         variant="claw"
