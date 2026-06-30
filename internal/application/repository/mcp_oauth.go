@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -95,7 +96,7 @@ func (r *mcpOAuthRepository) SaveToken(ctx context.Context, token *types.MCPOAut
 
 func (r *mcpOAuthRepository) SaveTokenForPrincipal(ctx context.Context, token *types.MCPOAuthToken) error {
 	if token.PrincipalType == "" || token.PrincipalID == "" {
-		return nil
+		return fmt.Errorf("mcp oauth token requires principal_type and principal_id")
 	}
 	if token.UserID == "" {
 		token.UserID = (types.Principal{Type: token.PrincipalType, ID: token.PrincipalID}).StorageID()

@@ -205,6 +205,16 @@ definitions:
       tier:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
     type: object
+  github_com_Tencent_WeKnora_internal_types.APIPrincipalMode:
+    enum:
+    - tenant
+    - direct_header
+    - signed_token
+    type: string
+    x-enum-varnames:
+    - APIPrincipalModeTenant
+    - APIPrincipalModeDirect
+    - APIPrincipalModeSignedToken
   github_com_Tencent_WeKnora_internal_types.ASRConfig:
     properties:
       enabled:
@@ -1674,6 +1684,15 @@ definitions:
     properties:
       api_key:
         type: string
+      api_key_header:
+        description: |-
+          APIKeyHeader is the header name that carries APIKey when AuthType is
+          api_key. Empty defaults to "X-API-Key". This is non-secret structural
+          config (the secret is APIKey), so it is not encrypted and is safe to echo
+          back in responses. It lets services that expect the key in a different
+          header (e.g. the raw token directly in "Authorization") work without
+          resorting to plaintext custom headers.
+        type: string
       auth_server_metadata_url:
         description: |-
           AuthServerMetadataURL optionally pins the OAuth authorization server
@@ -1859,13 +1878,25 @@ definitions:
     properties:
       id:
         type: string
+      kb_id:
+        description: Parent knowledge base for file/tag mentions
+        type: string
+      kb_name:
+        description: Display name for parent KB
+        type: string
       kb_type:
         description: '"document" or "faq" (only for kb type)'
         type: string
       name:
         type: string
+      service_id:
+        description: Parent MCP service for MCP tool mentions
+        type: string
+      skill_name:
+        description: Preloaded agent skill name
+        type: string
       type:
-        description: '"kb" for knowledge base, "file" for file'
+        description: '"kb", "file", "tag", "mcp", "skill"'
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.Message:
@@ -2774,8 +2805,24 @@ definitions:
         items:
           type: string
         type: array
+      mcp_service_ids:
+        items:
+          type: string
+        type: array
+      mentioned_items:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem'
+        type: array
       model_id:
         type: string
+      skill_names:
+        items:
+          type: string
+        type: array
+      tag_ids:
+        items:
+          type: string
+        type: array
       web_search_enabled:
         type: boolean
     type: object
@@ -4746,6 +4793,19 @@ definitions:
     required:
     - similar_questions
     type: object
+  internal_handler.apiPrincipalConfigRequest:
+    properties:
+      direct_header_name:
+        type: string
+      hmac_secret:
+        type: string
+      mode:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.APIPrincipalMode'
+      require_direct_header:
+        type: boolean
+      signed_token_header_name:
+        type: string
+    type: object
   internal_handler.auditLogListResponse:
     properties:
       data:
@@ -4937,6 +4997,11 @@ definitions:
         items:
           type: string
         type: array
+      mcp_service_ids:
+        description: Per-request MCP services selected via @mention
+        items:
+          type: string
+        type: array
       mentioned_items:
         description: '@mentioned knowledge bases and files'
         items:
@@ -4945,10 +5010,20 @@ definitions:
       query:
         description: Query text for knowledge base search
         type: string
+      skill_names:
+        description: Per-request Skills selected via @mention
+        items:
+          type: string
+        type: array
       summary_model_id:
         description: Optional summary model ID for this request (overrides session
           default)
         type: string
+      tag_ids:
+        description: '@mentioned tag IDs (display/debug; scoped via MentionedItems)'
+        items:
+          type: string
+        type: array
       web_search_enabled:
         description: Whether web search is enabled for this request
         type: boolean
@@ -4990,13 +5065,25 @@ definitions:
     properties:
       id:
         type: string
+      kb_id:
+        description: Parent knowledge base for file/tag mentions
+        type: string
+      kb_name:
+        description: Display name for parent KB
+        type: string
       kb_type:
         description: '"document" or "faq" (only for kb type)'
         type: string
       name:
         type: string
+      service_id:
+        description: Parent MCP service for MCP tool mentions
+        type: string
+      skill_name:
+        description: Preloaded agent skill name
+        type: string
       type:
-        description: '"kb" for knowledge base, "file" for file'
+        description: '"kb", "file", "tag", "mcp", "skill"'
         type: string
     type: object
   internal_handler_session.SearchKnowledgeRequest:
@@ -5045,6 +5132,71 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /agent/mcp-oauth-resolutions/{pending_id}:
+    post:
+      consumes:
+      - application/json
+      description: 用户在对话中完成 OAuth 授权后调用，校验令牌存在后恢复被暂停的 Agent 工具调用
+      parameters:
+      - description: 待授权 ID
+        in: path
+        name: pending_id
+        required: true
+        type: string
+      - description: '{service_id: string}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 用户尚未完成授权
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 完成对话内 MCP OAuth 授权
+      tags:
+      - MCP服务
+  /agent/mcp-oauth-resolutions/{pending_id}/cancel:
+    post:
+      description: 用户主动跳过 OAuth 授权，解除 Agent 阻塞
+      parameters:
+      - description: 待授权 ID
+        in: path
+        name: pending_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 跳过对话内 MCP OAuth 授权
+      tags:
+      - MCP服务
   /agent/tool-approvals/{pending_id}:
     post:
       consumes:
@@ -12463,6 +12615,75 @@ paths:
       security:
       - Bearer: []
       summary: 重置租户 API Key
+      tags:
+      - 租户管理
+  /tenants/{id}/api-principal-config:
+    get:
+      consumes:
+      - application/json
+      description: 返回 X-API-Key 请求如何映射为终端 Principal 的配置（Owner）
+      parameters:
+      - description: 租户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: API principal 配置
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 获取租户 API Key 用户身份配置
+      tags:
+      - 租户管理
+    put:
+      consumes:
+      - application/json
+      description: 配置 X-API-Key 请求如何映射为终端 Principal（Owner）
+      parameters:
+      - description: 租户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: API principal 配置
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.apiPrincipalConfigRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的配置
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 更新租户 API Key 用户身份配置
       tags:
       - 租户管理
   /tenants/{id}/audit-log:

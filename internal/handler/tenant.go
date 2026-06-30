@@ -100,6 +100,7 @@ type apiPrincipalConfigRequest struct {
 	Mode                  types.APIPrincipalMode `json:"mode"`
 	DirectHeaderName      string                 `json:"direct_header_name"`
 	SignedTokenHeaderName string                 `json:"signed_token_header_name"`
+	RequireDirectHeader   bool                   `json:"require_direct_header"`
 	HMACSecret            *string                `json:"hmac_secret"`
 }
 
@@ -107,6 +108,7 @@ type apiPrincipalConfigResponse struct {
 	Mode                  types.APIPrincipalMode `json:"mode"`
 	DirectHeaderName      string                 `json:"direct_header_name"`
 	SignedTokenHeaderName string                 `json:"signed_token_header_name"`
+	RequireDirectHeader   bool                   `json:"require_direct_header"`
 	HasHMACSecret         bool                   `json:"has_hmac_secret"`
 }
 
@@ -549,11 +551,23 @@ func apiPrincipalConfigForResponse(cfg *types.APIPrincipalConfig) apiPrincipalCo
 		Mode:                  mode,
 		DirectHeaderName:      directHeader,
 		SignedTokenHeaderName: tokenHeader,
+		RequireDirectHeader:   cfg.RequireDirectHeader,
 		HasHMACSecret:         strings.TrimSpace(cfg.HMACSecret) != "",
 	}
 }
 
-// GetAPIPrincipalConfig returns the tenant API-key principal mapping config.
+// GetAPIPrincipalConfig godoc
+// @Summary      获取租户 API Key 用户身份配置
+// @Description  返回 X-API-Key 请求如何映射为终端 Principal 的配置（Owner）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "租户ID"
+// @Success      200  {object}  map[string]interface{}  "API principal 配置"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      403  {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Router       /tenants/{id}/api-principal-config [get]
 func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -576,7 +590,19 @@ func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
 	})
 }
 
-// UpdateAPIPrincipalConfig updates how tenant API-key requests resolve principals.
+// UpdateAPIPrincipalConfig godoc
+// @Summary      更新租户 API Key 用户身份配置
+// @Description  配置 X-API-Key 请求如何映射为终端 Principal（Owner）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                           true  "租户ID"
+// @Param        request  body      handler.apiPrincipalConfigRequest  true  "API principal 配置"
+// @Success      200      {object}  map[string]interface{}        "更新后的配置"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Router       /tenants/{id}/api-principal-config [put]
 func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -621,6 +647,7 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 		Mode:                  req.Mode,
 		DirectHeaderName:      strings.TrimSpace(req.DirectHeaderName),
 		SignedTokenHeaderName: strings.TrimSpace(req.SignedTokenHeaderName),
+		RequireDirectHeader:   req.RequireDirectHeader,
 		HMACSecret:            hmacSecret,
 	}
 	if cfg.DirectHeaderName == "" {

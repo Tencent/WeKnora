@@ -16,6 +16,8 @@
 | PUT    | `/tenants/:id`             | 更新租户信息                                      |
 | DELETE | `/tenants/:id`             | 删除租户                                          |
 | POST   | `/tenants/:id/api-key`     | 重置租户 API Key                                  |
+| GET    | `/tenants/:id/api-principal-config` | 获取 API Key 用户身份配置（Owner）          |
+| PUT    | `/tenants/:id/api-principal-config` | 更新 API Key 用户身份配置（Owner）          |
 | GET    | `/tenants`                 | 获取当前用户可见的租户列表                        |
 | GET    | `/tenants/kv/:key`         | 获取当前租户的 KV 配置（tenant 由认证上下文确定） |
 | PUT    | `/tenants/kv/:key`         | 更新当前租户的 KV 配置（tenant 由认证上下文确定） |
@@ -352,6 +354,73 @@ curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-k
     },
     "success": true
 }
+```
+
+## GET `/tenants/:id/api-principal-config` - 获取 API Key 用户身份配置
+
+返回租户级 API Key 请求如何映射为终端 Principal 的配置。**需要 Owner 权限**。
+
+**响应字段**:
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| mode | string | `tenant` / `direct_header` / `signed_token` |
+| direct_header_name | string | 直接传用户 ID 时的请求头名，默认 `X-External-User-ID` |
+| signed_token_header_name | string | 签名 token 模式请求头名，默认 `X-External-User-Token` |
+| require_direct_header | bool | `direct_header` 模式下是否强制要求用户 ID 请求头 |
+| has_hmac_secret | bool | 是否已配置 HMAC secret（不返回明文） |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/tenants/10000/api-principal-config' \
+--header 'Authorization: Bearer <token>'
+```
+
+**响应**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "mode": "signed_token",
+    "direct_header_name": "X-External-User-ID",
+    "signed_token_header_name": "X-External-User-Token",
+    "require_direct_header": false,
+    "has_hmac_secret": true
+  }
+}
+```
+
+## PUT `/tenants/:id/api-principal-config` - 更新 API Key 用户身份配置
+
+更新 API Key 请求的 Principal 映射方式。**需要 Owner 权限**。
+
+**请求体**:
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| mode | string | 必填，`tenant` / `direct_header` / `signed_token` |
+| direct_header_name | string | 可选 |
+| signed_token_header_name | string | 可选 |
+| require_direct_header | bool | 可选，`direct_header` 模式下缺 header 是否 401 |
+| hmac_secret | string | 可选，`signed_token` 模式 HMAC 密钥；省略则保留现有值 |
+
+`signed_token` 模式首次启用时必须提供 `hmac_secret`。
+
+外部用户 JWT 要求：HS256 签名、`aud=weknora`、包含 `sub` 与 `tenant_id`、有效期不超过 24 小时。
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/tenants/10000/api-principal-config' \
+--header 'Authorization: Bearer <token>' \
+--header 'Content-Type: application/json' \
+--data '{
+  "mode": "direct_header",
+  "direct_header_name": "X-External-User-ID",
+  "require_direct_header": true
+}'
 ```
 
 ## GET `/tenants` - 获取租户列表

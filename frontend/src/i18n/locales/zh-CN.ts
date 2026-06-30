@@ -5776,6 +5776,8 @@ export default {
       directWarning: "直接传用户 ID 会信任调用方请求头，仅建议用于可信服务端到服务端调用。",
       signedRecommended: "推荐给面向用户的应用：业务方后端为外部用户签发短期 HS256 JWT。",
       directHeader: "用户 ID 请求头",
+      requireDirectHeader: "必须携带用户 ID",
+      requireDirectHeaderDesc: "开启后，缺少用户 ID 请求头的 API Key 请求将被拒绝；关闭则回退为租户级 Principal。",
       tokenHeader: "Token 请求头",
       hmacSecret: "HMAC 密钥",
       secretConfigured: "已配置密钥；输入新值可轮换",

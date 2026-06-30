@@ -23,6 +23,7 @@ export interface APIPrincipalConfig {
   mode: APIPrincipalMode
   direct_header_name: string
   signed_token_header_name: string
+  require_direct_header: boolean
   has_hmac_secret: boolean
 }
 
@@ -30,6 +31,7 @@ export interface UpdateAPIPrincipalConfigPayload {
   mode: APIPrincipalMode
   direct_header_name?: string
   signed_token_header_name?: string
+  require_direct_header?: boolean
   hmac_secret?: string
 }
 
