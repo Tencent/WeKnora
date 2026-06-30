@@ -27,6 +27,10 @@ import (
 // release before the next worker tries to acquire it; otherwise we'd
 // just bounce on ErrWikiIngestConcurrent and burn an asynq retry slot.
 func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIngestPayload) bool {
+	// Detach from the task context. asynq cancels the task ctx when a batch hits
+	// its Timeout; without this the follow-up enqueue below fails on the cancelled
+	// ctx and the self-chain stops, stranding the rest of the pending queue.
+	ctx = context.WithoutCancel(ctx)
 	if s.pendingRepo == nil {
 		return false
 	}
