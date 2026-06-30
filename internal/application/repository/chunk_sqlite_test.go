@@ -197,6 +197,59 @@ func TestCreateChunks_SQLite_SeqIDAfterSoftDelete(t *testing.T) {
 	assert.Equal(t, int64(5), saved[1].SeqID)
 }
 
+// TestPurgeSoftDeletedByKnowledgeID_AllowsStableIDReinsert reproduces the
+// content-addressed-ID reparse conflict (#1679) and verifies the purge fixes it:
+// re-parsing unchanged content yields the same primary key as a row the reparse
+// cleanup just soft-deleted, so the recreate INSERT conflicts unless the
+// soft-deleted row is hard-purged first.
+func TestPurgeSoftDeletedByKnowledgeID_AllowsStableIDReinsert(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	const stableID = "content-addressed-stable-id"
+
+	makeStable := func() *types.Chunk {
+		return &types.Chunk{
+			ID:              stableID,
+			TenantID:        1,
+			KnowledgeBaseID: kbID,
+			KnowledgeID:     knowledgeID,
+			Content:         "unchanged content",
+			ChunkType:       types.ChunkTypeText,
+			IsEnabled:       true,
+		}
+	}
+
+	// First parse: insert a chunk with a deterministic ID.
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{makeStable()}))
+
+	// Reparse cleanup soft-deletes all chunks of the knowledge.
+	require.NoError(t, repo.DeleteChunksByKnowledgeID(ctx, 1, knowledgeID))
+
+	// The bug: re-inserting the SAME id now conflicts with the soft-deleted row.
+	require.Error(t, repo.CreateChunks(ctx, []*types.Chunk{makeStable()}),
+		"re-inserting a soft-deleted stable ID should conflict without purge")
+
+	// The fix: purge the soft-deleted row, then the re-insert succeeds.
+	require.NoError(t, repo.PurgeSoftDeletedByKnowledgeID(ctx, 1, knowledgeID))
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{makeStable()}),
+		"after purge the stable ID can be re-inserted")
+
+	// Exactly one live row with the stable ID remains.
+	var saved []types.Chunk
+	require.NoError(t, db.Where("id = ?", stableID).Find(&saved).Error)
+	assert.Len(t, saved, 1)
+	assert.Equal(t, "unchanged content", saved[0].Content)
+
+	// And the purge only touches soft-deleted rows: a no-op purge leaves it intact.
+	require.NoError(t, repo.PurgeSoftDeletedByKnowledgeID(ctx, 1, knowledgeID))
+	require.NoError(t, db.Where("id = ?", stableID).Find(&saved).Error)
+	assert.Len(t, saved, 1, "purge must not delete the live row")
+}
+
 func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	db := setupChunkTestDB(t)
 	ctx := context.Background()

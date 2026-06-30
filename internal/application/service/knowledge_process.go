@@ -499,6 +499,16 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
+	// Content-addressed chunk IDs (#1679) are deterministic, so re-parsing
+	// unchanged content yields the same primary key as a row the reparse cleanup
+	// just soft-deleted. Hard-purge those soft-deleted rows first; otherwise the
+	// insert below would hit a primary-key conflict. No-op on the first parse
+	// (nothing soft-deleted yet).
+	if err := s.chunkService.GetRepository().PurgeSoftDeletedByKnowledgeID(
+		ctx, knowledge.TenantID, knowledge.ID,
+	); err != nil {
+		logger.Warnf(ctx, "Failed to purge soft-deleted chunks before recreate: %v", err)
+	}
 	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
