@@ -4,10 +4,6 @@
     :subtitle="$t('integrations.chrome.subtitle')"
     variant="chrome"
   >
-    <template #icon>
-      <t-icon name="extension" size="22px" />
-    </template>
-
     <template #tags>
       <span v-for="key in scenarioKeys" :key="key" class="scenario-tag">
         {{ $t(`integrations.chrome.scenarios.${key}`) }}
