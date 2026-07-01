@@ -47,13 +47,13 @@
           class="msg-item-wrapper"
         >
           <div v-if="session.role === 'user'">
-              <EmbedUserMessage
-                :content="String(session.content || '')"
-                :mentioned_items="asUnknownArray(session.mentioned_items)"
-                :images="asEmbedImages(session.images)"
-                :attachments="asEmbedAttachments(session.attachments)"
-                :embeddedMode="true"
-                :embed-channel-id="channelId"
+            <EmbedUserMessage
+              :content="String(session.content || '')"
+              :mentioned_items="asUnknownArray(session.mentioned_items)"
+              :images="asEmbedImages(session.images)"
+              :attachments="asEmbedAttachments(session.attachments)"
+              :embeddedMode="true"
+              :embed-channel-id="channelId"
               :embed-token="token"
             />
           </div>
