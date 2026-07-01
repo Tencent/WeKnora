@@ -8,6 +8,15 @@ import (
 	"strings"
 )
 
+const (
+	blockTypeHeading       = "heading"
+	blockTypeParagraph     = "paragraph"
+	blockTypeBlockquote    = "blockquote"
+	blockTypeOrderedList   = "orderedList"
+	blockTypeUnorderedList = "unorderedList"
+	blockTypeCallout       = "callout"
+)
+
 func renderBlocksMarkdown(title string, blocks []docBlock) string {
 	var out bytes.Buffer
 	if strings.TrimSpace(title) != "" {
@@ -26,62 +35,20 @@ func renderBlocksMarkdown(title string, blocks []docBlock) string {
 func renderBlock(out *bytes.Buffer, block docBlock, depth int) {
 	text := strings.TrimSpace(blockText(block))
 	switch block.BlockType {
-	case "heading":
-		if text != "" {
-			level := 2
-			if block.Heading != nil && block.Heading.Level > 0 {
-				level = block.Heading.Level
-			}
-			if level < 1 {
-				level = 1
-			}
-			if level > 6 {
-				level = 6
-			}
-			out.WriteString(strings.Repeat("#", level))
-			out.WriteByte(' ')
-			out.WriteString(text)
-			out.WriteString("\n\n")
-		}
-	case "blockquote":
-		if text != "" {
-			for _, line := range strings.Split(text, "\n") {
-				out.WriteString("> ")
-				out.WriteString(strings.TrimSpace(line))
-				out.WriteByte('\n')
-			}
-			out.WriteByte('\n')
-		}
-	case "orderedList":
-		if text != "" {
-			out.WriteString(indent(depth))
-			out.WriteString("1. ")
-			out.WriteString(text)
-			out.WriteByte('\n')
-		}
-	case "unorderedList":
-		if text != "" {
-			out.WriteString(indent(depth))
-			out.WriteString("- ")
-			out.WriteString(text)
-			out.WriteByte('\n')
-		}
-	case "callout":
-		if text != "" {
-			out.WriteString("> ")
-			out.WriteString(text)
-			out.WriteString("\n\n")
-		}
-	case "paragraph":
-		if text != "" {
-			out.WriteString(text)
-			out.WriteString("\n\n")
-		}
+	case blockTypeHeading:
+		writeHeading(out, block, text)
+	case blockTypeBlockquote:
+		writeBlockquote(out, text)
+	case blockTypeOrderedList:
+		writeListItem(out, depth, "1. ", text)
+	case blockTypeUnorderedList:
+		writeListItem(out, depth, "- ", text)
+	case blockTypeCallout:
+		writeCallout(out, text)
+	case blockTypeParagraph:
+		writeParagraph(out, text)
 	default:
-		if text != "" {
-			out.WriteString(text)
-			out.WriteString("\n\n")
-		}
+		writeParagraph(out, text)
 	}
 
 	for _, child := range parseChildren(block.Children) {
@@ -89,29 +56,93 @@ func renderBlock(out *bytes.Buffer, block docBlock, depth int) {
 	}
 }
 
+func writeHeading(out *bytes.Buffer, block docBlock, text string) {
+	if text == "" {
+		return
+	}
+	level := normalizedHeadingLevel(block)
+	out.WriteString(strings.Repeat("#", level))
+	out.WriteByte(' ')
+	out.WriteString(text)
+	out.WriteString("\n\n")
+}
+
+func normalizedHeadingLevel(block docBlock) int {
+	level := 2
+	if block.Heading != nil && block.Heading.Level > 0 {
+		level = int(block.Heading.Level)
+	}
+	if level < 1 {
+		return 1
+	}
+	if level > 6 {
+		return 6
+	}
+	return level
+}
+
+func writeBlockquote(out *bytes.Buffer, text string) {
+	if text == "" {
+		return
+	}
+	for _, line := range strings.Split(text, "\n") {
+		out.WriteString("> ")
+		out.WriteString(strings.TrimSpace(line))
+		out.WriteByte('\n')
+	}
+	out.WriteByte('\n')
+}
+
+func writeListItem(out *bytes.Buffer, depth int, marker, text string) {
+	if text == "" {
+		return
+	}
+	out.WriteString(indent(depth))
+	out.WriteString(marker)
+	out.WriteString(text)
+	out.WriteByte('\n')
+}
+
+func writeCallout(out *bytes.Buffer, text string) {
+	if text == "" {
+		return
+	}
+	out.WriteString("> ")
+	out.WriteString(text)
+	out.WriteString("\n\n")
+}
+
+func writeParagraph(out *bytes.Buffer, text string) {
+	if text == "" {
+		return
+	}
+	out.WriteString(text)
+	out.WriteString("\n\n")
+}
+
 func blockText(block docBlock) string {
 	switch block.BlockType {
-	case "heading":
+	case blockTypeHeading:
 		if block.Heading != nil {
 			return block.Heading.Text
 		}
-	case "paragraph":
+	case blockTypeParagraph:
 		if block.Paragraph != nil {
 			return block.Paragraph.Text
 		}
-	case "blockquote":
+	case blockTypeBlockquote:
 		if block.Blockquote != nil {
 			return block.Blockquote.Text
 		}
-	case "orderedList":
+	case blockTypeOrderedList:
 		if block.OrderedList != nil {
 			return block.OrderedList.Text
 		}
-	case "unorderedList":
+	case blockTypeUnorderedList:
 		if block.UnorderedList != nil {
 			return block.UnorderedList.Text
 		}
-	case "callout":
+	case blockTypeCallout:
 		if block.Callout != nil {
 			return block.Callout.Text
 		}
@@ -161,7 +192,7 @@ func collectText(v interface{}, parts []string) []string {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			if key == "id" || key == "index" || key == "blockType" {
+			if isBlockMetadataKey(key) {
 				continue
 			}
 			parts = collectText(value[key], parts)
@@ -178,6 +209,15 @@ func collectText(v interface{}, parts []string) []string {
 		}
 	}
 	return parts
+}
+
+func isBlockMetadataKey(key string) bool {
+	switch key {
+	case "id", "index", "blockType":
+		return true
+	default:
+		return false
+	}
 }
 
 func indent(depth int) string {

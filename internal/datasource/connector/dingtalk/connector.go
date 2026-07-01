@@ -13,14 +13,30 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+const (
+	nodeTypeFile           = "FILE"
+	nodeTypeFolder         = "FOLDER"
+	nodeCategoryOnlineDoc  = "ALIDOC"
+	resourceTypeWikiSpace  = "wiki_space"
+	resourceTypeFolder     = "folder"
+	resourceTypeDocument   = "document"
+	markdownContentType    = "text/markdown"
+	markdownFileNameSuffix = ".md"
+)
+
+// Compile-time proof that *Connector satisfies the datasource.Connector interface.
 var _ datasource.Connector = (*Connector)(nil)
 
+// Connector implements datasource.Connector for DingTalk.
 type Connector struct{}
 
+// NewConnector creates a new DingTalk connector.
 func NewConnector() *Connector { return &Connector{} }
 
+// Type returns the connector type identifier.
 func (c *Connector) Type() string { return types.ConnectorTypeDingTalk }
 
+// Validate verifies the given credentials by listing accessible workspaces.
 func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
 	cfg, err := parseConfig(config)
 	if err != nil {
@@ -32,6 +48,9 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	return nil
 }
 
+// ListResources returns DingTalk wiki spaces or the direct child nodes under parentID.
+// The picker is loaded lazily: root requests return workspaces, while non-root
+// requests return only the next level under the selected workspace/node.
 func (c *Connector) ListResources(
 	ctx context.Context,
 	config *types.DataSourceConfig,
@@ -52,7 +71,7 @@ func (c *Connector) ListResources(
 		for _, space := range spaces {
 			resources = append(resources, workspaceToResource(space))
 		}
-		sort.Slice(resources, func(i, j int) bool { return resources[i].Name < resources[j].Name })
+		sortResourcesByName(resources)
 		return resources, nil
 	}
 
@@ -71,21 +90,24 @@ func (c *Connector) ListResources(
 		}
 		resources = append(resources, nodeToResource(parentID, n))
 	}
-	sort.Slice(resources, func(i, j int) bool { return resources[i].Name < resources[j].Name })
+	sortResourcesByName(resources)
 	return resources, nil
 }
 
+// ResolveResourceAncestors has nothing to do for DingTalk selections currently.
 func (c *Connector) ResolveResourceAncestors(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]string, error) {
 	return []string{}, nil
 }
 
+// FetchAll performs a full sync of all selected DingTalk resources.
 func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error) {
 	items, _, err := c.walk(ctx, config, resourceIDs, nil, false)
 	return items, err
 }
 
+// FetchIncremental returns items changed or deleted since the prior cursor.
 func (c *Connector) FetchIncremental(
 	ctx context.Context,
 	config *types.DataSourceConfig,
@@ -104,21 +126,23 @@ func (c *Connector) FetchIncremental(
 		prev = &p
 	}
 
-	items, next, err := c.walk(ctx, config, resourceIDs, prev, true)
+	items, newCursor, err := c.walk(ctx, config, resourceIDs, prev, true)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	cursorMap := make(map[string]interface{})
-	b, _ := json.Marshal(next)
+	b, _ := json.Marshal(newCursor)
 	_ = json.Unmarshal(b, &cursorMap)
 
 	return items, &types.SyncCursor{
-		LastSyncTime:    next.LastSyncTime,
+		LastSyncTime:    newCursor.LastSyncTime,
 		ConnectorCursor: cursorMap,
 	}, nil
 }
 
+// walk is the shared implementation for FetchAll and FetchIncremental.
+// If incremental is false, prev is ignored and no cursor is returned.
 func (c *Connector) walk(
 	ctx context.Context,
 	config *types.DataSourceConfig,
@@ -135,7 +159,7 @@ func (c *Connector) walk(
 	}
 	cli := newClient(cfg)
 
-	next := &dingtalkCursor{
+	newCursor := &dingtalkCursor{
 		LastSyncTime:     time.Now(),
 		ResourceNodeTime: make(map[string]map[string]string),
 	}
@@ -148,17 +172,17 @@ func (c *Connector) walk(
 		}
 		nodes, err := collectNodes(ctx, cli, workspaceID, nodeID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("list nodes for resource %s: %w", resourceID, err)
+			return nil, nil, fmt.Errorf("load dingtalk resource %s: %w", resourceID, err)
 		}
 
 		currentNodes := make(map[string]bool)
-		next.ResourceNodeTime[resourceID] = make(map[string]string)
+		newCursor.ResourceNodeTime[resourceID] = make(map[string]string)
 		for _, n := range nodes {
 			if n.NodeID == "" {
 				continue
 			}
 			currentNodes[n.NodeID] = true
-			next.ResourceNodeTime[resourceID][n.NodeID] = n.ModifiedTime
+			newCursor.ResourceNodeTime[resourceID][n.NodeID] = n.ModifiedTime
 
 			if incremental && prev != nil && prev.ResourceNodeTime != nil {
 				if prevTimes, ok := prev.ResourceNodeTime[resourceID]; ok && prevTimes[n.NodeID] == n.ModifiedTime {
@@ -204,20 +228,31 @@ func (c *Connector) walk(
 	if !incremental {
 		return out, nil, nil
 	}
-	return out, next, nil
+	return out, newCursor, nil
 }
 
+// collectNodes returns the selected node and all descendants that may contain content.
 func collectNodes(ctx context.Context, cli *client, workspaceID, nodeID string) ([]node, error) {
 	root, err := cli.GetNode(ctx, nodeID)
 	if err != nil {
-		logger.Warnf(ctx, "[DingTalk] get node %s failed, continuing with children: %v", nodeID, err)
-		root = node{NodeID: nodeID, WorkspaceID: workspaceID, Type: "FOLDER", HasChildren: true}
+		if _, blockErr := cli.QueryDocBlocks(ctx, nodeID); blockErr == nil {
+			logger.Warnf(ctx, "[DingTalk] get node %s failed, treating it as a document after blocks query succeeded: %v", nodeID, err)
+			return []node{{
+				NodeID:      nodeID,
+				WorkspaceID: workspaceID,
+				Name:        nodeID,
+				Type:        nodeTypeFile,
+				Category:    nodeCategoryOnlineDoc,
+			}}, nil
+		} else {
+			return nil, fmt.Errorf("get dingtalk node %s: %w (document blocks fallback failed: %v)", nodeID, err, blockErr)
+		}
 	}
 	if root.WorkspaceID == "" {
 		root.WorkspaceID = workspaceID
 	}
 	all := []node{root}
-	if root.HasChildren || root.Type == "FOLDER" {
+	if isFolderNode(root) {
 		children, err := collectChildNodes(ctx, cli, workspaceID, root.NodeID)
 		if err != nil {
 			return nil, err
@@ -227,6 +262,7 @@ func collectNodes(ctx context.Context, cli *client, workspaceID, nodeID string) 
 	return all, nil
 }
 
+// collectChildNodes recursively walks child nodes under a folder.
 func collectChildNodes(ctx context.Context, cli *client, workspaceID, parentNodeID string) ([]node, error) {
 	children, err := cli.ListNodes(ctx, parentNodeID)
 	if err != nil {
@@ -238,7 +274,7 @@ func collectChildNodes(ctx context.Context, cli *client, workspaceID, parentNode
 			child.WorkspaceID = workspaceID
 		}
 		all = append(all, child)
-		if child.HasChildren || child.Type == "FOLDER" {
+		if isFolderNode(child) {
 			descendants, err := collectChildNodes(ctx, cli, workspaceID, child.NodeID)
 			if err != nil {
 				return nil, err
@@ -249,6 +285,7 @@ func collectChildNodes(ctx context.Context, cli *client, workspaceID, parentNode
 	return all, nil
 }
 
+// fetchNodeContent converts a supported online document into a fetched Markdown item.
 func (c *Connector) fetchNodeContent(
 	ctx context.Context,
 	cli *client,
@@ -269,8 +306,8 @@ func (c *Connector) fetchNodeContent(
 		ExternalID:       n.NodeID,
 		Title:            title,
 		Content:          []byte(content),
-		ContentType:      "text/markdown",
-		FileName:         sanitizeFileName(title) + ".md",
+		ContentType:      markdownContentType,
+		FileName:         sanitizeFileName(title) + markdownFileNameSuffix,
 		URL:              n.URL,
 		UpdatedAt:        parseDingTalkTime(n.ModifiedTime),
 		SourceResourceID: resourceID,
@@ -290,7 +327,7 @@ func workspaceToResource(space workspace) types.Resource {
 	return types.Resource{
 		ExternalID:  makeResourceID(space.WorkspaceID, space.RootNodeID),
 		Name:        name,
-		Type:        "wiki_space",
+		Type:        resourceTypeWikiSpace,
 		Description: space.Description,
 		URL:         space.URL,
 		ModifiedAt:  parseDingTalkTime(space.ModifiedTime),
@@ -311,9 +348,9 @@ func nodeToResource(parentID string, n node) types.Resource {
 	if workspaceID == "" {
 		workspaceID, _ = parseResourceID(parentID)
 	}
-	resourceType := "document"
-	if n.Type == "FOLDER" || n.HasChildren {
-		resourceType = "folder"
+	resourceType := resourceTypeDocument
+	if isFolderNode(n) {
+		resourceType = resourceTypeFolder
 	}
 	return types.Resource{
 		ExternalID:  makeResourceID(workspaceID, n.NodeID),
@@ -322,7 +359,7 @@ func nodeToResource(parentID string, n node) types.Resource {
 		URL:         n.URL,
 		ModifiedAt:  parseDingTalkTime(n.ModifiedTime),
 		ParentID:    parentID,
-		HasChildren: n.HasChildren || n.Type == "FOLDER",
+		HasChildren: isFolderNode(n),
 		Metadata: map[string]interface{}{
 			"node_id":         n.NodeID,
 			"workspace_id":    workspaceID,
@@ -336,7 +373,17 @@ func nodeToResource(parentID string, n node) types.Resource {
 }
 
 func isSupportedDocNode(n node) bool {
-	return n.Type == "FILE" && n.Category == "ALIDOC"
+	return n.Type == nodeTypeFile && n.Category == nodeCategoryOnlineDoc
+}
+
+func isFolderNode(n node) bool {
+	return n.Type == nodeTypeFolder || n.HasChildren
+}
+
+func sortResourcesByName(resources []types.Resource) {
+	sort.Slice(resources, func(i, j int) bool {
+		return resources[i].Name < resources[j].Name
+	})
 }
 
 func resourceTitle(name, fallback string) string {
