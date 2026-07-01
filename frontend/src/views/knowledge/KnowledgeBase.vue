@@ -3716,6 +3716,20 @@ async function createNewSession(value: string): Promise<void> {
   }
 }
 
+// 移动端（<768px）：移除 answers-input 的 translateX hack，使用自然流式布局
+@media screen and (max-width: 767px) {
+  .answers-input {
+    transform: none !important;
+    width: 100% !important;
+    position: static !important;
+  }
+
+  :deep(.t-textarea__inner) {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
 @keyframes contentFadeIn {
   from {
     opacity: 0;

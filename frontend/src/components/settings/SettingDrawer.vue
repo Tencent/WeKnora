@@ -471,4 +471,41 @@ const handleCancel = () => {
 .t-drawer.setting-drawer--resizing .t-drawer__content {
   transition: none !important;
 }
+
+// 移动端：drawer 全屏，隐藏拖拽手柄
+@media screen and (max-width: 767px) {
+  .setting-drawer {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      width: 100vw !important;
+      max-width: 100vw !important;
+    }
+
+    .t-drawer__header {
+      padding: 12px 14px;
+    }
+
+    .t-drawer__body {
+      padding: 14px;
+    }
+
+    .t-drawer__footer {
+      padding: 10px 14px;
+    }
+  }
+
+  .setting-drawer-resize-handle {
+    display: none !important;
+  }
+}
+
+// 平板：drawer 宽度适配
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .setting-drawer {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      max-width: 85vw !important;
+    }
+  }
+}
 </style>

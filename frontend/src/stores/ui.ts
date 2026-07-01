@@ -20,7 +20,10 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
+    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true',
+    // 响应式状态
+    isMobile: false,
+    mobileMenuOpen: false,
   }),
 
   actions: {
@@ -133,6 +136,23 @@ export const useUIStore = defineStore('ui', {
     expandSidebar() {
       this.sidebarCollapsed = false
       localStorage.setItem('sidebar_collapsed', 'false')
+    },
+
+    // 响应式断点
+    setMobile(value: boolean) {
+      this.isMobile = value
+    },
+
+    openMobileMenu() {
+      this.mobileMenuOpen = true
+    },
+
+    closeMobileMenu() {
+      this.mobileMenuOpen = false
+    },
+
+    toggleMobileMenu() {
+      this.mobileMenuOpen = !this.mobileMenuOpen
     }
   }
 })

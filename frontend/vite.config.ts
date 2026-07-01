@@ -121,6 +121,14 @@ export default defineConfig({
     vueJsx(),
     embedHtmlDevFallback(),
   ],
+  css: {
+    preprocessorOptions: {
+      less: {
+        additionalData: `@import (reference) "${resolve(__dirname, 'src/assets/responsive.less')}";\n`,
+        javascriptEnabled: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

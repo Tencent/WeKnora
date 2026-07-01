@@ -1,0 +1,84 @@
+// ============================================================
+// WeKnora 响应式断点 Less 混入
+// ============================================================
+// 使用移动端优先 (mobile-first) 策略：
+//   基础样式 = 移动端，
+//   .tablet-up()  → 平板及以上增强，
+//   .desktop()    → 桌面端增强。
+// ============================================================
+
+// 断点值（与 useBreakpoint.ts 保持一致）
+@bp-mobile-max: 767px;
+@bp-tablet-min: 768px;
+@bp-tablet-max: 1023px;
+@bp-desktop-min: 1024px;
+
+// --- 设备类型混入 ---
+
+// 仅手机 (< 768px)
+.mobile(@rules) {
+  @media screen and (max-width: @bp-mobile-max) {
+    @rules();
+  }
+}
+
+// 仅平板 (768px - 1023px)
+.tablet(@rules) {
+  @media screen and (min-width: @bp-tablet-min) and (max-width: @bp-tablet-max) {
+    @rules();
+  }
+}
+
+// 平板及以上 (≥ 768px) — mobile-first 增强用
+.tablet-up(@rules) {
+  @media screen and (min-width: @bp-tablet-min) {
+    @rules();
+  }
+}
+
+// 仅桌面 (≥ 1024px)
+.desktop(@rules) {
+  @media screen and (min-width: @bp-desktop-min) {
+    @rules();
+  }
+}
+
+// 非桌面 (< 1024px) — 即手机 + 平板
+.not-desktop(@rules) {
+  @media screen and (max-width: @bp-tablet-max) {
+    @rules();
+  }
+}
+
+// --- 自定义断点混入（使用 min-width） ---
+.min-width(@width, @rules) {
+  @media screen and (min-width: @width) {
+    @rules();
+  }
+}
+
+.max-width(@width, @rules) {
+  @media screen and (max-width: @width) {
+    @rules();
+  }
+}
+
+// --- 触摸设备 ---
+.touch(@rules) {
+  @media (hover: none) {
+    @rules();
+  }
+}
+
+.hover-capable(@rules) {
+  @media (hover: hover) {
+    @rules();
+  }
+}
+
+// --- 减少动效 ---
+.reduced-motion(@rules) {
+  @media (prefers-reduced-motion: reduce) {
+    @rules();
+  }
+}

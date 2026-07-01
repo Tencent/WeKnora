@@ -248,3 +248,32 @@
     color: var(--td-brand-color);
 }
 
+// 移动端：建议问题全宽单列，间距缩小
+@media screen and (max-width: 767px) {
+    .suggested-questions-container {
+        padding: 8px 4px 8px;
+        max-width: 100%;
+    }
+
+    .suggested-questions-grid {
+        gap: 8px;
+    }
+
+    .suggested-question-card {
+        width: 100%;
+        max-width: 100%;
+        padding: 10px 14px;
+
+        &.sq-card-skeleton,
+        &.sq-card-skeleton:nth-child(2n),
+        &.sq-card-skeleton:nth-child(3n),
+        &.sq-card-skeleton:nth-child(5n) {
+            width: 100%;
+        }
+    }
+
+    .suggested-question-text {
+        font-size: 14px;
+    }
+}
+

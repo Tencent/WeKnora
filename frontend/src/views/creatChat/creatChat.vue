@@ -402,6 +402,20 @@ const handleKBEditorSuccess = (kbId: string) => {
         width: 300px !important;
     }
 }
+
+// 移动端：移除 translateX hack，全宽自然布局
+@media screen and (max-width: 767px) {
+    .answers-input {
+        transform: none !important;
+        width: 100% !important;
+        position: static !important;
+    }
+
+    :deep(.t-textarea__inner) {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+}
 </style>
 <style lang="less">
 .del-menu-popup {

@@ -1,6 +1,34 @@
 <template>
-    <div class="main" ref="dropzone">
-        <Menu></Menu>
+    <div class="main" ref="dropzone" :class="{ 'main--mobile': uiStore.isMobile, 'main--tablet': isTablet }">
+        <!-- 移动端顶部导航栏 -->
+        <div v-if="uiStore.isMobile" class="mobile-topbar">
+            <div class="mobile-topbar__menu-btn" @click="uiStore.toggleMobileMenu()">
+                <MenuIcon size="24px" />
+            </div>
+            <div class="mobile-topbar__logo" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
+                <img class="mobile-topbar__logo-img" src="@/assets/img/weknora.png" alt="">
+            </div>
+            <div class="mobile-topbar__spacer"></div>
+        </div>
+
+        <!-- 桌面/平板：侧边栏 -->
+        <Menu v-if="!uiStore.isMobile" />
+
+        <!-- 移动端：Drawer 包裹侧边栏 -->
+        <t-drawer
+            v-if="uiStore.isMobile"
+            :visible="uiStore.mobileMenuOpen"
+            placement="left"
+            size="280px"
+            :close-btn="false"
+            :show-overlay="true"
+            :close-on-overlay-click="true"
+            :destroy-on-close="false"
+            @close="uiStore.closeMobileMenu()"
+        >
+            <Menu variant="drawer" @navigate="uiStore.closeMobileMenu()" />
+        </t-drawer>
+
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
         </div>
@@ -22,8 +50,9 @@
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
-import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
+import { MenuIcon } from 'tdesign-icons-vue-next'
 import useKnowledgeBase from '@/hooks/useKnowledgeBase'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
@@ -33,17 +62,45 @@ import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useUIStore } from '@/stores/ui'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { isTablet as isTabletRef, isMobile as isMobileRef } from '@/composables/useBreakpoint'
 
 let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
+const uiStore = useUIStore();
 let ismask = ref(false)
 let uploadInput = ref();
 const { t } = useI18n();
+
+// 响应式断点
+const isTablet = computed(() => isTabletRef.value)
+
+// 平板模式自动折叠侧边栏；桌面模式恢复用户偏好
+watch(isTabletRef, (val) => {
+  if (val) {
+    // 进入平板：自动折叠侧边栏
+    uiStore.collapseSidebar()
+  }
+})
+
+watch(isMobileRef, (val) => {
+  if (val) {
+    // 进入手机模式：关闭可能残留的桌面侧边栏状态
+    uiStore.expandSidebar()
+  }
+})
+
+// 移动端：路由变化时关闭 Drawer
+watch(() => route.fullPath, () => {
+  if (uiStore.isMobile && uiStore.mobileMenuOpen) {
+    uiStore.closeMobileMenu()
+  }
+})
 
 const isRouterAlive = ref(true)
 const reloadApp = () => {
@@ -255,16 +312,80 @@ onUnmounted(() => {
     dragCounter = 0;
 });
 </script>
-<style lang="less">
+<style lang="less" scoped>
 .main {
     display: flex;
     align-items: stretch;
     width: 100%;
     height: 100%;
-    min-width: 600px;
     min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+/* 移动端：纵向布局（顶部栏 + 内容区） */
+.main--mobile {
+    flex-direction: column;
+}
+
+/* 平板模式：侧边栏折叠，内容区自适应 */
+.main--tablet {
+    /* 侧边栏折叠为 60px 由 Menu 组件处理 */
+}
+
+/* ============================================================
+   移动端顶部导航栏
+   ============================================================ */
+.mobile-topbar {
+    display: flex;
+    align-items: center;
+    height: 48px;
+    min-height: 48px;
+    padding: 0 12px;
+    background: var(--td-bg-color-container);
+    border-bottom: 1px solid var(--td-component-stroke);
+    z-index: 10;
+    flex-shrink: 0;
+
+    &__menu-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        cursor: pointer;
+        border-radius: 8px;
+        color: var(--td-text-color-primary);
+        flex-shrink: 0;
+
+        &:active {
+            background: var(--td-bg-color-container-hover);
+        }
+    }
+
+    &__logo {
+        display: flex;
+        align-items: center;
+        flex: 1;
+        justify-content: center;
+    }
+
+    &__logo-img {
+        width: 100px;
+        height: auto;
+    }
+
+    &__spacer {
+        width: 40px;
+        flex-shrink: 0;
+    }
+}
+
+/* ============================================================
+   移动端 Drawer 内菜单样式调整
+   ============================================================ */
+:deep(.t-drawer__body) {
+    padding: 0;
 }
 
 /* 右侧路由区：占满剩余宽度与整列高度，并把 min-height:0 传给子页面以便内部 flex 滚动 */
@@ -275,6 +396,11 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+/* 移动端：路由区在顶部栏下方 */
+.main--mobile .platform-route-outlet {
+    height: 0; /* flex: 1 在 column 布局下需要高度约束 */
 }
 
 .upload-mask {
