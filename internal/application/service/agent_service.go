@@ -283,10 +283,11 @@ func (s *agentService) registerMCPTools(
 		var regCtx *tools.MCPOAuthSession
 		if eventBus != nil && sessionID != "" && assistantMessageID != "" {
 			regCtx = &tools.MCPOAuthSession{
-				EventBus:           eventBus,
-				SessionID:          sessionID,
-				AssistantMessageID: assistantMessageID,
-				ApprovalCtx:        ctx,
+				EventBus:               eventBus,
+				SessionID:              sessionID,
+				AssistantMessageID:     assistantMessageID,
+				ApprovalCtx:            ctx,
+				AuthWaitTimeoutSeconds: config.MCPAuthWaitTimeout,
 			}
 		}
 		registered, err := tools.RegisterMCPTools(

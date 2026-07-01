@@ -5451,6 +5451,9 @@ export default {
       selectLabel: 'MCP 서비스 선택',
       selectDesc: '활성화할 MCP 서비스를 선택하세요',
       selectPlaceholder: 'MCP 서비스 선택',
+      authWaitTimeout: '인증 대기 시간(초)',
+      authWaitTimeoutDesc: '대화 중 OAuth 인증이 필요할 때 인증 완료를 기다리는 최대 시간(초)이며, 초과하면 인증 요청을 건너뜁니다(OAuth를 사용하는 MCP 서비스에만 적용).',
+      authWaitTimeoutPlaceholder: '기본 600초',
     },
     llmCallTimeout: {
       label: "LLM 호출 타임아웃",

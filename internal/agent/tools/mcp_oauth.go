@@ -15,6 +15,18 @@ import (
 
 const defaultMCPToolExecTimeout = 60 * time.Second
 
+// oauthWaitTimeout derives the in-conversation OAuth wait timeout from the
+// agent's user-configured value (carried on the session, in seconds). The wait
+// is ALWAYS bounded to avoid leaking the blocked goroutine when the user
+// neither authorizes nor skips: a value <= 0 returns 0, which tells the gate to
+// fall back to its configured default timeout.
+func oauthWaitTimeout(sess *MCPOAuthSession) time.Duration {
+	if sess == nil || sess.AuthWaitTimeoutSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(sess.AuthWaitTimeoutSeconds) * time.Second
+}
+
 // MCPOAuthSession carries chat/session metadata so MCP connect and tool
 // registration can pause for in-conversation OAuth. Nil disables the prompt.
 type MCPOAuthSession struct {
@@ -28,6 +40,9 @@ type MCPOAuthSession struct {
 	ApprovalCtx context.Context
 	// ExecTimeout, when >0, caps the retry ctx after a successful authorization.
 	ExecTimeout time.Duration
+	// AuthWaitTimeoutSeconds is the agent-level, user-configured number of
+	// seconds to wait for in-conversation OAuth authorization. See oauthWaitTimeout.
+	AuthWaitTimeoutSeconds int
 }
 
 // oauthSessionFromToolExec builds an OAuth session from per-tool execution metadata.
@@ -54,6 +69,16 @@ func oauthSessionFromToolExec(ctx context.Context, meta *ToolExecContext) *MCPOA
 	}
 }
 
+// withAuthWaitTimeout returns sess with the agent-level OAuth wait timeout
+// (seconds) applied. Safe on a nil session.
+func (s *MCPOAuthSession) withAuthWaitTimeout(seconds int) *MCPOAuthSession {
+	if s == nil {
+		return nil
+	}
+	s.AuthWaitTimeoutSeconds = seconds
+	return s
+}
+
 // oauthSessionForRegistration builds an OAuth session for tool discovery at agent startup.
 func oauthSessionForRegistration(ctx context.Context, sess *MCPOAuthSession, retryTimeout time.Duration) *MCPOAuthSession {
 	if sess == nil || sess.EventBus == nil {
@@ -73,13 +98,14 @@ func oauthSessionForRegistration(ctx context.Context, sess *MCPOAuthSession, ret
 		requestID, _ = types.RequestIDFromContext(ctx)
 	}
 	return &MCPOAuthSession{
-		EventBus:           sess.EventBus,
-		SessionID:          sess.SessionID,
-		AssistantMessageID: sess.AssistantMessageID,
-		UserID:             userID,
-		RequestID:          requestID,
-		ApprovalCtx:        approvalCtx,
-		ExecTimeout:        retryTimeout,
+		EventBus:               sess.EventBus,
+		SessionID:              sess.SessionID,
+		AssistantMessageID:     sess.AssistantMessageID,
+		UserID:                 userID,
+		RequestID:              requestID,
+		ApprovalCtx:            approvalCtx,
+		ExecTimeout:            retryTimeout,
+		AuthWaitTimeoutSeconds: sess.AuthWaitTimeoutSeconds,
 	}
 }
 
@@ -161,6 +187,7 @@ func waitForMCPOAuthAuthorization(
 		ServiceName:        service.Name,
 		MCPToolName:        mcpToolName,
 		ToolCallID:         toolCallID,
+		WaitTimeout:        oauthWaitTimeout(sess),
 	})
 	if waitErr != nil || !decision.Approved {
 		return ctx, noop, false

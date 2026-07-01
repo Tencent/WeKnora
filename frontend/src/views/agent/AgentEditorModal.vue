@@ -967,6 +967,18 @@
                         </t-select>
                       </div>
                     </div>
+
+                    <!-- 授权等待超时：对话中触发 OAuth 授权时的等待秒数 -->
+                    <div v-if="mcpSelectionMode !== 'none'" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.mcp.authWaitTimeout') }}</label>
+                        <p class="desc">{{ $t('agentEditor.mcp.authWaitTimeoutDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.mcp_auth_wait_timeout" :min="5" :max="3600"
+                          theme="column" :placeholder="$t('agentEditor.mcp.authWaitTimeoutPlaceholder')" />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1990,6 +2002,8 @@ const defaultFormData = {
     // MCP 服务设置
     mcp_selection_mode: 'none' as 'all' | 'selected' | 'none',
     mcp_services: [] as string[],
+    // 对话中触发 OAuth 授权时的等待超时（秒），默认 600
+    mcp_auth_wait_timeout: 600,
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
@@ -2561,6 +2575,10 @@ watch(() => props.visible, async (val) => {
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
       if (!agentData.config.allowed_tools) agentData.config.allowed_tools = [];
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];
+      // 授权等待超时：旧数据缺省时用默认 600 秒
+      if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
+        agentData.config.mcp_auth_wait_timeout = 600;
+      }
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
 
