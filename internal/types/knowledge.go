@@ -104,6 +104,12 @@ type KnowledgeListFilter struct {
 	UpdatedFrom time.Time
 	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
 	UpdatedTo time.Time
+	// FolderID filters knowledge entries by folder. Empty means no folder filter.
+	// Use "__root__" to filter for items at the root level (folder_id IS NULL).
+	FolderID string
+	// Recursive, when true alongside a non-empty FolderID, includes entries from
+	// all descendant subfolders.
+	Recursive bool
 }
 
 // Knowledge represents a knowledge entity in the system.
@@ -164,6 +170,8 @@ type Knowledge struct {
 	ProcessedAt *time.Time `json:"processed_at"`
 	// Error message of the knowledge
 	ErrorMessage string `json:"error_message"`
+	// Folder ID that this knowledge entry belongs to, nil for root level
+	FolderID *string `json:"folder_id" gorm:"type:varchar(36)"`
 	// Deletion time of the knowledge
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
 	// Knowledge base name (not stored in database, populated on query)

@@ -170,6 +170,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewWikiLogEntryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewKnowledgeFolderRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -187,6 +188,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewAgentShareService))
+	must(container.Provide(service.NewKnowledgeFolderService))
 	must(container.Provide(service.NewKnowledgeService))
 	must(container.Provide(service.NewSpanTracker))
 	must(container.Provide(service.NewChunkService))

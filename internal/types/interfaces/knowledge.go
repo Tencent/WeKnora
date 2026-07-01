@@ -197,6 +197,10 @@ type KnowledgeService interface {
 	SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// SearchKnowledgeForScopes searches knowledge within the given (tenant_id, kb_id) scopes (e.g. for shared agent context).
 	SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
+	// MoveToFolder moves a single knowledge entry to a folder.
+	MoveToFolder(ctx context.Context, knowledgeID string, folderID *string) error
+	// BatchMoveToFolder moves multiple knowledge entries to a folder.
+	BatchMoveToFolder(ctx context.Context, knowledgeIDs []string, folderID *string) error
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.
@@ -271,4 +275,21 @@ type KnowledgeRepository interface {
 	GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error)
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.
 	DeleteKnowledgeTagRelations(ctx context.Context, knowledgeID string) error
+	// ListPagedKnowledgeByFolderID lists knowledge entries directly under a folder with pagination.
+	// When recursive is true, also includes entries from all descendant subfolders.
+	ListPagedKnowledgeByFolderID(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		folderID string,
+		recursive bool,
+		page *types.Pagination,
+		filter types.KnowledgeListFilter,
+	) ([]*types.Knowledge, int64, error)
+	// UpdateKnowledgeFolderID moves a single knowledge entry to a folder.
+	// folderID can be nil to move the entry to root.
+	UpdateKnowledgeFolderID(ctx context.Context, knowledgeID string, folderID *string) error
+	// BatchUpdateKnowledgeFolderID moves multiple knowledge entries to a folder.
+	// folderID can be nil to move entries to root.
+	BatchUpdateKnowledgeFolderID(ctx context.Context, knowledgeIDs []string, folderID *string) error
 }

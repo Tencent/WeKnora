@@ -756,3 +756,91 @@ func (r *knowledgeRepository) ListIDsByTagIDs(
 		Pluck("knowledges.id", &ids).Error
 	return ids, err
 }
+
+// ListPagedKnowledgeByFolderID lists knowledge entries under a folder with pagination.
+// When recursive is true, also includes entries from all descendant subfolders.
+func (r *knowledgeRepository) ListPagedKnowledgeByFolderID(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	folderID string,
+	recursive bool,
+	page *types.Pagination,
+	filter types.KnowledgeListFilter,
+) ([]*types.Knowledge, int64, error) {
+	var knowledges []*types.Knowledge
+	var total int64
+
+	baseScope := func(q *gorm.DB) *gorm.DB {
+		q = q.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)
+		if recursive {
+			var folder types.KnowledgeFolder
+			if err := r.db.WithContext(ctx).
+				Select("path").
+				Where("id = ?", folderID).
+				First(&folder).Error; err != nil {
+				return q
+			}
+			var folderIDs []string
+			if err := r.db.WithContext(ctx).Model(&types.KnowledgeFolder{}).
+				Where("path LIKE ?", folder.Path+"%").
+				Pluck("id", &folderIDs).Error; err != nil {
+				return q
+			}
+			q = q.Where("folder_id IN ?", folderIDs)
+		} else {
+			q = q.Where("folder_id = ?", folderID)
+		}
+		return q
+	}
+
+	scopeFn := func(q *gorm.DB) *gorm.DB {
+		return applyKnowledgeListFilter(baseScope(q), filter)
+	}
+
+	if err := scopeFn(r.db.WithContext(ctx).Model(&types.Knowledge{})).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if err := scopeFn(r.db.WithContext(ctx)).
+		Order("created_at DESC").
+		Offset(page.Offset()).
+		Limit(page.Limit()).
+		Find(&knowledges).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return knowledges, total, nil
+}
+
+// UpdateKnowledgeFolderID moves a single knowledge entry to a folder or to root.
+func (r *knowledgeRepository) UpdateKnowledgeFolderID(
+	ctx context.Context,
+	knowledgeID string,
+	folderID *string,
+) error {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ?", knowledgeID).
+		Update("folder_id", folderID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrKnowledgeNotFound
+	}
+	return nil
+}
+
+// BatchUpdateKnowledgeFolderID moves multiple knowledge entries to a folder or to root.
+func (r *knowledgeRepository) BatchUpdateKnowledgeFolderID(
+	ctx context.Context,
+	knowledgeIDs []string,
+	folderID *string,
+) error {
+	if len(knowledgeIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id IN ?", knowledgeIDs).
+		Update("folder_id", folderID).Error
+}
