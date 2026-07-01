@@ -43,10 +43,14 @@ func newOSSClient(endpoint, region, accessKey, secretKey, signatureVersion strin
 		WithRegion(region).
 		WithEndpoint(endpoint)
 
-	if signatureVersion != "" && signatureVersion != "v1" {
+	if strings.EqualFold(signatureVersion, "v1") {
+		cfg = oss.LoadDefaultConfig().
+			WithCredentialsProvider(creds).
+			WithRegion(region).
+			WithEndpoint(endpoint).
+			WithUsePathStyle(true)
 		cfg = cfg.WithSignatureVersion(oss.SignatureVersionV1)
-	} else {
-		cfg = cfg.WithSignatureVersion(oss.SignatureVersionV4)
+		logger.Infof(context.Background(), "using OSS signature version v1")
 	}
 
 	return oss.NewClient(cfg), nil
