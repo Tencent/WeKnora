@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps } from 'vue';
+import { ref } from 'vue';
 import type { GraphQueryResultsData, RelevanceLevel } from '@/types/tool-results';
 import { useI18n } from 'vue-i18n';
 

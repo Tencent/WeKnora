@@ -476,7 +476,47 @@ func withIMIdentity(ctx context.Context, tenantID uint64, channelID string, msg 
 		ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalIMUser, ID: principalID})
 	}
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+	// IM bots have no live client that can complete an in-conversation MCP OAuth
+	// prompt, so mark the context non-interactive: the agent emits a one-shot
+	// authorization notice (surfaced in the reply) instead of blocking until the
+	// OAuth wait times out for every unauthorized service.
+	ctx = types.WithMCPOAuthNonInteractive(ctx)
 	return ctx
+}
+
+// formatIMMCPAuthNotice builds a user-facing hint listing OAuth-enabled MCP
+// services that still need authorization. Returns "" when there is nothing to
+// report. IM users cannot authorize inline, so they are directed to the console.
+func formatIMMCPAuthNotice(serviceNames []string) string {
+	names := make([]string, 0, len(serviceNames))
+	seen := make(map[string]bool, len(serviceNames))
+	for _, name := range serviceNames {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"⚠️ 以下 MCP 服务需要授权后才能使用：%s。请在 WeKnora 管理后台完成 OAuth 授权后重试。",
+		strings.Join(names, "、"),
+	)
+}
+
+// appendIMAuthNotice appends an authorization notice to an existing reply body,
+// separated by a blank line. When the body is empty the notice becomes the body.
+func appendIMAuthNotice(body, notice string) string {
+	if notice == "" {
+		return body
+	}
+	if strings.TrimSpace(body) == "" {
+		return notice
+	}
+	return body + "\n\n" + notice
 }
 
 func buildIMQARequest(
@@ -1900,6 +1940,11 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 
 		agentCompleteFinalAnswer string
 		streamedAny              bool
+
+		// mcpAuthNotices collects OAuth service names that need out-of-band
+		// authorization (IM cannot resolve the in-conversation prompt).
+		mcpAuthNotices []string
+		mcpAuthSeen    = make(map[string]bool)
 	)
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 	closeComplete := func() { completeOnce.Do(func() { close(completeDone) }) }
@@ -2104,6 +2149,23 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		return nil
 	})
 
+	// An OAuth-enabled MCP service the IM user has not authorized yet. IM cannot
+	// resolve the in-conversation prompt, so collect the service name and append
+	// an authorization notice to the final reply (deduped per service).
+	eventBus.On(event.EventMCPOAuthRequired, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.MCPOAuthRequiredData)
+		if !ok {
+			return nil
+		}
+		bufMu.Lock()
+		if !mcpAuthSeen[data.ServiceID] {
+			mcpAuthSeen[data.ServiceID] = true
+			mcpAuthNotices = append(mcpAuthNotices, data.ServiceName)
+		}
+		bufMu.Unlock()
+		return nil
+	})
+
 	// Determine whether to use agent mode (already set above for event handlers).
 	requestID := uuid.New().String()
 
@@ -2212,6 +2274,7 @@ loop:
 	answer := resolvedAnswer
 	finalErr := qaErr
 	noVisibleContent := !streamedAny && strings.TrimSpace(resolvedAnswer) == ""
+	authNotices := append([]string(nil), mcpAuthNotices...)
 	bufMu.Unlock()
 
 	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc)
@@ -2224,6 +2287,10 @@ loop:
 		if answer == "" {
 			answer = fallback
 		}
+	}
+	if notice := formatIMMCPAuthNotice(authNotices); notice != "" {
+		finalDisplay = appendIMAuthNotice(finalDisplay, notice)
+		answer = appendIMAuthNotice(answer, notice)
 	}
 
 	if err := streamer.FinalizeStream(ctx, msg, streamID, finalDisplay); err != nil {
@@ -2273,6 +2340,8 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	var answerMu sync.Mutex
 	var answerBuilder strings.Builder
 	var qaErr error
+	var mcpAuthNotices []string
+	mcpAuthSeen := make(map[string]bool)
 	done := make(chan struct{})
 	completeDone := make(chan struct{})
 	var closeOnce sync.Once
@@ -2305,6 +2374,22 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		answerMu.Unlock()
 		closeDone()
 		closeComplete()
+		return nil
+	})
+
+	// Collect OAuth services that need out-of-band authorization (IM cannot
+	// resolve the in-conversation prompt); appended to the answer below.
+	eventBus.On(event.EventMCPOAuthRequired, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.MCPOAuthRequiredData)
+		if !ok {
+			return nil
+		}
+		answerMu.Lock()
+		if !mcpAuthSeen[data.ServiceID] {
+			mcpAuthSeen[data.ServiceID] = true
+			mcpAuthNotices = append(mcpAuthNotices, data.ServiceName)
+		}
+		answerMu.Unlock()
 		return nil
 	})
 
@@ -2408,6 +2493,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	answerMu.Lock()
 	answer := answerBuilder.String()
 	qaError := qaErr
+	authNotices := append([]string(nil), mcpAuthNotices...)
 	answerMu.Unlock()
 
 	if answer == "" && qaError != nil {
@@ -2415,6 +2501,9 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	}
 	if answer == "" {
 		answer = "抱歉，我暂时无法回答这个问题。"
+	}
+	if notice := formatIMMCPAuthNotice(authNotices); notice != "" {
+		answer = appendIMAuthNotice(answer, notice)
 	}
 
 	// Update assistant message with the full answer (including citation tags for web rendering).

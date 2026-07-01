@@ -967,7 +967,7 @@ const selectModelType = async (type: EditorModelType) => {
     formData.value.provider = 'generic'
     formData.value.baseUrl = ''
   } else {
-    handleProviderChange(formData.value.provider)
+    handleProviderChange(formData.value.provider || 'generic')
   }
   if (showThinkingControlField.value && !isEdit.value) {
     thinkingControlManual.value = false
@@ -1319,7 +1319,7 @@ const checkRemoteAPI = async () => {
         // 对话模型（KnowledgeQA）
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,
@@ -1332,7 +1332,7 @@ const checkRemoteAPI = async () => {
         result = await testEmbeddingModel({
           source: 'remote',
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           dimension: formData.value.dimension,
           supportsDimensionOverride: formData.value.supportsDimensionOverride ?? false,
@@ -1360,7 +1360,7 @@ const checkRemoteAPI = async () => {
           : {}
         result = await checkRerankModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,
@@ -1375,7 +1375,7 @@ const checkRemoteAPI = async () => {
         // VLLM 使用 checkRemoteModel 进行基础连接测试
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,
@@ -1387,7 +1387,7 @@ const checkRemoteAPI = async () => {
         // ASR 模型（语音识别）— 使用专用的 ASR 测试接口（/v1/audio/transcriptions）
         result = await checkASRModel({
           modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl,
+          baseUrl: formData.value.baseUrl || '',
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
           ...idPayload,

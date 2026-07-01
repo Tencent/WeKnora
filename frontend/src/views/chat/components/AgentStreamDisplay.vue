@@ -719,6 +719,7 @@ interface SessionData {
   isAgentMode?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
+  [key: string]: unknown;
 }
 
 const props = defineProps<{
@@ -1617,7 +1618,7 @@ const onRootClick = (e: Event) => {
     const slug = wikiEl.getAttribute('data-slug');
 
     // Determine the relevant KB ID
-    const kbId = getKbIdForWiki(slug);
+    const kbId = getKbIdForWiki(slug || '');
 
     if (kbId && slug) {
       openWikiDrawer(kbId, slug);
