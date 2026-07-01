@@ -512,8 +512,8 @@ const tagPage = ref(1);
 const tagHasMore = ref(false);
 const tagLoadingMore = ref(false);
 const tagTotal = ref(0);
-let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null;
-let docSearchDebounce: ReturnType<typeof setTimeout> | null = null;
+let tagSearchDebounce: number | null = null;
+let docSearchDebounce: number | null = null;
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
 const fileTypeOptions = computed(() => [
@@ -961,7 +961,7 @@ watch(selectedTagIds, (newVal, oldVal) => {
 watch(tagSearchQuery, (newVal, oldVal) => {
   if (newVal === oldVal) return;
   if (tagSearchDebounce) {
-    clearTimeout(tagSearchDebounce);
+    window.clearTimeout(tagSearchDebounce);
   }
   tagSearchDebounce = window.setTimeout(() => {
     if (kbId.value) {
@@ -974,7 +974,7 @@ watch(tagSearchQuery, (newVal, oldVal) => {
 watch(docSearchKeyword, (newVal, oldVal) => {
   if (newVal === oldVal) return;
   if (docSearchDebounce) {
-    clearTimeout(docSearchDebounce);
+    window.clearTimeout(docSearchDebounce);
   }
   docSearchDebounce = window.setTimeout(() => {
     if (kbId.value) {
@@ -2409,7 +2409,7 @@ async function createNewSession(value: string): Promise<void> {
                           <div v-if="canEdit && batchMode" class="card-nav-check" @click.stop>
                             <t-checkbox class="card-select-checkbox" size="small" :checked="selectedIds.has(item.id)"
                               :title="item.file_name"
-                              @change="(checked, ctx) => onCardGridCheckboxChange(item.id, checked, ctx)" />
+                              @change="(checked: boolean, ctx?: { e?: Event }) => onCardGridCheckboxChange(item.id, checked, ctx)" />
                           </div>
                           <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
                           <t-popup v-if="canEdit" v-model="item.isMore" overlayClassName="card-more"

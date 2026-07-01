@@ -482,6 +482,7 @@ const filteredGroupedSessions = computed(() => {
         bucket.items.map((item) => ({
             ...item,
             path: `chat/${item.id}`,
+            title: item.title || '',
         })),
         dateBucketLabels.value,
         (session) => classifyDateBucket(session.updated_at || session.created_at),

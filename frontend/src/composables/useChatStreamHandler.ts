@@ -259,7 +259,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     const events: ChatMessage[] = []
 
     if (agentSteps && Array.isArray(agentSteps) && agentSteps.length > 0) {
-      agentSteps.forEach((step: ChatMessage) => {
+      agentSteps.forEach((rawStep) => {
+        const step = rawStep as ChatMessage
         const stepTimestamp = step.timestamp ? new Date(String(step.timestamp)).getTime() : 0
         const toolCalls = step.tool_calls
         const hasToolCalls = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0

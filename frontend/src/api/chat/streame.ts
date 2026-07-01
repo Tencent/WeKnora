@@ -200,7 +200,7 @@ export function useStream() {
 
   let chunkHandler: ((data: any) => void) | null = null
   // 注册块处理器
-  const onChunk = (handler: () => void) => {
+  const onChunk = (handler: (data: any) => void) => {
     chunkHandler = handler
   }
 

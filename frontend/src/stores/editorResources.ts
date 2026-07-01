@@ -13,7 +13,7 @@ import {
 } from '@/api/system'
 import { listMCPServices, type MCPService } from '@/api/mcp-service'
 import { listSkills, type SkillInfo } from '@/api/skill'
-import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholderDefinition } from '@/api/agent'
+import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
 
 const CACHE_TTL_MS = 60_000
@@ -38,7 +38,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   const skillsAvailable = ref(true)
   const agentTypePresets = ref<AgentTypePreset[]>([])
   const promptTemplates = ref<PromptTemplatesConfig | null>(null)
-  const placeholders = ref<PlaceholderDefinition[]>([])
+  const placeholders = ref<PlaceholdersResponse | null>(null)
   const tenantRetrievalConfig = ref<Record<string, unknown> | null>(null)
   const parserEngines = ref<ParserEngineInfo[]>([])
   const systemInfo = ref<SystemInfo | null>(null)
@@ -114,7 +114,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   async function ensurePlaceholders(force = false): Promise<void> {
     return runOnce('placeholders', force, async () => {
       const placeholdersRes = await getPlaceholders()
-      placeholders.value = placeholdersRes?.data ?? []
+      placeholders.value = placeholdersRes?.data ?? null
       loadedAt.value.placeholders = Date.now()
     })
   }
@@ -166,7 +166,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       skills.value = []
       agentTypePresets.value = []
       promptTemplates.value = null
-      placeholders.value = []
+      placeholders.value = null
       tenantRetrievalConfig.value = null
       parserEngines.value = []
       systemInfo.value = null
