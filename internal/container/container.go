@@ -119,6 +119,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Register goroutine pool cleanup handler
 	must(container.Invoke(registerPoolCleanup))
 
+	// Embedding cache is a singleton shared across all retrieve engines.
+	// Nil when ENABLE_EMBEDDING_CACHE is unset or not "true".
+	must(container.Provide(func(db *gorm.DB) *embedding.EmbeddingCache {
+		if strings.ToLower(os.Getenv("ENABLE_EMBEDDING_CACHE")) != "true" {
+			return nil
+		}
+		return embedding.NewEmbeddingCache(db)
+	}))
+
 	// Initialize retrieval engine registry for search capabilities
 	logger.Debugf(ctx, "[Container] Registering retrieval engine registry...")
 	must(container.Provide(initRetrieveEngineRegistry))
@@ -823,6 +832,7 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 //   - Error if initialization fails
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
+	embeddingCache *embedding.EmbeddingCache,
 ) (interfaces.RetrieveEngineRegistry, error) {
 	registry := retriever.NewRetrieveEngineRegistry()
 	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
@@ -835,7 +845,7 @@ func initRetrieveEngineRegistry(
 	if slices.Contains(retrieveDriver, "postgres") {
 		postgresRepo := postgresRepo.NewPostgresRetrieveEngineRepository(db)
 		if err := registry.Register(
-			retriever.NewKVHybridRetrieveEngine(postgresRepo, types.PostgresRetrieverEngineType),
+			retriever.NewKVHybridRetrieveEngineWithCache(postgresRepo, types.PostgresRetrieverEngineType, embeddingCache),
 		); err != nil {
 			log.Errorf("Register postgres retrieve engine failed: %v", err)
 		} else {
@@ -845,7 +855,7 @@ func initRetrieveEngineRegistry(
 	if slices.Contains(retrieveDriver, "sqlite") {
 		sqliteRepo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
 		if err := registry.Register(
-			retriever.NewKVHybridRetrieveEngine(sqliteRepo, types.SQLiteRetrieverEngineType),
+			retriever.NewKVHybridRetrieveEngineWithCache(sqliteRepo, types.SQLiteRetrieverEngineType, embeddingCache),
 		); err != nil {
 			log.Errorf("Register sqlite retrieve engine failed: %v", err)
 		} else {
@@ -863,8 +873,8 @@ func initRetrieveEngineRegistry(
 		} else {
 			elasticsearchRepo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, nil)
 			if err := registry.Register(
-				retriever.NewKVHybridRetrieveEngine(
-					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
+				retriever.NewKVHybridRetrieveEngineWithCache(
+					elasticsearchRepo, types.ElasticsearchRetrieverEngineType, embeddingCache,
 				),
 			); err != nil {
 				log.Errorf("Register elasticsearch_v8 retrieve engine failed: %v", err)
@@ -885,8 +895,8 @@ func initRetrieveEngineRegistry(
 		} else {
 			elasticsearchRepo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, nil)
 			if err := registry.Register(
-				retriever.NewKVHybridRetrieveEngine(
-					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
+				retriever.NewKVHybridRetrieveEngineWithCache(
+					elasticsearchRepo, types.ElasticsearchRetrieverEngineType, embeddingCache,
 				),
 			); err != nil {
 				log.Errorf("Register elasticsearch_v7 retrieve engine failed: %v", err)
@@ -911,7 +921,7 @@ func initRetrieveEngineRegistry(
 		); err != nil {
 			log.Errorf("Create opensearch repository failed: %v", err)
 		} else if err := registry.Register(
-			retriever.NewKVHybridRetrieveEngine(repo, types.OpenSearchRetrieverEngineType),
+			retriever.NewKVHybridRetrieveEngineWithCache(repo, types.OpenSearchRetrieverEngineType, embeddingCache),
 		); err != nil {
 			log.Errorf("Register opensearch retrieve engine failed: %v", err)
 		} else {
@@ -956,8 +966,8 @@ func initRetrieveEngineRegistry(
 		} else {
 			qdrantRepository := qdrantRepo.NewQdrantRetrieveEngineRepository(client, nil)
 			if err := registry.Register(
-				retriever.NewKVHybridRetrieveEngine(
-					qdrantRepository, types.QdrantRetrieverEngineType,
+				retriever.NewKVHybridRetrieveEngineWithCache(
+					qdrantRepository, types.QdrantRetrieverEngineType, embeddingCache,
 				),
 			); err != nil {
 				log.Errorf("Register qdrant retrieve engine failed: %v", err)
@@ -999,8 +1009,8 @@ func initRetrieveEngineRegistry(
 		} else {
 			weaviateRepository := weaviateRepo.NewWeaviateRetrieveEngineRepository(weaviateClient, nil)
 			if err := registry.Register(
-				retriever.NewKVHybridRetrieveEngine(
-					weaviateRepository, types.WeaviateRetrieverEngineType,
+				retriever.NewKVHybridRetrieveEngineWithCache(
+					weaviateRepository, types.WeaviateRetrieverEngineType, embeddingCache,
 				),
 			); err != nil {
 				log.Errorf("Register weaviate retrieve engine failed: %v", err)
@@ -1036,8 +1046,8 @@ func initRetrieveEngineRegistry(
 		} else {
 			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli, nil)
 			if err := registry.Register(
-				retriever.NewKVHybridRetrieveEngine(
-					milvusRepository, types.MilvusRetrieverEngineType,
+				retriever.NewKVHybridRetrieveEngineWithCache(
+					milvusRepository, types.MilvusRetrieverEngineType, embeddingCache,
 				),
 			); err != nil {
 				log.Errorf("Register milvus retrieve engine failed: %v", err)
@@ -1083,8 +1093,8 @@ func initRetrieveEngineRegistry(
 				dorisDB, httpBase, dorisUsername, dorisPassword, dorisDatabase, nil,
 			)
 			if err := registry.Register(
-				retriever.NewKVHybridRetrieveEngine(
-					dorisRepository, types.DorisRetrieverEngineType,
+				retriever.NewKVHybridRetrieveEngineWithCache(
+					dorisRepository, types.DorisRetrieverEngineType, embeddingCache,
 				),
 			); err != nil {
 				log.Errorf("Register doris retrieve engine failed: %v", err)
@@ -1113,8 +1123,8 @@ func initRetrieveEngineRegistry(
 					nil,
 				)
 				if err := registry.Register(
-					retriever.NewKVHybridRetrieveEngine(
-						tencentRepository, types.TencentVectorDBRetrieverEngineType,
+					retriever.NewKVHybridRetrieveEngineWithCache(
+						tencentRepository, types.TencentVectorDBRetrieverEngineType, embeddingCache,
 					),
 				); err != nil {
 					log.Errorf("Register tencent_vectordb retrieve engine failed: %v", err)
@@ -1126,7 +1136,7 @@ func initRetrieveEngineRegistry(
 	}
 	// ─── DB store registration (byStoreID) ───
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
-		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink)
+		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink, embeddingCache)
 	}
 
 	return registry, nil
@@ -1136,6 +1146,7 @@ func initRetrieveEngineRegistry(
 // in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
 func loadDBStoresIntoRegistry(
 	storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config, auditSink openSearchRepo.AuditSink,
+	embeddingCache *embedding.EmbeddingCache,
 ) {
 	ctx := context.Background()
 	log := logger.GetLogger(ctx)
@@ -1153,7 +1164,7 @@ func loadDBStoresIntoRegistry(
 
 	log.Infof("Loading %d vector store(s) from database", len(stores))
 	for _, store := range stores {
-		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink)
+		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink, embeddingCache)
 		if err != nil {
 			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
 			continue

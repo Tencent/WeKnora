@@ -751,3 +751,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_stores_name_tenant
 CREATE INDEX IF NOT EXISTS idx_vector_stores_tenant_id ON vector_stores(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_engine_type ON vector_stores(engine_type);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_deleted_at ON vector_stores(deleted_at);
+
+-- Embedding cache for redundant computation reduction
+-- chunk_config_hash is reserved for future cache partitioning across
+-- different chunking strategies. In this initial version it defaults to ''
+-- and is intentionally excluded from the primary key.
+CREATE TABLE IF NOT EXISTS embedding_cache (
+    content_hash      VARCHAR(64) NOT NULL,
+    model_id          VARCHAR(64) NOT NULL,
+    dimensions        INTEGER NOT NULL,
+    chunk_config_hash VARCHAR(64) NOT NULL DEFAULT '',
+    embedding         BLOB NOT NULL,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (content_hash, model_id, dimensions)
+);
+CREATE INDEX IF NOT EXISTS idx_emb_cache_model ON embedding_cache(model_id);
