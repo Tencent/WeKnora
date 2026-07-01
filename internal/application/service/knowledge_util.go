@@ -8,8 +8,11 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
@@ -44,7 +47,162 @@ func isValidURL(url string) bool {
 	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
 		return true
 	}
+	// file:// is recognised as a syntactically-valid URL here. Whether the
+	// path is actually allowed to be read is gated by the
+	// WEKNORA_LOCAL_FILE_URL_ROOTS allowlist (see resolveLocalFileURL).
+	if strings.HasPrefix(url, "file://") {
+		return true
+	}
 	return false
+}
+
+// isLocalFileURL reports whether the rawURL uses the file:// scheme.
+//
+// Used to branch the URL-import path between remote HTTP fetch and local
+// filesystem read. file:// imports are opt-in: even when this returns true,
+// resolveLocalFileURL still rejects the path unless the operator has set
+// WEKNORA_LOCAL_FILE_URL_ROOTS to whitelist allowed prefixes.
+func isLocalFileURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "file://")
+}
+
+var (
+	localFileURLRootsOnce sync.Once
+	localFileURLRoots     []string // canonical absolute paths, symlinks resolved if possible
+)
+
+// loadLocalFileURLRoots parses WEKNORA_LOCAL_FILE_URL_ROOTS (colon-separated,
+// path-list-separator on Windows, ~ expanded) once per process. Empty / unset
+// leaves localFileURLRoots empty, which disables file:// imports.
+func loadLocalFileURLRoots() {
+	raw := strings.TrimSpace(os.Getenv("WEKNORA_LOCAL_FILE_URL_ROOTS"))
+	if raw == "" {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	for _, p := range strings.Split(raw, string(os.PathListSeparator)) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		// Expand ~ / ~/ — common operator convenience.
+		if p == "~" {
+			if home != "" {
+				p = home
+			}
+		} else if strings.HasPrefix(p, "~/") && home != "" {
+			p = filepath.Join(home, p[2:])
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		// Resolve symlinks on the root itself so the per-request EvalSymlinks
+		// comparison below sees a canonical path on both sides.
+		if real, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = real
+		}
+		localFileURLRoots = append(localFileURLRoots, abs)
+	}
+}
+
+// resolveLocalFileURL parses a file:// URL, validates it against the
+// WEKNORA_LOCAL_FILE_URL_ROOTS allowlist, resolves symlinks, and returns
+// the canonical filesystem path.
+//
+// Behaviour:
+//   - WEKNORA_LOCAL_FILE_URL_ROOTS unset / empty → returns an error
+//     (feature disabled by default; the explicit allowlist makes the
+//     policy decision visible in deployment config).
+//   - URL host must be empty or "localhost"; remote SMB-style file://host/...
+//     URLs are rejected.
+//   - Path is canonicalised (filepath.Abs + filepath.Clean) and symlinks
+//     are resolved. The resolved path must sit underneath at least one of
+//     the configured root prefixes; this catches both "../" traversal and
+//     "symlink inside the allowed root that points outside" tricks.
+//
+// LocalHub deployments run the backend with the same UID as the operator,
+// so an LFI here exposes only files the operator can already read from a
+// shell. The allowlist is still required because (a) it surfaces the policy
+// choice explicitly, (b) it prevents accidental exposure when this fork is
+// repackaged into a multi-user service, and (c) it keeps the blast radius
+// of any future bug in this code path bounded to a known directory set.
+func resolveLocalFileURL(rawURL string) (string, error) {
+	localFileURLRootsOnce.Do(loadLocalFileURLRoots)
+	if len(localFileURLRoots) == 0 {
+		return "", fmt.Errorf("local file URL import is disabled; set WEKNORA_LOCAL_FILE_URL_ROOTS to a colon-separated list of allowed directory prefixes to enable")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid file URL: %w", err)
+	}
+	if u.Scheme != "file" {
+		return "", fmt.Errorf("expected file:// scheme, got %q", u.Scheme)
+	}
+	// file:// may carry an empty host (file:///path) or "localhost"
+	// (file://localhost/path). Anything else (e.g. SMB-style file://host/share)
+	// is rejected.
+	if u.Host != "" && u.Host != "localhost" {
+		return "", fmt.Errorf("file URL with non-local host is not allowed: %q", u.Host)
+	}
+	rawPath := u.Path
+	if rawPath == "" {
+		return "", fmt.Errorf("empty file URL path")
+	}
+	cleaned, err := filepath.Abs(filepath.Clean(rawPath))
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	// Resolve symlinks before the allowlist check so a symlink rooted inside
+	// the allowlist that points outside still gets rejected.
+	real, err := filepath.EvalSymlinks(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("evaluate symlinks for %s: %w", cleaned, err)
+	}
+	for _, root := range localFileURLRoots {
+		rel, err := filepath.Rel(root, real)
+		if err != nil {
+			continue
+		}
+		if rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)) {
+			return real, nil
+		}
+	}
+	return "", fmt.Errorf("path %s is not under any WEKNORA_LOCAL_FILE_URL_ROOTS prefix (resolved: %s)", rawPath, real)
+}
+
+// readLocalFileURL reads a file:// URL into memory, applying the same
+// size cap (maxFileURLSize) as the HTTP download path. The path is
+// validated against the WEKNORA_LOCAL_FILE_URL_ROOTS allowlist via
+// resolveLocalFileURL — callers do NOT need to pre-validate.
+//
+// payloadFileName / payloadFileType are in/out pointers, populated from
+// the resolved filesystem path when empty so the downstream parser sees
+// the right extension.
+func readLocalFileURL(ctx context.Context, fileURL string, payloadFileName, payloadFileType *string) ([]byte, error) {
+	fsPath, err := resolveLocalFileURL(fileURL)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := os.Stat(fsPath)
+	if err != nil {
+		return nil, fmt.Errorf("stat local file: %w", err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file: %s", fsPath)
+	}
+	if fi.Size() > maxFileURLSize {
+		return nil, fmt.Errorf("file size %d bytes exceeds limit of %d bytes (10MB)", fi.Size(), maxFileURLSize)
+	}
+	if *payloadFileName == "" {
+		*payloadFileName = filepath.Base(fsPath)
+	}
+	if *payloadFileType == "" && *payloadFileName != "" {
+		*payloadFileType = getFileType(*payloadFileName)
+	}
+	logger.Infof(ctx, "Reading local file URL: path=%s size=%d name=%s type=%s",
+		fsPath, fi.Size(), *payloadFileName, *payloadFileType)
+	return os.ReadFile(fsPath)
 }
 
 // calculateFileHash calculates MD5 hash of a file
@@ -335,7 +493,14 @@ func IsVideoType(fileType string) bool {
 // payloadFileName and payloadFileType are in/out pointers: if they point to an empty string,
 // the function resolves the value from Content-Disposition / URL path and writes it back.
 // It does NOT perform SSRF validation — callers are responsible for that.
+//
+// file:// URLs are short-circuited to readLocalFileURL, which enforces the
+// WEKNORA_LOCAL_FILE_URL_ROOTS allowlist instead of running through the
+// HTTP client and SSRF path.
 func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, payloadFileType *string) ([]byte, error) {
+	if isLocalFileURL(fileURL) {
+		return readLocalFileURL(ctx, fileURL, payloadFileName, payloadFileType)
+	}
 	httpClient := &http.Client{Timeout: 60 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {

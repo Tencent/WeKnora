@@ -449,11 +449,21 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		secutils.SanitizeForLog(req.FileType),
 	)
 
-	// SSRF validation for user-supplied URL
-	if err := secutils.ValidateURLForSSRF(req.URL); err != nil {
-		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: %v", err)
-		c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("URL", req.URL, err)))
-		return
+	// SSRF validation for user-supplied URL.
+	//
+	// file:// URLs are not network destinations and so don't fit the SSRF
+	// allowlist (which requires a hostname). Their security envelope is
+	// enforced by service.resolveLocalFileURL against the
+	// WEKNORA_LOCAL_FILE_URL_ROOTS allowlist — both at create-time (so we
+	// fail fast before persisting a knowledge row) and at fetch-time inside
+	// readLocalFileURL when the async worker reads the bytes. Skip the
+	// SSRF gate here for file:// so it reaches the service layer.
+	if !strings.HasPrefix(req.URL, "file://") {
+		if err := secutils.ValidateURLForSSRF(req.URL); err != nil {
+			logger.Warnf(ctx, "SSRF validation failed for knowledge URL: %v", err)
+			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("URL", req.URL, err)))
+			return
+		}
 	}
 
 	logger.Infof(ctx,
