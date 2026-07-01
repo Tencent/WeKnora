@@ -1298,9 +1298,10 @@ type SlugUpdate struct {
 	KnowledgeID       string
 	SourceRef         string
 	Language          string
-	SummaryBody       string // For summary
-	SummaryLine       string // For summary
-	RetractDocContent string // For retract / retractStale
+	SummaryBody       string     // For summary
+	SummaryLine       string     // For summary
+	PageMetadata      types.JSON // For summary bookkeeping/cache metadata
+	RetractDocContent string     // For retract / retractStale
 	// SourceChunks lists the chunk IDs (within KnowledgeID) that substantively
 	// support this update. Mirrors Item.SourceChunks for convenience — the
 	// Reduce phase reads from here to avoid an extra field hop.
