@@ -4504,8 +4504,6 @@ export default {
     codeImport: {
       toggle: "코드에서 가져오기",
       hint: "표준 mcpServers JSON 설정을 붙여넣으면 양식이 자동으로 채워집니다",
-      placeholder:
-        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
       parse: "파싱 후 채우기",
       editOverwriteHint: "가져오기는 현재 양식을 덮어씁니다(저장된 자격 증명은 영향받지 않으며, 저장을 눌러야 적용됩니다)",
       errors: {
