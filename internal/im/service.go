@@ -20,6 +20,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	mcppkg "github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -361,6 +362,11 @@ type Service struct {
 	// modelService is used to obtain the chat model for generating smart notification replies.
 	modelService interfaces.ModelService
 
+	// oauthManager builds MCP OAuth authorization URLs so IM users can authorize
+	// OAuth-enabled MCP services out-of-band (IM cannot resolve the in-conversation
+	// prompt). May be nil, in which case a generic console hint is shown instead.
+	oauthManager *mcppkg.OAuthManager
+
 	// streamManager writes/reads QA events for distributed stop detection,
 	// consistent with the web StopSession mechanism. May be nil in Lite mode
 	// (but NewStreamManager always returns at least a memory implementation).
@@ -484,27 +490,79 @@ func withIMIdentity(ctx context.Context, tenantID uint64, channelID string, msg 
 	return ctx
 }
 
-// formatIMMCPAuthNotice builds a user-facing hint listing OAuth-enabled MCP
-// services that still need authorization. Returns "" when there is nothing to
-// report. IM users cannot authorize inline, so they are directed to the console.
-func formatIMMCPAuthNotice(serviceNames []string) string {
-	names := make([]string, 0, len(serviceNames))
-	seen := make(map[string]bool, len(serviceNames))
-	for _, name := range serviceNames {
-		name = strings.TrimSpace(name)
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
-		names = append(names, name)
-	}
-	if len(names) == 0 {
+// imMCPAuthService identifies an OAuth-enabled MCP service that the IM user has
+// not authorized yet, collected during a turn so an authorization notice can be
+// appended to the reply.
+type imMCPAuthService struct {
+	ID   string
+	Name string
+}
+
+// mcpOAuthCallbackURL returns the absolute backend callback URL registered with
+// the authorization server, derived from APP_EXTERNAL_URL. Empty when unset.
+func mcpOAuthCallbackURL() string {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL")), "/")
+	if base == "" {
 		return ""
 	}
-	return fmt.Sprintf(
-		"⚠️ 以下 MCP 服务需要授权后才能使用：%s。请在 WeKnora 管理后台完成 OAuth 授权后重试。",
-		strings.Join(names, "、"),
-	)
+	return base + "/api/v1/mcp-oauth/callback"
+}
+
+// buildIMMCPAuthNotice builds a user-facing authorization notice for the given
+// OAuth-enabled MCP services. When the OAuth manager and APP_EXTERNAL_URL are
+// available it generates a per-service authorization URL (StartAuthorization)
+// the user can open; otherwise it falls back to a console hint. Returns "" when
+// there is nothing to report. The user authorizes out-of-band, then re-sends
+// their message to use the service (IM cannot resolve the prompt inline).
+func (s *Service) buildIMMCPAuthNotice(ctx context.Context, services []imMCPAuthService) string {
+	// Deduplicate by service ID, preserving order.
+	seen := make(map[string]bool, len(services))
+	uniq := make([]imMCPAuthService, 0, len(services))
+	for _, svc := range services {
+		if svc.ID == "" || seen[svc.ID] {
+			continue
+		}
+		seen[svc.ID] = true
+		uniq = append(uniq, svc)
+	}
+	if len(uniq) == 0 {
+		return ""
+	}
+
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	principal := types.MCPOAuthPrincipalFromContext(ctx)
+	redirectURI := mcpOAuthCallbackURL()
+	frontendRedirect := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
+	if frontendRedirect == "" {
+		frontendRedirect = "/"
+	}
+
+	var lines []string
+	for _, svc := range uniq {
+		name := strings.TrimSpace(svc.Name)
+		if name == "" {
+			name = svc.ID
+		}
+		var authURL string
+		if s.oauthManager != nil && redirectURI != "" && tenantID != 0 && principal.Valid() {
+			url, err := s.oauthManager.StartAuthorizationForService(
+				ctx, tenantID, principal, svc.ID, redirectURI, frontendRedirect,
+			)
+			if err != nil {
+				logger.Warnf(ctx, "[IM] Failed to build MCP OAuth URL for service %s: %v", svc.ID, err)
+			} else {
+				authURL = url
+			}
+		}
+		if authURL != "" {
+			lines = append(lines, fmt.Sprintf("• %s：%s", name, authURL))
+		} else {
+			lines = append(lines, fmt.Sprintf("• %s（请在 WeKnora 管理后台完成 OAuth 授权）", name))
+		}
+	}
+
+	return "⚠️ 以下 MCP 服务需要授权后才能使用，请点击链接完成授权，然后重新发送你的消息：\n" +
+		strings.Join(lines, "\n")
 }
 
 // appendIMAuthNotice appends an authorization notice to an existing reply body,
@@ -726,6 +784,7 @@ func NewService(
 	modelService interfaces.ModelService,
 	streamManager interfaces.StreamManager,
 	defaultFileSvc interfaces.FileService,
+	oauthManager *mcppkg.OAuthManager,
 	redisClient *redis.Client,
 	appCfg *config.Config,
 ) *Service {
@@ -752,6 +811,7 @@ func NewService(
 		modelService:     modelService,
 		streamManager:    streamManager,
 		defaultFileSvc:   defaultFileSvc,
+		oauthManager:     oauthManager,
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
 		adapterFactories: make(map[string]AdapterFactory),
@@ -1941,10 +2001,10 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		agentCompleteFinalAnswer string
 		streamedAny              bool
 
-		// mcpAuthNotices collects OAuth service names that need out-of-band
+		// mcpAuthServices collects OAuth services that need out-of-band
 		// authorization (IM cannot resolve the in-conversation prompt).
-		mcpAuthNotices []string
-		mcpAuthSeen    = make(map[string]bool)
+		mcpAuthServices []imMCPAuthService
+		mcpAuthSeen     = make(map[string]bool)
 	)
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 	closeComplete := func() { completeOnce.Do(func() { close(completeDone) }) }
@@ -2160,7 +2220,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		bufMu.Lock()
 		if !mcpAuthSeen[data.ServiceID] {
 			mcpAuthSeen[data.ServiceID] = true
-			mcpAuthNotices = append(mcpAuthNotices, data.ServiceName)
+			mcpAuthServices = append(mcpAuthServices, imMCPAuthService{ID: data.ServiceID, Name: data.ServiceName})
 		}
 		bufMu.Unlock()
 		return nil
@@ -2274,7 +2334,7 @@ loop:
 	answer := resolvedAnswer
 	finalErr := qaErr
 	noVisibleContent := !streamedAny && strings.TrimSpace(resolvedAnswer) == ""
-	authNotices := append([]string(nil), mcpAuthNotices...)
+	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	bufMu.Unlock()
 
 	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc)
@@ -2288,7 +2348,7 @@ loop:
 			answer = fallback
 		}
 	}
-	if notice := formatIMMCPAuthNotice(authNotices); notice != "" {
+	if notice := s.buildIMMCPAuthNotice(ctx, authServices); notice != "" {
 		finalDisplay = appendIMAuthNotice(finalDisplay, notice)
 		answer = appendIMAuthNotice(answer, notice)
 	}
@@ -2340,7 +2400,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	var answerMu sync.Mutex
 	var answerBuilder strings.Builder
 	var qaErr error
-	var mcpAuthNotices []string
+	var mcpAuthServices []imMCPAuthService
 	mcpAuthSeen := make(map[string]bool)
 	done := make(chan struct{})
 	completeDone := make(chan struct{})
@@ -2387,7 +2447,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		answerMu.Lock()
 		if !mcpAuthSeen[data.ServiceID] {
 			mcpAuthSeen[data.ServiceID] = true
-			mcpAuthNotices = append(mcpAuthNotices, data.ServiceName)
+			mcpAuthServices = append(mcpAuthServices, imMCPAuthService{ID: data.ServiceID, Name: data.ServiceName})
 		}
 		answerMu.Unlock()
 		return nil
@@ -2493,7 +2553,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	answerMu.Lock()
 	answer := answerBuilder.String()
 	qaError := qaErr
-	authNotices := append([]string(nil), mcpAuthNotices...)
+	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	answerMu.Unlock()
 
 	if answer == "" && qaError != nil {
@@ -2502,7 +2562,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	if answer == "" {
 		answer = "抱歉，我暂时无法回答这个问题。"
 	}
-	if notice := formatIMMCPAuthNotice(authNotices); notice != "" {
+	if notice := s.buildIMMCPAuthNotice(ctx, authServices); notice != "" {
 		answer = appendIMAuthNotice(answer, notice)
 	}
 
