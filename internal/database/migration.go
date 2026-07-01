@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -103,10 +104,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
-		migrationsPath = "file://migrations/sqlite"
-	}
+	migrationsPath := migrationSourceURL(dsn)
 
 	var m *migrate.Migrate
 	if opts.SQLiteDBPath != "" {
@@ -255,6 +253,17 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	}
 
 	return nil
+}
+
+func migrationSourceURL(dsn string) string {
+	switch {
+	case strings.HasPrefix(dsn, "sqlite3://"):
+		return "file://migrations/sqlite"
+	case strings.HasPrefix(dsn, "mysql://"):
+		return "file://migrations/mysql"
+	default:
+		return "file://migrations/versioned"
+	}
 }
 
 // recoverFromDirtyState attempts to recover from a dirty migration state
