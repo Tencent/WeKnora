@@ -3,6 +3,8 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 
@@ -183,6 +185,33 @@ func (c *Chunk) EmbeddingContent() string {
 		return body
 	}
 	return c.ContextHeader + "\n\n" + body
+}
+
+// DocumentChunkFingerprint returns a stable hash for parsed document text.
+// It intentionally mirrors EmbeddingContent because a cache hit must mean the
+// existing chunk vector can be reused without another embedding call.
+func DocumentChunkFingerprint(content, contextHeader string) string {
+	return DocumentChunkScopedFingerprint(content, contextHeader)
+}
+
+func DocumentChunkScopedFingerprint(content, contextHeader string, scopeParts ...string) string {
+	body := strings.TrimSpace(content)
+	input := body
+	if contextHeader != "" {
+		input = contextHeader + "\n\n" + body
+	}
+	if len(scopeParts) > 0 {
+		input = strings.Join(scopeParts, "\x00") + "\x00" + input
+	}
+	sum := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(sum[:])
+}
+
+func (c *Chunk) DocumentFingerprint() string {
+	if c == nil {
+		return ""
+	}
+	return DocumentChunkFingerprint(c.Content, c.ContextHeader)
 }
 
 // AssignChunkSeqIDs assigns sequential SeqIDs to a batch of chunks that have SeqID == 0.

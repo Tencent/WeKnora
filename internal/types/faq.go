@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -28,6 +29,11 @@ type FAQChunkMetadata struct {
 type GeneratedQuestion struct {
 	ID       string `json:"id"`       // 唯一标识，用于构造 source_id
 	Question string `json:"question"` // 问题内容
+}
+
+func StableGeneratedQuestionID(question string, index int) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(question) + "\x00" + strconv.Itoa(index)))
+	return "q" + hex.EncodeToString(sum[:8])
 }
 
 // DocumentChunkMetadata 定义文档 Chunk 的元数据结构

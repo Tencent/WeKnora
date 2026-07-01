@@ -172,6 +172,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	if willSpawnQuestion {
 		for _, c := range textChunks {
 			if c.ChunkType == types.ChunkTypeText {
+				meta, metaErr := c.DocumentMetadata()
+				if metaErr == nil && meta != nil && len(meta.GeneratedQuestions) > 0 {
+					continue
+				}
 				questionChunks = append(questionChunks, c)
 			}
 		}
