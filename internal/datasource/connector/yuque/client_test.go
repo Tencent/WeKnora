@@ -118,7 +118,7 @@ func TestClient_Ping_403WrapsInvalidCredentials(t *testing.T) {
 func TestClient_TokenNeverLoggedInFull(t *testing.T) {
 	t.Setenv("LOG_FORMAT", "")
 	logger.ConfigureFromEnv()
-	defer logger.ConfigureFromEnv()
+	t.Cleanup(func() { logger.ConfigureFromEnv() })
 
 	// Redirect the project's internal logger to an in-memory buffer so we can
 	// assert the raw token never appears in log output. Using stdlib `log`
