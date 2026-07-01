@@ -1,14 +1,20 @@
 package im
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
 
-func TestFormatIMMCPAuthNotice(t *testing.T) {
+// buildIMMCPAuthNotice with a nil OAuth manager falls back to a per-service
+// console hint (no authorization URL). These cases exercise the dedup and
+// empty-input handling without needing a live OAuth manager.
+func TestBuildIMMCPAuthNotice(t *testing.T) {
+	svc := &Service{} // nil oauthManager => console-hint fallback
+
 	tests := []struct {
 		name     string
-		input    []string
+		input    []imMCPAuthService
 		want     string
 		contains []string
 	}{
@@ -18,33 +24,37 @@ func TestFormatIMMCPAuthNotice(t *testing.T) {
 			want:  "",
 		},
 		{
-			name:  "all blank names",
-			input: []string{"", "  ", "\t"},
+			name:  "all blank ids",
+			input: []imMCPAuthService{{ID: "", Name: "x"}, {ID: "", Name: "y"}},
 			want:  "",
 		},
 		{
 			name:     "single service",
-			input:    []string{"GitHub MCP"},
+			input:    []imMCPAuthService{{ID: "svc-1", Name: "GitHub MCP"}},
 			contains: []string{"GitHub MCP", "OAuth 授权"},
 		},
 		{
-			name:     "dedupe and trim",
-			input:    []string{" A ", "A", " B", "  ", "B"},
-			contains: []string{"A、B"},
+			name: "dedupe by id",
+			input: []imMCPAuthService{
+				{ID: "a", Name: "A"},
+				{ID: "a", Name: "A"},
+				{ID: "b", Name: "B"},
+			},
+			contains: []string{"A", "B"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatIMMCPAuthNotice(tt.input)
+			got := svc.buildIMMCPAuthNotice(context.Background(), tt.input)
 			if tt.contains == nil {
 				if got != tt.want {
-					t.Fatalf("formatIMMCPAuthNotice() = %q, want %q", got, tt.want)
+					t.Fatalf("buildIMMCPAuthNotice() = %q, want %q", got, tt.want)
 				}
 				return
 			}
 			for _, sub := range tt.contains {
 				if !strings.Contains(got, sub) {
-					t.Fatalf("formatIMMCPAuthNotice() = %q, want substring %q", got, sub)
+					t.Fatalf("buildIMMCPAuthNotice() = %q, want substring %q", got, sub)
 				}
 			}
 		})
