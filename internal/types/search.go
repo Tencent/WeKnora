@@ -167,6 +167,25 @@ type SearchParams struct {
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
 }
 
+// UnmarshalJSON supports both "query_text" (canonical) and "query" (shorthand)
+// so clients using either field name can deserialize correctly.
+func (s *SearchParams) UnmarshalJSON(data []byte) error {
+	type Alias SearchParams
+	aux := &struct {
+		Query string `json:"query"`
+		*Alias
+	}{
+		Alias: (*Alias)(s),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if s.QueryText == "" && aux.Query != "" {
+		s.QueryText = aux.Query
+	}
+	return nil
+}
+
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value
 func (c SearchResult) Value() (driver.Value, error) {
 	return json.Marshal(c)
