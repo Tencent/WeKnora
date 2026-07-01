@@ -378,6 +378,14 @@ start_app() {
     fi
 
     # 检查是否安装了 Air（热重载工具）
+    if ! command -v air &> /dev/null; then
+        # 尝试将 Go 的 bin 目录加入 PATH
+        GOPATH_BIN="$(go env GOPATH 2>/dev/null)/bin"
+        if [ -d "$GOPATH_BIN" ]; then
+            export PATH="$PATH:$GOPATH_BIN"
+        fi
+    fi
+
     if command -v air &> /dev/null; then
         log_success "检测到 Air，使用热重载模式启动..."
         log_info "修改 Go 代码后将自动重新编译和重启"
