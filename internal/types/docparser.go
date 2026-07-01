@@ -5,14 +5,16 @@ import "strings"
 // ReadRequest is the unified transport-agnostic request for document reading.
 // Set FileContent for file mode, URL for URL mode.
 type ReadRequest struct {
-	FileContent           []byte
-	FileName              string
-	FileType              string
-	URL                   string
-	Title                 string
-	ParserEngine          string
-	RequestID             string
-	ParserEngineOverrides map[string]string
+	FileContent             []byte
+	FileName                string
+	FileType                string
+	URL                     string
+	Title                   string
+	ParserEngine            string
+	RequestID               string
+	ParserEngineOverrides   map[string]string
+	EnableTableStructure    bool
+	TableStructureFileTypes []string
 }
 
 // ReadResult is the transport-agnostic result of document reading.

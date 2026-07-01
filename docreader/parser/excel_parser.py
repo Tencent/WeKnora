@@ -87,13 +87,14 @@ class ExcelParser(BaseParser):
         start, end = 0, 0
 
         excel_file = _open_excel_file(content, file_type=self.file_type)
-        structured_sheet_frames = [
-            (sheet_name, _read_sheet_dataframe_for_structured(excel_file, sheet_name))
-            for sheet_name in excel_file.sheet_names
-        ]
-        structured_doc = build_structured_excel_document(structured_sheet_frames)
-        if structured_doc is not None:
-            return structured_doc
+        if self.enable_table_structure:
+            structured_sheet_frames = [
+                (sheet_name, _read_sheet_dataframe_for_structured(excel_file, sheet_name))
+                for sheet_name in excel_file.sheet_names
+            ]
+            structured_doc = build_structured_excel_document(structured_sheet_frames)
+            if structured_doc is not None:
+                return structured_doc
 
         sheet_frames = [
             (sheet_name, _read_sheet_dataframe(excel_file, sheet_name))
@@ -130,6 +131,21 @@ class ExcelParser(BaseParser):
 
         # Combine all text and return as Document
         return Document(content="".join(text), chunks=chunks)
+
+
+def structured_excel_tables_to_markdown(
+    content: bytes, file_type: str | None = None
+) -> str:
+    """Return structured Excel markdown when a workbook is table-like."""
+    excel_file = _open_excel_file(content, file_type=file_type)
+    structured_sheet_frames = [
+        (sheet_name, _read_sheet_dataframe_for_structured(excel_file, sheet_name))
+        for sheet_name in excel_file.sheet_names
+    ]
+    structured_doc = build_structured_excel_document(structured_sheet_frames)
+    if structured_doc is None:
+        return ""
+    return structured_doc.content
 
 
 def _read_sheet_dataframe(excel_file: pd.ExcelFile, sheet_name: str) -> pd.DataFrame:

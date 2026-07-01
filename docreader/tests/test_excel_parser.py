@@ -12,6 +12,7 @@ import pandas as pd
 
 from docreader.parser.excel_convert import detect_excel_format, engine_for_format
 from docreader.parser.excel_parser import ExcelParser
+from docreader.parser.markitdown_parser import StdMarkitdownParser
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
 from docreader.parser.xlsx_repair import repair_xlsx_bytes
 
@@ -276,6 +277,24 @@ class ExcelImageFilterTest(unittest.TestCase):
 
 
 class ExcelParserTest(unittest.TestCase):
+    def _structured_policy_workbook(self) -> bytes:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Support policy"
+        ws["A1"] = (
+            "General handling guidance: acknowledge the customer first, collect "
+            "photos or videos when needed, then choose an appropriate resolution."
+        )
+        ws.merge_cells("A1:D1")
+        ws.append(["Product", "Issue type", "Issue detail", "Resolution"])
+        ws.append(["Sleeping bag", "Non-quality", "Changed mind", "No return after use"])
+        ws.append([None, "Quality", "Yellowing", "Offer replacement or compensation"])
+        ws.merge_cells("A3:A4")
+
+        bio = io.BytesIO()
+        wb.save(bio)
+        return bio.getvalue()
+
     def test_parse_phantom_shared_strings_workbook(self):
         document = ExcelParser().parse_into_text(_xlsx_with_phantom_shared_strings())
         self.assertIn("hello", document.content)
@@ -300,24 +319,12 @@ class ExcelParserTest(unittest.TestCase):
         self.assertGreater(len(document.chunks), 0)
 
     def test_parse_structured_policy_table(self):
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Support policy"
-        ws["A1"] = (
-            "General handling guidance: acknowledge the customer first, collect "
-            "photos or videos when needed, then choose an appropriate resolution."
-        )
-        ws.merge_cells("A1:D1")
-        ws.append(["Product", "Issue type", "Issue detail", "Resolution"])
-        ws.append(["Sleeping bag", "Non-quality", "Changed mind", "No return after use"])
-        ws.append([None, "Quality", "Yellowing", "Offer replacement or compensation"])
-        ws.merge_cells("A3:A4")
-
-        bio = io.BytesIO()
-        wb.save(bio)
-
-        document = ExcelParser(file_name="policy.xlsx", file_type="xlsx").parse_into_text(
-            bio.getvalue()
+        document = ExcelParser(
+            file_name="policy.xlsx",
+            file_type="xlsx",
+            enable_table_structure=True,
+        ).parse_into_text(
+            self._structured_policy_workbook()
         )
 
         self.assertEqual(document.metadata.get("parser"), "structured_excel")
@@ -356,7 +363,11 @@ class ExcelParserTest(unittest.TestCase):
 
         fake_excel = FakeExcelFile()
         with patch("docreader.parser.excel_parser._open_excel_file", return_value=fake_excel):
-            document = ExcelParser(file_name="people.xls", file_type="xls").parse_into_text(
+            document = ExcelParser(
+                file_name="people.xls",
+                file_type="xls",
+                enable_table_structure=True,
+            ).parse_into_text(
                 b"fake xls bytes"
             )
 
@@ -387,6 +398,72 @@ class ExcelParserTest(unittest.TestCase):
         self.assertNotEqual(document.metadata.get("parser"), "structured_excel")
         self.assertIn("Product", document.content)
         self.assertIn("This free-form note has no table header", document.content)
+
+    def test_excel_parser_uses_legacy_output_by_default(self):
+        document = ExcelParser(file_name="policy.xlsx", file_type="xlsx").parse_into_text(
+            self._structured_policy_workbook()
+        )
+
+        self.assertNotEqual(document.metadata.get("parser"), "structured_excel")
+        self.assertIn("A: General handling guidance", document.content)
+        self.assertIn("A: Product", document.content)
+        self.assertNotIn("## Sheet: Support policy", document.content)
+
+    def test_markitdown_excel_parser_replaces_raw_output_with_structured_table(self):
+        class FakeMarkitdownResult:
+            text_content = "| A | B |\n| --- | --- |\n| raw | table |\n"
+
+        with patch.object(
+            StdMarkitdownParser,
+            "_convert_markitdown",
+            return_value=FakeMarkitdownResult(),
+        ):
+            document = StdMarkitdownParser(
+                file_type="xlsx",
+                enable_table_structure=True,
+            ).parse_into_text(
+                self._structured_policy_workbook()
+            )
+
+        self.assertIn("## Sheet: Support policy", document.content)
+        self.assertIn("- Product: Sleeping bag", document.content)
+        self.assertIn("- Issue detail: Yellowing", document.content)
+        self.assertNotIn("| raw | table |", document.content)
+
+    def test_markitdown_excel_parser_falls_back_to_raw_output_when_unstructured(self):
+        class FakeMarkitdownResult:
+            text_content = "| raw | table |\n"
+
+        with patch.object(
+            StdMarkitdownParser,
+            "_convert_markitdown",
+            return_value=FakeMarkitdownResult(),
+        ):
+            with patch(
+                "docreader.parser.markitdown_parser.structured_excel_tables_to_markdown",
+                return_value="",
+            ):
+                document = StdMarkitdownParser(
+                    file_type="xlsx",
+                    enable_table_structure=True,
+                ).parse_into_text(b"fake")
+
+        self.assertEqual(document.content, "| raw | table |\n")
+
+    def test_markitdown_excel_parser_keeps_raw_output_by_default(self):
+        class FakeMarkitdownResult:
+            text_content = "| raw | table |\n"
+
+        with patch.object(
+            StdMarkitdownParser,
+            "_convert_markitdown",
+            return_value=FakeMarkitdownResult(),
+        ):
+            document = StdMarkitdownParser(file_type="xlsx").parse_into_text(
+                self._structured_policy_workbook()
+            )
+
+        self.assertEqual(document.content, "| raw | table |\n")
 
 
 if __name__ == "__main__":
