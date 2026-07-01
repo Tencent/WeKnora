@@ -420,4 +420,6 @@ type KnowledgeCheckParams struct {
 	Passages []string
 	// Knowledge type
 	Type string
+	// Folder ID for scoping duplicate check to a specific folder (nil = root, omit = KB-wide)
+	FolderID *string
 }

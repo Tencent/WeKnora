@@ -138,6 +138,11 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	if !filter.UpdatedTo.IsZero() {
 		query = query.Where("updated_at <= ?", filter.UpdatedTo)
 	}
+	if filter.FolderID == "__root__" {
+		query = query.Where("folder_id IS NULL")
+	} else if filter.FolderID != "" {
+		query = query.Where("folder_id = ?", filter.FolderID)
+	}
 	return query
 }
 
@@ -220,6 +225,14 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 ) (bool, *types.Knowledge, error) {
 	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, "failed")
+
+	// Scope duplicate check to the same folder
+	if params.FolderID != nil && *params.FolderID != "" {
+		query = query.Where("folder_id = ?", *params.FolderID)
+	} else {
+		// nil or empty string = root level
+		query = query.Where("folder_id IS NULL")
+	}
 
 	switch params.Type {
 	case "file":

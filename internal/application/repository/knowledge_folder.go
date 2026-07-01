@@ -183,6 +183,34 @@ func (r *knowledgeFolderRepository) CountKnowledge(
 	return count, nil
 }
 
+// CountKnowledgeByKB returns a map from folder_id to knowledge count for all folders in a KB.
+// Uses a single GROUP BY query for efficiency.
+func (r *knowledgeFolderRepository) CountKnowledgeByKB(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) (map[string]int64, error) {
+	type row struct {
+		FolderID *string
+		Count    int64
+	}
+	var rows []row
+	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Select("folder_id, count(*) as count").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND folder_id IS NOT NULL", tenantID, kbID).
+		Group("folder_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		if r.FolderID != nil {
+			result[*r.FolderID] = r.Count
+		}
+	}
+	return result, nil
+}
+
 // CountKnowledgeRecursive counts knowledge entries in a folder and all its descendants.
 func (r *knowledgeFolderRepository) CountKnowledgeRecursive(
 	ctx context.Context,

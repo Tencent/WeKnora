@@ -122,7 +122,20 @@ func (s *knowledgeFolderService) ListByParent(
 	parentID *string,
 ) ([]*types.KnowledgeFolder, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
-	return s.repo.ListByParent(ctx, tenantID, kbID, parentID)
+	folders, err := s.repo.ListByParent(ctx, tenantID, kbID, parentID)
+	if err != nil {
+		return nil, err
+	}
+	// Bulk load counts for these folders
+	counts, err := s.repo.CountKnowledgeByKB(ctx, tenantID, kbID)
+	if err != nil {
+		logger.Warnf(ctx, "[Folder] Failed to bulk count knowledge for KB %s: %v", kbID, err)
+		return folders, nil
+	}
+	for _, f := range folders {
+		f.KnowledgeCount = counts[f.ID]
+	}
+	return folders, nil
 }
 
 // GetTree returns the full folder tree for a knowledge base.
@@ -135,8 +148,32 @@ func (s *knowledgeFolderService) GetTree(
 	if err != nil {
 		return nil, err
 	}
-	// Build tree from flat list
-	return buildFolderTree(allFolders), nil
+	// Bulk load knowledge counts for all folders
+	counts, err := s.repo.CountKnowledgeByKB(ctx, tenantID, kbID)
+	if err != nil {
+		logger.Warnf(ctx, "[Folder] Failed to bulk count knowledge for KB %s: %v", kbID, err)
+		counts = make(map[string]int64)
+	}
+	// Populate counts on each folder
+	for _, f := range allFolders {
+		f.KnowledgeCount = counts[f.ID]
+	}
+	// Build tree from flat list and accumulate child counts
+	roots := buildFolderTree(allFolders)
+	for _, root := range roots {
+		populateChildCounts(root)
+	}
+	return roots, nil
+}
+
+// populateChildCounts recursively sums knowledge counts for a tree node.
+func populateChildCounts(folder *types.KnowledgeFolder) int64 {
+	total := folder.KnowledgeCount
+	for _, child := range folder.Children {
+		total += populateChildCounts(child)
+	}
+	folder.KnowledgeCount = total
+	return total
 }
 
 // buildFolderTree converts a flat folder list into a tree structure.

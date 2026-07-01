@@ -20,10 +20,13 @@ interface KnowledgeItem {
   parse_status?: string;
   summary_status?: string;
   updated_at?: string;
+  created_at?: string;
   source?: string;
   description?: string;
   channel?: string;
   isMore?: boolean;
+  isFolder?: boolean;
+  knowledge_count?: number;
 }
 
 const props = defineProps<{
@@ -36,6 +39,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
+  (e: 'enter-folder', folderId: string): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
   (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem): void;
@@ -216,8 +220,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
     <div class="doc-list-body">
       <div v-for="item in items" :key="item.id" class="doc-list-row"
-        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
-        role="row" @click="emit('open', item)">
+        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id, 'is-folder': item.isFolder }" :data-select-id="item.id"
+        role="row" @click="item.isFolder ? emit('enter-folder', item.id) : emit('open', item)">
         <div class="cell cell-check" @click.stop>
           <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
             @change="(c, ctx) => onRowCheckboxChange(item, c, ctx)" />
@@ -225,11 +229,12 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
         <div class="cell cell-name">
           <span class="row-file-icon-wrap">
-            <t-icon :name="getFileIcon(item)" />
+            <t-icon v-if="item.isFolder" name="folder" class="folder-row-icon" />
+            <t-icon v-else :name="getFileIcon(item)" />
           </span>
           <div class="row-file-text">
             <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
-            <span v-if="item.description" class="row-file-desc" :title="item.description">{{ item.description }}</span>
+            <span v-if="item.description && !item.isFolder" class="row-file-desc" :title="item.description">{{ item.description }}</span>
           </div>
         </div>
 
@@ -261,33 +266,63 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
         </div>
 
         <div class="cell cell-source">
-          <t-icon class="row-source-icon" :name="getSourceInfo(item).icon" />
-          <span class="row-source-label">{{ getSourceInfo(item).label }}</span>
+          <template v-if="item.isFolder">
+            <span class="row-muted">--</span>
+          </template>
+          <template v-else>
+            <t-icon class="row-source-icon" :name="getSourceInfo(item).icon" />
+            <span class="row-source-label">{{ getSourceInfo(item).label }}</span>
+          </template>
         </div>
 
         <div class="cell cell-size">
-          <span class="row-mono">{{ formatFileSize(item.file_size) || '--' }}</span>
+          <template v-if="item.isFolder">
+            <span class="row-mono">{{ item.knowledge_count ?? 0 }} {{ $t('knowledgeFolder.itemCount', { count: item.knowledge_count ?? 0 }) }}</span>
+          </template>
+          <template v-else>
+            <span class="row-mono">{{ formatFileSize(item.file_size) || '--' }}</span>
+          </template>
         </div>
 
         <div class="cell cell-status">
-          <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
-            <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
-              variant="light-outline" class="row-status-tag">
-              <template v-if="statusByRow.get(item.id)!.icon" #icon>
-                <t-icon :name="statusByRow.get(item.id)!.icon!"
-                  :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }" />
-              </template>
-              {{ statusByRow.get(item.id)!.label }}
-            </t-tag>
-            <span v-else class="row-muted">--</span>
+          <template v-if="item.isFolder">
+            <span class="row-muted">--</span>
+          </template>
+          <template v-else>
+            <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
+              <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
+                variant="light-outline" class="row-status-tag">
+                <template v-if="statusByRow.get(item.id)!.icon" #icon>
+                  <t-icon :name="statusByRow.get(item.id)!.icon!"
+                    :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }" />
+                </template>
+                {{ statusByRow.get(item.id)!.label }}
+              </t-tag>
+              <span v-else class="row-muted">--</span>
+            </template>
           </template>
         </div>
 
         <div class="cell cell-time">
-          <span class="row-mono">{{ formatTime(item.updated_at) }}</span>
+          <span class="row-mono">{{ formatTime(item.created_at || item.updated_at) }}</span>
         </div>
 
         <div class="cell cell-actions" v-if="canEdit" @click.stop>
+          <template v-if="item.isFolder">
+            <t-popconfirm
+              theme="warning"
+              :content="$t('knowledgeFolder.confirmDeleteFolder', { name: item.file_name || '' })"
+              :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
+              :cancel-btn="{ content: $t('common.cancel') }"
+              placement="left"
+              @confirm="emit('action', 'delete', item)"
+            >
+              <button class="row-more-btn" type="button" :aria-label="$t('knowledgeFolder.deleteFolder')">
+                <t-icon name="delete" size="16px" />
+              </button>
+            </t-popconfirm>
+          </template>
+          <template v-else>
           <t-popup placement="bottom-right" trigger="click" destroy-on-close
             :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)">
             <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button"
@@ -341,6 +376,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
               </div>
             </template>
           </t-popup>
+          </template>
         </div>
       </div>
     </div>
@@ -348,6 +384,18 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 </template>
 
 <style scoped lang="less">
+.folder-row-icon {
+  color: var(--td-warning-color);
+}
+
+.is-folder {
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+}
+
 @keyframes doc-list-fade-in {
   from {
     opacity: 0;

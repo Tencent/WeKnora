@@ -29,6 +29,8 @@ type KnowledgeFolderRepository interface {
 	GetDescendants(ctx context.Context, folderID string) ([]*types.KnowledgeFolder, error)
 	// CountKnowledge counts knowledge entries directly in a folder.
 	CountKnowledge(ctx context.Context, tenantID uint64, folderID string) (int64, error)
+	// CountKnowledgeByKB returns a map from folder_id to knowledge count for all folders in a KB.
+	CountKnowledgeByKB(ctx context.Context, tenantID uint64, kbID string) (map[string]int64, error)
 	// CountKnowledgeRecursive counts knowledge entries in a folder and all its descendants.
 	CountKnowledgeRecursive(ctx context.Context, tenantID uint64, folderID string) (int64, error)
 	// CheckNameExists checks if a folder with the given name already exists under a parent in the same KB.

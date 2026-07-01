@@ -148,6 +148,7 @@ func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T)
 		nil,
 		"",
 		nil,
+		nil,
 	)
 
 	require.Error(t, err)
@@ -178,6 +179,7 @@ func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {
 		"",
 		nil,
 		"",
+		nil,
 		nil,
 	)
 
@@ -212,6 +214,7 @@ func TestCreateKnowledgeFromFileDeletesStoredFileWhenCreateFails(t *testing.T) {
 		"",
 		nil,
 		"",
+		nil,
 		nil,
 	)
 
@@ -251,6 +254,7 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 		nil,
 		"",
 		overrides,
+		nil,
 	)
 
 	require.NoError(t, err)
