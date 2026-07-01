@@ -4976,6 +4976,8 @@ export default {
     parser: {
       title: 'Parser Engine',
       description: 'Select document parser engines for different file types. Unconfigured file types will use the built-in parser.',
+      tableStructure: 'Table Recognition',
+      tableStructureDesc: 'Enable structured table extraction by file type.',
       loading: 'Loading...',
       noEngineAvailable: 'No parser engine available, or the document parsing service is not configured.',
       default: 'Default',

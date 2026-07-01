@@ -57,7 +57,7 @@ class StdMarkitdownParser(BaseParser):
                 result = self._convert_markitdown(content, ext, keep_data_uris=False)
 
         text = result.text_content
-        if ft == "docx":
+        if self.enable_table_structure and ft == "docx":
             try:
                 table_text = structured_docx_tables_to_markdown(content)
             except Exception:

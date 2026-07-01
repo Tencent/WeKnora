@@ -14,24 +14,24 @@ import (
 
 // KnowledgeBase represents a knowledge base
 type KnowledgeBase struct {
-	ID                    string                `json:"id"`
-	Name                  string                `json:"name"` // Name must be unique within the same tenant
-	Type                  string                `json:"type"`
-	IsTemporary           bool                  `json:"is_temporary"`
-	IsPinned              bool                  `json:"is_pinned"`
-	Description           string                `json:"description"`
-	TenantID              uint64                `json:"tenant_id"`
-	ChunkingConfig        ChunkingConfig        `json:"chunking_config"`
-	ImageProcessingConfig ImageProcessingConfig `json:"image_processing_config"`
-	FAQConfig             *FAQConfig            `json:"faq_config"`
-	EmbeddingModelID      string                `json:"embedding_model_id"`
-	SummaryModelID        string                `json:"summary_model_id"`
+	ID                    string                 `json:"id"`
+	Name                  string                 `json:"name"` // Name must be unique within the same tenant
+	Type                  string                 `json:"type"`
+	IsTemporary           bool                   `json:"is_temporary"`
+	IsPinned              bool                   `json:"is_pinned"`
+	Description           string                 `json:"description"`
+	TenantID              uint64                 `json:"tenant_id"`
+	ChunkingConfig        ChunkingConfig         `json:"chunking_config"`
+	ImageProcessingConfig ImageProcessingConfig  `json:"image_processing_config"`
+	FAQConfig             *FAQConfig             `json:"faq_config"`
+	EmbeddingModelID      string                 `json:"embedding_model_id"`
+	SummaryModelID        string                 `json:"summary_model_id"`
 	VLMConfig             VLMConfig              `json:"vlm_config"`
 	StorageProviderConfig *StorageProviderConfig `json:"storage_provider_config"`
 	StorageConfig         StorageConfig          `json:"storage_config"`
 	ExtractConfig         *ExtractConfig         `json:"extract_config"`
-	CreatedAt             time.Time             `json:"created_at"`
-	UpdatedAt             time.Time             `json:"updated_at"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
 	// Computed fields (not stored in database)
 	KnowledgeCount  int64 `json:"knowledge_count"`
 	ChunkCount      int64 `json:"chunk_count"`
@@ -48,9 +48,18 @@ type KnowledgeBaseConfig struct {
 
 // ChunkingConfig represents document chunking configuration
 type ChunkingConfig struct {
-	ChunkSize    int      `json:"chunk_size"`    // Chunk size
-	ChunkOverlap int      `json:"chunk_overlap"` // Overlap size
-	Separators   []string `json:"separators"`    // Separators
+	ChunkSize               int                `json:"chunk_size"` // Chunk size
+	ChunkOverlap            int                `json:"chunk_overlap"`
+	Separators              []string           `json:"separators"`
+	ParserEngineRules       []ParserEngineRule `json:"parser_engine_rules,omitempty"`
+	EnableTableStructure    bool               `json:"enable_table_structure,omitempty"`
+	TableStructureFileTypes []string           `json:"table_structure_file_types,omitempty"`
+	EnableParentChild       bool               `json:"enable_parent_child,omitempty"`
+	ParentChunkSize         int                `json:"parent_chunk_size,omitempty"`
+	ChildChunkSize          int                `json:"child_chunk_size,omitempty"`
+	Strategy                string             `json:"strategy,omitempty"`
+	TokenLimit              int                `json:"token_limit,omitempty"`
+	Languages               []string           `json:"languages,omitempty"`
 }
 
 // FAQConfig represents faq-specific configuration
@@ -116,8 +125,8 @@ type ParserEngineRule struct {
 
 // QuestionGenerationConfig controls LLM-generated questions per chunk during parsing.
 type QuestionGenerationConfig struct {
-	Enabled         bool `json:"enabled"`
-	QuestionCount   int  `json:"question_count"`
+	Enabled       bool `json:"enabled"`
+	QuestionCount int  `json:"question_count"`
 }
 
 // ASRConfig represents automatic speech recognition settings for audio files.
@@ -349,9 +358,9 @@ func (c *Client) ClearKnowledgeBaseContents(ctx context.Context, knowledgeBaseID
 	}
 
 	var response struct {
-		Success bool                                `json:"success"`
-		Message string                              `json:"message"`
-		Data    ClearKnowledgeBaseContentsResponse   `json:"data"`
+		Success bool                               `json:"success"`
+		Message string                             `json:"message"`
+		Data    ClearKnowledgeBaseContentsResponse `json:"data"`
 	}
 
 	if err := parseResponse(resp, &response); err != nil {

@@ -99,6 +99,8 @@ export interface KBModelConfigRequest {
         chunkOverlap: number
         separators: string[]
         parserEngineRules?: { file_types: string[]; engine: string }[]
+        enableTableStructure?: boolean
+        tableStructureFileTypes?: string[]
         enableParentChild?: boolean
         parentChunkSize?: number
         childChunkSize?: number

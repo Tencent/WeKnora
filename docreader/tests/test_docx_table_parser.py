@@ -261,7 +261,7 @@ class DocxTableParserTest(unittest.TestCase):
         self.assertIsInstance(state, TableRenderState)
         self.assertIn("Name: Timeout", rendered)
 
-    def test_markitdown_docx_parser_appends_structured_table_section(self):
+    def test_markitdown_docx_parser_keeps_legacy_output_by_default(self):
         doc = Document()
         doc.add_paragraph("Before table")
         table = doc.add_table(rows=2, cols=2)
@@ -273,6 +273,24 @@ class DocxTableParserTest(unittest.TestCase):
         parsed = StdMarkitdownParser(file_type="docx").parse_into_text(
             _docx_bytes(doc)
         )
+
+        self.assertIn("Before table", parsed.content)
+        self.assertNotIn("## Structured tables", parsed.content)
+        self.assertNotIn("Name: Timeout", parsed.content)
+
+    def test_markitdown_docx_parser_appends_structured_table_when_enabled(self):
+        doc = Document()
+        doc.add_paragraph("Before table")
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "Name"
+        table.cell(0, 1).text = "Value"
+        table.cell(1, 0).text = "Timeout"
+        table.cell(1, 1).text = "30 seconds"
+
+        parsed = StdMarkitdownParser(
+            file_type="docx",
+            enable_table_structure=True,
+        ).parse_into_text(_docx_bytes(doc))
 
         self.assertIn("Before table", parsed.content)
         self.assertIn("## Structured tables", parsed.content)

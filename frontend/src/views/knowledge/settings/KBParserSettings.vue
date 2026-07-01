@@ -15,6 +15,23 @@
     </div>
 
     <div v-else class="settings-group">
+      <div class="setting-row">
+        <div class="setting-info">
+          <label class="group-label">
+            <t-icon name="table" class="group-icon" />
+            {{ $t('kbSettings.parser.tableStructure') }}
+          </label>
+          <p class="setting-desc">{{ $t('kbSettings.parser.tableStructureDesc') }}</p>
+        </div>
+        <div class="setting-control table-structure-options">
+          <t-checkbox
+            :model-value="isTableStructureEnabled('docx')"
+            @change="(checked: boolean) => handleTableStructureFileTypeChange('docx', checked)"
+          >
+            Word
+          </t-checkbox>
+        </div>
+      </div>
       <div
         v-for="group in fileTypeGroups"
         :key="group.key"
@@ -123,6 +140,8 @@ interface EngineOption {
 
 interface Props {
   parserEngineRules?: ParserEngineRule[]
+  enableTableStructure?: boolean
+  tableStructureFileTypes?: string[]
   /** Compact layout for upload-confirm dialog */
   embedded?: boolean
   /** When set, only show file-type groups matching these extensions */
@@ -131,16 +150,27 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   parserEngineRules: () => [],
+  enableTableStructure: false,
+  tableStructureFileTypes: () => [],
   embedded: false,
   relevantExtensions: () => [],
 })
 
 const emit = defineEmits<{
   'update:parserEngineRules': [value: ParserEngineRule[]]
+  'update:enableTableStructure': [value: boolean]
+  'update:tableStructureFileTypes': [value: string[]]
 }>()
 
 const uiStore = useUIStore()
 const localEngineRules = ref<ParserEngineRule[]>([...props.parserEngineRules])
+const localTableStructureFileTypes = ref<string[]>(
+  props.tableStructureFileTypes?.length
+    ? [...props.tableStructureFileTypes]
+    : props.enableTableStructure
+      ? ['docx']
+      : []
+)
 const parserEngines = ref<ParserEngineInfo[]>([])
 const loading = ref(true)
 
@@ -254,6 +284,26 @@ function handleEngineChange(extensions: string[], engine: string) {
   emit('update:parserEngineRules', buildCompleteRules())
 }
 
+function isTableStructureEnabled(fileType: string): boolean {
+  return localTableStructureFileTypes.value.includes(fileType)
+}
+
+function handleTableStructureFileTypeChange(fileType: string, checked: boolean) {
+  const values = new Set(localTableStructureFileTypes.value)
+  const related = fileType === 'docx' ? ['docx', 'doc'] : ['xlsx', 'xls']
+  for (const ft of related) {
+    if (checked) {
+      values.add(ft)
+    } else {
+      values.delete(ft)
+    }
+  }
+  const next = Array.from(values)
+  localTableStructureFileTypes.value = next
+  emit('update:tableStructureFileTypes', next)
+  emit('update:enableTableStructure', next.length > 0)
+}
+
 function buildCompleteRules(): ParserEngineRule[] {
   const rules: ParserEngineRule[] = []
   for (const group of fileTypeGroups.value) {
@@ -303,6 +353,16 @@ watch(showSettingsModal, (open, wasOpen) => {
 watch(() => props.parserEngineRules, (v) => {
   localEngineRules.value = v?.length ? [...v] : []
 }, { deep: true })
+
+watch(() => props.enableTableStructure, (v) => {
+  if (!props.tableStructureFileTypes?.length && v) {
+    localTableStructureFileTypes.value = ['docx']
+  }
+})
+
+watch(() => props.tableStructureFileTypes, (v) => {
+  localTableStructureFileTypes.value = v?.length ? [...v] : []
+})
 </script>
 
 <style lang="less" scoped>
@@ -401,7 +461,7 @@ watch(() => props.parserEngineRules, (v) => {
     font-family: var(--app-font-family-mono);
   }
 
-  .desc {
+  .setting-desc {
     font-size: 13px;
     color: var(--td-text-color-secondary);
     margin: 0;
@@ -415,6 +475,13 @@ watch(() => props.parserEngineRules, (v) => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+}
+
+.table-structure-options {
+  flex-direction: row;
+  justify-content: flex-end;
+  gap: 16px;
+  padding-top: 2px;
 }
 
 .no-engine-warning {
