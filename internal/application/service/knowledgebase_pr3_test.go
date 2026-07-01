@@ -161,6 +161,58 @@ func TestCreateKnowledgeBase_DefaultStorageProviderFromTenant(t *testing.T) {
 	assert.Equal(t, "cos", kbExplicit.GetStorageProvider())
 }
 
+func TestUpdateKnowledgeBase_VLMConfig(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["kb-1"] = &types.KnowledgeBase{
+		ID:          "kb-1",
+		Name:        "old name",
+		Description: "old description",
+		VLMConfig: types.VLMConfig{
+			Enabled: true,
+			ModelID: "vlm-old",
+		},
+	}
+	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
+
+	t.Run("nil vlm_config preserves existing config", func(t *testing.T) {
+		kb, err := svc.UpdateKnowledgeBase(
+			context.Background(),
+			"kb-1",
+			"new name",
+			"new description",
+			nil,
+			nil,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "new name", kb.Name)
+		assert.Equal(t, "new description", kb.Description)
+		assert.Equal(t, types.VLMConfig{
+			Enabled: true,
+			ModelID: "vlm-old",
+		}, repo.rows["kb-1"].VLMConfig)
+	})
+
+	t.Run("provided vlm_config overwrites existing config", func(t *testing.T) {
+		kb, err := svc.UpdateKnowledgeBase(
+			context.Background(),
+			"kb-1",
+			"new name",
+			"new description",
+			nil,
+			&types.VLMConfig{
+				Enabled: true,
+				ModelID: "vlm-new",
+			},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, types.VLMConfig{
+			Enabled: true,
+			ModelID: "vlm-new",
+		}, kb.VLMConfig)
+		assert.Equal(t, kb.VLMConfig, repo.rows["kb-1"].VLMConfig)
+	})
+}
+
 // ---------------------------------------------------------------------------
 // CreateKnowledgeBase — vector_store_id binding validation matrix
 // ---------------------------------------------------------------------------

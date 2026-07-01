@@ -269,6 +269,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
 | name        | string | 是   | 知识库名称                                                    |
 | description | string | 否   | 知识库描述                                                    |
 | config      | object | 否   | 更新配置；包含 `chunking_config` / `image_processing_config` / `faq_config` / `wiki_config` / `indexing_strategy` |
+| vlm_config  | object | 否   | VLM（视觉模型）配置；省略时保持原配置，传入时更新该配置       |
 
 **请求**:
 
@@ -306,6 +307,10 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/b582
         "image_processing_config": {
             "model_id": ""
         }
+    },
+    "vlm_config": {
+        "enabled": true,
+        "model_id": "vllm-model-id"
     }
 }'
 ```

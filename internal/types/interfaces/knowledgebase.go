@@ -67,11 +67,12 @@ type KnowledgeBaseService interface {
 	//   - name: New knowledge base name
 	//   - description: New knowledge base description
 	//   - config: Knowledge base configuration, including chunking strategy, vectorization settings, etc.
+	//   - vlmConfig: Optional VLM configuration. nil means keep the existing configuration.
 	// Returns:
 	//   - Updated knowledge base object
 	//   - Possible errors such as not existing, insufficient permissions, etc.
 	UpdateKnowledgeBase(ctx context.Context,
-		id string, name string, description string, config *types.KnowledgeBaseConfig,
+		id string, name string, description string, config *types.KnowledgeBaseConfig, vlmConfig *types.VLMConfig,
 	) (*types.KnowledgeBase, error)
 
 	// DeleteKnowledgeBase deletes a knowledge base
