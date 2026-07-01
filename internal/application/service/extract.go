@@ -212,11 +212,13 @@ func graphExtractionConfigHash(template *types.PromptTemplateStructured) string 
 		Description string            `json:"description"`
 		Tags        []string          `json:"tags,omitempty"`
 		Examples    []types.GraphData `json:"examples,omitempty"`
+		Limits      string            `json:"limits,omitempty"`
 	}{
 		Schema:      types.GraphExtractionCacheSchemaVersion,
 		Description: template.Description,
 		Tags:        template.Tags,
 		Examples:    template.Examples,
+		Limits:      chatpipeline.GraphExtractionLimitSignature(),
 	})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])

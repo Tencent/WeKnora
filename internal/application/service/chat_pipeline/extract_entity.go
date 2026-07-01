@@ -266,6 +266,13 @@ func (qa *QAPromptGenerator) System(ctx context.Context) string {
 			promptLines = append(promptLines, "")
 		}
 	}
+	promptLines = append(promptLines,
+		"# Output Constraints",
+		fmt.Sprintf("- Return at most %d entities and at most %d relations.", graphExtractionMaxNodes, graphExtractionMaxRelations),
+		fmt.Sprintf("- Keep each entity name concise, no more than %d characters.", graphExtractionMaxNameRunes),
+		"- Prefer high-confidence central entities and relations; ignore OCR noise, garbled text, repeated SQL fragments, and low-value syntax tokens.",
+		"- Return only the requested JSON extraction payload. Do not add prose before or after it.",
+	)
 	return strings.Join(promptLines, "\n")
 }
 
@@ -310,9 +317,22 @@ const (
 	_FENCE_END     = "```"
 )
 
+const (
+	graphExtractionMaxNodes     = 12
+	graphExtractionMaxRelations = 12
+	graphExtractionMaxNameRunes = 80
+)
+
 var _FENCE_RE = regexp.MustCompile(
 	_FENCE_START + _LANGUAGE_TAG + _FENCE_NEWLINE + _FENCE_BODY + _FENCE_END,
 )
+
+// GraphExtractionLimitSignature is included in the cache config hash so
+// changing output limits never reuses graph JSON produced under older rules.
+func GraphExtractionLimitSignature() string {
+	return fmt.Sprintf("nodes=%d;relations=%d;name_runes=%d",
+		graphExtractionMaxNodes, graphExtractionMaxRelations, graphExtractionMaxNameRunes)
+}
 
 // Formater is a struct for formatting entities
 type Formater struct {
@@ -388,6 +408,16 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 	var err error
 	if f.formatType == FormatTypeJSON {
 		err = json.Unmarshal([]byte(content), &parsed)
+		if err != nil {
+			if repaired := repairJSONLike(content); repaired != "" && repaired != content {
+				var repairedParsed interface{}
+				if repairErr := json.Unmarshal([]byte(repaired), &repairedParsed); repairErr == nil {
+					logger.Warnf(ctx, "recovered malformed JSON extraction output: %v", err)
+					parsed = repairedParsed
+					err = nil
+				}
+			}
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse %s content: %s", strings.ToUpper(string(f.formatType)), err.Error())
@@ -461,7 +491,111 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 		Relation: relations,
 	}
 	f.rebuildGraph(ctx, graph)
+	limitGraphExtraction(ctx, graph)
 	return graph, nil
+}
+
+func limitGraphExtraction(ctx context.Context, graph *types.GraphData) {
+	if graph == nil {
+		return
+	}
+	originalNodes := len(graph.Node)
+	originalRelations := len(graph.Relation)
+	if originalNodes <= graphExtractionMaxNodes && originalRelations <= graphExtractionMaxRelations {
+		trimGraphNodeNames(graph)
+		return
+	}
+
+	nodeByName := make(map[string]*types.GraphNode, len(graph.Node))
+	for _, node := range graph.Node {
+		if node == nil {
+			continue
+		}
+		node.Name = trimGraphName(node.Name)
+		if node.Name != "" {
+			nodeByName[node.Name] = node
+		}
+	}
+
+	selected := make(map[string]bool, graphExtractionMaxNodes)
+	nodes := make([]*types.GraphNode, 0, graphExtractionMaxNodes)
+	relations := make([]*types.GraphRelation, 0, graphExtractionMaxRelations)
+
+	addNode := func(name string) bool {
+		name = trimGraphName(name)
+		if name == "" {
+			return false
+		}
+		if selected[name] {
+			return true
+		}
+		if len(nodes) >= graphExtractionMaxNodes {
+			return false
+		}
+		node := nodeByName[name]
+		if node == nil {
+			node = &types.GraphNode{Name: name}
+		}
+		node.Name = name
+		nodes = append(nodes, node)
+		selected[name] = true
+		return true
+	}
+
+	for _, relation := range graph.Relation {
+		if len(relations) >= graphExtractionMaxRelations {
+			break
+		}
+		if relation == nil {
+			continue
+		}
+		relation.Node1 = trimGraphName(relation.Node1)
+		relation.Node2 = trimGraphName(relation.Node2)
+		if relation.Node1 == "" || relation.Node2 == "" || relation.Node1 == relation.Node2 {
+			continue
+		}
+		if !addNode(relation.Node1) || !addNode(relation.Node2) {
+			continue
+		}
+		relations = append(relations, relation)
+	}
+
+	for _, node := range graph.Node {
+		if len(nodes) >= graphExtractionMaxNodes {
+			break
+		}
+		if node != nil {
+			addNode(node.Name)
+		}
+	}
+
+	graph.Node = nodes
+	graph.Relation = relations
+	logger.Warnf(ctx, "graph extraction truncated nodes %d->%d relations %d->%d",
+		originalNodes, len(graph.Node), originalRelations, len(graph.Relation))
+}
+
+func trimGraphNodeNames(graph *types.GraphData) {
+	for _, node := range graph.Node {
+		if node != nil {
+			node.Name = trimGraphName(node.Name)
+		}
+	}
+	for _, relation := range graph.Relation {
+		if relation != nil {
+			relation.Node1 = trimGraphName(relation.Node1)
+			relation.Node2 = trimGraphName(relation.Node2)
+		}
+	}
+}
+
+func trimGraphName(name string) string {
+	name = strings.TrimSpace(name)
+	runes := []rune(name)
+	if len(runes) <= graphExtractionMaxNameRunes {
+		return name
+	}
+	return string(runes[:graphExtractionMaxNameRunes])
 }
 
 func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
@@ -613,6 +747,76 @@ func stripFencesAndExtract(text string, format FormatType) string {
 	}
 
 	return ""
+}
+
+func repairJSONLike(s string) string {
+	s = strings.TrimSpace(s)
+	if extracted := extractJSONLike(s); extracted != "" {
+		s = extracted
+	}
+	return sanitizeJSONEscapes(s)
+}
+
+func sanitizeJSONEscapes(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s))
+	inString := false
+	escape := false
+	for _, r := range s {
+		if escape {
+			switch {
+			case isValidJSONEscape(r):
+				buf.WriteRune('\\')
+				buf.WriteRune(r)
+			case r == '\n':
+				buf.WriteString(`\n`)
+			case r == '\r':
+				buf.WriteString(`\r`)
+			case r == '\t':
+				buf.WriteString(`\t`)
+			default:
+				buf.WriteRune(r)
+			}
+			escape = false
+			continue
+		}
+		if r == '\\' && inString {
+			escape = true
+			continue
+		}
+		if r == '"' {
+			inString = !inString
+			buf.WriteRune(r)
+			continue
+		}
+		if inString {
+			switch r {
+			case '\n':
+				buf.WriteString(`\n`)
+				continue
+			case '\r':
+				buf.WriteString(`\r`)
+				continue
+			case '\t':
+				buf.WriteString(`\t`)
+				continue
+			}
+		}
+		buf.WriteRune(r)
+	}
+	if escape {
+		buf.WriteString(`\\`)
+	}
+	return buf.String()
+}
+
+func isValidJSONEscape(r rune) bool {
+	switch r {
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':
+		return true
+	default:
+		return false
+	}
 }
 
 // isLikelyLanguageTag reports whether s looks like a markdown fence language
