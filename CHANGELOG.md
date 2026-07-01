@@ -32,6 +32,7 @@ All notable changes to this project will be documented in this file.
 - **IMPROVED**: **Model management** — deletion blocked when model is referenced by KB or agent; optional embedding-model descriptions in i18n.
 - **IMPROVED**: **Tencent VectorDB** — replica count configurable via env; collection compatibility hardened.
 - **IMPROVED**: **Performance** — compile-once regexps in SQL validation, LLM-JSON fence parsing, and sandbox command substitution.
+- **IMPROVED**: **Knowledge reparse** — unchanged document chunks, image OCR/caption outputs, and Wiki map results now reuse cache entries so reparsing only reruns embeddings or LLM/VLM work when content, model, prompt, or processing config changes (#1679).
 - **IMPROVED**: **Frontend build** — streamlined Docker frontend build via `scripts/build_frontend_dist.sh`; embed entry (`embed.html`) separated from main SPA.
 - **IMPROVED**: **Auth** — session resource caches cleared on logout to prevent cross-user leakage.
 

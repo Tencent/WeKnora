@@ -3,6 +3,8 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 
@@ -183,6 +185,32 @@ func (c *Chunk) EmbeddingContent() string {
 		return body
 	}
 	return c.ContextHeader + "\n\n" + body
+}
+
+// CalculateDocumentChunkContentHash returns a stable hash for non-FAQ document
+// chunks. The hash intentionally includes the persisted content, embedding
+// context, chunk type, and indexing-relevant model/config identifiers so a
+// reparse can safely reuse unchanged chunks while invalidating cache entries
+// when the embedding input or chunking mode changes.
+func CalculateDocumentChunkContentHash(
+	content string,
+	contextHeader string,
+	chunkType ChunkType,
+	embeddingModelID string,
+	chunkingFingerprint string,
+) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte("document-chunk-v1\x00"))
+	_, _ = h.Write([]byte(chunkType))
+	_, _ = h.Write([]byte("\x00"))
+	_, _ = h.Write([]byte(strings.TrimSpace(contextHeader)))
+	_, _ = h.Write([]byte("\x00"))
+	_, _ = h.Write([]byte(strings.TrimSpace(content)))
+	_, _ = h.Write([]byte("\x00"))
+	_, _ = h.Write([]byte(strings.TrimSpace(embeddingModelID)))
+	_, _ = h.Write([]byte("\x00"))
+	_, _ = h.Write([]byte(strings.TrimSpace(chunkingFingerprint)))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // AssignChunkSeqIDs assigns sequential SeqIDs to a batch of chunks that have SeqID == 0.

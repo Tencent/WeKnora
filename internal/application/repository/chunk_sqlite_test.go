@@ -215,3 +215,35 @@ func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
 	assert.Equal(t, "updated content", saved.Content)
 }
+
+func TestListDocumentChunksForReuse_SQLite(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	reusable := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	reusable.ContentHash = types.CalculateDocumentChunkContentHash(reusable.Content, "", reusable.ChunkType, "embed-a", "chunking-a")
+	parent := makeChunk(kbID, knowledgeID, types.ChunkTypeParentText)
+	parent.ContentHash = types.CalculateDocumentChunkContentHash(parent.Content, "", parent.ChunkType, "embed-a", "chunking-a")
+	noHash := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	noHash.Content = "legacy content without hash"
+	faq := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)
+	faq.ContentHash = "faq-hash"
+	otherKnowledge := makeChunk(kbID, uuid.New().String(), types.ChunkTypeText)
+	otherKnowledge.ContentHash = "other-hash"
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{reusable, parent, noHash, faq, otherKnowledge}))
+
+	got, err := repo.ListDocumentChunksForReuse(ctx, 1, knowledgeID)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	ids := map[string]bool{}
+	for _, chunk := range got {
+		ids[chunk.ID] = true
+	}
+	assert.True(t, ids[reusable.ID])
+	assert.True(t, ids[parent.ID])
+	assert.True(t, ids[noHash.ID])
+}

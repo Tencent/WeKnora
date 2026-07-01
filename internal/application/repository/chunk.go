@@ -144,6 +144,24 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
+// ListDocumentChunksForReuse lists existing document chunks that can be matched
+// or retired during a reparse. It intentionally includes rows whose
+// content_hash is still empty so pre-upgrade chunks can either be matched by a
+// freshly-computed hash or removed as stale instead of being left as duplicates.
+func (r *chunkRepository) ListDocumentChunksForReuse(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN ?",
+			tenantID, knowledgeID, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeParentText}).
+		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	ctx context.Context,
