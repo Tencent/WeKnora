@@ -38,6 +38,32 @@ class DocReaderConfigTest(unittest.TestCase):
         self.assertIn("DOCREADER_PDF_RENDER_DPI", dumped)
         self.assertIn("DOCREADER_PDF_JPEG_QUALITY", dumped)
 
+    def test_proxy_aliases_ignore_empty_specific_values(self):
+        env = {
+            "DOCREADER_EXTERNAL_HTTP_PROXY": "",
+            "EXTERNAL_HTTP_PROXY": "http://proxy.example.com:8080",
+            "DOCREADER_EXTERNAL_HTTPS_PROXY": "",
+            "EXTERNAL_HTTPS_PROXY": "http://proxy.example.com:8443",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            cfg = config.load_config()
+
+        self.assertEqual(cfg.external_http_proxy, "http://proxy.example.com:8080")
+        self.assertEqual(cfg.external_https_proxy, "http://proxy.example.com:8443")
+
+    def test_docreader_proxy_vars_take_priority_over_aliases(self):
+        env = {
+            "DOCREADER_EXTERNAL_HTTP_PROXY": "http://doc.proxy.example.com:8080",
+            "EXTERNAL_HTTP_PROXY": "http://proxy.example.com:8080",
+            "DOCREADER_EXTERNAL_HTTPS_PROXY": "http://doc.proxy.example.com:8443",
+            "EXTERNAL_HTTPS_PROXY": "http://proxy.example.com:8443",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            cfg = config.load_config()
+
+        self.assertEqual(cfg.external_http_proxy, "http://doc.proxy.example.com:8080")
+        self.assertEqual(cfg.external_https_proxy, "http://doc.proxy.example.com:8443")
+
 
 if __name__ == "__main__":
     unittest.main()
