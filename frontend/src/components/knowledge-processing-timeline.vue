@@ -1600,7 +1600,7 @@ const processConfigLines = computed<string[]>(() => {
               </div>
               <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
               <div v-if="data.last_error.error_message" class="kp-last-error-raw kp-mono">{{
-                data.last_error.error_message }}
+                data.last_error.error_message?.toLowerCase().includes('storage quota exceeded') ? t('knowledgeBase.quotaExceeded') : data.last_error.error_message }}
               </div>
             </div>
             </div>
@@ -1746,7 +1746,7 @@ const processConfigLines = computed<string[]>(() => {
                       selectedRow.node.error_code }}</span>
                   </div>
                   <pre v-if="selectedRow.node.error_message"
-                    class="kp-error-msg kp-mono">{{ selectedRow.node.error_message }}</pre>
+                    class="kp-error-msg kp-mono">{{ selectedRow.node.error_message?.toLowerCase().includes('storage quota exceeded') ? t('knowledgeBase.quotaExceeded') : selectedRow.node.error_message }}</pre>
                 </div>
 
                 <div v-if="!selectedRow.node.span_id && !selectedRow.node.started_at" class="kp-detail-hint">

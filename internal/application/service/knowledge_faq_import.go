@@ -1397,6 +1397,19 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 			return types.NewStorageQuotaExceededError()
 		}
 	}
+	// check user storage quota (charge KB owner when available so async workers still enforce limits)
+	chargeUserID := kb.CreatorID
+	if chargeUserID == "" {
+		if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
+			chargeUserID = uid
+		}
+	}
+	if chargeUserID != "" {
+		member, err := s.tenantMemberRepo.Get(ctx, chargeUserID, tenantInfo.ID)
+		if err == nil && member != nil && member.StorageQuota > 0 && member.StorageUsed+size > member.StorageQuota {
+			return types.NewUserStorageQuotaExceededError()
+		}
+	}
 
 	// 删除旧向量
 	var deleteDuration time.Duration
@@ -1410,7 +1423,6 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 			logger.Debugf(ctx, "indexFAQChunks: deleted old vectors for %d chunks in %v", len(chunkIDs), deleteDuration)
 		}
 	}
-
 	// 批量索引（这里可能是性能瓶颈）
 	batchIndexStartTime := time.Now()
 	if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
@@ -1424,6 +1436,18 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 		adjustStartTime := time.Now()
 		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, size); err == nil {
 			tenantInfo.StorageUsed += size
+		}
+		// update user's storage usage (charge KB owner when available so async workers still update usage)
+		chargeUserID := kb.CreatorID
+		if chargeUserID == "" {
+			if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
+				chargeUserID = uid
+			}
+		}
+		if chargeUserID != "" {
+			if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, chargeUserID, tenantInfo.ID, size); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).Errorf("indexFAQChunks update user storage used failed")
+			}
 		}
 		knowledge.StorageSize += size
 		adjustDuration := time.Since(adjustStartTime)
@@ -1486,6 +1510,14 @@ func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 	}
 
 	size := retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfo)
+
+	//update user's storage usage
+	if userID, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(userID) {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, userID, tenantInfo.ID, -size); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("deleteFAQChunkVectors update user storage used failed")
+		}
+	}
+
 	if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
 		return err
 	}

@@ -164,14 +164,24 @@ export default function (knowledgeBaseId?: string) {
           MessagePlugin.info(t('knowledgeBase.uploadSuccess'));
           getKnowled({ page: 1, page_size: 35 }, currentKbId);
         } else {
-          const errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
-          MessagePlugin.error(result.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
+          let errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
+          if (result.code === 'duplicate_file') {
+            errorMessage = t('knowledgeBase.fileExists');
+          } else if (errorMessage?.toLowerCase().includes('storage quota exceeded')) {
+            errorMessage = t('knowledgeBase.quotaExceeded');
+          }
+          MessagePlugin.error(errorMessage);
         }
         uploadInput.value.value = "";
       })
       .catch((err: any) => {
-        const errorMessage = err.error?.message || err.message || t('knowledgeBase.uploadFailed');
-        MessagePlugin.error(err.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
+        let errorMessage = err.error?.message || err.message || t('knowledgeBase.uploadFailed');
+        if (err.code === 'duplicate_file') {
+          errorMessage = t('knowledgeBase.fileExists');
+        } else if (errorMessage?.toLowerCase().includes('storage quota exceeded')) {
+          errorMessage = t('knowledgeBase.quotaExceeded');
+        }
+        MessagePlugin.error(errorMessage);
         uploadInput.value.value = "";
       });
   };

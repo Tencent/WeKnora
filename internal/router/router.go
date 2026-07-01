@@ -586,6 +586,7 @@ func RegisterTenantRoutes(
 				tenantByID.POST("/members", g.Owner(), memberHandler.AddMember)
 				tenantByID.PUT("/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
 				tenantByID.DELETE("/members/:user_id", g.Owner(), memberHandler.RemoveMember)
+				tenantByID.PUT("/members/:user_id/quota", g.Admin(), memberHandler.UpdateMemberQuota)
 				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)
 			}
 
