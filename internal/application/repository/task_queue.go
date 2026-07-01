@@ -117,6 +117,31 @@ func (r *taskPendingOpsRepository) PendingCount(
 	return n, nil
 }
 
+// HasPendingDedupKey reports whether at least one row exists for the
+// tuple and dedup key. It is intentionally a precise probe: tuple-level
+// PendingCount cannot answer "is THIS knowledge still queued?" when a KB
+// has many wiki ops backlogged.
+func (r *taskPendingOpsRepository) HasPendingDedupKey(
+	ctx context.Context,
+	taskType, scope, scopeID, dedupKey, op string,
+) (bool, error) {
+	if dedupKey == "" {
+		return false, nil
+	}
+	var n int64
+	q := r.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("task_type = ? AND scope = ? AND scope_id = ? AND dedup_key = ?",
+			taskType, scope, scopeID, dedupKey)
+	if op != "" {
+		q = q.Where("op = ?", op)
+	}
+	if err := q.Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // DeleteByDedupKey drops rows in the tuple whose dedup_key matches.
 // If `op` is non-empty, only rows with the matching op are dropped;
 // otherwise every matching row is removed. Empty dedup_key is rejected
