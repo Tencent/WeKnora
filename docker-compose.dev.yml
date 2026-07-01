@@ -5,7 +5,7 @@ services:
     image: paradedb/paradedb:v0.22.2-pg17
     container_name: WeKnora-postgres-dev
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${POSTGRES_DEV_PORT:-5432}:5432"
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
@@ -22,6 +22,36 @@ services:
       start_period: 30s
     restart: unless-stopped
     stop_grace_period: 1m
+    profiles:
+      - postgres
+      - full
+
+  # MySQL alternative to PostgreSQL. Enable with: DB_DRIVER=mysql and
+  # `./scripts/dev.sh start --profile mysql` (or dev.sh auto-selects it when DB_DRIVER=mysql).
+  mysql:
+    image: mysql:8.0
+    container_name: WeKnora-mysql-dev
+    ports:
+      - "${MYSQL_DEV_PORT:-3306}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=${DB_NAME}
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - mysql-data-dev:/var/lib/mysql
+    networks:
+      - WeKnora-network-dev
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${DB_USER}", "--password=${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    profiles:
+      - mysql
+      - full
 
   redis:
     image: redis:7.0-alpine
@@ -520,6 +550,7 @@ networks:
 
 volumes:
   postgres-data-dev:
+  mysql-data-dev:
   redis_data_dev:
   minio_data_dev:
   neo4j-data-dev:

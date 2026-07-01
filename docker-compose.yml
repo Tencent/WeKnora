@@ -309,6 +309,32 @@ services:
     # 添加停机时的优雅退出时间
     stop_grace_period: 1m
 
+  # MySQL alternative to PostgreSQL. To use MySQL instead of Postgres:
+  #   1. Set DB_DRIVER=mysql, DB_HOST=mysql, DB_PORT=3306 in app environment
+  #   2. Remove or comment out the postgres service dependency in the app service
+  #   3. Use an external vector store (e.g. Milvus/Qdrant) — pgvector is not available with MySQL
+  mysql:
+    image: mysql:8.0
+    container_name: WeKnora-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=${DB_NAME}
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - WeKnora-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${DB_USER}", "--password=${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis
@@ -789,6 +815,7 @@ networks:
 
 volumes:
   postgres-data:
+  mysql-data:
   data-files:
   docreader-tmp:
   minio_data:

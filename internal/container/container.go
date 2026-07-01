@@ -21,7 +21,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
-	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
+	gomysql "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
@@ -29,6 +29,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -510,6 +511,33 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
 		)
+	case "mysql":
+		// Use Config.FormatDSN so special chars in password (e.g. @, #) are handled correctly.
+		mysqlCfg := gomysql.NewConfig()
+		mysqlCfg.User = os.Getenv("DB_USER")
+		mysqlCfg.Passwd = os.Getenv("DB_PASSWORD")
+		mysqlCfg.Net = "tcp"
+		mysqlCfg.Addr = os.Getenv("DB_HOST") + ":" + os.Getenv("DB_PORT")
+		mysqlCfg.DBName = os.Getenv("DB_NAME")
+		mysqlCfg.ParseTime = true
+		mysqlCfg.Loc = time.UTC
+		mysqlCfg.Params = map[string]string{"charset": "utf8mb4"}
+		dsn := mysqlCfg.FormatDSN()
+		dialector = mysql.Open(dsn)
+		migrateDSN = fmt.Sprintf(
+			"mysql://%s:%s@tcp(%s:%s)/%s",
+			url.QueryEscape(os.Getenv("DB_USER")),
+			url.QueryEscape(os.Getenv("DB_PASSWORD")),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
 		if dbPath == "" {
@@ -544,9 +572,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// different name (e.g., a wrapper dialect for managed PG) would silently
 	// fall back to the SQLite path, dropping the row-level X-lock. Catching
 	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" && name != "mysql" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
+			"unsupported gorm dialector %q; expected postgres, sqlite, or mysql "+
 				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 
