@@ -2380,3 +2380,44 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		},
 	})
 }
+
+// GetKnowledgeGeneratedQuestions godoc
+// @Summary      Get AI-generated questions for a knowledge item
+// @Description  Returns all questions that were automatically generated from the
+//
+//	knowledge item's text chunks during post-processing. Each question is linked
+//	to the chunk it was derived from, enabling downstream pipelines (e.g. FAQ
+//	population) to retrieve the source context via the chunk ID.
+//
+// @Tags         知识管理
+// @Produce      json
+// @Param        id   path   string  true  "Knowledge ID"
+// @Success      200  {object}  map[string]interface{}  "data: [{chunk_id, question_id, question}]"
+// @Router       /api/v1/knowledge/{id}/generated-questions [get]
+func (h *KnowledgeHandler) GetKnowledgeGeneratedQuestions(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	// Validate KB access (viewer permission is sufficient for read)
+	if _, _, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer); err != nil {
+		c.Error(err)
+		return
+	}
+
+	questions, err := h.kgService.GetGeneratedQuestions(ctx, id)
+	if err != nil {
+		logger.Errorf(ctx, "GetKnowledgeGeneratedQuestions: failed for knowledge %s: %v", id, err)
+		c.Error(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    questions,
+	})
+}
