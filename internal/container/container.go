@@ -793,6 +793,7 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 			os.Getenv("OSS_ACCESS_KEY"),
 			os.Getenv("OSS_SECRET_KEY"),
 			os.Getenv("OSS_BUCKET_NAME"),
+			os.Getenv("OSS_SIGNATURE_VERSION"),
 			pathPrefix,
 			os.Getenv("OSS_TEMP_BUCKET_NAME"),
 			os.Getenv("OSS_TEMP_REGION"),

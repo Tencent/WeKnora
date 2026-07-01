@@ -537,15 +537,16 @@ type S3EngineConfig struct {
 
 // OSSEngineConfig is for Alibaba Cloud OSS (对象存储服务).
 type OSSEngineConfig struct {
-	Endpoint       string `json:"endpoint"`
-	Region         string `json:"region"`
-	AccessKey      string `json:"access_key"`
-	SecretKey      string `json:"secret_key"`
-	BucketName     string `json:"bucket_name"`
-	PathPrefix     string `json:"path_prefix"`
-	UseTempBucket  bool   `json:"use_temp_bucket"`
-	TempBucketName string `json:"temp_bucket_name"`
-	TempRegion     string `json:"temp_region"`
+	Endpoint         string `json:"endpoint"`
+	Region           string `json:"region"`
+	AccessKey        string `json:"access_key"`
+	SecretKey        string `json:"secret_key"`
+	SignatureVersion string `json:"signature_version"`
+	BucketName       string `json:"bucket_name"`
+	PathPrefix       string `json:"path_prefix"`
+	UseTempBucket    bool   `json:"use_temp_bucket"`
+	TempBucketName   string `json:"temp_bucket_name"`
+	TempRegion       string `json:"temp_region"`
 }
 
 // KS3EngineConfig is for Kingsoft Cloud KS3 object storage.

@@ -125,6 +125,10 @@ func NewFileServiceFromStorageConfig(
 		if sec == nil || sec.OSS == nil || sec.OSS.Endpoint == "" || sec.OSS.Region == "" || sec.OSS.AccessKey == "" || sec.OSS.SecretKey == "" || sec.OSS.BucketName == "" {
 			return nil, p, fmt.Errorf("incomplete oss config")
 		}
+		signatureVersion := sec.OSS.SignatureVersion
+		if signatureVersion == "" {
+			signatureVersion = os.Getenv("OSS_SIGNATURE_VERSION")
+		}
 		pathPrefix := strings.TrimSpace(sec.OSS.PathPrefix)
 		if pathPrefix == "" {
 			pathPrefix = "weknora/"
@@ -134,13 +138,13 @@ func NewFileServiceFromStorageConfig(
 		if sec.OSS.UseTempBucket && sec.OSS.TempBucketName != "" {
 			svc, err = NewOssFileServiceWithTempBucket(
 				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
-				sec.OSS.BucketName, pathPrefix,
+				sec.OSS.BucketName, signatureVersion, pathPrefix,
 				sec.OSS.TempBucketName, sec.OSS.TempRegion,
 			)
 		} else {
 			svc, err = NewOssFileService(
 				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
-				sec.OSS.BucketName, pathPrefix,
+				sec.OSS.BucketName, signatureVersion, pathPrefix,
 			)
 		}
 		return svc, p, err

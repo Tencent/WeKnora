@@ -954,7 +954,7 @@ func (h *SystemHandler) checkOSS(c *gin.Context, ctx context.Context, cfg *types
 		return
 	}
 
-	err := file.CheckOssConnectivity(ctx, endpoint, cfg.Region, accessKey, secretKey, cfg.BucketName)
+	err := file.CheckOssConnectivity(ctx, endpoint, cfg.Region, accessKey, secretKey, cfg.BucketName, cfg.SignatureVersion)
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "AccessDenied") {
