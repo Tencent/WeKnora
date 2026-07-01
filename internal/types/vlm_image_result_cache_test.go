@@ -34,7 +34,7 @@ func TestVLMFingerprintPayload_SanitizesSecrets(t *testing.T) {
 	if payload.ExtraConfig["temperature"] != "0.1" {
 		t.Fatalf("expected non-sensitive extra_config to remain: %+v", payload.ExtraConfig)
 	}
-	if payload.ExtraConfig["api_key"] != "" {
+	if _, ok := payload.ExtraConfig["api_key"]; ok {
 		t.Fatalf("api_key should be stripped from extra_config: %+v", payload.ExtraConfig)
 	}
 	if payload.CustomHeaders["X-Route"] != "vision" {
