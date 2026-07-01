@@ -4508,8 +4508,6 @@ export default {
     codeImport: {
       toggle: 'Import from code',
       hint: 'Paste a standard mcpServers JSON config to auto-fill the form',
-      placeholder:
-        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
       parse: 'Parse & Fill',
       editOverwriteHint: 'Importing overwrites the current form (saved credentials are unaffected; click Save to apply)',
       errors: {

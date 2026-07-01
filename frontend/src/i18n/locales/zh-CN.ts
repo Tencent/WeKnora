@@ -4521,8 +4521,6 @@ export default {
     codeImport: {
       toggle: "从代码导入",
       hint: "粘贴标准 mcpServers JSON 配置，自动填充表单",
-      placeholder:
-        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
       parse: "解析并填充",
       editOverwriteHint: "导入会覆盖当前表单内容（不影响已保存的凭证，需点保存生效）",
       errors: {

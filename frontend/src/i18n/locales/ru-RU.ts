@@ -4156,8 +4156,6 @@ export default {
     codeImport: {
       toggle: 'Импорт из кода',
       hint: 'Вставьте стандартную JSON-конфигурацию mcpServers для автозаполнения формы',
-      placeholder:
-        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
       parse: 'Разобрать и заполнить',
       editOverwriteHint: 'Импорт перезапишет текущую форму (сохранённые учётные данные не затрагиваются; нажмите «Сохранить», чтобы применить)',
       errors: {
