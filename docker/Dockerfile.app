@@ -84,8 +84,8 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     rm -rf /var/lib/apt/lists/*
 
 # Create data directories and set permissions
-RUN mkdir -p /data/files && \
-    chown -R appuser:appuser /app /data/files
+RUN mkdir -p /data/files /data/weknora && \
+    chown -R appuser:appuser /app /data/files /data/weknora
 
 # Copy migrate tool from builder stage
 COPY --from=builder /go/bin/migrate /usr/local/bin/

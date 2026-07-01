@@ -119,6 +119,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     const refs =
       data.knowledge_references ||
       dataPayload?.references ||
+      dataPayload?.knowledge_refs ||
       dataPayload?.knowledge_references ||
       []
     return Array.isArray(refs) ? refs : []
@@ -803,6 +804,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       }
       case 'complete': {
         log('[Agent] Complete event received')
+        applyKnowledgeReferences(data)
         loading.value = false
         isReplying.value = false
         message.is_completed = true

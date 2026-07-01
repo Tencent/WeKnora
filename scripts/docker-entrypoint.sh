@@ -12,6 +12,7 @@ set -e
 MOUNT_DIRS=(
     /app/skills/preloaded
     /data/files
+    /data/weknora
 )
 
 for dir in "${MOUNT_DIRS[@]}"; do

@@ -36,6 +36,9 @@ services:
       - "${APP_PORT:-8080}:8080"
     volumes:
       - data-files:/data/files
+      # OpenAI Codex OAuth credentials are a WeKnora-owned login state.
+      # Do not mount ~/.codex/auth.json here; use a dedicated ChatGPT account.
+      - codex-oauth:/data/weknora
       - docreader-tmp:/tmp/docreader:ro
       - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
@@ -81,6 +84,7 @@ services:
       - DB_NAME=${DB_NAME:-}
       - TZ=${TZ:-Asia/Shanghai}
       - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
+      - WEKNORA_CODEX_AUTH_FILE=${WEKNORA_CODEX_AUTH_FILE:-/data/weknora/codex_auth.json}
       # ========== Langfuse (optional observability) ==========
       # Enabled automatically when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are set.
       # See docs/Langfuse集成.md for the full list of tuning knobs.
@@ -790,6 +794,7 @@ networks:
 volumes:
   postgres-data:
   data-files:
+  codex-oauth:
   docreader-tmp:
   minio_data:
   neo4j-data:

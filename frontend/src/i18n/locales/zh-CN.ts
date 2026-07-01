@@ -2802,10 +2802,30 @@ export default {
       // Provider (厂商) 相关翻译
       providerLabel: "服务商",
       providerPlaceholder: "选择模型服务商",
+      codexOAuth: {
+        configured: "已登录 ChatGPT 账号：{account}",
+        unconfigured: "尚未完成 ChatGPT/Codex OAuth 登录",
+        authFileLabel: "Codex 凭证文件",
+        authFilePlaceholder: "/data/weknora/codex_auth.json",
+        authFileDesc: "该文件独立保存 WeKnora 的 ChatGPT OAuth token，请挂载到私有持久卷。",
+        start: "生成登录链接",
+        open: "打开登录页",
+        callbackLabel: "回跳 URL",
+        callbackPlaceholder: "登录后把浏览器跳转到 localhost:1455 的整条 URL 粘贴到这里",
+        complete: "完成登录",
+        startSuccess: "登录链接已生成",
+        startFailed: "生成登录链接失败",
+        completeSuccess: "Codex OAuth 登录已保存",
+        completeFailed: "完成 Codex OAuth 登录失败",
+      },
       providers: {
         openai: {
           label: "OpenAI",
           description: "gpt-5.2, gpt-5-mini, etc.",
+        },
+        openaiCodex: {
+          label: "OpenAI Codex OAuth",
+          description: "使用 ChatGPT/Codex 订阅 OAuth 调用对话模型",
         },
         anthropic: {
           label: "Anthropic",
