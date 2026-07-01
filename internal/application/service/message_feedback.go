@@ -17,7 +17,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-const maxFeedbackReasonTextRunes = 1000
+const (
+	maxFeedbackReasonCodeRunes = 64
+	maxFeedbackReasonTextRunes = 1000
+)
 
 type messageFeedbackService struct {
 	feedbackRepo interfaces.MessageFeedbackRepository
@@ -93,6 +96,9 @@ func (s *messageFeedbackService) SetMessageFeedback(
 		reasonCode = ""
 		reasonText = ""
 	} else {
+		if len([]rune(reasonCode)) > maxFeedbackReasonCodeRunes {
+			return nil, apperrors.NewBadRequestError("reason_code is too long")
+		}
 		reasonText = truncateRunes(reasonText, maxFeedbackReasonTextRunes)
 	}
 

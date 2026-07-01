@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -164,6 +165,24 @@ func TestSetMessageFeedbackSwitchesAndClearsDislikeReason(t *testing.T) {
 	require.EqualValues(t, 0, stats.DislikeCount)
 	require.Nil(t, stats.PositiveRate)
 	require.Equal(t, 1.0, stats.RecallWeight)
+}
+
+func TestSetMessageFeedbackRejectsLongReasonCode(t *testing.T) {
+	svc, db, ctx := newMessageFeedbackTestService(t)
+	session, message, _ := createFeedbackFixture(t, db)
+
+	_, err := svc.SetMessageFeedback(ctx, session.ID, message.ID, types.MessageFeedbackRequest{
+		FeedbackType: types.FeedbackTypeDislike,
+		ReasonCode:   strings.Repeat("a", maxFeedbackReasonCodeRunes+1),
+	})
+	require.Error(t, err)
+	appErr, ok := err.(*apperrors.AppError)
+	require.True(t, ok)
+	require.Equal(t, apperrors.ErrBadRequest, appErr.Code)
+
+	var count int64
+	require.NoError(t, db.Model(&types.MessageFeedback{}).Count(&count).Error)
+	require.Zero(t, count)
 }
 
 func TestResetChunkFeedbackIgnoresOldFeedbackEpoch(t *testing.T) {
