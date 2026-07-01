@@ -53,6 +53,8 @@ type CreateKnowledgeQARequest struct {
 	SkillNames       []string               `json:"skill_names"`                           // Per-request Skills selected via @mention
 	TagIDs           []string               `json:"tag_ids"`                               // @mentioned tag IDs (display/debug; scoped via MentionedItems)
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // @mentioned knowledge bases and files
+	FolderIDs        []string               `json:"folder_ids,omitempty"`                  // Folder IDs for search scope restriction
+	IncludeSubfolders bool                  `json:"include_subfolders,omitempty"`           // Include subfolders in folder scope
 	DisableTitle     bool                   `json:"disable_title"`                         // Whether to disable auto title generation
 	// EnableMemory is the per-request override for the memory feature.
 	// Pointer + omitempty so the request can distinguish three states:

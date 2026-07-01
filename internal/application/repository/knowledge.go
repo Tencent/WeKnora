@@ -857,3 +857,79 @@ func (r *knowledgeRepository) BatchUpdateKnowledgeFolderID(
 		Where("id IN ?", knowledgeIDs).
 		Update("folder_id", folderID).Error
 }
+
+// ListKnowledgeIDsByFolderIDs returns knowledge IDs that belong to the specified folders.
+// When recursive is true, it also includes knowledge from all descendant subfolders.
+// Use "__root__" as a folderID to include knowledge with folder_id IS NULL.
+func (r *knowledgeRepository) ListKnowledgeIDsByFolderIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	folderIDs []string,
+	recursive bool,
+) ([]string, error) {
+	if len(folderIDs) == 0 {
+		return nil, nil
+	}
+
+	// Separate __root__ from normal folder IDs
+	hasRoot := false
+	var normalIDs []string
+	for _, fid := range folderIDs {
+		if fid == "__root__" {
+			hasRoot = true
+		} else {
+			normalIDs = append(normalIDs, fid)
+		}
+	}
+
+	// Resolve descendant folder IDs for recursive queries
+	resolvedIDs := make([]string, 0, len(normalIDs))
+	if len(normalIDs) > 0 {
+		if recursive {
+			// For each normal folder ID, find all descendant folder IDs via path LIKE
+			for _, fid := range normalIDs {
+				var folder types.KnowledgeFolder
+				if err := r.db.WithContext(ctx).
+					Select("path").
+					Where("id = ?", fid).
+					First(&folder).Error; err != nil {
+					// Skip invalid folder IDs (e.g. deleted)
+					continue
+				}
+				resolvedIDs = append(resolvedIDs, fid)
+				var descendantIDs []string
+				if err := r.db.WithContext(ctx).Model(&types.KnowledgeFolder{}).
+					Where("path LIKE ?", folder.Path+"%").
+					Where("id != ?", fid).
+					Pluck("id", &descendantIDs).Error; err != nil {
+					return nil, err
+				}
+				resolvedIDs = append(resolvedIDs, descendantIDs...)
+			}
+		} else {
+			resolvedIDs = normalIDs
+		}
+	}
+
+	// Build the knowledge query
+	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL",
+			tenantID, kbID)
+
+	if len(resolvedIDs) > 0 && hasRoot {
+		query = query.Where("folder_id IN ? OR folder_id IS NULL", resolvedIDs)
+	} else if len(resolvedIDs) > 0 {
+		query = query.Where("folder_id IN ?", resolvedIDs)
+	} else if hasRoot {
+		query = query.Where("folder_id IS NULL")
+	} else {
+		return nil, nil
+	}
+
+	var ids []string
+	if err := query.Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}

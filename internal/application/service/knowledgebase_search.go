@@ -93,6 +93,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if len(searchKBIDs) == 0 {
 		searchKBIDs = []string{id}
 	}
+	logger.Infof(ctx, "[FolderScope] HybridSearch: KB=%v, FolderIDs=%v, IncludeSub=%v, KnowledgeIDs=%v, KW=%v",
+		searchKBIDs, params.FolderIDs, params.IncludeSubfolders, params.KnowledgeIDs, secutils.SanitizeForLog(params.QueryText))
 
 	// QueryText is user-controlled; sanitize before logging to prevent
 	// CR/LF/tab log injection. Matches the handler-layer sanitization at
@@ -324,6 +326,39 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	currentTenantID := types.MustTenantIDFromContext(ctx)
 	var retrieveParams []types.RetrieveParams
 
+	// Resolve FolderIDs to KnowledgeIDs before building retrieval params.
+	// This avoids touching every vector store engine: we simply restrict the
+	// existing KnowledgeIDs filter, which all engines already support.
+	logger.Infof(ctx, "[FolderScope] buildRetrievalParams: FolderIDs=%v, IncludeSubfolders=%v, KnowledgeIDs=%v, groupKB count=%d",
+		params.FolderIDs, params.IncludeSubfolders, params.KnowledgeIDs, len(groupKBs))
+	mergedKnowledgeIDs := params.KnowledgeIDs
+	if len(params.FolderIDs) > 0 {
+		var folderKnowledgeIDs []string
+		for _, kb := range groupKBs {
+			tenantID := kb.TenantID
+			if tenantID == 0 {
+				tenantID = currentTenantID
+			}
+			ids, err := s.kgRepo.ListKnowledgeIDsByFolderIDs(
+				ctx, tenantID, kb.ID, params.FolderIDs, params.IncludeSubfolders,
+			)
+			if err != nil {
+				logger.Warnf(ctx, "Failed to resolve folder IDs to knowledge IDs for KB %s: %v", kb.ID, err)
+				continue
+			}
+			folderKnowledgeIDs = append(folderKnowledgeIDs, ids...)
+		}
+		mergedKnowledgeIDs = mergeKnowledgeIDs(params.KnowledgeIDs, folderKnowledgeIDs)
+		logger.Infof(ctx, "[FolderScope] Resolved %d folder knowledge IDs, merged to %d IDs",
+			len(folderKnowledgeIDs), len(mergedKnowledgeIDs))
+		if len(mergedKnowledgeIDs) == 0 && len(params.FolderIDs) > 0 {
+			// Folder filtering was requested but matched zero knowledge entries.
+			// Return empty params so the caller can short-circuit retrieval.
+			logger.Infof(ctx, "Folder filtering produced empty knowledge ID set; skipping retrieval")
+			return nil, nil
+		}
+	}
+
 	// Partition the group's KBs by index routing. A KB that does not have
 	// vector indexing enabled (e.g. wiki-only or graph-only KBs) has no
 	// embeddings to retrieve from, and typically has no EmbeddingModelID
@@ -366,7 +401,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 				TopK:             matchCount,
 				Threshold:        params.VectorThreshold,
 				RetrieverType:    types.VectorRetrieverType,
-				KnowledgeIDs:     params.KnowledgeIDs,
+				KnowledgeIDs:     mergedKnowledgeIDs,
 				TagIDs:           params.TagIDs,
 				KnowledgeType:    knowledgeType,
 			})
@@ -395,13 +430,43 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			TopK:             matchCount,
 			Threshold:        params.KeywordThreshold,
 			RetrieverType:    types.KeywordsRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
+			KnowledgeIDs:     mergedKnowledgeIDs,
 			TagIDs:           params.TagIDs,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}
 
 	return retrieveParams, nil
+}
+
+// mergeKnowledgeIDs merges two knowledge ID lists for retrieval filtering.
+// - If both are nil/empty, returns nil (no knowledge ID restriction).
+// - If only one is non-empty, returns that one.
+// - If both are non-empty, returns the intersection.
+func mergeKnowledgeIDs(existingIDs, folderIDs []string) []string {
+	if len(existingIDs) == 0 && len(folderIDs) == 0 {
+		return nil
+	}
+	if len(existingIDs) == 0 {
+		return folderIDs
+	}
+	if len(folderIDs) == 0 {
+		return existingIDs
+	}
+	// Both non-empty: take intersection
+	folderSet := make(map[string]bool, len(folderIDs))
+	for _, id := range folderIDs {
+		folderSet[id] = true
+	}
+	var result []string
+	seen := make(map[string]bool, len(existingIDs))
+	for _, id := range existingIDs {
+		if folderSet[id] && !seen[id] {
+			result = append(result, id)
+			seen[id] = true
+		}
+	}
+	return result
 }
 
 // resolveQueryEmbedding returns the query embedding for a store group. It

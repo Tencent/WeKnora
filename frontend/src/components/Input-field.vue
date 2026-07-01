@@ -13,6 +13,7 @@ import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
+import FolderTreeSelector from './FolderTreeSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
@@ -57,6 +58,8 @@ const { t, locale } = useI18n();
 
 let query = ref("");
 const showKbSelector = ref(false);
+const showFolderSelector = ref(false);
+const folderButtonRef = ref<HTMLElement>();
 
 // Image upload state
 const uploadedImages = ref<Array<{ file: File; preview: string }>>([]);
@@ -621,7 +624,16 @@ const allSelectedItems = computed(() => {
     isAgentConfigured: false,
   }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  const folderItems = (settingsStore.settings.selectedFolderIds || []).map((f: any) => ({
+    id: f.id,
+    name: f.id === '__root__' ? t('knowledgeFolder.rootFolder') : f.name,
+    type: 'folder' as const,
+    kbId: f.kbId,
+    kbName: f.kbName || '',
+    isAgentConfigured: false,
+  }));
+
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...folderItems, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
@@ -636,6 +648,8 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeMCPService(item.id);
   } else if (item.type === 'skill') {
     settingsStore.removeSkill(item.skillName || item.id);
+  } else if (item.type === 'folder') {
+    settingsStore.removeFolder(item.id, item.kbId);
   }
 };
 
@@ -2588,6 +2602,27 @@ defineExpose({
             </div>
           </t-tooltip>
 
+          <!-- 文件夹选择按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <span>{{ settingsStore.settings.selectedFolderIds?.length > 0
+                ? $t('knowledgeFolder.currentFolder') + ': ' + (settingsStore.settings.selectedFolderIds[0]?.id === '__root__'
+                  ? $t('knowledgeFolder.rootFolder')
+                  : settingsStore.settings.selectedFolderIds[0]?.name || '...')
+                : $t('knowledgeFolder.selectFolder') }}</span>
+            </template>
+            <div ref="folderButtonRef" class="control-btn kb-btn" :class="{
+              'active': settingsStore.settings.selectedFolderIds?.length > 0,
+              'disabled': isMentionDisabled
+            }" @click.stop @mousedown.prevent="showFolderSelector = !showFolderSelector">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round" class="control-icon">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                <polyline points="17 10 12 16 8 12" v-if="settingsStore.settings.selectedFolderIds?.length > 0" />
+              </svg>
+            </div>
+          </t-tooltip>
+
           <!-- 模型显示 -->
           <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
             :disabled="!isModelLockedByAgent">
@@ -2666,6 +2701,13 @@ defineExpose({
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
     <Teleport to="body">
       <KnowledgeBaseSelector v-model:visible="showKbSelector" :anchorEl="atButtonRef" @close="showKbSelector = false" />
+    </Teleport>
+
+    <!-- 文件夹选择下拉（不传 kbId 时自动加载所有知识库的文件夹树） -->
+    <Teleport to="body">
+      <FolderTreeSelector v-model:visible="showFolderSelector" :anchorEl="folderButtonRef"
+        :kbId="settingsStore.settings.selectedKnowledgeBases?.[0] || ''"
+        @close="showFolderSelector = false" />
     </Teleport>
   </div>
 </template>

@@ -33,6 +33,8 @@ type qaRequestContext struct {
 	knowledgeIDs      []string
 	tagScopes         []types.TagScope
 	tagIDs            []string
+	folderIDs         []string
+	includeSubfolders bool
 	mcpServiceIDs     []string
 	skillNames        []string
 	summaryModelID    string
@@ -63,6 +65,8 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		CustomAgent:        rc.customAgent,
 		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
 		KnowledgeIDs:       rc.knowledgeIDs,
+		FolderIDs:          rc.folderIDs,
+		IncludeSubfolders:  rc.includeSubfolders,
 		TagScopes:          rc.tagScopes,
 		MCPServiceIDs:      rc.mcpServiceIDs,
 		SkillNames:         rc.skillNames,
@@ -277,6 +281,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		knowledgeIDs:      secutils.SanitizeForLogArray(knowledgeIDs),
 		tagScopes:         tagScopes,
 		tagIDs:            secutils.SanitizeForLogArray(tagIDs),
+		folderIDs:         secutils.SanitizeForLogArray(request.FolderIDs),
+		includeSubfolders: request.IncludeSubfolders,
 		mcpServiceIDs:     secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:        secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:    secutils.SanitizeForLog(request.SummaryModelID),
@@ -908,6 +914,7 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:     reqCtx.knowledgeIDs,
 		TagIDs:           reqCtx.tagIDs,
+		FolderIDs:        reqCtx.folderIDs,
 		MCPServiceIDs:    reqCtx.mcpServiceIDs,
 		SkillNames:       reqCtx.skillNames,
 		MentionedItems:   reqCtx.mentionedItems,

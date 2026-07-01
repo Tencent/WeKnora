@@ -415,8 +415,13 @@ func (p *PluginSearch) searchByTargets(
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
+						FolderIDs:             chatManage.FolderIDs,
+						IncludeSubfolders:     chatManage.IncludeSubfolders,
 						SkipContextEnrichment: true,
 					}
+					pipelineInfo(ctx, "Search", "combined_kb_params", map[string]interface{}{
+						"kb_ids": fullKBIDs, "folder_ids": chatManage.FolderIDs, "include_subs": chatManage.IncludeSubfolders,
+					})
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
 					if err != nil {
 						pipelineWarn(ctx, "Search", "combined_kb_search_error", map[string]interface{}{
@@ -503,6 +508,8 @@ func (p *PluginSearch) searchSingleTarget(
 		KeywordThreshold:      chatManage.KeywordThreshold,
 		MatchCount:            chatManage.EmbeddingTopK,
 		TagIDs:                t.TagIDs,
+		FolderIDs:             t.FolderIDs,
+		IncludeSubfolders:     t.IncludeSubfolders,
 		SkipContextEnrichment: true,
 	}
 	if t.Type == types.SearchTargetTypeKnowledge {

@@ -89,6 +89,16 @@ func (s *sessionService) KnowledgeQA(
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 	}
 
+	// Propagate folder scope from request to every search target
+	if len(req.FolderIDs) > 0 {
+		for _, st := range searchTargets {
+			st.FolderIDs = req.FolderIDs
+			st.IncludeSubfolders = req.IncludeSubfolders
+		}
+	}
+	logger.Infof(ctx, "[FolderScope] KnowledgeQA: FolderIDs=%v, IncludeSubfolders=%v, searchTargets=%d",
+		req.FolderIDs, req.IncludeSubfolders, len(searchTargets))
+
 	// Create chat management object with session settings
 	logger.Infof(
 		ctx,
@@ -112,6 +122,8 @@ func (s *sessionService) KnowledgeQA(
 			KnowledgeBaseIDs:        knowledgeBaseIDs,
 			KnowledgeIDs:            knowledgeIDs,
 			SearchTargets:           searchTargets,
+			FolderIDs:               req.FolderIDs,
+			IncludeSubfolders:       req.IncludeSubfolders,
 			VectorThreshold:         s.cfg.Conversation.VectorThreshold,
 			KeywordThreshold:        s.cfg.Conversation.KeywordThreshold,
 			EmbeddingTopK:           s.cfg.Conversation.EmbeddingTopK,
