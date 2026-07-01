@@ -4504,8 +4504,6 @@ export default {
     codeImport: {
       toggle: "코드에서 가져오기",
       hint: "표준 mcpServers JSON 설정을 붙여넣으면 양식이 자동으로 채워집니다",
-      placeholder:
-        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
       parse: "파싱 후 채우기",
       editOverwriteHint: "가져오기는 현재 양식을 덮어씁니다(저장된 자격 증명은 영향받지 않으며, 저장을 눌러야 적용됩니다)",
       errors: {
@@ -5451,6 +5449,9 @@ export default {
       selectLabel: 'MCP 서비스 선택',
       selectDesc: '활성화할 MCP 서비스를 선택하세요',
       selectPlaceholder: 'MCP 서비스 선택',
+      authWaitTimeout: '인증 대기 시간(초)',
+      authWaitTimeoutDesc: '대화 중 OAuth 인증이 필요할 때 인증 완료를 기다리는 최대 시간(초)이며, 초과하면 인증 요청을 건너뜁니다(OAuth를 사용하는 MCP 서비스에만 적용).',
+      authWaitTimeoutPlaceholder: '기본 600초',
     },
     llmCallTimeout: {
       label: "LLM 호출 타임아웃",

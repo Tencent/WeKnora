@@ -4156,8 +4156,6 @@ export default {
     codeImport: {
       toggle: 'Импорт из кода',
       hint: 'Вставьте стандартную JSON-конфигурацию mcpServers для автозаполнения формы',
-      placeholder:
-        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
       parse: 'Разобрать и заполнить',
       editOverwriteHint: 'Импорт перезапишет текущую форму (сохранённые учётные данные не затрагиваются; нажмите «Сохранить», чтобы применить)',
       errors: {
@@ -4950,7 +4948,9 @@ export default {
       desc: 'Выберите MCP-сервисы, доступные агенту',
       selectLabel: 'Выбор MCP-сервисов',
       selectDesc: 'Выберите MCP-сервисы для включения',
-      selectPlaceholder: 'Выберите MCP-сервисы'
+      selectPlaceholder: 'Выберите MCP-сервисы',
+      authWaitTimeout: 'Тайм-аут ожидания аутентификации (с)',
+      authWaitTimeoutDesc: 'Максимальное время ожидания (в секундах) завершения OAuth-аутентификации при запросе во время диалога; по его истечении запрос пропускается (влияет только на MCP-сервисы с OAuth).'
     },
     llmCallTimeout: {
       label: 'Таймаут вызова LLM',

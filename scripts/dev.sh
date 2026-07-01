@@ -153,7 +153,7 @@ start_services() {
     if [ $? -ne 0 ]; then
         return 1
     fi
-    
+
     cd "$PROJECT_ROOT"
     
     # 检查 .env 文件
@@ -300,12 +300,22 @@ restart_services() {
 
 # 查看日志
 show_logs() {
+    check_docker
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+
     cd "$PROJECT_ROOT"
     "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml logs -f
 }
 
 # 查看状态
 show_status() {
+    check_docker
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+
     cd "$PROJECT_ROOT"
     "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml ps
 }

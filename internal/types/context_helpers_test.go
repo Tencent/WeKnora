@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"testing"
 )
 
@@ -95,6 +96,24 @@ func TestLanguageLocaleName(t *testing.T) {
 				t.Errorf("LanguageLocaleName(%q) = %q, want %q", tt.locale, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestMCPOAuthNonInteractive(t *testing.T) {
+	if IsMCPOAuthNonInteractive(nil) {
+		t.Fatal("nil context should not be non-interactive")
+	}
+	if IsMCPOAuthNonInteractive(context.Background()) {
+		t.Fatal("background context should not be non-interactive")
+	}
+
+	ctx := WithMCPOAuthNonInteractive(context.Background())
+	if !IsMCPOAuthNonInteractive(ctx) {
+		t.Fatal("marked context should be non-interactive")
+	}
+	child := context.WithValue(ctx, LanguageContextKey, "en-US")
+	if !IsMCPOAuthNonInteractive(child) {
+		t.Fatal("child context should inherit non-interactive flag")
 	}
 }
 

@@ -89,7 +89,7 @@ export async function listAllTenants(): Promise<{ success: boolean; data?: { ite
  * 重置租户的 API Key。成功后返回新的明文 Key，旧 Key 立即失效。
  */
 export async function resetTenantApiKey(
-  tenantId: number,
+  tenantId: string | number,
 ): Promise<{ success: boolean; data?: { api_key: string }; message?: string }> {
   try {
     const response = await post(`/api/v1/tenants/${tenantId}/api-key`)

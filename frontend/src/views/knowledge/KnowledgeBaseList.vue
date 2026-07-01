@@ -822,6 +822,8 @@ interface KB {
   name: string;
   description?: string;
   updated_at?: string;
+  created_at?: string;
+  pinned_at?: string;
   embedding_model_id?: string;
   summary_model_id?: string;
   type?: 'document' | 'faq';

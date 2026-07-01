@@ -4508,8 +4508,6 @@ export default {
     codeImport: {
       toggle: 'Import from code',
       hint: 'Paste a standard mcpServers JSON config to auto-fill the form',
-      placeholder:
-        '{\n  "mcpServers": {\n    "my-server": {\n      "url": "https://example.com/sse"\n    }\n  }\n}',
       parse: 'Parse & Fill',
       editOverwriteHint: 'Importing overwrites the current form (saved credentials are unaffected; click Save to apply)',
       errors: {
@@ -5440,6 +5438,9 @@ export default {
       selectLabel: 'Select MCP Services',
       selectDesc: 'Select MCP services to enable',
       selectPlaceholder: 'Select MCP services',
+      authWaitTimeout: 'Authentication Wait Timeout (s)',
+      authWaitTimeoutDesc: 'Maximum seconds to wait for you to complete OAuth authentication when prompted during a conversation; the prompt is skipped after it elapses (only affects OAuth MCP services).',
+      authWaitTimeoutPlaceholder: 'Default 600 seconds',
     },
     llmCallTimeout: {
       label: "LLM Call Timeout",

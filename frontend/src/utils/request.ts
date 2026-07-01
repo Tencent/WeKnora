@@ -246,14 +246,14 @@ instance.interceptors.response.use(
   }
 );
 
-export function get(url: string, config?: any) {
-  return instance.get(url, config);
+export function get<T = any>(url: string, config?: any): Promise<T> {
+  return instance.get<T>(url, config) as unknown as Promise<T>;
 }
 
-export async function getDown(url: string) {
-  let res = await instance.get(url, {
+export async function getDown(url: string): Promise<Blob> {
+  const res = await instance.get<Blob>(url, {
     responseType: "blob",
-  });
+  }) as unknown as Blob;
   return res
 }
 
@@ -262,7 +262,7 @@ export function postUpload(
   data = {},
   onUploadProgress?: (progressEvent: any) => void,
   config: any = {},
-) {
+): Promise<any> {
   return instance.post(url, data, {
     ...config,
     headers: {
@@ -271,26 +271,26 @@ export function postUpload(
       ...(config.headers || {}),
     },
     onUploadProgress: onUploadProgress || config.onUploadProgress,
-  });
+  }) as unknown as Promise<any>;
 }
 
-export function postChat(url: string, data = {}) {
+export function postChat<T = any>(url: string, data = {}): Promise<T> {
   return instance.post(url, data, {
     headers: {
       "Content-Type": "text/event-stream;charset=utf-8",
       "X-Request-ID": `${generateRandomString(12)}`,
     },
-  });
+  }) as unknown as Promise<T>;
 }
 
-export function post(url: string, data = {}, config?: any) {
-  return instance.post(url, data, config);
+export function post<T = any>(url: string, data = {}, config?: any): Promise<T> {
+  return instance.post<T>(url, data, config) as unknown as Promise<T>;
 }
 
-export function put(url: string, data = {}) {
-  return instance.put(url, data);
+export function put<T = any>(url: string, data = {}, config?: any): Promise<T> {
+  return instance.put<T>(url, data, config) as unknown as Promise<T>;
 }
 
-export function del(url: string, data?: any) {
-  return instance.delete(url, { data });
+export function del<T = any>(url: string, data?: any): Promise<T> {
+  return instance.delete<T>(url, { data }) as unknown as Promise<T>;
 }
