@@ -471,10 +471,18 @@ onUnmounted(() => {
   z-index: 1100;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
-  align-items: center;
+  // Use flex-start (not center) to avoid the classic flexbox overflow
+  // trap: align-items:center causes content to overflow symmetrically,
+  // making the top unreachable via scroll. Vertical centering is
+  // achieved via margin:auto on the modal instead.
+  align-items: flex-start;
   justify-content: center;
   padding: 20px;
   backdrop-filter: blur(4px);
+  // Allow scrolling when viewport is too short for the modal min-height
+  // (#1731 follow-up). Without this the close button and bottom nav
+  // items are unreachable on very small screens (< 440px).
+  overflow-y: auto;
 }
 
 /* 弹窗容器 */
@@ -489,12 +497,23 @@ onUnmounted(() => {
   max-width: 1080px;
   height: 780px;
   max-height: calc(100vh - 40px);
+  // Prevent the modal from shrinking below a usable height where
+  // the nav + close button become unreachable. When the viewport is
+  // shorter than min-height + 40px, the overlay scrolls instead.
+  min-height: 400px;
+  // Vertical centering via margin:auto — this replaces align-items:center
+  // on the parent and gracefully degrades: when space is sufficient the
+  // modal is centered; when space is tight it stays top-aligned and the
+  // overlay scrolls, keeping all content reachable.
+  margin: auto;
   background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  // Flex children should not collapse the modal below min-height
+  flex-shrink: 0;
 }
 
 /* 关闭按钮 */
