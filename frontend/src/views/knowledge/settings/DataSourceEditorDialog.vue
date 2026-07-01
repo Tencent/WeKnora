@@ -27,7 +27,7 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible', { default: false })
 const emit = defineEmits<{ saved: [] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
@@ -395,6 +395,22 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com',
+    permissionDocUrl: 'https://open.dingtalk.com/document/orgapp/export-document-content',
+    permissionPageUrl: 'https://open-dev.dingtalk.com',
+    requiredPermissions: [
+      'document.read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: 'dingxxxxxx' },
+      { key: 'client_secret', labelKey: 'datasource.field.clientSecret', placeholder: '', secret: true },
+      { key: 'user_id', labelKey: 'datasource.field.userId', placeholder: 'manager123' },
+      { key: 'mcp_server_url', labelKey: 'datasource.field.mcpServerUrl', placeholder: 'https://mcp-gw.dingtalk.com/server/...?key=...', secret: true },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
@@ -540,6 +556,11 @@ async function testConnection() {
   testErrorMsg.value = ''
   try {
     if (isEdit.value && tempDsId.value) {
+      const credsOk = await commitCredentialsIfNeeded(tempDsId.value)
+      if (!credsOk) {
+        testing.value = false
+        return
+      }
       await updateDataSource(tempDsId.value, {
         ...form.value,
         knowledge_base_id: props.kbId,
@@ -1084,6 +1105,10 @@ const drawerConfirmText = computed(() => {
                 t('datasource.prereqMemberBrief')) }}</span>
               <span class="ds-setup-step__desc">{{ t(`datasource.prereqStep3Desc_${form.type}`,
                 t('datasource.prereqMemberDesc')) }}</span>
+            </li>
+            <li v-if="te(`datasource.prereqStep4Brief_${form.type}`)" class="ds-setup-step">
+              <span class="ds-setup-step__title">{{ t(`datasource.prereqStep4Brief_${form.type}`) }}</span>
+              <span class="ds-setup-step__desc">{{ t(`datasource.prereqStep4Desc_${form.type}`) }}</span>
             </li>
           </ol>
           <a
