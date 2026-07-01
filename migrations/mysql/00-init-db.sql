@@ -155,3 +155,22 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+
+CREATE TABLE vlm_image_result_cache (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    cache_key VARCHAR(64) NOT NULL,
+    image_hash VARCHAR(64) NOT NULL,
+    model_fingerprint VARCHAR(64) NOT NULL,
+    result_type VARCHAR(32) NOT NULL,
+    prompt_version VARCHAR(64) NOT NULL,
+    prompt_hash VARCHAR(64) NOT NULL,
+    result_canonicalizer_version VARCHAR(64) NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_vlm_image_result_cache_tenant_key (tenant_id, cache_key),
+    KEY idx_vlm_image_result_cache_image_hash (image_hash),
+    KEY idx_vlm_image_result_cache_model_fp (model_fingerprint),
+    KEY idx_vlm_image_result_cache_result_type (result_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -751,3 +751,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_stores_name_tenant
 CREATE INDEX IF NOT EXISTS idx_vector_stores_tenant_id ON vector_stores(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_engine_type ON vector_stores(engine_type);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_deleted_at ON vector_stores(deleted_at);
+
+CREATE TABLE IF NOT EXISTS vlm_image_result_cache (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    cache_key VARCHAR(64) NOT NULL,
+    image_hash VARCHAR(64) NOT NULL,
+    model_fingerprint VARCHAR(64) NOT NULL,
+    result_type VARCHAR(32) NOT NULL,
+    prompt_version VARCHAR(64) NOT NULL,
+    prompt_hash VARCHAR(64) NOT NULL,
+    result_canonicalizer_version VARCHAR(64) NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_vlm_image_result_cache_tenant_key UNIQUE (tenant_id, cache_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vlm_image_result_cache_image_hash ON vlm_image_result_cache(image_hash);
+CREATE INDEX IF NOT EXISTS idx_vlm_image_result_cache_model_fp ON vlm_image_result_cache(model_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_vlm_image_result_cache_result_type ON vlm_image_result_cache(result_type);

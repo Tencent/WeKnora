@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -99,6 +100,10 @@ func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, err
 }
 
 func (s *stubModelService) GetVLMModel(context.Context, string) (vlm.VLM, error) {
+	return nil, nil
+}
+
+func (s *stubModelService) GetVLMModelWithFingerprint(context.Context, string) (*interfaces.ResolvedVLMModel, error) {
 	return nil, nil
 }
 
