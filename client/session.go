@@ -272,7 +272,7 @@ func (c *Client) KnowledgeQAStream(
 	path := fmt.Sprintf("/api/v1/knowledge-chat/%s", sessionID)
 	debugLogger.Debug("knowledge_qa_stream_start", "session_id", sessionID, "query", request.Query)
 
-	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
+	resp, err := c.doRequestStream(ctx, http.MethodPost, path, request, nil)
 	if err != nil {
 		debugLogger.Debug("request_failed", "error", err)
 		return err
@@ -290,6 +290,11 @@ func (c *Client) KnowledgeQAStream(
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
+	// Default 64KiB per-line cap truncates large SSE data lines (the
+	// references event bundles chunk contents that can reach hundreds of
+	// KiB). Raise the cap so those lines parse instead of erroring with
+	// "bufio.Scanner: token too long".
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var dataBuffer string
 	var eventType string
 	messageCount := 0
@@ -314,6 +319,9 @@ func (c *Client) KnowledgeQAStream(
 				if err := callback(&streamResponse); err != nil {
 					debugLogger.Debug("sse_callback_failed", "error", err)
 					return err
+				}
+				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
+					return fmt.Errorf("SSE stream error: %s", streamResponse.Content)
 				}
 				dataBuffer = ""
 				eventType = ""
@@ -354,7 +362,7 @@ func (c *Client) ContinueStream(
 	queryParams := url.Values{}
 	queryParams.Add("message_id", messageID)
 
-	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
+	resp, err := c.doRequestStream(ctx, http.MethodGet, path, nil, queryParams)
 	if err != nil {
 		return err
 	}
@@ -367,6 +375,9 @@ func (c *Client) ContinueStream(
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
+	// See KnowledgeQAStream: raise the per-line cap so large SSE data lines
+	// (references event) parse instead of erroring with "token too long".
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var dataBuffer string
 	var eventType string
 
@@ -383,6 +394,9 @@ func (c *Client) ContinueStream(
 
 				if err := callback(&streamResponse); err != nil {
 					return err
+				}
+				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
+					return fmt.Errorf("SSE stream error: %s", streamResponse.Content)
 				}
 				dataBuffer = ""
 				eventType = ""

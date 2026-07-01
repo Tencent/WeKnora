@@ -10,6 +10,18 @@ of the WeKnora server / frontend release cadence.
 CLI history before v0.3 is recorded in the project root
 [CHANGELOG.md](../CHANGELOG.md) under the release that introduced the CLI.
 
+## [Unreleased]
+
+### Fixed
+- Streaming SDK calls are no longer cut off by the client's default 30-second
+  timeout (explicit `WithTimeout` values remain honored), and SSE data lines
+  up to 4 MiB are accepted.
+- Terminal `response_type=error, done=true` frames now end SDK stream calls
+  even when the server leaves the HTTP connection open.
+- Agent accumulation now waits for `response_type=complete` instead of treating
+  per-event `done:true` markers as completion of the whole run.
+- Reference `parent_chunk_id` / `sub_chunk_id` fields now survive SDK unmarshal.
+
 ## [0.9.0] - 2026-06-10
 
 ### v0.9 — auth/profile model harmonization + flag cleanup
