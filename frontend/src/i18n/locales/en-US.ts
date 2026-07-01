@@ -5440,6 +5440,9 @@ export default {
       selectLabel: 'Select MCP Services',
       selectDesc: 'Select MCP services to enable',
       selectPlaceholder: 'Select MCP services',
+      authWaitTimeout: 'Authentication Wait Timeout (s)',
+      authWaitTimeoutDesc: 'Maximum seconds to wait for you to complete OAuth authentication when prompted during a conversation; the prompt is skipped after it elapses (only affects OAuth MCP services).',
+      authWaitTimeoutPlaceholder: 'Default 600 seconds',
     },
     llmCallTimeout: {
       label: "LLM Call Timeout",

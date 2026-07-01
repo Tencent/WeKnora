@@ -5453,6 +5453,9 @@ export default {
       selectLabel: "选择 MCP 服务",
       selectDesc: "选择要启用的 MCP 服务",
       selectPlaceholder: "选择 MCP 服务",
+      authWaitTimeout: "授权等待超时（秒）",
+      authWaitTimeoutDesc: "对话中触发 OAuth 授权时，等待你完成授权的最长秒数，超时后自动跳过授权提示（仅对使用 OAuth 的 MCP 服务生效）。",
+      authWaitTimeoutPlaceholder: "默认 600 秒",
     },
     llmCallTimeout: {
       label: "LLM 调用超时",
