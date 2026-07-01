@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -47,6 +48,11 @@ func GeneratedQuestionSourceID(chunkID, questionID string) string {
 	// UUID chunk IDs use 36 bytes; "-q" plus 24 hex characters keeps the
 	// complete identifier at 62 bytes while retaining ample collision space.
 	return chunkID + "-q" + hex.EncodeToString(digest[:12])
+}
+
+func StableGeneratedQuestionID(question string, index int) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(question) + "\x00" + strconv.Itoa(index)))
+	return "q" + hex.EncodeToString(sum[:8])
 }
 
 // DocumentChunkMetadata 定义文档 Chunk 的元数据结构

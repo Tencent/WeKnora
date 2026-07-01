@@ -283,6 +283,8 @@ type DocumentProcessPayload struct {
 	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
 	QuestionCount            int      `json:"question_count,omitempty"`   // 每个chunk生成的问题数量
 	Language                 string   `json:"language,omitempty"`         // Request locale for {{language}} in prompt templates
+	ReuseUnchangedChunks     bool     `json:"reuse_unchanged_chunks,omitempty"`
+	AllowLegacyChunkReuse    bool     `json:"allow_legacy_chunk_reuse,omitempty"`
 	// Attempt is the per-knowledge attempt number this task belongs to.
 	// Set on enqueue (initial parse → attempt 1; reparse → max+1) so
 	// every span recorded by this task lands on the right attempt
