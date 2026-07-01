@@ -22,7 +22,7 @@ function fallbackText(type: string) {
     case 'yuque':
       return 'Y'
     case 'dingtalk':
-      return '钉'
+      return 'D'
     default:
       return type.slice(0, 1).toUpperCase() || '?'
   }

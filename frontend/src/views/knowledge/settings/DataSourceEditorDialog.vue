@@ -408,7 +408,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'app_key', labelKey: 'datasource.field.dingtalkAppKey', placeholder: 'dingxxxxxxxxxxxxxxxx' },
       { key: 'app_secret', labelKey: 'datasource.field.dingtalkAppSecret', placeholder: '', secret: true },
-      { key: 'operator_union_id', labelKey: 'datasource.field.operatorUnionId', placeholder: '', hintKey: 'datasource.field.operatorUnionIdHint' },
+      { key: 'operator_user_id', labelKey: 'datasource.field.operatorUserId', placeholder: '' },
     ],
   },
   {
