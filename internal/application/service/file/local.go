@@ -293,7 +293,7 @@ func (s *localFileService) normalizePathForBase(filePath string) string {
 
 	clean := filepath.Clean(strings.TrimSpace(filePath))
 	if clean == "." || clean == "" {
-		return clean
+		return s.baseDir
 	}
 	if filepath.IsAbs(clean) {
 		return clean

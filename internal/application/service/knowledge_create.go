@@ -216,6 +216,10 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	filePath, err := fileSvc.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to save file, knowledge ID: %s, error: %v", knowledge.ID, err)
+		// Clean up the orphan knowledge record created before SaveFile
+		if delErr := s.repo.DeleteKnowledge(ctx, knowledge.TenantID, knowledge.ID); delErr != nil {
+			logger.Errorf(ctx, "Failed to clean up orphan knowledge record %s after SaveFile failure: %v", knowledge.ID, delErr)
+		}
 		return nil, err
 	}
 	knowledge.FilePath = filePath
