@@ -96,9 +96,6 @@ func (s *sessionService) KnowledgeQA(
 			st.IncludeSubfolders = req.IncludeSubfolders
 		}
 	}
-	logger.Infof(ctx, "[FolderScope] KnowledgeQA: FolderIDs=%v, IncludeSubfolders=%v, searchTargets=%d",
-		req.FolderIDs, req.IncludeSubfolders, len(searchTargets))
-
 	// Create chat management object with session settings
 	logger.Infof(
 		ctx,

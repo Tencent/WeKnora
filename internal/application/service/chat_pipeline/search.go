@@ -419,9 +419,6 @@ func (p *PluginSearch) searchByTargets(
 						IncludeSubfolders:     chatManage.IncludeSubfolders,
 						SkipContextEnrichment: true,
 					}
-					pipelineInfo(ctx, "Search", "combined_kb_params", map[string]interface{}{
-						"kb_ids": fullKBIDs, "folder_ids": chatManage.FolderIDs, "include_subs": chatManage.IncludeSubfolders,
-					})
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
 					if err != nil {
 						pipelineWarn(ctx, "Search", "combined_kb_search_error", map[string]interface{}{

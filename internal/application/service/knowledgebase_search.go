@@ -93,8 +93,6 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if len(searchKBIDs) == 0 {
 		searchKBIDs = []string{id}
 	}
-	logger.Infof(ctx, "[FolderScope] HybridSearch: KB=%v, FolderIDs=%v, IncludeSub=%v, KnowledgeIDs=%v, KW=%v",
-		searchKBIDs, params.FolderIDs, params.IncludeSubfolders, params.KnowledgeIDs, secutils.SanitizeForLog(params.QueryText))
 
 	// QueryText is user-controlled; sanitize before logging to prevent
 	// CR/LF/tab log injection. Matches the handler-layer sanitization at
@@ -329,8 +327,6 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	// Resolve FolderIDs to KnowledgeIDs before building retrieval params.
 	// This avoids touching every vector store engine: we simply restrict the
 	// existing KnowledgeIDs filter, which all engines already support.
-	logger.Infof(ctx, "[FolderScope] buildRetrievalParams: FolderIDs=%v, IncludeSubfolders=%v, KnowledgeIDs=%v, groupKB count=%d",
-		params.FolderIDs, params.IncludeSubfolders, params.KnowledgeIDs, len(groupKBs))
 	mergedKnowledgeIDs := params.KnowledgeIDs
 	if len(params.FolderIDs) > 0 {
 		var folderKnowledgeIDs []string
@@ -349,8 +345,6 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			folderKnowledgeIDs = append(folderKnowledgeIDs, ids...)
 		}
 		mergedKnowledgeIDs = mergeKnowledgeIDs(params.KnowledgeIDs, folderKnowledgeIDs)
-		logger.Infof(ctx, "[FolderScope] Resolved %d folder knowledge IDs, merged to %d IDs",
-			len(folderKnowledgeIDs), len(mergedKnowledgeIDs))
 		if len(mergedKnowledgeIDs) == 0 && len(params.FolderIDs) > 0 {
 			// Folder filtering was requested but matched zero knowledge entries.
 			// Return empty params so the caller can short-circuit retrieval.
