@@ -320,17 +320,18 @@ type WikiPendingOp struct {
 // both of which are correctness-critical short-lived flags rather
 // than data the system should survive without.
 type wikiIngestService struct {
-	wikiService    interfaces.WikiPageService
-	kbService      interfaces.KnowledgeBaseService
-	knowledgeSvc   interfaces.KnowledgeService
-	knowledgeRepo  interfaces.KnowledgeRepository
-	chunkRepo      interfaces.ChunkRepository
-	modelService   interfaces.ModelService
-	task           interfaces.TaskEnqueuer
-	audit          interfaces.AuditLogService
-	pendingRepo    interfaces.TaskPendingOpsRepository
-	deadLetterRepo interfaces.TaskDeadLetterRepository
-	redisClient    *redis.Client // nil in Lite mode (no Redis)
+	wikiService      interfaces.WikiPageService
+	kbService        interfaces.KnowledgeBaseService
+	knowledgeSvc     interfaces.KnowledgeService
+	knowledgeRepo    interfaces.KnowledgeRepository
+	chunkRepo        interfaces.ChunkRepository
+	modelService     interfaces.ModelService
+	task             interfaces.TaskEnqueuer
+	audit            interfaces.AuditLogService
+	pendingRepo      interfaces.TaskPendingOpsRepository
+	deadLetterRepo   interfaces.TaskDeadLetterRepository
+	wikiMapCacheRepo interfaces.WikiMapCacheRepository
+	redisClient      *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
 	// batch design means we look up the parent attempt by knowledge
@@ -370,22 +371,24 @@ func NewWikiIngestService(
 	audit interfaces.AuditLogService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
+	wikiMapCacheRepo interfaces.WikiMapCacheRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
-		wikiService:    wikiService,
-		kbService:      kbService,
-		knowledgeSvc:   knowledgeSvc,
-		knowledgeRepo:  knowledgeRepo,
-		chunkRepo:      chunkRepo,
-		modelService:   modelService,
-		task:           task,
-		audit:          audit,
-		pendingRepo:    pendingRepo,
-		deadLetterRepo: deadLetterRepo,
-		redisClient:    redisClient,
-		spanTracker:    spanTracker,
+		wikiService:      wikiService,
+		kbService:        kbService,
+		knowledgeSvc:     knowledgeSvc,
+		knowledgeRepo:    knowledgeRepo,
+		chunkRepo:        chunkRepo,
+		modelService:     modelService,
+		task:             task,
+		audit:            audit,
+		pendingRepo:      pendingRepo,
+		deadLetterRepo:   deadLetterRepo,
+		wikiMapCacheRepo: wikiMapCacheRepo,
+		redisClient:      redisClient,
+		spanTracker:      spanTracker,
 	}
 	return svc
 }
@@ -3068,11 +3071,14 @@ func cleanLLMJSON(s string) string {
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
 	s = strings.TrimSpace(s)
+	if extracted := extractWikiJSONLike(s); extracted != "" {
+		s = extracted
+	}
 	return sanitizeJSONString(s)
 }
 
 // sanitizeJSONString sanitizes a string that is intended to be parsed as JSON,
-// by properly escaping unescaped control characters (like newlines) inside string literals.
+// by escaping control characters and dropping invalid string escapes produced by LLMs.
 func sanitizeJSONString(s string) string {
 	var buf strings.Builder
 	buf.Grow(len(s))
@@ -3080,21 +3086,24 @@ func sanitizeJSONString(s string) string {
 	escape := false
 	for _, r := range s {
 		if escape {
-			if r == '\n' {
-				buf.WriteString(`n`)
-			} else if r == '\r' {
-				buf.WriteString(`r`)
-			} else if r == '\t' {
-				buf.WriteString(`t`)
-			} else {
+			switch {
+			case isValidJSONEscape(r):
+				buf.WriteRune('\\')
+				buf.WriteRune(r)
+			case r == '\n':
+				buf.WriteString(`\n`)
+			case r == '\r':
+				buf.WriteString(`\r`)
+			case r == '\t':
+				buf.WriteString(`\t`)
+			default:
 				buf.WriteRune(r)
 			}
 			escape = false
 			continue
 		}
-		if r == '\\' {
+		if r == '\\' && inString {
 			escape = true
-			buf.WriteRune(r)
 			continue
 		}
 		if r == '"' {
@@ -3118,5 +3127,68 @@ func sanitizeJSONString(s string) string {
 		}
 		buf.WriteRune(r)
 	}
+	if escape {
+		buf.WriteString(`\\`)
+	}
 	return buf.String()
+}
+
+func isValidJSONEscape(r rune) bool {
+	switch r {
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':
+		return true
+	default:
+		return false
+	}
+}
+
+func extractWikiJSONLike(s string) string {
+	objStart := strings.IndexByte(s, '{')
+	arrStart := strings.IndexByte(s, '[')
+	var open, closeCh byte
+	var start int
+	switch {
+	case objStart < 0 && arrStart < 0:
+		return ""
+	case objStart < 0:
+		open, closeCh, start = '[', ']', arrStart
+	case arrStart < 0:
+		open, closeCh, start = '{', '}', objStart
+	case objStart < arrStart:
+		open, closeCh, start = '{', '}', objStart
+	default:
+		open, closeCh, start = '[', ']', arrStart
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case open:
+			depth++
+		case closeCh:
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(s[start : i+1])
+			}
+		}
+	}
+	return ""
 }
