@@ -23,7 +23,8 @@ class SandboxExecutor:
         """Initialize sandbox executor with configuration
 
         Args:
-            proxy: Proxy URL to use for network access. If None, will use WEB_PROXY environment variable
+            proxy: Proxy URL to use for network access. If None, will use
+                DOCREADER_EXTERNAL_HTTPS_PROXY or EXTERNAL_HTTPS_PROXY.
             default_timeout: Default timeout in seconds for command execution
         """
         # Get proxy from parameter, environment variable, or use default blocking proxy
