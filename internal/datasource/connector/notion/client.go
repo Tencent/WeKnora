@@ -26,16 +26,19 @@ type notionClient struct {
 }
 
 // newClient creates a new Notion API client.
-func newClient(token, baseURL string) *notionClient {
+func newClient(token, baseURL string) (*notionClient, error) {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
+	if err := datasource.ValidateConnectorBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 	return &notionClient{
 		token:      token,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		limiter:    rate.NewLimiter(rate.Limit(3), 3), // 3 req/s with burst of 3 (matches Notion's actual behavior)
+		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
+		limiter:    rate.NewLimiter(rate.Limit(3), 3),
 		baseURL:    baseURL,
-	}
+	}, nil
 }
 
 const maxRetries = 3

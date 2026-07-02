@@ -7,7 +7,21 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func mustTestClient(t *testing.T, token, baseURL string) *notionClient {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+
+	client, err := newClient(token, baseURL)
+	if err != nil {
+		t.Fatalf("newClient: %v", err)
+	}
+	return client
+}
 
 // fakeNotion builds an httptest.Server that emulates relevant Notion API endpoints.
 func fakeNotion() (*httptest.Server, *Config) {
@@ -233,7 +247,7 @@ func TestClientPing(t *testing.T) {
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
-	client := newClient(cfg.APIKey, ts.URL)
+	client := mustTestClient(t, cfg.APIKey, ts.URL)
 	if err := client.Ping(context.Background()); err != nil {
 		t.Fatalf("Ping() error: %v", err)
 	}
@@ -243,7 +257,7 @@ func TestClientPing_InvalidToken(t *testing.T) {
 	ts, _ := fakeNotion()
 	defer ts.Close()
 
-	client := newClient("wrong-token", ts.URL)
+	client := mustTestClient(t, "wrong-token", ts.URL)
 	err := client.Ping(context.Background())
 	if err == nil {
 		t.Fatal("expected error for invalid token")
@@ -254,7 +268,7 @@ func TestClientSearchPages(t *testing.T) {
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
-	client := newClient(cfg.APIKey, ts.URL)
+	client := mustTestClient(t, cfg.APIKey, ts.URL)
 	pages, err := client.SearchPages(context.Background())
 	if err != nil {
 		t.Fatalf("SearchPages() error: %v", err)
@@ -277,7 +291,7 @@ func TestClientGetBlockChildrenAll(t *testing.T) {
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
-	client := newClient(cfg.APIKey, ts.URL)
+	client := mustTestClient(t, cfg.APIKey, ts.URL)
 	blocks, err := client.GetBlockChildrenAll(context.Background(), "page-1")
 	if err != nil {
 		t.Fatalf("GetBlockChildrenAll() error: %v", err)
@@ -301,7 +315,7 @@ func TestClientGetPage(t *testing.T) {
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
-	client := newClient(cfg.APIKey, ts.URL)
+	client := mustTestClient(t, cfg.APIKey, ts.URL)
 	page, err := client.GetPage(context.Background(), "page-1")
 	if err != nil {
 		t.Fatalf("GetPage() error: %v", err)
@@ -318,7 +332,7 @@ func TestClientQueryDatabaseAll(t *testing.T) {
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
-	client := newClient(cfg.APIKey, ts.URL)
+	client := mustTestClient(t, cfg.APIKey, ts.URL)
 	records, err := client.QueryDatabaseAll(context.Background(), "db-1")
 	if err != nil {
 		t.Fatalf("QueryDatabaseAll() error: %v", err)
