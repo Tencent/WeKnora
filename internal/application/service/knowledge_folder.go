@@ -67,7 +67,7 @@ func (s *knowledgeFolderService) CreateFolder(
 			return nil, repository.ErrMaxDepthExceeded
 		}
 		depth = parent.Depth + 1
-		path = parent.Path + parent.ID + "/"
+		path = parent.Path
 	} else {
 		path = "/"
 	}
@@ -358,7 +358,7 @@ func (s *knowledgeFolderService) MoveFolder(
 		if targetParent.Depth >= types.MaxFolderDepth {
 			return nil, repository.ErrMaxDepthExceeded
 		}
-		newParentPath = targetParent.Path + targetParent.ID + "/"
+		newParentPath = targetParent.Path
 		newDepth = targetParent.Depth + 1
 	} else {
 		newParentPath = "/"
@@ -422,14 +422,17 @@ func (s *knowledgeFolderService) GetBreadcrumb(
 		return []*types.KnowledgeFolder{folder}, nil
 	}
 
-	// Split path and fetch each ancestor
+	// Split path and fetch each ancestor (skip consecutive duplicate segments
+	// that may exist from a previous path construction bug).
 	// Path format: /ancestor1_id/ancestor2_id/current_id/
 	segments := strings.Split(strings.Trim(path, "/"), "/")
 	breadcrumb := make([]*types.KnowledgeFolder, 0, len(segments))
+	var lastSegID string
 	for _, seg := range segments {
-		if seg == "" || seg == folderID {
+		if seg == "" || seg == folderID || seg == lastSegID {
 			continue
 		}
+		lastSegID = seg
 		ancestor, err := s.repo.GetByID(ctx, tenantID, seg)
 		if err != nil {
 			logger.Warnf(ctx, "[Folder] Failed to fetch breadcrumb ancestor %s: %v", seg, err)
