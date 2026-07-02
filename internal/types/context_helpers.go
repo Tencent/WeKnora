@@ -138,6 +138,24 @@ func LanguageFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// ForwardHeadersFromContext extracts the per-request forward headers from ctx.
+// Returns nil when no headers were set.
+func ForwardHeadersFromContext(ctx context.Context) map[string]string {
+	v, ok := ctx.Value(ForwardHeadersContextKey).(map[string]string)
+	if !ok {
+		return nil
+	}
+	return v
+}
+
+// WithForwardHeaders attaches per-request forward headers to ctx.
+func WithForwardHeaders(ctx context.Context, headers map[string]string) context.Context {
+	if len(headers) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, ForwardHeadersContextKey, headers)
+}
+
 // LanguageNameFromContext returns the human-readable language name for use in prompts.
 // e.g. "zh-CN" -> "Chinese (Simplified)", "en-US" -> "English", "ko-KR" -> "Korean"
 // Falls back to DefaultLanguage() (WEKNORA_LANGUAGE env, then "zh-CN").

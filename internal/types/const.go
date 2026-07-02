@@ -43,6 +43,11 @@ const (
 	// the agent emits a one-shot authorization notice and continues instead of
 	// blocking until the OAuth wait times out. See IsMCPOAuthNonInteractive.
 	MCPOAuthNonInteractiveContextKey ContextKey = "MCPOAuthNonInteractive"
+	// ForwardHeadersContextKey carries per-request HTTP headers that should be
+	// forwarded to downstream model API calls (LLM, embedding, rerank, VLM).
+	// Populated by the handler from incoming request headers matching the
+	// header_forwarding configuration.
+	ForwardHeadersContextKey ContextKey = "ForwardHeaders"
 )
 
 // String returns the string representation of the context key

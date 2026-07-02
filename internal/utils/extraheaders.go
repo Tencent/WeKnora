@@ -68,6 +68,29 @@ func (t *CustomHeadersRoundTripper) RoundTrip(req *http.Request) (*http.Response
 	return base.RoundTrip(req)
 }
 
+// MergeHeaders merges extra headers into base. Reserved headers (Authorization,
+// api-key, Content-Type, etc.) in extra are always skipped. When both maps
+// define the same key, base headers take precedence (static configuration wins
+// over dynamic per-request headers). Returns base unchanged when extra is empty.
+func MergeHeaders(base, extra map[string]string) map[string]string {
+	if len(extra) == 0 {
+		return base
+	}
+	merged := make(map[string]string, len(base)+len(extra))
+	for k, v := range extra {
+		if IsReservedHeader(k) {
+			continue
+		}
+		merged[k] = v
+	}
+	// Base headers overwrite forwarded headers for the same key
+	// (static model configuration takes precedence).
+	for k, v := range base {
+		merged[k] = v
+	}
+	return merged
+}
+
 // WrapHTTPClientWithHeaders 返回一个新的 *http.Client，在原有 client 基础上注入自定义 header。
 // 如果 headers 为空则直接返回原 client，避免不必要的开销。
 func WrapHTTPClientWithHeaders(client *http.Client, headers map[string]string) *http.Client {

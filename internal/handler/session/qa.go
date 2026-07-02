@@ -256,6 +256,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
 
+	// Inject per-request forward headers into the context so downstream model
+	// calls (LLM, embedding, rerank, VLM) can attach them to outbound requests.
+	ctx = h.injectForwardHeaders(ctx, c)
+
 	// Build request context
 	reqCtx := &qaRequestContext{
 		ctx:         ctx,
@@ -933,6 +937,28 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 		}}
 	}
 	msg.AgentSteps[0].ReasoningContent += content
+}
+
+// injectForwardHeaders extracts headers from the incoming request that match
+// the header_forwarding configuration and stores them in the context so
+// downstream model calls (LLM, embedding, rerank, VLM) can forward them.
+// Returns the updated context.
+func (h *Handler) injectForwardHeaders(ctx context.Context, c *gin.Context) context.Context {
+	cfg := h.config.HeaderForwarding
+	if cfg == nil || !cfg.Enabled {
+		return ctx
+	}
+	headers := make(map[string]string)
+	for key, values := range c.Request.Header {
+		if cfg.ShouldForward(key) && len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+	if len(headers) == 0 {
+		return ctx
+	}
+	logger.Infof(ctx, "[HeaderForwarding] Forwarding %d header(s) to downstream model calls", len(headers))
+	return types.WithForwardHeaders(ctx, headers)
 }
 
 // completeAssistantMessage marks an assistant message as complete, updates it,

@@ -406,7 +406,10 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embConfig.CustomHeaders = utils.MergeHeaders(embConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+
+	embedder, err := embedding.NewEmbedder(embConfig, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -453,7 +456,10 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
+	embConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embConfig.CustomHeaders = utils.MergeHeaders(embConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+
+	embedder, err := embedding.NewEmbedder(embConfig, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -483,7 +489,10 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
+	rerankConfig := rerank.ConfigFromModel(model, appID, appSecret)
+	rerankConfig.CustomHeaders = utils.MergeHeaders(rerankConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+
+	reranker, err := rerank.NewReranker(rerankConfig)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -526,7 +535,10 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	chatModel, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), s.ollamaService)
+	chatConfig := chat.ConfigFromModel(model, appID, appSecret)
+	chatConfig.CustomHeaders = utils.MergeHeaders(chatConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+
+	chatModel, err := chat.NewChat(chatConfig, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -563,7 +575,10 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	vlmModel, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), s.ollamaService)
+	vlmConfig := vlm.ConfigFromModel(model, appID, appSecret)
+	vlmConfig.CustomHeaders = utils.MergeHeaders(vlmConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+
+	vlmModel, err := vlm.NewVLM(vlmConfig, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -601,7 +616,10 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 
 	logger.Infof(ctx, "Getting ASR model: %s, source: %s", model.Name, model.Source)
 
-	sttModel, err := asr.NewASR(asr.ConfigFromModel(model))
+	asrConfig := asr.ConfigFromModel(model)
+	asrConfig.CustomHeaders = utils.MergeHeaders(asrConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+
+	sttModel, err := asr.NewASR(asrConfig)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,

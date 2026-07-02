@@ -1775,7 +1775,9 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeEmbedding, types.ModelSourceRemote)
-	emb, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), h.pooler, h.ollamaService)
+	embConfig := embedding.ConfigFromModel(model, appID, appSecret)
+	embConfig.CustomHeaders = utils.MergeHeaders(embConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+	emb, err := embedding.NewEmbedder(embConfig, h.pooler, h.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model": utils.SanitizeForLog(req.ModelName)})
 		c.JSON(http.StatusOK, gin.H{
@@ -1831,7 +1833,9 @@ func classifyConnectionError(errMsg string) string {
 func (h *InitializationHandler) checkChatModelConnection(
 	ctx context.Context, model *types.Model, appID, appSecret string,
 ) (bool, string) {
-	chatInstance, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), h.ollamaService)
+	chatConfig := chat.ConfigFromModel(model, appID, appSecret)
+	chatConfig.CustomHeaders = utils.MergeHeaders(chatConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+	chatInstance, err := chat.NewChat(chatConfig, h.ollamaService)
 	if err != nil {
 		return false, fmt.Sprintf("创建聊天实例失败: %v", err)
 	}
@@ -1867,7 +1871,9 @@ func (h *InitializationHandler) checkChatModelConnection(
 func (h *InitializationHandler) checkRerankModelConnection(
 	ctx context.Context, model *types.Model, appID, appSecret string,
 ) (bool, string) {
-	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
+	rerankConfig := rerank.ConfigFromModel(model, appID, appSecret)
+	rerankConfig.CustomHeaders = utils.MergeHeaders(rerankConfig.CustomHeaders, types.ForwardHeadersFromContext(ctx))
+	reranker, err := rerank.NewReranker(rerankConfig)
 	if err != nil {
 		return false, fmt.Sprintf("创建Reranker失败: %v", err)
 	}
