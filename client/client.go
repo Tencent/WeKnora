@@ -24,20 +24,27 @@ import (
 // HTTP layer. The legacy WithToken is kept as an alias for WithAPIKey for two
 // minor versions of compatibility.
 type Client struct {
-	baseURL     string
-	httpClient  *http.Client
-	apiKey      string
-	bearerToken string
-	tenantID    *uint64
+	baseURL    string
+	httpClient *http.Client
+	// streamTimeout is zero by default so long-lived SSE responses are not
+	// severed by the ordinary request timeout. An explicit WithTimeout option
+	// sets both timeouts, preserving the public option's all-request semantics.
+	streamTimeout time.Duration
+	apiKey        string
+	bearerToken   string
+	tenantID      *uint64
 }
 
 // ClientOption defines client configuration options
 type ClientOption func(*Client)
 
-// WithTimeout sets the HTTP client timeout
+// WithTimeout sets the timeout for ordinary and streaming HTTP requests.
+// Streaming requests have no timeout by default; callers that set this option
+// explicitly are asking for the same upper bound to apply to SSE streams.
 func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *Client) {
 		c.httpClient.Timeout = timeout
+		c.streamTimeout = timeout
 	}
 }
 
@@ -109,10 +116,12 @@ func NewClient(baseURL string, options ...ClientOption) *Client {
 	return client
 }
 
-// doRequest executes an HTTP request
-func (c *Client) doRequest(ctx context.Context,
+// buildRequest constructs the authenticated *http.Request shared by doRequest
+// and doRequestStream: serializes the JSON body, composes URL + query, and
+// applies auth headers.
+func (c *Client) buildRequest(ctx context.Context,
 	method, path string, body interface{}, query url.Values,
-) (*http.Response, error) {
+) (*http.Request, error) {
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := json.Marshal(body)
@@ -122,20 +131,50 @@ func (c *Client) doRequest(ctx context.Context,
 		reqBody = bytes.NewBuffer(jsonData)
 	}
 
-	url := fmt.Sprintf("%s%s", c.baseURL, path)
+	u := fmt.Sprintf("%s%s", c.baseURL, path)
 	if len(query) > 0 {
-		url = fmt.Sprintf("%s?%s", url, query.Encode())
+		u = fmt.Sprintf("%s?%s", u, query.Encode())
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, u, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	c.applyAuthHeaders(ctx, req)
+	return req, nil
+}
 
+// doRequest executes an HTTP request subject to the client's blanket Timeout
+// (default 30s). Use for ordinary request/response calls.
+func (c *Client) doRequest(ctx context.Context,
+	method, path string, body interface{}, query url.Values,
+) (*http.Response, error) {
+	req, err := c.buildRequest(ctx, method, path, body, query)
+	if err != nil {
+		return nil, err
+	}
 	return c.httpClient.Do(req)
+}
+
+// doRequestStream executes a streaming (SSE) request without the client's
+// default 30-second blanket Timeout. http.Client.Timeout covers reading the
+// response body, so applying that default would sever long-running chat /
+// session-ask / continue-stream responses. Stream lifetime is governed by ctx
+// unless the caller explicitly supplied WithTimeout, in which case that upper
+// bound is preserved. The Transport is shared with c.httpClient so connection
+// pooling is unaffected.
+func (c *Client) doRequestStream(ctx context.Context,
+	method, path string, body interface{}, query url.Values,
+) (*http.Response, error) {
+	req, err := c.buildRequest(ctx, method, path, body, query)
+	if err != nil {
+		return nil, err
+	}
+	sc := *c.httpClient // shallow copy: shares Transport, override Timeout
+	sc.Timeout = c.streamTimeout
+	return sc.Do(req)
 }
 
 // applyAuthHeaders sets X-API-Key, Authorization, X-Request-ID, and X-Tenant-ID

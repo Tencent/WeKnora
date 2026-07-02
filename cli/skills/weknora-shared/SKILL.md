@@ -57,9 +57,11 @@ Default output is `--format json`: a single envelope.
 - `error.type` is a **stable typed code** (e.g. `local.kb_not_found`,
   `input.invalid_argument`, `input.confirmation_required`, `server.error`).
   Branch on it; `error.hint` usually tells you the next action.
-- `--format text` = human output. Streaming commands (`chat`, `session ask`,
-  `session continue-stream`) emit **NDJSON event lines** by default — expect a
-  stream, not one blob; use `--format text` for a rendered transcript.
+- `--format text` = a live human-readable projection. `chat` and `session ask`
+  buffer a bounded answer-event projection into one JSON envelope by default;
+  pass `--reference` for indexed citations, `--verbose` for execution detail,
+  or `--format ndjson` for raw event lines. `session continue-stream` remains
+  an NDJSON streaming command.
 - `--jq '<expr>'` filters the envelope (e.g. `weknora kb list --jq '.data[].id'`).
 - Exception: `weknora auth token` emits the **raw token** by default (it's a
   scripting helper); pass `--format json` for the `{token, mode, profile}` envelope.
@@ -165,5 +167,5 @@ that to learn a command without scraping the human help table.
 | `weknora auth login` before any profile exists | `profile add <n> --host <url> --use` first (§1) |
 | Expecting `auth login --host/--name` flags | Gone — host comes from the profile; use global `--profile` |
 | Auto-adding `-y` to clear an exit-10 | Never; get user approval first (§5) |
-| `weknora chat "..."` prints "garbled" stream | NDJSON by default; use `--format text` for a transcript |
+| Need the raw `chat` event stream | pass `--format ndjson`; use `--format text` for a live projected transcript |
 | `search chunks "q"` → exit 1 `local.kb_id_required` | Pass `--kb <name-or-id>`, set `WEKNORA_KB_ID`, or `weknora link` the dir |

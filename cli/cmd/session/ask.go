@@ -3,26 +3,24 @@ package sessioncmd
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/sse"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// sessionAskFields enumerates the NDJSON init-event fields surfaced for
-// `--format json` / `--format ndjson` discovery on `session ask`. Reflects
-// the InitEvent head line + the raw SDK agent event vocabulary.
+// sessionAskFields enumerates the fields surfaced for `--jq` projection
+// discovery on `session ask`: the json object's data fields + the raw SDK
+// agent event vocabulary used by --format ndjson.
 var sessionAskFields = []string{
-	"session_id", "agent_id",
-	// SDK event fields (pass-through): response_type, content, done,
-	// knowledge_references, tool_call_id, tool_result
+	"events", "session_id", "agent_id", "query",
+	// NDJSON init + SDK event fields.
+	"type", "profile", "response_type", "content", "done", "knowledge_references", "data",
 }
 
 // AskOptions captures `session ask` flag state.
@@ -30,6 +28,12 @@ type AskOptions struct {
 	AgentID   string
 	Query     string
 	SessionID string // --session: continue an existing session (skip auto-create)
+	// Reference adds bounded kb_id/chunk_id reference events to JSON/text.
+	Reference bool
+	// Verbose surfaces the projected execution trace in JSON/text,
+	// including reasoning, tools, and lifecycle events.
+	// NDJSON is always raw and is unaffected by presentation flags.
+	Verbose bool
 }
 
 // AskService is the narrow SDK surface this command depends on.
@@ -60,12 +64,14 @@ The 'weknora agent' subtree handles CRUD only (list / view / create /
 edit / delete / status / check).
 
 Modes:
-  --format text:                 live answer streaming + tool-trace footer
-  --format json / --format ndjson / pipe (default): NDJSON event stream —
-                                 one init line at head (session_id, agent_id),
-                                 then raw SDK agent events verbatim. Both
-                                 json and ndjson flags produce the same
-                                 NDJSON stream.`,
+  --format json (default):       one JSON envelope with answer events
+  --format text:                 live human-readable answer stream
+  --format ndjson:               raw NDJSON event stream — init line (session_id,
+                                 agent_id) then SDK agent events verbatim. Debug.
+
+Pass --reference to include bounded kb_id/chunk_id reference indexes. Pass
+--verbose to include reasoning, tool activity, and lifecycle frames. Combine
+both flags for the complete projected stream.`,
 		Example: `  weknora session ask --agent ag_x "Summarize Q3 sales"
   weknora session ask --session sess_x --agent ag_x "Follow-up question"
   weknora session ask --agent ag_x "Multi-step task" --format ndjson`,
@@ -87,15 +93,18 @@ Modes:
 	cmd.Flags().StringVarP(&opts.AgentID, "agent", "a", "", "Agent ID to invoke (required)")
 	_ = cmd.MarkFlagRequired("agent")
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
+	cmd.Flags().BoolVar(&opts.Reference, "reference", false, "Include indexed references in JSON/text output")
+	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "Include reasoning, tools, and lifecycle events in JSON/text output")
 	cmdutil.AddFormatFlag(cmd, sessionAskFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "Invoke a custom agent in a session context. Produces an NDJSON event stream: init line (session_id, agent_id) then raw SDK agent events. Use --format json or --format ndjson.",
+		UsedFor:       "Invoke a custom agent in a session context. Default JSON returns a bounded answer-event projection. --reference adds indexed citations; --verbose adds reasoning, tools, and lifecycle events. --format ndjson streams raw SDK agent events; --format text renders the selected events live.",
 		RequiredFlags: []string{"--agent"},
 		Examples: []string{
-			`weknora session ask --agent ag_x "Summarize Q3 sales" --format json`,
-			`weknora session ask --session sess_x --agent ag_x "Follow-up question" --format json`,
+			`weknora session ask --agent ag_x "Summarize Q3 sales"`,
+			`weknora session ask --agent ag_x "Summarize Q3 sales" --jq '[.data.events[].content] | join("")'`,
+			`weknora session ask --session sess_x --agent ag_x "Follow-up question"`,
 		},
-		Output: "NDJSON stream: {type:init, session_id, agent_id} then SDK agent events (response_type, content, done, knowledge_references, ...)",
+		Output: "Default --format json: {ok,data:{events:[answer...],session_id,agent_id,query}}. --reference adds kb_id/chunk_id reference events; --verbose adds execution events. --format ndjson remains raw.",
 	})
 	return cmd
 }
@@ -111,11 +120,8 @@ func runAsk(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions,
 		return cmdutil.NewError(cmdutil.CodeServerError, "session ask: no SDK client available")
 	}
 
-	// Streaming commands route --format json AND --format ndjson to the
-	// NDJSON event-stream path. A buffered envelope makes no sense for a
-	// streaming command. Only --format text uses the live renderer.
-	ndjsonMode := fopts != nil && (fopts.Mode == cmdutil.FormatJSON || fopts.Mode == cmdutil.FormatNDJSON)
-
+	// --format selects the output shape: json (default) accumulates and
+	// emits one object, ndjson streams raw SDK agent events, text renders.
 	sessionID := opts.SessionID
 	autoCreated := false
 	if sessionID == "" {
@@ -134,13 +140,16 @@ func runAsk(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions,
 		autoCreated = true
 	}
 
-	if ndjsonMode {
+	if fopts != nil && fopts.Mode == cmdutil.FormatNDJSON {
 		return runAskNDJSON(ctx, opts, sessionID, svc)
+	}
+	if fopts != nil && fopts.Mode == cmdutil.FormatJSON {
+		return runAskJSON(ctx, opts, fopts, sessionID, svc)
 	}
 
 	// Surface auto-created session id up-front so a ^C mid-stream still
-	// leaves a recoverable pointer. Skipped in NDJSON mode (it appears in
-	// the init event).
+	// leaves a recoverable pointer. Skipped in json/ndjson mode (session_id
+	// is in the output).
 	if autoCreated {
 		fmt.Fprintf(iostreams.IO.Err, "session: %s (use --session to continue)\n", sessionID)
 	}
@@ -148,9 +157,9 @@ func runAsk(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions,
 	return runAskText(ctx, opts, sessionID, autoCreated, svc)
 }
 
-// runAskNDJSON handles --format json and --format ndjson paths.
-// Emits a CLI init event at stream head, then passes every SDK agent event
-// through verbatim as NDJSON lines. No buffering.
+// runAskNDJSON handles the --format ndjson path: emits a CLI init event at
+// stream head, then passes every SDK agent event through verbatim as NDJSON
+// lines. No buffering.
 func runAskNDJSON(ctx context.Context, opts *AskOptions, sessionID string, svc AskService) error {
 	w := iostreams.IO.Out
 
@@ -173,6 +182,8 @@ func runAskNDJSON(ctx context.Context, opts *AskOptions, sessionID string, svc A
 		Channel:      "api",
 	}
 	cb := func(r *sdk.AgentStreamResponse) error {
+		// NDJSON is the raw protocol/debug surface: do not filter events or
+		// mutate their payloads. JSON/text modes own presentation filtering.
 		return output.EmitSDKEvent(w, r)
 	}
 	if err := svc.AgentQAStreamWithRequest(ctx, sessionID, req, cb); err != nil {
@@ -184,12 +195,9 @@ func runAskNDJSON(ctx context.Context, opts *AskOptions, sessionID string, svc A
 	return nil
 }
 
-// runAskText handles the --format text path. Streams answer fragments
-// live on TTY; accumulates then renders on non-TTY pipes.
+// runAskText handles the --format text path. It renders the same
+// projection as JSON immediately for both terminals and pipes.
 func runAskText(ctx context.Context, opts *AskOptions, sessionID string, autoCreated bool, svc AskService) error {
-	// Stream mode requires an interactive stdout.
-	streamMode := iostreams.IO.IsStdoutTTY()
-
 	req := &sdk.AgentQARequest{
 		Query:        opts.Query,
 		AgentEnabled: true,
@@ -197,13 +205,14 @@ func runAskText(ctx context.Context, opts *AskOptions, sessionID string, autoCre
 		Channel:      "api",
 	}
 
-	acc := &sse.AgentAccumulator{}
+	projector := sse.NewProjector(opts.Verbose, opts.Reference, "")
+	renderer := sse.NewTextRenderer(iostreams.IO.Out, opts.Verbose)
 	cb := func(r *sdk.AgentStreamResponse) error {
-		if streamMode && r != nil && r.ResponseType == sdk.AgentResponseTypeAnswer && r.Content != "" {
-			_, _ = iostreams.IO.Out.Write([]byte(r.Content))
+		event, include := projector.Agent(r)
+		if !include {
+			return nil
 		}
-		acc.Append(r)
-		return nil
+		return renderer.Write(event)
 	}
 
 	streamErr := svc.AgentQAStreamWithRequest(ctx, sessionID, req, cb)
@@ -214,61 +223,79 @@ func runAskText(ctx context.Context, opts *AskOptions, sessionID string, autoCre
 		if cmdutil.IsCancelled(ctx, streamErr) {
 			return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, streamErr, "session ask cancelled")
 		}
-		if acc.Answer() != "" && !acc.Done() {
+		if projector.Seen() && !projector.Done() {
 			return cmdutil.Wrapf(cmdutil.CodeSSEStreamAborted, streamErr, "stream aborted before completion")
 		}
 		return cmdutil.WrapHTTP(streamErr, "agent-chat stream")
 	}
 
-	// Server closed cleanly but never sent a Done event — treat as aborted
+	// Server closed cleanly but never sent a complete event — treat as aborted
 	// so agents don't silently emit a truncated answer as ok=true.
-	if !acc.Done() {
+	if !projector.Done() {
 		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")
 	}
-
-	answer := acc.Answer()
-	out := iostreams.IO.Out
-	if streamMode {
-		if !strings.HasSuffix(answer, "\n") {
-			fmt.Fprintln(out)
-		}
-	} else {
-		fmt.Fprint(out, answer)
-		if !strings.HasSuffix(answer, "\n") {
-			fmt.Fprintln(out)
-		}
-	}
-	renderAskToolTrace(out, acc.ToolEvents)
-	format.WriteReferences(out, acc.References)
-	return nil
+	return renderer.Close()
 }
 
-// renderAskToolTrace prints a compact tool-event footer in --format text
-// mode. Skipped when the agent emitted no tool events — silent beats an
-// empty banner.
-func renderAskToolTrace(w io.Writer, events []sse.AgentToolEvent) {
-	if len(events) == 0 {
-		return
+// runAskJSON handles the --format json path (the default): collect the
+// projection and emit it in one normal success envelope.
+func runAskJSON(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions, sessionID string, svc AskService) error {
+	req := &sdk.AgentQARequest{
+		Query:        opts.Query,
+		AgentEnabled: true,
+		AgentID:      opts.AgentID,
+		Channel:      "api",
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "──── Tool trace ────")
-	for i, e := range events {
-		fmt.Fprintf(w, "[%d] %s", i+1, e.Kind)
-		if e.Result != "" {
-			fmt.Fprintf(w, "  %s", truncateAskInline(e.Result, 80))
+
+	projector := sse.NewProjector(opts.Verbose, opts.Reference, "")
+	events := make([]sse.ProjectedEvent, 0)
+	cb := func(r *sdk.AgentStreamResponse) error {
+		if event, include := projector.Agent(r); include {
+			events = append(events, event)
 		}
-		fmt.Fprintln(w)
+		return nil
 	}
+
+	if err := svc.AgentQAStreamWithRequest(ctx, sessionID, req, cb); err != nil {
+		if cmdutil.IsCancelled(ctx, err) {
+			return askStreamError(cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "session ask cancelled"), sessionID)
+		}
+		return askStreamError(cmdutil.WrapHTTP(err, "agent-chat stream"), sessionID)
+	}
+	if !projector.Done() {
+		return askStreamError(
+			cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event"),
+			sessionID,
+		)
+	}
+
+	data := askResult{
+		Events:    events,
+		SessionID: sessionID,
+		AgentID:   opts.AgentID,
+		Query:     opts.Query,
+	}
+
+	// Reaching here means fopts.Mode is FormatJSON (the only caller). Route
+	// through FormatOptions.Emit so --jq projection and the success-envelope
+	// contract apply. A nil fopts (direct-test entry) defaults to JSON.
+	if fopts == nil {
+		fopts = &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	}
+	return fopts.Emit(iostreams.IO.Out, data, nil)
 }
 
-// truncateAskInline shrinks a multi-line result to a single line + ellipsis
-// for the text tool-trace footer.
-func truncateAskInline(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-1] + "…"
+func askStreamError(err *cmdutil.Error, sessionID string) *cmdutil.Error {
+	return err.WithDetail(map[string]any{"session_id": sessionID})
+}
+
+// askResult is the --format json data payload. The projector controls default
+// versus verbose coverage.
+type askResult struct {
+	Events    []sse.ProjectedEvent `json:"events"`
+	SessionID string               `json:"session_id"`
+	AgentID   string               `json:"agent_id"`
+	Query     string               `json:"query"`
 }
 
 // compile-time check: production SDK client satisfies AskService.

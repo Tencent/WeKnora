@@ -14,24 +14,24 @@ import (
 
 // KnowledgeBase represents a knowledge base
 type KnowledgeBase struct {
-	ID                    string                `json:"id"`
-	Name                  string                `json:"name"` // Name must be unique within the same tenant
-	Type                  string                `json:"type"`
-	IsTemporary           bool                  `json:"is_temporary"`
-	IsPinned              bool                  `json:"is_pinned"`
-	Description           string                `json:"description"`
-	TenantID              uint64                `json:"tenant_id"`
-	ChunkingConfig        ChunkingConfig        `json:"chunking_config"`
-	ImageProcessingConfig ImageProcessingConfig `json:"image_processing_config"`
-	FAQConfig             *FAQConfig            `json:"faq_config"`
-	EmbeddingModelID      string                `json:"embedding_model_id"`
-	SummaryModelID        string                `json:"summary_model_id"`
+	ID                    string                 `json:"id"`
+	Name                  string                 `json:"name"` // Name must be unique within the same tenant
+	Type                  string                 `json:"type"`
+	IsTemporary           bool                   `json:"is_temporary"`
+	IsPinned              bool                   `json:"is_pinned"`
+	Description           string                 `json:"description"`
+	TenantID              uint64                 `json:"tenant_id"`
+	ChunkingConfig        ChunkingConfig         `json:"chunking_config"`
+	ImageProcessingConfig ImageProcessingConfig  `json:"image_processing_config"`
+	FAQConfig             *FAQConfig             `json:"faq_config"`
+	EmbeddingModelID      string                 `json:"embedding_model_id"`
+	SummaryModelID        string                 `json:"summary_model_id"`
 	VLMConfig             VLMConfig              `json:"vlm_config"`
 	StorageProviderConfig *StorageProviderConfig `json:"storage_provider_config"`
 	StorageConfig         StorageConfig          `json:"storage_config"`
 	ExtractConfig         *ExtractConfig         `json:"extract_config"`
-	CreatedAt             time.Time             `json:"created_at"`
-	UpdatedAt             time.Time             `json:"updated_at"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
 	// Computed fields (not stored in database)
 	KnowledgeCount  int64 `json:"knowledge_count"`
 	ChunkCount      int64 `json:"chunk_count"`
@@ -116,8 +116,8 @@ type ParserEngineRule struct {
 
 // QuestionGenerationConfig controls LLM-generated questions per chunk during parsing.
 type QuestionGenerationConfig struct {
-	Enabled         bool `json:"enabled"`
-	QuestionCount   int  `json:"question_count"`
+	Enabled       bool `json:"enabled"`
+	QuestionCount int  `json:"question_count"`
 }
 
 // ASRConfig represents automatic speech recognition settings for audio files.
@@ -209,6 +209,16 @@ type SearchResult struct {
 	// MatchedContent is the actual content that was matched in vector search
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`
+	// KnowledgeBaseID identifies the KB that produced this hit. It is required
+	// for agent runs that search more than one knowledge base.
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// ParentChunkID / SubChunkID describe the chunk hierarchy: a retrieval
+	// "hit" id may be a sub-chunk, while the parent holds the self-contained
+	// passage an agent fetches via `chunk view <parent_chunk_id>`. The server
+	// ships these in the references event; without fields here Go silently
+	// drops them during unmarshal.
+	ParentChunkID string   `json:"parent_chunk_id,omitempty"`
+	SubChunkID    []string `json:"sub_chunk_id,omitempty"`
 }
 
 // HybridSearchResponse hybrid search response
@@ -349,9 +359,9 @@ func (c *Client) ClearKnowledgeBaseContents(ctx context.Context, knowledgeBaseID
 	}
 
 	var response struct {
-		Success bool                                `json:"success"`
-		Message string                              `json:"message"`
-		Data    ClearKnowledgeBaseContentsResponse   `json:"data"`
+		Success bool                               `json:"success"`
+		Message string                             `json:"message"`
+		Data    ClearKnowledgeBaseContentsResponse `json:"data"`
 	}
 
 	if err := parseResponse(resp, &response); err != nil {

@@ -423,30 +423,37 @@ func TestTool_SearchChunks_PassesMatchCountFromLimit(t *testing.T) {
 	assert.Equal(t, 50, svc.calls.hybridParams.MatchCount, "MCP search_chunks must thread limit into SearchParams.MatchCount")
 }
 
-func TestTool_Chat_AccumulateAnswerAndReferences(t *testing.T) {
+func TestTool_Chat_DefaultReturnsAnswerEventsOnly(t *testing.T) {
 	svc := &fakeSvc{
 		kbStreamEvents: []*sdk.StreamResponse{
 			{Content: "Hello "},
 			{Content: "world."},
-			{KnowledgeReferences: []*sdk.SearchResult{{KnowledgeID: "k1"}}},
+			{KnowledgeReferences: []*sdk.SearchResult{{
+				ID:            "c1",
+				KnowledgeID:   "k1",
+				ParentChunkID: "p1",
+				Content:       "bulky passage",
+			}}},
 			{ResponseType: sdk.ResponseTypeComplete},
 		},
 	}
 	c, _ := newTestServer(t, svc)
 	var out chatOutput
 	callTool(t, c, "chat", map[string]any{"kb_id": "kb_x", "query": "ping"}, &out)
-	if out.Answer != "Hello world." {
-		t.Errorf("answer = %q", out.Answer)
+	if len(out.Events) != 2 || out.Events[0].Content != "Hello " || out.Events[1].Content != "world." {
+		t.Errorf("answer events=%+v", out.Events)
 	}
-	if len(out.References) != 1 || out.References[0].KnowledgeID != "k1" {
-		t.Errorf("references missing: %+v", out.References)
+	for _, event := range out.Events {
+		if event.ResponseType != "answer" || len(event.KnowledgeReferences) != 0 {
+			t.Errorf("default output leaked non-answer data: %+v", event)
+		}
 	}
 	if out.SessionID != "sess_auto" {
 		t.Errorf("session_id = %q, want sess_auto", out.SessionID)
 	}
 }
 
-func TestMCP_ChatToolReturnsThinking(t *testing.T) {
+func TestMCP_ChatVerbosePreservesThinking(t *testing.T) {
 	svc := &fakeSvc{
 		kbStreamEvents: []*sdk.StreamResponse{
 			{ResponseType: sdk.ResponseTypeThinking, Content: "let me reason..."},
@@ -456,12 +463,15 @@ func TestMCP_ChatToolReturnsThinking(t *testing.T) {
 	}
 	c, _ := newTestServer(t, svc)
 	var out chatOutput
-	callTool(t, c, "chat", map[string]any{"kb_id": "kb_x", "query": "deep question"}, &out)
-	if out.Thinking != "let me reason..." {
-		t.Errorf("thinking = %q, want %q", out.Thinking, "let me reason...")
+	callTool(t, c, "chat", map[string]any{"kb_id": "kb_x", "query": "deep question", "verbose": true}, &out)
+	want := []string{"thinking", "answer", "complete"}
+	if len(out.Events) != len(want) {
+		t.Fatalf("events=%+v", out.Events)
 	}
-	if out.Answer != "final answer" {
-		t.Errorf("answer = %q, want %q", out.Answer, "final answer")
+	for i, responseType := range want {
+		if out.Events[i].ResponseType != responseType {
+			t.Errorf("events[%d]=%q, want %q", i, out.Events[i].ResponseType, responseType)
+		}
 	}
 	if out.KBID != "kb_x" {
 		t.Errorf("kb_id = %q, want %q", out.KBID, "kb_x")
@@ -471,23 +481,35 @@ func TestMCP_ChatToolReturnsThinking(t *testing.T) {
 	}
 }
 
-func TestMCP_SessionAskToolReturnsToolCalls(t *testing.T) {
+func TestMCP_SessionAskVerboseAndReferenceReturnsBothDetailClasses(t *testing.T) {
 	svc := &fakeSvc{
 		agentEvents: []*sdk.AgentStreamResponse{
 			{ResponseType: sdk.AgentResponseTypeThinking, Content: "agent thinks"},
 			{ResponseType: sdk.AgentResponseTypeToolCall, ID: "tc1", Content: "knowledge_search"},
+			{ResponseType: sdk.AgentResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{{
+				ID:            "c1",
+				ParentChunkID: "p1",
+				Content:       "bulky passage",
+			}}},
 			{ResponseType: sdk.AgentResponseTypeAnswer, Content: "agent answer"},
-			{Done: true},
+			{ResponseType: sdk.AgentResponseTypeComplete, Done: true},
 		},
 	}
 	c, _ := newTestServer(t, svc)
 	var out sessionAskOutput
-	callTool(t, c, "session_ask", map[string]any{"agent_id": "ag1", "query": "tool question"}, &out)
-	if out.Thinking != "agent thinks" {
-		t.Errorf("thinking = %q, want %q", out.Thinking, "agent thinks")
+	callTool(t, c, "session_ask", map[string]any{"agent_id": "ag1", "query": "tool question", "verbose": true, "reference": true}, &out)
+	want := []string{"thinking", "tool_call", "references", "answer", "complete"}
+	if len(out.Events) != len(want) {
+		t.Fatalf("events=%+v", out.Events)
 	}
-	if len(out.ToolEvents) != 1 || out.ToolEvents[0].ID != "tc1" {
-		t.Errorf("tool_events = %+v, want 1 event with id tc1", out.ToolEvents)
+	for i, responseType := range want {
+		if out.Events[i].ResponseType != responseType {
+			t.Errorf("events[%d]=%q, want %q", i, out.Events[i].ResponseType, responseType)
+		}
+	}
+	refs := out.Events[2].KnowledgeReferences
+	if len(refs) != 1 || refs[0].ChunkID != "c1" || refs[0].ParentChunkID != "p1" {
+		t.Errorf("reference indexes=%+v", refs)
 	}
 	if out.Query != "tool question" {
 		t.Errorf("query = %q, want %q", out.Query, "tool question")
@@ -523,17 +545,14 @@ func TestTool_SessionAsk(t *testing.T) {
 		agentEvents: []*sdk.AgentStreamResponse{
 			{ResponseType: sdk.AgentResponseTypeAnswer, Content: "result"},
 			{ResponseType: sdk.AgentResponseTypeToolCall, ID: "c1", Content: "knowledge_search"},
-			{Done: true},
+			{ResponseType: sdk.AgentResponseTypeComplete, Done: true},
 		},
 	}
 	c, _ := newTestServer(t, svc)
 	var out sessionAskOutput
 	callTool(t, c, "session_ask", map[string]any{"agent_id": "ag1", "query": "x"}, &out)
-	if out.Answer != "result" {
-		t.Errorf("answer = %q", out.Answer)
-	}
-	if len(out.ToolEvents) != 1 {
-		t.Errorf("tool_calls len = %d, want 1", len(out.ToolEvents))
+	if len(out.Events) != 1 || out.Events[0].ResponseType != "answer" || out.Events[0].Content != "result" {
+		t.Errorf("default events=%+v", out.Events)
 	}
 	if out.AgentID != "ag1" {
 		t.Errorf("agent_id = %q", out.AgentID)
