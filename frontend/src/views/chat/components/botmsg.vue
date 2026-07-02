@@ -52,6 +52,47 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- 点赞/点踩按钮 -->
+                <div class="feedback-actions" v-if="session.id">
+                    <t-tooltip content="有帮助" placement="top">
+                        <t-button size="small" variant="outline" shape="round"
+                            :class="{ 'is-active': currentFeedback === true }"
+                            @click.stop="handleFeedback(true)">
+                            <template #icon>
+                                <t-icon name="thumb-up" />
+                            </template>
+                            <span v-if="feedbackStats.likeCount > 0">{{ feedbackStats.likeCount }}</span>
+                        </t-button>
+                    </t-tooltip>
+                    <t-tooltip content="没帮助" placement="top">
+                        <t-button size="small" variant="outline" shape="round"
+                            :class="{ 'is-active': currentFeedback === false }"
+                            @click.stop="handleDislike">
+                            <template #icon>
+                                <t-icon name="thumb-down" />
+                            </template>
+                            <span v-if="feedbackStats.dislikeCount > 0">{{ feedbackStats.dislikeCount }}</span>
+                        </t-button>
+                    </t-tooltip>
+                </div>
+                <!-- 点踩原因弹窗 -->
+                <t-dialog v-model:visible="dislikeDialogVisible" header="选择反馈原因" :footer="false" width="400px">
+                    <div class="dislike-reasons">
+                        <t-radio-group v-model="selectedReason">
+                            <t-radio value="inaccurate">答案不准确</t-radio>
+                            <t-radio value="incomplete">答案不完整</t-radio>
+                            <t-radio value="unclear">表达不清楚</t-radio>
+                            <t-radio value="irrelevant">与问题不相关</t-radio>
+                            <t-radio value="other">其他</t-radio>
+                        </t-radio-group>
+                        <t-input v-if="selectedReason === 'other'" v-model="customReason"
+                            placeholder="请输入反馈原因" style="margin-top: 12px" />
+                        <div style="margin-top: 16px; text-align: right;">
+                            <t-button theme="primary" @click="submitDislike">提交</t-button>
+                            <t-button style="margin-left: 8px" @click="dislikeDialogVisible = false">取消</t-button>
+                        </div>
+                    </div>
+                </t-dialog>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -103,8 +144,19 @@ import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
+import { submitFeedback } from '@/api/feedback';
 
 ensureMermaidInitialized();
+
+// 反馈相关状态
+const currentFeedback = ref<boolean | null>(null);
+const feedbackStats = reactive({
+    likeCount: 0,
+    dislikeCount: 0,
+});
+const dislikeDialogVisible = ref(false);
+const selectedReason = ref('');
+const customReason = ref('');
 
 const mentionTagClass = (item) => {
     if (item.type === 'kb') return item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag';
@@ -256,6 +308,74 @@ const handleAddToKnowledge = () => {
     });
 
     MessagePlugin.info(t('chat.editorOpened'));
+};
+
+// 反馈相关函数
+const handleFeedback = async (isPositive: boolean) => {
+    if (!props.session?.id) return;
+
+    // 如果已经点了同样的按钮，取消反馈
+    if (currentFeedback.value === isPositive) {
+        currentFeedback.value = null;
+        return;
+    }
+
+    try {
+        await submitFeedback({
+            message_id: props.session.id,
+            is_positive: isPositive,
+        });
+        currentFeedback.value = isPositive;
+        if (isPositive) {
+            feedbackStats.likeCount++;
+            if (feedbackStats.dislikeCount > 0) feedbackStats.dislikeCount--;
+        } else {
+            feedbackStats.dislikeCount++;
+            if (feedbackStats.likeCount > 0) feedbackStats.likeCount--;
+        }
+        MessagePlugin.success(isPositive ? '感谢您的反馈' : '感谢您的反馈');
+    } catch (error) {
+        console.error('提交反馈失败:', error);
+        MessagePlugin.error('提交反馈失败');
+    }
+};
+
+const handleDislike = () => {
+    if (currentFeedback.value === false) {
+        // 已经点踩，点击取消
+        handleFeedback(false);
+    } else {
+        // 打开点踩原因弹窗
+        selectedReason.value = '';
+        customReason.value = '';
+        dislikeDialogVisible.value = true;
+    }
+};
+
+const submitDislike = async () => {
+    if (!props.session?.id) return;
+
+    const reason = selectedReason.value === 'other' ? customReason.value : selectedReason.value;
+    if (!reason) {
+        MessagePlugin.warning('请选择或输入反馈原因');
+        return;
+    }
+
+    try {
+        await submitFeedback({
+            message_id: props.session.id,
+            is_positive: false,
+            dislike_reason: reason,
+        });
+        currentFeedback.value = false;
+        feedbackStats.dislikeCount++;
+        if (feedbackStats.likeCount > 0) feedbackStats.likeCount--;
+        dislikeDialogVisible.value = false;
+        MessagePlugin.success('感谢您的反馈');
+    } catch (error) {
+        console.error('提交反馈失败:', error);
+        MessagePlugin.error('提交反馈失败');
+    }
 };
 
 // 处理 markdown-content 中图片的点击事件
