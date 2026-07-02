@@ -47,6 +47,15 @@ func TestTenantResponse_AdminGetsRedactedIntegrationConfigs(t *testing.T) {
 	assert.Equal(t, types.RedactedSecretPlaceholder, resp.StorageEngineConfig.MinIO.SecretAccessKey)
 }
 
+func TestTenantResponsesCrossTenant_RedactsEvenForOwnerContext(t *testing.T) {
+	tenant := sampleSecretTenant()
+	body, err := json.Marshal(NewTenantResponsesCrossTenant([]*types.Tenant{tenant}))
+	require.NoError(t, err)
+	s := string(body)
+	assert.NotContains(t, s, "tenant-api-key-123")
+	assert.NotContains(t, s, "parser-secret-123")
+}
+
 func sampleSecretTenant() *types.Tenant {
 	return &types.Tenant{
 		ID:     42,

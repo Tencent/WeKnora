@@ -93,6 +93,9 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 	if !includeDetail {
 		resp.Headers = nil
 		resp.EnvVars = nil
+		resp.URL = nil
+		resp.StdioConfig = nil
+		resp.AdvancedConfig = nil
 	}
 	if svc.AuthConfig != nil {
 		auth := &MCPAuthConfigResponse{
