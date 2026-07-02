@@ -3716,8 +3716,11 @@ async function createNewSession(value: string): Promise<void> {
   }
 }
 
-// 移动端（<768px）：移除 answers-input 的 translateX hack，使用自然流式布局
+// ============================================================
+// 移动端适配
+// ============================================================
 @media screen and (max-width: 767px) {
+  // 移除 answers-input 的 translateX hack
   .answers-input {
     transform: none !important;
     width: 100% !important;
@@ -3727,6 +3730,72 @@ async function createNewSession(value: string): Promise<void> {
   :deep(.t-textarea__inner) {
     width: 100% !important;
     max-width: 100% !important;
+  }
+
+  // 容器 padding 缩小
+  .knowledge-layout {
+    padding: 12px 12px 0;
+    margin: 0;
+    gap: 12px;
+  }
+
+  // FAQ 包装器
+  .faq-manager-wrapper {
+    padding: 12px;
+    margin: 0;
+  }
+
+  // Wiki 主区域
+  .wiki-main-area {
+    margin: 0;
+  }
+
+  // 文档筛选栏：整行全宽
+  .doc-filter-bar {
+    gap: 8px;
+  }
+
+  .doc-filter-field {
+    width: 100% !important;
+    flex: 1 1 100%;
+
+    &--wide {
+      width: 100% !important;
+    }
+  }
+
+  .doc-filter-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  // 面包屑/标签切换
+  .breadcrumb-tab {
+    font-size: 13px;
+  }
+}
+
+// ============================================================
+// 平板适配
+// ============================================================
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .knowledge-layout {
+    padding: 16px 20px 0;
+    margin: 0 8px 0 2px;
+    gap: 14px;
+  }
+
+  .faq-manager-wrapper {
+    padding: 16px 20px;
+    margin: 0 8px 0 2px;
+  }
+
+  .doc-filter-field {
+    width: 120px;
+
+    &--wide {
+      width: 220px;
+    }
   }
 }
 

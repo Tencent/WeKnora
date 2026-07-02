@@ -6004,6 +6004,52 @@ onUnmounted(() => {
     opacity: 0.8;
   }
 }
+
+// ============================================================
+// 移动端适配
+// ============================================================
+@media screen and (max-width: 767px) {
+  .wiki-browser {
+    flex-direction: column;
+  }
+
+  .wiki-sidebar {
+    width: 100%;
+    min-width: 0;
+    max-height: 45vh;
+    border-right: none;
+    border-bottom: 1px solid var(--td-component-stroke);
+    flex-shrink: 0;
+  }
+
+  .wiki-sidebar-header {
+    padding: 10px 12px 8px;
+    gap: 8px;
+  }
+
+  .wiki-content {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .wiki-reader-body {
+    padding: 16px 12px;
+  }
+}
+
+// ============================================================
+// 平板适配
+// ============================================================
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .wiki-sidebar {
+    width: 220px;
+    min-width: 180px;
+  }
+
+  .wiki-sidebar-header {
+    padding: 12px 12px 10px;
+  }
+}
 </style>
 
 <style lang="less">
@@ -6043,6 +6089,26 @@ onUnmounted(() => {
     max-width: 100% !important;
     padding-bottom: 0 !important;
     margin: 0 !important;
+  }
+}
+
+// 移动端：所有 wiki 相关抽屉全屏
+@media screen and (max-width: 767px) {
+  .wiki-global-issues-drawer,
+  .wiki-fix-drawer {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      width: 100vw !important;
+      max-width: 100vw !important;
+    }
+  }
+
+  // 图形详情抽屉（480px → 100vw）
+  .t-drawer:not(.wiki-fix-drawer):not(.wiki-global-issues-drawer) {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      max-width: 100vw !important;
+    }
   }
 }
 </style>

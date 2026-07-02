@@ -1979,4 +1979,97 @@ body:has(.t-drawer.kp-secondary-drawer--resizing) .trace-drawer-resize-line {
 .t-drawer.kp-secondary-drawer--resizing .t-drawer__content {
   transition: none !important;
 }
+
+// ============================================================
+// 移动端适配：抽屉全屏，隐藏拖拽手柄
+// ============================================================
+@media screen and (max-width: 767px) {
+  // 主抽屉全屏
+  .t-drawer.doc-main-drawer {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      width: 100vw !important;
+      max-width: 100vw !important;
+    }
+
+    .t-drawer__header {
+      padding: 12px 14px;
+    }
+
+    .t-drawer__body {
+      padding: 14px;
+    }
+  }
+
+  // 追踪抽屉全屏
+  .t-drawer.kp-secondary-drawer {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      width: 100vw !important;
+      max-width: 100vw !important;
+    }
+  }
+
+  // 隐藏拖拽手柄
+  .doc-drawer-resize-handle,
+  .trace-drawer-resize-handle {
+    display: none !important;
+  }
+
+  // 元数据行纵向堆叠
+  .doc-detail-rows {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .doc-detail-row {
+    flex: none;
+    width: 100%;
+  }
+
+  .doc-detail-label {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  // 标签 inline 换行
+  .doc-tag-chip {
+    max-width: none;
+  }
+
+  // 头部操作按钮紧凑
+  .header-actions {
+    gap: 4px;
+  }
+
+  .header-action-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  // 内容区全宽
+  .md-content {
+    max-width: 100%;
+    padding: 0;
+  }
+}
+
+// ============================================================
+// 平板适配
+// ============================================================
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .t-drawer.doc-main-drawer {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      max-width: 85vw !important;
+    }
+  }
+
+  .t-drawer.kp-secondary-drawer {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      max-width: 90vw !important;
+    }
+  }
+}
 </style>

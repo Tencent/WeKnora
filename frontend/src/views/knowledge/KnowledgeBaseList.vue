@@ -3066,6 +3066,43 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
+// 移动端：全宽抽屉
+@media screen and (max-width: 767px) {
+  .shared-detail-drawer {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  .shared-detail-drawer-header {
+    padding: 16px 18px;
+  }
+
+  .shared-detail-drawer-title {
+    font-size: 16px;
+  }
+
+  .shared-detail-drawer-body {
+    padding: 18px;
+    gap: 16px;
+  }
+
+  .shared-detail-drawer-body .shared-detail-row {
+    gap: 4px;
+  }
+
+  .shared-detail-drawer-footer {
+    padding: 14px 18px;
+  }
+}
+
+// 平板：适应宽度
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .shared-detail-drawer {
+    width: 420px;
+    max-width: 85vw;
+  }
+}
+
 // 创建对话框样式优化
 .create-kb-dialog {
   .t-form-item__label {
