@@ -1,0 +1,364 @@
+<template>
+  <div class="chunk-feedback-settings">
+    <div v-if="!embedded" class="section-header">
+      <h2>{{ $t('knowledgeEditor.feedback.title') }}</h2>
+      <p class="section-description">{{ $t('knowledgeEditor.feedback.description') }}</p>
+    </div>
+
+    <div class="settings-group">
+      <!-- 低质量片段列表 -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.feedback.lowQualityChunks') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.feedback.lowQualityChunksDesc') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-button variant="outline" @click="showLowQualityDialog = true">
+            {{ $t('knowledgeEditor.feedback.viewLowQuality') }}
+          </t-button>
+        </div>
+      </div>
+
+      <!-- 统计概览 -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.feedback.statsOverview') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.feedback.statsOverviewDesc') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-button variant="outline" @click="loadStats">
+            {{ $t('common.refresh') }}
+          </t-button>
+        </div>
+      </div>
+
+      <!-- 统计卡片 -->
+      <div v-if="stats" class="stats-cards">
+        <t-card :bordered="true" class="stat-card">
+          <div class="stat-value">{{ stats.totalChunks }}</div>
+          <div class="stat-label">{{ $t('knowledgeEditor.feedback.totalChunks') }}</div>
+        </t-card>
+        <t-card :bordered="true" class="stat-card">
+          <div class="stat-value">{{ stats.highQualityCount }}</div>
+          <div class="stat-label">{{ $t('knowledgeEditor.feedback.highQualityChunks') }}</div>
+        </t-card>
+        <t-card :bordered="true" class="stat-card">
+          <div class="stat-value">{{ stats.lowQualityCount }}</div>
+          <div class="stat-label">{{ $t('knowledgeEditor.feedback.lowQualityChunks') }}</div>
+        </t-card>
+        <t-card :bordered="true" class="stat-card">
+          <div class="stat-value">{{ stats.totalFeedbacks }}</div>
+          <div class="stat-label">{{ $t('knowledgeEditor.feedback.totalFeedbacks') }}</div>
+        </t-card>
+      </div>
+    </div>
+
+    <!-- 低质量片段弹窗 -->
+    <t-dialog v-model:visible="showLowQualityDialog" :header="$t('knowledgeEditor.feedback.lowQualityList')" width="800px" :footer="null">
+      <div class="low-quality-list">
+        <div class="filter-bar">
+          <t-select
+            v-model="filterMaxRate"
+            :options="rateOptions"
+            :placeholder="$t('knowledgeEditor.feedback.maxRate')"
+            style="width: 200px"
+            @change="loadLowQualityChunks"
+          />
+          <t-pagination
+            v-model:current="currentPage"
+            v-model:pageSize="pageSize"
+            :total="totalCount"
+            @change="loadLowQualityChunks"
+          />
+        </div>
+
+        <t-table
+          :data="lowQualityChunks"
+          :columns="columns"
+          row-key="chunk_id"
+          :pagination="false"
+          stripe
+        >
+          <template #content="{ row }">
+            <span :title="row.content">{{ truncateContent(row.content, 50) }}</span>
+          </template>
+          <template #positiveRate="{ row }">
+            <t-tag :theme="getRateTheme(row.positive_rate)">
+              {{ (row.positive_rate * 100).toFixed(1) }}%
+            </t-tag>
+          </template>
+          <template #recallWeight="{ row }">
+            <span :class="{ 'weight-boosted': row.recall_weight > 1, 'weight-penalized': row.recall_weight < 1 }">
+              {{ row.recall_weight.toFixed(2) }}
+            </span>
+          </template>
+          <template #qualityStatus="{ row }">
+            <t-tag :theme="getStatusTheme(row.quality_status)">
+              {{ getStatusLabel(row.quality_status) }}
+            </t-tag>
+          </template>
+          <template #operations="{ row }">
+            <t-button size="small" variant="text" @click="viewChunkStats(row.chunk_id)">
+              {{ $t('common.view') }}
+            </t-button>
+            <t-button size="small" variant="text" @click="resetChunkFeedbackHandler(row.chunk_id)">
+              {{ $t('knowledgeEditor.feedback.reset') }}
+            </t-button>
+          </template>
+        </t-table>
+      </div>
+    </t-dialog>
+
+    <!-- 片段详情弹窗 -->
+    <t-dialog v-model:visible="showChunkDetailDialog" :header="$t('knowledgeEditor.feedback.chunkDetail')" width="600px" :footer="null">
+      <div v-if="chunkStats" class="chunk-detail">
+        <t-descriptions :column="2" bordered>
+          <t-descriptions-item :label="$t('knowledgeEditor.feedback.chunkId')">
+            {{ chunkStats.chunk_id }}
+          </t-descriptions-item>
+          <t-descriptions-item :label="$t('knowledgeEditor.feedback.likeCount')">
+            {{ chunkStats.like_count }}
+          </t-descriptions-item>
+          <t-descriptions-item :label="$t('knowledgeEditor.feedback.dislikeCount')">
+            {{ chunkStats.dislike_count }}
+          </t-descriptions-item>
+          <t-descriptions-item :label="$t('knowledgeEditor.feedback.positiveRate')">
+            {{ (chunkStats.positive_rate * 100).toFixed(1) }}%
+          </t-descriptions-item>
+          <t-descriptions-item :label="$t('knowledgeEditor.feedback.recallWeight')">
+            {{ chunkStats.recall_weight.toFixed(2) }}
+          </t-descriptions-item>
+          <t-descriptions-item :label="$t('knowledgeEditor.feedback.qualityStatus')">
+            {{ getStatusLabel(chunkStats.quality_status) }}
+          </t-descriptions-item>
+          <t-descriptions-item :label="$t('knowledgeEditor.feedback.relatedSessions')">
+            {{ chunkStats.related_session_count }}
+          </t-descriptions-item>
+        </t-descriptions>
+
+        <div v-if="chunkStats.dislike_reasons?.length" class="dislike-reasons">
+          <h4>{{ $t('knowledgeEditor.feedback.dislikeReasons') }}</h4>
+          <t-tag-group>
+            <t-tag v-for="reason in chunkStats.dislike_reasons" :key="reason" theme="danger">
+              {{ reason }}
+            </t-tag>
+          </t-tag-group>
+        </div>
+      </div>
+    </t-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { MessagePlugin } from 'tdesign-vue-next'
+import { listLowQualityChunks, getChunkStats, resetChunkFeedback } from '@/api/feedback'
+
+interface Props {
+  embedded?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  embedded: false,
+})
+
+// 状态
+const showLowQualityDialog = ref(false)
+const showChunkDetailDialog = ref(false)
+const lowQualityChunks = ref<any[]>([])
+const chunkStats = ref<any>(null)
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalCount = ref(0)
+const filterMaxRate = ref(0.5)
+
+const stats = ref<any>(null)
+
+// 筛选选项
+const rateOptions = [
+  { label: '<= 30%', value: 0.3 },
+  { label: '<= 50%', value: 0.5 },
+  { label: '<= 70%', value: 0.7 },
+]
+
+// 表格列
+const columns = [
+  { colKey: 'content', header: '内容', width: '30%' },
+  { colKey: 'like_count', header: '点赞', width: '10%' },
+  { colKey: 'dislike_count', header: '点踩', width: '10%' },
+  { colKey: 'positiveRate', header: '好评率', width: '15%' },
+  { colKey: 'recallWeight', header: '权重', width: '10%' },
+  { colKey: 'qualityStatus', header: '状态', width: '15%' },
+  { colKey: 'operations', header: '操作', width: '10%' },
+]
+
+// 加载统计数据
+const loadStats = async () => {
+  // 简单统计：加载前100个低质量片段来汇总
+  try {
+    const res = await listLowQualityChunks({ max_rate: 1.0, limit: 100 })
+    if (res.data?.data) {
+      const chunks = res.data.data
+      stats.value = {
+        totalChunks: chunks.length,
+        highQualityCount: chunks.filter(c => c.positive_rate >= 0.8).length,
+        lowQualityCount: chunks.filter(c => c.positive_rate <= 0.5).length,
+        totalFeedbacks: chunks.reduce((sum, c) => sum + c.like_count + c.dislike_count, 0),
+      }
+    }
+  } catch (error) {
+    console.error('加载统计数据失败:', error)
+  }
+}
+
+// 加载低质量片段
+const loadLowQualityChunks = async () => {
+  try {
+    const res = await listLowQualityChunks({
+      max_rate: filterMaxRate.value,
+      limit: pageSize.value,
+      offset: (currentPage.value - 1) * pageSize.value,
+    })
+    if (res.data?.data) {
+      lowQualityChunks.value = res.data.data
+      totalCount.value = res.data.data.length * 10 // 简化估算
+    }
+  } catch (error) {
+    console.error('加载低质量片段失败:', error)
+    MessagePlugin.error('加载失败')
+  }
+}
+
+// 查看片段详情
+const viewChunkStats = async (chunkId: string) => {
+  try {
+    const res = await getChunkStats(chunkId)
+    if (res.data?.data) {
+      chunkStats.value = res.data.data
+      showChunkDetailDialog.value = true
+    }
+  } catch (error) {
+    console.error('加载片段详情失败:', error)
+    MessagePlugin.error('加载失败')
+  }
+}
+
+// 重置片段反馈
+const resetChunkFeedbackHandler = async (chunkId: string) => {
+  try {
+    await resetChunkFeedback(chunkId)
+    MessagePlugin.success('重置成功')
+    loadLowQualityChunks()
+    loadStats()
+  } catch (error) {
+    console.error('重置失败:', error)
+    MessagePlugin.error('重置失败')
+  }
+}
+
+// 辅助函数
+const truncateContent = (content: string, maxLen: number) => {
+  return content?.length > maxLen ? content.slice(0, maxLen) + '...' : content
+}
+
+const getRateTheme = (rate: number) => {
+  if (rate >= 0.8) return 'success'
+  if (rate >= 0.5) return 'warning'
+  return 'danger'
+}
+
+const getStatusTheme = (status: string) => {
+  const map: Record<string, string> = {
+    normal: 'default',
+    pending_optimization: 'warning',
+    optimizing: 'primary',
+    optimized: 'success',
+  }
+  return map[status] || 'default'
+}
+
+const getStatusLabel = (status: string) => {
+  const map: Record<string, string> = {
+    normal: '正常',
+    pending_optimization: '待优化',
+    optimizing: '优化中',
+    optimized: '已优化',
+  }
+  return map[status] || status
+}
+
+onMounted(() => {
+  loadStats()
+})
+</script>
+
+<style scoped lang="less">
+.chunk-feedback-settings {
+  .section-header {
+    margin-bottom: 24px;
+
+    h2 {
+      margin: 0 0 8px 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .section-description {
+      color: var(--td-text-color-secondary);
+      margin: 0;
+    }
+  }
+
+  .stats-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin: 16px 0;
+
+    .stat-card {
+      text-align: center;
+
+      .stat-value {
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--td-brand-color);
+      }
+
+      .stat-label {
+        font-size: 12px;
+        color: var(--td-text-color-secondary);
+        margin-top: 4px;
+      }
+    }
+  }
+
+  .filter-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .weight-boosted {
+    color: var(--td-brand-color);
+    font-weight: 600;
+  }
+
+  .weight-penalized {
+    color: var(--td-error-color);
+    font-weight: 600;
+  }
+
+  .chunk-detail {
+    .dislike-reasons {
+      margin-top: 16px;
+
+      h4 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+        font-weight: 500;
+      }
+    }
+  }
+}
+</style>
