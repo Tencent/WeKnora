@@ -405,6 +405,18 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
+  {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://developers.dingtalk.com/document/app',
+    permissionDocUrl: 'https://developers.dingtalk.com/document/app',
+    permissionPageUrl: 'https://developers.dingtalk.com/app',
+    requiredPermissions: [],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: '', secret: true },
+      { key: 'client_secret', labelKey: 'datasource.field.clientSecret', placeholder: '', secret: true },
+    ],
+  },
 ])
 
 

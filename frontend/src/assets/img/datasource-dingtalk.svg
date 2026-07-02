@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- DingTalk logo - hexagonal shape with "D" letter -->
+  <defs>
+    <linearGradient id="dtGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1677FF"/>
+      <stop offset="100%" style="stop-color:#0958D9"/>
+    </linearGradient>
+  </defs>
+  <!-- Hexagon background -->
+  <path d="M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z" fill="url(#dtGrad)" stroke="#0958D9" stroke-width="2"/>
+  <!-- Inner hexagon -->
+  <path d="M32 12 L48 22 L48 42 L32 52 L16 42 L16 22 Z" fill="none" stroke="#FFFFFF" stroke-width="1.5" opacity="0.3"/>
+  <!-- "D" letter -->
+  <text x="32" y="40" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#FFFFFF" text-anchor="middle">D</text>
+</svg>
