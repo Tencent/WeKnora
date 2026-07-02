@@ -5,7 +5,15 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/im"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func withQQBotSSRFWhitelist(t *testing.T, whitelist string) {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST", whitelist)
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+}
 
 func TestParseGatewayPayloadC2CMessage(t *testing.T) {
 	event := messageEvent{
@@ -74,5 +82,29 @@ func TestParseExpiresIn(t *testing.T) {
 				t.Fatalf("parseExpiresIn() = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNewClientRejectsPrivateAPIBaseURL(t *testing.T) {
+	withQQBotSSRFWhitelist(t, "")
+
+	if _, err := NewClient("app", "secret", "http://127.0.0.1:8080", ""); err == nil {
+		t.Fatal("expected private qqbot api_base_url to be rejected")
+	}
+}
+
+func TestNewClientRejectsInsecureGatewayURL(t *testing.T) {
+	withQQBotSSRFWhitelist(t, "127.0.0.1")
+
+	if _, err := NewClient("app", "secret", "http://127.0.0.1:8080", "ws://127.0.0.1/gateway"); err == nil {
+		t.Fatal("expected non-wss qqbot gateway_url to be rejected")
+	}
+}
+
+func TestNewClientAllowsWhitelistedPrivateDeployment(t *testing.T) {
+	withQQBotSSRFWhitelist(t, "127.0.0.1")
+
+	if _, err := NewClient("app", "secret", "http://127.0.0.1:8080", "wss://127.0.0.1/gateway"); err != nil {
+		t.Fatalf("expected whitelisted private qqbot endpoints to pass: %v", err)
 	}
 }

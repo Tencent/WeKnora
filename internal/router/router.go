@@ -1465,28 +1465,12 @@ func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFu
 		}
 		defer reader.Close()
 
-		ext := filepath.Ext(filePath)
-		contentType := "application/octet-stream"
-		switch strings.ToLower(ext) {
-		case ".png":
-			contentType = "image/png"
-		case ".jpg", ".jpeg":
-			contentType = "image/jpeg"
-		case ".gif":
-			contentType = "image/gif"
-		case ".webp":
-			contentType = "image/webp"
-		case ".bmp":
-			contentType = "image/bmp"
-		case ".svg":
-			contentType = "image/svg+xml"
-		case ".pdf":
-			contentType = "application/pdf"
-		case ".csv":
-			contentType = "text/csv; charset=utf-8"
-		}
-
+		contentType, inline := secutils.SafeContentTypeByFilename(filePath)
 		c.Header("Content-Type", contentType)
+		c.Header("X-Content-Type-Options", "nosniff")
+		if !inline {
+			c.Header("Content-Disposition", "attachment")
+		}
 		c.Header("Cache-Control", "public, max-age=86400")
 		c.Status(http.StatusOK)
 		if _, err := io.Copy(c.Writer, reader); err != nil {
@@ -1587,24 +1571,7 @@ func presignedFileHandler(tenantService interfaces.TenantService, absDir string)
 			return
 		}
 
-		ext := filepath.Ext(filePath)
-		contentType := "application/octet-stream"
-		switch strings.ToLower(ext) {
-		case ".png":
-			contentType = "image/png"
-		case ".jpg", ".jpeg":
-			contentType = "image/jpeg"
-		case ".gif":
-			contentType = "image/gif"
-		case ".webp":
-			contentType = "image/webp"
-		case ".bmp":
-			contentType = "image/bmp"
-		case ".svg":
-			contentType = "image/svg+xml"
-		case ".pdf":
-			contentType = "application/pdf"
-		}
+		contentType, inline := secutils.SafeContentTypeByFilename(filePath)
 
 		// HEAD short-circuits the body read. We still need to confirm the
 		// object exists, but we use a 0-byte content length and skip io.Copy.
@@ -1621,6 +1588,10 @@ func presignedFileHandler(tenantService interfaces.TenantService, absDir string)
 		defer reader.Close()
 
 		c.Header("Content-Type", contentType)
+		c.Header("X-Content-Type-Options", "nosniff")
+		if !inline {
+			c.Header("Content-Disposition", "attachment")
+		}
 		c.Header("Cache-Control", "public, max-age=86400")
 		if c.Request.Method == http.MethodHead {
 			c.Status(http.StatusOK)
