@@ -1058,3 +1058,138 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 
 	return chunks, nil
 }
+
+// UpdateChunkFeedbackStats 更新片段的反馈统计
+func (r *chunkRepository) UpdateChunkFeedbackStats(ctx context.Context, chunkID string, likeCount, dislikeCount int, positiveRate float64, recallWeight float64, qualityStatus types.ChunkQualityStatus) error {
+	updates := map[string]interface{}{
+		"like_count":     likeCount,
+		"dislike_count": dislikeCount,
+		"positive_rate":  positiveRate,
+		"recall_weight": recallWeight,
+		"quality_status": qualityStatus,
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		Updates(updates).Error
+}
+
+// IncrementLikeCount 增加点赞数
+func (r *chunkRepository) IncrementLikeCount(ctx context.Context, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		UpdateColumn("like_count", gorm.Expr("like_count + ?", 1)).Error
+}
+
+// DecrementLikeCount 减少点赞数
+func (r *chunkRepository) DecrementLikeCount(ctx context.Context, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ? AND like_count > 0", chunkID).
+		UpdateColumn("like_count", gorm.Expr("like_count - ?", 1)).Error
+}
+
+// IncrementDislikeCount 增加点踩数
+func (r *chunkRepository) IncrementDislikeCount(ctx context.Context, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		UpdateColumn("dislike_count", gorm.Expr("dislike_count + ?", 1)).Error
+}
+
+// DecrementDislikeCount 减少点踩数
+func (r *chunkRepository) DecrementDislikeCount(ctx context.Context, chunkID string) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ? AND dislike_count > 0", chunkID).
+		UpdateColumn("dislike_count", gorm.Expr("dislike_count - ?", 1)).Error
+}
+
+// UpdateChunkRecallWeight 更新片段的召回权重
+func (r *chunkRepository) UpdateChunkRecallWeight(ctx context.Context, chunkID string, weight float64) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		Update("recall_weight", weight).Error
+}
+
+// UpdateChunkQualityStatus 更新片段的质量状态
+func (r *chunkRepository) UpdateChunkQualityStatus(ctx context.Context, chunkID string, status types.ChunkQualityStatus) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		Update("quality_status", status).Error
+}
+
+// UpdateChunkLastFeedbackAt 更新片段的最后反馈时间
+func (r *chunkRepository) UpdateChunkLastFeedbackAt(ctx context.Context, chunkID string) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		Update("last_feedback_at", now).Error
+}
+
+// ListLowQualityChunks 获取低质量片段列表
+func (r *chunkRepository) ListLowQualityChunks(ctx context.Context, tenantID uint64, maxRate float64, limit, offset int) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND positive_rate <= ? AND (like_count + dislike_count) > 0", tenantID, maxRate).
+		Order("positive_rate ASC, updated_at DESC")
+
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
+	err := query.Find(&chunks).Error
+	return chunks, err
+}
+
+// CountLowQualityChunks 统计低质量片段数量
+func (r *chunkRepository) CountLowQualityChunks(ctx context.Context, tenantID uint64, maxRate float64) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("tenant_id = ? AND positive_rate <= ? AND (like_count + dislike_count) > 0", tenantID, maxRate).
+		Count(&count).Error
+	return count, err
+}
+
+// ResetChunkFeedback 重置片段的反馈数据
+func (r *chunkRepository) ResetChunkFeedback(ctx context.Context, chunkID string) error {
+	updates := map[string]interface{}{
+		"like_count":     0,
+		"dislike_count":  0,
+		"positive_rate":   0.0,
+		"recall_weight":   1.0,
+		"quality_status": types.ChunkQualityStatusNormal,
+		"dislike_reasons": "[]",
+		"last_feedback_at": nil,
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("id = ?", chunkID).
+		Updates(updates).Error
+}
+
+// GetChunkStats 获取片段的反馈统计
+func (r *chunkRepository) GetChunkStats(ctx context.Context, chunkID string) (*types.ChunkStatsResponse, error) {
+	var chunk types.Chunk
+	if err := r.db.WithContext(ctx).Where("id = ?", chunkID).First(&chunk).Error; err != nil {
+		return nil, err
+	}
+
+	return &types.ChunkStatsResponse{
+		ChunkID:       chunk.ID,
+		LikeCount:     chunk.LikeCount,
+		DislikeCount:  chunk.DislikeCount,
+		PositiveRate:  chunk.PositiveRate,
+		RecallWeight:  chunk.RecallWeight,
+		QualityStatus: string(chunk.QualityStatus),
+		LastFeedbackAt: chunk.LastFeedbackAt,
+	}, nil
+}

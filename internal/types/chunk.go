@@ -167,6 +167,24 @@ type Chunk struct {
 	// when generating embeddings. NOT persisted — populated by the chunker
 	// during initial splitting and discarded after indexing.
 	ContextHeader string `json:"-" gorm:"-"`
+
+	// ============================================
+	// 反馈统计字段 - 用于知识库问答-点赞点踩功能
+	// ============================================
+	// LikeCount 点赞数量
+	LikeCount int `json:"like_count" gorm:"default:0"`
+	// DislikeCount 点踩数量
+	DislikeCount int `json:"dislike_count" gorm:"default:0"`
+	// PositiveRate 好评率 (0.0-1.0)
+	PositiveRate float64 `json:"positive_rate" gorm:"type:float;default:0"`
+	// RecallWeight 召回权重，用于影响检索排序
+	RecallWeight float64 `json:"recall_weight" gorm:"type:float;default:1.0"`
+	// QualityStatus 质量状态: normal, pending_optimization, optimizing, optimized
+	QualityStatus ChunkQualityStatus `json:"quality_status" gorm:"type:varchar(50);default:'normal'"`
+	// DislikeReasons 点踩原因聚合
+	DislikeReasons JSON `json:"dislike_reasons" gorm:"type:json;default:'[]'"`
+	// LastFeedbackAt 最后反馈时间
+	LastFeedbackAt *time.Time `json:"last_feedback_at"`
 }
 
 // EmbeddingContent returns the chunk content with ContextHeader prepended
