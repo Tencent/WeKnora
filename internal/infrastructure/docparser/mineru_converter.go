@@ -18,6 +18,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 const mineruTimeout = 1000 * time.Second // large docs can take a while
@@ -52,6 +53,14 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	if c.endpoint == "" {
 		return &types.ReadResult{Error: "MinerU endpoint is not configured"}, nil
+	}
+	if err := validateMinerUOutboundURL(c.endpoint); err != nil {
+		return &types.ReadResult{Error: err.Error()}, nil
+	}
+	if c.vlmServerURL != "" {
+		if err := validateMinerUOutboundURL(c.vlmServerURL); err != nil {
+			return &types.ReadResult{Error: err.Error()}, nil
+		}
 	}
 
 	content := req.FileContent
@@ -146,7 +155,10 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	}
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := &http.Client{Timeout: mineruTimeout}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+		Timeout:      mineruTimeout,
+		MaxRedirects: 5,
+	})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", nil, fmt.Errorf("HTTP request: %w", err)
@@ -258,13 +270,32 @@ func (c *MinerUReader) logMinerUResponseStructure(obj interface{}, prefix string
 	logResponseStructure("MinerU", obj, prefix)
 }
 
+// validateMinerUOutboundURL rejects MinerU endpoints that would reach private
+// or otherwise restricted hosts when parsed or probed from the app server.
+func validateMinerUOutboundURL(rawURL string) error {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil
+	}
+	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
+		return fmt.Errorf("MinerU URL blocked by SSRF check: %v", err)
+	}
+	return nil
+}
+
 // PingMinerU checks if the self-hosted MinerU service is reachable.
 func PingMinerU(endpoint string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
 		return false, "未配置 MinerU 端点"
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	if err := validateMinerUOutboundURL(endpoint); err != nil {
+		return false, err.Error()
+	}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+		Timeout:      5 * time.Second,
+		MaxRedirects: 5,
+	})
 	resp, err := client.Get(endpoint + "/docs")
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
