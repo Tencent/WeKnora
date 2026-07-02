@@ -3,7 +3,27 @@
 from __future__ import annotations
 
 import os
-from typing import List
+from typing import List, Optional
+
+_active_transport: Optional[str] = None
+
+
+def set_active_transport(transport: str) -> None:
+    """Record the transport selected at server startup (CLI or run_* entry)."""
+    global _active_transport
+    _active_transport = transport.strip().lower()
+
+
+def clear_active_transport() -> None:
+    """Reset startup transport override (for tests)."""
+    global _active_transport
+    _active_transport = None
+
+
+def _current_transport() -> str:
+    if _active_transport is not None:
+        return _active_transport
+    return os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
 
 
 def _path_within_root(resolved_path: str, root: str) -> bool:
@@ -22,7 +42,7 @@ def _allowed_upload_roots() -> List[str]:
     if raw:
         return [os.path.realpath(part.strip()) for part in raw.split(",") if part.strip()]
 
-    transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
+    transport = _current_transport()
     if transport in ("sse", "http"):
         return [os.path.realpath(os.getcwd())]
     return []

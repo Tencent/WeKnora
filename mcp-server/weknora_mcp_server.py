@@ -23,7 +23,7 @@ import requests
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from requests.exceptions import RequestException
-from upload_paths import resolve_upload_file_path
+from upload_paths import resolve_upload_file_path, set_active_transport
 
 # Set up logging configuration for the MCP server
 logging.basicConfig(level=logging.INFO)
@@ -1338,12 +1338,14 @@ def _init_options() -> InitializationOptions:
 
 async def run_stdio():
     """Run the MCP server using stdio transport"""
+    set_active_transport("stdio")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, _init_options())
 
 
 async def run_sse(host: str, port: int):
     """Run the MCP server using SSE transport (legacy MCP clients)"""
+    set_active_transport("sse")
     auth_token = require_network_transport_auth("sse")
     try:
         from mcp.server.sse import SseServerTransport
@@ -1380,6 +1382,7 @@ async def run_sse(host: str, port: int):
 
 async def run_http(host: str, port: int):
     """Run the MCP server using Streamable HTTP transport (MCP 2025-03-26 spec)"""
+    set_active_transport("http")
     auth_token = require_network_transport_auth("http")
     try:
         from contextlib import asynccontextmanager
