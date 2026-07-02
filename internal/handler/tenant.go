@@ -1099,7 +1099,7 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    types.EffectiveWebSearchConfig(updatedTenant.WebSearchConfig),
+		"data":    types.WebSearchConfigForResponse(updatedTenant.WebSearchConfig, true),
 		"message": "Web search configuration updated successfully",
 	})
 }
@@ -1180,7 +1180,7 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant.ParserEngineConfig,
+		"data":    types.ParserEngineConfigForResponse(updatedTenant.ParserEngineConfig, true),
 		"message": "解析引擎配置已更新",
 	})
 }
@@ -1245,7 +1245,7 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant.StorageEngineConfig,
+		"data":    types.StorageEngineConfigForResponse(updatedTenant.StorageEngineConfig, true),
 		"message": "存储引擎配置已更新",
 	})
 }

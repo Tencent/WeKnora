@@ -211,14 +211,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Check if login was successful
 	if !response.Success {
 		logger.Warnf(ctx, "Login failed: %s", response.Message)
-		c.JSON(http.StatusUnauthorized, response)
+		c.JSON(http.StatusUnauthorized, dto.NewAuthLoginResponse(response))
 		return
 	}
 
 	// User is already in the correct format from service
 
 	logger.Infof(ctx, "User logged in successfully, email: %s", email)
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(response))
 }
 
 // GetOIDCAuthorizationURL godoc
@@ -336,7 +336,7 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 }
 
 func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error) {
-	payload, err := json.Marshal(resp)
+	payload, err := json.Marshal(dto.NewAuthOIDCCallbackResponse(resp))
 	if err != nil {
 		return "", err
 	}
@@ -711,10 +711,8 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(resp))
 }
-
-// AutoSetup godoc
 // @Summary      自动初始化（Lite 桌面版）
 // @Description  Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
 // @Tags         认证
@@ -777,7 +775,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 	tenant, _ := h.tenantService.GetTenantByID(ctx, user.TenantID)
 
 	logger.Info(ctx, "Auto-setup: completed successfully")
-	c.JSON(http.StatusOK, &types.LoginResponse{
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(&types.LoginResponse{
 		Success:      true,
 		Message:      "Auto-setup successful",
 		User:         user,
@@ -789,7 +787,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 		}},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
-	})
+	}))
 }
 
 // tenantNameOrEmpty returns t.Name when t is non-nil, "" otherwise.

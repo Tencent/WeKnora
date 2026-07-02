@@ -35,27 +35,33 @@ type TenantResponse struct {
 
 // NewTenantResponse converts a stored tenant into its HTTP response shape.
 func NewTenantResponse(ctx context.Context, tenant *types.Tenant) *TenantResponse {
+	return NewTenantResponseWithRole(tenant, RoleFromContext(ctx))
+}
+
+// NewTenantResponseWithRole converts a stored tenant using an explicit role
+// (for auth flows where tenant role is not yet in request context).
+func NewTenantResponseWithRole(tenant *types.Tenant, role types.TenantRole) *TenantResponse {
 	if tenant == nil {
 		return nil
 	}
-	includeSecrets := CanViewIntegrationSecrets(ctx)
-	includeAPIKey := CanViewTenantAPIKey(ctx)
+	includeSecrets := role.HasPermission(types.TenantRoleAdmin)
+	includeAPIKey := role.HasPermission(types.TenantRoleOwner)
 
 	resp := &TenantResponse{
-		ID:               tenant.ID,
-		Name:             tenant.Name,
-		Description:      tenant.Description,
-		Status:           tenant.Status,
-		RetrieverEngines: tenant.RetrieverEngines,
-		Business:         tenant.Business,
-		StorageQuota:     tenant.StorageQuota,
-		StorageUsed:      tenant.StorageUsed,
-		ContextConfig:    tenant.ContextConfig,
+		ID:                tenant.ID,
+		Name:              tenant.Name,
+		Description:       tenant.Description,
+		Status:            tenant.Status,
+		RetrieverEngines:  tenant.RetrieverEngines,
+		Business:          tenant.Business,
+		StorageQuota:      tenant.StorageQuota,
+		StorageUsed:       tenant.StorageUsed,
+		ContextConfig:     tenant.ContextConfig,
 		ChatHistoryConfig: tenant.ChatHistoryConfig,
-		RetrievalConfig:  tenant.RetrievalConfig,
-		CreatedAt:        tenant.CreatedAt,
-		UpdatedAt:        tenant.UpdatedAt,
-		DeletedAt:        tenant.DeletedAt,
+		RetrievalConfig:   tenant.RetrievalConfig,
+		CreatedAt:         tenant.CreatedAt,
+		UpdatedAt:         tenant.UpdatedAt,
+		DeletedAt:         tenant.DeletedAt,
 	}
 	if includeAPIKey {
 		resp.APIKey = tenant.APIKey

@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -200,7 +201,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	}
 
 	tenant, _ := h.tenantService.GetTenantByID(ctx, inv.TenantID)
-	c.JSON(http.StatusCreated, &types.LoginResponse{
+	c.JSON(http.StatusCreated, dto.NewAuthLoginResponse(&types.LoginResponse{
 		Success:      true,
 		Message:      "Registration successful",
 		User:         user,
@@ -212,5 +213,5 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 		}},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
-	})
+	}))
 }
