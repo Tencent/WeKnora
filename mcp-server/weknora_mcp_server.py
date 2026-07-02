@@ -23,6 +23,7 @@ import requests
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
 from requests.exceptions import RequestException
+from upload_paths import resolve_upload_file_path
 
 # Set up logging configuration for the MCP server
 logging.basicConfig(level=logging.INFO)
@@ -260,7 +261,8 @@ class WeKnoraClient:
         self, kb_id: str, file_path: str, enable_multimodel: bool = True
     ) -> Dict:
         """Create knowledge from a local file with optional multimodal processing"""
-        with open(file_path, "rb") as f:
+        safe_path = resolve_upload_file_path(file_path)
+        with open(safe_path, "rb") as f:
             files = {"file": f}
             data = {"enable_multimodel": str(enable_multimodel).lower()}
             # Temporarily remove Content-Type header for multipart/form-data request
