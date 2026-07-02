@@ -5489,12 +5489,14 @@ export default {
       notion: 'Notion',
       yuque: 'Yuque (Юйцюэ)',
       rss: 'RSS / Atom лента',
+      dingtalk: 'DingTalk (ДинТок)',
     },
     connectorDesc: {
       feishu: 'Синхронизация документов, таблиц и файлов из Feishu Wiki',
       notion: 'Синхронизация страниц и баз данных из Notion',
       yuque: 'Синхронизация документов из баз знаний Yuque',
       rss: 'Синхронизация статей из лент RSS / Atom',
+      dingtalk: 'Синхронизация документов из DingTalk Wiki',
     },
     field: {
       appId: 'App ID',

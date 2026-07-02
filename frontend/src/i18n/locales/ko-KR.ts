@@ -5668,12 +5668,14 @@ export default {
       notion: "Notion",
       yuque: "위큐 (Yuque)",
       rss: "RSS / Atom 피드",
+      dingtalk: "링크톡 (DingTalk)",
     },
     connectorDesc: {
       feishu: "페이슈 위키에서 문서, 스프레드시트, 파일 동기화",
       notion: "Notion에서 페이지 및 데이터베이스 동기화",
       yuque: "위큐 지식베이스에서 문서 동기화",
       rss: "RSS / Atom 피드에서 글 동기화",
+      dingtalk: "링크톡 위키에서 문서 동기화",
     },
     field: {
       appId: "App ID",
