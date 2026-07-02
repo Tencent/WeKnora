@@ -22,7 +22,7 @@ func TestModelResponse_OmitsSecrets(t *testing.T) {
 			Provider:  "openai",
 		},
 	}
-	body, err := json.Marshal(NewModelResponse(m))
+	body, err := json.Marshal(NewModelResponse(adminContext(), m))
 	assert.NoError(t, err)
 	s := string(body)
 	assert.NotContains(t, s, "sk-real-api-key-do-not-leak")
@@ -55,7 +55,7 @@ func TestModelResponse_BuiltinStripsTenantConfig(t *testing.T) {
 			ExtraConfig:    map[string]string{"region": "cn-hangzhou"},
 		},
 	}
-	resp := NewModelResponse(m)
+	resp := NewModelResponse(adminContext(), m)
 	assert.Empty(t, resp.Parameters.BaseURL,
 		"builtin must not leak per-tenant base URL")
 	assert.Empty(t, resp.Parameters.AppID,
@@ -70,7 +70,20 @@ func TestModelResponse_BuiltinStripsTenantConfig(t *testing.T) {
 	assert.False(t, strings.Contains(string(body), "tenant-private.example.com"))
 }
 
+func TestModelResponse_ViewerStripsIntegrationDetail(t *testing.T) {
+	m := &types.Model{
+		ID: "m-2",
+		Parameters: types.ModelParameters{
+			CustomHeaders: map[string]string{"Authorization": "Bearer secret"},
+			ExtraConfig:     map[string]string{"region": "cn-hangzhou"},
+		},
+	}
+	resp := NewModelResponse(viewerContext(), m)
+	assert.Nil(t, resp.Parameters.CustomHeaders)
+	assert.Nil(t, resp.Parameters.ExtraConfig)
+}
+
 func TestModelResponse_NilSafe(t *testing.T) {
-	assert.Nil(t, NewModelResponse(nil))
-	assert.Equal(t, []*ModelResponse{}, NewModelResponses(nil))
+	assert.Nil(t, NewModelResponse(adminContext(), nil))
+	assert.Equal(t, []*ModelResponse{}, NewModelResponses(adminContext(), nil))
 }

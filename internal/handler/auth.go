@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -522,7 +523,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"user":        userInfo,
-			"tenant":      tenant,
+			"tenant":      dto.NewTenantResponse(ctx, tenant),
 			"memberships": memberships,
 		},
 	})
