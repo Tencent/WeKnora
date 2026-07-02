@@ -462,6 +462,10 @@ func (h *FAQHandler) GetEntry(c *gin.Context) {
 func (h *FAQHandler) GetImportProgress(c *gin.Context) {
 	ctx := c.Request.Context()
 	taskID := secutils.SanitizeForLog(c.Param("task_id"))
+	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		c.Error(err)
+		return
+	}
 
 	progress, err := h.knowledgeService.GetFAQImportProgress(ctx, taskID)
 	if err != nil {

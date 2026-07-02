@@ -2197,6 +2197,10 @@ func (h *KnowledgeHandler) GetKnowledgeMoveProgress(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Task ID cannot be empty"))
 		return
 	}
+	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		c.Error(err)
+		return
+	}
 
 	progress, err := h.kgService.GetKnowledgeMoveProgress(ctx, taskID)
 	if err != nil {

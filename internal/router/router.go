@@ -720,7 +720,7 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler) {
 func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.InitializationHandler, g *rbacGuards) {
 	// 初始化接口
 	// GetCurrentConfigByKB 是只读，Viewer+ 即可。
-	r.GET("/initialization/config/:kbId", g.Viewer(), handler.GetCurrentConfigByKB)
+	r.GET("/initialization/config/:kbId", g.Viewer(), g.KBAccessRead("kbId"), handler.GetCurrentConfigByKB)
 	// InitializeByKB / UpdateKBConfig 都是改 KB 的核心模型/storage 配置 —
 	// 跟 PUT /knowledge-bases/:id 同等敏感，挂同款 OwnedKB 矩阵。
 	r.POST("/initialization/initialize/:kbId", g.OwnedKBOrAdminFromKbIDParam(), handler.InitializeByKB)
@@ -1770,45 +1770,46 @@ func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraClou
 
 // RegisterWikiPageRoutes registers wiki page related routes.
 //
-// Wiki pages are KB content (wiki mode): reads are Viewer+, content
-// mutations (create/update/delete) and maintenance actions
-// (rebuild-links, auto-fix, change issue status) honour per-KB
-// ownership via OwnedWikiKBOrAdmin (PR 5, #1303): the URL :kb_id
-// resolves directly to the owning KB so a Contributor who owns the KB
-// can manage its wiki, while a non-owner Contributor gets 403.
+// Wiki pages are KB content (wiki mode): reads are Viewer+ and gated by
+// KBAccessRead (own / org-shared / via shared agent), matching FAQ /
+// chunk / tag read routes. Content mutations (create/update/delete) and
+// maintenance actions (rebuild-links, auto-fix, change issue status)
+// honour per-KB ownership via OwnedWikiKBOrAdmin (PR 5, #1303): the URL
+// :kb_id resolves directly to the owning KB so a Contributor who owns
+// the KB can manage its wiki, while a non-owner Contributor gets 403.
 func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler, g *rbacGuards) {
 	wiki := r.Group("/knowledgebase/:kb_id/wiki")
 	{
 		// Page CRUD
-		wiki.GET("/pages", g.Viewer(), wikiHandler.ListPages)
+		wiki.GET("/pages", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.ListPages)
 		wiki.POST("/pages", g.OwnedWikiKBOrAdmin(), wikiHandler.CreatePage)
 		wiki.PUT("/move-page", g.OwnedWikiKBOrAdmin(), wikiHandler.MovePage)
-		wiki.GET("/pages/*slug", g.Viewer(), wikiHandler.GetPage)
+		wiki.GET("/pages/*slug", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetPage)
 		wiki.PUT("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdatePage)
 		wiki.DELETE("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.DeletePage)
 
 		// Folder tree (directory nodes)
-		wiki.GET("/folders", g.Viewer(), wikiHandler.ListFolders)
+		wiki.GET("/folders", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.ListFolders)
 		wiki.POST("/folders", g.OwnedWikiKBOrAdmin(), wikiHandler.CreateFolder)
 		wiki.PUT("/folders/:folder_id", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdateFolder)
 		wiki.DELETE("/folders/:folder_id", g.OwnedWikiKBOrAdmin(), wikiHandler.DeleteFolder)
 
 		// Special pages
-		wiki.GET("/index", g.Viewer(), wikiHandler.GetIndex)
-		wiki.GET("/log", g.Viewer(), wikiHandler.GetLog)
+		wiki.GET("/index", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetIndex)
+		wiki.GET("/log", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetLog)
 
 		// Graph and stats
-		wiki.GET("/graph", g.Viewer(), wikiHandler.GetGraph)
-		wiki.GET("/stats", g.Viewer(), wikiHandler.GetStats)
+		wiki.GET("/graph", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetGraph)
+		wiki.GET("/stats", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.GetStats)
 
 		// Search and maintenance
-		wiki.GET("/search", g.Viewer(), wikiHandler.SearchPages)
+		wiki.GET("/search", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.SearchPages)
 		wiki.POST("/rebuild-links", g.OwnedWikiKBOrAdmin(), wikiHandler.RebuildLinks)
-		wiki.GET("/lint", g.Viewer(), wikiHandler.Lint)
+		wiki.GET("/lint", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.Lint)
 		wiki.POST("/auto-fix", g.OwnedWikiKBOrAdmin(), wikiHandler.AutoFix)
 
 		// Issues
-		wiki.GET("/issues", g.Viewer(), wikiHandler.ListIssues)
+		wiki.GET("/issues", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.ListIssues)
 		wiki.PUT("/issues/:issue_id/status", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdateIssueStatus)
 	}
 }
