@@ -157,6 +157,13 @@ type ChunkingConfig struct {
 	// ParserEngineRules configures which parser engine to use for each file type.
 	// When empty, the builtin engine is used for all types.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
+	// EnableTableStructure enables optional structured table extraction for
+	// supported document parsers. The zero value preserves legacy parser output.
+	EnableTableStructure bool `yaml:"enable_table_structure,omitempty" json:"enable_table_structure,omitempty"`
+	// TableStructureFileTypes limits structured table extraction to selected
+	// file types (for example: ["docx", "xlsx"]). Empty means disabled unless
+	// EnableTableStructure is true for legacy clients.
+	TableStructureFileTypes []string `yaml:"table_structure_file_types,omitempty" json:"table_structure_file_types,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
 	// are used for vector matching. Retrieval matches on child but returns parent content.

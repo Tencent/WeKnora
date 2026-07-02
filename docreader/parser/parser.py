@@ -29,6 +29,8 @@ class Parser:
         content: bytes,
         parser_engine: Optional[str] = None,
         engine_overrides: Optional[dict[str, Any]] = None,
+        enable_table_structure: bool = False,
+        table_structure_file_types: Optional[list[str]] = None,
     ) -> Document:
         """Parse file content to markdown."""
         engine = parser_engine or ""
@@ -49,6 +51,11 @@ class Parser:
         parser = cls(
             file_name=file_name,
             file_type=file_type,
+            enable_table_structure=_table_structure_enabled(
+                file_type,
+                enable_table_structure,
+                table_structure_file_types,
+            ),
             **overrides,
         )
 
@@ -68,6 +75,8 @@ class Parser:
         title: str,
         parser_engine: Optional[str] = None,
         engine_overrides: Optional[dict[str, Any]] = None,
+        enable_table_structure: bool = False,
+        table_structure_file_types: Optional[list[str]] = None,
     ) -> Document:
         """Parse content from a URL to markdown."""
         logger.info("Parsing URL: %s, title: %s", url, title)
@@ -80,3 +89,18 @@ class Parser:
             logger.warning("Parser returned empty content for url: %s", url)
         logger.info("Parsed url %s, content length=%d", url, len(result.content))
         return result
+
+
+def _table_structure_enabled(
+    file_type: str,
+    enable_table_structure: bool,
+    table_structure_file_types: Optional[list[str]],
+) -> bool:
+    if table_structure_file_types:
+        normalized = {
+            ft.lstrip(".").lower()
+            for ft in table_structure_file_types
+            if ft
+        }
+        return file_type.lstrip(".").lower() in normalized
+    return enable_table_structure
