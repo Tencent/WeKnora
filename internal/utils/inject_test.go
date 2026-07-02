@@ -481,6 +481,90 @@ func TestValidateAndSecureSQL_WithStructuredSearchScopes(t *testing.T) {
 	}
 }
 
+// TestValidateSQL_JSONNodeBypass verifies that PG17 SQL/JSON expression nodes
+// cannot be used to smuggle dangerous functions past the blacklist. These were
+// previously accepted because validateNode had no handler for them and fell
+// through to a permissive `return nil`.
+func TestValidateSQL_JSONNodeBypass(t *testing.T) {
+	dangerous := []struct {
+		name string
+		sql  string
+	}{
+		{"JSON_SCALAR + pg_read_file", "SELECT JSON_SCALAR(pg_read_file('/etc/passwd')) AS data FROM knowledge_bases LIMIT 1"},
+		{"JSON_VALUE + pg_read_file", "SELECT JSON_VALUE(pg_read_file('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1"},
+		{"JSON_QUERY + pg_read_file", "SELECT JSON_QUERY(pg_read_file('/etc/passwd'), '$') AS data FROM knowledge_bases LIMIT 1"},
+		{"JSON scalar + lo_export", "SELECT JSON_SCALAR(lo_export(1, '/tmp/x')) FROM knowledge_bases LIMIT 1"},
+		{"JSON() parse + pg_read_file", "SELECT JSON(pg_read_file('/etc/passwd')) FROM knowledge_bases LIMIT 1"},
+		{"JSON_SERIALIZE + pg_read_file", "SELECT JSON_SERIALIZE(pg_read_file('/etc/passwd')) FROM knowledge_bases LIMIT 1"},
+	}
+
+	for _, tt := range dangerous {
+		t.Run(tt.name, func(t *testing.T) {
+			_, validation := ValidateSQL(tt.sql, WithSecurityDefaults(10000))
+			if validation.Valid {
+				t.Fatalf("expected SQL to be REJECTED, but it was accepted: %s", tt.sql)
+			}
+		})
+	}
+}
+
+// TestValidateSQL_UnknownNodeDefaultDeny ensures a legitimate query still
+// passes after the default-deny change, guarding against over-blocking.
+func TestValidateSQL_DefaultDenyAllowsLegitimate(t *testing.T) {
+	legit := []string{
+		"SELECT id, name FROM knowledge_bases WHERE name LIKE '%test%' ORDER BY created_at DESC LIMIT 10",
+		"SELECT COUNT(*) AS c FROM knowledges WHERE parse_status = 'completed'",
+		"SELECT COALESCE(title, 'untitled') FROM knowledges LIMIT 5",
+		"SELECT CASE WHEN file_size > 100 THEN 'big' ELSE 'small' END FROM knowledges LIMIT 5",
+		"SELECT kb.name, COUNT(k.id) FROM knowledge_bases kb LEFT JOIN knowledges k ON kb.id = k.knowledge_base_id GROUP BY kb.id, kb.name",
+	}
+	for _, sql := range legit {
+		t.Run(sql, func(t *testing.T) {
+			_, validation := ValidateSQL(sql, WithSecurityDefaults(10000))
+			if !validation.Valid {
+				t.Fatalf("expected legitimate SQL to pass, got errors: %#v\nSQL: %s", validation.Errors, sql)
+			}
+		})
+	}
+}
+
+// TestValidateSQL_DuckDBSubqueryFileRead verifies that the data_analysis tool's
+// validation options (no WithNoSubqueries) still reject file-reading functions
+// hidden inside a FROM subquery, as well as at the top level.
+func TestValidateSQL_DuckDBFileRead(t *testing.T) {
+	// Mirror the exact options used by the data_analysis (DuckDB) tool.
+	opts := []SQLValidationOption{
+		WithAllowedTables("k_data"),
+		WithSingleStatement(),
+		WithNoDangerousFunctions(),
+	}
+
+	dangerous := []struct {
+		name string
+		sql  string
+	}{
+		{"read_text in FROM subquery", "SELECT * FROM (SELECT * FROM read_text('/etc/passwd')) AS f, k_data AS k LIMIT 1"},
+		{"read_text in target list", "SELECT read_text('/etc/passwd') FROM k_data LIMIT 1"},
+		{"read_blob in FROM subquery", "SELECT * FROM (SELECT * FROM read_blob('/etc/passwd')) AS f LIMIT 1"},
+		{"nested subquery read_csv", "SELECT * FROM (SELECT * FROM (SELECT * FROM read_csv('/etc/passwd')) AS a) AS b LIMIT 1"},
+	}
+	for _, tt := range dangerous {
+		t.Run(tt.name, func(t *testing.T) {
+			_, validation := ValidateSQL(tt.sql, opts...)
+			if validation.Valid {
+				t.Fatalf("expected SQL to be REJECTED, but it was accepted: %s", tt.sql)
+			}
+		})
+	}
+
+	t.Run("legitimate table query passes", func(t *testing.T) {
+		_, validation := ValidateSQL("SELECT product, SUM(amount) FROM k_data GROUP BY product", opts...)
+		if !validation.Valid {
+			t.Fatalf("expected legitimate DuckDB query to pass, got: %#v", validation.Errors)
+		}
+	})
+}
+
 func BenchmarkInjectAndConditions(b *testing.B) {
 	const sql = "SELECT id, title FROM docs WHERE status = 'active' ORDER BY created_at LIMIT 50"
 	for i := 0; i < b.N; i++ {
