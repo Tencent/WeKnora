@@ -72,6 +72,7 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 	if !CanViewIntegrationSecrets(ctx) {
 		params.ExtraConfig = nil
 		params.CustomHeaders = nil
+		params.BaseURL = ""
 	}
 	if m.IsBuiltin {
 		// Builtin: strip everything that could reveal per-tenant config.

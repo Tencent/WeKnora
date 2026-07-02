@@ -890,7 +890,7 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items": tenants,
+			"items": dto.NewTenantResponsesCrossTenant(tenants),
 		},
 	})
 }
@@ -960,7 +960,7 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items":     tenants,
+			"items":     dto.NewTenantResponsesCrossTenant(tenants),
 			"total":     total,
 			"page":      page,
 			"page_size": pageSize,
@@ -1070,18 +1070,18 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 		return
 	}
 
-	cfg = *types.EffectiveWebSearchConfig(&cfg)
-
-	// Validate configuration
-	if cfg.MaxResults < 1 || cfg.MaxResults > 50 {
-		c.Error(errors.NewBadRequestError("max_results must be between 1 and 50"))
-		return
-	}
-
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		return
+	}
+
+	cfg = *types.MergeWebSearchConfigForUpdate(&cfg, tenant.WebSearchConfig)
+
+	// Validate configuration
+	if cfg.MaxResults < 1 || cfg.MaxResults > 50 {
+		c.Error(errors.NewBadRequestError("max_results must be between 1 and 50"))
 		return
 	}
 
@@ -1167,7 +1167,8 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
 		return
 	}
-	tenant.ParserEngineConfig = &cfg
+	merged := types.MergeParserEngineConfigForUpdate(&cfg, tenant.ParserEngineConfig)
+	tenant.ParserEngineConfig = merged
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -1232,7 +1233,8 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
 		return
 	}
-	tenant.StorageEngineConfig = &cfg
+	merged := types.MergeStorageEngineConfigForUpdate(&cfg, tenant.StorageEngineConfig)
+	tenant.StorageEngineConfig = merged
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {

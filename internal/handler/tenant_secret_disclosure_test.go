@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/middleware"
@@ -18,6 +19,11 @@ type stubTenantService struct {
 	tenant *types.Tenant
 }
 
+func (s *stubTenantService) UpdateTenant(_ context.Context, tenant *types.Tenant) (*types.Tenant, error) {
+	s.tenant = tenant
+	return tenant, nil
+}
+
 func (s *stubTenantService) CreateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }
@@ -26,9 +32,6 @@ func (s *stubTenantService) GetTenantByID(context.Context, uint64) (*types.Tenan
 }
 func (s *stubTenantService) GetTenantsByIDs(context.Context, []uint64) (map[uint64]*types.Tenant, error) {
 	return map[uint64]*types.Tenant{s.tenant.ID: s.tenant}, nil
-}
-func (s *stubTenantService) UpdateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
-	return s.tenant, nil
 }
 func (s *stubTenantService) DeleteTenant(context.Context, uint64) error { return nil }
 func (s *stubTenantService) ListTenants(context.Context) ([]*types.Tenant, error) {
@@ -71,6 +74,7 @@ func newTenantHandlerTestEngine(t *testing.T, role types.TenantRole, tenant *typ
 	r.GET("/tenants", h.ListTenants)
 	r.GET("/tenants/:id", h.GetTenant)
 	r.GET("/tenants/kv/:key", h.GetTenantKV)
+	r.PUT("/tenants/kv/:key", h.UpdateTenantKV)
 	return r
 }
 
@@ -159,4 +163,19 @@ func TestGetTenantKVViewerAllowedForNonSecretKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/tenants/kv/retrieval-config", nil)
 	engine.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestPutTenantParserConfigAdminPreservesRedactedSecrets(t *testing.T) {
+	tenant := secretTenantFixture()
+	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, tenant)
+
+	body := `{"mineru_api_key":"***","mineru_endpoint":"http://new-endpoint"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/tenants/kv/parser-engine-config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, tenant.ParserEngineConfig)
+	assert.Equal(t, "parser-secret-123", tenant.ParserEngineConfig.MinerUAPIKey)
+	assert.Equal(t, "http://new-endpoint", tenant.ParserEngineConfig.MinerUEndpoint)
 }

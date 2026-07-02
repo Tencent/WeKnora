@@ -83,3 +83,14 @@ func NewTenantResponses(ctx context.Context, tenants []*types.Tenant) []*TenantR
 	}
 	return out
 }
+
+// NewTenantResponsesCrossTenant redacts every tenant as Viewer regardless of
+// the caller's active-tenant role. Used by cross-tenant list/search endpoints
+// where the caller's home-tenant role must not unlock other tenants' secrets.
+func NewTenantResponsesCrossTenant(tenants []*types.Tenant) []*TenantResponse {
+	out := make([]*TenantResponse, 0, len(tenants))
+	for _, t := range tenants {
+		out = append(out, NewTenantResponseWithRole(t, types.TenantRoleViewer))
+	}
+	return out
+}

@@ -74,11 +74,13 @@ func TestModelResponse_ViewerStripsIntegrationDetail(t *testing.T) {
 	m := &types.Model{
 		ID: "m-2",
 		Parameters: types.ModelParameters{
+			BaseURL:       "https://tenant-private.example.com",
 			CustomHeaders: map[string]string{"Authorization": "Bearer secret"},
-			ExtraConfig:     map[string]string{"region": "cn-hangzhou"},
+			ExtraConfig:   map[string]string{"region": "cn-hangzhou"},
 		},
 	}
 	resp := NewModelResponse(viewerContext(), m)
+	assert.Empty(t, resp.Parameters.BaseURL)
 	assert.Nil(t, resp.Parameters.CustomHeaders)
 	assert.Nil(t, resp.Parameters.ExtraConfig)
 }

@@ -111,7 +111,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    dto.NewWebSearchProviderResponse(ctx,provider),
+		"data":    dto.NewWebSearchProviderResponse(ctx, provider),
 	})
 }
 
@@ -169,7 +169,7 @@ func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewWebSearchProviderResponse(ctx,provider),
+		"data":    dto.NewWebSearchProviderResponse(ctx, provider),
 	})
 }
 
@@ -263,7 +263,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 	// Re-fetch to get the full stored state
 	updated, _ := h.repo.GetByID(ctx, tenantID, id)
 	if updated != nil {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(ctx,updated)})
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(ctx, updated)})
 	} else {
 		c.JSON(http.StatusOK, gin.H{"success": true})
 	}

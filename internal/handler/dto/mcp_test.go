@@ -74,17 +74,27 @@ func TestMCPServiceResponse_BuiltinStripsTenantConfig(t *testing.T) {
 }
 
 func TestMCPServiceResponse_ViewerStripsIntegrationDetail(t *testing.T) {
+	url := "https://tenant-private.example.com"
 	svc := &types.MCPService{
 		ID:      "svc-2",
+		URL:     &url,
 		Headers: types.MCPHeaders{"Authorization": "Bearer secret"},
 		EnvVars: types.MCPEnvVars{"TOKEN": "secret"},
+		StdioConfig: &types.MCPStdioConfig{
+			Command: "npx",
+			Args:    []string{"-y", "mcp-server"},
+		},
+		AdvancedConfig: &types.MCPAdvancedConfig{},
 		AuthConfig: &types.MCPAuthConfig{
 			CustomHeaders: map[string]string{"X-Auth": "secret"},
 		},
 	}
 	resp := NewMCPServiceResponse(viewerContext(), svc)
+	assert.Nil(t, resp.URL)
 	assert.Nil(t, resp.Headers)
 	assert.Nil(t, resp.EnvVars)
+	assert.Nil(t, resp.StdioConfig)
+	assert.Nil(t, resp.AdvancedConfig)
 	assert.NotNil(t, resp.AuthConfig)
 	assert.Nil(t, resp.AuthConfig.CustomHeaders)
 }
