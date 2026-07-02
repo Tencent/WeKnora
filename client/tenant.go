@@ -228,3 +228,105 @@ func (c *Client) UpdateTenantKV(ctx context.Context, key string, value any) (jso
 	}
 	return result.Data, nil
 }
+
+// APIPrincipalMode controls how X-API-Key requests map to terminal principals.
+type APIPrincipalMode string
+
+const (
+	APIPrincipalModeTenant      APIPrincipalMode = "tenant"
+	APIPrincipalModeDirect      APIPrincipalMode = "direct_header"
+	APIPrincipalModeSignedToken APIPrincipalMode = "signed_token"
+)
+
+// APIPrincipalConfig describes tenant API-key principal mapping settings.
+type APIPrincipalConfig struct {
+	Mode                  APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string           `json:"direct_header_name"`
+	SignedTokenHeaderName string           `json:"signed_token_header_name"`
+	RequireDirectHeader   bool             `json:"require_direct_header"`
+	HasHMACSecret         bool             `json:"has_hmac_secret"`
+	HMACSecret            string           `json:"hmac_secret,omitempty"`
+}
+
+type apiPrincipalConfigResponse struct {
+	Success bool               `json:"success"`
+	Data    APIPrincipalConfig `json:"data"`
+}
+
+// UpdateAPIPrincipalConfigRequest updates tenant API-key principal mapping.
+type UpdateAPIPrincipalConfigRequest struct {
+	Mode                  APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string           `json:"direct_header_name,omitempty"`
+	SignedTokenHeaderName string           `json:"signed_token_header_name,omitempty"`
+	RequireDirectHeader   bool             `json:"require_direct_header,omitempty"`
+	HMACSecret            string           `json:"hmac_secret,omitempty"`
+}
+
+// CreateAPIPrincipalTestTokenRequest signs a short-lived JWT for API integration testing.
+type CreateAPIPrincipalTestTokenRequest struct {
+	ExternalUserID   string `json:"external_user_id"`
+	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
+}
+
+// APIPrincipalTestToken is a short-lived JWT signed with the tenant API principal HMAC secret.
+type APIPrincipalTestToken struct {
+	Token            string `json:"token"`
+	HeaderName       string `json:"header_name"`
+	ExpiresInSeconds int    `json:"expires_in_seconds"`
+	ExpiresAtUnix    int64  `json:"expires_at_unix"`
+	ExternalUserID   string `json:"external_user_id"`
+}
+
+type apiPrincipalTestTokenResponse struct {
+	Success bool                  `json:"success"`
+	Data    APIPrincipalTestToken `json:"data"`
+}
+
+// GetAPIPrincipalConfig returns how X-API-Key requests map to principals for a tenant.
+func (c *Client) GetAPIPrincipalConfig(ctx context.Context, tenantID uint64) (*APIPrincipalConfig, error) {
+	path := fmt.Sprintf("/api/v1/tenants/%d/api-principal-config", tenantID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response apiPrincipalConfigResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}
+
+// UpdateAPIPrincipalConfig updates how X-API-Key requests map to principals for a tenant.
+func (c *Client) UpdateAPIPrincipalConfig(
+	ctx context.Context, tenantID uint64, req *UpdateAPIPrincipalConfigRequest,
+) (*APIPrincipalConfig, error) {
+	path := fmt.Sprintf("/api/v1/tenants/%d/api-principal-config", tenantID)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response apiPrincipalConfigResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}
+
+// CreateAPIPrincipalTestToken signs a short-lived JWT with the tenant API principal HMAC secret.
+func (c *Client) CreateAPIPrincipalTestToken(
+	ctx context.Context, tenantID uint64, req *CreateAPIPrincipalTestTokenRequest,
+) (*APIPrincipalTestToken, error) {
+	path := fmt.Sprintf("/api/v1/tenants/%d/api-principal-test-token", tenantID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response apiPrincipalTestTokenResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return &response.Data, nil
+}

@@ -181,7 +181,38 @@
     padding: 4px;
     min-width: 148px;
     animation: dropdownSlideIn 0.18s cubic-bezier(0.2, 0, 0, 1) both;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.2s ease;
+
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background-color: transparent;
+      border: none;
+      border-radius: 6px;
+      transition: background-color 0.2s ease;
+    }
+
+    &:hover {
+      scrollbar-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18)) transparent;
+
+      &::-webkit-scrollbar-thumb {
+        background-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18));
+      }
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+      background-color: var(--td-scrollbar-hover-color, rgba(0, 0, 0, 0.32));
+    }
   }
 
   .t-dropdown__item {
@@ -493,5 +524,17 @@
       0 0 0 0.5px rgba(255, 255, 255, 0.05),
       0 2px 4px rgba(0, 0, 0, 0.12),
       0 8px 32px rgba(0, 0, 0, 0.28);
+
+    &:hover {
+      scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+
+      &::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.22);
+      }
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+      background-color: rgba(255, 255, 255, 0.38);
+    }
   }
 }

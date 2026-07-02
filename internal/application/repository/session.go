@@ -57,6 +57,21 @@ func (r *sessionRepository) Get(ctx context.Context, tenantID uint64, userID str
 	return &session, nil
 }
 
+// GetByID retrieves a session by tenant and id without user scoping.
+func (r *sessionRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error) {
+	var session types.Session
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		First(&session).Error
+	if err != nil {
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
 // GetByTenantID retrieves all sessions for a tenant
 func (r *sessionRepository) GetByTenantID(ctx context.Context, tenantID uint64, userID string) ([]*types.Session, error) {
 	var sessions []*types.Session
@@ -259,6 +274,18 @@ func (r *sessionRepository) Update(ctx context.Context, session *types.Session, 
 			"title":       session.Title,
 			"description": session.Description,
 			"updated_at":  session.UpdatedAt,
+		})
+	return res.RowsAffected, res.Error
+}
+
+// SetOwnerID assigns sessions.user_id for a tenant-scoped row.
+func (r *sessionRepository) SetOwnerID(ctx context.Context, tenantID uint64, id, ownerID string) (int64, error) {
+	res := r.db.WithContext(ctx).
+		Model(&types.Session{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id).
+		Updates(map[string]interface{}{
+			"user_id":    ownerID,
+			"updated_at": time.Now(),
 		})
 	return res.RowsAffected, res.Error
 }

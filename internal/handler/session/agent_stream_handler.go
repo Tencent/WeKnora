@@ -110,6 +110,8 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentComplete, h.handleComplete)
 	h.eventBus.On(event.EventToolApprovalRequired, h.handleToolApprovalRequired)
 	h.eventBus.On(event.EventToolApprovalResolved, h.handleToolApprovalResolved)
+	h.eventBus.On(event.EventMCPOAuthRequired, h.handleMCPOAuthRequired)
+	h.eventBus.On(event.EventMCPOAuthResolved, h.handleMCPOAuthResolved)
 }
 
 // handleThought handles agent thought events
@@ -320,6 +322,49 @@ func (h *AgentStreamHandler) handleToolApprovalResolved(ctx context.Context, evt
 		Data:      meta,
 	}); err != nil {
 		logger.GetLogger(h.ctx).Error("Append tool approval resolved event failed", "error", err)
+	}
+	return nil
+}
+
+// handleMCPOAuthRequired forwards an in-conversation "authorize this MCP
+// service" prompt to the SSE stream so the UI can render an Authorize card.
+func (h *AgentStreamHandler) handleMCPOAuthRequired(ctx context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.MCPOAuthRequiredData)
+	if !ok {
+		return nil
+	}
+	meta := toolApprovalDataToMap(data)
+	meta["pending_id"] = data.PendingID
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      types.ResponseTypeMCPOAuthRequired,
+		Content:   "MCP service requires OAuth authorization",
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      meta,
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append mcp oauth required event failed", "error", err)
+	}
+	return nil
+}
+
+// handleMCPOAuthResolved forwards the outcome of an in-conversation OAuth prompt.
+func (h *AgentStreamHandler) handleMCPOAuthResolved(ctx context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.MCPOAuthResolvedData)
+	if !ok {
+		return nil
+	}
+	meta := toolApprovalDataToMap(data)
+	meta["pending_id"] = data.PendingID
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      types.ResponseTypeMCPOAuthResolved,
+		Content:   "MCP OAuth authorization resolved",
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      meta,
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append mcp oauth resolved event failed", "error", err)
 	}
 	return nil
 }

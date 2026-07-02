@@ -113,6 +113,24 @@ func SessionTenantIDFromContext(ctx context.Context) (uint64, bool) {
 	return TenantIDFromContext(ctx)
 }
 
+// WithMCPOAuthNonInteractive marks ctx as originating from a channel that cannot
+// complete an in-conversation MCP OAuth prompt (e.g. an IM bot). The agent uses
+// this to emit a one-shot authorization notice instead of blocking on the OAuth
+// wait until it times out. See MCPOAuthNonInteractiveContextKey.
+func WithMCPOAuthNonInteractive(ctx context.Context) context.Context {
+	return context.WithValue(ctx, MCPOAuthNonInteractiveContextKey, true)
+}
+
+// IsMCPOAuthNonInteractive reports whether ctx was marked non-interactive for
+// MCP OAuth (see WithMCPOAuthNonInteractive).
+func IsMCPOAuthNonInteractive(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(MCPOAuthNonInteractiveContextKey).(bool)
+	return v
+}
+
 // LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").
 // Returns ("zh-CN", false) when the key is absent.
 func LanguageFromContext(ctx context.Context) (string, bool) {

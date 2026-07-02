@@ -49,9 +49,9 @@
           <div v-if="session.role === 'user'">
             <EmbedUserMessage
               :content="String(session.content || '')"
-              :mentioned_items="session.mentioned_items"
-              :images="session.images"
-              :attachments="session.attachments"
+              :mentioned_items="asUnknownArray(session.mentioned_items)"
+              :images="asEmbedImages(session.images)"
+              :attachments="asEmbedAttachments(session.attachments)"
               :embeddedMode="true"
               :embed-channel-id="channelId"
               :embed-token="token"
@@ -66,6 +66,8 @@
               :embedded-mode="true"
               :embed-channel-id="channelId"
               :embed-token="token"
+              :embed-session-sig="sessionSig"
+              :embed-visitor-id="visitorId"
             />
           </div>
         </div>
@@ -110,9 +112,13 @@ import EmbedBotMessage from '@/views/embed/EmbedBotMessage.vue'
 import EmbedUserMessage from '@/views/embed/EmbedUserMessage.vue'
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
 
+type EmbedImage = { url?: string; data?: string }
+type EmbedAttachment = { file_name: string; file_size?: number }
+
 const props = defineProps<{
   sessionId: string
   sessionSig: string
+  visitorId: string
   channelId: string
   token: string
   agentId: string
@@ -135,9 +141,22 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const sessionIdRef = toRef(props, 'sessionId')
 const sessionSigRef = toRef(props, 'sessionSig')
+const visitorIdRef = toRef(props, 'visitorId')
 const suggestedQuestions = ref<SuggestedQuestion[]>([])
 const suggestedLoading = ref(false)
 const hostContextRef = ref<Record<string, unknown>>(props.hostContext || {})
+
+function asUnknownArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined
+}
+
+function asEmbedImages(value: unknown): EmbedImage[] | undefined {
+  return Array.isArray(value) ? value as EmbedImage[] : undefined
+}
+
+function asEmbedAttachments(value: unknown): EmbedAttachment[] | undefined {
+  return Array.isArray(value) ? value as EmbedAttachment[] : undefined
+}
 
 const embedWebSearchStorageKey = () => `weknora-embed-web-search:${props.channelId}`
 
@@ -189,6 +208,7 @@ const {
 } = useEmbedChatSession({
   sessionId: sessionIdRef,
   sessionSig: sessionSigRef,
+  visitorId: visitorIdRef,
   channelId: props.channelId,
   token: props.token,
   agentId: props.agentId,

@@ -248,6 +248,7 @@ services:
       - docreader-tmp-dev:/tmp/docreader
     environment:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
+      - DOCREADER_PDF_FORCE_SCANNED=${DOCREADER_PDF_FORCE_SCANNED:-false}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
       - DOCREADER_ODL_MAX_WORKERS=${DOCREADER_ODL_MAX_WORKERS:-1}
       - DOCREADER_ODL_HYBRID=${DOCREADER_ODL_HYBRID:-off}

@@ -246,3 +246,15 @@ func validateImageMultimodalConfig(ctx context.Context, kb *types.KnowledgeBase)
 
 	return nil
 }
+
+// MergeParserEngineOverrides merges upload overrides on top of tenant overrides safely.
+func MergeParserEngineOverrides(tenantOverrides map[string]string, uploadOverrides map[string]string) map[string]string {
+	merged := make(map[string]string)
+	for k, v := range tenantOverrides {
+		merged[k] = v
+	}
+	for k, v := range uploadOverrides {
+		merged[k] = v
+	}
+	return merged
+}

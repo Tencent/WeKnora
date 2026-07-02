@@ -2,14 +2,18 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -95,6 +99,44 @@ type updateTenantRequest struct {
 	Name        *string `json:"name"        binding:"omitempty,min=1,max=128"`
 	Description *string `json:"description" binding:"omitempty,max=512"`
 }
+
+type apiPrincipalConfigRequest struct {
+	Mode                  types.APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string                 `json:"direct_header_name"`
+	SignedTokenHeaderName string                 `json:"signed_token_header_name"`
+	RequireDirectHeader   bool                   `json:"require_direct_header"`
+	HMACSecret            *string                `json:"hmac_secret"`
+}
+
+type apiPrincipalConfigResponse struct {
+	Mode                  types.APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string                 `json:"direct_header_name"`
+	SignedTokenHeaderName string                 `json:"signed_token_header_name"`
+	RequireDirectHeader   bool                   `json:"require_direct_header"`
+	HasHMACSecret         bool                   `json:"has_hmac_secret"`
+	HMACSecret            string                 `json:"hmac_secret,omitempty"`
+}
+
+type apiPrincipalTestTokenRequest struct {
+	ExternalUserID   string `json:"external_user_id"`
+	ExpiresInSeconds int    `json:"expires_in_seconds"`
+}
+
+type apiPrincipalTestTokenResponse struct {
+	Token            string `json:"token"`
+	HeaderName       string `json:"header_name"`
+	ExpiresInSeconds int    `json:"expires_in_seconds"`
+	ExpiresAtUnix    int64  `json:"expires_at_unix"`
+	ExternalUserID   string `json:"external_user_id"`
+}
+
+const (
+	defaultAPIPrincipalDirectHeader  = "X-External-User-ID"
+	defaultAPIPrincipalTokenHeader   = "X-External-User-Token"
+	defaultAPIPrincipalTestTokenTTL  = 15 * time.Minute
+	maxAPIPrincipalTestTokenTTL      = time.Hour
+	maxAPIPrincipalExternalUserIDLen = 128
+)
 
 // defaultMaxOwnedTenantsPerUser is the cap applied when
 // config.Tenant.MaxOwnedPerUser is left at zero. Picked to comfortably
@@ -371,7 +413,7 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    tenant,
+		"data":    dto.NewTenantResponse(ctx, tenant),
 	})
 }
 
@@ -462,7 +504,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant,
+		"data":    dto.NewTenantResponse(ctx, updatedTenant),
 	})
 }
 
@@ -508,6 +550,243 @@ func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
 			"api_key": apiKey,
 		},
 	})
+}
+
+func apiPrincipalConfigForResponse(cfg *types.APIPrincipalConfig) apiPrincipalConfigResponse {
+	if cfg == nil {
+		cfg = &types.APIPrincipalConfig{}
+	}
+	mode := cfg.Mode
+	if mode == "" {
+		mode = types.APIPrincipalModeTenant
+	}
+	return apiPrincipalConfigResponse{
+		Mode:                  mode,
+		DirectHeaderName:      defaultAPIPrincipalDirectHeader,
+		SignedTokenHeaderName: defaultAPIPrincipalTokenHeader,
+		RequireDirectHeader:   cfg.RequireDirectHeader,
+		HasHMACSecret:         strings.TrimSpace(cfg.HMACSecret) != "",
+		HMACSecret:            strings.TrimSpace(cfg.HMACSecret),
+	}
+}
+
+// GetAPIPrincipalConfig godoc
+// @Summary      获取租户 API Key 用户身份配置
+// @Description  返回 X-API-Key 请求如何映射为终端 Principal 的配置（Owner）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "租户ID"
+// @Success      200  {object}  map[string]interface{}  "API principal 配置"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      403  {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Router       /tenants/{id}/api-principal-config [get]
+func (h *TenantHandler) GetAPIPrincipalConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		return
+	}
+	tenant, err := h.service.GetTenantByID(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    apiPrincipalConfigForResponse(tenant.APIPrincipalConfig),
+	})
+}
+
+// UpdateAPIPrincipalConfig godoc
+// @Summary      更新租户 API Key 用户身份配置
+// @Description  配置 X-API-Key 请求如何映射为终端 Principal（Owner）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                           true  "租户ID"
+// @Param        request  body      handler.apiPrincipalConfigRequest  true  "API principal 配置"
+// @Success      200      {object}  map[string]interface{}        "更新后的配置"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Router       /tenants/{id}/api-principal-config [put]
+func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		return
+	}
+	var req apiPrincipalConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if req.Mode == "" {
+		req.Mode = types.APIPrincipalModeTenant
+	}
+	switch req.Mode {
+	case types.APIPrincipalModeTenant, types.APIPrincipalModeDirect, types.APIPrincipalModeSignedToken:
+	default:
+		c.Error(errors.NewValidationError("mode must be tenant, direct_header, or signed_token"))
+		return
+	}
+
+	tenant, err := h.service.GetTenantByID(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+		}
+		return
+	}
+
+	existingSecret := ""
+	if tenant.APIPrincipalConfig != nil {
+		existingSecret = tenant.APIPrincipalConfig.HMACSecret
+	}
+	hmacSecret := existingSecret
+	if req.HMACSecret != nil {
+		hmacSecret = strings.TrimSpace(*req.HMACSecret)
+	}
+	cfg := &types.APIPrincipalConfig{
+		Mode:                  req.Mode,
+		DirectHeaderName:      defaultAPIPrincipalDirectHeader,
+		SignedTokenHeaderName: defaultAPIPrincipalTokenHeader,
+		RequireDirectHeader:   req.RequireDirectHeader,
+		HMACSecret:            hmacSecret,
+	}
+	if cfg.Mode == types.APIPrincipalModeSignedToken && strings.TrimSpace(cfg.HMACSecret) == "" {
+		c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
+		return
+	}
+	tenant.APIPrincipalConfig = cfg
+
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError("Failed to update API principal config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    apiPrincipalConfigForResponse(updatedTenant.APIPrincipalConfig),
+	})
+}
+
+// CreateAPIPrincipalTestToken godoc
+// @Summary      生成 API Playground 测试 JWT
+// @Description  使用租户已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int                                  true  "租户ID"
+// @Param        request  body      handler.apiPrincipalTestTokenRequest true  "测试 Token 参数"
+// @Success      200      {object}  map[string]interface{}               "短期 JWT"
+// @Failure      400      {object}  errors.AppError                      "请求参数错误"
+// @Failure      403      {object}  errors.AppError                      "权限不足"
+// @Security     Bearer
+// @Router       /tenants/{id}/api-principal-test-token [post]
+func (h *TenantHandler) CreateAPIPrincipalTestToken(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		return
+	}
+
+	var req apiPrincipalTestTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+
+	externalUserID := strings.TrimSpace(req.ExternalUserID)
+	if err := validateAPIPrincipalExternalUserID(externalUserID); err != nil {
+		c.Error(errors.NewValidationError("external_user_id is invalid").WithDetails(err.Error()))
+		return
+	}
+
+	tenant, err := h.service.GetTenantByID(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+		}
+		return
+	}
+
+	cfg := tenant.APIPrincipalConfig
+	if cfg == nil || cfg.Mode != types.APIPrincipalModeSignedToken {
+		c.Error(errors.NewValidationError("signed_token mode is required"))
+		return
+	}
+	secret := strings.TrimSpace(cfg.HMACSecret)
+	if secret == "" {
+		c.Error(errors.NewValidationError("hmac_secret is required for signed_token mode"))
+		return
+	}
+
+	ttl := defaultAPIPrincipalTestTokenTTL
+	if req.ExpiresInSeconds > 0 {
+		ttl = time.Duration(req.ExpiresInSeconds) * time.Second
+	}
+	if ttl <= 0 || ttl > maxAPIPrincipalTestTokenTTL {
+		c.Error(errors.NewValidationError("expires_in_seconds must be between 1 and 3600"))
+		return
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(ttl)
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":       externalUserID,
+		"tenant_id": strconv.FormatUint(id, 10),
+		"aud":       "weknora",
+		"iat":       now.Unix(),
+		"exp":       expiresAt.Unix(),
+	}).SignedString([]byte(secret))
+	if err != nil {
+		c.Error(errors.NewInternalServerError("Failed to create API principal test token").WithDetails(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": apiPrincipalTestTokenResponse{
+			Token:            token,
+			HeaderName:       defaultAPIPrincipalTokenHeader,
+			ExpiresInSeconds: int(ttl.Seconds()),
+			ExpiresAtUnix:    expiresAt.Unix(),
+			ExternalUserID:   externalUserID,
+		},
+	})
+}
+
+func validateAPIPrincipalExternalUserID(id string) error {
+	if id == "" {
+		return errors.NewValidationError("external_user_id is required")
+	}
+	if len(id) > maxAPIPrincipalExternalUserIDLen {
+		return errors.NewValidationError("external_user_id is too long")
+	}
+	for _, r := range id {
+		if r < 0x20 || r == 0x7f {
+			return errors.NewValidationError("external_user_id contains invalid characters")
+		}
+	}
+	return nil
 }
 
 // DeleteTenant godoc
@@ -575,7 +854,7 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items": []*types.Tenant{tenant},
+			"items": []*dto.TenantResponse{dto.NewTenantResponse(ctx, tenant)},
 		},
 	})
 }
@@ -612,7 +891,7 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items": tenants,
+			"items": dto.NewTenantResponsesCrossTenant(tenants),
 		},
 	})
 }
@@ -682,7 +961,7 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items":     tenants,
+			"items":     dto.NewTenantResponsesCrossTenant(tenants),
 			"total":     total,
 			"page":      page,
 			"page_size": pageSize,
@@ -705,6 +984,14 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	ctx := c.Request.Context()
 	key := secutils.SanitizeForLog(c.Param("key"))
+
+	switch key {
+	case "web-search-config", "parser-engine-config", "storage-engine-config":
+		if !dto.CanViewIntegrationSecrets(ctx) {
+			c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
+			return
+		}
+	}
 
 	switch key {
 	case "web-search-config":
@@ -784,18 +1071,18 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 		return
 	}
 
-	cfg = *types.EffectiveWebSearchConfig(&cfg)
-
-	// Validate configuration
-	if cfg.MaxResults < 1 || cfg.MaxResults > 50 {
-		c.Error(errors.NewBadRequestError("max_results must be between 1 and 50"))
-		return
-	}
-
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		return
+	}
+
+	cfg = *types.MergeWebSearchConfigForUpdate(&cfg, tenant.WebSearchConfig)
+
+	// Validate configuration
+	if cfg.MaxResults < 1 || cfg.MaxResults > 50 {
+		c.Error(errors.NewBadRequestError("max_results must be between 1 and 50"))
 		return
 	}
 
@@ -813,7 +1100,7 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    types.EffectiveWebSearchConfig(updatedTenant.WebSearchConfig),
+		"data":    types.WebSearchConfigForResponse(updatedTenant.WebSearchConfig, true),
 		"message": "Web search configuration updated successfully",
 	})
 }
@@ -843,7 +1130,7 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	logger.Infof(ctx, "Tenant web search config retrieved successfully, Tenant ID: %d", tenant.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    types.EffectiveWebSearchConfig(tenant.WebSearchConfig),
+		"data":    types.WebSearchConfigForResponse(tenant.WebSearchConfig, true),
 	})
 }
 
@@ -856,7 +1143,7 @@ func (h *TenantHandler) GetTenantParserEngineConfig(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
 		return
 	}
-	data := tenant.ParserEngineConfig
+	data := types.ParserEngineConfigForResponse(tenant.ParserEngineConfig, true)
 	if data == nil {
 		data = &types.ParserEngineConfig{}
 	}
@@ -881,7 +1168,12 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
 		return
 	}
-	tenant.ParserEngineConfig = &cfg
+	merged := types.MergeParserEngineConfigForUpdate(&cfg, tenant.ParserEngineConfig)
+	if err := validateParserEngineOutboundURLs(merged); err != nil {
+		c.Error(errors.NewValidationError(err.Error()))
+		return
+	}
+	tenant.ParserEngineConfig = merged
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -894,7 +1186,7 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant.ParserEngineConfig,
+		"data":    types.ParserEngineConfigForResponse(updatedTenant.ParserEngineConfig, true),
 		"message": "解析引擎配置已更新",
 	})
 }
@@ -908,7 +1200,7 @@ func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
 		return
 	}
-	data := tenant.StorageEngineConfig
+	data := types.StorageEngineConfigForResponse(tenant.StorageEngineConfig, true)
 	if data == nil {
 		data = &types.StorageEngineConfig{}
 	}
@@ -946,7 +1238,8 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
 		return
 	}
-	tenant.StorageEngineConfig = &cfg
+	merged := types.MergeStorageEngineConfigForUpdate(&cfg, tenant.StorageEngineConfig)
+	tenant.StorageEngineConfig = merged
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -959,7 +1252,7 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant.StorageEngineConfig,
+		"data":    types.StorageEngineConfigForResponse(updatedTenant.StorageEngineConfig, true),
 		"message": "存储引擎配置已更新",
 	})
 }
@@ -1176,4 +1469,21 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		"data":    updatedTenant.RetrievalConfig,
 		"message": "Retrieval configuration updated successfully",
 	})
+}
+
+func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	if endpoint := strings.TrimSpace(cfg.MinerUEndpoint); endpoint != "" {
+		if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+			return fmt.Errorf("mineru_endpoint failed SSRF validation: %v", err)
+		}
+	}
+	if vlmURL := strings.TrimSpace(cfg.MinerUVLMServerURL); vlmURL != "" {
+		if err := secutils.ValidateURLForSSRF(vlmURL); err != nil {
+			return fmt.Errorf("mineru_vlm_server_url failed SSRF validation: %v", err)
+		}
+	}
+	return nil
 }

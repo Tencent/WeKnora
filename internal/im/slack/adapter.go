@@ -254,8 +254,8 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	return streamID, nil
 }
 
-func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
-	if content == "" {
+func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+	if fullContent == "" {
 		return nil
 	}
 
@@ -267,20 +267,25 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	}
 
 	state.mu.Lock()
-	state.content.WriteString(content)
-	fullContent := state.content.String()
+	state.content.Reset()
+	state.content.WriteString(fullContent)
+	channel := state.channel
+	ts := state.ts
 	state.mu.Unlock()
 
-	// Update the message
-	logger.Infof(ctx, "[Slack] Updating stream chunk: stream_id=%s, content=%s", streamID, fullContent)
-	_, _, _, err := a.api.UpdateMessageContext(ctx, state.channel, state.ts, slack.MsgOptionText(fullContent, false))
+	_, _, _, err := a.api.UpdateMessageContext(ctx, channel, ts, slack.MsgOptionText(fullContent, false))
 	if err != nil {
-		// slack has rate limit, so we just log the error
-		// see: https://docs.slack.dev/reference/methods/chat.update/
-		logger.Warnf(ctx, "[Slack] Failed to update stream chunk: %v", err)
+		logger.Warnf(ctx, "[Slack] Failed to update stream content: %v", err)
 	}
-
 	return nil
+}
+
+func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+	return a.UpdateStreamContent(ctx, incoming, streamID, finalContent)
+}
+
+func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
 func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {

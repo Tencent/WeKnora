@@ -162,11 +162,16 @@ func EmbedAuth(
 			TenantID: ch.TenantID,
 			IsActive: true,
 		}
+		principal := types.Principal{
+			Type: types.PrincipalEmbedChannel,
+			ID:   fmt.Sprintf("%d:%s", ch.TenantID, ch.ID),
+		}
 
 		c.Set(types.TenantIDContextKey.String(), ch.TenantID)
 		c.Set(types.TenantInfoContextKey.String(), tenant)
 		c.Set(types.UserContextKey.String(), user)
 		c.Set(types.UserIDContextKey.String(), user.ID)
+		c.Set(types.PrincipalContextKey.String(), principal)
 		c.Set(types.TenantRoleContextKey.String(), types.TenantRoleViewer)
 		c.Set(types.SystemAdminContextKey.String(), false)
 		c.Set(string(EmbedChannelContextKey), ch)
@@ -176,6 +181,7 @@ func EmbedAuth(
 		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 		ctx = context.WithValue(ctx, types.UserContextKey, user)
 		ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+		ctx = types.WithPrincipal(ctx, principal)
 		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
 		ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
 		ctx = context.WithValue(ctx, EmbedChannelContextKey, ch)

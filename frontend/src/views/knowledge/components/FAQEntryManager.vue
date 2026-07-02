@@ -185,7 +185,7 @@
                     <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40"
                       :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
                       @enter="submitCreateTag"
-                      @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelCreateTag() } }" />
+                      @keydown="(_v: string, ctx?: { e?: KeyboardEvent }) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelCreateTag() } }" />
                   </div>
                 </div>
                 <div class="tag-inline-actions">
@@ -210,7 +210,7 @@
                       <div class="tag-edit-input" @click.stop>
                         <t-input :ref="setEditingTagInputRefByTag(tag.id)" v-model="editingTagName" size="small"
                           :maxlength="40" @enter="submitEditTag"
-                          @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelEditTag() } }" />
+                          @keydown="(_v: string, ctx?: { e?: KeyboardEvent }) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelEditTag() } }" />
                       </div>
                     </template>
                     <template v-else>
@@ -615,7 +615,7 @@
 
             <div class="setting-row vertical">
               <div class="setting-info">
-                <label>{{ $t('knowledgeBase.category') }}</label>
+                <label>{{ $t('knowledgeBase.tagLabel') }}</label>
                 <p class="desc">{{ $t('knowledgeEditor.faq.tagDesc') }}</p>
               </div>
               <div class="setting-control">
@@ -1086,7 +1086,7 @@ const hasMore = ref(true)
 const pageSize = 20
 let currentPage = 1
 const entrySearchKeyword = ref('')
-let entrySearchDebounce: ReturnType<typeof setTimeout> | null = null
+let entrySearchDebounce: number | null = null
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>
 
 const tagList = ref<any[]>([])
@@ -1101,7 +1101,7 @@ const tagPage = ref(1)
 const tagHasMore = ref(false)
 const tagLoadingMore = ref(false)
 const tagTotal = ref(0)
-let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null
+let tagSearchDebounce: number | null = null
 const editingTagInputRefs = new Map<string, TagInputInstance | null>()
 const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
   if (el) {
@@ -1175,14 +1175,14 @@ const loadKnowledgeInfo = async (kbId: string) => {
 const loadKnowledgeList = async () => {
   try {
     const res: any = await listKnowledgeBases()
-    const myKbs = (res?.data || []).map((item: any) => ({
+    const myKbs: typeof knowledgeList.value = (res?.data || []).map((item: any) => ({
       id: String(item.id),
       name: item.name,
       type: item.type,
     }))
 
     // Also include shared knowledge bases from orgStore
-    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+    const sharedKbs: typeof knowledgeList.value = (orgStore.sharedKnowledgeBases || [])
       .filter(s => s.knowledge_base != null)
       .map(s => ({
         id: String(s.knowledge_base.id),
@@ -2039,7 +2039,7 @@ const parseCSVFile = async (file: File): Promise<FAQEntryPayload[]> => {
                 similar_questions: splitByDelimiter(record['相似问题'] || record['similar_questions']),
                 negative_questions: splitByDelimiter(record['反例问题'] || record['negative_questions']),
                 tag_id: record['tag_id'] ? Number(record['tag_id']) : undefined,
-                tag_name: record['分类'] || record['tag_name'] || '',
+                tag_name: record['标签'] || record['分类'] || record['tag_name'] || '',
                 is_enabled: isDisabled !== undefined ? !isDisabled : undefined, // 是否停用：FALSE表示启用，TRUE表示停用，所以取反
               }),
             )
@@ -2086,7 +2086,7 @@ const parseExcelFile = async (file: File): Promise<FAQEntryPayload[]> => {
       similar_questions: splitByDelimiter(normalizedRow['相似问题'] || normalizedRow['similar_questions']),
       negative_questions: splitByDelimiter(normalizedRow['反例问题'] || normalizedRow['negative_questions']),
       tag_id: normalizedRow['tag_id'] ? Number(normalizedRow['tag_id']) : undefined,
-      tag_name: normalizedRow['分类'] || normalizedRow['tag_name'] || '',
+      tag_name: normalizedRow['标签'] || normalizedRow['分类'] || normalizedRow['tag_name'] || '',
       is_enabled: isDisabled !== undefined ? !isDisabled : undefined, // 是否停用：FALSE表示启用，TRUE表示停用，所以取反
     })
   })
@@ -2563,10 +2563,10 @@ const downloadJSONExample = () => {
 
 // 下载 CSV 示例
 const downloadCSVExample = () => {
-  const headers = ['分类(必填)', '问题(必填)', '相似问题(选填-多个用##分隔)', '反例问题(选填-多个用##分隔)', '机器人回答(必填-多个用##分隔)', '是否全部回复(选填-默认FALSE)', '是否停用(选填-默认FALSE)', '是否禁止被推荐(选填-默认False 可被推荐)']
+  const headers = ['标签(必填)', '问题(必填)', '相似问题(选填-多个用##分隔)', '反例问题(选填-多个用##分隔)', '机器人回答(必填-多个用##分隔)', '是否全部回复(选填-默认FALSE)', '是否停用(选填-默认FALSE)', '是否禁止被推荐(选填-默认False 可被推荐)']
   const rows = exampleData.map((item) => {
     return [
-      item.tag_name || '', // 分类
+      item.tag_name || '', // 标签
       item.standard_question,
       item.similar_questions.join('##'),
       item.negative_questions.join('##'),
@@ -2601,7 +2601,7 @@ const downloadCSVExample = () => {
 const downloadExcelExample = () => {
   const worksheet = XLSX.utils.json_to_sheet(
     exampleData.map((item) => ({
-      '分类(必填)': item.tag_name || '',
+      '标签(必填)': item.tag_name || '',
       '问题(必填)': item.standard_question,
       '相似问题(选填-多个用##分隔)': item.similar_questions.join('##'),
       '反例问题(选填-多个用##分隔)': item.negative_questions.join('##'),
@@ -2691,7 +2691,7 @@ watch(selectedTagId, (newVal, oldVal) => {
 watch(tagSearchQuery, (newVal, oldVal) => {
   if (newVal === oldVal) return
   if (tagSearchDebounce) {
-    clearTimeout(tagSearchDebounce)
+    window.clearTimeout(tagSearchDebounce)
   }
   tagSearchDebounce = window.setTimeout(() => {
     loadTags(true)
@@ -2702,7 +2702,7 @@ watch(tagSearchQuery, (newVal, oldVal) => {
 watch(entrySearchKeyword, (newVal, oldVal) => {
   if (newVal === oldVal) return
   if (entrySearchDebounce) {
-    clearTimeout(entrySearchDebounce)
+    window.clearTimeout(entrySearchDebounce)
   }
   entrySearchDebounce = window.setTimeout(() => {
     loadEntries()
@@ -5732,7 +5732,7 @@ watch(() => entries.value.map(e => ({
   gap: 8px;
 }
 
-// 批量分类弹窗样式 - 与导入对话框风格一致
+// 批量标签弹窗样式 - 与导入对话框风格一致
 .batch-tag-overlay {
   position: fixed;
   inset: 0;

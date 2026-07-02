@@ -120,7 +120,7 @@ curl --location --request POST 'http://localhost:8080/api/v1/vector-stores/test'
 | connection_config | object | 是   | 连接配置（与所选引擎的 `connection_fields` 对应）                |
 | index_config      | object | 否   | 索引配置（与所选引擎的 `index_fields` 对应）                     |
 
-> Tencent VectorDB 使用 `engine_type: "tencent_vectordb"`。`connection_config` 中 `addr`、`username`、`api_key` 必填，`database` 可选；`index_config.collection_name` 表示集合名前缀，实际集合会按向量维度追加后缀（例如 `weknora_embeddings_768`）。该适配器同时支持向量检索和基于 BM25 sparse vector 的关键词检索；旧版本已创建且没有 `sparse_vector` 索引的集合需要重建并重新导入数据后才能启用关键词检索。
+> Tencent VectorDB 使用 `engine_type: "tencent_vectordb"`。`connection_config` 中 `addr`、`username`、`api_key` 必填，`database` 可选；`index_config.collection_name` 表示集合名前缀，实际集合会按向量维度追加后缀（例如 `weknora_embeddings_768`）；`index_config.replica_number` 表示创建集合时使用的副本数。该适配器同时支持向量检索和基于 BM25 sparse vector 的关键词检索；旧版本已创建且没有 `sparse_vector` 索引的集合需要重建并重新导入数据后才能启用关键词检索。
 
 **请求**:
 
@@ -158,7 +158,8 @@ curl --location 'http://localhost:8080/api/v1/vector-stores' \
         "database": "weknora"
     },
     "index_config": {
-        "collection_name": "weknora_embeddings"
+        "collection_name": "weknora_embeddings",
+        "replica_number": 1
     }
 }'
 ```
@@ -418,6 +419,8 @@ curl --location --request POST 'http://localhost:8080/api/v1/vector-stores/550e8
 - **不可修改/删除**：`PUT` 和 `DELETE` 返回 `400`
 - **可测试连通性**：`POST /vector-stores/:id/test` 正常工作
 - **被知识库绑定时**：未指定 `vector_store_id` 创建的知识库默认使用环境变量存储；这种知识库在响应中显示为 `vector_store_name="System default"` + `vector_store_source="env"`。
+
+Tencent VectorDB 环境变量存储可通过 `TENCENT_VECTORDB_REPLICA_NUMBER` 覆盖默认集合副本数。默认值为 `1`；单节点 QA 环境可设为 `0`，生产环境可按 Tencent VectorDB 集群规模调整。
 
 ## 错误码
 

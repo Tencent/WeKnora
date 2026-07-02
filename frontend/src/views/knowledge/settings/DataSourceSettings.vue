@@ -202,11 +202,11 @@ onBeforeUnmount(stopPolling)
           v-for="ds in dataSources"
           :key="ds.id"
           :type="canManageDataSource ? 'button' : undefined"
-          :class="['ds-card', { 'ds-card--clickable': canManageDataSource }]"
+          :class="['ds-card', `ds-card--${ds.type}`, { 'ds-card--clickable': canManageDataSource }]"
           @click="canManageDataSource ? openEdit(ds) : undefined"
         >
           <div class="ds-card__badge">
-            <DataSourceTypeIcon :type="ds.type" :size="22" />
+            <DataSourceTypeIcon :type="ds.type" variant="badge" />
           </div>
           <div class="ds-card__body">
             <div class="ds-card__header">
@@ -452,8 +452,21 @@ onBeforeUnmount(stopPolling)
     display: flex;
     align-items: center;
     justify-content: center;
-    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    margin-top: 1px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: rgba(7, 192, 95, 0.12);
+    color: #07c05f;
     overflow: hidden;
+  }
+
+  &--feishu .ds-card__badge,
+  &--notion .ds-card__badge,
+  &--yuque .ds-card__badge,
+  &--rss .ds-card__badge {
+    background: var(--td-bg-color-container, #fff);
+    box-shadow: inset 0 0 0 1px var(--td-component-stroke);
   }
 
   &__body {

@@ -6,6 +6,9 @@ export function getAgentToolIconName(toolName: string): string {
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
     return 'data-search'
   }
+  if (toolName === 'wiki_search') {
+    return 'search'
+  }
   if (toolName === 'grep_chunks') {
     return 'search'
   }
@@ -15,7 +18,7 @@ export function getAgentToolIconName(toolName: string): string {
   if (toolName === 'get_document_info' || toolName === 'list_knowledge_chunks') {
     return 'file-search'
   }
-  if (toolName === 'get_document_content' || toolName === 'wiki_read_source_doc') {
+  if (toolName === 'get_document_content' || toolName === 'wiki_read_page' || toolName === 'wiki_read_source_doc') {
     return 'file-search'
   }
   if (toolName === 'todo_write') {

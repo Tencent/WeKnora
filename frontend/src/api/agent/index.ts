@@ -33,6 +33,9 @@ export interface CustomAgentConfig {
   // MCP服务选择模式：all=全部启用的MCP服务, selected=指定服务, none=不使用MCP
   mcp_selection_mode?: 'all' | 'selected' | 'none';
   mcp_services?: string[];          // 选择的MCP服务ID列表
+  // 对话中触发 OAuth 授权时的等待超时（秒）：到点后自动跳过授权提示。
+  // <=0 时使用服务端默认超时。仅对使用 OAuth 的 MCP 服务生效。
+  mcp_auth_wait_timeout?: number;
 
   // ===== Skills设置（仅Agent模式）=====
   // Skills选择模式：all=全部预装, selected=指定, none=不使用
@@ -259,7 +262,7 @@ export interface IMChannel {
   id: string;
   tenant_id?: number;
   agent_id: string;
-  platform: 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat';
+  platform: 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat' | 'qqbot';
   name: string;
   enabled: boolean;
   mode: 'webhook' | 'websocket' | 'longpoll';
@@ -326,11 +329,12 @@ export interface SuggestedQuestion {
 // 根据智能体关联的知识库范围返回推荐问题，用于前端对话面板快捷提问
 export function getSuggestedQuestions(
   agentId: string,
-  params?: { knowledge_base_ids?: string[]; knowledge_ids?: string[]; limit?: number }
+  params?: { knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; limit?: number }
 ) {
   const query = new URLSearchParams();
   if (params?.knowledge_base_ids?.length) query.set('knowledge_base_ids', params.knowledge_base_ids.join(','));
   if (params?.knowledge_ids?.length) query.set('knowledge_ids', params.knowledge_ids.join(','));
+  if (params?.tag_ids?.length) query.set('tag_ids', params.tag_ids.join(','));
   if (params?.limit) query.set('limit', String(params.limit));
   const qs = query.toString();
   return get<{ data: { questions: SuggestedQuestion[] } }>(`/api/v1/agents/${agentId}/suggested-questions${qs ? '?' + qs : ''}`);

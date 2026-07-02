@@ -14,3 +14,17 @@ test('timeline loading uses shared gray bounce dots on the axis', () => {
   assert.match(css, /animation:\s*chatTimelineTypingBounce/)
   assert.match(css, /animation-delay:\s*0\.2s/)
 })
+
+test('in-progress step titles get the streaming shimmer sweep', () => {
+  // Both timelines opt into the shimmer: agent (.action-pending) and RAG (.is-running).
+  assert.match(css, /\.action-card\.action-pending \.action-name,\s*\.action-name\.is-running/)
+  assert.match(css, /-webkit-background-clip:\s*text/)
+  assert.match(css, /animation:\s*chatStreamShimmer/)
+  assert.match(css, /@keyframes chatStreamShimmer/)
+})
+
+test('shimmer is disabled under reduced motion', () => {
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
+  const reducedBlock = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+  assert.match(reducedBlock, /animation:\s*none/)
+})

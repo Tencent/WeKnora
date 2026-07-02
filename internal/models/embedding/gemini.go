@@ -79,6 +79,11 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 	}
 
 	timeout := 60 * time.Second
+
+	if err := validateEmbeddingBaseURL(baseURL); err != nil {
+		return nil, err
+	}
+
 	return &GeminiEmbedder{
 		apiKey:               apiKey,
 		baseURL:              baseURL,
@@ -86,7 +91,7 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 		truncatePromptTokens: truncatePromptTokens,
 		dimensions:           dimensions,
 		modelID:              modelID,
-		httpClient:           &http.Client{Timeout: timeout},
+		httpClient:           newEmbeddingHTTPClient(timeout),
 		timeout:              timeout,
 		maxRetries:           3,
 		EmbedderPooler:       pooler,

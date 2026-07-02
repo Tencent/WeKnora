@@ -69,16 +69,15 @@ func NewJinaEmbedder(apiKey, baseURL, modelName string,
 
 	timeout := 60 * time.Second
 
-	// Create HTTP client
-	client := &http.Client{
-		Timeout: timeout,
+	if err := validateEmbeddingBaseURL(baseURL); err != nil {
+		return nil, err
 	}
 
 	return &JinaEmbedder{
 		apiKey:         apiKey,
 		baseURL:        baseURL,
 		modelName:      modelName,
-		httpClient:     client,
+		httpClient:     newEmbeddingHTTPClient(timeout),
 		EmbedderPooler: pooler,
 		dimensions:     dimensions,
 		modelID:        modelID,

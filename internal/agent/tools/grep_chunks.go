@@ -126,20 +126,17 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	// bounded so the LLM context stays small regardless of regex breadth.
 	const limit = 30
 
-	kbIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
 	kbTenantMap := t.searchTargets.GetKBTenantMap()
-
-	var allowedKnowledgeIDs []string
-	for _, target := range t.searchTargets {
-		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
-			allowedKnowledgeIDs = append(allowedKnowledgeIDs, target.KnowledgeIDs...)
-		}
+	fullKBIDs, knowledgeIDs, tagTargets := t.resolveGrepScope()
+	kbIDsForMeta := fullKBIDs
+	if len(kbIDsForMeta) == 0 {
+		kbIDsForMeta = t.searchTargets.GetAllKnowledgeBaseIDs()
 	}
 
-	logger.Infof(ctx, "[Tool][GrepChunks] Queries: %v, Limit: %d, KBs: %v, KnowledgeIDs: %v",
-		queries, limit, kbIDs, allowedKnowledgeIDs)
+	logger.Infof(ctx, "[Tool][GrepChunks] Queries: %v, Limit: %d, fullKBs: %d, knowledgeIDs: %d, tagScopes: %d",
+		queries, limit, len(fullKBIDs), len(knowledgeIDs), len(tagTargets))
 
-	results, err := t.searchChunks(ctx, queries, kbIDs, allowedKnowledgeIDs, kbTenantMap)
+	results, err := t.searchChunks(ctx, queries, fullKBIDs, knowledgeIDs, tagTargets, kbTenantMap)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Search failed: %v", err)
 		return &types.ToolResult{
@@ -217,7 +214,7 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			"result_count":       len(chunkResults),
 			"document_count":     documentCount,
 			"total_matches":      len(finalResults),
-			"knowledge_base_ids": kbIDs,
+			"knowledge_base_ids": kbIDsForMeta,
 			"limit":              limit,
 			"max_results":        limit, // legacy alias
 			"display_type":       "grep_results",
@@ -254,16 +251,127 @@ func (t *GrepChunksTool) regexOperatorForDialect() string {
 	}
 }
 
+// resolveGrepScope splits search targets into full-KB, specific-knowledge, and
+// tag-constrained KB scopes. Tag scopes stay as tag IDs so the chunk query can
+// use the knowledge_tag_relations index instead of expanding a large tag into a
+// huge knowledge_id IN list.
+func (t *GrepChunksTool) resolveGrepScope() (fullKBIDs, knowledgeIDs []string, tagTargets []*types.SearchTarget) {
+	seenKB := make(map[string]bool)
+	seenKnowledge := make(map[string]bool)
+	seenTagScope := make(map[string]bool)
+	for _, target := range t.searchTargets {
+		if target == nil || target.KnowledgeBaseID == "" {
+			continue
+		}
+		switch {
+		case len(target.KnowledgeIDs) > 0:
+			for _, kid := range target.KnowledgeIDs {
+				if kid != "" && !seenKnowledge[kid] {
+					seenKnowledge[kid] = true
+					knowledgeIDs = append(knowledgeIDs, kid)
+				}
+			}
+		case len(target.TagIDs) > 0:
+			tenantID := target.TenantID
+			if tenantID == 0 {
+				tenantID = t.searchTargets.GetTenantIDForKB(target.KnowledgeBaseID)
+			}
+			tagIDs := dedupNonEmptyStrings(target.TagIDs)
+			if len(tagIDs) == 0 || tenantID == 0 {
+				continue
+			}
+			scopeKey := fmt.Sprintf("%s:%d:%s", target.KnowledgeBaseID, tenantID, strings.Join(tagIDs, "\x00"))
+			if seenTagScope[scopeKey] {
+				continue
+			}
+			seenTagScope[scopeKey] = true
+			tagTargets = append(tagTargets, &types.SearchTarget{
+				Type:            types.SearchTargetTypeKnowledgeBase,
+				KnowledgeBaseID: target.KnowledgeBaseID,
+				TenantID:        tenantID,
+				TagIDs:          tagIDs,
+			})
+		default:
+			if !seenKB[target.KnowledgeBaseID] {
+				seenKB[target.KnowledgeBaseID] = true
+				fullKBIDs = append(fullKBIDs, target.KnowledgeBaseID)
+			}
+		}
+	}
+	return fullKBIDs, knowledgeIDs, tagTargets
+}
+
+func dedupNonEmptyStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+// scopeClause builds the SQL predicate restricting chunks to the active scope.
+// Specific knowledge IDs, tag-constrained KB scopes, and full-KB (kb, tenant)
+// pairs are OR'd together so a turn that mentions @KB + @tag + @file searches
+// every requested scope. Returns ("", nil) when no usable scope exists.
+func scopeClause(
+	kbIDs, knowledgeIDs []string,
+	tagTargets []*types.SearchTarget,
+	kbTenantMap map[string]uint64,
+) (string, []interface{}) {
+	var clauses []string
+	var args []interface{}
+	if len(knowledgeIDs) > 0 {
+		clauses = append(clauses, "chunks.knowledge_id IN ?")
+		args = append(args, knowledgeIDs)
+	}
+	for _, target := range tagTargets {
+		if target == nil || target.KnowledgeBaseID == "" || len(target.TagIDs) == 0 {
+			continue
+		}
+		tenantID := target.TenantID
+		if tenantID == 0 {
+			tenantID = kbTenantMap[target.KnowledgeBaseID]
+		}
+		if tenantID == 0 {
+			continue
+		}
+		clauses = append(clauses,
+			"(chunks.knowledge_base_id = ? AND chunks.tenant_id = ? AND EXISTS ("+
+				"SELECT 1 FROM knowledge_tag_relations ktr "+
+				"WHERE ktr.knowledge_id = chunks.knowledge_id AND ktr.tag_id IN ?"+
+				"))")
+		args = append(args, target.KnowledgeBaseID, tenantID, target.TagIDs)
+	}
+	for _, kbID := range kbIDs {
+		tenantID := kbTenantMap[kbID]
+		if tenantID == 0 {
+			continue
+		}
+		clauses = append(clauses, "(chunks.knowledge_base_id = ? AND chunks.tenant_id = ?)")
+		args = append(args, kbID, tenantID)
+	}
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return "(" + strings.Join(clauses, " OR ") + ")", args
+}
+
 // searchChunks performs the database search using regex queries.
 func (t *GrepChunksTool) searchChunks(
 	ctx context.Context,
 	queries []string,
 	kbIDs []string,
 	knowledgeIDs []string,
+	tagTargets []*types.SearchTarget,
 	kbTenantMap map[string]uint64,
 ) ([]chunkWithTitle, error) {
-	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 {
-		logger.Warnf(ctx, "[Tool][GrepChunks] No kbIDs or knowledgeIDs specified, returning empty results")
+	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 && len(tagTargets) == 0 {
+		logger.Warnf(ctx, "[Tool][GrepChunks] No kbIDs, knowledgeIDs, or tag scopes specified, returning empty results")
 		return nil, nil
 	}
 
@@ -278,26 +386,17 @@ func (t *GrepChunksTool) searchChunks(
 		Where("chunks.deleted_at IS NULL").
 		Where("knowledges.deleted_at IS NULL")
 
-	if len(knowledgeIDs) > 0 {
-		query = query.Where("chunks.knowledge_id IN ?", knowledgeIDs)
-		logger.Infof(ctx, "[Tool][GrepChunks] Filtering by %d specific knowledge IDs", len(knowledgeIDs))
-	} else if len(kbIDs) > 0 {
-		var conditions []string
-		var args []interface{}
-		for _, kbID := range kbIDs {
-			tenantID := kbTenantMap[kbID]
-			if tenantID > 0 {
-				conditions = append(conditions, "(chunks.knowledge_base_id = ? AND chunks.tenant_id = ?)")
-				args = append(args, kbID, tenantID)
-			}
-		}
-		if len(conditions) > 0 {
-			query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
-		} else {
-			logger.Warnf(ctx, "[Tool][GrepChunks] No valid KB-tenant pairs found")
-			return nil, nil
-		}
+	// Combine specific knowledge IDs, tag scopes, and full-KB scopes with OR so
+	// that mixing @KB with @tag/@file searches BOTH, mirroring knowledge_search's
+	// concurrent fan-out instead of dropping one side.
+	scopeSQL, scopeArgs := scopeClause(kbIDs, knowledgeIDs, tagTargets, kbTenantMap)
+	if scopeSQL == "" {
+		logger.Warnf(ctx, "[Tool][GrepChunks] No valid scope (kb-tenant pairs / knowledge IDs)")
+		return nil, nil
 	}
+	logger.Infof(ctx, "[Tool][GrepChunks] Scope: %d knowledge IDs, %d tag scopes, %d KBs",
+		len(knowledgeIDs), len(tagTargets), len(kbIDs))
+	query = query.Where(scopeSQL, scopeArgs...)
 
 	// For MySQL/SQLite REGEXP case-insensitivity we rely on the column's default
 	// collation (utf8mb4_general_ci etc.) OR the driver's REGEXP implementation,

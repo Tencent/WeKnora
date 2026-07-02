@@ -38,6 +38,23 @@ func (s *stubSessionServiceForEmbed) GetSession(_ context.Context, id string) (*
 	return sess, nil
 }
 
+func (s *stubSessionServiceForEmbed) GetSessionByID(_ context.Context, tenantID uint64, id string) (*types.Session, error) {
+	sess, ok := s.sessions[id]
+	if !ok || sess.TenantID != tenantID {
+		return nil, errors.New("session not found")
+	}
+	return sess, nil
+}
+
+func (s *stubSessionServiceForEmbed) SetSessionOwnerID(_ context.Context, tenantID uint64, sessionID, ownerID string) error {
+	sess, ok := s.sessions[sessionID]
+	if !ok || sess.TenantID != tenantID {
+		return errors.New("session not found")
+	}
+	sess.UserID = ownerID
+	return nil
+}
+
 func (s *stubSessionServiceForEmbed) CreateSession(_ context.Context, session *types.Session) (*types.Session, error) {
 	created := *session
 	if created.ID == "" {
@@ -170,8 +187,8 @@ func TestEnsureEmbedSessionWrongTenant(t *testing.T) {
 	if err := h.ensureEmbedSession(c); err == nil {
 		t.Fatal("expected error for cross-tenant session")
 	}
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusNotFound, w.Body.String())
 	}
 }
 

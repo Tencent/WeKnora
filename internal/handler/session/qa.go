@@ -31,6 +31,10 @@ type qaRequestContext struct {
 	assistantMessage  *types.Message
 	knowledgeBaseIDs  []string
 	knowledgeIDs      []string
+	tagScopes         []types.TagScope
+	tagIDs            []string
+	mcpServiceIDs     []string
+	skillNames        []string
 	summaryModelID    string
 	webSearchEnabled  bool
 	enableMemory      bool // Whether memory feature is enabled
@@ -59,6 +63,9 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		CustomAgent:        rc.customAgent,
 		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
 		KnowledgeIDs:       rc.knowledgeIDs,
+		TagScopes:          rc.tagScopes,
+		MCPServiceIDs:      rc.mcpServiceIDs,
+		SkillNames:         rc.skillNames,
 		ImageURLs:          imageURLs,
 		ImageDescription:   imageDescription,
 		UserMessageID:      rc.userMessageID,
@@ -240,6 +247,15 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	//      had memory enabled in practice, keep that behaviour.
 	enableMemory := h.resolveEnableMemory(ctx, request.EnableMemory)
 
+	tagScopes := mergeTagScopesFromRequestIDs(
+		tagScopesFromMentionedItems(request.MentionedItems),
+		dedupRequestStrings(request.TagIDs),
+		secutils.SanitizeForLogArray(kbIDs),
+	)
+	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
+	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
+	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
+
 	// Build request context
 	reqCtx := &qaRequestContext{
 		ctx:         ctx,
@@ -259,6 +275,10 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		},
 		knowledgeBaseIDs:  secutils.SanitizeForLogArray(kbIDs),
 		knowledgeIDs:      secutils.SanitizeForLogArray(knowledgeIDs),
+		tagScopes:         tagScopes,
+		tagIDs:            secutils.SanitizeForLogArray(tagIDs),
+		mcpServiceIDs:     secutils.SanitizeForLogArray(mcpServiceIDs),
+		skillNames:        secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:    secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:  request.WebSearchEnabled,
 		enableMemory:      enableMemory,
@@ -583,28 +603,6 @@ func (h *Handler) AgentQA(c *gin.Context) {
 			agentModeEnabled, reqCtx.customAgent.Config.AgentMode)
 	}
 
-	// Tenant-RBAC gate: block Viewers from running agents whose author
-	// has cleared RunnableByViewer. The flag exists so an admin can mark
-	// an agent as "internal tools only" without turning every viewer
-	// into a contributor. Gated behind cfg.Tenant.EnableRBAC so the
-	// check is dormant during the rollout window — same pattern as
-	// middleware/rbac.go.
-	if agentModeEnabled && reqCtx.customAgent != nil && !reqCtx.customAgent.RunnableByViewer {
-		role := types.TenantRoleFromContext(reqCtx.ctx)
-		if !role.HasPermission(types.TenantRoleContributor) {
-			if h.config != nil && h.config.Tenant.IsRBACEnforced() {
-				logger.Warnf(reqCtx.ctx,
-					"[rbac] agent run blocked: viewer cannot run runnable_by_viewer=false agent: agent=%s role=%s",
-					reqCtx.customAgent.ID, role)
-				c.Error(errors.NewForbiddenError("Forbidden: this agent is restricted to contributors and above"))
-				return
-			}
-			logger.Warnf(reqCtx.ctx,
-				"[rbac] agent run would be blocked (logged, not enforced): agent=%s role=%s",
-				reqCtx.customAgent.ID, role)
-		}
-	}
-
 	// Sanity gate: agent mode requires a resolved CustomAgent. If we got
 	// here with agent_enabled=true but agent_id missing/unresolvable, the
 	// AgentQA service will fail deep inside the async goroutine with a
@@ -909,6 +907,10 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		ModelID:          reqCtx.summaryModelID,
 		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:     reqCtx.knowledgeIDs,
+		TagIDs:           reqCtx.tagIDs,
+		MCPServiceIDs:    reqCtx.mcpServiceIDs,
+		SkillNames:       reqCtx.skillNames,
+		MentionedItems:   reqCtx.mentionedItems,
 		WebSearchEnabled: reqCtx.webSearchEnabled,
 	}
 

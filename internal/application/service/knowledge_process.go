@@ -3099,7 +3099,12 @@ func (s *knowledgeService) convert(
 	s.beginStage(ctx, knowledge.ID, types.StageDocReader, docInput)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
-	overrides := s.getParserEngineOverridesFromContext(ctx)
+	tenantOverrides := s.getParserEngineOverridesFromContext(ctx)
+	var uploadOverrides map[string]string
+	if processOverrides, err := knowledge.ProcessOverrides(); err == nil && processOverrides != nil {
+		uploadOverrides = processOverrides.ParserEngineOverrides
+	}
+	mergedOverrides := MergeParserEngineOverrides(tenantOverrides, uploadOverrides)
 
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {
@@ -3122,7 +3127,7 @@ func (s *knowledgeService) convert(
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
 
-	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
+	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, mergedOverrides)
 	if reader == nil {
 		logger.Errorf(ctx, "[convert] no doc reader for kb=%s knowledge=%s fileType=%s engine=%q isURL=%v",
 			kb.ID, knowledge.ID, fileType, parserEngine, isURL)
@@ -3140,7 +3145,7 @@ func (s *knowledgeService) convert(
 		Title:                 knowledge.Title,
 		ParserEngine:          parserEngine,
 		RequestID:             payload.RequestId,
-		ParserEngineOverrides: overrides,
+		ParserEngineOverrides: mergedOverrides,
 	}
 
 	if !isURL {
@@ -3371,4 +3376,39 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
 		}
 	}
+}
+
+// ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.
+func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *asynq.Task) error {
+	var payload types.KnowledgeListReparsePayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		logger.Errorf(ctx, "Failed to unmarshal knowledge list reparse payload: %v", err)
+		return err
+	}
+
+	logger.Infof(ctx, "Processing knowledge list reparse task for %d knowledge items", len(payload.KnowledgeIDs))
+
+	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
+		return err
+	}
+
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+
+	var failed int
+	for _, id := range payload.KnowledgeIDs {
+		if _, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig); err != nil {
+			logger.Errorf(ctx, "Failed to reparse knowledge %s: %v", id, err)
+			failed++
+		}
+	}
+
+	if failed > 0 {
+		logger.Warnf(ctx, "Knowledge list reparse completed with %d failures out of %d", failed, len(payload.KnowledgeIDs))
+	}
+	logger.Infof(ctx, "Knowledge list reparse task finished: %d submitted, %d failed",
+		len(payload.KnowledgeIDs)-failed, failed)
+	return nil
 }

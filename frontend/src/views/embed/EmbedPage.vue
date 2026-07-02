@@ -29,6 +29,7 @@
         v-if="sessionId"
         :session-id="sessionId"
         :session-sig="sessionSig"
+        :visitor-id="visitorId"
         :channel-id="channelId"
         :token="token"
         :agent-id="config.agent_id"
@@ -69,6 +70,7 @@ const {
   config,
   sessionId,
   sessionSig,
+  visitorId,
   loadError,
   awaitingToken,
   bootstrapping,

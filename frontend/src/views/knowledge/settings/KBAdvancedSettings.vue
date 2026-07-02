@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, withDefaults } from 'vue'
+import { ref, watch } from 'vue'
 
 interface QuestionGenerationConfig {
   enabled: boolean

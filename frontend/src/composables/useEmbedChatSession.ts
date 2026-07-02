@@ -25,6 +25,7 @@ import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize'
 export function useEmbedChatSession(options: {
   sessionId: Ref<string>
   sessionSig: Ref<string>
+  visitorId: Ref<string>
   channelId: string
   token: string
   agentId: string
@@ -315,6 +316,7 @@ export function useEmbedChatSession(options: {
       url: endpoint,
       embed_token: options.token,
       embed_session_sig: options.sessionSig.value,
+      embed_visitor_id: options.visitorId.value,
     })
   }
 

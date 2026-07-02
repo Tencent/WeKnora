@@ -64,16 +64,15 @@ func NewOpenAIEmbedder(apiKey, baseURL, modelName string,
 
 	timeout := 60 * time.Second
 
-	// Create HTTP client
-	client := &http.Client{
-		Timeout: timeout,
+	if err := validateEmbeddingBaseURL(baseURL); err != nil {
+		return nil, err
 	}
 
 	return &OpenAIEmbedder{
 		apiKey:               apiKey,
 		baseURL:              baseURL,
 		modelName:            modelName,
-		httpClient:           client,
+		httpClient:           newEmbeddingHTTPClient(timeout),
 		truncatePromptTokens: truncatePromptTokens,
 		EmbedderPooler:       pooler,
 		dimensions:           dimensions,

@@ -84,7 +84,7 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs)
+	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 	}
@@ -99,8 +99,8 @@ func (s *sessionService) KnowledgeQA(
 		len(searchTargets),
 	)
 
-	// Get UserID from context
-	userID, _ := types.UserIDFromContext(ctx)
+	// Scope memory and pipeline attribution to the same owner as the session.
+	userID := types.SessionOwnerIDFromContext(ctx)
 
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
@@ -431,6 +431,7 @@ func (s *sessionService) buildSearchTargets(
 	tenantID uint64,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
+	tagScopes []types.TagScope,
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
 
@@ -517,7 +518,55 @@ func (s *sessionService) buildSearchTargets(
 		}
 	}
 
-	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial KB, kbTenantMap=%v",
+	if len(tagScopes) > 0 {
+		tagKBIDs := make([]string, 0, len(tagScopes))
+		for _, scope := range tagScopes {
+			if scope.KnowledgeBaseID != "" && !fullKBSet[scope.KnowledgeBaseID] {
+				tagKBIDs = append(tagKBIDs, scope.KnowledgeBaseID)
+			}
+		}
+		kbByID := make(map[string]*types.KnowledgeBase, len(tagKBIDs))
+		if len(tagKBIDs) > 0 {
+			if kbs, err := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, tagKBIDs); err == nil {
+				for _, kb := range kbs {
+					if kb != nil {
+						kbByID[kb.ID] = kb
+					}
+				}
+			}
+		}
+		userID, _ := types.UserIDFromContext(ctx)
+		for _, scope := range tagScopes {
+			if scope.KnowledgeBaseID == "" || len(scope.TagIDs) == 0 || fullKBSet[scope.KnowledgeBaseID] {
+				continue
+			}
+			kbTenant := kbTenantMap[scope.KnowledgeBaseID]
+			if kbTenant == 0 {
+				kb := kbByID[scope.KnowledgeBaseID]
+				if kb == nil || kb.TenantID == tenantID {
+					kbTenant = tenantID
+				} else if s.kbShareService != nil && userID != "" {
+					hasAccess, _ := s.kbShareService.HasTenantKBPermission(ctx, scope.KnowledgeBaseID, tenantID, callerTenantRole, types.OrgRoleViewer)
+					if hasAccess {
+						kbTenant = kb.TenantID
+					} else {
+						kbTenant = tenantID
+					}
+				} else {
+					kbTenant = tenantID
+				}
+				kbTenantMap[scope.KnowledgeBaseID] = kbTenant
+			}
+			targets = append(targets, &types.SearchTarget{
+				Type:            types.SearchTargetTypeKnowledgeBase,
+				KnowledgeBaseID: scope.KnowledgeBaseID,
+				TenantID:        kbTenant,
+				TagIDs:          append([]string(nil), scope.TagIDs...),
+			})
+		}
+	}
+
+	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial/tag KB, kbTenantMap=%v",
 		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
 
 	return targets, nil
@@ -674,7 +723,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, nil)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 	}
@@ -685,7 +734,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Create default retrieval parameters — prefer tenant RetrievalConfig, fallback to built-in defaults
-	userID, _ := types.UserIDFromContext(ctx)
+	userID := types.SessionOwnerIDFromContext(ctx)
 
 	// Load tenant-level retrieval config (nil is safe — GetEffective* methods handle nil receiver)
 	var rc *types.RetrievalConfig

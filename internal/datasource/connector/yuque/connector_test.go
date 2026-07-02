@@ -4,10 +4,18 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestMain(m *testing.M) {
+	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+	os.Exit(m.Run())
+}
 
 func makeDSConfig(f *fakeYuque, resourceIDs []string) *types.DataSourceConfig {
 	return &types.DataSourceConfig{
@@ -69,7 +77,7 @@ func TestConnector_ListResources_Aggregates(t *testing.T) {
 		{ID: 30, Slug: "bb", Name: "B Book", Type: "Book", Namespace: "team-b/bb"},
 	}})
 
-	resources, err := NewConnector().ListResources(context.Background(), makeDSConfig(f, nil))
+	resources, err := NewConnector().ListResources(context.Background(), makeDSConfig(f, nil), "")
 	if err != nil {
 		t.Fatalf("ListResources: %v", err)
 	}
@@ -108,7 +116,7 @@ func TestConnector_ListResources_DedupByID(t *testing.T) {
 		{ID: 99, Slug: "shared", Type: "Book", Namespace: "alice/shared"},
 	}})
 
-	resources, err := NewConnector().ListResources(context.Background(), makeDSConfig(f, nil))
+	resources, err := NewConnector().ListResources(context.Background(), makeDSConfig(f, nil), "")
 	if err != nil {
 		t.Fatalf("ListResources: %v", err)
 	}
@@ -457,7 +465,7 @@ func TestConnector_ListResources_ContinuesOnGroupFailure(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message":"forbidden"}`))
 	})
 
-	resources, err := NewConnector().ListResources(context.Background(), makeDSConfig(f, nil))
+	resources, err := NewConnector().ListResources(context.Background(), makeDSConfig(f, nil), "")
 	if err != nil {
 		t.Fatalf("ListResources should not fail on per-group error, got %v", err)
 	}

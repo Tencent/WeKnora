@@ -13,6 +13,10 @@ type SessionService interface {
 	CreateSession(ctx context.Context, session *types.Session) (*types.Session, error)
 	// GetSession gets a session
 	GetSession(ctx context.Context, id string) (*types.Session, error)
+	// GetSessionByID loads a session by tenant and id without user scoping.
+	GetSessionByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error)
+	// SetSessionOwnerID assigns sessions.user_id for the given session row.
+	SetSessionOwnerID(ctx context.Context, tenantID uint64, sessionID, ownerID string) error
 	// GetSessionsByTenant gets all sessions of a tenant
 	GetSessionsByTenant(ctx context.Context) ([]*types.Session, error)
 	// GetPagedSessionsByTenant gets paged sessions of a tenant
@@ -61,6 +65,9 @@ type SessionRepository interface {
 	Create(ctx context.Context, session *types.Session) (*types.Session, error)
 	// Get gets a session visible to the tenant/user scope.
 	Get(ctx context.Context, tenantID uint64, userID string, id string) (*types.Session, error)
+	// GetByID loads a session by tenant and id without user scoping. Callers
+	// must enforce access (e.g. embed channel + session signature).
+	GetByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error)
 	// GetByTenantID gets all sessions visible to the tenant/user scope.
 	GetByTenantID(ctx context.Context, tenantID uint64, userID string) ([]*types.Session, error)
 	// GetPagedByTenantID gets paged sessions visible to the tenant/user scope.
@@ -69,6 +76,8 @@ type SessionRepository interface {
 	QueryPaged(ctx context.Context, q *types.SessionListQuery) ([]*types.SessionListItem, int64, error)
 	// Update updates a session visible to the tenant/user scope.
 	Update(ctx context.Context, session *types.Session, userID string) (int64, error)
+	// SetOwnerID assigns sessions.user_id for a tenant-scoped row.
+	SetOwnerID(ctx context.Context, tenantID uint64, id, ownerID string) (int64, error)
 	// UpdateLastRequestState persists the most recent input-bar state for a
 	// session (agent, model, KB scope, etc.) so the chat UI can restore it
 	// when the session is reopened. Scope rules match Update.

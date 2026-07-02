@@ -2,6 +2,73 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.3] - 2026-06-26
+
+### New Features
+
+- **NEW**: **Website Embed Widget & Channels** — the headline of this release. Publish custom agents to external websites via embed channels with domain allowlists, per-minute / per-day rate limiting, and secure-mode token exchange (`em_…` publish token → short-lived `ems_…` session token). Ships `weknora-widget.js`, a standalone embed chat UI, visitor session management, and a unified **Integrations Center** for IM + embed channel editors with agent rebind and live preview. See [`docs/embed-secure-mode.md`](./docs/embed-secure-mode.md) and [`docs/embed-subdomain.md`](./docs/embed-subdomain.md).
+- **NEW**: **Chat Experience Overhaul** — unified markdown rendering pipeline with citation popovers, chunk caching, shared resource chips, and `@` mention browsing of recent files; RAG pipeline progress events surfaced in a dedicated timeline component; agent stream display refactor with tool-result rendering, thinking blocks, shimmer streaming tail, and typewriter effect; large tool outputs trimmed via agent-side persistence.
+- **NEW**: **Document Multi-Tag** — documents can carry multiple tags (`knowledge_tag_ids` many-to-many via migration `000063_knowledge_multi_tags`); tag manage drawer, redesigned tag chips / edit dialog, and unified document tag filter in the KB list.
+- **NEW**: **Batch Document Reparse** — `POST /knowledge/batch-reparse` re-queues parsing for multiple documents with optional `process_config`; async task UI refreshes after enqueue.
+- **NEW**: **Wiki Folder & Hierarchy** — folder CRUD, page move, category hierarchy metadata, taxonomy planning APIs, and category navigation in the Wiki browser (migration `000061_wiki_page_hierarchy`).
+- **NEW**: **RSS Data Source Connector** — subscribe to RSS / Atom feeds for full-text ingestion with incremental sync and partial-failure surfacing.
+- **NEW**: **MCP OAuth2 Authorization** — OAuth2 flow for remote MCP services (migration `000062_mcp_oauth`); plus custom HTTP headers and JSON code-import for MCP service configuration.
+- **NEW**: **EPUB & MHTML Document Support** — new docreader parsers with image-resolution and Markdown-structure preservation for MHTML.
+- **NEW**: **PDF Scanned-Page OCR Override** — force OCR parsing on scanned PDF pages via `process_config`; upload overview reflects scanned-PDF detection.
+- **NEW**: **Model Test Debugger** — interactive drawer to probe saved chat / embedding / rerank / VLM model configs before binding them to KBs or agents.
+- **NEW**: **Agent Model Readiness** — agent selector enforces model readiness (missing / misconfigured models blocked with actionable hints); shared-agent readiness UX polished.
+- **NEW**: **Session Source Filter** — sidebar filter and grouping for sessions by source (Web / IM / Embed / etc.).
+- **NEW**: **Tenant Workspace Deletion UI** — self-service workspace deletion with membership purge on tenant delete.
+- **NEW**: **Embedding Dimension Override** — per-model `dimensions` override propagated to all embedding providers; fixes missing `dimensions` in API requests (#1654).
+- **NEW**: **RAG Pipeline Progress Events** — backend emits stage-level progress during retrieval / rerank / merge; Langfuse retrieve & rerank tracing enriched; agent reranks all knowledge-search hits with threshold filtering.
+
+### Improvements
+
+- **IMPROVED**: **IM agent stream display** aligned with web UI — thinking sections, tool progress, stream finalize hardening; DingTalk long-connection stale reconnect; custom-agent deletion cascades to IM bindings.
+- **IMPROVED**: **Settings UI** — service / store / MCP cards refactored with unified empty states; MCP config section in settings; modal navigation styles harmonized; small-screen overflow fixes.
+- **IMPROVED**: **Sidebar UX** — search + collapse toggles, session grouping, source switcher, and typography polish.
+- **IMPROVED**: **Knowledge** — parent-child chunk merge carries deep sub-heading context; imageinfo matching hardened; delete failures surfaced after retry exhaustion; KB deletion removes bound data sources.
+- **IMPROVED**: **Datasource editors** — lazy-load Feishu wiki resources; reveal pre-existing selections in deferred picker; edit flow clarifies that saving config does not trigger sync.
+- **IMPROVED**: **Model management** — deletion blocked when model is referenced by KB or agent; optional embedding-model descriptions in i18n.
+- **IMPROVED**: **Tencent VectorDB** — replica count configurable via env; collection compatibility hardened.
+- **IMPROVED**: **Performance** — compile-once regexps in SQL validation, LLM-JSON fence parsing, and sandbox command substitution.
+- **IMPROVED**: **Frontend build** — streamlined Docker frontend build via `scripts/build_frontend_dist.sh`; embed entry (`embed.html`) separated from main SPA.
+- **IMPROVED**: **Auth** — session resource caches cleared on logout to prevent cross-user leakage.
+
+### Bug Fixes
+
+- **FIXED**: Viewer role could not chat due to an unused `RunnableByViewer` gate.
+- **FIXED**: Agent thinking toggle and RAG-timeline reasoning display wired correctly.
+- **FIXED**: Auto-scroll for capped thinking blocks during streaming.
+- **FIXED**: Excel parser no longer emits image `DISPIMG` function strings as text.
+- **FIXED**: PaddleOCR-VL HTML table normalization (#1725).
+- **FIXED**: MHTML image resolution and Markdown structure preservation (#1743).
+- **FIXED**: EPUB / MHTML parser registration restored after refactor.
+- **FIXED**: Question-chunk ID mapping when copying to vector DB.
+- **FIXED**: RSS incremental sync partial failures now reported; Feishu wiki listing timeout via lazy load (#1672).
+- **FIXED**: SearXNG test-connection error messages clarified.
+- **FIXED**: Organization fetch cache invalidated after org creation.
+- **FIXED**: Stale tenant memberships purged on delete; switcher rows filtered.
+- **FIXED**: Writable shared KBs listed in manual knowledge editor.
+- **FIXED**: Wiki protected-provider images use placeholder `src` to avoid broken initial loads; citation chunks cleared on page deletion; LLM image URL masking prevents UUID corruption.
+- **FIXED**: `hybrid-search` accepts POST while keeping GET compatibility (#1727).
+- **FIXED**: Integrations redirect tab and lazy-loaded panel loading.
+- **FIXED**: Upload confirm dialog z-index below Settings modal.
+- **FIXED**: Knowledge timeline parser display.
+- **FIXED**: IM stream wait unblocked when QA fails before complete event.
+
+### Infrastructure & Build
+
+- **BUILD**: Migrations `000060_embed_channels`, `000061_wiki_page_hierarchy`, `000062_mcp_oauth`, `000063_knowledge_multi_tags`.
+- **BUILD**: Go client updated for embed channels, multi-tag knowledge, batch reparse, and wiki folder APIs.
+- **BUILD**: Swagger / API docs regenerated; `docs/api/` hand-written pages extended.
+
+### Documentation
+
+- **DOC**: `docs/embed-secure-mode.md`, `docs/embed-subdomain.md` added.
+- **DOC**: `docs/QA.md` extended for embed channels, multi-tag, batch reparse, MCP OAuth2, and RSS connector.
+- **DOC**: Architecture diagram updated for embed widget and input channels; simplified to architecture-level components.
+
 ## [0.6.2] - 2026-06-10
 
 ### New Features

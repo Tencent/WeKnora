@@ -31,21 +31,12 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	})
 
 	// Build messages with all context
-	language := types.LanguageNameFromContext(ctx)
-	systemPrompt := BuildSystemPromptWithOptions(
-		e.knowledgeBasesInfo,
-		e.config.WebSearchEnabled,
-		e.selectedDocs,
-		&BuildSystemPromptOptions{
-			Language: language,
-			Config:   e.appConfig,
-		},
-		e.systemPromptTemplate,
-	)
+	systemPrompt := e.buildSystemPrompt(ctx)
+	userTurn := e.RenderUserTurnContent(sessionID, query)
 
 	messages := []chat.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: query},
+		{Role: "user", Content: userTurn},
 	}
 
 	// Add all tool call results as context

@@ -61,14 +61,28 @@ type RecentDocInfo struct {
 	FAQAnswers          []string
 }
 
-// SelectedDocumentInfo contains summary information about a user-selected document (via @ mention)
-// Only metadata is included; content will be fetched via tools when needed
+// SelectedDocumentInfo contains summary information about a user-selected document (via @ mention).
+// Injected into the user message runtime_context (pinned_documents); content is fetched via tools.
 type SelectedDocumentInfo struct {
 	KnowledgeID     string // Knowledge ID
 	KnowledgeBaseID string // Knowledge base ID
 	Title           string // Document title
 	FileName        string // Original file name
 	FileType        string // File type (pdf, docx, etc.)
+}
+
+// PinnedMCPServiceInfo describes an MCP service explicitly @mentioned for this turn.
+type PinnedMCPServiceInfo struct {
+	ID          string
+	Name        string
+	Description string
+	ToolNames   []string // Registered tool.function names for this service (mcp_{service}_{tool})
+}
+
+// PinnedSkillInfo describes a preloaded skill explicitly @mentioned for this turn.
+type PinnedSkillInfo struct {
+	Name        string
+	Description string
 }
 
 // KnowledgeBaseInfo contains essential information about a knowledge base for agent prompt
@@ -159,7 +173,7 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 			} else {
 				b.WriteString("<recent_documents>\n")
 				for j, doc := range kb.RecentDocs {
-					if j >= 10 {
+					if j >= 2 {
 						break
 					}
 					docName := doc.Title
@@ -194,6 +208,9 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 //     placeholder is expanded to a short pointer so legacy / custom
 //     templates that still reference `{{knowledge_bases}}` degrade
 //     gracefully instead of dumping the detail twice.
+//   - `<must_use>` is NOT a placeholder — when the user @mentions MCP/Skill,
+//     observe.buildMustUseBlock injects it as a sibling block in the user
+//     message; system prompts document it by convention (see agent_system_prompt.yaml).
 func renderPromptPlaceholders(template string, knowledgeBases []*KnowledgeBaseInfo) string {
 	result := template
 
@@ -245,38 +262,6 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata) string {
 	return builder.String()
 }
 
-// formatSelectedDocuments formats selected documents for the prompt (summary only, no content)
-func formatSelectedDocuments(docs []*SelectedDocumentInfo) string {
-	if len(docs) == 0 {
-		return ""
-	}
-
-	var builder strings.Builder
-	builder.WriteString("\n### User Selected Documents (via @ mention)\n")
-	builder.WriteString("The user has explicitly selected the following documents. ")
-	builder.WriteString("**You should prioritize searching and retrieving information from these documents when answering.**\n")
-	builder.WriteString("Use `list_knowledge_chunks` with the provided Knowledge IDs to fetch their content.\n\n")
-
-	builder.WriteString("| # | Document Name | Type | Knowledge ID |\n")
-	builder.WriteString("|---|---------------|------|---------------|\n")
-
-	for i, doc := range docs {
-		title := doc.Title
-		if title == "" {
-			title = doc.FileName
-		}
-		fileType := doc.FileType
-		if fileType == "" {
-			fileType = "-"
-		}
-		builder.WriteString(fmt.Sprintf("| %d | %s | %s | `%s` |\n",
-			i+1, title, fileType, doc.KnowledgeID))
-	}
-	builder.WriteString("\n")
-
-	return builder.String()
-}
-
 // renderPromptPlaceholdersWithStatus renders placeholders including web search status
 // Supported placeholders:
 //   - {{knowledge_bases}}
@@ -320,17 +305,15 @@ type BuildSystemPromptOptions struct {
 func BuildSystemPrompt(
 	knowledgeBases []*KnowledgeBaseInfo,
 	webSearchEnabled bool,
-	selectedDocs []*SelectedDocumentInfo,
 	systemPromptTemplate ...string,
 ) string {
-	return BuildSystemPromptWithOptions(knowledgeBases, webSearchEnabled, selectedDocs, nil, systemPromptTemplate...)
+	return BuildSystemPromptWithOptions(knowledgeBases, webSearchEnabled, nil, systemPromptTemplate...)
 }
 
 // BuildSystemPromptWithOptions builds the system prompt with additional options like skills
 func BuildSystemPromptWithOptions(
 	knowledgeBases []*KnowledgeBaseInfo,
 	webSearchEnabled bool,
-	selectedDocs []*SelectedDocumentInfo,
 	options *BuildSystemPromptOptions,
 	systemPromptTemplate ...string,
 ) string {
@@ -360,11 +343,6 @@ func BuildSystemPromptWithOptions(
 		language = options.Language
 	}
 	basePrompt = renderPromptPlaceholdersWithStatus(template, knowledgeBases, webSearchEnabled, currentTime, language)
-
-	// Append selected documents section if any
-	if len(selectedDocs) > 0 {
-		basePrompt += formatSelectedDocuments(selectedDocs)
-	}
 
 	// Append skills metadata if available (Level 1 - Progressive Disclosure)
 	if options != nil && len(options.SkillsMetadata) > 0 {

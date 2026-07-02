@@ -1,20 +1,17 @@
 <script setup lang="ts">
-import feishuIcon from '@/assets/img/datasource-feishu.ico'
-import notionIcon from '@/assets/img/datasource-notion.ico'
-import yuqueIcon from '@/assets/img/datasource-yuque.ico'
+import { getDatasourceIconUrl, datasourceIconMap } from './datasourceIcons'
 
 const props = withDefaults(defineProps<{
   type: string
   size?: number
+  /** inline: 类型选择等小尺寸场景；badge: 嵌入 ds-card__badge 等父级徽章容器 */
+  variant?: 'inline' | 'badge'
 }>(), {
   size: 20,
+  variant: 'inline',
 })
 
-const iconMap: Record<string, string> = {
-  feishu: feishuIcon,
-  notion: notionIcon,
-  yuque: yuqueIcon,
-}
+const iconMap = datasourceIconMap
 
 function fallbackText(type: string) {
   switch (type) {
@@ -33,13 +30,15 @@ function fallbackText(type: string) {
 <template>
   <span
     class="ds-type-icon"
-    :style="{ width: `${size}px`, height: `${size}px` }"
+    :class="`ds-type-icon--${variant}`"
+    :style="variant === 'inline' ? { width: `${size}px`, height: `${size}px` } : undefined"
   >
     <img
       v-if="iconMap[type]"
       :src="iconMap[type]"
       :alt="type"
-      :style="{ width: `${size}px`, height: `${size}px` }"
+      class="ds-type-icon__img"
+      :style="variant === 'inline' ? { width: `${size}px`, height: `${size}px` } : undefined"
     >
     <span v-else class="ds-type-icon-fallback">{{ fallbackText(type) }}</span>
   </span>
@@ -52,18 +51,41 @@ function fallbackText(type: string) {
   justify-content: center;
   flex-shrink: 0;
   overflow: hidden;
+}
+
+.ds-type-icon--inline {
   border-radius: 6px;
   background: var(--td-bg-color-component);
 }
 
-.ds-type-icon img {
+.ds-type-icon--inline .ds-type-icon__img {
   display: block;
-  object-fit: cover;
+  object-fit: contain;
 }
 
-.ds-type-icon-fallback {
+.ds-type-icon--inline .ds-type-icon-fallback {
   font-size: 11px;
   font-weight: 600;
   color: var(--td-text-color-placeholder);
+}
+
+.ds-type-icon--badge {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.ds-type-icon--badge .ds-type-icon__img {
+  display: block;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.ds-type-icon--badge .ds-type-icon-fallback {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: inherit;
 }
 </style>

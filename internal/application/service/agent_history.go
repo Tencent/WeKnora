@@ -129,8 +129,8 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 	}
 	// Only append fallbacks when RenderedContent is absent — when present, it
 	// already carries the augmented version persisted by the original turn.
-	// Agent-mode turns currently do not persist RenderedContent, so attachments
-	// and image captions would otherwise be invisible to subsequent rounds.
+	// Agent-mode turns do not persist RenderedContent (scope envelopes are
+	// injected only for the current LLM call, not replayed from history).
 	if m.RenderedContent == "" {
 		if captions := extractImageCaptionsFromMessage(m.Images); captions != "" {
 			content += "\n\n[用户上传图片内容]\n" + captions

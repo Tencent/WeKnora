@@ -13,8 +13,9 @@ func boolPtr(v bool) *bool {
 func TestKnowledgeProcessOverridesRoundtrip(t *testing.T) {
 	k := &Knowledge{}
 	overrides := &KnowledgeProcessOverrides{
-		EnableMultimodel: boolPtr(true),
-		ChunkingConfig:   &ChunkingConfig{ChunkSize: 1024},
+		EnableMultimodel:      boolPtr(true),
+		ChunkingConfig:        &ChunkingConfig{ChunkSize: 1024},
+		ParserEngineOverrides: map[string]string{"pdf_force_scanned": "true"},
 	}
 	require.NoError(t, k.SetProcessOverrides(overrides))
 	got, err := k.ProcessOverrides()
@@ -22,6 +23,7 @@ func TestKnowledgeProcessOverridesRoundtrip(t *testing.T) {
 	require.NotNil(t, got)
 	require.True(t, *got.EnableMultimodel)
 	require.Equal(t, 1024, got.ChunkingConfig.ChunkSize)
+	require.Equal(t, "true", got.ParserEngineOverrides["pdf_force_scanned"])
 }
 
 func TestSetProcessOverridesPreservesOtherMetadata(t *testing.T) {

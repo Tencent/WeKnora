@@ -89,17 +89,11 @@ func (s *sessionService) AgentQA(
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 
-	// Get rerank model from custom agent config (only required when knowledge_search is allowed)
+	// Get rerank model from custom agent config only when knowledge_search can
+	// actually run. A disabled KB scope makes all KB tools ineffective, so it
+	// must not force users to configure an otherwise-unused rerank model.
 	var rerankModel rerank.Reranker
-	hasKnowledgeSearchTool := false
-	for _, tool := range agentConfig.AllowedTools {
-		if tool == tools.ToolKnowledgeSearch {
-			hasKnowledgeSearchTool = true
-			break
-		}
-	}
-
-	if hasKnowledgeSearchTool {
+	if agentRequiresRerankModel(req.CustomAgent) {
 		// Rerank model is resolved purely from the agent config now.
 		// We used to fall back to ConversationConfig.RerankModelID at
 		// the tenant level, but that path encouraged "leave rerank
@@ -121,7 +115,7 @@ func (s *sessionService) AgentQA(
 			return fmt.Errorf("failed to get rerank model: %w", err)
 		}
 	} else {
-		logger.Infof(ctx, "knowledge_search tool not enabled, skipping rerank model initialization")
+		logger.Infof(ctx, "knowledge_search is unavailable for the effective agent scope, skipping rerank model initialization")
 	}
 
 	// Load multi-turn history directly from DB (the single source of truth).
@@ -155,6 +149,7 @@ func (s *sessionService) AgentQA(
 		rerankModel,
 		eventBus,
 		sessionID,
+		req.AssistantMessageID,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create agent engine: %v", err)
@@ -188,6 +183,10 @@ func (s *sessionService) AgentQA(
 		agentQuery += req.Attachments.BuildPrompt()
 		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
 	}
+
+	// Scope envelopes (runtime_context / must_use) are injected per LLM call inside
+	// the agent engine only; we intentionally do not persist them on user messages
+	// so multi-turn history stays clean and is not skewed by stale @mention scope.
 
 	// Execute agent with streaming (asynchronously)
 	// Events will be emitted to EventBus and handled by the Handler layer
@@ -228,6 +227,7 @@ func (s *sessionService) buildAgentConfig(
 		HistoryTurns:                customAgent.Config.HistoryTurns,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
 		MCPServices:                 customAgent.Config.MCPServices,
+		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
@@ -251,6 +251,12 @@ func (s *sessionService) buildAgentConfig(
 	} else {
 		agentConfig.AllowedTools = tools.DefaultAllowedTools()
 	}
+	// Apply per-turn @Skill / @MCP scope. Each helper narrows the agent's
+	// whitelist to the mentioned items and records the pinned set used for the
+	// <must_use> hint, keeping all scope logic in one place per resource type.
+	isSharedAgent := req.Session != nil && req.Session.TenantID != customAgent.TenantID
+	applyPerRequestSkillScope(ctx, agentConfig, customAgent.Config.SkillsSelectionMode, req.SkillNames)
+	applyPerRequestMCPScope(ctx, agentConfig, customAgent.Config.MCPServices, isSharedAgent, req.MCPServiceIDs)
 
 	// Use custom agent's system prompt if specified
 	if customAgent.Config.SystemPrompt != "" {
@@ -279,15 +285,19 @@ func (s *sessionService) buildAgentConfig(
 	logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, req.Session.ID)
 
 	// Log knowledge bases if present
-	if len(agentConfig.KnowledgeBases) > 0 {
-		logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
-			len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
+	if len(agentConfig.KnowledgeBases) > 0 || len(req.TagScopes) > 0 {
+		if len(agentConfig.KnowledgeBases) > 0 {
+			logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
+				len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
+		} else {
+			logger.Infof(ctx, "Agent configured with %d tag-scoped search target(s)", len(req.TagScopes))
+		}
 	} else {
 		logger.Infof(ctx, "No knowledge bases specified for agent, running in pure agent mode")
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets for agent: %v", err)
 	}
@@ -299,6 +309,137 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	return agentConfig, nil
+}
+
+// applyPerRequestSkillScope narrows the agent's skill whitelist to the @Skill
+// mentions for this turn and records the pinned set for the <must_use> hint.
+// It is a no-op when no skills were mentioned or skills are disabled.
+func applyPerRequestSkillScope(
+	ctx context.Context,
+	agentConfig *types.AgentConfig,
+	skillsMode string,
+	requested []string,
+) {
+	if len(requested) == 0 {
+		return
+	}
+	if skillsMode == "none" || skillsMode == "" {
+		logger.Warnf(ctx, "Ignoring @skill mention: agent skills selection is disabled (mode=%s)", skillsMode)
+		return
+	}
+	if !agentConfig.SkillsEnabled {
+		return
+	}
+	switch skillsMode {
+	case "selected":
+		agentConfig.AllowedSkills = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
+		if len(agentConfig.AllowedSkills) == 0 {
+			agentConfig.SkillsEnabled = false
+		}
+	case "all":
+		agentConfig.AllowedSkills = dedupPreservingOrder(requested)
+	}
+	if agentConfig.SkillsEnabled && len(agentConfig.AllowedSkills) > 0 {
+		agentConfig.PinnedSkillNames = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
+	}
+	logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v pinned=%v",
+		requested, agentConfig.AllowedSkills, agentConfig.PinnedSkillNames)
+}
+
+// applyPerRequestMCPScope narrows the agent's MCP services to the @MCP mentions
+// for this turn and records the pinned set for the <must_use> hint. It is a
+// no-op when no services were mentioned or MCP selection is disabled.
+func applyPerRequestMCPScope(
+	ctx context.Context,
+	agentConfig *types.AgentConfig,
+	agentPresetMCPs []string,
+	isSharedAgent bool,
+	requested []string,
+) {
+	if len(requested) == 0 {
+		return
+	}
+	if agentConfig.MCPSelectionMode == "none" {
+		logger.Warnf(ctx, "Ignoring @MCP mention: agent MCP selection is disabled (mode=none)")
+		return
+	}
+	mentioned := dedupPreservingOrder(requested)
+	effective, mode := resolvePerRequestMCPScope(mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent)
+	if len(effective) == 0 {
+		logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
+			requested, agentPresetMCPs, isSharedAgent)
+		return
+	}
+	agentConfig.MCPSelectionMode = mode
+	agentConfig.MCPServices = effective
+	agentConfig.PinnedMCPServiceIDs = intersectPreservingRequestOrder(requested, agentConfig.MCPServices)
+	logger.Infof(ctx, "Applied per-request @MCP scope: requested=%v mode=%s effective=%v",
+		requested, agentConfig.MCPSelectionMode, agentConfig.MCPServices)
+}
+
+// resolvePerRequestMCPScope narrows MCP registration for a per-turn @mention.
+// selectionMode "none" rejects all mentions. Shared agents never register MCP
+// services outside the agent preset.
+func resolvePerRequestMCPScope(
+	mentioned, agentMCPs []string,
+	selectionMode string,
+	isSharedAgent bool,
+) (effective []string, mode string) {
+	if len(mentioned) == 0 {
+		return nil, selectionMode
+	}
+	if isSharedAgent {
+		mentioned = intersectPreservingRequestOrder(mentioned, agentMCPs)
+		if len(mentioned) == 0 {
+			return nil, selectionMode
+		}
+	}
+	switch selectionMode {
+	case "none":
+		return nil, selectionMode
+	case "selected":
+		effective = intersectPreservingRequestOrder(mentioned, agentMCPs)
+	case "all", "":
+		effective = mentioned
+	default:
+		effective = mentioned
+	}
+	if len(effective) == 0 {
+		return nil, selectionMode
+	}
+	return effective, "selected"
+}
+
+func intersectPreservingRequestOrder(requested []string, allowed []string) []string {
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		if value != "" {
+			allowedSet[value] = true
+		}
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, value := range requested {
+		if value == "" || seen[value] || !allowedSet[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func dedupPreservingOrder(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 // configureSkillsFromAgent configures skills settings in AgentConfig based on CustomAgentConfig

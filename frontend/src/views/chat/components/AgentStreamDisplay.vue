@@ -43,9 +43,9 @@
                         aria-hidden="true" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
                       <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think')
-                        }}</span>
-                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
                       }}</span>
+                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
+                        }}</span>
                     </div>
                   </div>
                   <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
@@ -85,7 +85,17 @@
                   :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
                   :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
                   :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
-                  :resolve-reason="event.resolve_reason" />
+                  :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
+              </div>
+
+              <!-- MCP OAuth in-conversation authorization prompt -->
+              <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
+                <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
+                  :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
+                  :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
+                  :resolved="event.resolved" :authorized="event.authorized"
+                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out" :canceled="event.canceled"
+                  v-bind="embedAuthProps" />
               </div>
 
               <!-- Tool Call Event (non-thinking) -->
@@ -231,7 +241,16 @@
               <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
                 :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
-                :approved="event.approved" :resolve-reason="event.resolve_reason" />
+                :approved="event.approved" :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
+            </div>
+
+            <!-- MCP OAuth in-conversation authorization prompt -->
+            <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
+              <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
+                :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
+                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
+                :authorized="event.authorized" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                :canceled="event.canceled" v-bind="embedAuthProps" />
             </div>
 
             <!-- Thinking Tool Call -->
@@ -243,7 +262,7 @@
                     <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
                     <span class="action-name">{{ $t('agent.think') }}</span>
                     <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number
-                      }}/{{ event.tool_data.total_thoughts }}</span>
+                    }}/{{ event.tool_data.total_thoughts }}</span>
                     <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
                       class="action-summary">{{ getThinkingSummary(event) }}</span>
                   </div>
@@ -260,7 +279,8 @@
             <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))"
               class="answer-event">
               <div v-if="event.content && event.content.trim()" class="answer-content markdown-content">
-                <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)"></div>
+                <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
+                </div>
               </div>
               <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
@@ -418,6 +438,7 @@ import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
+import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -434,7 +455,7 @@ import i18n from '@/i18n';
 import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
-import { getQueryText } from '@/utils/agent-tool-display';
+import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -480,6 +501,8 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   list_knowledge_chunks: 'agentStream.tools.listKnowledgeChunks',
   get_related_documents: 'agentStream.tools.getRelatedDocuments',
   get_document_content: 'agentStream.tools.getDocumentContent',
+  wiki_search: 'agentEditor.tools.wikiSearch',
+  wiki_read_page: 'agentEditor.tools.wikiReadPage',
   wiki_read_source_doc: 'agentStream.tools.wikiReadSourceDoc',
   todo_write: 'agentStream.tools.todoWrite',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
@@ -626,7 +649,8 @@ const wikiDrawerContent = computed(() => {
     return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
   });
 
-  return wrapChatMarkdownTables(marked.parse(preprocessed, { breaks: true, async: false }) as string);
+  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string;
+  return sanitizeMarkdownHTML(wrapChatMarkdownTables(html));
 });
 
 watch(wikiDrawerContent, async () => {
@@ -696,6 +720,7 @@ interface SessionData {
   isAgentMode?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
+  [key: string]: unknown;
 }
 
 const props = defineProps<{
@@ -705,8 +730,19 @@ const props = defineProps<{
   embeddedMode?: boolean;
   embedChannelId?: string;
   embedToken?: string;
+  embedSessionSig?: string;
+  embedVisitorId?: string;
   ragMode?: boolean;
 }>();
+
+const embedAuthProps = computed(() => ({
+  embeddedMode: props.embeddedMode,
+  embedChannelId: props.embedChannelId,
+  embedToken: props.embedToken,
+  embedSessionId: props.sessionId,
+  embedSessionSig: props.embedSessionSig,
+  embedVisitorId: props.embedVisitorId,
+}));
 
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
@@ -1334,9 +1370,8 @@ const displayEvents = computed(() => {
 
   const result = buildFullEventList(stream);
 
-  // Quick-answer RAG: only render the final answer stream here. Pipeline steps
-  // are ephemeral UI in RagPipelineProgress and are replaced by citations or
-  // answer output — never show tool_call cards in this component.
+  // Quick-answer RAG: pipeline steps and model thinking live in RagPipelineProgress;
+  // here we only render the final answer stream.
   if (props.ragMode) {
     return result.filter((e: any) => e.type === 'answer');
   }
@@ -1402,6 +1437,9 @@ const getEventKey = (event: any, index: number): string => {
   if (event.tool_call_id) return `tool-${event.tool_call_id}`;
   if (event.type === 'tool_approval_required' && event.pending_id) {
     return `approval-${event.pending_id}`;
+  }
+  if (event.type === 'mcp_oauth_required' && event.pending_id) {
+    return `mcp-oauth-${event.pending_id}`;
   }
   return `event-${index}-${event.type || 'unknown'}`;
 };
@@ -1581,7 +1619,7 @@ const onRootClick = (e: Event) => {
     const slug = wikiEl.getAttribute('data-slug');
 
     // Determine the relevant KB ID
-    const kbId = getKbIdForWiki(slug);
+    const kbId = getKbIdForWiki(slug || '');
 
     if (kbId && slug) {
       openWikiDrawer(kbId, slug);
@@ -1934,12 +1972,15 @@ const getToolTitle = (event: any): string => {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
     }
+    if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
+      return `${getLocalizedToolName(event.tool_name)}...`;
+    }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
   }
 
   const toolName = event.tool_name;
-  const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search';
+  const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search' || toolName === 'wiki_search';
   const isWebSearchTool = toolName === 'web_search';
   const isGrepTool = toolName === 'grep_chunks';
 
@@ -2019,6 +2060,16 @@ const getToolTitle = (event: any): string => {
     return baseTitle;
   }
 
+  if (toolName === 'wiki_read_page') {
+    const pageLabel = String(
+      event.tool_data?.title ||
+      getWikiPageText(event.arguments) ||
+      getWikiPageText(event.tool_data)
+    ).trim();
+    const baseTitle = getToolDescription(event);
+    return pageLabel ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」` : baseTitle;
+  }
+
   // Use tool summary if available
   const summary = getToolSummary(event);
   return summary || getToolDescription(event);
@@ -2042,6 +2093,9 @@ const getToolDescription = (event: any): string => {
 
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
     return success ? t('agentStream.toolStatus.searchKb') : t('agentStream.toolStatus.searchKbFailed');
+  } else if (toolName === 'wiki_search' || toolName === 'wiki_read_page') {
+    const localizedName = getLocalizedToolName(toolName);
+    return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else if (toolName === 'web_search') {
     return success ? t('agentStream.toolStatus.webSearch') : t('agentStream.toolStatus.webSearchFailed');
   } else if (toolName === 'grep_chunks') {
@@ -2621,11 +2675,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
   0%,
   60%,
   100% {
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 
   30% {
-    transform: translateY(-8px);
+    transform: translate3d(0, -5px, 0);
   }
 }
 
@@ -2962,6 +3016,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
       border-radius: 50%;
       background: var(--td-text-color-placeholder);
       animation: typingBounce 1.4s ease-in-out infinite;
+      // Composite each dot so the bounce stays smooth and ghost-free while the
+      // streaming answer relayouts every token.
+      will-change: transform;
+      backface-visibility: hidden;
 
       &:nth-child(1) {
         animation-delay: 0s;

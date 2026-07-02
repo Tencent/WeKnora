@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -18,16 +19,19 @@ import (
 type mcpServiceService struct {
 	mcpServiceRepo interfaces.MCPServiceRepository
 	mcpManager     *mcp.MCPManager
+	oauthRepo      interfaces.MCPOAuthRepository
 }
 
 // NewMCPServiceService creates a new MCP service service
 func NewMCPServiceService(
 	mcpServiceRepo interfaces.MCPServiceRepository,
 	mcpManager *mcp.MCPManager,
+	oauthRepo interfaces.MCPOAuthRepository,
 ) interfaces.MCPServiceService {
 	return &mcpServiceService{
 		mcpServiceRepo: mcpServiceRepo,
 		mcpManager:     mcpManager,
+		oauthRepo:      oauthRepo,
 	}
 }
 
@@ -168,14 +172,43 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		maps.Copy(preHeaders, existing.AuthConfig.CustomHeaders)
 	}
 
+	preAuthType := types.MCPAuthNone
+	preAPIKeyHeader := ""
+	if existing.AuthConfig != nil {
+		preAuthType = existing.AuthConfig.AuthType
+		preAPIKeyHeader = existing.AuthConfig.APIKeyHeader
+	}
+
 	// CustomHeaders flows through main PUT (it's structural, not a secret) —
 	// nil preserves, non-nil replaces. Other AuthConfig fields (APIKey/Token)
 	// are never accepted via main PUT; the handler strips them up front.
-	if service.AuthConfig != nil && service.AuthConfig.CustomHeaders != nil {
+	//
+	// auth_type / scopes / auth_server_metadata_url are non-secret OAuth
+	// configuration and also flow through here.
+	if service.AuthConfig != nil {
 		if existing.AuthConfig == nil {
 			existing.AuthConfig = &types.MCPAuthConfig{}
 		}
-		existing.AuthConfig.CustomHeaders = service.AuthConfig.CustomHeaders
+		if service.AuthConfig.CustomHeaders != nil {
+			existing.AuthConfig.CustomHeaders = service.AuthConfig.CustomHeaders
+		}
+		// Only overwrite OAuth config when explicitly provided, so a partial
+		// PUT that carries only custom_headers does not wipe an existing
+		// auth_type / scopes. (Empty/absent is treated as "no change".)
+		if service.AuthConfig.AuthType != types.MCPAuthNone {
+			existing.AuthConfig.AuthType = service.AuthConfig.AuthType
+		}
+		// APIKeyHeader is non-secret; empty means "use default X-API-Key", so a
+		// partial PUT that omits it is treated as no-change (mirrors scopes).
+		if service.AuthConfig.APIKeyHeader != "" {
+			existing.AuthConfig.APIKeyHeader = service.AuthConfig.APIKeyHeader
+		}
+		if service.AuthConfig.Scopes != nil {
+			existing.AuthConfig.Scopes = service.AuthConfig.Scopes
+		}
+		if service.AuthConfig.AuthServerMetadataURL != "" {
+			existing.AuthConfig.AuthServerMetadataURL = service.AuthConfig.AuthServerMetadataURL
+		}
 	}
 
 	// Merge updates: only update fields that are provided (non-zero or explicitly set)
@@ -257,6 +290,11 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	if !maps.Equal(currHeaders, preHeaders) {
 		configChanged = true
 	}
+	if existing.AuthConfig != nil &&
+		(existing.AuthConfig.AuthType != preAuthType ||
+			existing.AuthConfig.APIKeyHeader != preAPIKeyHeader) {
+		configChanged = true
+	}
 	name := secutils.SanitizeForLog(existing.Name)
 	// Close existing client connection if:
 	// 1. Service is now disabled (need to close connection)
@@ -307,6 +345,26 @@ func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint6
 }
 
 // TestMCPService tests the connection to an MCP service and returns available tools/resources
+// mcpTestFailure builds a failed MCPTestResult, upgrading a generic connection
+// error into an explicit "OAuth required" signal when the server answered with
+// an RFC 9728 OAuth challenge. This lets the UI guide the user to switch the
+// auth strategy to OAuth instead of showing a bare 401.
+func mcpTestFailure(err error, prefix string) *types.MCPTestResult {
+	var oerr *mcp.OAuthRequiredError
+	if errors.As(err, &oerr) {
+		return &types.MCPTestResult{
+			Success:       false,
+			OAuthRequired: true,
+			Message: "This MCP server requires OAuth authorization. " +
+				"Switch the auth method to OAuth 2.0 and authorize.",
+		}
+	}
+	return &types.MCPTestResult{
+		Success: false,
+		Message: fmt.Sprintf("%s: %v", prefix, err),
+	}
+}
+
 func (s *mcpServiceService) TestMCPService(
 	ctx context.Context,
 	tenantID uint64,
@@ -321,9 +379,17 @@ func (s *mcpServiceService) TestMCPService(
 		return nil, fmt.Errorf("MCP service not found")
 	}
 
-	// Create temporary client for testing
+	// Create temporary client for testing. For OAuth services, wire the
+	// per-user token store so the test connects with the current user's
+	// authorization (and surfaces an authorization-required message when the
+	// user has not authorized yet).
 	config := &mcp.ClientConfig{
 		Service: service,
+	}
+	if service.AuthConfig.IsOAuth() {
+		config.OAuthRepo = s.oauthRepo
+		config.TenantID, _ = types.TenantIDFromContext(ctx)
+		config.Principal, _ = types.PrincipalFromContext(ctx)
 	}
 
 	client, err := mcp.NewMCPClient(config)
@@ -339,20 +405,14 @@ func (s *mcpServiceService) TestMCPService(
 	defer cancel()
 
 	if err := client.Connect(testCtx); err != nil {
-		return &types.MCPTestResult{
-			Success: false,
-			Message: fmt.Sprintf("Connection failed: %v", err),
-		}, nil
+		return mcpTestFailure(err, "Connection failed"), nil
 	}
 	defer client.Disconnect()
 
 	// Initialize
 	initResult, err := client.Initialize(testCtx)
 	if err != nil {
-		return &types.MCPTestResult{
-			Success: false,
-			Message: fmt.Sprintf("Initialization failed: %v", err),
-		}, nil
+		return mcpTestFailure(err, "Initialization failed"), nil
 	}
 
 	// List tools
@@ -376,8 +436,9 @@ func (s *mcpServiceService) TestMCPService(
 			initResult.ServerInfo.Name,
 			initResult.ServerInfo.Version,
 		),
-		Tools:     tools,
-		Resources: resources,
+		Description: initResult.ServerInfo.Description,
+		Tools:       tools,
+		Resources:   resources,
 	}, nil
 }
 
@@ -397,7 +458,7 @@ func (s *mcpServiceService) GetMCPServiceTools(
 	}
 
 	// Get or create client
-	client, err := s.mcpManager.GetOrCreateClient(service)
+	client, err := s.mcpManager.GetOrCreateClient(ctx, service)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get MCP client: %w", err)
 	}
@@ -535,7 +596,7 @@ func (s *mcpServiceService) GetMCPServiceResources(
 	}
 
 	// Get or create client
-	client, err := s.mcpManager.GetOrCreateClient(service)
+	client, err := s.mcpManager.GetOrCreateClient(ctx, service)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get MCP client: %w", err)
 	}
@@ -548,4 +609,3 @@ func (s *mcpServiceService) GetMCPServiceResources(
 
 	return resources, nil
 }
-

@@ -306,6 +306,7 @@ curl --location --request POST 'http://localhost:8080/api/v1/mcp-services/mcp-00
     "data": {
         "success": true,
         "message": "连接成功",
+        "description": "提供全球天气信息查询",
         "tools": [
             {
                 "name": "get_weather",

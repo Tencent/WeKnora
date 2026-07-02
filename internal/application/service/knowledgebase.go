@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -37,6 +38,9 @@ type knowledgeBaseService struct {
 	fileSvc        interfaces.FileService
 	graphEngine    interfaces.RetrieveGraphRepository
 	asynqClient    interfaces.TaskEnqueuer
+	dsRepo         interfaces.DataSourceRepository
+	syncLogRepo    interfaces.SyncLogRepository
+	dsScheduler    *datasource.Scheduler
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -52,6 +56,9 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	fileSvc interfaces.FileService,
 	graphEngine interfaces.RetrieveGraphRepository,
 	asynqClient interfaces.TaskEnqueuer,
+	dsRepo interfaces.DataSourceRepository,
+	syncLogRepo interfaces.SyncLogRepository,
+	dsScheduler *datasource.Scheduler,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:           repo,
@@ -66,6 +73,9 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		fileSvc:        fileSvc,
 		graphEngine:    graphEngine,
 		asynqClient:    asynqClient,
+		dsRepo:         dsRepo,
+		syncLogRepo:    syncLogRepo,
+		dsScheduler:    dsScheduler,
 	}
 }
 
@@ -641,9 +651,15 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	}
 
 	// Step 1b: Remove all organization shares for this KB so org settings no longer show them
-	if delErr := s.shareRepo.DeleteByKnowledgeBaseID(ctx, id); delErr != nil {
-		logger.Warnf(ctx, "Failed to delete KB shares for knowledge base %s: %v", id, delErr)
+	if s.shareRepo != nil {
+		if delErr := s.shareRepo.DeleteByKnowledgeBaseID(ctx, id); delErr != nil {
+			logger.Warnf(ctx, "Failed to delete KB shares for knowledge base %s: %v", id, delErr)
+		}
 	}
+
+	// Step 1c: Stop and soft-delete all data sources bound to this KB so cron
+	// schedules and in-flight sync logs do not keep running against a deleted KB.
+	s.deleteDataSourcesForKnowledgeBase(ctx, id)
 
 	// Step 2: Enqueue async task for heavy cleanup operations
 	payload := types.KBDeletePayload{
@@ -822,6 +838,39 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 
 	logger.Infof(ctx, "KB delete task completed successfully, knowledge base ID: %s", kbID)
 	return nil
+}
+
+// deleteDataSourcesForKnowledgeBase mirrors DataSourceService.DeleteDataSource for
+// every data source attached to the KB. Errors on individual sources are logged
+// but do not fail KB deletion — the KB record is already soft-deleted.
+func (s *knowledgeBaseService) deleteDataSourcesForKnowledgeBase(ctx context.Context, kbID string) {
+	if s.dsRepo == nil {
+		return
+	}
+
+	dataSources, err := s.dsRepo.FindByKnowledgeBase(ctx, kbID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to list data sources for deleted KB %s: %v", kbID, err)
+		return
+	}
+	for _, ds := range dataSources {
+		if ds == nil || ds.ID == "" {
+			continue
+		}
+		if err := s.dsRepo.Delete(ctx, ds.ID); err != nil {
+			logger.Warnf(ctx, "Failed to delete data source %s for KB %s: %v", ds.ID, kbID, err)
+			continue
+		}
+		if s.dsScheduler != nil {
+			s.dsScheduler.Remove(ds.ID)
+		}
+		if s.syncLogRepo != nil {
+			if err := s.syncLogRepo.CancelPendingByDataSource(ctx, ds.ID); err != nil {
+				logger.Warnf(ctx, "Failed to cancel pending sync logs for ds=%s (kb=%s): %v", ds.ID, kbID, err)
+			}
+		}
+		logger.Infof(ctx, "Data source deleted with knowledge base: ds=%s kb=%s", ds.ID, kbID)
+	}
 }
 
 // SetEmbeddingModel sets the embedding model for a knowledge base

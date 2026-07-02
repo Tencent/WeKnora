@@ -1,23 +1,32 @@
-// Package types — shared secret-handling helpers.
+// Package types — shared secret redaction helpers.
 //
-// Historically this file also held PreserveIfRedacted / IsRedactedOrEmpty
-// to support the old "echo redacted placeholder back, server merges on
-// Update" pattern shared by MCP / Model / WebSearch / DataSource. Those
-// resources have since moved to the credential-resource pattern (a
-// dedicated /credentials subresource), so the merge helpers were removed.
+// VectorStore connection configs and tenant KV configs (web search, parser
+// engine, storage engine) use the redacted-placeholder round-trip pattern:
 //
-// The placeholder constant survives because VectorStore connection configs
-// still inline-redact a Password / APIKey on response (see
-// types/vectorstore.go → ConnectionConfig.MaskSensitiveFields); migrating
-// VectorStore to the credential-resource pattern is left for a future PR
-// because it would require introducing a separate connection record (the
-// secret currently lives inline on the knowledge base config).
+//   - GET responses replace set secrets with RedactedSecretPlaceholder (or
+//     empty string when unset).
+//   - PUT requests treat "", or RedactedSecretPlaceholder as "preserve
+//     existing"; any other value replaces the stored secret.
+//
+// MCP / Model / WebSearch provider / DataSource credentials use a dedicated
+// /credentials subresource instead; see internal/handler/dto/mcp.go.
 package types
 
 // RedactedSecretPlaceholder is the fixed value returned in API responses
-// whenever a sensitive field is set but withheld from the client. Currently
-// used only by VectorStore connection responses. New code should NOT
-// introduce redacted-placeholder semantics — model the credential as a
-// subresource and omit it from the main response shape instead (see
-// internal/handler/dto/mcp.go for the template).
+// whenever a sensitive field is set but withheld from the client.
 const RedactedSecretPlaceholder = "***"
+
+// IsRedactedOrEmpty reports whether s should be treated as "no change
+// requested" in an Update request.
+func IsRedactedOrEmpty(s string) bool {
+	return s == "" || s == RedactedSecretPlaceholder
+}
+
+// PreserveIfRedacted returns existing when incoming is empty or the redacted
+// placeholder, otherwise returns incoming.
+func PreserveIfRedacted(incoming, existing string) string {
+	if IsRedactedOrEmpty(incoming) {
+		return existing
+	}
+	return incoming
+}

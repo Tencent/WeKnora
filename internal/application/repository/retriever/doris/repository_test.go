@@ -265,8 +265,10 @@ func TestVectorRetrieve_SQLShape(t *testing.T) {
 		WithArgs("weknora", "weknora_embeddings_3").
 		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
 
-	mock.ExpectQuery(`SELECT id, content, .*inner_product_approximate.*HAVING score >= \? ORDER BY score DESC LIMIT \?`).
-		WithArgs(true, 0.5, 5).
+	// Doris does not support placeholders for LIMIT, so TopK is inlined as a
+	// literal and is not a bound argument.
+	mock.ExpectQuery(`SELECT id, content, .*inner_product_approximate.*HAVING score >= \? ORDER BY score DESC LIMIT \d+`).
+		WithArgs(true, 0.5).
 		WillReturnRows(
 			sqlmock.NewRows([]string{
 				"id", "content", "source_id", "source_type",
@@ -298,8 +300,8 @@ func TestVectorRetrieve_SQLShape_LegacyMode(t *testing.T) {
 		WithArgs("weknora", "weknora_embeddings_3").
 		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
 
-	mock.ExpectQuery(`SELECT id, content, .*cosine_distance_approximate.*HAVING score >= \? ORDER BY score DESC LIMIT \?`).
-		WithArgs(true, 0.5, 5).
+	mock.ExpectQuery(`SELECT id, content, .*cosine_distance_approximate.*HAVING score >= \? ORDER BY score DESC LIMIT \d+`).
+		WithArgs(true, 0.5).
 		WillReturnRows(
 			sqlmock.NewRows([]string{
 				"id", "content", "source_id", "source_type",
@@ -345,8 +347,10 @@ func TestKeywordsRetrieve_SQLShape(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).
 			AddRow("weknora_embeddings_768"))
 
+	// LIMIT is inlined (see VectorRetrieve), so only is_enabled and the
+	// MATCH_ANY query string are bound arguments.
 	mock.ExpectQuery(`MATCH_ANY \?`).
-		WithArgs(true, "你好", 3).
+		WithArgs(true, "你好").
 		WillReturnRows(
 			sqlmock.NewRows([]string{
 				"id", "content", "source_id", "source_type",

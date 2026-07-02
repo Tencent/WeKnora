@@ -661,11 +661,9 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	return cardID, nil
 }
 
-// SendStreamChunk accumulates content and pushes it to the card element.
-// Content containing <think>...</think> blocks is transformed into
-// Feishu-compatible markdown blockquotes before sending.
-func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
-	if content == "" {
+// UpdateStreamContent replaces the card element with the full visible content so far.
+func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+	if fullContent == "" {
 		return nil
 	}
 
@@ -678,12 +676,10 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 
 	state.mu.Lock()
 	if !state.firstChunk {
-		// Clear the "💭 正在思考..." placeholder on first real content
-		state.content.Reset()
 		state.firstChunk = true
 	}
-	state.content.WriteString(content)
-	fullContent := transformThinkBlocks(state.content.String())
+	state.content.Reset()
+	state.content.WriteString(fullContent)
 	seq := state.nextSeq()
 	state.mu.Unlock()
 
@@ -695,8 +691,14 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	return a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, fullContent, seq)
 }
 
-func transformThinkBlocks(content string) string {
-	return im.TransformThinkBlocks(content, im.MarkdownThinkStyle)
+// FinalizeStream replaces the card with answer-only content.
+func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+	return a.UpdateStreamContent(ctx, incoming, streamID, finalContent)
+}
+
+// SendStreamChunk is an alias for UpdateStreamContent.
+func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
 // EndStream disables streaming_mode and cleans up state.

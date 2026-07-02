@@ -499,18 +499,19 @@ func CloneContext(ctx context.Context) context.Context {
 		types.TenantInfoContextKey,
 		types.UserIDContextKey,
 		types.UserContextKey,
+		types.PrincipalContextKey,
 		// TenantRoleContextKey: the caller's resolved role in the
 		// active tenant (PR 2 #1303). Must be propagated for the same
 		// reason as TenantIDContextKey — any handler that does
 		// `ctx := logger.CloneContext(c.Request.Context())` and then
-		// reads role via TenantRoleFromContext (e.g. session/qa.go's
-		// "viewer cannot run runnable_by_viewer=false agent" gate)
-		// would otherwise see the type-zero TenantRole and fall back
+		// reads role via TenantRoleFromContext would otherwise see the
+		// type-zero TenantRole and fall back
 		// to Viewer, blocking even Owners.
 		types.TenantRoleContextKey,
 		types.LanguageContextKey,
 		types.SessionTenantIDContextKey,
 		types.EmbedQueryContextKey,
+		types.EmbedVisitorContextKey,
 		// Keep the Langfuse trace alive across CloneContext boundaries so
 		// LLM/Embedder/Reranker/VLM/ASR wrappers attach their generations
 		// to the same trace opened by GinMiddleware, instead of each call

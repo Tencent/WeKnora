@@ -16,6 +16,8 @@
 | PUT    | `/tenants/:id`             | 更新租户信息                                      |
 | DELETE | `/tenants/:id`             | 删除租户                                          |
 | POST   | `/tenants/:id/api-key`     | 重置租户 API Key                                  |
+| GET    | `/tenants/:id/api-principal-config` | 获取 API Key 用户身份配置（Owner）          |
+| PUT    | `/tenants/:id/api-principal-config` | 更新 API Key 用户身份配置（Owner）          |
 | GET    | `/tenants`                 | 获取当前用户可见的租户列表                        |
 | GET    | `/tenants/kv/:key`         | 获取当前租户的 KV 配置（tenant 由认证上下文确定） |
 | PUT    | `/tenants/kv/:key`         | 更新当前租户的 KV 配置（tenant 由认证上下文确定） |
@@ -352,6 +354,97 @@ curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-k
     },
     "success": true
 }
+```
+
+## API Key Principal：隔离边界与安全说明
+
+`api-principal-config` 控制 `X-API-Key` 请求如何映射为终端 **Principal**。请先理解以下边界，再选择模式。
+
+### Principal 隔离范围（当前实现）
+
+Principal **仅**用于按终端用户隔离以下能力：
+
+- **对话 Session**（创建、列表、读取按外部用户分开；`仅租户` 模式仍共用租户级 Session）
+- **MCP OAuth** 访问令牌（同一租户下不同外部用户各自授权，token 互不共用）
+- 对话内 MCP OAuth 提示、MCP 工具审批等与终端用户绑定的流程
+
+Principal **不会**缩小 API Key 的 API 权限：`X-API-Key` 认证仍授予租户内 **Admin** 角色，知识库、Agent 配置等接口**不按**外部用户做 RBAC 隔离。
+
+### 模式与安全假设
+
+| mode | 适用场景 | 安全假设 |
+| ---- | -------- | -------- |
+| `tenant` | 无 per-user MCP 需求 | 全租户共用一个 MCP OAuth 身份 |
+| `direct_header` | 仅可信服务端到服务端 | 用户 ID 来自调用方请求头，**可被持有 API Key 的任意调用方伪造**（冒充其他外部用户并共用/劫持其 MCP OAuth 授权）。面向终端用户或不可信客户端时**禁止**使用；若必须使用，请开启 `require_direct_header` 并确保 API Key 仅保存在可信后端 |
+| `signed_token` | 面向终端用户的集成（**推荐**） | 由业务后端使用 `hmac_secret` 为外部用户签发短期 HS256 JWT；无效或缺失 token 返回 401，**不回退**为租户级 Principal |
+
+`direct_header` 模式下，若未携带用户 ID 请求头：`require_direct_header=false` 时回退为租户级 Principal；`require_direct_header=true` 时返回 401。
+
+## GET `/tenants/:id/api-principal-config` - 获取 API Key 用户身份配置
+
+返回租户级 API Key 请求如何映射为终端 Principal 的配置。**需要 Owner 权限**。
+
+**响应字段**:
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| mode | string | `tenant` / `direct_header` / `signed_token` |
+| direct_header_name | string | 直接传用户 ID 时的请求头名，默认 `X-External-User-ID` |
+| signed_token_header_name | string | 签名 token 模式请求头名，默认 `X-External-User-Token` |
+| require_direct_header | bool | `direct_header` 模式下是否强制要求用户 ID 请求头 |
+| has_hmac_secret | bool | 是否已配置 HMAC secret（不返回明文） |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/tenants/10000/api-principal-config' \
+--header 'Authorization: Bearer <token>'
+```
+
+**响应**:
+
+```json
+{
+  "success": true,
+  "data": {
+    "mode": "signed_token",
+    "direct_header_name": "X-External-User-ID",
+    "signed_token_header_name": "X-External-User-Token",
+    "require_direct_header": false,
+    "has_hmac_secret": true
+  }
+}
+```
+
+## PUT `/tenants/:id/api-principal-config` - 更新 API Key 用户身份配置
+
+更新 API Key 请求的 Principal 映射方式。**需要 Owner 权限**。
+
+**请求体**:
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| mode | string | 必填，`tenant` / `direct_header` / `signed_token` |
+| direct_header_name | string | 可选 |
+| signed_token_header_name | string | 可选 |
+| require_direct_header | bool | 可选，`direct_header` 模式下缺 header 是否 401 |
+| hmac_secret | string | 可选，`signed_token` 模式 HMAC 密钥；省略则保留现有值 |
+
+`signed_token` 模式首次启用时必须提供 `hmac_secret`。
+
+外部用户 JWT 要求：HS256 签名、`aud=weknora`、包含 `sub` 与 `tenant_id`、有效期不超过 24 小时。
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/tenants/10000/api-principal-config' \
+--header 'Authorization: Bearer <token>' \
+--header 'Content-Type: application/json' \
+--data '{
+  "mode": "direct_header",
+  "direct_header_name": "X-External-User-ID",
+  "require_direct_header": true
+}'
 ```
 
 ## GET `/tenants` - 获取租户列表

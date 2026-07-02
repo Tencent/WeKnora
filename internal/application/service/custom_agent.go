@@ -30,6 +30,8 @@ type customAgentService struct {
 	kbService      interfaces.KnowledgeBaseService
 	kbShareService interfaces.KBShareService
 	wikiPageRepo   interfaces.WikiPageRepository
+	tagRepo        interfaces.KnowledgeTagRepository
+	knowledgeRepo  interfaces.KnowledgeRepository
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -39,6 +41,8 @@ func NewCustomAgentService(
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
 	wikiPageRepo interfaces.WikiPageRepository,
+	tagRepo interfaces.KnowledgeTagRepository,
+	knowledgeRepo interfaces.KnowledgeRepository,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:           repo,
@@ -46,6 +50,8 @@ func NewCustomAgentService(
 		kbService:      kbService,
 		kbShareService: kbShareService,
 		wikiPageRepo:   wikiPageRepo,
+		tagRepo:        tagRepo,
+		knowledgeRepo:  knowledgeRepo,
 	}
 }
 
@@ -449,6 +455,7 @@ func (s *customAgentService) GetSuggestedQuestions(
 	agentID string,
 	kbIDs []string,
 	knowledgeIDs []string,
+	tagIDs []string,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
 	if limit <= 0 {
@@ -479,6 +486,21 @@ func (s *customAgentService) GetSuggestedQuestions(
 				Question: prompt,
 				Source:   "agent_config",
 			})
+		}
+	}
+
+	if len(tagIDs) > 0 {
+		resolved, err := s.resolveKnowledgeIDsFromTags(ctx, tenantID, tagIDs)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"agent_id": agentID,
+				"tag_ids":  tagIDs,
+			})
+			return s.truncateQuestions(result, limit), nil
+		}
+		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolved)
+		if len(knowledgeIDs) == 0 {
+			return s.truncateQuestions(result, limit), nil
 		}
 	}
 
@@ -691,6 +713,74 @@ func (s *customAgentService) GetSuggestedQuestions(
 	}
 
 	return s.truncateQuestions(result, limit), nil
+}
+
+func (s *customAgentService) resolveKnowledgeIDsFromTags(
+	ctx context.Context,
+	tenantID uint64,
+	tagIDs []string,
+) ([]string, error) {
+	if len(tagIDs) == 0 || s.tagRepo == nil || s.knowledgeRepo == nil {
+		return nil, nil
+	}
+	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, tagIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(tags) == 0 {
+		return nil, nil
+	}
+	byKB := make(map[string][]string)
+	for _, tag := range tags {
+		byKB[tag.KnowledgeBaseID] = append(byKB[tag.KnowledgeBaseID], tag.ID)
+	}
+	return mergeKnowledgeIDsFromTagGroups(ctx, s.knowledgeRepo, tenantID, byKB)
+}
+
+func mergeKnowledgeIDsFromTagGroups(
+	ctx context.Context,
+	knowledgeRepo interfaces.KnowledgeRepository,
+	tenantID uint64,
+	byKB map[string][]string,
+) ([]string, error) {
+	seen := make(map[string]bool)
+	var out []string
+	for kbID, ids := range byKB {
+		kids, err := knowledgeRepo.ListIDsByTagIDs(ctx, tenantID, kbID, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, kid := range kids {
+			if !seen[kid] {
+				seen[kid] = true
+				out = append(out, kid)
+			}
+		}
+	}
+	return out, nil
+}
+
+func mergeUniqueStrings(base, extra []string) []string {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := make(map[string]bool, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, s := range base {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, s := range extra {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // truncateQuestions truncates the question list to the specified limit

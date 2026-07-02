@@ -25,6 +25,13 @@ const embedWebhookTimeout = 5 * time.Second
 // ErrEmbedWebhookURLInvalid is returned when a webhook URL fails format or SSRF checks.
 var ErrEmbedWebhookURLInvalid = errors.New("invalid embed webhook URL")
 
+func newEmbedWebhookHTTPClient() *http.Client {
+	return secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+		Timeout:      embedWebhookTimeout,
+		MaxRedirects: 5,
+	})
+}
+
 // ValidateEmbedWebhookURL checks an optional outbound webhook URL. Empty is allowed.
 func ValidateEmbedWebhookURL(raw string) error {
 	trimmed := strings.TrimSpace(raw)
@@ -90,7 +97,7 @@ func DispatchEmbedWebhook(ch *types.EmbedChannel, eventType, sessionID string, p
 			_, _ = mac.Write(raw)
 			req.Header.Set("X-WeKnora-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := newEmbedWebhookHTTPClient().Do(req)
 		if err != nil {
 			logger.Warnf(context.Background(), "[embed_webhook] dispatch %s failed: %v", eventType, err)
 			return

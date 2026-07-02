@@ -31,6 +31,28 @@ const canDeleteGeneratedQuestion = computed(() => {
   return authStore.hasRole('admin');
 });
 
+const detailTags = computed(() => {
+  const tags = props.details?.tags;
+  return Array.isArray(tags) ? tags : [];
+});
+
+const headerIconName = computed(() => {
+  switch (props.details?.type) {
+    case 'url':
+      return 'link';
+    case 'manual':
+      return 'edit';
+    default:
+      return 'file';
+  }
+});
+
+const showSummarySection = computed(() =>
+  Boolean(props.details?.description)
+  || props.details?.summary_status === 'pending'
+  || props.details?.summary_status === 'processing',
+);
+
 // Mermaid 初始化计数器，用于生成唯一ID
 let mermaidRenderCount = 0;
 
@@ -1065,11 +1087,13 @@ const handleDetailsScroll = () => {
       :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
       @close="handleClose">
       <template #header>
-        <div class="drawer-header">
-          <span class="header-title">{{ getDisplayTitle() }}</span>
-          <t-tag v-if="details.type" class="header-type-tag" size="small" :theme="getTypeTheme()" variant="light">
-            {{ getTypeLabel() }}
-          </t-tag>
+        <div class="doc-drawer-header">
+          <div class="doc-drawer-header-icon">
+            <t-icon :name="headerIconName" />
+          </div>
+          <div class="doc-drawer-header-text">
+            <div class="doc-drawer-header-title">{{ getDisplayTitle() }}</div>
+          </div>
           <div class="header-actions">
             <t-button v-if="details.type === 'file' || details.type === 'manual'" class="header-action-btn" size="small"
               variant="text" shape="square" theme="default" :title="$t('common.download') || 'Download'"
@@ -1116,58 +1140,81 @@ const handleDetailsScroll = () => {
         </div>
       </t-drawer>
 
-      <div ref="docMarkdownRoot" class="doc-markdown-root">
-      <!-- URL类型专属区域（保留：source 是真实链接，不与标题重复） -->
-      <div v-if="details.type === 'url'" class="url_box">
-        <span class="label">{{ $t('knowledgeBase.urlSource') }}</span>
-        <div class="url_link_box">
-          <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'"
-            :target="isValidURL(details.source) ? '_blank' : undefined" class="url_link">
-            <t-icon name="link" size="14px" />
-            <span class="url_text">{{ details.source }}</span>
-            <t-icon name="jump" size="14px" class="jump-icon" />
-          </a>
-        </div>
-      </div>
+      <div ref="docMarkdownRoot" class="doc-markdown-root doc-drawer-body setting-drawer__body">
+        <section v-if="details.id" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.detailSectionMeta') }}</h4>
+          <div class="doc-detail-rows">
+            <div v-if="details.time" class="doc-detail-row">
+              <span class="doc-detail-label">{{ getTimeLabel() }}</span>
+              <span class="doc-detail-value">{{ details.time }}</span>
+            </div>
+            <div v-if="details.type" class="doc-detail-row">
+              <span class="doc-detail-label">{{ $t('knowledgeBase.infoCard.type') }}</span>
+              <span class="doc-detail-value">
+                <t-tag size="small" :theme="getTypeTheme()" variant="light">{{ getTypeLabel() }}</t-tag>
+              </span>
+            </div>
+            <div v-if="details.channel && details.channel !== 'web'" class="doc-detail-row">
+              <span class="doc-detail-label">{{ $t('knowledgeBase.infoCard.source') }}</span>
+              <span class="doc-detail-value">
+                <t-tag size="small" variant="light" theme="warning">{{ getChannelLabel(details.channel) }}</t-tag>
+              </span>
+            </div>
+            <div v-if="detailTags.length > 0" class="doc-detail-row">
+              <span class="doc-detail-label">{{ $t('knowledgeBase.tagLabel') }}</span>
+              <span class="doc-detail-value doc-tag-chips">
+                <t-tag
+                  v-for="tag in detailTags"
+                  :key="tag.id"
+                  size="small"
+                  variant="light-outline"
+                  class="doc-tag-chip"
+                >
+                  <span class="tag-text">{{ tag.name }}</span>
+                </t-tag>
+              </span>
+            </div>
+          </div>
+        </section>
 
-      <!-- 文档摘要 -->
-      <div v-if="details.description" class="summary_box">
-        <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
-        <div class="summary_wrapper" :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }"
-          @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
-          <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{
-            details.description
+        <section v-if="details.type === 'url'" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.urlSource') }}</h4>
+          <div class="url_link_box">
+            <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'"
+              :target="isValidURL(details.source) ? '_blank' : undefined" class="url_link">
+              <t-icon name="link" size="14px" />
+              <span class="url_text">{{ details.source }}</span>
+              <t-icon name="jump" size="14px" class="jump-icon" />
+            </a>
+          </div>
+        </section>
+
+        <section v-if="showSummarySection" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.documentSummary') }}</h4>
+          <div v-if="details.description" class="summary_wrapper"
+            :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }"
+            @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
+            <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{
+              details.description
             }}</div>
-          <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade"
-            :class="{ 'summary_fade_expanded': summaryExpanded }">
-            <t-icon :name="summaryExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="summary_fade_icon" />
+            <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade"
+              :class="{ 'summary_fade_expanded': summaryExpanded }">
+              <t-icon :name="summaryExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="summary_fade_icon" />
+            </div>
           </div>
-        </div>
-      </div>
-      <div v-else-if="details.summary_status === 'pending' || details.summary_status === 'processing'"
-        class="summary_box">
-        <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
-        <div class="summary_loading">
-          <t-loading size="small" />
-          <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
-        </div>
-      </div>
+          <div v-else class="summary_loading">
+            <t-loading size="small" />
+            <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
+          </div>
+        </section>
 
-      <div class="content_header">
-        <div class="header-left">
-          <div class="title-row">
-            <span class="label">{{ getContentLabel() }}</span>
-            <span v-if="details.total > 0" class="chunk-count">
-              {{ $t('knowledgeBase.chunkCount', { count: details.total }) }}
-            </span>
-          </div>
-          <div class="meta-row">
-            <div class="meta-left">
-              <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
-              <t-tag v-if="details.channel && details.channel !== 'web'" size="small" variant="light" theme="warning"
-                class="channel-tag">
-                {{ getChannelLabel(details.channel) }}
-              </t-tag>
+        <section class="setting-drawer__section doc-content-section">
+          <div class="doc-content-section-head">
+            <div class="doc-content-section-head-left">
+              <h4 class="setting-drawer__section-title">{{ getContentLabel() }}</h4>
+              <span v-if="details.total > 0" class="chunk-count">
+                {{ $t('knowledgeBase.chunkCount', { count: details.total }) }}
+              </span>
             </div>
             <div class="view-mode-buttons">
               <t-button v-if="canPreview()" size="small" :variant="viewMode === 'preview' ? 'base' : 'outline'"
@@ -1187,87 +1234,86 @@ const handleDetailsScroll = () => {
               </t-button>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- 音频播放器（音频文件时固定显示在内容区顶部） -->
-      <div v-if="isAudioFile(details.file_type)" class="audio-player-section">
-        <div v-if="audioLoading" class="audio-loading">
-          <t-loading size="small" />
-          <span>{{ $t('preview.audioLoading') }}</span>
-        </div>
-        <audio v-else-if="audioBlobUrl" controls class="audio-player" :src="audioBlobUrl">
-          {{ $t('preview.audioNotSupported') }}
-        </audio>
-      </div>
-
-      <!-- 合并视图 -->
-      <div v-if="viewMode === 'merged'">
-        <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
-        <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
-      </div>
-
-      <!-- 分块视图 -->
-      <div v-else-if="viewMode === 'chunks'">
-        <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
-        <div v-else class="chunk-list">
-          <div class="chunk-item" v-for="(chunk, index) in processedChunks" :key="index">
-            <div class="chunk-header">
-              <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
-              <div class="chunk-header-right">
-                <t-tag v-if="chunk.hasParent" size="small" theme="primary" variant="light">
-                  {{ $t('knowledgeBase.childChunk') }}
-                </t-tag>
-                <t-tag v-if="chunk.questions.length > 0" size="small" theme="success" variant="light">
-                  {{ $t('knowledgeBase.questions') }} {{ chunk.questions.length }}
-                </t-tag>
-                <span class="chunk-meta">{{ chunk.meta }}</span>
-              </div>
+          <!-- 音频播放器（音频文件时固定显示在内容区顶部） -->
+          <div v-if="isAudioFile(details.file_type)" class="audio-player-section">
+            <div v-if="audioLoading" class="audio-loading">
+              <t-loading size="small" />
+              <span>{{ $t('preview.audioLoading') }}</span>
             </div>
-            <div class="md-content" v-html="chunk.processedContent"></div>
+            <audio v-else-if="audioBlobUrl" controls class="audio-player" :src="audioBlobUrl">
+              {{ $t('preview.audioNotSupported') }}
+            </audio>
+          </div>
 
-            <!-- 父 Chunk 上下文展开 -->
-            <div v-if="chunk.hasParent" class="parent-context-section">
-              <div class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
-                <t-icon v-if="!parentContextLoading.has(index)"
-                  :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                <t-loading v-else size="small" style="width: 14px; height: 14px;" />
-                <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
-              </div>
-              <div v-show="isParentExpanded(index)" class="parent-context-content">
-                <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
-              </div>
-            </div>
+          <!-- 合并视图 -->
+          <div v-if="viewMode === 'merged'">
+            <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
+            <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
+          </div>
 
-            <!-- 生成的问题展示 -->
-            <div v-if="chunk.questions.length > 0" class="questions-section">
-              <div class="questions-toggle" @click="toggleQuestions(index)">
-                <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ chunk.questions.length }})</span>
-              </div>
-              <div v-show="isExpanded(index)" class="questions-list">
-                <div v-for="question in chunk.questions" :key="question.id" class="question-item">
-                  <t-icon name="help-circle" size="14px" class="question-icon" />
-                  <span class="question-text">{{ question.question }}</span>
-                  <t-button v-if="canDeleteGeneratedQuestion" theme="default" variant="text" size="small"
-                    class="delete-question-btn" :loading="isDeleting(index, question.id)"
-                    @click.stop="handleDeleteQuestion(chunk.original, index, question)">
-                    <template #icon>
-                      <t-icon name="delete" size="14px" />
-                    </template>
-                  </t-button>
+          <!-- 分块视图 -->
+          <div v-else-if="viewMode === 'chunks'">
+            <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
+            <div v-else class="chunk-list">
+              <div class="chunk-item" v-for="(chunk, index) in processedChunks" :key="index">
+                <div class="chunk-header">
+                  <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
+                  <div class="chunk-header-right">
+                    <t-tag v-if="chunk.hasParent" size="small" theme="primary" variant="light">
+                      {{ $t('knowledgeBase.childChunk') }}
+                    </t-tag>
+                    <t-tag v-if="chunk.questions.length > 0" size="small" theme="success" variant="light">
+                      {{ $t('knowledgeBase.questions') }} {{ chunk.questions.length }}
+                    </t-tag>
+                    <span class="chunk-meta">{{ chunk.meta }}</span>
+                  </div>
+                </div>
+                <div class="md-content" v-html="chunk.processedContent"></div>
+
+                <!-- 父 Chunk 上下文展开 -->
+                <div v-if="chunk.hasParent" class="parent-context-section">
+                  <div class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
+                    <t-icon v-if="!parentContextLoading.has(index)"
+                      :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                    <t-loading v-else size="small" style="width: 14px; height: 14px;" />
+                    <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
+                  </div>
+                  <div v-show="isParentExpanded(index)" class="parent-context-content">
+                    <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
+                  </div>
+                </div>
+
+                <!-- 生成的问题展示 -->
+                <div v-if="chunk.questions.length > 0" class="questions-section">
+                  <div class="questions-toggle" @click="toggleQuestions(index)">
+                    <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                    <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ chunk.questions.length }})</span>
+                  </div>
+                  <div v-show="isExpanded(index)" class="questions-list">
+                    <div v-for="question in chunk.questions" :key="question.id" class="question-item">
+                      <t-icon name="help-circle" size="14px" class="question-icon" />
+                      <span class="question-text">{{ question.question }}</span>
+                      <t-button v-if="canDeleteGeneratedQuestion" theme="default" variant="text" size="small"
+                        class="delete-question-btn" :loading="isDeleting(index, question.id)"
+                        @click.stop="handleDeleteQuestion(chunk.original, index, question)">
+                        <template #icon>
+                          <t-icon name="delete" size="14px" />
+                        </template>
+                      </t-button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- 文档预览视图 -->
-      <div v-else-if="viewMode === 'preview'">
-        <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
-          :active="viewMode === 'preview'" />
-      </div>
+          <!-- 文档预览视图 -->
+          <div v-else-if="viewMode === 'preview'">
+            <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
+              :active="viewMode === 'preview'" />
+          </div>
+        </section>
       </div>
 
     </t-drawer>
@@ -1326,87 +1372,169 @@ const handleDetailsScroll = () => {
   font-weight: normal;
 }
 
-:deep(.t-drawer__body.narrow-scrollbar) {
-  padding: 16px 20px;
+.doc-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  padding-right: 32px;
 }
 
-.drawer-header {
+.doc-drawer-header-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 192, 95, 0.1);
+  color: var(--td-brand-color);
+  font-size: 16px;
+}
+
+.doc-drawer-header-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.doc-drawer-header-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.doc-drawer-body .setting-drawer__section {
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  &:first-child {
+    padding-top: 0;
+  }
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+}
+
+.doc-drawer-body .setting-drawer__section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 4px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  &::before {
+    content: '';
+    width: 3px;
+    height: 14px;
+    background: var(--td-brand-color);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+}
+
+.doc-detail-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.doc-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  line-height: 1.6;
+}
+
+.doc-detail-label {
+  flex: 0 0 72px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.doc-detail-value {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  word-break: break-word;
+}
+
+.doc-content-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.doc-content-section-head-left {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  width: 100%;
-  /* TDesign 抽屉的 X 关闭按钮浮在 header 右上角（约 16px 宽 + 16px 间距），
-     给右侧留出空间，避免我们的图标按钮被 X 遮挡。 */
-  padding-right: 32px;
+  flex: 1;
 
-  .header-title {
-    /* flex: 1 1 auto + min-width:0 让标题在标题超长时收缩出省略号，
-       而不是把右侧 tag/操作按钮挤出 header。 */
-    flex: 1 1 auto;
-    min-width: 0;
-    font-size: 16px;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .setting-drawer__section-title {
+    margin-bottom: 0;
+  }
+}
+
+.doc-content-section {
+  gap: 12px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  flex-grow: 0;
+}
+
+.header-action-btn {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+  border-radius: 4px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
   }
 
-  .header-type-tag {
-    flex-shrink: 0;
-  }
-
-  .header-actions {
+  :deep(.t-button__text) {
     display: flex;
     align-items: center;
-    gap: 2px;
-    /* 关键：操作区永不收缩，标题再长也能完整看到图标 */
-    flex-shrink: 0;
-    flex-grow: 0;
+    justify-content: center;
   }
-
-  .header-action-btn {
-    /* 28×28 文本按钮：无边框，与抽屉头部融为一体；hover 时浅灰背景，
-       与右上角 X 关闭按钮的视觉风格一致。 */
-    width: 28px;
-    min-width: 28px;
-    height: 28px;
-    padding: 0;
-    flex-shrink: 0;
-    color: var(--td-text-color-secondary);
-    border-radius: 4px;
-    transition: background-color 0.15s ease, color 0.15s ease;
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-      color: var(--td-text-color-primary);
-    }
-
-    :deep(.t-button__text) {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-  }
-}
-
-// 信息面板通用样式（仅 url_box 在用，file/manual 已合并到 header）
-.info_panel {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 16px;
-}
-
-.url_box {
-  .info_panel();
-}
-
-.parse_timeline_box {
-  margin-top: 8px;
-  margin-bottom: 16px;
-  padding: 12px 16px;
-  background: var(--td-bg-color-component);
-  border-radius: 6px;
 }
 
 /* Hidden mount keeps fetcher live without showing UI */
@@ -1422,8 +1550,6 @@ const handleDetailsScroll = () => {
   height: 100%;
   width: 100%;
   background: var(--td-bg-color-container);
-  /* Belt-and-suspenders: even if some inner element forgets a min-width:0
-     declaration in a flex chain, clip rather than overflow the drawer. */
   overflow: hidden;
   min-width: 0;
 }
@@ -1433,10 +1559,6 @@ const handleDetailsScroll = () => {
   height: 100%;
 }
 
-/* Width is set via the :size prop on the <t-drawer>, not CSS — see the
-   <script> for mainDrawerSize / timelineDrawerSize. Only padding +
-   background are still tweaked here so the timeline fills the secondary
-   drawer cleanly, edge-to-edge. */
 :deep(.kp-secondary-drawer .t-drawer__body) {
   padding: 0 !important;
 }
@@ -1446,83 +1568,61 @@ const handleDetailsScroll = () => {
 }
 
 // 文档摘要区域
-.summary_box {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 24px;
-  margin-top: 8px;
+.summary_wrapper {
+  position: relative;
+  background: var(--td-bg-color-container-hover);
+  border-radius: 4px;
 
-  .label {
-    margin-bottom: 8px;
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  .summary_wrapper {
-    position: relative;
-    background: var(--td-bg-color-container-hover);
-    border-radius: 4px;
-
-    &.summary_clickable {
-      cursor: pointer;
-    }
-  }
-
-  .summary_content {
-    padding: 12px;
-    color: var(--td-text-color-primary);
-    font-size: 13px;
-    line-height: 1.5;
-    word-break: break-word;
-    white-space: pre-wrap;
-
-    &.summary_collapsed {
-      max-height: 4.5em;
-      overflow: hidden;
-    }
-  }
-
-  .summary_fade {
-    display: flex;
-    justify-content: center;
-    padding-bottom: 4px;
-    pointer-events: none;
-
-    &:not(.summary_fade_expanded) {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 28px;
-      background: linear-gradient(transparent, var(--td-bg-color-container-hover) 80%);
-      border-radius: 0 0 4px 4px;
-      align-items: flex-end;
-    }
-  }
-
-  .summary_fade_icon {
-    color: var(--td-text-color-placeholder);
-  }
-
-  .summary_loading {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px;
-    background: var(--td-bg-color-container-hover);
-    border-radius: 4px;
-    color: var(--td-text-color-placeholder);
-    font-size: 13px;
+  &.summary_clickable {
+    cursor: pointer;
   }
 }
 
-.label {
+.summary_content {
+  padding: 12px;
   color: var(--td-text-color-primary);
-  font-size: 14px;
-  font-style: normal;
-  font-weight: 600;
-  line-height: 22px;
-  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+
+  &.summary_collapsed {
+    max-height: 4.5em;
+    overflow: hidden;
+  }
+}
+
+.summary_fade {
+  display: flex;
+  justify-content: center;
+  padding-bottom: 4px;
+  pointer-events: none;
+
+  &:not(.summary_fade_expanded) {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    background: linear-gradient(transparent, var(--td-bg-color-container-hover) 80%);
+    border-radius: 0 0 4px 4px;
+    align-items: flex-end;
+  }
+}
+
+.summary_fade_icon {
+  color: var(--td-text-color-placeholder);
+}
+
+.summary_loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: var(--td-bg-color-container-hover);
+  border-radius: 4px;
+  color: var(--td-text-color-placeholder);
+  font-size: 13px;
 }
 
 // URL链接区域
@@ -1551,79 +1651,52 @@ const handleDetailsScroll = () => {
   }
 }
 
-.content_header {
-  margin-top: 16px;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.doc-tag-chips {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 
-  .header-left {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
-  }
+.doc-tag-chip {
+  max-width: 140px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: 999px;
+  border-color: var(--td-component-stroke);
+  color: var(--td-text-color-secondary);
+  padding: 0 8px;
+  background: transparent;
 
-  .title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-
-    .label {
-      margin: 0;
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--td-text-color-primary);
-    }
-  }
-
-  .meta-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .meta-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .channel-tag {
-    flex-shrink: 0;
-  }
-
-  .chunk-count {
-    color: var(--td-text-color-secondary);
-    font-size: 12px;
-    background: var(--td-bg-color-container-hover);
-    padding: 2px 8px;
-    border-radius: 4px;
-  }
-
-  .view-mode-buttons {
-    display: flex;
-    gap: 4px;
-
-    .view-mode-btn {
-      height: 28px;
-      min-width: 60px;
-    }
+  .tag-text {
+    display: inline-block;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    font-size: 11px;
   }
 }
 
-.time {
+.chunk-count {
   color: var(--td-text-color-secondary);
   font-size: 12px;
-  font-style: normal;
-  font-weight: 400;
+  background: var(--td-bg-color-container-hover);
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.view-mode-buttons {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+
+  .view-mode-btn {
+    height: 28px;
+    min-width: 60px;
+  }
 }
 
 .no_content {
@@ -1815,6 +1888,17 @@ const handleDetailsScroll = () => {
      content background need to be flushed for the timeline to fill
      edge-to-edge. -->
 <style lang="less">
+.t-drawer.doc-main-drawer {
+  .t-drawer__header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .t-drawer__body {
+    padding: 16px 18px;
+  }
+}
+
 /* 主抽屉宽度可调：拖拽手柄通过 teleport 挂到 body，不受 scoped 影响，
    故样式写在非 scoped 块里。手柄贴在抽屉面板左缘（right = 抽屉宽度）。 */
 .doc-drawer-resize-handle {

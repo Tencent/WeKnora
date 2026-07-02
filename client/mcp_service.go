@@ -78,10 +78,11 @@ type MCPResource struct {
 
 // MCPTestResult represents the result of testing an MCP service connection
 type MCPTestResult struct {
-	Success   bool           `json:"success"`
-	Message   string         `json:"message,omitempty"`
-	Tools     []*MCPTool     `json:"tools,omitempty"`
-	Resources []*MCPResource `json:"resources,omitempty"`
+	Success     bool           `json:"success"`
+	Message     string         `json:"message,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Tools       []*MCPTool     `json:"tools,omitempty"`
+	Resources   []*MCPResource `json:"resources,omitempty"`
 }
 
 // CreateMCPService creates a new MCP service

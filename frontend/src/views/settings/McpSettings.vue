@@ -112,15 +112,7 @@
       :service="currentService"
       :mode="dialogMode"
       @success="handleDialogSuccess"
-      @test="handleDrawerTest"
-    />
-
-    <!-- Test Result Dialog -->
-    <McpTestResult
-      v-model:visible="testDialogVisible"
-      :result="testResult"
-      :service-name="testingServiceName"
-      :service-id="testingServiceId"
+      @created="handleDialogCreated"
     />
   </div>
 </template>
@@ -134,11 +126,9 @@ import {
   listMCPServices,
   updateMCPService,
   deleteMCPService,
-  type MCPService,
-  type MCPTestResult
+  type MCPService
 } from '@/api/mcp-service'
 import McpServiceDialog from './components/McpServiceDialog.vue'
-import McpTestResult from './components/McpTestResult.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 
@@ -151,10 +141,6 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogMode = ref<'add' | 'edit'>('add')
 const currentService = ref<MCPService | null>(null)
-const testDialogVisible = ref(false)
-const testResult = ref<MCPTestResult | null>(null)
-const testingServiceName = ref('')
-const testingServiceId = ref('')
 
 // Load MCP services
 const loadServices = async () => {
@@ -197,10 +183,22 @@ const handleEdit = (service: MCPService) => {
   dialogVisible.value = true
 }
 
-// Handle dialog success
+// Handle dialog success (edit-mode update): close + refresh.
 const handleDialogSuccess = () => {
   dialogVisible.value = false
   loadServices()
+}
+
+// Handle first create: keep the drawer open and flip it to edit mode bound to
+// the newly created service, so OAuth authorization and "test connection"
+// (both of which need a saved service id) are usable right away. The list is
+// refreshed in the background; we prefer the freshly-fetched record so the
+// edit form sees server-side fields (e.g. credential metadata).
+const handleDialogCreated = async (created: MCPService) => {
+  await loadServices()
+  const full = services.value.find((s) => s.id === created.id) || created
+  currentService.value = { ...full }
+  dialogMode.value = 'edit'
 }
 
 // Handle toggle enabled/disabled
@@ -264,15 +262,6 @@ const getBuiltinServiceOptions = () => {
   return [
     { content: t('common.edit'), value: 'edit' }
   ]
-}
-
-// Drawer 内点击"测试连接"后，复用现有的 testResult dialog 展示结果。
-// 抽屉只负责调 API + 拿结果，弹窗位置/状态由父组件统一管。
-const handleDrawerTest = ({ service, result }: { service: MCPService; result: MCPTestResult }) => {
-  testingServiceName.value = service.name
-  testingServiceId.value = service.id
-  testResult.value = result
-  testDialogVisible.value = true
 }
 
 // Handle menu action. 'test' has been removed from the menu — testing now

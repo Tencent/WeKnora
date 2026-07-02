@@ -10,6 +10,7 @@
 package dto
 
 import (
+	"context"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -21,21 +22,21 @@ import (
 // only a boolean per credential field so the frontend can render a
 // "configured / not configured" badge without an additional round-trip.
 type MCPServiceResponse struct {
-	ID             string                             `json:"id"`
-	TenantID       uint64                             `json:"tenant_id"`
-	Name           string                             `json:"name"`
-	Description    string                             `json:"description"`
-	Enabled        bool                               `json:"enabled"`
-	TransportType  types.MCPTransportType             `json:"transport_type"`
-	URL            *string                            `json:"url,omitempty"`
-	Headers        types.MCPHeaders                   `json:"headers,omitempty"`
-	AuthConfig     *MCPAuthConfigResponse             `json:"auth_config,omitempty"`
-	AdvancedConfig *types.MCPAdvancedConfig           `json:"advanced_config,omitempty"`
-	StdioConfig    *types.MCPStdioConfig              `json:"stdio_config,omitempty"`
-	EnvVars        types.MCPEnvVars                   `json:"env_vars,omitempty"`
-	IsBuiltin      bool                               `json:"is_builtin"`
-	CreatedAt      time.Time                          `json:"created_at"`
-	UpdatedAt      time.Time                          `json:"updated_at"`
+	ID             string                   `json:"id"`
+	TenantID       uint64                   `json:"tenant_id"`
+	Name           string                   `json:"name"`
+	Description    string                   `json:"description"`
+	Enabled        bool                     `json:"enabled"`
+	TransportType  types.MCPTransportType   `json:"transport_type"`
+	URL            *string                  `json:"url,omitempty"`
+	Headers        types.MCPHeaders         `json:"headers,omitempty"`
+	AuthConfig     *MCPAuthConfigResponse   `json:"auth_config,omitempty"`
+	AdvancedConfig *types.MCPAdvancedConfig `json:"advanced_config,omitempty"`
+	StdioConfig    *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
+	EnvVars        types.MCPEnvVars         `json:"env_vars,omitempty"`
+	IsBuiltin      bool                     `json:"is_builtin"`
+	CreatedAt      time.Time                `json:"created_at"`
+	UpdatedAt      time.Time                `json:"updated_at"`
 	// Credentials is the per-field "configured?" map. Embedded on the main
 	// response so the credential UI doesn't need a follow-up GET. The
 	// frontend never sees the actual secret value — only whether one is
@@ -45,9 +46,15 @@ type MCPServiceResponse struct {
 }
 
 // MCPAuthConfigResponse intentionally has no APIKey or Token fields. Their
-// presence is signalled via MCPServiceResponse.Credentials.
+// presence is signalled via MCPServiceResponse.Credentials. AuthType, Scopes
+// and AuthServerMetadataURL are non-secret OAuth configuration and are safe to
+// echo back so the UI can render the current strategy.
 type MCPAuthConfigResponse struct {
-	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+	AuthType              types.MCPAuthType `json:"auth_type,omitempty"`
+	APIKeyHeader          string            `json:"api_key_header,omitempty"`
+	CustomHeaders         map[string]string `json:"custom_headers,omitempty"`
+	Scopes                []string          `json:"scopes,omitempty"`
+	AuthServerMetadataURL string            `json:"auth_server_metadata_url,omitempty"`
 }
 
 // CredentialFieldMetadata reports whether a credential field has a value
@@ -62,10 +69,11 @@ type CredentialFieldMetadata struct {
 // Headers, EnvVars, StdioConfig) stripped — these reveal how the tenant
 // configured an upstream provider and must not be visible to other tenants
 // that see the same builtin row via the cross-tenant list.
-func NewMCPServiceResponse(svc *types.MCPService) *MCPServiceResponse {
+func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServiceResponse {
 	if svc == nil {
 		return nil
 	}
+	includeDetail := CanViewIntegrationSecrets(ctx)
 	resp := &MCPServiceResponse{
 		ID:             svc.ID,
 		TenantID:       svc.TenantID,
@@ -82,10 +90,25 @@ func NewMCPServiceResponse(svc *types.MCPService) *MCPServiceResponse {
 		CreatedAt:      svc.CreatedAt,
 		UpdatedAt:      svc.UpdatedAt,
 	}
+	if !includeDetail {
+		resp.Headers = nil
+		resp.EnvVars = nil
+		resp.URL = nil
+		resp.StdioConfig = nil
+		resp.AdvancedConfig = nil
+	}
 	if svc.AuthConfig != nil {
-		resp.AuthConfig = &MCPAuthConfigResponse{
-			CustomHeaders: svc.AuthConfig.CustomHeaders,
+		auth := &MCPAuthConfigResponse{
+			AuthType:              svc.AuthConfig.AuthType,
+			APIKeyHeader:          svc.AuthConfig.APIKeyHeader,
+			CustomHeaders:         svc.AuthConfig.CustomHeaders,
+			Scopes:                svc.AuthConfig.Scopes,
+			AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		}
+		if !includeDetail {
+			auth.CustomHeaders = nil
+		}
+		resp.AuthConfig = auth
 	}
 	if svc.IsBuiltin {
 		// Builtin services are shared across tenants — strip everything that
@@ -105,10 +128,10 @@ func NewMCPServiceResponse(svc *types.MCPService) *MCPServiceResponse {
 }
 
 // NewMCPServiceResponses is the slice convenience wrapper used by ListMCPServices.
-func NewMCPServiceResponses(svcs []*types.MCPService) []*MCPServiceResponse {
+func NewMCPServiceResponses(ctx context.Context, svcs []*types.MCPService) []*MCPServiceResponse {
 	out := make([]*MCPServiceResponse, 0, len(svcs))
 	for _, s := range svcs {
-		out = append(out, NewMCPServiceResponse(s))
+		out = append(out, NewMCPServiceResponse(ctx, s))
 	}
 	return out
 }

@@ -144,6 +144,15 @@ type sqlValidator struct {
 	enableSearchScopeFilter bool
 	searchScopeKBIDs        []string
 	searchScopeKnowledgeIDs []string
+	searchScopes            []SearchScope
+}
+
+// SearchScope describes one allowed knowledge scope for SQL query injection.
+// Empty KnowledgeIDs and TagIDs means the whole KB is in scope.
+type SearchScope struct {
+	KnowledgeBaseID string
+	KnowledgeIDs    []string
+	TagIDs          []string
 }
 
 // ParseSQL parses a SQL statement using pg_query_go and extracts table names, select fields, and where fields
@@ -630,6 +639,18 @@ func WithSearchScopeFilter(kbIDs []string, knowledgeIDs []string) SQLValidationO
 	}
 }
 
+// WithSearchScopes restricts queries using structured OR scopes. Each scope can
+// represent a full KB, specific documents, or a tag-constrained KB.
+func WithSearchScopes(scopes []SearchScope) SQLValidationOption {
+	return func(v *sqlValidator) {
+		if len(scopes) == 0 {
+			return
+		}
+		v.enableSearchScopeFilter = true
+		v.searchScopes = append([]SearchScope(nil), scopes...)
+	}
+}
+
 // WithSecurityDefaults applies a comprehensive set of security validations
 func WithSecurityDefaults(tenantID uint64) SQLValidationOption {
 	return func(v *sqlValidator) {
@@ -1015,7 +1036,13 @@ func (v *sqlValidator) injectHiddenKBFilter(sql string, tablesInQuery map[string
 // and (optionally) specific knowledge documents.
 func (v *sqlValidator) injectSearchScopeConditions(sql string, tablesInQuery map[string]string) string {
 	if !v.enableSearchScopeFilter || len(v.searchScopeKBIDs) == 0 {
-		return sql
+		if len(v.searchScopes) == 0 {
+			return sql
+		}
+	}
+
+	if len(v.searchScopes) > 0 {
+		return v.injectStructuredSearchScopeConditions(sql, tablesInQuery)
 	}
 
 	quotedKBIDs := quoteStringSlice(v.searchScopeKBIDs)
@@ -1048,6 +1075,116 @@ func (v *sqlValidator) injectSearchScopeConditions(sql string, tablesInQuery map
 	}
 
 	return InjectAndConditions(sql, strings.Join(conditions, " AND "))
+}
+
+func (v *sqlValidator) injectStructuredSearchScopeConditions(sql string, tablesInQuery map[string]string) string {
+	var conditions []string
+
+	if alias, ok := tablesInQuery["knowledge_bases"]; ok {
+		if cond := buildKnowledgeBaseScopeCondition(alias, v.searchScopes); cond != "" {
+			conditions = append(conditions, cond)
+		}
+	}
+	if alias, ok := tablesInQuery["knowledges"]; ok {
+		if cond := buildKnowledgeScopeCondition(alias, v.searchScopes); cond != "" {
+			conditions = append(conditions, cond)
+		}
+	}
+	if alias, ok := tablesInQuery["chunks"]; ok {
+		if cond := buildChunkScopeCondition(alias, v.searchScopes); cond != "" {
+			conditions = append(conditions, cond)
+		}
+	}
+
+	if len(conditions) == 0 {
+		return sql
+	}
+	return InjectAndConditions(sql, strings.Join(conditions, " AND "))
+}
+
+func buildKnowledgeBaseScopeCondition(alias string, scopes []SearchScope) string {
+	kbIDs := uniqueScopeKBIDs(scopes)
+	if len(kbIDs) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s.id IN (%s)", alias, strings.Join(quoteStringSlice(kbIDs), ", "))
+}
+
+func buildKnowledgeScopeCondition(alias string, scopes []SearchScope) string {
+	clauses := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" {
+			continue
+		}
+		kbID := quoteString(scope.KnowledgeBaseID)
+		switch {
+		case len(scope.KnowledgeIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND %s.id IN (%s))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
+			))
+		case len(scope.TagIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.id AND ktr.tag_id IN (%s)))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+			))
+		default:
+			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
+		}
+	}
+	return joinOrClauses(clauses)
+}
+
+func buildChunkScopeCondition(alias string, scopes []SearchScope) string {
+	clauses := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" {
+			continue
+		}
+		kbID := quoteString(scope.KnowledgeBaseID)
+		switch {
+		case len(scope.KnowledgeIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND %s.knowledge_id IN (%s))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.KnowledgeIDs), ", "),
+			))
+		case len(scope.TagIDs) > 0:
+			clauses = append(clauses, fmt.Sprintf(
+				"(%s.knowledge_base_id = %s AND EXISTS (SELECT 1 FROM knowledge_tag_relations ktr WHERE ktr.knowledge_id = %s.knowledge_id AND ktr.tag_id IN (%s)))",
+				alias, kbID, alias, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
+			))
+		default:
+			clauses = append(clauses, fmt.Sprintf("%s.knowledge_base_id = %s", alias, kbID))
+		}
+	}
+	return joinOrClauses(clauses)
+}
+
+func uniqueScopeKBIDs(scopes []SearchScope) []string {
+	seen := make(map[string]bool, len(scopes))
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" || seen[scope.KnowledgeBaseID] {
+			continue
+		}
+		seen[scope.KnowledgeBaseID] = true
+		out = append(out, scope.KnowledgeBaseID)
+	}
+	return out
+}
+
+func joinOrClauses(clauses []string) string {
+	if len(clauses) == 0 {
+		return ""
+	}
+	if len(clauses) == 1 {
+		return clauses[0]
+	}
+	return "(" + strings.Join(clauses, " OR ") + ")"
+}
+
+func quoteString(s string) string {
+	return quoteStringSlice([]string{s})[0]
 }
 
 func quoteStringSlice(ss []string) []string {
@@ -1295,8 +1432,16 @@ func (v *sqlValidator) validateFromItem(node *pg_query.Node, tables map[string]s
 	}
 
 	// Handle RangeSubselect (subquery in FROM)
-	if v.checkSubqueries && node.GetRangeSubselect() != nil {
-		return fmt.Errorf("subqueries in FROM clause are not allowed")
+	if rss := node.GetRangeSubselect(); rss != nil {
+		if v.checkSubqueries {
+			return fmt.Errorf("subqueries in FROM clause are not allowed")
+		}
+		// SECURITY: Even when subqueries are permitted, recurse into the
+		// subquery so dangerous constructs hidden inside it are still
+		// validated. Without this, a FROM subquery like
+		//   (SELECT * FROM read_text('/etc/passwd'))
+		// smuggles a RangeFunction past the check below.
+		return v.validateSubquery(rss.Subquery, tables, result)
 	}
 
 	// Handle RangeFunction (function in FROM)
@@ -1304,6 +1449,45 @@ func (v *sqlValidator) validateFromItem(node *pg_query.Node, tables map[string]s
 		return fmt.Errorf("functions in FROM clause are not allowed")
 	}
 
+	return nil
+}
+
+// validateSubquery validates a SELECT statement nested in a FROM subquery.
+// It reuses the FROM-item and expression validators so RangeFunction and
+// dangerous function checks apply recursively to arbitrarily nested subqueries.
+func (v *sqlValidator) validateSubquery(node *pg_query.Node, tables map[string]string, result *SQLValidationResult) error {
+	if node == nil {
+		return nil
+	}
+	sub := node.GetSelectStmt()
+	if sub == nil {
+		return nil
+	}
+	for _, fromItem := range sub.FromClause {
+		if err := v.validateFromItem(fromItem, tables, result); err != nil {
+			return err
+		}
+	}
+	for _, target := range sub.TargetList {
+		if err := v.validateNode(target, result); err != nil {
+			return err
+		}
+	}
+	if sub.WhereClause != nil {
+		if err := v.validateNode(sub.WhereClause, result); err != nil {
+			return err
+		}
+	}
+	for _, groupBy := range sub.GroupClause {
+		if err := v.validateNode(groupBy, result); err != nil {
+			return err
+		}
+	}
+	if sub.HavingClause != nil {
+		if err := v.validateNode(sub.HavingClause, result); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1758,6 +1942,70 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 		}
 	}
 
+	// JsonScalarExpr (JSON_SCALAR(...)) - PG17 SQL/JSON node.
+	// Attack: SELECT JSON_SCALAR(pg_read_file('/etc/passwd')) FROM table
+	if jse := node.GetJsonScalarExpr(); jse != nil {
+		if err := v.validateNode(jse.Expr, result); err != nil {
+			return err
+		}
+	}
+
+	// JsonFuncExpr (JSON_VALUE / JSON_QUERY / JSON_EXISTS(...)) - PG17 SQL/JSON node.
+	// Attack: SELECT JSON_VALUE(pg_read_file('/etc/passwd'), '$') FROM table
+	if jfe := node.GetJsonFuncExpr(); jfe != nil {
+		if err := v.validateJsonValueExpr(jfe.ContextItem, result); err != nil {
+			return err
+		}
+		if err := v.validateNode(jfe.Pathspec, result); err != nil {
+			return err
+		}
+		for _, arg := range jfe.Passing {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+		if err := v.validateJsonBehavior(jfe.OnEmpty, result); err != nil {
+			return err
+		}
+		if err := v.validateJsonBehavior(jfe.OnError, result); err != nil {
+			return err
+		}
+	}
+
+	// JsonParseExpr (JSON(...)) - PG17 SQL/JSON node.
+	if jpe := node.GetJsonParseExpr(); jpe != nil {
+		if err := v.validateJsonValueExpr(jpe.Expr, result); err != nil {
+			return err
+		}
+	}
+
+	// JsonSerializeExpr (JSON_SERIALIZE(...)) - PG17 SQL/JSON node.
+	if jse := node.GetJsonSerializeExpr(); jse != nil {
+		if err := v.validateJsonValueExpr(jse.Expr, result); err != nil {
+			return err
+		}
+	}
+
+	// JsonTable (JSON_TABLE(...)) - PG17 SQL/JSON node.
+	if jt := node.GetJsonTable(); jt != nil {
+		if err := v.validateJsonValueExpr(jt.ContextItem, result); err != nil {
+			return err
+		}
+		for _, arg := range jt.Passing {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+		for _, col := range jt.Columns {
+			if err := v.validateNode(col, result); err != nil {
+				return err
+			}
+		}
+		if err := v.validateJsonBehavior(jt.OnError, result); err != nil {
+			return err
+		}
+	}
+
 	// XmlSerialize
 	if xs := node.GetXmlSerialize(); xs != nil {
 		if err := v.validateNode(xs.Expr, result); err != nil {
@@ -1795,7 +2043,108 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 		return fmt.Errorf("AlternativeSubPlan nodes are not allowed")
 	}
 
-	return nil
+	// ============================================================
+	// SECURITY: DEFAULT-DENY.
+	// The recursive branches above validate every expression type we know how
+	// to inspect. Any node type NOT in the recognized set below is REJECTED,
+	// because an unhandled type can smuggle a dangerous FuncCall past the
+	// blacklist (e.g. PG17's JSON_SCALAR wrapping pg_read_file). Whenever a new
+	// recursive handler is added above, add its Node_* wrapper here as well.
+	// ============================================================
+	switch node.Node.(type) {
+	case
+		// Recognized expression types (validated recursively above).
+		*pg_query.Node_FuncCall,
+		*pg_query.Node_FuncExpr,
+		*pg_query.Node_ColumnRef,
+		*pg_query.Node_TypeCast,
+		*pg_query.Node_AExpr,
+		*pg_query.Node_OpExpr,
+		*pg_query.Node_BoolExpr,
+		*pg_query.Node_NullTest,
+		*pg_query.Node_BooleanTest,
+		*pg_query.Node_CoalesceExpr,
+		*pg_query.Node_CaseExpr,
+		*pg_query.Node_CaseWhen,
+		*pg_query.Node_ResTarget,
+		*pg_query.Node_SortBy,
+		*pg_query.Node_List,
+		*pg_query.Node_AArrayExpr,
+		*pg_query.Node_RowExpr,
+		*pg_query.Node_MinMaxExpr,
+		*pg_query.Node_NullIfExpr,
+		*pg_query.Node_ScalarArrayOpExpr,
+		*pg_query.Node_ArrayCoerceExpr,
+		*pg_query.Node_CoerceViaIo,
+		*pg_query.Node_CollateExpr,
+		*pg_query.Node_CollateClause,
+		*pg_query.Node_SubLink,
+		*pg_query.Node_DistinctExpr,
+		*pg_query.Node_XmlExpr,
+		*pg_query.Node_XmlSerialize,
+		*pg_query.Node_JsonConstructorExpr,
+		*pg_query.Node_JsonValueExpr,
+		*pg_query.Node_JsonExpr,
+		*pg_query.Node_JsonIsPredicate,
+		*pg_query.Node_JsonScalarExpr,
+		*pg_query.Node_JsonFuncExpr,
+		*pg_query.Node_JsonParseExpr,
+		*pg_query.Node_JsonSerializeExpr,
+		*pg_query.Node_JsonTable,
+		*pg_query.Node_Aggref,
+		*pg_query.Node_WindowFunc,
+		*pg_query.Node_WindowDef,
+		*pg_query.Node_GroupingFunc,
+		*pg_query.Node_SubscriptingRef,
+		*pg_query.Node_NamedArgExpr,
+		*pg_query.Node_FieldSelect,
+		*pg_query.Node_FieldStore,
+		*pg_query.Node_RelabelType,
+		*pg_query.Node_ConvertRowtypeExpr,
+		*pg_query.Node_RowCompareExpr,
+		*pg_query.Node_CoerceToDomain,
+		*pg_query.Node_AIndices,
+		*pg_query.Node_AIndirection,
+		// Recognized safe leaf nodes (no child expressions to smuggle through).
+		*pg_query.Node_AConst,
+		*pg_query.Node_ParamRef,
+		*pg_query.Node_SetToDefault,
+		*pg_query.Node_CurrentOfExpr,
+		*pg_query.Node_CaseTestExpr,
+		*pg_query.Node_SqlvalueFunction,
+		*pg_query.Node_AStar,
+		*pg_query.Node_Integer,
+		*pg_query.Node_Float,
+		*pg_query.Node_Boolean,
+		*pg_query.Node_String_,
+		*pg_query.Node_BitString:
+		return nil
+	default:
+		return fmt.Errorf("unsupported SQL expression type %T is not allowed", node.Node)
+	}
+}
+
+// validateJsonValueExpr validates a JsonValueExpr, which appears as a concrete
+// (non-Node) field on several PG17 SQL/JSON expression nodes. Its RawExpr /
+// FormattedExpr children can hold arbitrary expressions (including FuncCalls),
+// so they must be recursed into.
+func (v *sqlValidator) validateJsonValueExpr(jve *pg_query.JsonValueExpr, result *SQLValidationResult) error {
+	if jve == nil {
+		return nil
+	}
+	if err := v.validateNode(jve.RawExpr, result); err != nil {
+		return err
+	}
+	return v.validateNode(jve.FormattedExpr, result)
+}
+
+// validateJsonBehavior validates the ON EMPTY / ON ERROR behavior of a PG17
+// SQL/JSON function. The DEFAULT branch can carry an arbitrary expression.
+func (v *sqlValidator) validateJsonBehavior(jb *pg_query.JsonBehavior, result *SQLValidationResult) error {
+	if jb == nil {
+		return nil
+	}
+	return v.validateNode(jb.Expr, result)
 }
 
 // validateFuncCall validates a function call
@@ -1914,6 +2263,26 @@ func (v *sqlValidator) validateFuncCall(fc *pg_query.FuncCall, result *SQLValida
 			// System catalog modification
 			"pg_catalog":         true,
 			"information_schema": true,
+
+			// DuckDB file-access functions (data_analysis tool runs on DuckDB).
+			// The user's data is already loaded into a session table, so these
+			// arbitrary-path readers are never legitimately needed and would
+			// allow reading any file on the app container.
+			"read_text":         true,
+			"read_blob":         true,
+			"read_csv":          true,
+			"read_csv_auto":     true,
+			"read_parquet":      true,
+			"read_json":         true,
+			"read_json_auto":    true,
+			"read_ndjson":       true,
+			"read_ndjson_auto":  true,
+			"read_json_objects": true,
+			"read_xlsx":         true,
+			"sniff_csv":         true,
+			"glob":              true,
+			"st_read":           true,
+			"st_read_meta":      true,
 		}
 		if dangerousFunctions[funcName] {
 			return fmt.Errorf("function '%s' is not allowed", funcName)
