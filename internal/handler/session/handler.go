@@ -16,25 +16,27 @@ import (
 
 // Handler handles all HTTP requests related to conversation sessions
 type Handler struct {
-	messageService       interfaces.MessageService       // Service for managing messages
-	sessionService       interfaces.SessionService       // Service for managing sessions
-	streamManager        interfaces.StreamManager        // Manager for handling streaming responses
-	config               *config.Config                  // Application configuration
-	knowledgebaseService interfaces.KnowledgeBaseService // Service for managing knowledge bases
-	customAgentService   interfaces.CustomAgentService   // Service for managing custom agents
-	tenantService        interfaces.TenantService        // Service for loading tenant (shared agent context)
-	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
-	kbShareService       interfaces.KBShareService       // Service for resolving shared KB permissions
-	fileService          interfaces.FileService          // Service for file storage (image uploads)
-	modelService         interfaces.ModelService         // Service for model management (VLM access)
-	userService          interfaces.UserService          // Service for resolving per-user preferences (e.g. enable_memory default)
-	attachmentProcessor  *AttachmentProcessor            // Processor for file attachments
+	messageService         interfaces.MessageService         // Service for managing messages
+	messageFeedbackService interfaces.MessageFeedbackService // Service for answer feedback attribution
+	sessionService         interfaces.SessionService         // Service for managing sessions
+	streamManager          interfaces.StreamManager          // Manager for handling streaming responses
+	config                 *config.Config                    // Application configuration
+	knowledgebaseService   interfaces.KnowledgeBaseService   // Service for managing knowledge bases
+	customAgentService     interfaces.CustomAgentService     // Service for managing custom agents
+	tenantService          interfaces.TenantService          // Service for loading tenant (shared agent context)
+	agentShareService      interfaces.AgentShareService      // Service for resolving shared agents (KB scope in retrieval)
+	kbShareService         interfaces.KBShareService         // Service for resolving shared KB permissions
+	fileService            interfaces.FileService            // Service for file storage (image uploads)
+	modelService           interfaces.ModelService           // Service for model management (VLM access)
+	userService            interfaces.UserService            // Service for resolving per-user preferences (e.g. enable_memory default)
+	attachmentProcessor    *AttachmentProcessor              // Processor for file attachments
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
 func NewHandler(
 	sessionService interfaces.SessionService,
 	messageService interfaces.MessageService,
+	messageFeedbackService interfaces.MessageFeedbackService,
 	streamManager interfaces.StreamManager,
 	config *config.Config,
 	knowledgebaseService interfaces.KnowledgeBaseService,
@@ -49,18 +51,19 @@ func NewHandler(
 	imageResolver *docparser.ImageResolver,
 ) *Handler {
 	return &Handler{
-		sessionService:       sessionService,
-		messageService:       messageService,
-		streamManager:        streamManager,
-		config:               config,
-		knowledgebaseService: knowledgebaseService,
-		customAgentService:   customAgentService,
-		tenantService:        tenantService,
-		agentShareService:    agentShareService,
-		kbShareService:       kbShareService,
-		fileService:          fileService,
-		modelService:         modelService,
-		userService:          userService,
+		sessionService:         sessionService,
+		messageService:         messageService,
+		messageFeedbackService: messageFeedbackService,
+		streamManager:          streamManager,
+		config:                 config,
+		knowledgebaseService:   knowledgebaseService,
+		customAgentService:     customAgentService,
+		tenantService:          tenantService,
+		agentShareService:      agentShareService,
+		kbShareService:         kbShareService,
+		fileService:            fileService,
+		modelService:           modelService,
+		userService:            userService,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

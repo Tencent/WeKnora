@@ -261,6 +261,9 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 		chunks.GET("/:knowledge_id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("knowledge_id"), handler.ListKnowledgeChunks)
 		// 通过chunk_id获取单个chunk（不需要knowledge_id） — Viewer+ 且对父 KB 有 read 权限
 		chunks.GET("/by-id/:id", g.Viewer(), g.KBAccessReadFromChunkIDParam("id"), handler.GetChunkByIDOnly)
+		chunks.GET("/by-id/:id/feedback-stats", g.Viewer(), g.KBAccessReadFromChunkIDParam("id"), handler.GetChunkFeedbackStats)
+		chunks.GET("/by-id/:id/weight-logs", g.Viewer(), g.KBAccessReadFromChunkIDParam("id"), handler.GetChunkWeightLogs)
+		chunks.POST("/by-id/:id/feedback-reset", g.Admin(), g.KBAccessWriteFromChunkIDParam("id"), handler.ResetChunkFeedback)
 		// 删除分块 — KB owner OR Admin+，且对父 KB 有 write 权限
 		chunks.DELETE("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.DeleteChunk)
 		// 删除知识下的所有分块 — KB owner OR Admin+，且对父 KB 有 write 权限
@@ -444,6 +447,7 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 		messages.POST("/search", g.Viewer(), handler.SearchMessages)
 		messages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
 		messages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
+		messages.POST("/:session_id/:id/feedback", g.Viewer(), handler.SetMessageFeedback)
 		messages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
 	}
 }

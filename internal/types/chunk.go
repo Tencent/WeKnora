@@ -104,6 +104,12 @@ type VideoInfo struct {
 	URL string `json:"url"          gorm:"type:text"`
 }
 
+// ChunkFeedbackFilter contains optional feedback-quality filters for chunk lists.
+type ChunkFeedbackFilter struct {
+	MaxPositiveRate   *float64
+	NeedsOptimization *bool
+}
+
 // Chunk represents a document chunk
 // Chunks are meaningful text segments extracted from original documents
 // and are the basic units of knowledge base retrieval
@@ -156,6 +162,18 @@ type Chunk struct {
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
+	// LikeCount stores aggregated positive feedback attributed to this chunk.
+	LikeCount int64 `json:"like_count" gorm:"column:like_count;default:0"`
+	// DislikeCount stores aggregated negative feedback attributed to this chunk.
+	DislikeCount int64 `json:"dislike_count" gorm:"column:dislike_count;default:0"`
+	// PositiveRate is nil when the chunk has no valid feedback after the latest reset.
+	PositiveRate *float64 `json:"positive_rate" gorm:"column:positive_rate"`
+	// RecallWeight is applied to post-rerank scores; neutral/default is 1.0.
+	RecallWeight float64 `json:"recall_weight" gorm:"column:recall_weight;default:1.0"`
+	// NeedsOptimization marks chunks with enough poor feedback for manual review.
+	NeedsOptimization bool `json:"needs_optimization" gorm:"column:needs_optimization;default:false"`
+	// FeedbackResetAt is the epoch boundary after which feedback counts again.
+	FeedbackResetAt *time.Time `json:"feedback_reset_at" gorm:"column:feedback_reset_at"`
 	// Chunk creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Chunk last update time

@@ -30,6 +30,7 @@ type Config struct {
 	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
 	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
 	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
+	MessageFeedback *MessageFeedbackConfig `yaml:"message_feedback" json:"message_feedback"`
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
@@ -39,6 +40,17 @@ type Config struct {
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// MessageFeedbackConfig controls chunk feedback aggregation and recall-weight rules.
+type MessageFeedbackConfig struct {
+	MinFeedbackCount               int     `yaml:"min_feedback_count"                   json:"min_feedback_count"`
+	BoostPositiveRateThreshold     float64 `yaml:"boost_positive_rate_threshold"         json:"boost_positive_rate_threshold"`
+	NeutralPositiveRateThreshold   float64 `yaml:"neutral_positive_rate_threshold"       json:"neutral_positive_rate_threshold"`
+	NeedsOptimizationRateThreshold float64 `yaml:"needs_optimization_rate_threshold"     json:"needs_optimization_rate_threshold"`
+	BoostRecallWeight              float64 `yaml:"boost_recall_weight"                  json:"boost_recall_weight"`
+	NeutralRecallWeight            float64 `yaml:"neutral_recall_weight"                json:"neutral_recall_weight"`
+	PenaltyRecallWeight            float64 `yaml:"penalty_recall_weight"                json:"penalty_recall_weight"`
 }
 
 // AgentConfig represents the global agent settings.
@@ -565,6 +577,7 @@ func LoadConfig() (*Config, error) {
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
+	applyMessageFeedbackDefaults(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -589,6 +602,61 @@ func LoadConfig() (*Config, error) {
 	)
 
 	return &cfg, nil
+}
+
+func applyMessageFeedbackDefaults(cfg *Config) {
+	if cfg.MessageFeedback == nil {
+		cfg.MessageFeedback = &MessageFeedbackConfig{}
+	}
+	mf := cfg.MessageFeedback
+	if mf.MinFeedbackCount <= 0 {
+		mf.MinFeedbackCount = 3
+	}
+	if mf.BoostPositiveRateThreshold <= 0 {
+		mf.BoostPositiveRateThreshold = 0.8
+	}
+	if mf.NeutralPositiveRateThreshold <= 0 {
+		mf.NeutralPositiveRateThreshold = 0.5
+	}
+	if mf.NeedsOptimizationRateThreshold <= 0 {
+		mf.NeedsOptimizationRateThreshold = 0.3
+	}
+	if mf.BoostRecallWeight <= 0 {
+		mf.BoostRecallWeight = 1.2
+	}
+	if mf.NeutralRecallWeight <= 0 {
+		mf.NeutralRecallWeight = 1.0
+	}
+	if mf.PenaltyRecallWeight <= 0 {
+		mf.PenaltyRecallWeight = 0.8
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_FEEDBACK_MIN_COUNT")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n > 0 {
+			mf.MinFeedbackCount = n
+		}
+	}
+	applyFloatEnv("WEKNORA_FEEDBACK_BOOST_THRESHOLD", &mf.BoostPositiveRateThreshold, 0, 1)
+	applyFloatEnv("WEKNORA_FEEDBACK_NEUTRAL_THRESHOLD", &mf.NeutralPositiveRateThreshold, 0, 1)
+	applyFloatEnv("WEKNORA_FEEDBACK_OPTIMIZATION_THRESHOLD", &mf.NeedsOptimizationRateThreshold, 0, 1)
+	applyFloatEnv("WEKNORA_FEEDBACK_BOOST_WEIGHT", &mf.BoostRecallWeight, 0, 0)
+	applyFloatEnv("WEKNORA_FEEDBACK_NEUTRAL_WEIGHT", &mf.NeutralRecallWeight, 0, 0)
+	applyFloatEnv("WEKNORA_FEEDBACK_PENALTY_WEIGHT", &mf.PenaltyRecallWeight, 0, 0)
+}
+
+func applyFloatEnv(name string, target *float64, min float64, max float64) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil || f <= min {
+		return
+	}
+	if max > min && f > max {
+		return
+	}
+	*target = f
 }
 
 // ValidateConfig performs basic validation of the loaded configuration.

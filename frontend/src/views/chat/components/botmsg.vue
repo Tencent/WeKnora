@@ -52,6 +52,20 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
+                <t-tooltip content="点赞" placement="top">
+                    <t-button size="small" variant="outline" shape="round"
+                        :class="{ 'feedback-active': feedbackType === 'like' }" :loading="feedbackLoading"
+                        @click.stop="handleLikeFeedback">
+                        <t-icon name="thumb-up" />
+                    </t-button>
+                </t-tooltip>
+                <t-tooltip content="点踩" placement="top">
+                    <t-button size="small" variant="outline" shape="round"
+                        :class="{ 'feedback-active': feedbackType === 'dislike', 'feedback-dislike': feedbackType === 'dislike' }"
+                        :loading="feedbackLoading" @click.stop="handleDislikeClick">
+                        <t-icon name="thumb-down" />
+                    </t-button>
+                </t-tooltip>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -68,6 +82,18 @@
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
                 :on-leave="scheduleCitationClose" />
         </Teleport>
+        <t-dialog v-model:visible="dislikeDialogVisible" header="反馈原因" width="420px" :confirm-loading="feedbackLoading"
+            confirm-btn="提交" cancel-btn="取消" @confirm="submitDislikeFeedback">
+            <div class="feedback-dialog">
+                <t-radio-group v-model="dislikeReasonCode" class="feedback-reasons">
+                    <t-radio v-for="reason in dislikeReasons" :key="reason.value" :value="reason.value">
+                        {{ reason.label }}
+                    </t-radio>
+                </t-radio-group>
+                <t-textarea v-model="dislikeReasonText" placeholder="补充说明（可选）" :maxlength="500"
+                    :autosize="{ minRows: 3, maxRows: 5 }" />
+            </div>
+        </t-dialog>
     </div>
 </template>
 <script setup>
@@ -103,6 +129,7 @@ import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
+import { setMessageFeedback } from '@/api/chat/index';
 
 ensureMermaidInitialized();
 
@@ -159,6 +186,26 @@ const props = defineProps({
 });
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+const feedbackType = ref(props.session?.feedback_type || 'none');
+const feedbackLoading = ref(false);
+const dislikeDialogVisible = ref(false);
+const dislikeReasonCode = ref(props.session?.feedback_reason_code || 'not_helpful');
+const dislikeReasonText = ref(props.session?.feedback_reason_text || '');
+const dislikeReasons = [
+    { value: 'not_helpful', label: '没有帮助' },
+    { value: 'wrong_answer', label: '回答有误' },
+    { value: 'bad_reference', label: '引用不准确' },
+    { value: 'unclear', label: '表达不清楚' },
+];
+
+watch(
+    () => [props.session?.id, props.session?.feedback_type, props.session?.feedback_reason_code, props.session?.feedback_reason_text],
+    () => {
+        feedbackType.value = props.session?.feedback_type || 'none';
+        dislikeReasonCode.value = props.session?.feedback_reason_code || 'not_helpful';
+        dislikeReasonText.value = props.session?.feedback_reason_text || '';
+    },
+);
 
 const preview = (url) => {
     nextTick(() => {
@@ -258,6 +305,57 @@ const handleAddToKnowledge = () => {
     MessagePlugin.info(t('chat.editorOpened'));
 };
 
+const syncLocalFeedback = (type, reasonCode = '', reasonText = '') => {
+    feedbackType.value = type || 'none';
+    if (props.session) {
+        props.session.feedback_type = feedbackType.value;
+        props.session.feedback_reason_code = reasonCode;
+        props.session.feedback_reason_text = reasonText;
+    }
+    if (feedbackType.value !== 'dislike') {
+        dislikeReasonCode.value = 'not_helpful';
+        dislikeReasonText.value = '';
+    }
+};
+
+const submitFeedback = async (type, reasonCode = '', reasonText = '') => {
+    const sessionId = props.sessionId;
+    const messageId = props.session?.id;
+    if (!sessionId || !messageId || feedbackLoading.value) return;
+    feedbackLoading.value = true;
+    try {
+        const response = await setMessageFeedback(sessionId, messageId, {
+            feedback_type: type,
+            reason_code: reasonCode,
+            reason_text: reasonText,
+        });
+        const data = response?.data || {};
+        syncLocalFeedback(data.feedback_type || type, data.reason_code || '', data.reason_text || '');
+        dislikeDialogVisible.value = false;
+    } catch (err) {
+        console.error('提交反馈失败:', err);
+        MessagePlugin.error(err?.message || '反馈提交失败');
+    } finally {
+        feedbackLoading.value = false;
+    }
+};
+
+const handleLikeFeedback = () => {
+    submitFeedback(feedbackType.value === 'like' ? 'none' : 'like');
+};
+
+const handleDislikeClick = () => {
+    if (feedbackType.value === 'dislike') {
+        submitFeedback('none');
+        return;
+    }
+    dislikeDialogVisible.value = true;
+};
+
+const submitDislikeFeedback = () => {
+    submitFeedback('dislike', dislikeReasonCode.value || 'not_helpful', dislikeReasonText.value || '');
+};
+
 // 处理 markdown-content 中图片的点击事件
 const handleMarkdownImageClick = (e) => {
     const target = e.target;
@@ -355,6 +453,30 @@ onBeforeUnmount(() => {
         color: var(--td-text-color-placeholder) !important;
         border-color: var(--td-component-border) !important;
     }
+}
+
+.feedback-active {
+    color: var(--td-brand-color) !important;
+    border-color: var(--td-brand-color) !important;
+    background: var(--td-brand-color-light) !important;
+}
+
+.feedback-dislike {
+    color: var(--td-error-color) !important;
+    border-color: var(--td-error-color) !important;
+    background: var(--td-error-color-1) !important;
+}
+
+.feedback-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.feedback-reasons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
 }
 
 @keyframes fadeInUp {

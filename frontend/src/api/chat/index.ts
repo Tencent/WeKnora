@@ -73,6 +73,14 @@ export async function stopSession(session_id: string, message_id: string) {
   return post(`/api/v1/sessions/${session_id}/stop`, { message_id });
 }
 
+export async function setMessageFeedback(
+  session_id: string,
+  message_id: string,
+  data: { feedback_type: "like" | "dislike" | "none"; reason_code?: string; reason_text?: string }
+) {
+  return post(`/api/v1/messages/${session_id}/${message_id}/feedback`, data);
+}
+
 export async function clearSessionMessages(session_id: string) {
   return del(`/api/v1/sessions/${session_id}/messages`);
 }

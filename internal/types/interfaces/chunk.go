@@ -48,6 +48,7 @@ type ChunkRepository interface {
 		searchField string,
 		sortOrder string,
 		knowledgeType string,
+		feedbackFilter *types.ChunkFeedbackFilter,
 	) ([]*types.Chunk, int64, error)
 	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
 	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list
@@ -125,6 +126,7 @@ type ChunkService interface {
 		knowledgeID string,
 		page *types.Pagination,
 		chunkType []types.ChunkType,
+		feedbackFilter *types.ChunkFeedbackFilter,
 	) (*types.PageResult, error)
 	// UpdateChunk updates a chunk
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error

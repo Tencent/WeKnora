@@ -77,6 +77,7 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		"", // searchField
 		"", // sortOrder
 		"", // knowledgeType
+		nil,
 	)
 	if err != nil {
 		return &types.ToolResult{

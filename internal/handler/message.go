@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 	"strconv"
@@ -19,7 +20,8 @@ import (
 // MessageHandler handles HTTP requests related to messages within chat sessions
 // It provides endpoints for loading and managing message history
 type MessageHandler struct {
-	MessageService interfaces.MessageService // Service that implements message business logic
+	MessageService         interfaces.MessageService         // Service that implements message business logic
+	MessageFeedbackService interfaces.MessageFeedbackService // Service for answer feedback state
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -27,9 +29,13 @@ type MessageHandler struct {
 //   - messageService: Service that implements message business logic
 //
 // Returns a pointer to a new MessageHandler
-func NewMessageHandler(messageService interfaces.MessageService) *MessageHandler {
+func NewMessageHandler(
+	messageService interfaces.MessageService,
+	messageFeedbackService interfaces.MessageFeedbackService,
+) *MessageHandler {
 	return &MessageHandler{
-		MessageService: messageService,
+		MessageService:         messageService,
+		MessageFeedbackService: messageFeedbackService,
 	}
 }
 
@@ -91,6 +97,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		h.attachFeedbackState(ctx, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    messages,
@@ -131,10 +138,28 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	h.attachFeedbackState(ctx, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    messages,
 	})
+}
+
+func (h *MessageHandler) attachFeedbackState(ctx context.Context, messages []*types.Message) {
+	if h.MessageFeedbackService == nil {
+		return
+	}
+	sessionTenantID, ok := types.SessionTenantIDFromContext(ctx)
+	if !ok || sessionTenantID == 0 {
+		return
+	}
+	userID, ok := types.UserIDFromContext(ctx)
+	if !ok || userID == "" {
+		return
+	}
+	if err := h.MessageFeedbackService.AttachFeedbackToMessages(ctx, sessionTenantID, userID, messages); err != nil {
+		logger.Warnf(ctx, "Failed to attach message feedback state: %v", err)
+	}
 }
 
 // DeleteMessage godoc
@@ -181,6 +206,47 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 		"success": true,
 		"message": "Message deleted successfully",
 	})
+}
+
+// SetMessageFeedback godoc
+// @Summary      提交回答反馈
+// @Description  对当前用户可见会话内的已完成 assistant message 点赞、点踩或取消评价
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Param        session_id  path      string                        true  "会话ID"
+// @Param        id          path      string                        true  "消息ID"
+// @Param        request     body      types.MessageFeedbackRequest  true  "反馈请求"
+// @Success      200         {object}  map[string]interface{}        "反馈状态"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/{session_id}/{id}/feedback [post]
+func (h *MessageHandler) SetMessageFeedback(c *gin.Context) {
+	ctx := c.Request.Context()
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	messageID := secutils.SanitizeForLog(c.Param("id"))
+
+	var req types.MessageFeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	resp, err := h.MessageFeedbackService.SetMessageFeedback(ctx, sessionID, messageID, req)
+	if err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID, "message_id": messageID})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
 // SearchMessages godoc

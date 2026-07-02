@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -27,13 +29,18 @@ import (
 // access — that lookup answers "is the caller the creator of THIS
 // resource", not "does the caller's tenant have access").
 type ChunkHandler struct {
-	service   interfaces.ChunkService
-	kgService interfaces.KnowledgeService
+	service         interfaces.ChunkService
+	kgService       interfaces.KnowledgeService
+	feedbackService interfaces.MessageFeedbackService
 }
 
 // NewChunkHandler creates a new chunk handler.
-func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService) *ChunkHandler {
-	return &ChunkHandler{service: service, kgService: kgService}
+func NewChunkHandler(
+	service interfaces.ChunkService,
+	kgService interfaces.KnowledgeService,
+	feedbackService interfaces.MessageFeedbackService,
+) *ChunkHandler {
+	return &ChunkHandler{service: service, kgService: kgService, feedbackService: feedbackService}
 }
 
 // GetChunkByIDOnly godoc
@@ -86,6 +93,70 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 	})
 }
 
+// GetChunkFeedbackStats returns aggregated answer-feedback stats for a chunk.
+func (h *ChunkHandler) GetChunkFeedbackStats(c *gin.Context) {
+	ctx := c.Request.Context()
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		return
+	}
+	stats, err := h.feedbackService.GetChunkFeedbackStats(ctx, chunkID)
+	if err != nil {
+		if err == service.ErrChunkNotFound {
+			c.Error(errors.NewNotFoundError("Chunk not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": chunkID})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
+}
+
+// GetChunkWeightLogs returns recall-weight change history for a chunk.
+func (h *ChunkHandler) GetChunkWeightLogs(c *gin.Context) {
+	ctx := c.Request.Context()
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		return
+	}
+	limit, _ := strconv.Atoi(secutils.SanitizeForLog(c.DefaultQuery("limit", "50")))
+	logs, err := h.feedbackService.GetChunkWeightLogs(ctx, chunkID, limit)
+	if err != nil {
+		if err == service.ErrChunkNotFound {
+			c.Error(errors.NewNotFoundError("Chunk not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": chunkID})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": logs})
+}
+
+// ResetChunkFeedback resets feedback aggregates and starts a new feedback epoch.
+func (h *ChunkHandler) ResetChunkFeedback(c *gin.Context) {
+	ctx := c.Request.Context()
+	chunkID := secutils.SanitizeForLog(c.Param("id"))
+	if chunkID == "" {
+		c.Error(errors.NewBadRequestError("Chunk ID cannot be empty"))
+		return
+	}
+	stats, err := h.feedbackService.ResetChunkFeedback(ctx, chunkID)
+	if err != nil {
+		if err == service.ErrChunkNotFound {
+			c.Error(errors.NewNotFoundError("Chunk not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": chunkID})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
+}
+
 // ListKnowledgeChunks godoc
 // @Summary      获取知识分块列表
 // @Description  获取指定知识下的所有分块列表，支持分页
@@ -95,6 +166,8 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 // @Param        knowledge_id  path      string  true   "知识ID"
 // @Param        page          query     int     false  "页码"  default(1)
 // @Param        page_size     query     int     false  "每页数量"  default(10)
+// @Param        max_positive_rate query number false "最大好评率，范围 0~1；无反馈 chunk 不会命中"
+// @Param        needs_optimization query bool false "是否筛选待优化 chunk"
 // @Success      200           {object}  map[string]interface{}  "分块列表"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -137,9 +210,15 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		}
 	}
 
+	feedbackFilter, err := parseChunkFeedbackFilter(c)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
 	// The route-level guard has rewritten the request's tenant context
 	// to the effective tenant for shared KBs.
-	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
+	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType, feedbackFilter)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -160,6 +239,32 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		"page":      result.Page,
 		"page_size": result.PageSize,
 	})
+}
+
+func parseChunkFeedbackFilter(c *gin.Context) (*types.ChunkFeedbackFilter, error) {
+	var filter types.ChunkFeedbackFilter
+	hasFilter := false
+
+	if raw := c.Query("max_positive_rate"); raw != "" {
+		rate, err := strconv.ParseFloat(raw, 64)
+		if err != nil || rate < 0 || rate > 1 {
+			return nil, fmt.Errorf("max_positive_rate must be a number between 0 and 1")
+		}
+		filter.MaxPositiveRate = &rate
+		hasFilter = true
+	}
+	if raw := c.Query("needs_optimization"); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("needs_optimization must be a boolean")
+		}
+		filter.NeedsOptimization = &v
+		hasFilter = true
+	}
+	if !hasFilter {
+		return nil, nil
+	}
+	return &filter, nil
 }
 
 // UpdateChunkRequest defines the request structure for updating a chunk
