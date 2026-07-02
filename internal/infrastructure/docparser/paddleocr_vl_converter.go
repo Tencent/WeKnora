@@ -26,18 +26,27 @@ const paddleOCRVLTimeout = 1000 * time.Second // large scanned PDFs can take a w
 // Flow: POST {endpoint}/layout-parsing with base64 file → synchronous JSON
 // response containing per-page markdown + inline base64 images.
 type PaddleOCRVLReader struct {
-	endpoint string
-	useSeal  bool
-	useChart bool
+	endpoint    string
+	bearerToken string
+	useSeal     bool
+	useChart    bool
 }
 
 // NewPaddleOCRVLReader creates a reader from ParserEngineOverrides.
 func NewPaddleOCRVLReader(overrides map[string]string) *PaddleOCRVLReader {
 	return &PaddleOCRVLReader{
-		endpoint: strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
-		useSeal:  parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
-		useChart: parseBoolOr(overrides["paddleocr_vl_use_chart_recognition"], false),
+		endpoint:    strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
+		bearerToken: paddleOCRVLBearerToken(overrides),
+		useSeal:     parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
+		useChart:    parseBoolOr(overrides["paddleocr_vl_use_chart_recognition"], false),
 	}
+}
+
+func paddleOCRVLBearerToken(overrides map[string]string) string {
+	if token := strings.TrimSpace(overrides["paddleocr_vl_bearer_token"]); token != "" {
+		return token
+	}
+	return strings.TrimSpace(overrides["paddleocr_vl_api_key"])
 }
 
 func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
@@ -156,6 +165,7 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 		return "", nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	setPaddleOCRVLAuthHeader(httpReq, c.bearerToken)
 
 	client := &http.Client{Timeout: paddleOCRVLTimeout}
 	resp, err := client.Do(httpReq)
@@ -260,7 +270,7 @@ func (c *PaddleOCRVLReader) processImages(
 }
 
 // PingPaddleOCRVL checks whether a self-hosted PaddleOCR-VL service is reachable.
-func PingPaddleOCRVL(endpoint string) (bool, string) {
+func PingPaddleOCRVL(endpoint, bearerToken string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
 		return false, "未配置 PaddleOCR-VL 端点"
@@ -271,7 +281,12 @@ func PingPaddleOCRVL(endpoint string) (bool, string) {
 	})
 	// The pipeline only exposes POST /layout-parsing; an empty GET should still
 	// produce a routed HTTP response (e.g. 404/405) when the service is up.
-	resp, err := client.Get(endpoint + "/layout-parsing")
+	req, err := http.NewRequest(http.MethodGet, endpoint+"/layout-parsing", nil)
+	if err != nil {
+		return false, fmt.Sprintf("PaddleOCR-VL 检测请求创建失败: %v", err)
+	}
+	setPaddleOCRVLAuthHeader(req, strings.TrimSpace(bearerToken))
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, fmt.Sprintf("PaddleOCR-VL 服务不可达: %v", err)
 	}
@@ -280,4 +295,11 @@ func PingPaddleOCRVL(endpoint string) (bool, string) {
 		return false, fmt.Sprintf("PaddleOCR-VL 服务返回状态 %d", resp.StatusCode)
 	}
 	return true, ""
+}
+
+func setPaddleOCRVLAuthHeader(req *http.Request, bearerToken string) {
+	if bearerToken == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+bearerToken)
 }

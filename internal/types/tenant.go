@@ -354,6 +354,8 @@ type ParserEngineConfig struct {
 
 	// PaddleOCR-VL self-hosted pipeline service (full /layout-parsing API).
 	PaddleOCRVLEndpoint            string `json:"paddleocr_vl_endpoint,omitempty"` // e.g. http://paddleocr-vl:8080
+	PaddleOCRVLBearerToken         string `json:"paddleocr_vl_bearer_token,omitempty"`
+	PaddleOCRVLAPIKey              string `json:"paddleocr_vl_api_key,omitempty" swaggerignore:"true"` // deprecated: use paddleocr_vl_bearer_token
 	PaddleOCRVLUseSealRecognition  *bool  `json:"paddleocr_vl_use_seal_recognition,omitempty"`
 	PaddleOCRVLUseChartRecognition *bool  `json:"paddleocr_vl_use_chart_recognition,omitempty"`
 
@@ -427,6 +429,11 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.PaddleOCRVLEndpoint != "" {
 		m["paddleocr_vl_endpoint"] = c.PaddleOCRVLEndpoint
+	}
+	if c.PaddleOCRVLBearerToken != "" {
+		m["paddleocr_vl_bearer_token"] = c.PaddleOCRVLBearerToken
+	} else if c.PaddleOCRVLAPIKey != "" {
+		m["paddleocr_vl_bearer_token"] = c.PaddleOCRVLAPIKey
 	}
 	if c.PaddleOCRVLUseSealRecognition != nil {
 		m["paddleocr_vl_use_seal_recognition"] = fmt.Sprintf("%v", *c.PaddleOCRVLUseSealRecognition)

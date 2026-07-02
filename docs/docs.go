@@ -16603,6 +16603,10 @@ const docTemplate = `{
                     "description": "PaddleOCR-VL self-hosted pipeline service (full /layout-parsing API).",
                     "type": "string"
                 },
+                "paddleocr_vl_bearer_token": {
+                    "description": "Optional Bearer token for self-hosted services protected by a gateway or reverse proxy. Official PaddleX Serving does not require this field.",
+                    "type": "string"
+                },
                 "paddleocr_vl_use_chart_recognition": {
                     "type": "boolean"
                 },

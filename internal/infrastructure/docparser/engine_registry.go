@@ -151,7 +151,7 @@ func (e *paddleOCRVLEngine) CheckAvailable(_ bool, overrides map[string]string) 
 	if endpoint == "" {
 		return false, "PaddleOCR-VL service not configured"
 	}
-	return PingPaddleOCRVL(endpoint)
+	return PingPaddleOCRVL(endpoint, paddleOCRVLBearerToken(overrides))
 }
 
 // ---------------------------------------------------------------------------
