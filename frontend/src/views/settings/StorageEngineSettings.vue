@@ -1627,6 +1627,32 @@ onMounted(loadAll)
     color: var(--td-error-color);
   }
 }
+
+@media (max-width: 720px) {
+  .engine-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .engine-card {
+    padding: 12px;
+  }
+
+  .setting-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .setting-info {
+    max-width: 100%;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+}
 </style>
 
 <!--

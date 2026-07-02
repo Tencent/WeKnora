@@ -1,8 +1,12 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
+    <div class="aside_box" :class="{
+        'aside_box--collapsed': sidebarCollapsed,
+        'aside_box--mobile': uiStore.responsiveSidebarCollapsed,
+        'aside_box--mobile-open': uiStore.responsiveSidebarCollapsed && !sidebarCollapsed
+    }">
         <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
-        <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
-            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
+        <div class="logo_row" v-if="!sidebarCollapsed">
+            <div class="logo_box" @click="handleLogoClick" style="cursor: pointer;">
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
@@ -50,16 +54,16 @@
         </t-tooltip>
 
         <!-- 租户选择器：仅在用户可切换租户时显示 -->
-        <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
+        <TenantSelector v-if="canAccessAllTenants && !sidebarCollapsed" />
 
         <!-- 折叠时右侧拖拽展开手柄 -->
-        <div v-if="uiStore.sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
+        <div v-if="sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
 
         <!-- 上半部分：新对话吸顶 + 知识库/智能体/共享空间/历史会话随滚动一起滚走 -->
         <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
             <!-- 全局搜索入口：点击打开命令面板（⌘K）。展开态移至顶部 logo_row 的图标按钮；
                  折叠态在此处保留为图标项 + 深色 tooltip。 -->
-            <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed">
+            <div class="menu_box menu_box--cmdk" v-if="sidebarCollapsed">
                 <t-tooltip placement="right">
                     <template #content>
                         <span class="cmdk-tip">
@@ -76,9 +80,9 @@
                     </div>
                 </t-tooltip>
             </div>
-            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
+            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !sidebarCollapsed }"
                 v-for="(item, index) in topMenuItems" :key="index">
-                <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
+                <t-tooltip :content="item.title" placement="right" :disabled="!sidebarCollapsed">
                     <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
@@ -88,7 +92,7 @@
                                     :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'integration' ? integrationIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
-                            <template v-if="!uiStore.sidebarCollapsed">
+                            <template v-if="!sidebarCollapsed">
                                 <span class="menu_title" :title="item.title">{{ item.title }}</span>
                                 <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0"
                                     class="menu-pending-badge"
@@ -110,7 +114,7 @@
             </div>
 
             <!-- 历史会话：按来源筛选后统一按日期分组展示 -->
-            <div class="submenu" v-if="!uiStore.sidebarCollapsed"
+            <div class="submenu" v-if="!sidebarCollapsed"
                 :class="{ 'submenu--scope-fallback': showSessionScopeFallback }">
                 <div v-if="showSessionScopeFallback" class="session-list-scope-fallback">
                     <SessionSourceFilter inline :emphasized="sessionScopeFilterPinned" :sources="sessionSourceOptions"
@@ -178,7 +182,7 @@
             </div>
 
             <!-- 批量管理底部操作条 -->
-            <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+            <div v-if="batchMode && !sidebarCollapsed" class="batch-inline-footer">
                 <div class="batch-footer-left">
                     <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
                         @change="toggleBatchSelectAll">
@@ -204,6 +208,8 @@
         </div>
 
     </div>
+    <div v-show="uiStore.responsiveSidebarCollapsed && !sidebarCollapsed" class="sidebar-mobile-backdrop"
+        @click="uiStore.closeMobileSidebar" />
 </template>
 
 <script setup lang="ts">
@@ -298,6 +304,7 @@ const authStore = useAuthStore();
 const orgStore = useOrganizationStore();
 const uiStore = useUIStore();
 const commandPaletteStore = useCommandPaletteStore();
+const sidebarCollapsed = computed(() => uiStore.effectiveSidebarCollapsed);
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
 // the alternatives (userAgentData.platform) aren't universally available yet;
@@ -1027,6 +1034,9 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
         loadCurrentKbInfo((newvalue[1] as any)?.kbId as string);
     }
 });
+watch(() => route.fullPath, () => {
+    closeMobileSidebarIfNeeded()
+});
 let knowledgeIcon = ref('zhishiku-green.svg');
 let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
@@ -1065,6 +1075,18 @@ const getIcon = (path: string) => {
     logoutIcon.value = 'logout.svg';
 }
 getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
+
+function closeMobileSidebarIfNeeded() {
+    if (uiStore.responsiveSidebarCollapsed) {
+        uiStore.closeMobileSidebar()
+    }
+}
+
+const handleLogoClick = () => {
+    router.push('/platform/knowledge-bases')
+    closeMobileSidebarIfNeeded()
+}
+
 const handleMenuClick = async (path: string) => {
     if (path === 'knowledge-bases') {
         // 知识库菜单项：如果在知识库内部，跳转到当前知识库文件页；否则跳转到知识库列表
@@ -1088,6 +1110,7 @@ const handleMenuClick = async (path: string) => {
     } else {
         gotopage(path)
     }
+    closeMobileSidebarIfNeeded()
 }
 
 // 处理退出登录确认
@@ -1133,6 +1156,7 @@ const gotopage = async (path: string) => {
         }
     }
     getIcon(path)
+    closeMobileSidebarIfNeeded()
 }
 
 const getImgSrc = (url: string) => {
@@ -1950,6 +1974,54 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
 .menu_box {
     position: relative;
+}
+
+.sidebar-mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 940;
+    background: rgba(0, 0, 0, 0.36);
+    backdrop-filter: blur(1px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 960px) {
+    .aside_box {
+        &.aside_box--mobile {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 950;
+            height: 100dvh;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        &.aside_box--mobile.aside_box--collapsed {
+            transform: translateX(-100%);
+        }
+
+        &.aside_box--mobile-open {
+            width: clamp(220px, 60vw, 340px);
+            min-width: clamp(220px, 60vw, 340px);
+            max-width: calc(100vw - 56px);
+            padding: 10px 8px 8px;
+            overflow: hidden;
+            transform: translateX(0);
+        }
+    }
+
+    // Backdrop sibling selectors — must live outside .aside_box scope
+    .aside_box--mobile.aside_box--collapsed ~ .sidebar-mobile-backdrop {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .aside_box--mobile-open ~ .sidebar-mobile-backdrop {
+        opacity: 1;
+        pointer-events: auto;
+    }
 }
 </style>
 <style lang="less">

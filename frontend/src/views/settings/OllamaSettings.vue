@@ -595,6 +595,62 @@ onMounted(async () => {
   }
 }
 
+@media (max-width: 900px) {
+  .section-header {
+    margin-bottom: 24px;
+  }
+
+  .setting-row,
+  .category-header,
+  .download-content .input-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .setting-row {
+    gap: 12px;
+  }
+
+  .setting-info {
+    padding-right: 0;
+  }
+
+  .setting-control {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    align-items: stretch;
+  }
+
+  .status-display,
+  .url-control-group,
+  .model-meta {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .url-control-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .download-content .input-group .download-btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .model-card {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .model-meta {
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);

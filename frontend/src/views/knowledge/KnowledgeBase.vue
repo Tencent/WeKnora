@@ -2345,7 +2345,9 @@ async function createNewSession(value: string): Promise<void> {
                 <div class="doc-filter-field doc-filter-field--wide">
                   <t-date-range-picker v-model="updatedTimeRange"
                     :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
-                    :disable-date="disableFutureDate" class="doc-date-range doc-filter-field__control" clearable
+                    :disable-date="disableFutureDate"
+                    :popup-props="{ overlayClassName: 'doc-date-range-popup', attach: 'body' }"
+                    class="doc-date-range doc-filter-field__control" clearable
                     allow-input>
                     <template #prefixIcon>
                       <t-icon name="time" size="16px" />
@@ -3676,46 +3678,6 @@ async function createNewSession(value: string): Promise<void> {
   margin: 0 16px 0 4px;
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-  .answers-input {
-    transform: translateX(-329px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 654px !important;
-  }
-}
-
-@media (max-width: 1045px) {
-  .answers-input {
-    transform: translateX(-250px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 500px !important;
-  }
-}
-
-@media (max-width: 750px) {
-  .answers-input {
-    transform: translateX(-182px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 340px !important;
-  }
-}
-
-@media (max-width: 600px) {
-  .answers-input {
-    transform: translateX(-164px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 300px !important;
-  }
-}
-
 @keyframes contentFadeIn {
   from {
     opacity: 0;
@@ -4437,5 +4399,187 @@ async function createNewSession(value: string): Promise<void> {
 
 .del-card {
   vertical-align: middle;
+}
+
+@media (max-width: 900px) {
+  .knowledge-layout {
+    margin: 0;
+    padding: 16px 14px 12px;
+    gap: 16px;
+  }
+
+  .document-header {
+    gap: 10px;
+
+    .document-breadcrumb {
+      font-size: 18px;
+      line-height: 26px;
+    }
+
+    h2 {
+      font-size: 20px;
+      line-height: 28px;
+    }
+  }
+
+  .faq-manager-wrapper {
+    padding: 16px 0 0;
+    margin: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .knowledge-layout {
+    padding: 12px 10px 10px;
+    gap: 12px;
+  }
+
+  .document-header {
+    .document-title-row {
+      align-items: flex-start;
+    }
+
+    .document-breadcrumb {
+      flex-wrap: wrap;
+      gap: 4px;
+      font-size: 17px;
+      line-height: 24px;
+    }
+
+    .document-subtitle,
+    .parser-hint,
+    .storage-engine-warning {
+      font-size: 12px;
+      line-height: 18px;
+    }
+  }
+
+  .doc-filter-bar {
+    gap: 8px;
+    padding-bottom: 10px;
+
+    .doc-filter-field,
+    .doc-filter-field--wide {
+      width: calc(50% - 4px);
+      flex: 0 1 calc(50% - 4px);
+    }
+
+    .doc-search-input {
+      flex: 1 1 100%;
+      min-width: 100%;
+    }
+
+    .doc-filter-field--wide {
+      width: 100%;
+      flex-basis: 100%;
+    }
+
+    .doc-view-toggle {
+      order: 20;
+      flex: 0 0 auto;
+      margin-right: auto;
+    }
+
+    .doc-filter-actions {
+      order: 21;
+      display: flex;
+      flex: 1 1 auto;
+      justify-content: flex-end;
+      margin-left: 0;
+
+      :deep(.kb-upload-source-dropdown) {
+        display: flex;
+        justify-content: flex-end;
+        width: 100%;
+      }
+
+      :deep(.content-bar-icon-btn),
+      :deep(.kb-upload-source-trigger) {
+        min-width: 36px;
+        min-height: 36px;
+      }
+    }
+  }
+
+  .doc-card-list {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .knowledge-card {
+    min-width: 0;
+  }
+
+  .doc-scroll-container {
+    padding-right: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .doc-filter-bar {
+    .doc-filter-field,
+    .doc-filter-field--wide {
+      width: 100%;
+      flex-basis: 100%;
+    }
+
+    .doc-view-toggle,
+    .doc-filter-actions {
+      width: 100%;
+    }
+
+    .doc-filter-actions {
+      justify-content: stretch;
+
+      :deep(.kb-upload-source-dropdown) {
+        justify-content: stretch;
+      }
+
+      :deep(.content-bar-icon-btn),
+      :deep(.kb-upload-source-trigger) {
+        width: 100%;
+        justify-content: center;
+        border-radius: 10px;
+        background: var(--td-bg-color-secondarycontainer);
+      }
+    }
+  }
+}
+</style>
+
+<style lang="less">
+.doc-date-range-popup {
+  .t-popup__content {
+    max-width: min(720px, calc(100vw - 24px));
+  }
+}
+
+@media (max-width: 720px) {
+  .doc-date-range-popup {
+    .t-popup__content {
+      width: min(420px, calc(100vw - 20px)) !important;
+      min-width: min(420px, calc(100vw - 20px)) !important;
+      max-width: calc(100vw - 20px) !important;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .t-date-range-picker__panel,
+    .t-date-range-picker__panel--direction-row,
+    .t-date-range-picker__panel-content,
+    .t-date-range-picker__panel-content-wrapper {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    .t-date-picker__panel-date {
+      width: 100%;
+    }
+
+    .t-date-picker__header {
+      flex-wrap: wrap;
+    }
+  }
 }
 </style>

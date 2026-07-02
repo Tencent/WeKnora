@@ -1331,6 +1331,62 @@ const handleClose = () => {
     background: var(--td-bg-color-component);
   }
 }
+
+@media (max-width: 720px) {
+  .custom-headers-header,
+  .custom-header-row,
+  .vision-toggle {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .custom-header-key,
+  .custom-header-value {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .custom-header-remove {
+    align-self: flex-end;
+  }
+
+  .source-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 100%;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .source-option {
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 32px;
+    text-align: center;
+  }
+
+  .source-option__label {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .code-import__actions {
+    justify-content: stretch;
+
+    :deep(.t-button) {
+      width: 100%;
+    }
+  }
+}
+
+@media (max-width: 360px) {
+  .source-options {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
 
 <!--

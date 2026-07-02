@@ -2017,11 +2017,11 @@ watch(currentSection, (section) => {
     min-width: 140px;
   }
 
-  .member-limit-input-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 8px;
+.member-limit-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
 
     .member-limit-hint {
       font-size: 12px;
@@ -2063,6 +2063,137 @@ watch(currentSection, (section) => {
       font-size: 13px;
       color: var(--td-text-color-placeholder);
     }
+  }
+}
+
+@media (max-width: 900px) {
+  .settings-modal {
+    width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .settings-container {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--td-component-stroke);
+
+    .sidebar-header {
+      padding: 18px 56px 12px 16px;
+    }
+
+    .settings-nav {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px 12px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+    }
+
+    .settings-nav::-webkit-scrollbar {
+      display: none;
+    }
+
+    .settings-nav .nav-item {
+      flex: 0 0 auto;
+      margin-bottom: 0;
+      white-space: nowrap;
+      padding: 8px 12px;
+    }
+
+    .settings-nav .nav-label {
+      flex: 0 0 auto;
+    }
+  }
+
+  .content-wrapper {
+    padding: 20px 18px 24px;
+  }
+
+  .setting-row {
+    flex-direction: column;
+    gap: 12px;
+
+    .setting-info,
+    .setting-control {
+      max-width: none;
+      width: 100%;
+      padding-right: 0;
+    }
+  }
+
+  .name-input-wrapper,
+  .member-limit-input-row,
+  .approval-toggle,
+  .members-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .avatar-trigger-wrap {
+    align-self: flex-start;
+  }
+
+  .invite-card .invite-code-box,
+  .invite-card .invite-link-box {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .invite-card .invite-code-actions {
+    justify-content: flex-end;
+  }
+
+  .members-list .member-item {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .members-list .member-role,
+  .members-list .member-actions {
+    margin-left: 48px;
+  }
+}
+
+@media (max-width: 720px) {
+  .settings-overlay {
+    padding: 0;
+  }
+
+  .settings-modal {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .close-btn {
+    top: 10px;
+    right: 10px;
+  }
+
+  .settings-sidebar {
+    .sidebar-header {
+      padding: 14px 52px 10px 14px;
+    }
+
+    .settings-nav {
+      padding: 6px 10px 10px;
+    }
+
+    .settings-nav .nav-item {
+      padding: 6px 10px;
+    }
+  }
+
+  .content-wrapper {
+    padding: 18px 14px 24px;
   }
 }
 

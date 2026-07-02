@@ -1,5 +1,9 @@
 <template>
-    <div class="chat" :class="{ 'is-embedded': embeddedMode, 'is-sidebar-collapsed': uiStore.sidebarCollapsed }">
+    <div class="chat" :class="{
+        'is-embedded': embeddedMode,
+        'is-sidebar-collapsed': uiStore.effectiveSidebarCollapsed,
+        'is-responsive-sidebar': uiStore.responsiveSidebarCollapsed
+    }">
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                 <!-- 消息列表骨架屏 -->
@@ -866,7 +870,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-direction: column;
     align-items: center;
     max-width: calc(100vw - 260px);
-    min-width: 400px;
+    min-width: 0;
 
     &.is-sidebar-collapsed {
         max-width: calc(100vw - 60px);
@@ -896,6 +900,8 @@ onBeforeRouteUpdate((to, from, next) => {
     &:not(.is-embedded) :deep(.answers-input) {
         position: static;
         transform: translateX(0);
+        width: 100%;
+        max-width: 100%;
 
         .t-textarea__inner {
             width: 100% !important;
@@ -906,6 +912,11 @@ onBeforeRouteUpdate((to, from, next) => {
         width: 100% !important;
         min-height: 48px !important;
         padding: 10px 14px 48px 14px;
+    }
+
+    &.is-responsive-sidebar:not(.is-embedded) {
+        max-width: 100%;
+        padding: 12px;
     }
 }
 
@@ -1123,5 +1134,30 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-enter-from,
 .sq-fade-leave-to {
     opacity: 0;
+}
+
+@media (max-width: 720px) {
+    .chat:not(.is-embedded) {
+        padding: 10px 10px 12px;
+    }
+
+    .msg_list {
+        gap: 12px;
+    }
+
+    .msg-skeleton-list {
+        gap: 14px;
+        padding: 8px 0;
+    }
+
+    .input-container {
+        min-height: 108px;
+    }
+
+    .scroll-to-bottom-btn {
+        bottom: 120px;
+        width: 34px;
+        height: 34px;
+    }
 }
 </style>

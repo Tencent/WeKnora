@@ -3,6 +3,11 @@
     <Transition name="modal">
       <div v-if="visible" class="settings-overlay" @click.self="handleClose">
         <div class="settings-modal">
+          <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </button>
           <div class="settings-container">
             <div class="settings-sidebar">
               <div class="sidebar-header">
@@ -24,11 +29,6 @@
             </div>
 
             <div class="settings-content">
-              <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                </svg>
-              </button>
               <div class="content-wrapper" :class="{ 'content-wrapper--landing': isLandingSection }">
                 <div v-if="currentSection === 'im'" class="section">
                   <div class="section-header">
@@ -389,6 +389,108 @@ watch(
   .settings-modal {
     transform: scale(0.98);
     opacity: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .settings-modal {
+    width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .settings-container {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .settings-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-height: auto;
+    padding: 8px 10px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .settings-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+
+  .nav-label {
+    flex: 0 0 auto;
+  }
+
+  .content-wrapper {
+    padding: 20px 18px 24px;
+
+    &--landing {
+      padding-right: 18px;
+    }
+  }
+}
+
+@media (max-width: 720px) {
+  .settings-overlay {
+    padding: 0;
+  }
+
+  .settings-modal {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .sidebar-header {
+    padding-right: 52px;
+  }
+
+  .settings-nav {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 6px 10px 10px;
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item {
+    padding: 6px 10px;
+  }
+
+  .close-btn {
+    top: 10px;
+    right: 10px;
+  }
+
+  .content-wrapper {
+    padding: 18px 14px 24px;
+
+    &--landing {
+      padding-right: 14px;
+    }
   }
 }
 </style>

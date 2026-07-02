@@ -949,4 +949,23 @@ onMounted(() => {
     margin-bottom: 16px;
   }
 }
+
+@media (max-width: 720px) {
+  .model-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .model-card {
+    padding: 12px;
+  }
+
+  .model-card__header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .model-card__action-btn {
+    opacity: 1;
+  }
+}
 </style>

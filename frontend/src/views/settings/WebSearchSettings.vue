@@ -1075,6 +1075,21 @@ onMounted(async () => {
     }
   }
 }
+
+@media (max-width: 720px) {
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-card {
+    padding: 12px;
+  }
+
+  .provider-card__header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
 </style>
 
 <!--

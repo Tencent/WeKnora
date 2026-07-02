@@ -157,7 +157,8 @@
           <div class="form-item">
             <label class="form-label">{{ $t('model.editor.providerLabel') }}</label>
             <t-select v-model="formData.provider" :placeholder="$t('model.editor.providerPlaceholder')"
-              @change="handleProviderChange" :popup-props="{ overlayClassName: 'provider-select-popup' }">
+              @change="handleProviderChange"
+              :popup-props="{ overlayClassName: 'provider-select-popup', attach: 'body' }">
               <!--
                 show-overflow-tooltip=false: TDesign 默认在 hover 时给选项浮一个
                 完整 label 的小气泡，但这里选项本身就是双行（主名 + 描述），不会
@@ -2247,6 +2248,42 @@ const handleCancel = () => {
     font-size: 13px;
   }
 }
+
+@media (max-width: 720px) {
+  .custom-header-row,
+  .vision-toggle {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .custom-header-row {
+    .custom-header-key,
+    .custom-header-value {
+      flex: 1 1 auto;
+      width: 100%;
+    }
+
+    .custom-header-remove {
+      align-self: flex-end;
+    }
+  }
+
+  .source-options {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .source-options::-webkit-scrollbar {
+    display: none;
+  }
+
+  .source-option {
+    flex: 0 0 auto;
+  }
+}
 </style>
 
 <!-- 非 scoped 样式：t-select popup 渲染到 body 下，scoped 样式无法覆盖 -->
@@ -2255,6 +2292,8 @@ const handleCancel = () => {
   min-width: 22rem;
   max-width: min(28rem, calc(100vw - 2rem));
   padding: 4px;
+  width: min(28rem, calc(100vw - 28px));
+  max-width: calc(100vw - 28px) !important;
 
   .t-select-option {
     height: auto !important;
@@ -2360,6 +2399,20 @@ const handleCancel = () => {
       overflow: hidden;
       text-overflow: ellipsis;
     }
+  }
+}
+
+@media (max-width: 720px) {
+  .provider-select-popup {
+    width: calc(100vw - 28px);
+    max-width: calc(100vw - 28px) !important;
+  }
+
+  .provider-select-popup .provider-option .provider-desc {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    word-break: break-word;
   }
 }
 </style>
