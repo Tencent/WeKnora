@@ -978,6 +978,9 @@ func (s *userService) RefreshToken(
 	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
 		return "", "", errors.New("refresh token is revoked")
 	}
+	if tokenRecord.TokenType != "refresh_token" {
+		return "", "", errors.New("not a refresh token")
+	}
 
 	// Get user
 	user, err := s.userRepo.GetUserByID(ctx, userID)
