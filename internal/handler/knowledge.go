@@ -1267,49 +1267,8 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 
 // mimeTypeByExt returns the MIME type for a given file extension.
 func mimeTypeByExt(filename string) string {
-	ext := strings.ToLower(filename)
-	if idx := strings.LastIndex(ext, "."); idx >= 0 {
-		ext = ext[idx:]
-	} else {
-		ext = ""
-	}
-	m := map[string]string{
-		".pdf":      "application/pdf",
-		".docx":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-		".doc":      "application/msword",
-		".pptx":     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-		".ppt":      "application/vnd.ms-powerpoint",
-		".xlsx":     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-		".xls":      "application/vnd.ms-excel",
-		".csv":      "text/csv",
-		".jpg":      "image/jpeg",
-		".jpeg":     "image/jpeg",
-		".png":      "image/png",
-		".gif":      "image/gif",
-		".bmp":      "image/bmp",
-		".webp":     "image/webp",
-		".svg":      "image/svg+xml",
-		".tiff":     "image/tiff",
-		".txt":      "text/plain; charset=utf-8",
-		".md":       "text/markdown; charset=utf-8",
-		".markdown": "text/markdown; charset=utf-8",
-		".json":     "application/json; charset=utf-8",
-		".xml":      "application/xml; charset=utf-8",
-		".html":     "text/html; charset=utf-8",
-		".css":      "text/css; charset=utf-8",
-		".js":       "text/javascript; charset=utf-8",
-		".ts":       "text/typescript; charset=utf-8",
-		".py":       "text/x-python; charset=utf-8",
-		".go":       "text/x-go; charset=utf-8",
-		".java":     "text/x-java; charset=utf-8",
-		".yaml":     "text/yaml; charset=utf-8",
-		".yml":      "text/yaml; charset=utf-8",
-		".sh":       "text/x-shellscript; charset=utf-8",
-	}
-	if ct, ok := m[ext]; ok {
-		return ct
-	}
-	return "application/octet-stream"
+	ct, _ := secutils.SafeContentTypeByFilename(filename)
+	return ct
 }
 
 // PreviewKnowledgeFile godoc
@@ -1347,9 +1306,14 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	contentType := mimeTypeByExt(filename)
+	contentType, inline := secutils.SafeContentTypeByFilename(filename)
 	c.Header("Content-Type", contentType)
-	c.Header("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
+	c.Header("X-Content-Type-Options", "nosniff")
+	disposition := "inline"
+	if !inline {
+		disposition = "attachment"
+	}
+	c.Header("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filename}))
 	c.Header("Cache-Control", "private, max-age=3600")
 
 	c.Stream(func(w io.Writer) bool {

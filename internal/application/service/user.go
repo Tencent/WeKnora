@@ -1051,6 +1051,39 @@ type oidcTokenResponse struct {
 	TokenType   string `json:"token_type"`
 }
 
+func newOIDCHTTPClient() *http.Client {
+	cfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	cfg.Timeout = 30 * time.Second
+	return secutils.NewSSRFSafeHTTPClient(cfg)
+}
+
+func validateOIDCEndpoint(label, endpoint string, required bool) error {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		if required {
+			return fmt.Errorf("OIDC %s endpoint is required", label)
+		}
+		return nil
+	}
+	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+		return fmt.Errorf("OIDC %s endpoint failed SSRF validation: %w", label, err)
+	}
+	return nil
+}
+
+func validateOIDCEndpoints(cfg *config.OIDCAuthConfig) error {
+	if err := validateOIDCEndpoint("authorization", cfg.AuthorizationEndpoint, true); err != nil {
+		return err
+	}
+	if err := validateOIDCEndpoint("token", cfg.TokenEndpoint, true); err != nil {
+		return err
+	}
+	if err := validateOIDCEndpoint("userinfo", cfg.UserInfoEndpoint, false); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *userService) getOIDCConfig(ctx context.Context) (*config.OIDCAuthConfig, error) {
 	if s.config == nil || s.config.OIDCAuth == nil || !s.config.OIDCAuth.Enable {
 		return nil, errors.New("OIDC login is disabled")
@@ -1067,10 +1100,13 @@ func (s *userService) getOIDCConfig(ctx context.Context) (*config.OIDCAuthConfig
 
 func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OIDCAuthConfig) error {
 	if strings.TrimSpace(cfg.AuthorizationEndpoint) != "" && strings.TrimSpace(cfg.TokenEndpoint) != "" {
-		return nil
+		return validateOIDCEndpoints(cfg)
 	}
 	if strings.TrimSpace(cfg.DiscoveryURL) == "" {
 		return errors.New("OIDC discovery_url or explicit endpoints are required")
+	}
+	if err := validateOIDCEndpoint("discovery", cfg.DiscoveryURL, true); err != nil {
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.DiscoveryURL, nil)
@@ -1078,7 +1114,7 @@ func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OID
 		return fmt.Errorf("failed to create OIDC discovery request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newOIDCHTTPClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to load OIDC discovery document: %w", err)
 	}
@@ -1104,10 +1140,14 @@ func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OID
 	if cfg.AuthorizationEndpoint == "" || cfg.TokenEndpoint == "" {
 		return errors.New("OIDC discovery document missing required endpoints")
 	}
-	return nil
+	return validateOIDCEndpoints(cfg)
 }
 
 func (s *userService) exchangeOIDCCode(ctx context.Context, cfg *config.OIDCAuthConfig, code, redirectURI string) (*oidcTokenResponse, error) {
+	if err := validateOIDCEndpoint("token", cfg.TokenEndpoint, true); err != nil {
+		return nil, err
+	}
+
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
@@ -1122,14 +1162,14 @@ func (s *userService) exchangeOIDCCode(ctx context.Context, cfg *config.OIDCAuth
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newOIDCHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange OIDC code: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("OIDC token exchange failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("OIDC token exchange failed: status=%d", resp.StatusCode)
 	}
 
 	var tokenResp oidcTokenResponse
@@ -1186,6 +1226,10 @@ func (s *userService) resolveOIDCUserInfo(ctx context.Context, cfg *config.OIDCA
 }
 
 func (s *userService) fetchOIDCUserInfo(ctx context.Context, endpoint, accessToken string) (map[string]interface{}, error) {
+	if err := validateOIDCEndpoint("userinfo", endpoint, true); err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -1193,14 +1237,14 @@ func (s *userService) fetchOIDCUserInfo(ctx context.Context, endpoint, accessTok
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newOIDCHTTPClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("userinfo request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("userinfo request failed: status=%d", resp.StatusCode)
 	}
 
 	var claims map[string]interface{}
