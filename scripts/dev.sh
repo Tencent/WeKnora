@@ -76,6 +76,7 @@ show_help() {
     echo ""
     echo "示例："
     echo "  $0 start                    # 启动基础服务"
+    echo "  $0 start --mysql            # 启动基础服务 + MySQL（或设置 DB_DRIVER=mysql 自动触发）"
     echo "  $0 start --qdrant           # 启动基础服务 + Qdrant"
     echo "  $0 start --dex             # 启动基础服务 + Dex"
     echo "  $0 start --odl-hybrid       # 启动基础服务 + OpenDataLoader hybrid"
@@ -171,10 +172,22 @@ start_services() {
     shift  # 移除 "start" 命令本身
     # 默认启动基础设施（postgres / redis / docreader）+ langfuse，
     # 其余可选服务通过 --minio / --qdrant / --neo4j / --dex / --full 按需开启。
-    PROFILES="--profile langfuse"
-    ENABLED_SERVICES="langfuse"
+    # 根据 DB_DRIVER 二选一启动数据库
+    # MySQL 模式：只启动 mysql + redis + docreader（langfuse 依赖 postgres，跳过）
+    # Postgres 模式：启动 postgres + redis + docreader + langfuse
+    if [ "${DB_DRIVER:-}" = "mysql" ]; then
+        PROFILES="--profile mysql"
+        ENABLED_SERVICES="mysql"
+    else
+        PROFILES="--profile postgres --profile langfuse"
+        ENABLED_SERVICES="postgres langfuse"
+    fi
     while [ $# -gt 0 ]; do
         case "$1" in
+            --mysql)
+                PROFILES="$PROFILES --profile mysql"
+                ENABLED_SERVICES="$ENABLED_SERVICES mysql"
+                ;;
             --minio)
                 PROFILES="$PROFILES --profile minio"
                 ENABLED_SERVICES="$ENABLED_SERVICES minio"
@@ -234,11 +247,18 @@ start_services() {
         log_success "基础设施服务已启动"
         echo ""
         log_info "服务访问地址:"
-        echo "  - PostgreSQL:    localhost:5432"
+        if [ "${DB_DRIVER:-}" = "mysql" ]; then
+            echo "  - MySQL:         localhost:${MYSQL_DEV_PORT:-3306}"
+        else
+            echo "  - PostgreSQL:    localhost:${POSTGRES_DEV_PORT:-5432}"
+        fi
         echo "  - Redis:         localhost:6379"
         echo "  - DocReader:     localhost:50051"
-        
+
         # 根据启用的 profile 显示额外服务
+        if [[ "$ENABLED_SERVICES" == *"mysql"* ]] && [ "${DB_DRIVER:-}" != "mysql" ]; then
+            echo "  - MySQL:         localhost:${MYSQL_DEV_PORT:-3306}"
+        fi
         if [[ "$ENABLED_SERVICES" == *"minio"* ]]; then
             echo "  - MinIO:         localhost:9000 (Console: localhost:9001)"
         fi

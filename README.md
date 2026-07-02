@@ -255,6 +255,8 @@ Detailed API documentation is available at: [API Docs](./docs/api/README.md)
 
 Product plans and upcoming features: [Roadmap](./docs/ROADMAP.md)
 
+Using MySQL as the primary database: [MySQL Setup Guide](./docs/使用MySQL数据库.md)
+
 ## 🧭 Developer Guide
 
 ### ⚡ Fast Development Mode (Recommended)
