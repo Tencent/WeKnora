@@ -3399,6 +3399,17 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 
 	var failed int
 	for _, id := range payload.KnowledgeIDs {
+		// When the batch reparse is triggered without an explicit process_config,
+		// drop the per-knowledge parser engine rule snapshot so that the reparse
+		// uses the knowledge base's current rules instead of the engine that was
+		// configured at upload time.
+		if payload.ProcessConfig == nil {
+			if err := s.clearStoredParserEngineRules(ctx, id); err != nil {
+				logger.Errorf(ctx, "Failed to clear stored parser engine rules for knowledge %s: %v", id, err)
+				failed++
+				continue
+			}
+		}
 		if _, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig); err != nil {
 			logger.Errorf(ctx, "Failed to reparse knowledge %s: %v", id, err)
 			failed++
@@ -3411,4 +3422,32 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 	logger.Infof(ctx, "Knowledge list reparse task finished: %d submitted, %d failed",
 		len(payload.KnowledgeIDs)-failed, failed)
 	return nil
+}
+
+// clearStoredParserEngineRules removes the parser engine rule snapshot from a
+// knowledge's metadata so that subsequent reparses resolve the engine from the
+// current knowledge base configuration instead of the upload-time snapshot.
+func (s *knowledgeService) clearStoredParserEngineRules(ctx context.Context, knowledgeID string) error {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	k, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+
+	overrides, err := k.ProcessOverrides()
+	if err != nil {
+		return err
+	}
+	if overrides == nil {
+		return nil
+	}
+
+	overrides.ParserEngineRules = nil
+	if err := k.SetProcessOverrides(overrides); err != nil {
+		return err
+	}
+	return s.repo.UpdateKnowledgeColumn(ctx, k.ID, "metadata", k.Metadata)
 }
