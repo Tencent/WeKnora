@@ -7,7 +7,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class ReadConfig(_message.Message):
-    __slots__ = ("parser_engine", "parser_engine_overrides")
+    __slots__ = ("parser_engine", "parser_engine_overrides", "enable_table_structure", "table_structure_file_types")
     class ParserEngineOverridesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -17,9 +17,13 @@ class ReadConfig(_message.Message):
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     PARSER_ENGINE_FIELD_NUMBER: _ClassVar[int]
     PARSER_ENGINE_OVERRIDES_FIELD_NUMBER: _ClassVar[int]
+    ENABLE_TABLE_STRUCTURE_FIELD_NUMBER: _ClassVar[int]
+    TABLE_STRUCTURE_FILE_TYPES_FIELD_NUMBER: _ClassVar[int]
     parser_engine: str
     parser_engine_overrides: _containers.ScalarMap[str, str]
-    def __init__(self, parser_engine: _Optional[str] = ..., parser_engine_overrides: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    enable_table_structure: bool
+    table_structure_file_types: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, parser_engine: _Optional[str] = ..., parser_engine_overrides: _Optional[_Mapping[str, str]] = ..., enable_table_structure: _Optional[bool] = ..., table_structure_file_types: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ReadRequest(_message.Message):
     __slots__ = ("file_content", "file_name", "file_type", "url", "title", "config", "request_id")
@@ -128,7 +132,7 @@ class ParserEngineInfo(_message.Message):
     file_types: _containers.RepeatedScalarFieldContainer[str]
     available: bool
     unavailable_reason: str
-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., file_types: _Optional[_Iterable[str]] = ..., available: bool = ..., unavailable_reason: _Optional[str] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., file_types: _Optional[_Iterable[str]] = ..., available: _Optional[bool] = ..., unavailable_reason: _Optional[str] = ...) -> None: ...
 
 class ListEnginesResponse(_message.Message):
     __slots__ = ("engines",)

@@ -225,7 +225,11 @@
                 <div v-if="!isFAQ && formData && currentSection === 'parser'" class="section">
                   <KBParserSettings
                     :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
+                    :enable-table-structure="formData.chunkingConfig.enableTableStructure"
+                    :table-structure-file-types="formData.chunkingConfig.tableStructureFileTypes"
                     @update:parser-engine-rules="handleParserEngineRulesUpdate"
+                    @update:enable-table-structure="handleEnableTableStructureUpdate"
+                    @update:table-structure-file-types="handleTableStructureFileTypesUpdate"
                   />
                 </div>
 
@@ -650,6 +654,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       chunkOverlap: 80,
       separators: ['\n\n', '\n', '。', '！', '？', ';', '；'],
       parserEngineRules: undefined as any,
+      enableTableStructure: false,
+      tableStructureFileTypes: [] as string[],
       enableParentChild: true,
       parentChunkSize: 4096,
       childChunkSize: 384,
@@ -763,6 +769,8 @@ const loadKBData = async () => {
         chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
         separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
         parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
+        enableTableStructure: kb.chunking_config?.enable_table_structure || false,
+        tableStructureFileTypes: kb.chunking_config?.table_structure_file_types || [],
         enableParentChild: kb.chunking_config?.enable_parent_child || false,
         parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
         childChunkSize: kb.chunking_config?.child_chunk_size || 384,
@@ -927,6 +935,18 @@ const handleParserEngineRulesUpdate = (rules: any[]) => {
   }
 }
 
+const handleEnableTableStructureUpdate = (enabled: boolean) => {
+  if (formData.value) {
+    formData.value.chunkingConfig.enableTableStructure = enabled
+  }
+}
+
+const handleTableStructureFileTypesUpdate = (fileTypes: string[]) => {
+  if (formData.value) {
+    formData.value.chunkingConfig.tableStructureFileTypes = fileTypes
+  }
+}
+
 const handleMultimodalToggle = () => {
   if (formData.value && !formData.value.multimodalConfig.enabled) {
     formData.value.multimodalConfig.vllmModelId = ''
@@ -1067,6 +1087,8 @@ const buildSubmitData = () => {
       strategy: formData.value.chunkingConfig.strategy ?? '',
       token_limit: formData.value.chunkingConfig.tokenLimit ?? 0,
       languages: formData.value.chunkingConfig.languages ?? [],
+      enable_table_structure: !!formData.value.chunkingConfig.enableTableStructure,
+      table_structure_file_types: formData.value.chunkingConfig.tableStructureFileTypes ?? [],
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
@@ -1260,6 +1282,8 @@ const doSubmit = async () => {
           chunkOverlap: data.chunking_config.chunk_overlap,
           separators: data.chunking_config.separators,
           parserEngineRules: data.chunking_config.parser_engine_rules || undefined,
+          enableTableStructure: data.chunking_config.enable_table_structure || false,
+          tableStructureFileTypes: data.chunking_config.table_structure_file_types || [],
           enableParentChild: data.chunking_config.enable_parent_child || false,
           parentChunkSize: data.chunking_config.parent_chunk_size || 4096,
           childChunkSize: data.chunking_config.child_chunk_size || 384,
@@ -1896,4 +1920,3 @@ watch(
   }
 }
 </style>
-

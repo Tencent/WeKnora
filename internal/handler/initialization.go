@@ -98,13 +98,15 @@ type KBModelConfigRequest struct {
 
 	// 文档分块配置
 	DocumentSplitting struct {
-		ChunkSize         int                      `json:"chunkSize"`
-		ChunkOverlap      int                      `json:"chunkOverlap"`
-		Separators        []string                 `json:"separators"`
-		ParserEngineRules []types.ParserEngineRule `json:"parserEngineRules,omitempty"`
-		EnableParentChild bool                     `json:"enableParentChild"`
-		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
-		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
+		ChunkSize               int                      `json:"chunkSize"`
+		ChunkOverlap            int                      `json:"chunkOverlap"`
+		Separators              []string                 `json:"separators"`
+		ParserEngineRules       []types.ParserEngineRule `json:"parserEngineRules,omitempty"`
+		EnableTableStructure    bool                     `json:"enableTableStructure,omitempty"`
+		TableStructureFileTypes []string                 `json:"tableStructureFileTypes,omitempty"`
+		EnableParentChild       bool                     `json:"enableParentChild"`
+		ParentChunkSize         int                      `json:"parentChunkSize,omitempty"`
+		ChildChunkSize          int                      `json:"childChunkSize,omitempty"`
 		// Strategy / TokenLimit / Languages use pointer types so the
 		// handler can distinguish "field absent in payload" (no change)
 		// from "field present with empty/zero value" (clear / disable).
@@ -324,6 +326,8 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
 	}
 	kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
+	kb.ChunkingConfig.EnableTableStructure = req.DocumentSplitting.EnableTableStructure
+	kb.ChunkingConfig.TableStructureFileTypes = req.DocumentSplitting.TableStructureFileTypes
 	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
 	if req.DocumentSplitting.ParentChunkSize > 0 {
 		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
