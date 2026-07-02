@@ -167,7 +167,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			// Resolve --model / --rerank-model (id or name) and validate they
-			// exist, matching the id-or-name policy of `kb init`. A bogus name
+			// exist, matching the id-or-name policy of `kb config set`. A bogus name
 			// fails fast here instead of creating an agent whose model never
 			// resolves at run time.
 			if opts.Model, err = cmdutil.ResolveModelRef(cmd.Context(), cli, opts.Model, "KnowledgeQA"); err != nil {

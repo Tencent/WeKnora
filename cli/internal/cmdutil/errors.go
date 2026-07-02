@@ -228,9 +228,11 @@ func ErrorToDetail(err error) *output.ErrDetail {
 		detail := &output.ErrDetail{
 			Type:              string(typed.Code),
 			Message:           msg,
+			ExitCode:          ExitCode(err),
 			Hint:              hint,
 			RetryArgv:         retry,
 			RetryAfterSeconds: typed.RetryAfterSeconds,
+			Retryable:         retryableForCode(typed.Code),
 			Detail:            typed.Detail,
 		}
 		if typed.Risk != nil {
@@ -245,12 +247,14 @@ func ErrorToDetail(err error) *output.ErrDetail {
 	var fe *FlagError
 	if errors.As(err, &fe) {
 		return &output.ErrDetail{
-			Type:    string(CodeInputInvalidArgument),
-			Message: err.Error(),
-			Hint:    defaultHint(CodeInputInvalidArgument),
+			Type:      string(CodeInputInvalidArgument),
+			Message:   err.Error(),
+			ExitCode:  ExitCode(err), // FlagError → 2, distinguishing parse from typed-value (exit 5)
+			Hint:      defaultHint(CodeInputInvalidArgument),
+			Retryable: retryableForCode(CodeInputInvalidArgument),
 		}
 	}
-	return &output.ErrDetail{Type: "internal.error", Message: err.Error()}
+	return &output.ErrDetail{Type: string(CodeInternalError), Message: err.Error(), ExitCode: ExitCode(err)}
 }
 
 // NewError constructs a typed error.

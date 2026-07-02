@@ -76,7 +76,7 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			`weknora message search "deploy steps"`,
 			`weknora message search "deploy steps" --session sess_abc --limit 5`,
 		},
-		Output: "envelope.data is an array of grouped results (request_id, session_id, query_content, answer_content, score); meta.total_count is the server-side total. --mode accepts keyword | vector | hybrid (server default: hybrid)",
+		Output: "envelope.data is an array of grouped results (request_id, session_id, query_content, answer_content, score); meta.count is the returned count, meta.total_count is the server-side total. --mode accepts keyword | vector | hybrid (server default: hybrid)",
 	})
 	return cmd
 }

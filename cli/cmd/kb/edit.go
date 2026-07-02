@@ -120,6 +120,7 @@ to the user first.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "update a knowledge base's name or description",
 		RequiredFlags: []string{"<kb-id> (positional)", "--name or --description (at least one)"},
+		Output:        "envelope.data is the updated KnowledgeBase object (id, name, description)",
 		Examples: []string{
 			"weknora kb update kb_abc --name \"New Name\" -y",
 			"weknora kb update kb_abc --description \"Updated desc\" --format json -y",

@@ -121,9 +121,19 @@ Examples:
 			}
 			method := resolveMethod(opts)
 			// Escape-hatch DELETE through `weknora api` is just as destructive
-			// as `weknora kb delete` - exit-10 protocol must apply (cli/README.md).
-			if method == http.MethodDelete {
+			// as `weknora kb delete` - exit-10 destructive protocol must apply
+			// (cli/README.md). PUT/PATCH mutate server state like a typed
+			// `kb/agent/doc update`, so they get the same exit-10 WRITE gate;
+			// without it the raw escape hatch bypassed the "an agent cannot
+			// silently mutate" guarantee. POST stays ungated to match typed
+			// `create` (also ungated). GET/HEAD are reads.
+			switch method {
+			case http.MethodDelete:
 				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "endpoint", args[0], "api.delete", []string{"weknora", "api", "-X", "DELETE", args[0], "-y"}); err != nil {
+					return err
+				}
+			case http.MethodPut, http.MethodPatch:
+				if err := cmdutil.ConfirmWrite(f.Prompter(), opts.Yes, fopts.WantsJSON(), "write", "endpoint", args[0], "api."+strings.ToLower(method), apiRetryArgv(opts, method, args[0])); err != nil {
 					return err
 				}
 			}
@@ -154,7 +164,8 @@ Examples:
 		},
 		Output: "text mode (default): the raw server response body on stdout. json mode: the parsed server response is placed directly under envelope.data — project with --jq '.data...' at the server's own depth (e.g. '.data.data[]' for a list endpoint, '.data.data.id' for a created object). With --paginate, envelope.data is the merged {data, total}.",
 		Warnings: []string{
-			"Only -X DELETE is confirmation-gated (exit 10 / input.confirmation_required unless -y); -X GET/POST/PUT/PATCH and other methods are unguarded — you own the safety of writes made through this escape hatch.",
+			"-X DELETE is destructive-gated and -X PUT/PATCH are write-gated (exit 10 / input.confirmation_required unless -y), matching typed delete/update. -X POST (create-shaped) and GET are unguarded — you own the safety of creates made through this escape hatch.",
+			"Raw passthrough: the typed error envelope does NOT fully apply. The server's own response goes under envelope.data at its native depth; a non-2xx HTTP status surfaces via the exit code, not a typed error.type/retry_argv. Do not rely on error.type/retryable for `api` the way you do for typed subcommands.",
 			"Raw HTTP passthrough; agents should prefer typed subcommands (kb/doc/session/...) when available.",
 		},
 	})
@@ -291,6 +302,24 @@ func resolveMethod(opts *Options) string {
 		return "POST"
 	}
 	return "GET"
+}
+
+// apiRetryArgv reconstructs a directly-executable `weknora api` argv (with -y)
+// for the write-confirmation gate, preserving the method, path and body flags
+// the caller passed so an agent can re-run the exact mutation after approval.
+func apiRetryArgv(opts *Options, method, path string) []string {
+	argv := []string{"weknora", "api", "-X", method, path}
+	switch {
+	case opts.Data != "":
+		argv = append(argv, "-d", opts.Data)
+	case opts.Input != "":
+		argv = append(argv, "--input", opts.Input)
+	default:
+		for _, f := range opts.Fields {
+			argv = append(argv, "-F", f)
+		}
+	}
+	return append(argv, "-y")
 }
 
 // runAPI is the testable core: validate inputs, dispatch via Service.Raw,

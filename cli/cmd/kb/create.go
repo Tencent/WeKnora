@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -29,6 +30,7 @@ type CreateOptions struct {
 	Name            string
 	Description     string
 	EmbeddingModel  string
+	ChatModel       string
 	StorageProvider string
 	DryRun          bool
 }
@@ -84,16 +86,23 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 			}
 			// --embedding-model accepts a model id or name (a UUID passes
 			// through; a name resolves among Embedding models). Configuring a
-			// KB's models fully is `weknora kb init`; this just pre-sets the
+			// KB's models fully is `weknora kb config set`; this just pre-sets the
 			// embedding model at creation.
 			if opts.EmbeddingModel, err = cmdutil.ResolveModelRef(c.Context(), cli, opts.EmbeddingModel, "Embedding"); err != nil {
+				return err
+			}
+			// --chat-model (id or name) pre-sets the KB's LLM at creation, so a
+			// KB can be born retrieval-ready in one step. Full model config
+			// (rerank / multimodal) is still `weknora kb config set`.
+			if opts.ChatModel, err = cmdutil.ResolveModelRef(c.Context(), cli, opts.ChatModel, "KnowledgeQA"); err != nil {
 				return err
 			}
 			return runCreate(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Knowledge base description (optional)")
-	cmd.Flags().StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model id or name (optional; configure models fully with `weknora kb init`)")
+	cmd.Flags().StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model id or name (optional; makes the KB retrieval-ready at creation)")
+	cmd.Flags().StringVar(&opts.ChatModel, "chat-model", "", "Chat/LLM model id or name (optional; pre-set the KB's answer model at creation)")
 	cmd.Flags().StringVar(&opts.StorageProvider, "storage-provider", "",
 		"Storage provider for documents in this KB: "+strings.Join(storageProviderValues, " | ")+" (optional; server default when unset)")
 	cmdutil.AddFormatFlag(cmd, kbCreateFields...)
@@ -103,10 +112,10 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 		RequiredFlags: []string{"<name> (positional)"},
 		Examples: []string{
 			`weknora kb create "Eng Docs"`,
-			`weknora kb create "Eng Docs" --description "engineering knowledge base"`,
+			`weknora kb create "Eng Docs" --embedding-model text-embedding-3-small --chat-model gpt-4o-mini  # retrieval-ready in one step`,
 			`weknora kb create "Eng Docs" --jq .data.id   # capture id to chain into doc upload --kb`,
 		},
-		Output: "envelope.data is the created KnowledgeBase object with id, name, type, embedding_model_id",
+		Output: "envelope.data is the created KnowledgeBase object with id, name, type, embedding_model_id, summary_model_id",
 	})
 	return cmd
 }
@@ -125,6 +134,9 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 	if opts.EmbeddingModel != "" {
 		req.EmbeddingModelID = opts.EmbeddingModel
 	}
+	if opts.ChatModel != "" {
+		req.SummaryModelID = opts.ChatModel
+	}
 	if opts.StorageProvider != "" {
 		canonSP, err := cmdutil.ValidateEnum("storage-provider", opts.StorageProvider, storageProviderValues)
 		if err != nil {
@@ -138,9 +150,20 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		return cmdutil.WrapHTTP(err, "create knowledge base")
 	}
 
+	// A KB with no embedding model can hold documents but never index/retrieve
+	// them — surface the next step at the point of creation instead of leaving
+	// the agent to discover a silent-draft KB via a later empty search.
+	var meta *output.Meta
+	if created.EmbeddingModelID == "" {
+		meta = &output.Meta{Hint: "retrieval_ready=false: no embedding model bound. Uploaded docs will not be searchable until you run `weknora kb config set " + created.ID + " --embedding-model <id> --chat-model <id>` (create the KB with --embedding-model/--chat-model to skip this step)."}
+	}
+
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, created, nil)
+		return fopts.Emit(iostreams.IO.Out, created, meta)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Created knowledge base %q (id: %s)\n", created.Name, created.ID)
+	if meta != nil {
+		fmt.Fprintf(iostreams.IO.Out, "⚠ %s\n", meta.Hint)
+	}
 	return nil
 }

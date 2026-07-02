@@ -40,6 +40,10 @@ type ListOptions struct {
 	// …), matched case-insensitively. Empty shows everything.
 	Type   string
 	Source string
+	// Limit caps the returned slice client-side (applied after --type/--source
+	// filtering and sort). The ListModels SDK is unpaginated, so the CLI holds
+	// the true total and reports meta.total_count/has_more when --limit drops any.
+	Limit int
 }
 
 // ListService is the narrow SDK surface this command depends on.
@@ -62,6 +66,11 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate static input before building the client so a bad --limit
+			// returns input.invalid_argument (exit 5), not an auth error (exit 3).
+			if err := validateListOpts(opts); err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -71,6 +80,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.Type, "type", "", "Only show models of this type (Embedding, Rerank, KnowledgeQA, VLLM, ASR)")
 	cmd.Flags().StringVar(&opts.Source, "source", "", "Only show models from this provider (local, remote, openai, aliyun, …)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmdutil.AddFormatFlag(cmd, modelListFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor: "discover model ids for `agent create --model` and a KB's embedding/summary model",
@@ -79,12 +89,28 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			"weknora model list --type KnowledgeQA --format json",
 			"weknora model list --source local",
 		},
-		Output: "envelope.data is an array of Model objects (id, name, display_name, type, source, is_default); narrow it with --type / --source",
+		Output: "envelope.data is an array of Model objects (id, name, display_name, type, source, is_default); narrow it with --type / --source; meta.count is the returned count, meta.total_count is the full set and meta.has_more=true means --limit truncated it",
 	})
 	return cmd
 }
 
+// validateListOpts checks --limit. Called from RunE before the client is built
+// (so a bad value surfaces as exit 5, not an auth error) and at runList's top
+// for direct callers; idempotent.
+func validateListOpts(opts *ListOptions) error {
+	if opts.Limit < 1 || opts.Limit > 10000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
+		}
+	}
+	return nil
+}
+
 func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
+	if err := validateListOpts(opts); err != nil {
+		return err
+	}
 	if _, err := cmdutil.ValidateEnum("type", opts.Type, modelTypeValues); err != nil {
 		return err
 	}
@@ -121,8 +147,19 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		return modelLabel(items[i]) < modelLabel(items[j])
 	})
 
+	// Client-side --limit cap. The ListModels SDK is unpaginated, so the CLI
+	// holds the true total and can tell the caller whether --limit dropped any:
+	// total_count is the full (post-filter) count, has_more flags truncation.
+	total := len(items)
+	truncated := false
+	if opts.Limit > 0 && len(items) > opts.Limit {
+		items = items[:opts.Limit]
+		truncated = true
+	}
+
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, items, &output.Meta{Count: output.IntPtr(len(items))})
+		meta := &output.Meta{Count: output.IntPtr(len(items)), HasMore: truncated, TotalCount: output.IntPtr(total)}
+		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 
 	if len(items) == 0 {

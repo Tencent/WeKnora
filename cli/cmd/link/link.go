@@ -163,7 +163,15 @@ func resolveProfile(f *cmdutil.Factory) (string, error) {
 		return "", err
 	}
 	if cfg.CurrentProfile == "" {
-		return "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no active profile; run `weknora auth login` first")
+		// `link` binds a directory to a profile+KB, so it needs a configured
+		// profile — env credentials (WEKNORA_API_KEY) alone have no profile to
+		// record. Point at profile setup (not `auth login`, which loops with no
+		// profile) and name the headless alternative so an env-cred agent isn't
+		// stranded on a misleading hint.
+		return "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
+			"`link` records an active profile, but none is configured").
+			WithHint("register one with `weknora profile add <name> --host <url> --use`; for a headless (WEKNORA_API_KEY) workflow, skip `link` and pass --kb per command or set WEKNORA_KB_ID").
+			WithRetryArgv([]string{"weknora", "profile", "add", "--help"})
 	}
 	return cfg.CurrentProfile, nil
 }

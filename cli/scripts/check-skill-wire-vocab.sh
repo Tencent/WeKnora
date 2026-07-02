@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-skill-wire-vocab.sh — fail if cli/skills/ still references wire
 # vocabulary that the CLI has renamed or removed. Wire-shape changes must
-# sweep skills in the same PR (pattern borrowed from larksuite/cli).
+# sweep skills in the same PR.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,6 +16,8 @@ BANNED=(
   "auth login --host:profile add --host (auth login dropped --host in v0.9)"
   "auth login --name:profile add <name> (auth login dropped --name in v0.9)"
   "agent create --kb:agent create --attach-kb (renamed in v0.9)"
+  "kb init:kb config set (renamed — kb init removed)"
+  "continue-stream:session resume (renamed)"
 )
 
 fail=0

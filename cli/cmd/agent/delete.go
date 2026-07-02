@@ -93,6 +93,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete a custom agent",
 		RequiredFlags: []string{"<agent-id> (positional)"},
+		Output:        "envelope.data is {id, deleted:true}",
 		Examples: []string{
 			"weknora agent delete ag_abc -y",
 			"weknora agent delete ag_abc -y --format json",

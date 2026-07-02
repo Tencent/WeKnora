@@ -28,6 +28,8 @@ type fakeEditSvc struct {
 	updateResp  *sdk.Agent
 	updateErr   error
 	updateCalls int
+	models      []sdk.Model
+	modelsErr   error
 }
 
 func (f *fakeEditSvc) GetAgent(_ context.Context, _ string) (*sdk.Agent, error) {
@@ -39,6 +41,40 @@ func (f *fakeEditSvc) UpdateAgent(_ context.Context, id string, req *sdk.UpdateA
 	f.updateID = id
 	f.updateCalls++
 	return f.updateResp, f.updateErr
+}
+
+func (f *fakeEditSvc) ListModels(_ context.Context) ([]sdk.Model, error) {
+	return f.models, f.modelsErr
+}
+
+func TestEdit_ModelName_ResolvedToID(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeEditSvc{
+		getResp:    &sdk.Agent{ID: "ag_abc", Name: "A", Config: &sdk.AgentConfig{ModelID: "old-id"}},
+		updateResp: &sdk.Agent{ID: "ag_abc"},
+		models:     []sdk.Model{{ID: "m-real", Name: "good-llm", Type: "KnowledgeQA"}},
+	}
+	opts := &EditOptions{AgentID: "ag_abc", Model: "good-llm", flags: editFlagSet{modelSet: true}}
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	require.NotNil(t, svc.updateReq)
+	require.NotNil(t, svc.updateReq.Config)
+	assert.Equal(t, "m-real", svc.updateReq.Config.ModelID, "--model name must resolve to the model id")
+}
+
+func TestEdit_BogusModelName_RejectedNoWrite(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeEditSvc{
+		getResp:    &sdk.Agent{ID: "ag_abc", Name: "A", Config: &sdk.AgentConfig{ModelID: "old-id"}},
+		updateResp: &sdk.Agent{ID: "ag_abc"},
+		models:     []sdk.Model{{ID: "m-real", Name: "good-llm", Type: "KnowledgeQA"}},
+	}
+	opts := &EditOptions{AgentID: "ag_abc", Model: "totally-bogus-model-xyz", flags: editFlagSet{modelSet: true}}
+	err := runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
+	require.Error(t, err, "a --model name matching no model must fail")
+	var e *cmdutil.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, cmdutil.CodeResourceNotFound, e.Code)
+	assert.Equal(t, 0, svc.updateCalls, "must not write an agent with an unresolvable model")
 }
 
 func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {

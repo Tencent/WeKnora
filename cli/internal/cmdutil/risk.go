@@ -14,7 +14,7 @@ package cmdutil
 import "github.com/spf13/cobra"
 
 // Risk levels emitted in the annotation / envelope:
-//   - RiskDestructive: irreversible ops (delete, kb init clobber).
+//   - RiskDestructive: irreversible ops (delete).
 //   - RiskWrite: reversible metadata edits (kb / agent / doc update).
 //
 // "read" remains reserved (read-only commands carry no risk annotation).

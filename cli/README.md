@@ -17,16 +17,21 @@ Available Commands:
   chat        Ask a streaming RAG question against a knowledge base
   chunk       Manage document chunks (RAG retrieval debug)
   completion  Generate the autocompletion script for the specified shell
-  profile     Manage CLI profiles (named connection targets)
+  config      Inspect the CLI's resolved configuration
   doc         Manage documents in a knowledge base
   doctor      Run 4 self-checks: base URL, auth, server version, credential storage
+  exit-codes  Exit code matrix and the agent action for each
   help        Help about any command
   kb          Manage knowledge bases
   link        Bind the current directory to a knowledge base
   mcp         Run weknora as a Model Context Protocol server
   message     Inspect and manage messages inside chat sessions
+  model       Manage models (list / view / create / update / delete)
+  profile     Manage CLI profiles (named connection targets)
+  schema      Machine-readable contract for a command (or the whole surface)
   search      Search across chunks, knowledge bases, documents, or sessions
-  session     Manage chat sessions (incl. tool-approval resolve)
+  session     Manage chat sessions
+  skills      List and install the bundled Agent Skills
   unlink      Remove the directory's knowledge-base binding
   version     Show CLI build metadata
 ```
@@ -100,7 +105,7 @@ weknora message search "retry policy"                      # cross-session Q&A r
 
 # 11. Resolve a pending tool approval (agent run blocked on approval event)
 weknora session tool-approval resolve pend_xxx -y          # approve (after user go-ahead)
-weknora session continue-stream sess_abc --message msg_xyz # resume the blocked stream
+weknora session resume sess_abc --message msg_xyz # resume the blocked stream
 
 # 12. Health & verification verbs
 weknora kb status kb_abc       # fast snapshot: reachable / counts / processing flag (1 HTTP)
@@ -198,7 +203,9 @@ weknora auth logout --all
 
 Designed to be AI-agent-first. Stable across minor releases; breaking
 changes announced in the changelog and the corresponding
-`weknora --version` bump.
+`weknora --version` bump. This section is the human overview; the complete,
+authoritative contract (envelope field stability, error taxonomy, streaming,
+confirmation and dry-run protocols) lives in **[AGENTS.md](AGENTS.md)**.
 
 ### Streams
 
@@ -244,10 +251,10 @@ auth.unauthenticated: fetch current user: HTTP error 401: ...
 hint: run `weknora auth login`
 ```
 
-The full code registry is in `cli/internal/cmdutil/errors.go`
-(`AllCodes()`). Code namespaces: `auth.*` / `resource.*` / `input.*` /
-`server.*` / `network.*` / `local.*` / `mcp.*` / `operation.*` (CLI-level
-wait/poll outcomes: `operation.timeout`, `operation.failed`, `operation.cancelled`).
+Under `--format json` the same failure is the typed error envelope on stderr
+(`{ok:false, error:{type, exit_code, hint?, retry_argv?, …}}`) — see
+[AGENTS.md §1.4](AGENTS.md) for the field-by-field contract and the full code
+taxonomy.
 
 ### Exit codes
 
@@ -361,7 +368,7 @@ weknora api /api/v1/knowledge-bases --dry-run                                   
 
 ## Resuming streams
 
-The `weknora session continue-stream` command resumes an SSE event stream for an existing assistant message. Useful for network-blip recovery or polling long-running agent invocations:
+The `weknora session resume` command resumes an SSE event stream for an existing assistant message. Useful for network-blip recovery or polling long-running agent invocations:
 
 ```bash
 # Original streaming call captures session_id + message_id from init event:
@@ -371,7 +378,7 @@ weknora session ask "..." --agent ag_xxxx --format ndjson | tee /tmp/stream.ndjs
 # [network blip]
 
 # Resume the same stream:
-weknora session continue-stream sess_abc --message msg_xyz
+weknora session resume sess_abc --message msg_xyz
 # Server REPLAYS all stored events from the start, then tails new ones.
 # Agent must dedupe (by message_id or event hash) to avoid double-processing.
 ```
@@ -386,7 +393,7 @@ An agent run may pause the stream on a tool-approval event until a human approve
 weknora session tool-approval resolve pend_xxx -y                      # approve
 # weknora session tool-approval resolve pend_xxx --reject --reason "..." -y  # reject
 # 3. Resume the stream — server replays + tails from where the run was blocked.
-weknora session continue-stream sess_abc --message msg_xyz
+weknora session resume sess_abc --message msg_xyz
 ```
 
 Pass `--modified-args '{"key":"value"}'` to replace tool arguments on approve (must be a non-empty JSON object). Never auto-pass `-y` — the approval is the exit-10 human-in-the-loop gate.

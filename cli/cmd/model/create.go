@@ -85,7 +85,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 		Use:   "create <name>",
 		Short: "Register a model (embedding / rerank / chat / VLLM / ASR)",
 		Long: `Register a model on the server so it can back a knowledge base's embedding /
-summary config (see 'weknora kb init') or an agent (--model).
+summary config (see 'weknora kb config set') or an agent (--model).
 
 <name> is the model name as the provider knows it (e.g. "nomic-embed-text",
 "gpt-4o", "qwen2"). --type and --source are required.
@@ -178,7 +178,7 @@ else goes through repeatable --param key=value.`,
 	cmdutil.AddFormatFlag(cmd, modelCreateFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "register a model (embedding/rerank/chat/VLLM/ASR) so a KB or agent can use it; capture .data.id to pass to `weknora kb init` / `agent create --model`.",
+		UsedFor:       "register a model (embedding/rerank/chat/VLLM/ASR) so a KB or agent can use it; capture .data.id to pass to `weknora kb config set` / `agent create --model`.",
 		RequiredFlags: []string{"<name> (positional)", "--type", "--source (local|remote)", "--provider (when --source remote)"},
 		Examples: []string{
 			`weknora model create nomic-embed-text --type Embedding --source local --dimension 768   # Ollama (server pulls it)`,

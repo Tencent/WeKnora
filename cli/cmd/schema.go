@@ -105,6 +105,16 @@ human help prose.`,
 // Returns a typed input.unknown_subcommand error (with did-you-mean) when the
 // path does not resolve to a real command.
 func resolveSchemaTarget(root *cobra.Command, args []string) (*cobra.Command, error) {
+	// Tolerate the quoted multi-word form the no-arg `schema` index prints as a
+	// command label (e.g. `schema "agent create"`): re-split each arg on
+	// whitespace so an agent can paste a label verbatim and resolve it the same
+	// as `schema agent create`.
+	flat := make([]string, 0, len(args))
+	for _, a := range args {
+		flat = append(flat, strings.Fields(a)...)
+	}
+	args = flat
+
 	target, rest, err := root.Find(args)
 	// Find returns root (with the args unconsumed) when nothing matched; a
 	// fully-resolved leaf returns itself with its positional args as rest.

@@ -47,7 +47,12 @@ func AddFormatFlag(cmd *cobra.Command, fieldHints ...string) {
 	if len(fieldHints) > 0 {
 		sorted := append([]string(nil), fieldHints...)
 		sort.Strings(sorted)
-		hdr := "\n\nJSON fields available (for --jq projection):\n  " +
+		// Fields live under .data in the {ok,data,meta} envelope, so --jq must
+		// be rooted there: `--jq '.data.<field>'` (object) or
+		// `--jq '.data[].<field>'` (list). A bare `--jq '.<field>'` matches the
+		// envelope top level and silently returns null — spell out the path so
+		// agents don't ship broken projections.
+		hdr := "\n\nJSON fields available under .data (project with --jq '.data.<field>', or '.data[].<field>' for lists):\n  " +
 			strings.Join(sorted, "\n  ")
 		if cmd.Long != "" {
 			cmd.Long += hdr
@@ -144,9 +149,14 @@ func mapJQError(err error) error {
 }
 
 // ResolveDefault fills in Mode when the caller has not explicitly set it:
-//   - Mode defaults to FormatJSON
+//   - Mode defaults to FormatJSON, regardless of TTY
 //   - TTY only affects the indent decision (auto-indent in TTY; compact in pipe)
 //   - For human-readable rendering, pass --format text explicitly
+//
+// JSON-always (not a TTY switch to text on a terminal) is deliberate: an
+// agent-first CLI values output predictability over terminal ergonomics, so
+// the default never depends on whether stdout is a TTY. Humans opt into
+// human-readable output with `--format text`.
 func (o *FormatOptions) ResolveDefault(tty bool) {
 	o.TTY = tty
 	// Apply WEKNORA_FORMAT before the hard default so the documented

@@ -72,8 +72,8 @@ func TestRunBatch_PartialFailure(t *testing.T) {
 
 // TestRunBatch_StatusExitTriState verifies the batch tri-state exit mapping:
 // all-success → exit 0 (nil summaryErr), partial → exit 1, all-fail → exit 1
-// (operation.failed fall-through). Pairs with the envelope-status tri-state in
-// output.TestWriteBatchEnvelope_StatusTriState.
+// (any failure collapses to operation.failed). Pairs with the envelope-status
+// tri-state in output.TestWriteBatchEnvelope_StatusTriState.
 func TestRunBatch_StatusExitTriState(t *testing.T) {
 	failIf := func(fails map[string]bool) func(context.Context, string) error {
 		return func(_ context.Context, id string) error {
@@ -222,5 +222,32 @@ func TestEmitBatch_Text_PerLine(t *testing.T) {
 	}
 	if !strings.Contains(got, "FAIL y: boom\n") {
 		t.Errorf("expected 'FAIL y: boom' line; got %q", got)
+	}
+}
+
+// TestRunBatch_AllFailExit1 - any batch failure (partial OR all) collapses to
+// operation.failed → exit 1. The authoritative per-item detail lives in the
+// batch envelope (each item's typed error); the aggregate exit code is
+// deliberately coarse.
+func TestRunBatch_AllFailExit1(t *testing.T) {
+	notFound := func(_ context.Context, id string) error {
+		return NewError(CodeResourceNotFound, "no such thing "+id)
+	}
+	_, summaryErr := RunBatch(context.Background(), []string{"a", "b"}, notFound)
+	if got := ExitCode(summaryErr); got != 1 {
+		t.Errorf("all-fail batch ExitCode = %d, want 1; err=%v", got, summaryErr)
+	}
+}
+
+// TestRunBatch_ContextErrorsClassifiedPerItem verifies per-item context errors
+// are classified as operation.cancelled / operation.timeout in the batch
+// envelope (not the generic internal.error), so an agent inspecting the
+// per-item results sees why each item aborted. (The aggregate exit stays 1.)
+func TestRunBatch_ContextErrorsClassifiedPerItem(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel so every item takes the ctx.Done branch
+	outcomes, _ := RunBatch(ctx, []string{"a"}, func(context.Context, string) error { return nil })
+	if got := ErrorToDetail(outcomes[0].Err).Type; got != string(CodeOperationCancelled) {
+		t.Errorf("per-item type = %q, want %q", got, CodeOperationCancelled)
 	}
 }

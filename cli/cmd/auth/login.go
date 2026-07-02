@@ -128,8 +128,12 @@ func resolveActiveProfile(f *cmdutil.Factory) (name, host string, err error) {
 	}
 	active := cfg.CurrentProfile
 	if active == "" {
-		return "", "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			"no active profile; run `weknora profile add <name> --host <h> --use` first")
+		msg := "no active profile; run `weknora profile add <name> --host <h> --use` first"
+		if envActive, kind := cmdutil.EnvCredential(); envActive {
+			msg = "no active profile to log in — you are already authenticated this session via " + kind +
+				"; `auth login` only persists a named profile, so run `weknora profile add <name> --host <h> --use` first if you want one"
+		}
+		return "", "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, msg)
 	}
 	prof, ok := cfg.Profiles[active]
 	if !ok {
@@ -310,9 +314,9 @@ func applyUser(prof *config.Profile, user *sdk.AuthUser) {
 // loginResult is the typed payload emitted by `--format json`. mode is derived from
 // whether the server returned a user (password flow) vs API-key flow.
 type loginResult struct {
-	Profile  string `json:"profile"`
-	Host     string `json:"host"`
-	Mode     string `json:"mode"` // ModeBearer or ModeAPIKey
+	Profile string `json:"profile"`
+	Host    string `json:"host"`
+	Mode    string `json:"mode"` // ModeBearer or ModeAPIKey
 	// Email is the authenticated principal's email. Named "email" (not
 	// "user") so the identity field matches `auth status`, which also
 	// exposes it as `email` — one key for one concept across both commands.

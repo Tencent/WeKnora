@@ -13,6 +13,12 @@ output, not prose. Read this skill before any task-specific `weknora-*` skill.
 
 ## 1. Authenticate (do this first — order matters)
 
+**Agents usually skip profiles entirely:** set `WEKNORA_API_KEY` (or
+`WEKNORA_TOKEN`) + `WEKNORA_HOST` and every command authenticates statelessly and
+zero-disk — no `profile add` / `auth login` needed. `auth token` echoes that env
+credential; `auth status` / `doctor` confirm it. The steps below set up a
+**persistent named profile** instead (interactive / multi-environment use).
+
 Authentication is a **two-step sequence**. `weknora auth login` operates on the
 *active profile*, so the profile must exist first:
 
@@ -31,7 +37,11 @@ weknora auth status          # verify: who am I, which tenant
   (e.g. `weknora --profile staging auth refresh`). There is no per-command
   `--name`/`--host` on auth commands.
 - Get the raw token for scripting with `WEKNORA_TOKEN=$(weknora auth token)`
-  (raw token by default; `--format json` gives the `{token, mode, profile}` envelope).
+  (raw token by default; works with an env credential too; `--format json` gives
+  the `{token, mode, profile}` envelope).
+- `weknora auth logout` clears a profile's stored credentials but **keeps the
+  profile registered** (re-auth later with `auth login`); use `profile remove`
+  to delete the profile entirely.
 - `weknora doctor` runs 4 health checks (reachability, credential, version, storage).
 
 ## 2. Selecting a knowledge base (`--kb`)
@@ -41,6 +51,15 @@ weknora auth status          # verify: who am I, which tenant
 the cwd) → error. Read/create commands that operate "inside a project" inherit
 the link; **`search *` and destructive `--all` operations always require an
 explicit `--kb`** (so an agent never silently hits the wrong corpus).
+
+**A KB must have an embedding model bound to be searchable.** A freshly created
+KB is `retrieval_ready:false` — uploaded docs stay unindexed and `search`/`chat`
+return nothing until you bind models. Create it ready in one step
+(`kb create --embedding-model <m> --chat-model <m>`, discover ids with
+`weknora model list`) or bind after the fact
+(`kb config set <kb> --embedding-model <m> --chat-model <m>`). `kb status` /
+`kb check` report `retrieval_ready`, and `kb create` hints the fix when it is
+false — so an unconfigured KB is never silently "healthy".
 
 ## 3. Output contract — every command
 
@@ -60,18 +79,22 @@ Default output is `--format json`: a single envelope.
 - `--format text` = a live human-readable projection. `chat` and `session ask`
   buffer a bounded answer-event projection into one JSON envelope by default;
   pass `--reference` for indexed citations, `--verbose` for execution detail,
-  or `--format ndjson` for raw event lines. `session continue-stream` remains
+  or `--format ndjson` for raw event lines. `session resume` remains
   an NDJSON streaming command.
 - `--jq '<expr>'` filters the envelope (e.g. `weknora kb list --jq '.data[].id'`).
 - Exception: `weknora auth token` emits the **raw token** by default (it's a
   scripting helper); pass `--format json` for the `{token, mode, profile}` envelope.
-- **Batch / wait caveat:** for multi-item commands (`doc/chunk/session delete`
-  with several ids, `doc wait`), `ok:true` means *the command ran to completion*,
-  **not** that every item succeeded — per-item failures live in `data` and the
-  **exit code** carries the aggregate verdict (e.g. `doc wait` exits 1 if any doc
-  failed, 124 on timeout, while still printing the `{completed,failed,timeout}`
-  partition with `ok:true`). For these, branch on the **exit code**, then read
-  `data` for which items failed.
+- **Batch / wait caveat:** multi-item commands come in two shapes, but for
+  **both you branch on the exit code, not `ok`**:
+  - `doc/chunk/session delete` with several ids → a **batch** envelope:
+    `status` is `success`/`partial`/`error`, `ok` is `true` *only* when every
+    item succeeded (**`ok:false` on any failure**), `data` is a per-item array
+    `[{id, ok, result|error}]`, and `meta.successes`/`failures` count the split.
+    Exit 1 if any item failed.
+  - `doc wait` → a normal `ok:true` envelope whose `data` partitions the ids
+    into `{completed, failed, timeout}`; `ok` stays `true` even with failures
+    (to avoid a contradictory envelope). Exit 1 if any doc failed, 124 on timeout.
+  Either way, read the **exit code** first, then `data` for which items failed.
 
 ## 4. Exit codes (branch on these)
 
@@ -138,7 +161,7 @@ An agent run pauses mid-stream on a tool-approval event when the server requires
 1. The stream emits a tool-approval event; capture the `pending_id`.
 2. **Surface the pending tool call to the user** (show tool name + proposed args). Do not auto-approve.
 3. After explicit user go-ahead: `weknora session tool-approval resolve <pending-id> -y` to approve, or add `--reject --reason "..."` to reject.
-4. Resume the answer: `weknora session continue-stream <sess-id> --message <msg-id>`.
+4. Resume the answer: `weknora session resume <sess-id> --message <msg-id>`.
 
 `--modified-args '{"key":"val"}'` replaces the tool arguments on approve (non-empty JSON object required). This is an exit-10 interaction — see §5.
 
@@ -148,10 +171,10 @@ An agent run pauses mid-stream on a tool-approval event when the server requires
 kb        knowledge bases   list/view/create/update/delete/pin/unpin/status/check
 doc       documents in a KB list/view/create/upload/fetch/download/reparse/update/delete/wait
 chunk     retrieval units   list/view/delete   (RAG debug; not search)
-session   conversations     list/view/delete/ask/stop/continue-stream/tool-approval resolve
+session   conversations     list/view/delete/ask/stop/resume/tool-approval resolve
 message   session messages  list/search/delete
 agent     custom agents     list/view/create/update/delete/status/check
-model     configured models list/view   (read-only; find the id for agent create --model)
+model     configured models list/view/create/update/delete   (update rotates key / base-url in place, id preserved)
 search    retrieval         chunks / docs / kb / sessions
 chat      one-shot KB RAG Q&A (streaming)
 api       raw HTTP passthrough to any server endpoint (escape hatch)

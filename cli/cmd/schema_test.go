@@ -68,6 +68,25 @@ func TestSchema_SingleCommand(t *testing.T) {
 	assert.False(t, flagNames["profile"], "inherited global flags must be excluded")
 }
 
+// TestSchema_QuotedMultiWordArg: the no-arg `schema` index prints command
+// labels like "agent create"; an agent that pastes that label back as a single
+// quoted arg (`schema "agent create"`) must resolve the same as two tokens,
+// not fail with unknown_subcommand.
+func TestSchema_QuotedMultiWordArg(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	root := NewRootCmd(cmdutil.New())
+	root.SetArgs([]string{"schema", "agent create", "--format", "json"})
+	require.NoError(t, root.Execute(), "got %q", out.String())
+
+	var env struct {
+		OK   bool          `json:"ok"`
+		Data commandSchema `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env), "got %q", out.String())
+	assert.True(t, env.OK)
+	assert.Equal(t, "agent create", env.Data.Command)
+}
+
 // TestSchema_SurfacesRisk: a destructive command exposes its risk annotation,
 // so an agent can discover confirmation-gating without running the command.
 func TestSchema_SurfacesRisk(t *testing.T) {

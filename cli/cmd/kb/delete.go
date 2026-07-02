@@ -81,6 +81,7 @@ exactly to guard against unintended deletes.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete a knowledge base and all its contents",
 		RequiredFlags: []string{"<kb-id> (positional)"},
+		Output:        "envelope.data is {id, deleted:true}",
 		Examples: []string{
 			"weknora kb delete kb_abc -y",
 			"weknora kb delete kb_abc -y --format json",

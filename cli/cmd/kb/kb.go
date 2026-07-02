@@ -25,7 +25,6 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(NewCmdUnpin(f))
 	cmd.AddCommand(NewCmdStatus(f))
 	cmd.AddCommand(NewCmdCheck(f))
-	cmd.AddCommand(NewCmdConfig(f))
-	cmd.AddCommand(NewCmdInit(f))
+	cmd.AddCommand(NewCmdConfig(f)) // `config` also hosts the `config set` write subcommand
 	return cmd
 }

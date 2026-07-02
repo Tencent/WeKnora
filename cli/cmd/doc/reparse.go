@@ -57,6 +57,7 @@ keeps its id; parsing restarts asynchronously, so follow with
 			return runReparse(c.Context(), opts, fopts, cli, args[0])
 		},
 	}
+	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.AddFormatFlag(cmd, docReparseFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{

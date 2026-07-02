@@ -35,28 +35,21 @@ func (f *fakeCreateSvc) CreateManualKnowledge(
 	return f.resp, f.err
 }
 
-// TestCreate_TitlePreferredOverName: --title is the canonical flag; the
-// deprecated --name remains a working alias but --title wins when both are set.
-func TestCreate_TitlePreferredOverName(t *testing.T) {
+// TestCreate_TitleSetsRequestTitle: --title is the sole title flag and flows
+// straight into the create request.
+func TestCreate_TitleSetsRequestTitle(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "d1"}}
 	require.NoError(t, runCreate(context.Background(),
-		&CreateOptions{Text: "x", Title: "FromTitle", Name: "FromName"},
+		&CreateOptions{Text: "x", Title: "FromTitle"},
 		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb1"))
 	assert.Equal(t, "FromTitle", svc.got.req.Title)
-
-	// --name alone still works (back-compat for the deprecated alias).
-	svc2 := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "d2"}}
-	require.NoError(t, runCreate(context.Background(),
-		&CreateOptions{Text: "x", Name: "OnlyName"},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc2, "kb1"))
-	assert.Equal(t, "OnlyName", svc2.got.req.Title)
 }
 
 func TestCreate_Success_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_manual_1", Title: "Sprint Notes"}}
-	opts := &CreateOptions{Text: "# Sprint Notes\n\nAction items: ...", Name: "Sprint Notes"}
+	opts := &CreateOptions{Text: "# Sprint Notes\n\nAction items: ...", Title: "Sprint Notes"}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 
 	assert.Equal(t, "kb_xxx", svc.got.kbID)
@@ -110,7 +103,7 @@ func TestCreate_Channel_DefaultIsAPI(t *testing.T) {
 func TestCreate_JSON_Envelope(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_manual_json", Title: "My Note"}}
-	opts := &CreateOptions{Text: "# My Note", Name: "My Note"}
+	opts := &CreateOptions{Text: "# My Note", Title: "My Note"}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
 	require.NoError(t, runCreate(context.Background(), opts, fopts, svc, "kb_xxx"))
 

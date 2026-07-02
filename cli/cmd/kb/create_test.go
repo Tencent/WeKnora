@@ -66,6 +66,50 @@ func TestCreate_Success_OmitsEmbeddingModelWhenEmpty(t *testing.T) {
 	assert.Equal(t, "", svc.got.EmbeddingModelID, "embedding-model unset ⇒ empty in request")
 }
 
+// A KB created without an embedding model can never retrieve; the create result
+// must hand the agent the fix (kb config set) instead of a silent unusable KB.
+func TestCreate_HintsWhenNoEmbeddingModel(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n"}}
+	require.NoError(t, runCreate(context.Background(), &CreateOptions{Name: "n"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	var env struct {
+		Meta struct {
+			Hint string `json:"hint"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	assert.Contains(t, env.Meta.Hint, "kb config set", "unconfigured KB must hint the retrieval-readiness fix")
+}
+
+// A retrieval-ready KB (embedding model bound) carries no such hint — no noise.
+func TestCreate_NoHintWhenEmbeddingModelBound(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n", EmbeddingModelID: "emb_1"}}
+	require.NoError(t, runCreate(context.Background(), &CreateOptions{Name: "n", EmbeddingModel: "emb_1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	var env struct {
+		Meta *struct {
+			Hint string `json:"hint"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	if env.Meta != nil {
+		assert.Empty(t, env.Meta.Hint, "retrieval-ready KB must not emit a readiness hint")
+	}
+}
+
+// TestCreate_ChatModelSetsSummaryModelID: --chat-model rides the create request
+// as summary_model_id, so a KB can be born retrieval-ready in one step.
+func TestCreate_ChatModelSetsSummaryModelID(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n"}}
+	opts := &CreateOptions{Name: "n", EmbeddingModel: "emb_x", ChatModel: "chat_x"}
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+
+	require.NotNil(t, svc.got)
+	assert.Equal(t, "emb_x", svc.got.EmbeddingModelID)
+	assert.Equal(t, "chat_x", svc.got.SummaryModelID, "--chat-model must set summary_model_id on the create request")
+}
+
 func TestCreate_NameRequired(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}

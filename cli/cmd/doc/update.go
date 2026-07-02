@@ -98,6 +98,7 @@ to the user first.`,
 	}
 	cmd.Flags().StringVar(&title, "title", "", "New title (omit to leave unchanged)")
 	cmd.Flags().StringVar(&desc, "description", "", "New description (omit to leave unchanged)")
+	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.AddFormatFlag(cmd, docUpdateFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetWriteRisk(cmd, "doc.update")

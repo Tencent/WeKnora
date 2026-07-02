@@ -90,6 +90,7 @@ in scripted / --format json invocations (exit code 10; see cli/README.md).`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "remove a named profile and its stored credentials",
 		RequiredFlags: []string{"<name> (positional)"},
+		Output:        "envelope.data is {name, removed:true, was_current}",
 		Examples: []string{
 			"weknora profile remove staging",
 			"weknora profile remove production -y",

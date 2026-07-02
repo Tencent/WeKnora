@@ -73,3 +73,26 @@ func TestResolveDir(t *testing.T) {
 	assert.True(t, filepath.IsAbs(def), "default dir must be absolute")
 	assert.Contains(t, def, filepath.Join(".claude", "skills"))
 }
+
+// TestResolveDir_ExpandsTilde pins that a leading ~ in --dir is expanded to the
+// home directory instead of creating a literal "~" directory. Regression:
+// `skills install --dir '~/foo'` (quoted, so the shell doesn't expand it) used
+// to create a bogus ./~ tree.
+func TestResolveDir_ExpandsTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	got, err := resolveDir("~/agents/skills")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "agents", "skills"), got)
+	assert.NotContains(t, got, "~", "~ must be expanded, not left literal")
+
+	bare, err := resolveDir("~")
+	require.NoError(t, err)
+	assert.Equal(t, home, bare)
+
+	// A ~ that is NOT a leading path segment is left untouched (not a home ref).
+	lit, err := resolveDir("/tmp/a~b")
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/a~b", lit)
+}

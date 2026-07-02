@@ -96,6 +96,9 @@ func TestFormatOptions_TextModeReturnsError(t *testing.T) {
 
 // TestResolveDefault_AlwaysJSON verifies v0.7 semantics: default is FormatJSON
 // regardless of whether stdout is a TTY (BREAKING change from v0.6).
+// TestResolveDefault_AlwaysJSON pins the deliberate JSON-always default (no
+// TTY switch to text): the default output never depends on whether stdout is a
+// TTY, so agents get predictable JSON. Humans opt into text with --format text.
 func TestResolveDefault_AlwaysJSON(t *testing.T) {
 	for _, isTTY := range []bool{true, false} {
 		o := &FormatOptions{}
@@ -117,7 +120,7 @@ func TestResolveDefault(t *testing.T) {
 		isTTY    bool
 		wantMode FormatMode
 	}{
-		// v0.7: empty Mode always resolves to FormatJSON regardless of TTY.
+		// JSON-always default regardless of TTY (predictable for agents).
 		{"empty isTTY", "", "", true, FormatJSON},
 		{"empty no-tty", "", "", false, FormatJSON},
 		{"already set keeps value tty", FormatNDJSON, "", true, FormatNDJSON},

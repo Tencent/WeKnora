@@ -61,7 +61,7 @@ the caller to thread follow-ups.
 
 AI agents: this is the primary entrypoint for invoking custom agents.
 The 'weknora agent' subtree handles CRUD only (list / view / create /
-edit / delete / status / check).
+update / delete / status / check).
 
 Modes:
   --format json (default):       one JSON envelope with answer events

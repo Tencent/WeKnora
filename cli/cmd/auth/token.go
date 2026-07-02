@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -90,6 +91,16 @@ to see which mode each profile uses, and construct the matching HTTP header:
 }
 
 func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
+	// Env credentials are the active credential on the headless path — `auth
+	// token` must surface them (they ARE the token / api key) instead of
+	// erroring on the absence of a stored profile.
+	if active, kind := cmdutil.EnvCredential(); active {
+		mode := ModeBearer
+		if kind == "WEKNORA_API_KEY" {
+			mode = ModeAPIKey
+		}
+		return emitToken(fopts, os.Getenv(kind), mode, "(env)")
+	}
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -140,8 +151,18 @@ func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
 			fmt.Sprintf("profile %q credential is empty in keyring; run `weknora auth login`", profileName))
 	}
 
+	return emitToken(fopts, token, mode, profileName)
+}
+
+// emitToken renders a resolved credential: the {token, mode, profile} envelope
+// under --format json, else the raw token on stdout (no trailing newline, for
+// clean $(weknora auth token) capture) with a TTY-only leak hint on stderr.
+func emitToken(fopts *cmdutil.FormatOptions, token, mode, profile string) error {
+	if token == "" {
+		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "active credential is empty")
+	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Profile: profileName}, nil)
+		return fopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Profile: profile}, nil)
 	}
 
 	// No trailing newline - clean $(weknora auth token) substitution.

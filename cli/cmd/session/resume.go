@@ -1,4 +1,4 @@
-// continue_stream.go implements `weknora session continue-stream` —
+// resume.go implements `weknora session resume` —
 // re-attach to an SSE event buffer for an in-progress or already-completed
 // assistant message under a known session_id.
 //
@@ -23,44 +23,42 @@ package sessioncmd
 
 import (
 	"context"
-	"errors"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/output"
-	"github.com/Tencent/WeKnora/cli/internal/sse"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// continueStreamFields enumerates the NDJSON init-event + raw SDK event
+// resumeFields enumerates the NDJSON init-event + raw SDK event
 // vocabulary surfaced for `--format json` / `--format ndjson` discovery.
-var continueStreamFields = []string{
+var resumeFields = []string{
 	"session_id", "message_id",
 	// SDK StreamResponse fields (pass-through): id, response_type, content,
 	// done, knowledge_references, assistant_message_id, session_id,
 	// tool_calls, data
 }
 
-// ContinueStreamOptions captures `session continue-stream` flag/arg state.
-type ContinueStreamOptions struct {
+// ResumeOptions captures `session resume` flag/arg state.
+type ResumeOptions struct {
 	SessionID string
 	MessageID string
 }
 
-// ContinueStreamService is the narrow SDK surface this command depends on.
+// ResumeService is the narrow SDK surface this command depends on.
 // *sdk.Client satisfies it; tests substitute a fake. Compile-time check
 // at the bottom of this file.
-type ContinueStreamService interface {
+type ResumeService interface {
 	ContinueStream(ctx context.Context, sessionID, messageID string, cb func(*sdk.StreamResponse) error) error
 }
 
-// NewCmdContinueStream builds `weknora session continue-stream <session-id> --message <id>`.
-func NewCmdContinueStream(f *cmdutil.Factory) *cobra.Command {
-	opts := &ContinueStreamOptions{}
+// NewCmdResume builds `weknora session resume <session-id> --message <id>`.
+func NewCmdResume(f *cmdutil.Factory) *cobra.Command {
+	opts := &ResumeOptions{}
 	cmd := &cobra.Command{
-		Use:   "continue-stream <session-id>",
+		Use:   "resume <session-id>",
 		Short: "Resume an SSE event stream for an in-progress or completed session message",
 		Long: `Re-attach to the SSE event buffer for an assistant message under a known session.
 
@@ -92,8 +90,8 @@ regardless of --format value. The operator use case (incident response,
 debugging) always wants the raw event log; there is no human-text rendering.
 --format json and --format ndjson behave identically here; --format text is
 silently treated as NDJSON.`,
-		Example: `  weknora session continue-stream sess_xyz --message msg_abc
-  weknora session continue-stream sess_xyz -m msg_abc --format ndjson`,
+		Example: `  weknora session resume sess_xyz --message msg_abc
+  weknora session resume sess_xyz -m msg_abc --format ndjson`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.SessionID = args[0]
@@ -106,38 +104,39 @@ silently treated as NDJSON.`,
 			if err != nil {
 				return err
 			}
-			return runContinueStream(c.Context(), opts, fopts, cli)
+			return runResume(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().StringVarP(&opts.MessageID, "message", "m", "",
 		"Assistant message ID to resume (from the init or agent_query event of the original stream)")
 	_ = cmd.MarkFlagRequired("message")
-	cmdutil.AddFormatFlag(cmd, continueStreamFields...)
+	cmdutil.AddFormatFlag(cmd, resumeFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Resume an SSE event stream for an in-progress or completed assistant message. Produces an NDJSON event stream: init line (session_id, message_id) then raw SDK StreamResponse events.",
-		RequiredFlags: []string{"<session-id> (positional)", "--message (message_id from prior init / agent_query event)"},
+		RequiredFlags: []string{"<session-id> (positional)", "--message (persisted assistant message id — get it from `weknora message list --session <id>`; a live stream's assistant_message_id is not resumable once the message persists)"},
 		Examples: []string{
-			"weknora session continue-stream sess_xyz --message msg_abc --format json",
-			"# Network-blip recovery: replay with same session_id + message_id from the original 'session ask' init event",
+			"weknora session resume sess_xyz --message msg_abc --format json",
+			"# Get the message id from: weknora message list --session <session-id> (the persisted assistant message)",
 		},
 		Output: "NDJSON stream: {type:init, session_id, message_id, profile} then SDK StreamResponse events (response_type, content, done, knowledge_references, assistant_message_id, ...)",
 		Warnings: []string{
 			"Server replays from event 0 (NOT cursor-from-disconnect). Agents that already consumed events on the original stream MUST dedupe by message_id + event hash to avoid double-processing.",
 			"Buffer TTL: redis mode 1h hardcoded; memory mode = process lifetime. After expiry the CLI returns local.sse_stream_aborted.",
+			"Output is always NDJSON (an event stream, not an envelope): --jq does not apply and --format text/json/ndjson behave identically here — parse the event lines yourself.",
 		},
 	})
 	return cmd
 }
 
-// runContinueStream is the testable core: validate, dispatch the resume, and
+// runResume is the testable core: validate, dispatch the resume, and
 // route the NDJSON stream. Returns a typed error.
 //
 // Always emits NDJSON: a buffered envelope makes no sense for a streaming
-// command, and continue-stream has no human-text use case (operators reach
+// command, and resume has no human-text use case (operators reach
 // for it during incident response / debugging, which always wants the raw
 // event log). --format text is therefore treated identically to --format
 // json/ndjson here.
-func runContinueStream(ctx context.Context, opts *ContinueStreamOptions, _ *cmdutil.FormatOptions, svc ContinueStreamService) error {
+func runResume(ctx context.Context, opts *ResumeOptions, _ *cmdutil.FormatOptions, svc ResumeService) error {
 	if opts.SessionID == "" {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "session-id argument cannot be empty")
 	}
@@ -145,7 +144,7 @@ func runContinueStream(ctx context.Context, opts *ContinueStreamOptions, _ *cmdu
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--message cannot be empty")
 	}
 	if svc == nil {
-		return cmdutil.NewError(cmdutil.CodeServerError, "session continue-stream: no SDK client available")
+		return cmdutil.NewError(cmdutil.CodeServerError, "session resume: no SDK client available")
 	}
 
 	w := iostreams.IO.Out
@@ -165,52 +164,27 @@ func runContinueStream(ctx context.Context, opts *ContinueStreamOptions, _ *cmdu
 	// 2. Open the SDK replay stream and pass each event through as a bare
 	//    NDJSON line. The SDK's StreamResponse is the source of truth for
 	//    the event vocabulary; the CLI does not reshape it.
-	var streamErrMsg string
+	// The SDK invokes the callback for each event (including a terminal
+	// response_type=error frame) BEFORE returning, so raw passthrough still
+	// emits every event; on a terminal error frame the SDK then returns an
+	// *SSEStreamError. No CLI-level early-terminate is needed.
 	cb := func(r *sdk.StreamResponse) error {
-		isErr := r != nil && r.ResponseType == sdk.ResponseTypeError
-		if isErr && streamErrMsg == "" {
-			if r.Content != "" {
-				streamErrMsg = r.Content
-			} else if r.Data != nil {
-				if e, ok := r.Data["error"].(string); ok {
-					streamErrMsg = e
-				}
-			}
-		}
-		if err := output.EmitSDKEvent(w, r); err != nil {
-			return err
-		}
-		// Stop once the error frame is emitted rather than blocking on the SDK
-		// read until the ~30s transport timeout (the server holds the stream
-		// open after the error). streamErrMsg carries the real reason.
-		if isErr {
-			return sse.ErrTerminate
-		}
-		return nil
+		return output.EmitSDKEvent(w, r)
 	}
 	err := svc.ContinueStream(ctx, opts.SessionID, opts.MessageID, cb)
-	if errors.Is(err, sse.ErrTerminate) {
-		err = nil
-	}
-	// A server-delivered error frame is the authoritative failure reason —
-	// surface it as operation.failed (exit 1) instead of the transport timeout
-	// the server's stream-close triggers afterwards. Mirrors chat / session ask.
-	if streamErrMsg != "" {
-		return cmdutil.NewError(cmdutil.CodeOperationFailed, "continue stream failed: "+streamErrMsg)
-	}
 	if err != nil {
 		// Ctrl-C / SIGTERM lineage (operator gave up on the resume).
 		if cmdutil.IsCancelled(ctx, err) {
-			return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "session continue-stream cancelled")
+			return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "session resume cancelled")
 		}
-		// Pre-stream HTTP / transport failure (e.g. 404 if message_id is
-		// unknown, or buffer-expired body from the server). Route through
-		// the canonical classifier so codes survive — 404 still surfaces
-		// as resource.not_found etc.
-		return cmdutil.WrapHTTP(err, "continue stream")
+		// WrapStream routes through ClassifySDKError: a terminal SSE error
+		// frame classifies as server.error (matching chat / session ask); a
+		// pre-stream HTTP failure (e.g. 404 for an unknown message_id) still
+		// surfaces via ClassifyHTTPError as resource.not_found etc.
+		return cmdutil.WrapStream(err, "resume stream")
 	}
 	return nil
 }
 
-// compile-time check: production SDK client satisfies ContinueStreamService.
-var _ ContinueStreamService = (*sdk.Client)(nil)
+// compile-time check: production SDK client satisfies ResumeService.
+var _ ResumeService = (*sdk.Client)(nil)

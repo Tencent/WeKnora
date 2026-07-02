@@ -69,7 +69,7 @@ func TestValidateProfileName_RejectsShellMetachars(t *testing.T) {
 	for _, name := range cases {
 		err := ValidateProfileName(name)
 		if err == nil {
-			t.Errorf("ValidateProfileName(%q) should have rejected the name; an agent exec'ing retry_command would be injectable", name)
+			t.Errorf("ValidateProfileName(%q) should have rejected the name; a name echoed into retry_argv / prose would be injectable", name)
 			continue
 		}
 		var ce *Error

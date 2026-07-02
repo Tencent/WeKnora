@@ -20,6 +20,10 @@ CLI history before v0.3 is recorded in the project root
 - JSON, text, and MCP chat/session output hide reasoning, tools, lifecycle
   frames, and references by default. `--reference` adds bounded `kb_id` /
   `chunk_id` / `parent_chunk_id` indexes; `--verbose` adds execution events.
+- `session continue-stream` renamed to `session resume`.
+- `kb init` renamed to `kb config set`.
+- Error envelope: `retry_command` (a shell string) replaced by `retry_argv`
+  (a directly-executable argv array — no shell-splitting or quoting).
 
 ### Added
 - `chat` / `session ask --reference` includes indexed citations, while
@@ -27,6 +31,18 @@ CLI history before v0.3 is recorded in the project root
   `session_ask` expose the same controls through `reference` / `verbose` inputs.
 - Buffered chat/session errors include the auto-created `session_id` in
   `error.detail` so interrupted sessions remain recoverable.
+- `error.exit_code` embeds the process exit code in the JSON error envelope,
+  disambiguating the two `input.invalid_argument` cases (parse error → 2,
+  typed-value error → 5).
+- `kb status` / `kb check` / `kb create` report `retrieval_ready` (whether an
+  embedding model is bound); `kb create` hints the fix when it is false.
+- `model create` / `model update` / `model delete` (`update` rotates key /
+  base-url in place, preserving the id).
+- Stateless env-credential auth: `WEKNORA_API_KEY` / `WEKNORA_TOKEN` +
+  `WEKNORA_HOST`, a zero-disk path for headless / agent use. `auth logout` now
+  keeps the profile registered (use `profile remove` to delete it entirely).
+- `meta.total_count` on paginated list / search output (full result size before
+  client-side `--limit` truncation).
 
 ### Changed
 - JSON, text, and MCP now share one event projector and filtering policy.

@@ -21,6 +21,10 @@ import (
 type EditService interface {
 	GetAgent(ctx context.Context, id string) (*sdk.Agent, error)
 	UpdateAgent(ctx context.Context, id string, req *sdk.UpdateAgentRequest) (*sdk.Agent, error)
+	// ListModels backs --model / --rerank-model id-or-name resolution so a
+	// bogus name fails fast instead of clobbering config.model_id with an
+	// unresolvable string (which never resolves at run time).
+	ListModels(ctx context.Context) ([]sdk.Model, error)
 }
 
 // EditOptions captures the surgical flag state. Both string fields and
@@ -327,6 +331,20 @@ func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOption
 			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file read: %v", err))
 		}
 		opts.SystemPrompt = strings.TrimSpace(string(body))
+	}
+
+	// Resolve --model / --rerank-model (id or name) and validate they exist,
+	// mirroring agent create. Without this a bogus name is stored verbatim as
+	// config.model_id and the agent silently never resolves at run time.
+	if opts.flags.modelSet {
+		if opts.Model, err = cmdutil.ResolveModelRef(ctx, svc, opts.Model, "KnowledgeQA"); err != nil {
+			return err
+		}
+	}
+	if opts.flags.rerankModelSet {
+		if opts.RerankModel, err = cmdutil.ResolveModelRef(ctx, svc, opts.RerankModel, "Rerank"); err != nil {
+			return err
+		}
 	}
 
 	// Compute KB list from current + add/remove with a stderr warning when

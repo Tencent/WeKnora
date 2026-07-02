@@ -174,6 +174,13 @@ func TestBuildClient_NoCurrentProfile(t *testing.T) {
 	var typed *Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, CodeAuthUnauthenticated, typed.Code)
+	// Zero-state retry_argv must NOT be the generic `auth login` (which itself
+	// fails with no profile → an agent execing retry_argv would loop); it must
+	// point at profile creation instead.
+	detail := ErrorToDetail(err)
+	assert.NotEqual(t, []string{"weknora", "auth", "login"}, detail.RetryArgv,
+		"zero-state retry_argv must not loop back to auth login")
+	assert.Contains(t, detail.RetryArgv, "profile", "zero-state retry_argv should point at profile setup")
 }
 
 func TestBuildClient_UnknownContext(t *testing.T) {

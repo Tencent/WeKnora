@@ -21,7 +21,7 @@ import (
 func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "model",
-		Short: "Manage models (list / view / create / delete)",
+		Short: "Manage models (list / view / create / update / delete)",
 		Long: `List, inspect, register, and delete the models configured on the server. Use
 the model id to back a knowledge base's embedding / summary config ('weknora kb
 init') or an agent ('weknora agent create --model <id>').`,
@@ -29,6 +29,7 @@ init') or an agent ('weknora agent create --model <id>').`,
 	cmd.AddCommand(NewCmdList(f))
 	cmd.AddCommand(NewCmdView(f))
 	cmd.AddCommand(NewCmdCreate(f))
+	cmd.AddCommand(NewCmdUpdate(f))
 	cmd.AddCommand(NewCmdDelete(f))
 	return cmd
 }

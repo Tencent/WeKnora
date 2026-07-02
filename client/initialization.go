@@ -8,12 +8,48 @@ import (
 	"time"
 )
 
-// InitializationConfig represents the initialization configuration for a knowledge base
+// InitializationConfig is the WRITE payload for InitializeByKB / UpdateKBConfig
+// (the server's write endpoint accepts these flat model ids). It is NOT the
+// shape the read endpoint returns — see KBModelConfigView / GetInitializationConfig.
 type InitializationConfig struct {
 	ChatModelID      string `json:"chat_model_id,omitempty"`
 	EmbeddingModelID string `json:"embedding_model_id,omitempty"`
 	RerankModelID    string `json:"rerank_model_id,omitempty"`
 	MultimodalID     string `json:"multimodal_id,omitempty"`
+}
+
+// KBModelConfigView is the secret-free, read-only model configuration of a
+// knowledge base, returned by GetInitializationConfig. The server's read
+// response nests config under embedding/llm/rerank/multimodal and INCLUDES
+// provider apiKey/baseUrl (for the web config form); this view intentionally
+// parses only the non-secret fields, so credentials can never leak through the
+// CLI. Field tags are snake_case (the CLI envelope convention), remapped from
+// the server's camelCase.
+type KBModelConfigView struct {
+	RetrievalReady bool                  `json:"retrieval_ready"` // embedding model bound → KB can embed/retrieve
+	Embedding      ModelSlotView         `json:"embedding"`
+	LLM            ModelSlotView         `json:"llm"`
+	Rerank         RerankSlotView        `json:"rerank"`
+	Multimodal     MultimodalSlotView    `json:"multimodal"`
+}
+
+// ModelSlotView is one non-secret model slot (embedding / llm).
+type ModelSlotView struct {
+	Configured bool   `json:"configured"`
+	ModelName  string `json:"model_name,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Dimension  int    `json:"dimension,omitempty"`
+}
+
+// RerankSlotView is the rerank slot (may be disabled).
+type RerankSlotView struct {
+	Enabled   bool   `json:"enabled"`
+	ModelName string `json:"model_name,omitempty"`
+}
+
+// MultimodalSlotView reports whether multimodal processing is enabled.
+type MultimodalSlotView struct {
+	Enabled bool `json:"enabled"`
 }
 
 // OllamaModelInfo represents info about an Ollama model
@@ -40,20 +76,50 @@ type ModelCheckResult struct {
 	Message string `json:"message,omitempty"`
 }
 
-// GetInitializationConfig gets the current initialization config for a knowledge base
-func (c *Client) GetInitializationConfig(ctx context.Context, kbID string) (*InitializationConfig, error) {
+// GetInitializationConfig returns a knowledge base's model configuration as a
+// secret-free KBModelConfigView. The server response nests config under
+// embedding/llm/rerank/multimodal and includes provider apiKey/baseUrl; this
+// parses ONLY the non-secret fields (apiKey/baseUrl are never read into the
+// struct, so they cannot leak through the CLI) and remaps to snake_case.
+func (c *Client) GetInitializationConfig(ctx context.Context, kbID string) (*KBModelConfigView, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/initialization/config/%s", kbID), nil, nil)
 	if err != nil {
 		return nil, err
 	}
+	// Deliberately model only non-secret fields; apiKey / baseUrl in the server
+	// payload are ignored by omission.
 	var result struct {
-		Success bool                  `json:"success"`
-		Data    *InitializationConfig `json:"data"`
+		Data struct {
+			Embedding struct {
+				Source    string `json:"source"`
+				ModelName string `json:"modelName"`
+				Dimension int    `json:"dimension"`
+			} `json:"embedding"`
+			LLM struct {
+				Source    string `json:"source"`
+				ModelName string `json:"modelName"`
+			} `json:"llm"`
+			Rerank struct {
+				Enabled   bool   `json:"enabled"`
+				ModelName string `json:"modelName"`
+			} `json:"rerank"`
+			Multimodal struct {
+				Enabled bool `json:"enabled"`
+			} `json:"multimodal"`
+		} `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err
 	}
-	return result.Data, nil
+	d := result.Data
+	view := &KBModelConfigView{
+		RetrievalReady: d.Embedding.ModelName != "",
+		Embedding:      ModelSlotView{Configured: d.Embedding.ModelName != "", ModelName: d.Embedding.ModelName, Source: d.Embedding.Source, Dimension: d.Embedding.Dimension},
+		LLM:            ModelSlotView{Configured: d.LLM.ModelName != "", ModelName: d.LLM.ModelName, Source: d.LLM.Source},
+		Rerank:         RerankSlotView{Enabled: d.Rerank.Enabled, ModelName: d.Rerank.ModelName},
+		Multimodal:     MultimodalSlotView{Enabled: d.Multimodal.Enabled},
+	}
+	return view, nil
 }
 
 // InitializeByKB initializes a knowledge base with model configuration

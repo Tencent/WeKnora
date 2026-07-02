@@ -127,7 +127,13 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	}
 	profileName := cfg.CurrentProfile
 	if profileName == "" {
-		return nil, NewError(CodeAuthUnauthenticated, "no current profile configured; run `weknora auth login` to set one up")
+		// Zero-state: no profile exists at all. The generic auth.unauthenticated
+		// default retry_argv is `auth login`, but that ALSO fails here (it needs
+		// an active profile) — an agent that execs retry_argv would loop. Point
+		// hint + retry_argv at the real first step: create a profile.
+		return nil, NewError(CodeAuthUnauthenticated, "no profile configured").
+			WithHint("add one first: `weknora profile add <name> --host <url> --use`, then `weknora auth login` (or set WEKNORA_API_KEY + WEKNORA_HOST for headless use)").
+			WithRetryArgv([]string{"weknora", "profile", "add", "--help"})
 	}
 	prof, ok := cfg.Profiles[profileName]
 	if !ok {
@@ -252,6 +258,15 @@ func buildClientFromEnv(f *Factory) (client *sdk.Client, handled bool, err error
 // a knowledge base — one source of truth for flag name and help text.
 func AddKBFlag(cmd *cobra.Command) {
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
+}
+
+// AddIgnoredKBFlag registers a no-op --kb on id-addressed commands (doc view /
+// wait, chunk list / view). Those resolve a globally-unique doc/chunk id, so
+// --kb is redundant — but an agent flowing from `doc upload --kb X` naturally
+// carries it, and rejecting it with exit 2 is pure friction. Accepted and
+// ignored; declared here so schema still lists it truthfully.
+func AddIgnoredKBFlag(cmd *cobra.Command) {
+	cmd.Flags().String("kb", "", "Ignored — the id argument is globally unique; accepted for symmetry with `doc list`/`doc upload` so a carried-over --kb doesn't error")
 }
 
 // ResolveKB returns the active KB id for the running command, applying the

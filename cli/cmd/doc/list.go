@@ -106,7 +106,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
-	cmd.Flags().StringVar(&opts.Keyword, "keyword", "", "Server-side substring match against title / file_name (case-sensitive)")
+	cmd.Flags().StringVar(&opts.Keyword, "keyword", "", "Server-side substring match against title / file_name (case-insensitive)")
 	cmd.Flags().StringVar(&opts.FileType, "file-type", "", `Filter by file extension (e.g. "pdf", "md")`)
 	cmd.Flags().StringVar(&opts.Source, "source", "", `Filter by ingestion source (e.g. "api", "web")`)
 	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Filter by tag association")
@@ -116,7 +116,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:  "List documents in the resolved knowledge base. Results come with meta.count; use --limit to cap, --all-pages to walk every server page, --status/--keyword to filter server-side.",
 		Examples: []string{"weknora doc list --format json", "weknora doc list --all-pages --limit 200 --format json"},
-		Output:   "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the total returned; meta.total_count is the server-side total before client-side --limit truncation",
+		Output:   "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the returned count; meta.total_count is the server-side total before client-side --limit truncation; meta.has_more=true when --limit truncated",
 	})
 	return cmd
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -148,10 +149,13 @@ Existing files are left untouched unless --force is passed.`,
 	return cmd
 }
 
-// resolveDir returns the explicit --dir or the default ~/.claude/skills.
+// resolveDir returns the explicit --dir or the default ~/.claude/skills. A
+// leading ~ in --dir is expanded to the home directory — otherwise a quoted
+// `--dir '~/foo'` (which the shell leaves literal) would create a bogus "~"
+// directory tree.
 func resolveDir(dir string) (string, error) {
 	if dir != "" {
-		return dir, nil
+		return expandTilde(dir)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -159,6 +163,25 @@ func resolveDir(dir string) (string, error) {
 			"could not determine home directory; pass --dir explicitly")
 	}
 	return filepath.Join(home, ".claude", "skills"), nil
+}
+
+// expandTilde resolves a leading "~" or "~/" path segment to the user's home
+// directory. Other forms (including "~user" and a ~ that isn't the first
+// segment) are returned unchanged — matching the common shell behavior a CLI
+// is expected to reproduce when it receives an unexpanded literal tilde.
+func expandTilde(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+			"could not expand ~ (home directory unknown); pass an absolute --dir")
+	}
+	if path == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, path[len("~/"):]), nil
 }
 
 // writeSkills writes every embedded skill file under target, creating parent

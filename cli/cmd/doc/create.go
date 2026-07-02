@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -26,16 +27,11 @@ var docCreateFields = []string{
 // CreateOptions holds CLI flag values for `doc create`.
 type CreateOptions struct {
 	Text    string // --text (required): document text content (Markdown)
-	Title   string // --title: document title (preferred; matches `doc update --title`)
-	Name    string // --name: deprecated alias for --title
+	Title   string // --title: document title (matches `doc update --title`)
 	TagID   string // --tag-id: associate with a tag
 	Channel string // --channel: ingestion-channel tag (default "api")
 	DryRun  bool
 }
-
-// title returns the resolved document title, preferring --title over the
-// deprecated --name alias.
-func (o *CreateOptions) title() string { return cmp.Or(o.Title, o.Name) }
 
 // CreateService is the narrow SDK surface for `doc create`.
 // *sdk.Client satisfies it.
@@ -84,7 +80,7 @@ don't require a file upload or remote URL. KB resolution follows the standard
 					Action: "doc.create",
 					Args: map[string]any{
 						"text":  opts.Text,
-						"title": opts.title(),
+						"title": opts.Title,
 						"kb":    kbID,
 					},
 				}); handled {
@@ -106,8 +102,6 @@ don't require a file upload or remote URL. KB resolution follows the standard
 	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.Text, "text", "", "Document text content in Markdown format (required)")
 	cmd.Flags().StringVar(&opts.Title, "title", "", "Document title")
-	cmd.Flags().StringVar(&opts.Name, "name", "", "Document title (deprecated: use --title)")
-	_ = cmd.Flags().MarkDeprecated("name", "use --title instead")
 	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Tag id to associate with the new entry")
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	_ = cmd.MarkFlagRequired("text")
@@ -134,7 +128,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		return cmdutil.NewFlagError(fmt.Errorf("--text is required"))
 	}
 	req := &sdk.CreateManualKnowledgeRequest{
-		Title:   opts.title(),
+		Title:   opts.Title,
 		Content: opts.Text,
 		TagID:   opts.TagID,
 		Channel: cmp.Or(opts.Channel, uploadChannel),
@@ -143,10 +137,18 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "create document")
 	}
-	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, k, nil)
+	// Inline-created docs land in parse_status=draft and are NOT auto-queued
+	// for parsing (unlike `doc upload`), so they aren't searchable until
+	// reparsed. Surface the next step so an agent doesn't `doc wait` into a
+	// timeout or `search` into empty results.
+	var meta *output.Meta
+	if k.ParseStatus == "draft" {
+		meta = &output.Meta{Hint: "document created in parse_status=draft (not yet indexed) — run `weknora doc reparse " + k.ID + "` to parse & make it searchable"}
 	}
-	displayed := opts.title()
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, k, meta)
+	}
+	displayed := opts.Title
 	if displayed == "" {
 		displayed = k.Title
 	}
@@ -154,5 +156,8 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		displayed = k.ID
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Created %q (id: %s)\n", displayed, k.ID)
+	if meta != nil {
+		fmt.Fprintf(iostreams.IO.Out, "  ⚠ %s\n", meta.Hint)
+	}
 	return nil
 }

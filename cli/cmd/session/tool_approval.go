@@ -49,7 +49,7 @@ When a server-side agent run (weknora session ask) needs to call a tool
 that requires approval, the stream emits a tool-approval event carrying a
 pending id and the run blocks. This command unblocks it: approve (default)
 lets the tool call execute, --reject cancels it. After resolving, resume
-the answer with weknora session continue-stream.
+the answer with weknora session resume.
 
 --modified-args replaces the tool call arguments on approve (JSON object).
 It conflicts with --reject (rejected calls never execute).
@@ -122,7 +122,7 @@ func newCmdResolve(f *cmdutil.Factory) *cobra.Command {
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetRisk(cmd, "session.tool_approval.resolve")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "approve or reject a pending tool call from an agent run; then resume with session continue-stream",
+		UsedFor:       "approve or reject a pending tool call from an agent run; then resume with session resume",
 		RequiredFlags: []string{"<pending-id> (positional)"},
 		Examples: []string{
 			"weknora session tool-approval resolve pend_abc -y",

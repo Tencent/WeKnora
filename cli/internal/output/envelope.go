@@ -45,6 +45,11 @@ type Meta struct {
 	// Non-batch commands leave these nil so they are omitted from the envelope.
 	Successes *int `json:"successes,omitempty"` // batch ops
 	Failures  *int `json:"failures,omitempty"`  // batch ops
+	// Hint is an optional actionable note on a SUCCESS envelope — e.g. an
+	// empty search explaining the KB may be unindexed, or a freshly-created
+	// draft document pointing at `doc reparse`. Distinct from error.hint;
+	// omitted when empty so it never adds noise to normal results.
+	Hint string `json:"hint,omitempty"`
 	// Dry-run preview fields. Populated by EmitDryRun (cmdutil/dryrun.go)
 	// when --dry-run is set on a mutation command; omitted otherwise.
 	DryRun bool           `json:"dry_run,omitempty"` // true when --dry-run; omitted otherwise
@@ -56,7 +61,12 @@ type Meta struct {
 type ErrDetail struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
-	Hint    string `json:"hint,omitempty"`
+	// ExitCode is the process exit code this error maps to, embedded so an
+	// agent can branch on a single JSON read without observing $?. Needed
+	// because one type (input.invalid_argument) spans exit 2 (parse) and
+	// exit 5 (typed value) — exit_code disambiguates them.
+	ExitCode int    `json:"exit_code,omitempty"`
+	Hint     string `json:"hint,omitempty"`
 	// RetryArgv is a directly-executable argv array (e.g.
 	// ["weknora","auth","login"]) so an agent can exec it without
 	// shell-splitting or quote-handling. Distinct from the prose Hint.
@@ -73,7 +83,8 @@ type ErrDetail struct {
 
 // RiskDetail tags high-risk writes for the agent protocol. Surfaces in
 // error.risk on confirmation_required errors.
-// Level: only "destructive" is emitted; "read" / "write" slots reserved.
+// Level: "write" (reversible mutations — update) or "destructive" (delete);
+// the "read" slot is reserved.
 type RiskDetail struct {
 	Level  string `json:"level"`
 	Action string `json:"action"`

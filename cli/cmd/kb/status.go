@@ -16,12 +16,16 @@ import (
 // Shallow read only: 1 HTTP call, no failed-doc aggregation.
 // For deep verification including failed_count, use `kb check <id>`.
 type StatusResult struct {
-	ID              string `json:"id"`
-	Reachable       bool   `json:"reachable"`
-	KnowledgeCount  int64  `json:"knowledge_count,omitempty"`
-	ChunkCount      int64  `json:"chunk_count,omitempty"`
-	IsProcessing    bool   `json:"is_processing,omitempty"`
-	ProcessingCount int64  `json:"processing_count,omitempty"`
+	ID        string `json:"id"`
+	Reachable bool   `json:"reachable"`
+	// RetrievalReady is false when the KB has no embedding model bound — it can
+	// never index or retrieve until `kb config set` runs. Always emitted (no
+	// omitempty) so a not-ready KB is visible, not silently green.
+	RetrievalReady  bool  `json:"retrieval_ready"`
+	KnowledgeCount  int64 `json:"knowledge_count,omitempty"`
+	ChunkCount      int64 `json:"chunk_count,omitempty"`
+	IsProcessing    bool  `json:"is_processing,omitempty"`
+	ProcessingCount int64 `json:"processing_count,omitempty"`
 }
 
 // StatusService is the narrow SDK surface needed for kb status.
@@ -30,7 +34,7 @@ type StatusService interface {
 }
 
 var kbStatusFields = []string{
-	"id", "reachable", "knowledge_count", "chunk_count",
+	"id", "reachable", "retrieval_ready", "knowledge_count", "chunk_count",
 	"is_processing", "processing_count",
 }
 
@@ -73,7 +77,7 @@ For full metadata (config / pinned / tenant), use 'weknora kb view <id>'.`,
 		UsedFor:       "shallow health probe of a knowledge base (one HTTP call): reachability, no failed-doc aggregation",
 		RequiredFlags: []string{"<kb-id> (positional)"},
 		Examples:      []string{"weknora kb status kb_abc"},
-		Output:        "envelope.data is {id, reachable, ...}; use `kb check` for deep failed-doc aggregation",
+		Output:        "envelope.data is {id, reachable, retrieval_ready, ...}; retrieval_ready=false means no embedding model is bound (run `kb config set`), so the KB cannot index/retrieve; use `kb check` for deep failed-doc aggregation",
 	})
 	return cmd
 }
@@ -89,6 +93,7 @@ func runStatus(ctx context.Context, svc StatusService, id string) (*StatusResult
 	return &StatusResult{
 		ID:              kb.ID,
 		Reachable:       true,
+		RetrievalReady:  kb.EmbeddingModelID != "",
 		KnowledgeCount:  kb.KnowledgeCount,
 		ChunkCount:      kb.ChunkCount,
 		IsProcessing:    kb.IsProcessing,
@@ -115,10 +120,19 @@ func writeStatusText(w io.Writer, res *StatusResult) error {
 	if !res.Reachable {
 		return nil
 	}
+	fmt.Fprintf(w, "Retrieval:    %v%s\n", res.RetrievalReady, retrievalHint(res.RetrievalReady))
 	fmt.Fprintf(w, "Knowledge:    %d\n", res.KnowledgeCount)
 	fmt.Fprintf(w, "Chunks:       %d\n", res.ChunkCount)
 	fmt.Fprintf(w, "Processing:   %v (%d active)\n", res.IsProcessing, res.ProcessingCount)
 	return nil
+}
+
+// retrievalHint annotates a not-ready KB in text output with the fix.
+func retrievalHint(ready bool) string {
+	if ready {
+		return ""
+	}
+	return "  ← no embedding model bound; run `weknora kb config set <id>`"
 }
 
 // compile-time check: SDK client satisfies StatusService.

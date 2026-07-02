@@ -61,7 +61,7 @@ type DocsSearchService interface {
 
 // NewCmdDocs builds `weknora search docs "<query>" --kb <id-or-name>`.
 // Pages through the KB's documents and surfaces every entry whose title
-// or file_name contains the query as a server-side case-sensitive LIKE
+// or file_name contains the query as a server-side case-insensitive LIKE
 // match. Useful for finding a specific upload to download or delete.
 func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 	opts := &DocsSearchOptions{}
@@ -72,11 +72,9 @@ func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 keyword filter (matched against title / file_name). Useful for finding a
 specific upload to download or delete by id.
 
-The query is a case-sensitive server-side LIKE filter (the server runs
-` + "`LIKE %keyword%`" + ` against title and file_name). For case-insensitive
-matching, lower-case the query yourself, e.g.
-` + "`weknora search docs \"$(printf %s YOUR_QUERY | tr 'A-Z' 'a-z')\"`" + `, or
-fall back to ` + "`weknora api`" + ` with a custom filter.
+The query is a case-insensitive server-side LIKE filter (the server runs
+` + "`LOWER(...) LIKE LOWER('%keyword%')`" + ` against title and file_name), so
+` + "`FALCON`" + ` and ` + "`falcon`" + ` match the same documents.
 
 By default, --all-pages=true walks every server page until --limit is
 reached or the KB is exhausted. Pass --all-pages=false to stop after one page.`,
@@ -123,7 +121,7 @@ reached or the KB is exhausted. Pass --all-pages=false to stop after one page.`,
 		UsedFor:       "Find documents in a knowledge base by keyword (server-side LIKE filter on title/file_name). The KB comes from --kb (id or name), else WEKNORA_KB_ID, else the linked directory. Results come with meta.count; use --limit to cap and --all-pages=false to stop after one page.",
 		RequiredFlags: []string{"<query> (positional)", "--kb (or WEKNORA_KB_ID / linked directory)"},
 		Examples:      []string{`weknora search docs "spec" --kb engineering --format json`},
-		Output:        "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+		Output:        "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the returned count, meta.total_count the server's full match count, meta.has_more=true if more matched than --limit",
 	})
 	return cmd
 }
@@ -142,11 +140,13 @@ func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, fopts *cmdutil.
 	// --all-pages=true (default) walks every server page; --all-pages=false
 	// stops after the first page. Termination counts records actually
 	// received so server-capped page_size doesn't truncate.
+	var serverTotal int64
 	for page := 1; ; page++ {
 		items, total, err := svc.ListKnowledgeWithFilter(ctx, opts.KBID, page, opts.PageSize, filter)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list documents")
 		}
+		serverTotal = total
 		for _, k := range items {
 			matches = append(matches, k)
 			// Collect one past --limit so has_more is accurate; trimmed below.
@@ -172,7 +172,7 @@ done:
 		if matches == nil {
 			matches = []sdk.Knowledge{}
 		}
-		meta := &output.Meta{Count: output.IntPtr(len(matches)), HasMore: truncated}
+		meta := &output.Meta{Count: output.IntPtr(len(matches)), TotalCount: output.IntPtr(int(serverTotal)), HasMore: truncated, Hint: emptyContentSearchHint(len(matches))}
 		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {

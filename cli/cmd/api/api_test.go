@@ -551,3 +551,55 @@ func TestAPI_PaginateServerCapsPageSize(t *testing.T) {
 		t.Errorf("got %d records, want 5 (server-capped page_size should not cause truncation)", len(got.Data))
 	}
 }
+
+// TestAPI_PUT_RequiresConfirmation pins the exit-10 write gate on the
+// escape-hatch PUT path: `weknora api -X PUT /...` mutates server state the
+// same way a typed `kb update` does, so it must require -y (exit 10) rather
+// than silently writing. Regression: only DELETE was gated, letting an agent
+// bypass the write-confirmation protocol via raw PUT/PATCH.
+func TestAPI_PUT_RequiresConfirmation(t *testing.T) {
+	for _, method := range []string{"PUT", "PATCH"} {
+		t.Run(method, func(t *testing.T) {
+			iostreams.SetForTest(t) // non-TTY
+			f := &cmdutil.Factory{
+				Client:   func() (*sdk.Client, error) { return nil, nil },
+				Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+			}
+			root := withRootHarness(NewCmd(f), "/api/v1/knowledge-bases/kb_xxx", "-X", method, "-F", "name=x")
+			err := root.Execute()
+			if err == nil {
+				t.Fatalf("expected confirmation_required for %s without -y", method)
+			}
+			var ce *cmdutil.Error
+			if !asTypedError(err, &ce) || ce.Code != cmdutil.CodeInputConfirmationRequired {
+				t.Errorf("want input.confirmation_required, got %v", err)
+			}
+			if got := cmdutil.ExitCode(err); got != 10 {
+				t.Errorf("exit code = %d, want 10", got)
+			}
+		})
+	}
+}
+
+// TestAPI_POST_NotGated: POST is create-shaped and, like typed `kb create`,
+// intentionally ungated — it must reach the SDK without a confirmation gate.
+func TestAPI_POST_NotGated(t *testing.T) {
+	iostreams.SetForTest(t)
+	called := false
+	cli, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	defer stop()
+	f := &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return cli, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+	root := withRootHarness(NewCmd(f), "/api/v1/knowledge-bases", "-X", "POST", "-F", "name=x")
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !called {
+		t.Error("POST handler not called - POST must not be gated")
+	}
+}

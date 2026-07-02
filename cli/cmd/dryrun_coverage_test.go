@@ -21,8 +21,8 @@ import (
 var dryRunExpectation = map[string]bool{
 	// --- mutations: MUST have --dry-run ---
 	"kb create": true, "kb update": true, "kb delete": true, "kb pin": true, "kb unpin": true,
-	"kb init":      true, // binds models to a KB (state change)
-	"model create": true, "model delete": true,
+	"kb config set": true, // binds models to a KB (state change)
+	"model create": true, "model update": true, "model delete": true,
 	"doc create": true, "doc upload": true, "doc fetch": true, "doc delete": true,
 	"doc reparse": true, // re-triggers server-side parsing (a state change)
 	"doc update":  true, // edits title/description server-side
@@ -55,19 +55,37 @@ var dryRunExpectation = map[string]bool{
 	"doctor":      false, "version": false,
 	// generate / stream ops — the session-creation side effect is incidental,
 	// not a CRUD write; a no-SDK-call preview would be meaningless.
-	"chat": false, "session ask": false, "session continue-stream": false,
+	"chat": false, "session ask": false, "session resume": false,
 	// auth login VALIDATES credentials against the server and stores them; its
 	// whole purpose is the server round-trip, which a side-effect-free dry-run
 	// cannot exercise — so previewing it would be misleading. Exempt by design.
 	"auth login": false,
 	// long-running stdio server, not a one-shot command.
 	"mcp serve": false,
-	// offline read: enumerates tool metadata without any network call.
-	"mcp tools list": false,
 	// offline help topic: prints the static exit-code matrix.
 	"exit-codes": false,
 	// offline introspection: prints command contracts from the in-binary tree.
 	"schema": false,
+}
+
+// TestIdAddressedCommandsTolerateKB pins that the id-addressed read/wait
+// commands accept a (redundant, ignored) --kb flag, so an agent flowing from
+// `doc upload --kb X` into `doc wait <id> --kb X` doesn't hit exit 2.
+func TestIdAddressedCommandsTolerateKB(t *testing.T) {
+	root := NewRootCmd(cmdutil.New())
+	for _, path := range [][]string{
+		{"doc", "view"}, {"doc", "wait"}, {"doc", "download"},
+		{"doc", "reparse"}, {"doc", "update"},
+		{"chunk", "list"}, {"chunk", "view"}, {"chunk", "delete"},
+	} {
+		c, _, err := root.Find(path)
+		if err != nil {
+			t.Fatalf("find %v: %v", path, err)
+		}
+		if c.Flags().Lookup("kb") == nil {
+			t.Errorf("`%s` must accept a --kb flag (ignored) so a carried-over --kb doesn't error", strings.Join(path, " "))
+		}
+	}
 }
 
 func TestDryRunCoverageMatchesExpectation(t *testing.T) {
