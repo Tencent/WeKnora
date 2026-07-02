@@ -1,5 +1,8 @@
 import { defineStore } from 'pinia'
 
+const storedSidebarCollapsed = localStorage.getItem('sidebar_collapsed')
+const isPhoneViewport = typeof window !== 'undefined' && window.innerWidth <= 600
+
 export const useUIStore = defineStore('ui', {
   state: () => ({
     showSettingsModal: false,
@@ -20,7 +23,7 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
+    sidebarCollapsed: storedSidebarCollapsed === null ? isPhoneViewport : storedSidebarCollapsed === 'true'
   }),
 
   actions: {
