@@ -45,7 +45,7 @@ func NewTenantResponseWithRole(tenant *types.Tenant, role types.TenantRole) *Ten
 		return nil
 	}
 	includeSecrets := role.HasPermission(types.TenantRoleAdmin)
-	includeAPIKey := role.HasPermission(types.TenantRoleOwner)
+	includeAPIKey := RoleCanViewTenantAPIKey(role)
 
 	resp := &TenantResponse{
 		ID:                tenant.ID,
