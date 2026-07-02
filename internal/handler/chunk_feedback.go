@@ -76,17 +76,17 @@ func (h *ChunkFeedbackHandler) SubmitFeedback(c *gin.Context) {
 	})
 }
 
-// GetFeedbackStatus godoc
-// @Summary 获取反馈状态
+// GetUserFeedback godoc
+// @Summary 获取用户反馈状态
 // @Description 获取当前用户对指定消息的反馈状态
 // @Tags 反馈
 // @Produce json
-// @Param message_id path string true "消息ID"
+// @Param message_id query string true "消息ID"
 // @Success 200 {object} map[string]interface{} "反馈状态"
 // @Security Bearer
-// @Router /feedback/{message_id}/status [get]
-func (h *ChunkFeedbackHandler) GetFeedbackStatus(c *gin.Context) {
-	messageID := c.Param("message_id")
+// @Router /feedback/user-feedback [get]
+func (h *ChunkFeedbackHandler) GetUserFeedback(c *gin.Context) {
+	messageID := c.Query("message_id")
 	if messageID == "" {
 		c.Error(errors.NewBadRequestError("message_id is required"))
 		return
@@ -97,12 +97,16 @@ func (h *ChunkFeedbackHandler) GetFeedbackStatus(c *gin.Context) {
 		userID = uid.(string)
 	}
 
-	// 这里简化实现，实际应从 repository 获取
+	feedback, err := h.feedbackService.GetUserFeedback(c.Request.Context(), messageID, userID)
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "Failed to get user feedback: %v", err)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success":     true,
-		"message_id":  messageID,
-		"user_id":     userID,
-		"is_positive": false,
+		"success": true,
+		"data":    feedback,
 	})
 }
 

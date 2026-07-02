@@ -6225,4 +6225,21 @@ export default {
       generic: 'Something went wrong. Please try again.',
     },
   },
+  chunkFeedback: {
+    like: 'Helpful',
+    dislike: 'Not helpful',
+    feedbackSubmitted: 'Thank you for your feedback',
+    feedbackFailed: 'Failed to submit feedback, please try again later',
+    dislikeReasonTitle: 'Select a reason (optional)',
+    dislikeReasonPlaceholder: 'Please select or enter a reason',
+    dislikeReasons: {
+      inaccurate: 'Inaccurate answer',
+      incomplete: 'Incomplete information',
+      unclear: 'Unclear explanation',
+      unrelated: 'Not related to the question',
+      other: 'Other'
+    },
+    submitReason: 'Submit',
+    cancel: 'Cancel'
+  },
 }

@@ -54,7 +54,7 @@
                 </t-button>
                 <!-- 点赞/点踩按钮 -->
                 <div class="feedback-actions" v-if="session.id">
-                    <t-tooltip content="有帮助" placement="top">
+                    <t-tooltip :content="$t('chunkFeedback.like')" placement="top">
                         <t-button size="small" variant="outline" shape="round"
                             :class="{ 'is-active': currentFeedback === true }"
                             @click.stop="handleFeedback(true)">
@@ -64,7 +64,7 @@
                             <span v-if="feedbackStats.likeCount > 0">{{ feedbackStats.likeCount }}</span>
                         </t-button>
                     </t-tooltip>
-                    <t-tooltip content="没帮助" placement="top">
+                    <t-tooltip :content="$t('chunkFeedback.dislike')" placement="top">
                         <t-button size="small" variant="outline" shape="round"
                             :class="{ 'is-active': currentFeedback === false }"
                             @click.stop="handleDislike">
@@ -76,20 +76,20 @@
                     </t-tooltip>
                 </div>
                 <!-- 点踩原因弹窗 -->
-                <t-dialog v-model:visible="dislikeDialogVisible" header="选择反馈原因" :footer="false" width="400px">
+                <t-dialog v-model:visible="dislikeDialogVisible" :header="$t('chunkFeedback.dislikeReasonTitle')" :footer="false" width="400px">
                     <div class="dislike-reasons">
                         <t-radio-group v-model="selectedReason">
-                            <t-radio value="inaccurate">答案不准确</t-radio>
-                            <t-radio value="incomplete">答案不完整</t-radio>
-                            <t-radio value="unclear">表达不清楚</t-radio>
-                            <t-radio value="irrelevant">与问题不相关</t-radio>
-                            <t-radio value="other">其他</t-radio>
+                            <t-radio value="inaccurate">{{ $t('chunkFeedback.dislikeReasons.inaccurate') }}</t-radio>
+                            <t-radio value="incomplete">{{ $t('chunkFeedback.dislikeReasons.incomplete') }}</t-radio>
+                            <t-radio value="unclear">{{ $t('chunkFeedback.dislikeReasons.unclear') }}</t-radio>
+                            <t-radio value="irrelevant">{{ $t('chunkFeedback.dislikeReasons.unrelated') }}</t-radio>
+                            <t-radio value="other">{{ $t('chunkFeedback.dislikeReasons.other') }}</t-radio>
                         </t-radio-group>
                         <t-input v-if="selectedReason === 'other'" v-model="customReason"
-                            placeholder="请输入反馈原因" style="margin-top: 12px" />
+                            :placeholder="$t('chunkFeedback.dislikeReasonPlaceholder')" style="margin-top: 12px" />
                         <div style="margin-top: 16px; text-align: right;">
-                            <t-button theme="primary" @click="submitDislike">提交</t-button>
-                            <t-button style="margin-left: 8px" @click="dislikeDialogVisible = false">取消</t-button>
+                            <t-button theme="primary" @click="submitDislike">{{ $t('chunkFeedback.submitReason') }}</t-button>
+                            <t-button style="margin-left: 8px" @click="dislikeDialogVisible = false">{{ $t('chunkFeedback.cancel') }}</t-button>
                         </div>
                     </div>
                 </t-dialog>
@@ -333,10 +333,10 @@ const handleFeedback = async (isPositive: boolean) => {
             feedbackStats.dislikeCount++;
             if (feedbackStats.likeCount > 0) feedbackStats.likeCount--;
         }
-        MessagePlugin.success(isPositive ? '感谢您的反馈' : '感谢您的反馈');
+        MessagePlugin.success(t('chunkFeedback.feedbackSubmitted'));
     } catch (error) {
         console.error('提交反馈失败:', error);
-        MessagePlugin.error('提交反馈失败');
+        MessagePlugin.error(t('chunkFeedback.feedbackFailed'));
     }
 };
 
@@ -357,7 +357,7 @@ const submitDislike = async () => {
 
     const reason = selectedReason.value === 'other' ? customReason.value : selectedReason.value;
     if (!reason) {
-        MessagePlugin.warning('请选择或输入反馈原因');
+        MessagePlugin.warning(t('chunkFeedback.dislikeReasonPlaceholder'));
         return;
     }
 
@@ -371,10 +371,10 @@ const submitDislike = async () => {
         feedbackStats.dislikeCount++;
         if (feedbackStats.likeCount > 0) feedbackStats.likeCount--;
         dislikeDialogVisible.value = false;
-        MessagePlugin.success('感谢您的反馈');
+        MessagePlugin.success(t('chunkFeedback.feedbackSubmitted'));
     } catch (error) {
         console.error('提交反馈失败:', error);
-        MessagePlugin.error('提交反馈失败');
+        MessagePlugin.error(t('chunkFeedback.feedbackFailed'));
     }
 };
 

@@ -1822,6 +1822,7 @@ func RegisterFeedbackRoutes(r *gin.RouterGroup, handler *handler.ChunkFeedbackHa
 	// 反馈提交 - 所有登录用户可用
 	r.POST("/feedback", g.Viewer(), handler.SubmitFeedback)
 	r.GET("/feedback/dislike-reasons", g.Viewer(), handler.GetDislikeReasons)
+	r.GET("/feedback/user-feedback", g.Viewer(), handler.GetUserFeedback)
 
 	// 片段统计 - 所有登录用户可用
 	r.GET("/chunks/low-quality", g.Viewer(), handler.ListLowQualityChunks)

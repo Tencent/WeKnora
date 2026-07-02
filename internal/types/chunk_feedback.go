@@ -204,3 +204,11 @@ func GetDislikeReasons() []string {
 		"其他",
 	}
 }
+
+// UserFeedbackResponse 用户反馈状态响应
+type UserFeedbackResponse struct {
+	MessageID     string `json:"message_id"`
+	IsPositive    *bool  `json:"is_positive"`
+	DislikeReason string `json:"dislike_reason,omitempty"`
+	CreatedAt     string `json:"created_at,omitempty"`
+}
