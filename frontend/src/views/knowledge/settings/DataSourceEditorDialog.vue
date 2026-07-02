@@ -395,6 +395,24 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://help.dingtalk.io/zh/open/development/obtain-the-access-token-of-an-internal-app',
+    permissionDocUrl: 'https://help.dingtalk.io/open/development/get-knowledge-base-list',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/fe/app',
+    requiredPermissions: [
+      'qyapi_get_member',
+      'Wiki.Workspace.Read',
+      'Wiki.Node.Read',
+      'Storage.File.Read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.dingtalkClientId', placeholder: 'dingxxxxxxxxxxxxxxxx' },
+      { key: 'client_secret', labelKey: 'datasource.field.dingtalkClientSecret', placeholder: '', secret: true },
+      { key: 'operator_user_id', labelKey: 'datasource.field.operatorUserId', placeholder: 'manager001', hintKey: 'datasource.field.operatorUserIdHint' },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
@@ -1550,11 +1568,16 @@ const drawerConfirmText = computed(() => {
 .ds-type-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-auto-rows: 90px;
   gap: 10px;
 }
 
 .ds-type-card {
   .ds-surface-card--interactive();
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 90px;
   padding: 14px;
   cursor: pointer;
   text-align: left;
@@ -1571,15 +1594,22 @@ const drawerConfirmText = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 22px;
   margin-bottom: 6px;
 }
 
 .ds-type-name {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ds-type-soon {
+  flex-shrink: 0;
   font-size: 10px;
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-component);
@@ -1588,9 +1618,13 @@ const drawerConfirmText = computed(() => {
 }
 
 .ds-type-desc {
+  display: -webkit-box;
+  overflow: hidden;
   font-size: 11px;
   color: var(--td-text-color-secondary);
   line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* --- Step 1: setup guide + credentials (align with ModelEditor / CredentialResource) --- */
