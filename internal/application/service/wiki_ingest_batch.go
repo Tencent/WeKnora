@@ -438,7 +438,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			mapMu.Unlock()
 
 			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", op.DocTitle, op.KnowledgeID)
-			result, updates, err := s.mapOneDocument(mapCtx, chatModel, payload, op, batchCtx)
+			result, updates, err := s.mapOneDocument(mapCtx, chatModel, synthesisModelID, payload, op, batchCtx)
 			if err != nil {
 				mapMu.Lock()
 				ingestFailed++
@@ -772,6 +772,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 func (s *wikiIngestService) mapOneDocument(
 	ctx context.Context,
 	chatModel chat.Chat,
+	synthesisModelID string,
 	payload WikiIngestPayload,
 	op WikiPendingOp,
 	batchCtx *WikiBatchContext,
@@ -853,6 +854,19 @@ func (s *wikiIngestService) mapOneDocument(
 	// surface during wiki page editing.
 	sourceRef := knowledgeID
 	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
+	summarySlug := fmt.Sprintf("summary/%s", slugify(knowledgeID))
+	granularity := types.WikiExtractionStandard
+	if batchCtx != nil {
+		granularity = batchCtx.ExtractionGranularity.Normalize()
+	}
+	wikiMapFingerprint := calculateWikiMapCacheFingerprint(content, lang, synthesisModelID, granularity)
+	var cachedMap *wikiMapCacheEntry
+	if existingSummary, getErr := s.wikiService.GetPageBySlug(ctx, payload.KnowledgeBaseID, summarySlug); getErr == nil && existingSummary != nil {
+		if cache, ok := wikiMapCacheFromMetadata(existingSummary.PageMetadata, wikiMapFingerprint); ok {
+			cachedMap = cache
+			logger.Infof(ctx, "wiki ingest: map cache hit for knowledge %s", knowledgeID)
+		}
+	}
 
 	// Pass 0: lightweight candidate slug extraction (skeleton only).
 	// On failure we fall back to the legacy single-shot extractor so the doc
@@ -867,23 +881,32 @@ func (s *wikiIngestService) mapOneDocument(
 	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
 		"content_chars": utf8.RuneCountInString(content),
 		"old_pages":     len(oldPageSlugs),
+		"cache_hit":     cachedMap != nil,
 	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
-	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
-		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+	if cachedMap != nil {
+		extractedEntities = cachedMap.Entities
+		extractedConcepts = cachedMap.Concepts
+		slugItems = cachedMap.SlugItems
+		pass0Failed = cachedMap.Pass0Failed
+	} else {
+		extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 		if err != nil {
-			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
-			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
-			s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
-			return nil, nil, err
+			logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
+			pass0Failed = true
+			extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
+				s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
+				s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
+				return nil, nil, err
+			}
 		}
 	}
 	s.tracker().EndSpan(ctx, extractSpan, types.JSONMap{
 		"entities":         len(extractedEntities),
 		"concepts":         len(extractedConcepts),
 		"pass0_fallback":   pass0Failed,
+		"cache_hit":        cachedMap != nil,
 		"entities_preview": previewExtractedItems(extractedEntities, 8),
 		"concepts_preview": previewExtractedItems(extractedConcepts, 8),
 	})
@@ -893,12 +916,6 @@ func (s *wikiIngestService) mapOneDocument(
 	for slug := range slugItems {
 		summaryExtractedPages = append(summaryExtractedPages, slug)
 	}
-	// Wiki summary slug is derived from the knowledge ID rather than the
-	// docTitle (which is typically the upload filename). Filename-based slugs
-	// like "summary/mx5280-pdf" expose the filename in cross-link contexts
-	// that downstream LLM prompts read; a UUID-based slug is uglier but
-	// hallucination-safe.
-	summarySlug := fmt.Sprintf("summary/%s", slugify(knowledgeID))
 	var slugListing string
 	for _, slug := range summaryExtractedPages {
 		if item, ok := slugItems[slug]; ok {
@@ -942,11 +959,15 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
-			"Content":        content,
-			"Language":       lang,
-			"ExtractedSlugs": slugListing,
-		})
+		if cachedMap != nil {
+			summaryContent = cachedMap.SummaryContent
+		} else {
+			summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
+				"Content":        content,
+				"Language":       lang,
+				"ExtractedSlugs": slugListing,
+			})
+		}
 		if summaryErr != nil {
 			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
 		} else {
@@ -960,6 +981,12 @@ func (s *wikiIngestService) mapOneDocument(
 	}()
 	go func() {
 		defer wg.Done()
+		if cachedMap != nil {
+			citations = cachedMap.Citations
+			newSlugs = cachedMap.NewSlugs
+			batchCount = cachedMap.ClassifyBatches
+			return
+		}
 		// Skip citation pass when Pass 0 has fallen back to the legacy path —
 		// the legacy output already contains paraphrased Details, so chunk
 		// citations would be redundant and we'd spend LLM calls for nothing.
@@ -1058,15 +1085,27 @@ func (s *wikiIngestService) mapOneDocument(
 	if strings.TrimSpace(docSummary) == "" {
 		docSummary = sumLine
 	}
+	mapCacheMetadata := metadataWithWikiMapCache(nil, wikiMapCacheEntry{
+		Fingerprint:     wikiMapFingerprint,
+		SummaryContent:  summaryContent,
+		Entities:        extractedEntities,
+		Concepts:        extractedConcepts,
+		SlugItems:       slugItems,
+		Citations:       citations,
+		NewSlugs:        newSlugs,
+		Pass0Failed:     pass0Failed,
+		ClassifyBatches: batchCount,
+	})
 	updates = append(updates, SlugUpdate{
-		Slug:        summarySlug,
-		Type:        types.WikiPageTypeSummary,
-		DocTitle:    docTitle,
-		KnowledgeID: knowledgeID,
-		SourceRef:   sourceRef,
-		Language:    lang,
-		SummaryLine: sumLine,
-		SummaryBody: sumBody,
+		Slug:         summarySlug,
+		Type:         types.WikiPageTypeSummary,
+		DocTitle:     docTitle,
+		KnowledgeID:  knowledgeID,
+		SourceRef:    sourceRef,
+		Language:     lang,
+		SummaryLine:  sumLine,
+		SummaryBody:  sumBody,
+		PageMetadata: mapCacheMetadata,
 	})
 	extractedPages = append(extractedPages, types.WikiLogPageRef{Slug: summarySlug, Title: docTitle})
 
@@ -1200,6 +1239,7 @@ func (s *wikiIngestService) mapOneDocument(
 		"pass0_fallback":   pass0Failed,
 		"classify_batches": batchCount,
 		"summary_preview":  previewText(docSummaryLine, 160),
+		"map_cache_hit":    cachedMap != nil,
 	}
 
 	return &docIngestResult{
@@ -1434,6 +1474,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		page.Summary = summaryUpdate.SummaryLine
 		page.PageType = types.WikiPageTypeSummary
 		page.SourceRefs = appendUnique(page.SourceRefs, summaryUpdate.SourceRef)
+		if len(summaryUpdate.PageMetadata) > 0 {
+			page.PageMetadata = summaryUpdate.PageMetadata
+		}
 		// Summary pages don't carry chunk-level citations (they are document-
 		// level synopses generated from the whole content). Clear any stale
 		// chunk refs that may remain if this slug was once an entity page

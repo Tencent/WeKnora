@@ -99,7 +99,7 @@ func TestCalculateFAQContentHash_TraditionalSimplifiedInvariant(t *testing.T) {
 		Answers:          []string{"请联系客服"},
 	}
 	meta2 := &FAQChunkMetadata{
-		StandardQuestion: "如何退款", // simplified
+		StandardQuestion: "如何退款",            // simplified
 		Answers:          []string{"請聯繫客服"}, // traditional in answers — answers only sanitize, not normalize
 	}
 
@@ -176,5 +176,38 @@ func TestCalculateFAQContentHash_FullWidthHalfWidthInvariant(t *testing.T) {
 	if hashFull != hashHalf {
 		t.Errorf("Hash should be fullwidth/halfwidth invariant:\n  fullwidth: %s\n  halfwidth: %s",
 			hashFull, hashHalf)
+	}
+}
+
+func TestCalculateDocumentChunkContentHash_ReusesUnchangedEmbeddingInput(t *testing.T) {
+	hash1 := CalculateDocumentChunkContentHash(
+		"  same content  ",
+		"Heading > Section",
+		ChunkTypeText,
+		"embed-model-a",
+		"chunk-size=512",
+	)
+	hash2 := CalculateDocumentChunkContentHash(
+		"same content",
+		"Heading > Section",
+		ChunkTypeText,
+		"embed-model-a",
+		"chunk-size=512",
+	)
+	if hash1 == "" {
+		t.Fatal("document chunk hash is empty")
+	}
+	if hash1 != hash2 {
+		t.Fatalf("expected whitespace-normalized equivalent inputs to reuse hash: %s != %s", hash1, hash2)
+	}
+
+	changedModel := CalculateDocumentChunkContentHash("same content", "Heading > Section", ChunkTypeText, "embed-model-b", "chunk-size=512")
+	if hash1 == changedModel {
+		t.Fatal("embedding model changes must invalidate document chunk reuse")
+	}
+
+	changedChunking := CalculateDocumentChunkContentHash("same content", "Heading > Section", ChunkTypeText, "embed-model-a", "chunk-size=1024")
+	if hash1 == changedChunking {
+		t.Fatal("chunking config changes must invalidate document chunk reuse")
 	}
 }
