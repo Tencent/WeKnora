@@ -376,14 +376,23 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
+	// Content-addressed stable chunk IDs (issue #1679): deriving each chunk ID
+	// from (knowledge_id, chunk_type, normalized_content, occurrence) means
+	// unchanged content keeps the same ID across re-parses. That is the
+	// foundation that lets the reparse path reuse already-computed embeddings
+	// (see types.PlanChunkReuse) instead of recomputing everything from scratch.
+	idAlloc := types.NewChunkIDAllocator(knowledge.ID)
+
 	// === Parent-Child Chunking: create parent chunks first ===
 	hasParentChild := len(options.ParentChunks) > 0
 	var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
 	if hasParentChild {
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
+			parentID, parentHash := idAlloc.Allocate(types.ChunkTypeParentText, pc.Content)
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              parentID,
+				ContentHash:     parentHash,
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -421,8 +430,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 
 		// 创建主文本Chunk
+		textID, textHash := idAlloc.Allocate(types.ChunkTypeText, chunkData.Content)
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              textID,
+			ContentHash:     textHash,
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -488,6 +499,16 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
+	// Content-addressed chunk IDs (#1679) are deterministic, so re-parsing
+	// unchanged content yields the same primary key as a row the reparse cleanup
+	// just soft-deleted. Hard-purge those soft-deleted rows first; otherwise the
+	// insert below would hit a primary-key conflict. No-op on the first parse
+	// (nothing soft-deleted yet).
+	if err := s.chunkService.GetRepository().PurgeSoftDeletedByKnowledgeID(
+		ctx, knowledge.TenantID, knowledge.ID,
+	); err != nil {
+		logger.Warnf(ctx, "Failed to purge soft-deleted chunks before recreate: %v", err)
+	}
 	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()

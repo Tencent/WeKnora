@@ -445,6 +445,18 @@ func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantI
 	).Delete(&types.Chunk{}).Error
 }
 
+// PurgeSoftDeletedByKnowledgeID permanently removes rows already soft-deleted
+// for a knowledge ID. Content-addressed chunk IDs (#1679) are deterministic, so
+// re-parsing unchanged content produces the same primary key as a row the
+// reparse cleanup just soft-deleted; without purging, the recreate INSERT would
+// hit a primary-key conflict. Only soft-deleted rows are touched (deleted_at IS
+// NOT NULL), so live data is never affected.
+func (r *chunkRepository) PurgeSoftDeletedByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error {
+	return r.db.WithContext(ctx).Unscoped().Where(
+		"tenant_id = ? AND knowledge_id = ? AND deleted_at IS NOT NULL", tenantID, knowledgeID,
+	).Delete(&types.Chunk{}).Error
+}
+
 // ListImageInfoByKnowledgeIDs returns non-empty image_info values for the given knowledge IDs.
 // No chunk_type filter — collects from text, image_ocr, and image_caption chunks.
 func (r *chunkRepository) ListImageInfoByKnowledgeIDs(

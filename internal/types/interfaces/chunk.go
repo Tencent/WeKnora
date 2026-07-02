@@ -62,6 +62,10 @@ type ChunkRepository interface {
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
+	// PurgeSoftDeletedByKnowledgeID permanently removes already soft-deleted chunk
+	// rows for a knowledge id, so deterministic content-addressed IDs (#1679) can be
+	// re-inserted on reparse without a primary-key conflict.
+	PurgeSoftDeletedByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
