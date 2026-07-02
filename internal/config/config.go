@@ -39,6 +39,46 @@ type Config struct {
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+	// HeaderForwarding configures per-request header forwarding to downstream
+	// model API calls (LLM, embedding, rerank, VLM). When enabled, incoming
+	// request headers matching the configured prefixes or names are
+	// automatically attached to outbound model HTTP requests for token
+	// metering, multi-tenant isolation, traceability, etc.
+	HeaderForwarding *HeaderForwardingConfig `yaml:"header_forwarding" json:"header_forwarding"`
+}
+
+// HeaderForwardingConfig controls which incoming HTTP request headers are
+// forwarded to downstream model API calls (LLM, embedding, rerank, VLM).
+type HeaderForwardingConfig struct {
+	// Enabled turns header forwarding on or off. Default: false.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Prefixes defines header name prefixes to match for forwarding.
+	// e.g. ["X-User-", "X-Tenant-", "X-Trace-"] forwards headers like
+	// "X-User-Id", "X-Tenant-Id", "X-Trace-Id". Case-insensitive match.
+	Prefixes []string `yaml:"prefixes" json:"prefixes"`
+	// Include specifies exact header names to forward (case-insensitive).
+	// e.g. ["X-Request-Id"].
+	Include []string `yaml:"include" json:"include"`
+}
+
+// ShouldForward reports whether the header with the given name should be
+// forwarded to downstream model calls. Matching is case-insensitive.
+func (c *HeaderForwardingConfig) ShouldForward(name string) bool {
+	if c == nil || !c.Enabled {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, prefix := range c.Prefixes {
+		if strings.HasPrefix(lower, strings.ToLower(strings.TrimSpace(prefix))) {
+			return true
+		}
+	}
+	for _, exact := range c.Include {
+		if lower == strings.ToLower(strings.TrimSpace(exact)) {
+			return true
+		}
+	}
+	return false
 }
 
 // AgentConfig represents the global agent settings.
@@ -563,6 +603,7 @@ func LoadConfig() (*Config, error) {
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
+	applyHeaderForwardingDefaults(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
 
@@ -742,6 +783,17 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 		if d, err := time.ParseDuration(value); err == nil && d > 0 {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
 		}
+	}
+}
+
+// applyHeaderForwardingDefaults ensures the header_forwarding section exists
+// with safe defaults and wires the WEKNORA_HEADER_FORWARDING_ENABLED env toggle.
+func applyHeaderForwardingDefaults(cfg *Config) {
+	if cfg.HeaderForwarding == nil {
+		cfg.HeaderForwarding = &HeaderForwardingConfig{}
+	}
+	if v := strings.TrimSpace(os.Getenv("WEKNORA_HEADER_FORWARDING_ENABLED")); v != "" {
+		cfg.HeaderForwarding.Enabled = strings.EqualFold(v, "true")
 	}
 }
 
