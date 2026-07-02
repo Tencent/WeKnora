@@ -36,7 +36,7 @@ func newClient(cfg *Config) *client {
 	return &client{
 		baseURL:    cfg.GetBaseURL(),
 		token:      cfg.APIToken,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		httpClient: datasource.NewConnectorHTTPClient(defaultTimeout),
 	}
 }
 
