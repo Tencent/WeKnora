@@ -267,6 +267,12 @@ onUnmounted(() => {
     background: var(--td-bg-color-container);
 }
 
+@media (max-width: 600px) {
+    .main {
+        min-width: 0;
+    }
+}
+
 /* 右侧路由区：占满剩余宽度与整列高度，并把 min-height:0 传给子页面以便内部 flex 滚动 */
 .platform-route-outlet {
     flex: 1;
