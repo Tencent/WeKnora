@@ -427,8 +427,9 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 
 	token := tokenParts[1]
 
-	// Revoke token
-	err := h.userService.RevokeToken(ctx, token)
+	// Revoke every outstanding session for this user so refresh tokens
+	// cannot keep working after logout.
+	err := h.userService.Logout(ctx, token)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to revoke token: %v", err)
 		appErr := errors.NewInternalServerError("Logout failed").WithDetails(err.Error())

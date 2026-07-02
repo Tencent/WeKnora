@@ -858,10 +858,17 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 		return nil, 0, errors.New("invalid user ID in token")
 	}
 
+	if isRefreshTokenClaims(claims) {
+		return nil, 0, errors.New("refresh token cannot be used as access token")
+	}
+
 	// Check if token is revoked
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
 	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
 		return nil, 0, errors.New("token is revoked")
+	}
+	if tokenRecord.TokenType == "refresh_token" {
+		return nil, 0, errors.New("refresh token cannot be used as access token")
 	}
 
 	user, err := s.userRepo.GetUserByID(ctx, userID)
@@ -875,6 +882,34 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	activeTenantID := tenantIDFromClaims(claims, user.TenantID)
 
 	return user, activeTenantID, nil
+}
+
+func isRefreshTokenClaims(claims jwt.MapClaims) bool {
+	tokenType, ok := claims["type"].(string)
+	return ok && tokenType == "refresh"
+}
+
+func userIDFromSignedToken(tokenString string) (string, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(getJwtSecret()), nil
+	}, jwt.WithoutClaimsValidation())
+	if err != nil || token == nil || !token.Valid {
+		return "", errors.New("invalid token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", errors.New("invalid token claims")
+	}
+
+	userID, ok := claims["user_id"].(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		return "", errors.New("invalid user ID in token")
+	}
+	return userID, nil
 }
 
 // tenantIDFromClaims pulls the active tenant ID out of a parsed JWT
@@ -956,6 +991,18 @@ func (s *userService) RefreshToken(
 
 	// Generate new tokens
 	return s.GenerateTokens(ctx, user)
+}
+
+// Logout invalidates every outstanding session for the user identified by
+// the presented JWT. Access and refresh tokens are both accepted so clients
+// can end the session without refreshing first; expired tokens are allowed
+// so logout still works after the access token TTL.
+func (s *userService) Logout(ctx context.Context, tokenString string) error {
+	userID, err := userIDFromSignedToken(tokenString)
+	if err != nil {
+		return err
+	}
+	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
 }
 
 // RevokeToken revokes a token
