@@ -2403,13 +2403,15 @@ func (h *KnowledgeHandler) GetKnowledgeGeneratedQuestions(c *gin.Context) {
 		return
 	}
 
-	// Validate KB access (viewer permission is sufficient for read)
-	if _, _, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer); err != nil {
+	// Validate KB access (viewer permission is sufficient for read).
+	// Use the effective context so shared KB reads query the source tenant.
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	questions, err := h.kgService.GetGeneratedQuestions(ctx, id)
+	questions, err := h.kgService.GetGeneratedQuestions(effCtx, id)
 	if err != nil {
 		logger.Errorf(ctx, "GetKnowledgeGeneratedQuestions: failed for knowledge %s: %v", id, err)
 		c.Error(err)

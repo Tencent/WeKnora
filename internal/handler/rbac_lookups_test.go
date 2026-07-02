@@ -182,17 +182,49 @@ func TestAgentCreatorLookup_CrossTenantIsHiddenAsNotFound(t *testing.T) {
 // reaches outside GetOwningKBCreatorID should fail loudly, not silently.
 type stubKgService struct {
 	interfaces.KnowledgeService
-	getOwningKBCreatorID func(ctx context.Context, knowledgeID string) (string, error)
+	getOwningKBCreatorID  func(ctx context.Context, knowledgeID string) (string, error)
+	getKnowledgeByIDOnly  func(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	getGeneratedQuestions func(ctx context.Context, knowledgeID string) ([]*types.KnowledgeGeneratedQuestion, error)
 }
 
 func (s *stubKgService) GetOwningKBCreatorID(ctx context.Context, knowledgeID string) (string, error) {
 	return s.getOwningKBCreatorID(ctx, knowledgeID)
 }
 
+func (s *stubKgService) GetKnowledgeByIDOnly(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
+	return s.getKnowledgeByIDOnly(ctx, knowledgeID)
+}
+
+func (s *stubKgService) GetGeneratedQuestions(ctx context.Context, knowledgeID string) ([]*types.KnowledgeGeneratedQuestion, error) {
+	return s.getGeneratedQuestions(ctx, knowledgeID)
+}
+
+type stubKnowledgeKBShareService struct {
+	interfaces.KBShareService
+	check func(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole) (types.OrgMemberRole, bool, error)
+}
+
+func (s *stubKnowledgeKBShareService) CheckTenantKBPermission(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole) (types.OrgMemberRole, bool, error) {
+	return s.check(ctx, kbID, callerTenantID, callerTenantRole)
+}
+
 // newKnowledgeLookupCtx builds a gin.Context shaped like the
 // /knowledge/:id route — :id holds a knowledge id.
 func newKnowledgeLookupCtx(t *testing.T, tenantID uint64, knowledgeID string) *gin.Context {
 	return newKBLookupCtx(t, tenantID, knowledgeID)
+}
+
+func newKnowledgeHandlerCtx(t *testing.T, tenantID uint64, knowledgeID string) (*gin.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/knowledge/"+knowledgeID+"/generated-questions", nil)
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	c.Request = c.Request.WithContext(ctx)
+	c.Set(types.TenantIDContextKey.String(), tenantID)
+	c.Params = gin.Params{{Key: "id", Value: knowledgeID}}
+	return c, w
 }
 
 // newChunkLookupCtx builds a gin.Context shaped like the
@@ -220,6 +252,59 @@ func newWikiLookupCtx(t *testing.T, tenantID uint64, kbID string) *gin.Context {
 	c.Request = c.Request.WithContext(ctx)
 	c.Params = gin.Params{{Key: "kb_id", Value: kbID}}
 	return c
+}
+
+func TestGetKnowledgeGeneratedQuestions_UsesEffectiveTenantContextForSharedKB(t *testing.T) {
+	const (
+		callerTenantID uint64 = 100
+		sourceTenantID uint64 = 200
+		knowledgeID           = "kn-1"
+		kbID                  = "kb-1"
+	)
+
+	var gotTenantID uint64
+	h := &KnowledgeHandler{
+		kgService: &stubKgService{
+			getKnowledgeByIDOnly: func(_ context.Context, id string) (*types.Knowledge, error) {
+				if id != knowledgeID {
+					t.Fatalf("unexpected knowledge id: %s", id)
+				}
+				return &types.Knowledge{
+					ID:              knowledgeID,
+					TenantID:        sourceTenantID,
+					KnowledgeBaseID: kbID,
+				}, nil
+			},
+			getGeneratedQuestions: func(ctx context.Context, id string) ([]*types.KnowledgeGeneratedQuestion, error) {
+				if id != knowledgeID {
+					t.Fatalf("unexpected generated question knowledge id: %s", id)
+				}
+				gotTenantID = types.MustTenantIDFromContext(ctx)
+				return []*types.KnowledgeGeneratedQuestion{{ChunkID: "chunk-1", QuestionID: "q1", Question: "Question?"}}, nil
+			},
+		},
+		kbShareService: &stubKnowledgeKBShareService{
+			check: func(_ context.Context, checkedKBID string, checkedTenantID uint64, _ types.TenantRole) (types.OrgMemberRole, bool, error) {
+				if checkedKBID != kbID {
+					t.Fatalf("unexpected kb id: %s", checkedKBID)
+				}
+				if checkedTenantID != callerTenantID {
+					t.Fatalf("unexpected caller tenant id: %d", checkedTenantID)
+				}
+				return types.OrgRoleViewer, true, nil
+			},
+		},
+	}
+	c, w := newKnowledgeHandlerCtx(t, callerTenantID, knowledgeID)
+
+	h.GetKnowledgeGeneratedQuestions(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotTenantID != sourceTenantID {
+		t.Fatalf("expected service tenant %d, got %d", sourceTenantID, gotTenantID)
+	}
 }
 
 func TestKBCreatorLookupFromKnowledgeID_NotFoundMapsToSentinel(t *testing.T) {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -36,13 +37,14 @@ func aggregateGeneratedQuestions(chunks []*types.Chunk) []*types.KnowledgeGenera
 			continue
 		}
 		for _, gq := range meta.GeneratedQuestions {
-			if gq.Question == "" {
+			question := strings.TrimSpace(gq.Question)
+			if question == "" {
 				continue
 			}
 			results = append(results, &types.KnowledgeGeneratedQuestion{
 				ChunkID:    chunk.ID,
 				QuestionID: gq.ID,
-				Question:   gq.Question,
+				Question:   question,
 			})
 		}
 	}

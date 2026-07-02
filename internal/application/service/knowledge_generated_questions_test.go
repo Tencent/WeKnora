@@ -68,8 +68,9 @@ func TestAggregateGeneratedQuestions_EmptyWhenNoQuestionsGenerated(t *testing.T)
 func TestAggregateGeneratedQuestions_SkipsEmptyQuestionText(t *testing.T) {
 	chunks := []*types.Chunk{
 		buildTextChunkWithQuestions("chunk-1", []types.GeneratedQuestion{
-			{ID: "q1", Question: "Valid question"},
+			{ID: "q1", Question: "  Valid question  "},
 			{ID: "q2", Question: ""},
+			{ID: "q3", Question: " \t\n "},
 		}),
 	}
 
