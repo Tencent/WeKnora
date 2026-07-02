@@ -219,13 +219,18 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 	}
 
 	usersByID := h.hydrateUsers(c, rows)
+	showShareLinks := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleOwner)
 	resp := make([]types.TenantInvitationResponse, 0, len(rows))
 	for _, inv := range rows {
 		// Within the tenant view we don't bother hydrating tenant name
 		// (the caller already knows the tenant). Pass an empty map.
-		// Use ...WithLink so management UI can re-display invite_url
-		// for pending share-link rows (re-copy without revoking).
-		resp = append(resp, h.projectInvitationWithLink(inv, usersByID, nil))
+		// Share-link URLs embed the registration token — only Owners may
+		// re-copy them; other roles see metadata without invite_url.
+		if showShareLinks {
+			resp = append(resp, h.projectInvitationWithLink(inv, usersByID, nil))
+		} else {
+			resp = append(resp, projectInvitation(inv, usersByID, nil))
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

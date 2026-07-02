@@ -754,6 +754,24 @@ func DefaultSSRFSafeHTTPClientConfig() SSRFSafeHTTPClientConfig {
 // ErrSSRFRedirectBlocked is returned when a redirect target is blocked due to SSRF protection
 var ErrSSRFRedirectBlocked = fmt.Errorf("redirect blocked: target URL failed SSRF validation")
 
+// sameHTTPOrigin reports whether two URLs share scheme and host (port-aware).
+func sameHTTPOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
+// stripRedirectSensitiveHeaders removes credentials that must not follow a
+// cross-host redirect (Go only strips Authorization/Cookie by default).
+func stripRedirectSensitiveHeaders(req *http.Request) {
+	req.Header.Del("Authorization")
+	req.Header.Del("Cookie")
+	req.Header.Del("X-Auth-Token")
+	req.Header.Del("X-Api-Key")
+	req.Header.Del("Api-Key")
+}
+
 // NewSSRFSafeHTTPClient creates an HTTP client that validates redirect targets against SSRF protections.
 // This prevents SSRF attacks via HTTP redirects where an attacker's server redirects to internal services.
 func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
@@ -771,6 +789,12 @@ func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
 			// Check redirect count
 			if len(via) >= config.MaxRedirects {
 				return fmt.Errorf("stopped after %d redirects", config.MaxRedirects)
+			}
+
+			// Strip credentials when the redirect crosses hosts so connector
+			// tokens (e.g. Yuque X-Auth-Token) cannot leak to a third party.
+			if len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
+				stripRedirectSensitiveHeaders(req)
 			}
 
 			// Validate the redirect target URL for SSRF (whitelist-aware).
