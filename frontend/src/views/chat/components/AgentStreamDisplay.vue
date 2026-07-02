@@ -649,7 +649,8 @@ const wikiDrawerContent = computed(() => {
     return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
   });
 
-  return wrapChatMarkdownTables(marked.parse(preprocessed, { breaks: true, async: false }) as string);
+  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string;
+  return sanitizeMarkdownHTML(wrapChatMarkdownTables(html));
 });
 
 watch(wikiDrawerContent, async () => {

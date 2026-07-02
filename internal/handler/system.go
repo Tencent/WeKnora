@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -634,14 +635,35 @@ func sanitizeStorageCheckError(err error) string {
 	}
 }
 
+// storageEndpointHost extracts the hostname from a storage endpoint string.
+// Endpoints may be bare host:port, hostnames, or full URLs with a scheme
+// (e.g. "http://127.0.0.1:9000" for S3-compatible stores).
+func storageEndpointHost(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	if strings.Contains(endpoint, "://") {
+		if u, err := url.Parse(endpoint); err == nil {
+			if h := u.Hostname(); h != "" {
+				return h
+			}
+		}
+	}
+	if host, _, err := net.SplitHostPort(endpoint); err == nil {
+		return host
+	}
+	return endpoint
+}
+
 // isBlockedStorageEndpoint checks whether a storage endpoint resolves to a dangerous
 // address (cloud metadata, loopback, link-local). Unlike the stricter isSSRFSafeURL,
 // this allows private IPs since MinIO is commonly deployed on internal networks.
 // It also respects the SSRF_WHITELIST environment variable for whitelisted hosts.
 func isBlockedStorageEndpoint(endpoint string) (bool, string) {
-	host, _, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		host = endpoint
+	host := storageEndpointHost(endpoint)
+	if host == "" {
+		return true, "无效的地址"
 	}
 
 	// Check SSRF whitelist first – whitelisted hosts bypass the block check.

@@ -347,3 +347,17 @@ func TestClientQueryDatabaseAll(t *testing.T) {
 
 // Ensure time import is used (referenced by fakeNotion indirectly via time.Time in types).
 var _ = time.Now
+
+func TestDownloadFile_RejectsLoopbackURL(t *testing.T) {
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+
+	client, err := newClient("test-token", "https://api.notion.com")
+	if err != nil {
+		t.Fatalf("newClient: %v", err)
+	}
+	_, err = client.DownloadFile(context.Background(), "http://127.0.0.1/secret")
+	if err == nil {
+		t.Fatal("expected loopback attachment URL to be rejected")
+	}
+}

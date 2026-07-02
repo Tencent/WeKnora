@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // notionClient wraps the Notion API with rate limiting and retry logic.
@@ -378,6 +379,9 @@ const maxDownloadSize = 100 * 1024 * 1024 // 100MB — prevent OOM from oversize
 // DownloadFile downloads a file from the given URL (typically an S3 signed URL).
 // Does not go through the rate limiter since it's not a Notion API call.
 func (c *notionClient) DownloadFile(ctx context.Context, fileURL string) ([]byte, error) {
+	if err := utils.ValidateURLForSSRF(fileURL); err != nil {
+		return nil, fmt.Errorf("attachment URL rejected: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create download request: %w", err)
