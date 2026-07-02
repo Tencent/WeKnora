@@ -158,6 +158,7 @@ const handleBatchDelete = () => {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      margin-top: 4px;
     }
 
     .item-meta {

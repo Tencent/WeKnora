@@ -935,3 +935,8 @@ func (s *knowledgeService) BatchMoveToFolder(ctx context.Context, knowledgeIDs [
 	}
 	return s.repo.BatchUpdateKnowledgeFolderID(ctx, knowledgeIDs, folderID)
 }
+
+// ListKnowledgeIDsByFolderIDs returns knowledge IDs belonging to the specified folders.
+func (s *knowledgeService) ListKnowledgeIDsByFolderIDs(ctx context.Context, tenantID uint64, kbID string, folderIDs []string, recursive bool) ([]string, error) {
+	return s.repo.ListKnowledgeIDsByFolderIDs(ctx, tenantID, kbID, folderIDs, recursive)
+}

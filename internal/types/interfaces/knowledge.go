@@ -203,6 +203,10 @@ type KnowledgeService interface {
 	MoveToFolder(ctx context.Context, knowledgeID string, folderID *string) error
 	// BatchMoveToFolder moves multiple knowledge entries to a folder.
 	BatchMoveToFolder(ctx context.Context, knowledgeIDs []string, folderID *string) error
+	// ListKnowledgeIDsByFolderIDs returns knowledge IDs that belong to the specified folders.
+	// When recursive is true, it also includes knowledge from all descendant subfolders.
+	// Use "__root__" as a folderID to include knowledge with folder_id IS NULL.
+	ListKnowledgeIDsByFolderIDs(ctx context.Context, tenantID uint64, kbID string, folderIDs []string, recursive bool) ([]string, error)
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.

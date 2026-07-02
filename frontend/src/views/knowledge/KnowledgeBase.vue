@@ -2069,7 +2069,8 @@ const getDoc = (page: number) => {
 };
 
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
-  const items = cardList.value || [];
+  // Use displayCardList which includes both folderCardItems and cardList
+  const items = displayCardList.value;
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
   if (shiftKey && lastSelectedIndex >= 0 && idx >= 0) {
     const [s, e] = idx < lastSelectedIndex
@@ -2092,10 +2093,13 @@ const onCardGridCheckboxChange = (id: string, checked: boolean, ctx?: { e?: Even
 };
 
 const toggleSelectAll = (checked: boolean) => {
-  if (checked) {
-    for (const item of cardList.value || []) selectedIds.value.add(item.id);
-  } else {
-    for (const item of cardList.value || []) selectedIds.value.delete(item.id);
+  // displayCardList includes both folderCardItems and cardList (files)
+  for (const item of displayCardList.value) {
+    if (checked) {
+      selectedIds.value.add(item.id);
+    } else {
+      selectedIds.value.delete(item.id);
+    }
   }
 };
 
@@ -2185,10 +2189,20 @@ const confirmBatchDelete = async () => {
     const res: any = await batchDeleteKnowledge(kbId.value, ids);
     if (res?.success) {
       MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
+      // If the current folder was deleted, navigate to its parent (or root)
+      if (currentFolderId.value && deletedIdSet.has(currentFolderId.value)) {
+        const bc = breadcrumbPath.value || [];
+        const parentFolderId = bc.length >= 2 ? bc[bc.length - 2]?.id ?? null : null;
+        await navigateToFolder(parentFolderId);
+      }
       clearSelection();
       batchMode.value = false;
       resetPage();
-      // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
+      // Reload folders immediately (folders are deleted synchronously on the backend)
+      loadFolders(currentFolderId.value);
+      loadFolderTree();
+      // Backend enqueues knowledge deletion as async task; short-poll until
+      // the list no longer contains the deleted IDs or timeout.
       const maxPolls = 30;
       const delayMs = 400;
       for (let i = 0; i < maxPolls; i++) {
@@ -4739,6 +4753,10 @@ async function createNewSession(value: string): Promise<void> {
 /* ---- Folder card in grid ---- */
 .knowledge-card--folder {
   cursor: pointer;
+
+  .card-content-nav {
+    gap: 6px;
+  }
 
   .folder-card-icon {
     color: var(--td-warning-color);
