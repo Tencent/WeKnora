@@ -221,6 +221,7 @@ func newKnowledgeHandlerCtx(t *testing.T, tenantID uint64, knowledgeID string) (
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/knowledge/"+knowledgeID+"/generated-questions", nil)
 	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
 	c.Request = c.Request.WithContext(ctx)
 	c.Set(types.TenantIDContextKey.String(), tenantID)
 	c.Params = gin.Params{{Key: "id", Value: knowledgeID}}
