@@ -35,6 +35,10 @@ func NewWeKnoraCloudReranker(config *RerankerConfig) (*WeKnoraCloudReranker, err
 	if config.AppSecret == "" {
 		return nil, fmt.Errorf("WeKnoraCloud reranker: AppSecret is required")
 	}
+	baseURL := strings.TrimRight(config.BaseURL, "/")
+	if err := validateRerankBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 	remoteModelName := ""
 	if config.ExtraConfig != nil {
 		remoteModelName = strings.TrimSpace(config.ExtraConfig["remote_model_name"])
@@ -45,8 +49,8 @@ func NewWeKnoraCloudReranker(config *RerankerConfig) (*WeKnoraCloudReranker, err
 		modelID:         config.ModelID,
 		appID:           config.AppID,
 		apiKey:          config.AppSecret,
-		baseURL:         strings.TrimRight(config.BaseURL, "/"),
-		client:          &http.Client{Timeout: 60 * time.Second},
+		baseURL:         baseURL,
+		client:          newRerankHTTPClient(60 * time.Second),
 	}, nil
 }
 

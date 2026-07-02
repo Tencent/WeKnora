@@ -49,6 +49,10 @@ type RemoteAPIVLM struct {
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
 func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
+	if err := validateVLMBaseURL(config.BaseURL); err != nil {
+		return nil, err
+	}
+
 	providerName := provider.ProviderName(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
@@ -73,7 +77,7 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 			apiCfg.BaseURL = config.BaseURL
 		}
 	}
-	httpClient := &http.Client{Timeout: vlmHTTPTimeout()}
+	httpClient := newVLMHTTPClient(vlmHTTPTimeout())
 
 	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
 	if len(config.CustomHeaders) > 0 {
@@ -105,7 +109,7 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 // Predict sends an image with a text prompt to the OpenAI-compatible API.
 func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
 	var parts []openai.ChatMessagePart
-	
+
 	// Add text prompt first
 	parts = append(parts, openai.ChatMessagePart{
 		Type: openai.ChatMessagePartTypeText,
