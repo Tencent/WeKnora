@@ -86,6 +86,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
+	ChunkFeedbackHandler        *handler.ChunkFeedbackHandler
 }
 
 // NewRouter 创建新的路由
@@ -230,6 +231,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
+		RegisterFeedbackRoutes(v1, params.ChunkFeedbackHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 	}
 
@@ -1812,4 +1814,22 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 		wiki.GET("/issues", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.ListIssues)
 		wiki.PUT("/issues/:issue_id/status", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdateIssueStatus)
 	}
+}
+
+// RegisterFeedbackRoutes 注册反馈相关的路由
+//
+// 反馈功能允许用户对问答回复进行点赞/点踩，并支持管理员查看统计和权重日志
+func RegisterFeedbackRoutes(r *gin.RouterGroup, handler *handler.ChunkFeedbackHandler, g *rbacGuards) {
+	// 反馈提交 - 所有登录用户可用
+	r.POST("/feedback", g.Viewer(), handler.SubmitFeedback)
+	r.GET("/feedback/dislike-reasons", g.Viewer(), handler.GetDislikeReasons)
+	r.GET("/feedback/user-feedback", g.Viewer(), handler.GetUserFeedback)
+
+	// 片段统计 - 所有登录用户可用
+	r.GET("/chunks/low-quality", g.Viewer(), handler.ListLowQualityChunks)
+	r.GET("/chunks/:chunk_id/stats", g.Viewer(), handler.GetChunkStats)
+
+	// 管理员操作 - 需要管理员权限
+	r.POST("/admin/chunks/:chunk_id/reset-feedback", g.Admin(), handler.ResetChunkFeedback)
+	r.GET("/admin/chunks/:chunk_id/weight-logs", g.Admin(), handler.GetChunkWeightLogs)
 }
