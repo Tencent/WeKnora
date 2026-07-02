@@ -144,6 +144,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
+	must(container.Provide(repository.NewQAReplyChunkRefRepository))
+	must(container.Provide(repository.NewChunkFeedbackRepository))
+	must(container.Provide(repository.NewChunkWeightLogRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
 	must(container.Provide(repository.NewMessageRepository))
@@ -341,6 +344,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
+	// Chunk feedback handler
+	must(container.Provide(service.NewChunkFeedbackService))
+	must(container.Provide(handler.NewChunkFeedbackHandler))
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))

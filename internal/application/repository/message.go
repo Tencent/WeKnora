@@ -267,3 +267,14 @@ func (r *messageRepository) UpdateMessageKnowledgeID(
 		Where("id = ?", messageID).
 		Update("knowledge_id", knowledgeID).Error
 }
+
+// GetMessageByID retrieves a message by its ID only (without session_id check)
+func (r *messageRepository) GetMessageByID(
+	ctx context.Context, messageID string,
+) (*types.Message, error) {
+	var message types.Message
+	if err := r.db.WithContext(ctx).Where("id = ?", messageID).First(&message).Error; err != nil {
+		return nil, err
+	}
+	return &message, nil
+}

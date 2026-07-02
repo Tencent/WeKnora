@@ -95,4 +95,6 @@ type MessageRepository interface {
 	GetKnowledgeIDsBySessionID(ctx context.Context, sessionID string) ([]string, error)
 	// UpdateMessageKnowledgeID updates the knowledge_id field for a message
 	UpdateMessageKnowledgeID(ctx context.Context, messageID string, knowledgeID string) error
+	// GetMessageByID gets a message by its ID (for feedback feature)
+	GetMessageByID(ctx context.Context, messageID string) (*types.Message, error)
 }
