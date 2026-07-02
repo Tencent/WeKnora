@@ -540,18 +540,23 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 
 // GetVLMModel retrieves and initializes a vision language model instance.
 func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error) {
+	resolved, err := s.GetVLMModelWithFingerprint(ctx, modelId)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.VLM, nil
+}
+
+// GetVLMModelWithFingerprint retrieves and initializes a VLM using the same
+// credential resolution path as GetVLMModel, and returns the sanitized
+// fingerprint input used by cache keys.
+func (s *modelService) GetVLMModelWithFingerprint(ctx context.Context, modelId string) (*interfaces.ResolvedVLMModel, error) {
 	if modelId == "" {
 		return nil, errors.New("model ID cannot be empty")
 	}
 
-	tenantID := types.MustTenantIDFromContext(ctx)
-
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	model, err := s.GetModelByID(ctx, modelId)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
-			"tenant_id": tenantID,
-		})
 		return nil, err
 	}
 
@@ -572,7 +577,18 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 		return nil, err
 	}
 
-	return vlmModel, nil
+	fingerprintPayload := types.BuildVLMFingerprintPayloadFromModel(model)
+	modelFingerprint, err := fingerprintPayload.Fingerprint()
+	if err != nil {
+		return nil, err
+	}
+
+	return &interfaces.ResolvedVLMModel{
+		Model:              model,
+		VLM:                vlmModel,
+		FingerprintPayload: fingerprintPayload,
+		ModelFingerprint:   modelFingerprint,
+	}, nil
 }
 
 // Note: default model selection logic has been removed; models no longer

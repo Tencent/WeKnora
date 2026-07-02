@@ -59,6 +59,7 @@ type ImageMultimodalService struct {
 	kbService      interfaces.KnowledgeBaseService
 	knowledgeRepo  interfaces.KnowledgeRepository
 	tenantRepo     interfaces.TenantRepository
+	vlmCacheRepo   interfaces.VLMImageResultCacheRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ownership      retriever.TenantStoreOwnership
 	ollamaService  *ollama.OllamaService
@@ -82,6 +83,7 @@ func NewImageMultimodalService(
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	tenantRepo interfaces.TenantRepository,
+	vlmCacheRepo interfaces.VLMImageResultCacheRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
 	ollamaService *ollama.OllamaService,
@@ -96,6 +98,7 @@ func NewImageMultimodalService(
 		kbService:      kbService,
 		knowledgeRepo:  knowledgeRepo,
 		tenantRepo:     tenantRepo,
+		vlmCacheRepo:   vlmCacheRepo,
 		retrieveEngine: retrieveEngine,
 		ownership:      ownership,
 		ollamaService:  ollamaService,
@@ -201,7 +204,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}()
 
-	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
+	vlmModel, vlmCfg, modelFingerprint, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
@@ -228,6 +231,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 	imgOut["image_bytes"] = len(imgBytes)
+	imageHash := types.HashVLMImageBytes(imgBytes)
+	imgOut["image_hash"] = imageHash
 
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
@@ -244,12 +249,25 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			imgOut["ocr_prompt"] = "default"
 		}
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, ocrCacheHit, ocrErr := s.predictImageResultWithCache(ctx, vlmImageResultRequest{
+			TenantID:                   payload.TenantID,
+			ImageBytes:                 imgBytes,
+			ImageHash:                  imageHash,
+			ModelFingerprint:           modelFingerprint,
+			ResultType:                 types.VLMImageResultTypeOCR,
+			Prompt:                     prompt,
+			PromptVersion:              types.VLMOCRPromptVersion,
+			ResultCanonicalizerVersion: types.VLMOCRCanonicalizerV1,
+			Predict: func(ctx context.Context) (string, error) {
+				return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+			},
+			Canonicalize: sanitizeOCRText,
+		})
+		imgOut["ocr_cache_hit"] = ocrCacheHit
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
-			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
@@ -262,14 +280,30 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	if payload.EnableCaption {
+		caption, captionCacheHit, capErr := s.predictImageResultWithCache(ctx, vlmImageResultRequest{
+			TenantID:                   payload.TenantID,
+			ImageBytes:                 imgBytes,
+			ImageHash:                  imageHash,
+			ModelFingerprint:           modelFingerprint,
+			ResultType:                 types.VLMImageResultTypeCaption,
+			Prompt:                     vlmCaptionPrompt,
+			PromptVersion:              types.VLMCaptionPromptVersion,
+			ResultCanonicalizerVersion: types.VLMCaptionCanonicalizerV1,
+			Predict: func(ctx context.Context) (string, error) {
+				return vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+			},
+			Canonicalize: strings.TrimSpace,
+		})
+		imgOut["caption_cache_hit"] = captionCacheHit
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else if caption != "" {
+			imageInfo.Caption = caption
+			imgOut["caption_chars"] = len([]rune(caption))
+			imgOut["caption_preview"] = previewText(caption, 200)
+		}
 	}
 
 	// Build child chunks for OCR and caption results
@@ -452,16 +486,102 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for image %s", len(chunks), payload.ImageURL)
 }
 
+type vlmImageResultRequest struct {
+	TenantID                   uint64
+	ImageBytes                 []byte
+	ImageHash                  string
+	ModelFingerprint           string
+	ResultType                 string
+	Prompt                     string
+	PromptVersion              string
+	ResultCanonicalizerVersion string
+	Predict                    func(context.Context) (string, error)
+	Canonicalize               func(string) string
+}
+
+func (s *ImageMultimodalService) predictImageResultWithCache(
+	ctx context.Context,
+	req vlmImageResultRequest,
+) (string, bool, error) {
+	if req.ImageHash == "" {
+		req.ImageHash = types.HashVLMImageBytes(req.ImageBytes)
+	}
+	promptHash := types.HashVLMPrompt(req.Prompt)
+	cacheKey, keyErr := types.BuildVLMImageResultCacheKey(types.VLMImageResultCacheKeyPayload{
+		ImageHash:                  req.ImageHash,
+		ModelFingerprint:           req.ModelFingerprint,
+		ResultType:                 req.ResultType,
+		PromptVersion:              req.PromptVersion,
+		PromptHash:                 promptHash,
+		ResultCanonicalizerVersion: req.ResultCanonicalizerVersion,
+	})
+	if keyErr != nil {
+		return "", false, keyErr
+	}
+
+	if s.vlmCacheRepo != nil {
+		entry, err := s.vlmCacheRepo.GetByKey(ctx, req.TenantID, cacheKey)
+		if err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] VLM cache lookup failed: %v", err)
+		} else if entry != nil {
+			return entry.Content, true, nil
+		}
+	}
+
+	raw, err := req.Predict(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	content := raw
+	if req.Canonicalize != nil {
+		content = req.Canonicalize(raw)
+	}
+
+	if s.vlmCacheRepo == nil {
+		return content, false, nil
+	}
+
+	entry := &types.VLMImageResultCache{
+		TenantID:                   req.TenantID,
+		CacheKey:                   cacheKey,
+		ImageHash:                  req.ImageHash,
+		ModelFingerprint:           req.ModelFingerprint,
+		ResultType:                 req.ResultType,
+		PromptVersion:              req.PromptVersion,
+		PromptHash:                 promptHash,
+		ResultCanonicalizerVersion: req.ResultCanonicalizerVersion,
+		Content:                    content,
+	}
+	inserted, err := s.vlmCacheRepo.PutIfAbsent(ctx, entry)
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] VLM cache insert failed: %v", err)
+		return content, false, nil
+	}
+	if inserted {
+		return content, false, nil
+	}
+
+	existing, err := s.vlmCacheRepo.GetByKey(ctx, req.TenantID, cacheKey)
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] VLM cache conflict read failed: %v", err)
+		return content, false, nil
+	}
+	if existing != nil {
+		return existing.Content, true, nil
+	}
+	return content, false, nil
+}
+
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
 // supporting both new-style (ModelID) and legacy (inline BaseURL) configs.
 // Per-upload process_overrides on the knowledge entry take precedence over KB defaults.
-func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledgeID string) (vlm.VLM, types.VLMConfig, error) {
+func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledgeID string) (vlm.VLM, types.VLMConfig, string, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
-		return nil, types.VLMConfig{}, fmt.Errorf("get knowledge base %s: %w", kbID, err)
+		return nil, types.VLMConfig{}, "", fmt.Errorf("get knowledge base %s: %w", kbID, err)
 	}
 	if kb == nil {
-		return nil, types.VLMConfig{}, fmt.Errorf("knowledge base %s not found", kbID)
+		return nil, types.VLMConfig{}, "", fmt.Errorf("knowledge base %s not found", kbID)
 	}
 
 	var processOverrides *types.KnowledgeProcessOverrides
@@ -472,18 +592,29 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	}
 	vlmCfg := ResolveProcessConfig(kb, processOverrides).VLMConfig
 	if !vlmCfg.IsEnabled() {
-		return nil, types.VLMConfig{}, fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
+		return nil, types.VLMConfig{}, "", fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
 	}
 
 	// New-style: resolve model through ModelService
 	if vlmCfg.ModelID != "" {
-		model, err := s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
-		return model, vlmCfg, err
+		resolved, err := s.modelService.GetVLMModelWithFingerprint(ctx, vlmCfg.ModelID)
+		if err != nil {
+			return nil, types.VLMConfig{}, "", err
+		}
+		return resolved.VLM, vlmCfg, resolved.ModelFingerprint, nil
 	}
 
 	// Legacy: create VLM from inline config
 	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
-	return model, vlmCfg, err
+	if err != nil {
+		return nil, types.VLMConfig{}, "", err
+	}
+	fingerprintPayload := types.BuildVLMFingerprintPayloadFromConfig(vlmCfg)
+	modelFingerprint, err := fingerprintPayload.Fingerprint()
+	if err != nil {
+		return nil, types.VLMConfig{}, "", err
+	}
+	return model, vlmCfg, modelFingerprint, nil
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
