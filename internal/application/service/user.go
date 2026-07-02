@@ -27,11 +27,6 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-type oidcAuthorizationState struct {
-	Nonce       string `json:"nonce"`
-	RedirectURI string `json:"redirect_uri,omitempty"`
-}
-
 var (
 	jwtSecretOnce sync.Once
 	jwtSecret     string
@@ -367,7 +362,7 @@ func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI s
 		return nil, fmt.Errorf("failed to generate state: %w", err)
 	}
 
-	state, err := encodeOIDCAuthorizationState(&oidcAuthorizationState{
+	state, err := secutils.SignOIDCState(&secutils.OIDCStatePayload{
 		Nonce:       nonce,
 		RedirectURI: strings.TrimSpace(redirectURI),
 	})
@@ -394,6 +389,7 @@ func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI s
 		ProviderDisplayName: cfg.ProviderDisplayName,
 		AuthorizationURL:    authURL,
 		State:               state,
+		Nonce:               nonce,
 	}, nil
 }
 
@@ -592,7 +588,13 @@ func (s *userService) ChangePassword(ctx context.Context, userID string, oldPass
 	user.PasswordHash = string(hashedPassword)
 	user.UpdatedAt = time.Now()
 
-	return s.userRepo.UpdateUser(ctx, user)
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return err
+	}
+
+	// Invalidate every outstanding session so a stolen token cannot
+	// survive a password rotation.
+	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
 }
 
 // ValidatePassword validates user password
@@ -1205,14 +1207,6 @@ func generateRandomString(length int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buffer), nil
-}
-
-func encodeOIDCAuthorizationState(state *oidcAuthorizationState) (string, error) {
-	payload, err := json.Marshal(state)
-	if err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
 func decodeJWTClaims(token string) (map[string]interface{}, error) {

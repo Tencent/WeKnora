@@ -20,6 +20,9 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+const oidcNonceCookieName = "weknora_oidc_nonce"
+const oidcNonceCookieMaxAge = 600
+
 // AuthHandler implements HTTP request handlers for user authentication
 // Provides functionality for user registration, login, logout, and token management
 // through the REST API endpoints
@@ -249,6 +252,14 @@ func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 		return
 	}
 
+	// Bind the state nonce to this browser so an attacker cannot replay
+	// their own authorization code into a victim's callback.
+	if resp.Nonce != "" {
+		secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+		c.SetSameSite(http.SameSiteLaxMode)
+		c.SetCookie(oidcNonceCookieName, resp.Nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
+	}
+
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -301,12 +312,14 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 	}
 
 	state := strings.TrimSpace(c.Query("state"))
-	decodedState, err := decodeOIDCState(state)
+	decodedState, err := decodeOIDCState(state, c.Request)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to decode OIDC state: %v", err)
 		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("invalid_state"))
 		return
 	}
+	// One-time use: clear the binding cookie as soon as it is checked.
+	c.SetCookie(oidcNonceCookieName, "", -1, "/", "", false, true)
 
 	code := strings.TrimSpace(c.Query("code"))
 	if code == "" {
@@ -344,23 +357,26 @@ func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error)
 }
 
 type oidcStatePayload struct {
-	Nonce       string `json:"nonce"`
-	RedirectURI string `json:"redirect_uri,omitempty"`
+	Nonce       string
+	RedirectURI string
 }
 
-func decodeOIDCState(raw string) (*oidcStatePayload, error) {
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
+func decodeOIDCState(raw string, req *http.Request) (*oidcStatePayload, error) {
+	payload, err := secutils.VerifyOIDCState(raw)
 	if err != nil {
 		return nil, err
 	}
-	var payload oidcStatePayload
-	if err := json.Unmarshal(decoded, &payload); err != nil {
-		return nil, err
+	cookieNonce, err := req.Cookie(oidcNonceCookieName)
+	if err != nil || cookieNonce == nil || strings.TrimSpace(cookieNonce.Value) == "" {
+		return nil, errors.NewValidationError("oidc nonce cookie missing")
 	}
-	if strings.TrimSpace(payload.RedirectURI) == "" {
-		return nil, errors.NewValidationError("state.redirect_uri is required")
+	if cookieNonce.Value != payload.Nonce {
+		return nil, errors.NewValidationError("oidc nonce mismatch")
 	}
-	return &payload, nil
+	return &oidcStatePayload{
+		Nonce:       payload.Nonce,
+		RedirectURI: strings.TrimSpace(payload.RedirectURI),
+	}, nil
 }
 
 func urlQueryEscape(value string) string {
@@ -713,6 +729,7 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 
 	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(resp))
 }
+
 // @Summary      自动初始化（Lite 桌面版）
 // @Description  Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
 // @Tags         认证

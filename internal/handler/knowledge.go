@@ -16,8 +16,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -29,6 +31,7 @@ import (
 
 // KnowledgeHandler processes HTTP requests related to knowledge resources
 type KnowledgeHandler struct {
+	cfg               *config.Config
 	kgService         interfaces.KnowledgeService
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
@@ -39,6 +42,7 @@ type KnowledgeHandler struct {
 
 // NewKnowledgeHandler creates a new knowledge handler instance
 func NewKnowledgeHandler(
+	cfg *config.Config,
 	kgService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
@@ -47,6 +51,7 @@ func NewKnowledgeHandler(
 	spanRepo repository.KnowledgeSpanRepository,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
+		cfg:               cfg,
 		kgService:         kgService,
 		kbService:         kbService,
 		kbShareService:    kbShareService,
@@ -54,6 +59,32 @@ func NewKnowledgeHandler(
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
 	}
+}
+
+// requireKBOwnershipOrAdmin enforces the same "KB creator OR Admin+" matrix
+// used by OwnedKBOrAdmin for routes whose KB id comes from the request body.
+func (h *KnowledgeHandler) requireKBOwnershipOrAdmin(c *gin.Context, kbID string) error {
+	creator, err := resolveKBCreatorByKBID(c, h.kbService, kbID)
+	evalErr := middleware.EvaluateOwnershipOrRole(
+		c.Request.Context(),
+		h.cfg,
+		types.TenantRoleAdmin,
+		creator,
+		err,
+	)
+	if evalErr == nil {
+		return nil
+	}
+	if goerrors.Is(evalErr, middleware.ErrResourceNotFound) {
+		return errors.NewNotFoundError("knowledge base not found")
+	}
+	if goerrors.Is(evalErr, middleware.ErrOwnershipForbidden) {
+		return errors.NewForbiddenError("No permission to operate on this knowledge base")
+	}
+	logger.ErrorWithFields(c.Request.Context(), evalErr, map[string]interface{}{
+		"kb_id": secutils.SanitizeForLog(kbID),
+	})
+	return errors.NewInternalServerError("cannot verify knowledge base ownership")
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
@@ -1046,6 +1077,10 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 	}
 	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
 		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		c.Error(err)
 		return
 	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
@@ -2057,6 +2092,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("No permission to access source knowledge base"))
 		return
 	}
+	if err := h.requireKBOwnershipOrAdmin(c, req.SourceKBID); err != nil {
+		c.Error(err)
+		return
+	}
 
 	// Validate target KB
 	targetKB, err := h.kbService.GetKnowledgeBaseByID(ctx, req.TargetKBID)
@@ -2070,6 +2109,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	}
 	if targetKB.TenantID != tenantID.(uint64) {
 		c.Error(errors.NewForbiddenError("No permission to access target knowledge base"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, req.TargetKBID); err != nil {
+		c.Error(err)
 		return
 	}
 

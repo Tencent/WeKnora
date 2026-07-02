@@ -1870,6 +1870,8 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	// 1) Match users by query and group by TenantID. We over-fetch so the
 	//    de-duplication after filtering "already a member" tenants still
 	//    leaves us with enough candidates to fill `limit`.
+	//    User PII (email/username) is intentionally omitted from results:
+	//    org admins only need tenant identity to send an invite.
 	users, err := h.userService.SearchUsers(ctx, query, limit*3+20)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to search users: %v", err)
@@ -1902,11 +1904,7 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		seen[u.TenantID] = &entry{
 			idx: len(seen),
 			candidate: types.TenantInviteCandidate{
-				TenantID:                u.TenantID,
-				RepresentativeUserID:    u.ID,
-				RepresentativeUsername:  u.Username,
-				RepresentativeEmail:     u.Email,
-				RepresentativeAvatar:    u.Avatar,
+				TenantID: u.TenantID,
 			},
 		}
 	}
