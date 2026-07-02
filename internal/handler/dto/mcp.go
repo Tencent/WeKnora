@@ -10,6 +10,7 @@
 package dto
 
 import (
+	"context"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -68,10 +69,11 @@ type CredentialFieldMetadata struct {
 // Headers, EnvVars, StdioConfig) stripped — these reveal how the tenant
 // configured an upstream provider and must not be visible to other tenants
 // that see the same builtin row via the cross-tenant list.
-func NewMCPServiceResponse(svc *types.MCPService) *MCPServiceResponse {
+func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServiceResponse {
 	if svc == nil {
 		return nil
 	}
+	includeDetail := CanViewIntegrationSecrets(ctx)
 	resp := &MCPServiceResponse{
 		ID:             svc.ID,
 		TenantID:       svc.TenantID,
@@ -88,14 +90,22 @@ func NewMCPServiceResponse(svc *types.MCPService) *MCPServiceResponse {
 		CreatedAt:      svc.CreatedAt,
 		UpdatedAt:      svc.UpdatedAt,
 	}
+	if !includeDetail {
+		resp.Headers = nil
+		resp.EnvVars = nil
+	}
 	if svc.AuthConfig != nil {
-		resp.AuthConfig = &MCPAuthConfigResponse{
+		auth := &MCPAuthConfigResponse{
 			AuthType:              svc.AuthConfig.AuthType,
 			APIKeyHeader:          svc.AuthConfig.APIKeyHeader,
 			CustomHeaders:         svc.AuthConfig.CustomHeaders,
 			Scopes:                svc.AuthConfig.Scopes,
 			AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		}
+		if !includeDetail {
+			auth.CustomHeaders = nil
+		}
+		resp.AuthConfig = auth
 	}
 	if svc.IsBuiltin {
 		// Builtin services are shared across tenants — strip everything that
@@ -115,10 +125,10 @@ func NewMCPServiceResponse(svc *types.MCPService) *MCPServiceResponse {
 }
 
 // NewMCPServiceResponses is the slice convenience wrapper used by ListMCPServices.
-func NewMCPServiceResponses(svcs []*types.MCPService) []*MCPServiceResponse {
+func NewMCPServiceResponses(ctx context.Context, svcs []*types.MCPService) []*MCPServiceResponse {
 	out := make([]*MCPServiceResponse, 0, len(svcs))
 	for _, s := range svcs {
-		out = append(out, NewMCPServiceResponse(s))
+		out = append(out, NewMCPServiceResponse(ctx, s))
 	}
 	return out
 }

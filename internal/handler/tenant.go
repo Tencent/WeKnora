@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -411,7 +412,7 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    tenant,
+		"data":    dto.NewTenantResponse(ctx, tenant),
 	})
 }
 
@@ -502,7 +503,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant,
+		"data":    dto.NewTenantResponse(ctx, updatedTenant),
 	})
 }
 
@@ -852,7 +853,7 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items": []*types.Tenant{tenant},
+			"items": []*dto.TenantResponse{dto.NewTenantResponse(ctx, tenant)},
 		},
 	})
 }
@@ -982,6 +983,14 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	ctx := c.Request.Context()
 	key := secutils.SanitizeForLog(c.Param("key"))
+
+	switch key {
+	case "web-search-config", "parser-engine-config", "storage-engine-config":
+		if !dto.CanViewIntegrationSecrets(ctx) {
+			c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
+			return
+		}
+	}
 
 	switch key {
 	case "web-search-config":
@@ -1120,7 +1129,7 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	logger.Infof(ctx, "Tenant web search config retrieved successfully, Tenant ID: %d", tenant.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    types.EffectiveWebSearchConfig(tenant.WebSearchConfig),
+		"data":    types.WebSearchConfigForResponse(tenant.WebSearchConfig, true),
 	})
 }
 
@@ -1133,7 +1142,7 @@ func (h *TenantHandler) GetTenantParserEngineConfig(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
 		return
 	}
-	data := tenant.ParserEngineConfig
+	data := types.ParserEngineConfigForResponse(tenant.ParserEngineConfig, true)
 	if data == nil {
 		data = &types.ParserEngineConfig{}
 	}
@@ -1185,7 +1194,7 @@ func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
 		return
 	}
-	data := tenant.StorageEngineConfig
+	data := types.StorageEngineConfigForResponse(tenant.StorageEngineConfig, true)
 	if data == nil {
 		data = &types.StorageEngineConfig{}
 	}

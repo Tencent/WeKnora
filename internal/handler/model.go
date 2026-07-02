@@ -118,7 +118,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponse(model),
+		"data":    dto.NewModelResponse(ctx,model),
 	})
 }
 
@@ -163,7 +163,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponse(model),
+		"data":    dto.NewModelResponse(ctx,model),
 	})
 }
 
@@ -201,7 +201,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponses(models),
+		"data":    dto.NewModelResponses(ctx, models),
 	})
 }
 
@@ -634,7 +634,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponse(model),
+		"data":    dto.NewModelResponse(ctx,model),
 	})
 }
 

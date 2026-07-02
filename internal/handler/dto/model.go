@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"context"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -53,7 +54,7 @@ type ModelParametersDTO struct {
 //
 // Builtin models are shared across tenants — strip BaseURL (which can leak
 // the tenant's private endpoint) and any non-shared parameters.
-func NewModelResponse(m *types.Model) *ModelResponse {
+func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 	if m == nil {
 		return nil
 	}
@@ -67,6 +68,10 @@ func NewModelResponse(m *types.Model) *ModelResponse {
 		CustomHeaders:       m.Parameters.CustomHeaders,
 		SupportsVision:      m.Parameters.SupportsVision,
 		AppID:               m.Parameters.AppID,
+	}
+	if !CanViewIntegrationSecrets(ctx) {
+		params.ExtraConfig = nil
+		params.CustomHeaders = nil
 	}
 	if m.IsBuiltin {
 		// Builtin: strip everything that could reveal per-tenant config.
@@ -104,10 +109,10 @@ func NewModelResponse(m *types.Model) *ModelResponse {
 }
 
 // NewModelResponses is the slice convenience wrapper.
-func NewModelResponses(models []*types.Model) []*ModelResponse {
+func NewModelResponses(ctx context.Context, models []*types.Model) []*ModelResponse {
 	out := make([]*ModelResponse, 0, len(models))
 	for _, m := range models {
-		out = append(out, NewModelResponse(m))
+		out = append(out, NewModelResponse(ctx, m))
 	}
 	return out
 }

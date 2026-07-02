@@ -85,7 +85,7 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	// construction — no runtime redaction needed.
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewMCPServiceResponse(&service),
+		"data":    dto.NewMCPServiceResponse(ctx,&service),
 	})
 }
 
@@ -119,7 +119,7 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewMCPServiceResponses(services),
+		"data":    dto.NewMCPServiceResponses(ctx, services),
 	})
 }
 
@@ -158,7 +158,7 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 	// so the cross-tenant builtin list does not leak per-tenant config.
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewMCPServiceResponse(service),
+		"data":    dto.NewMCPServiceResponse(ctx,service),
 	})
 }
 
@@ -351,7 +351,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewMCPServiceResponse(stored),
+		"data":    dto.NewMCPServiceResponse(ctx,stored),
 	})
 }
 
