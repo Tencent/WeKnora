@@ -117,6 +117,11 @@ type SpanTracker interface {
 	// looking like they're still in flight forever after the user
 	// stopped the parse. Idempotent.
 	AbortAttempt(ctx context.Context, knowledgeID string, attempt int, errorCode, errorMessage, reason string)
+
+	// ListAttemptSpans returns every span recorded for (knowledgeID, attempt),
+	// or nil on error / no rows. resume-enrichment uses it to discover which
+	// graph chunks and wiki already completed so it only re-drives the gaps.
+	ListAttemptSpans(ctx context.Context, knowledgeID string, attempt int) []types.KnowledgeProcessingSpan
 }
 
 type spanTracker struct {
@@ -261,6 +266,19 @@ func (t *spanTracker) LatestAttempt(ctx context.Context, knowledgeID string) int
 		return 0
 	}
 	return n
+}
+
+func (t *spanTracker) ListAttemptSpans(ctx context.Context, knowledgeID string, attempt int) []types.KnowledgeProcessingSpan {
+	if knowledgeID == "" || attempt <= 0 {
+		return nil
+	}
+	rows, err := t.repo.ListByAttempt(ctx, knowledgeID, attempt)
+	if err != nil {
+		logger.Warnf(ctx, "[SpanTracker] ListAttemptSpans failed kid=%s attempt=%d: %v",
+			knowledgeID, attempt, err)
+		return nil
+	}
+	return rows
 }
 
 func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attempt int, stage string, input types.JSONMap) *Span {
@@ -839,3 +857,6 @@ func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ st
 func (noopSpanTracker) FinalizeAttempt(_ context.Context, _ string, _ int, _ string, _ types.JSONMap, _, _ string) {
 }
 func (noopSpanTracker) AbortAttempt(_ context.Context, _ string, _ int, _, _, _ string) {}
+func (noopSpanTracker) ListAttemptSpans(_ context.Context, _ string, _ int) []types.KnowledgeProcessingSpan {
+	return nil
+}

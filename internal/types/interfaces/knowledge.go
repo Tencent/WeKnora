@@ -111,6 +111,17 @@ type KnowledgeService interface {
 	// is already cancelled. Returns an error when the knowledge is in a
 	// terminal state (completed / failed) or being deleted.
 	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// ResumeEnrichment re-drives only the enrichment subtasks (graph + wiki)
+	// for a failed/finalizing knowledge WITHOUT clearing its chunks /
+	// embeddings / graph nodes, so the expensive embedding work is not
+	// repeated. includeGraph overrides the per-status default (nil ⇒
+	// finalizing resumes graph, failed skips it); triggerWiki=false suppresses
+	// the per-doc wiki trigger so a batch caller can fire one trigger via
+	// TriggerWikiBatch afterwards.
+	ResumeEnrichment(ctx context.Context, knowledgeID string, includeGraph *bool, triggerWiki bool) (*types.Knowledge, error)
+	// TriggerWikiBatch enqueues a single wiki ingest trigger for the KB so the
+	// wiki worker drains all queued pending ops serially (no concurrency storm).
+	TriggerWikiBatch(ctx context.Context, kbID string) error
 	// CloneKnowledgeBase clones knowledge to another knowledge base.
 	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
 	// UpdateImageInfo updates image information for a knowledge chunk.

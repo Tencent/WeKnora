@@ -299,6 +299,28 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 			markKnowledgeListDeleteFailed(ctx, repo, t, taskErr)
 			return
 		}
+		// Enrichment subtask (graph extraction) that exhausts its retry budget
+		// must DECREMENT the parent's pending_subtasks_count, not be ignored:
+		// otherwise a single permanently-failing graph chunk strands the whole
+		// knowledge in "finalizing" until the housekeeping sweep reaps it
+		// 1h10m later. We decrement rather than mark the doc failed — a missing
+		// graph chunk or two is degraded-but-usable enrichment, not a
+		// document-level failure. (wiki:ingest is NOT handled here: its trigger
+		// payload is KB-scoped with no knowledge_id; the wiki worker's own
+		// in-batch requeue path already decrements per-knowledge on exhaustion.)
+		if t.Type() == types.TypeChunkExtract {
+			var probe deadLetterKnowledgePayload
+			if err := json.Unmarshal(t.Payload(), &probe); err == nil && probe.KnowledgeID != "" {
+				if _, _, derr := repo.FinalizeSubtask(ctx, probe.KnowledgeID); derr != nil {
+					logger.Warnf(ctx, "dead-letter: FinalizeSubtask for %s after %s exhausted: %v",
+						probe.KnowledgeID, t.Type(), derr)
+				} else {
+					logger.Infof(ctx, "dead-letter: decremented pending_subtasks for %s after %s exhausted",
+						probe.KnowledgeID, t.Type())
+				}
+			}
+			return
+		}
 		if _, ok := taskTypesAffectingKnowledgeStatus[t.Type()]; !ok {
 			return
 		}

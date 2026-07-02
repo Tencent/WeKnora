@@ -27,6 +27,10 @@ import (
 // release before the next worker tries to acquire it; otherwise we'd
 // just bounce on ErrWikiIngestConcurrent and burn an asynq retry slot.
 func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIngestPayload) bool {
+	// Detach from the task context. asynq cancels the task ctx when a batch hits
+	// its Timeout; without this the follow-up enqueue below fails on the cancelled
+	// ctx and the self-chain stops, stranding the rest of the pending queue.
+	ctx = context.WithoutCancel(ctx)
 	if s.pendingRepo == nil {
 		return false
 	}
@@ -210,6 +214,14 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		return fmt.Errorf("wiki ingest: get chat model: %w", err)
+	}
+	// Stash the optional per-KB fallback model id on the context so
+	// generateWithTemplate (the single LLM entry point for all wiki calls) can
+	// switch to it per-call when the primary exhausts retries on a transient
+	// transient gateway error on long-output calls. Skip if unset or same as primary.
+	if kb.WikiConfig != nil && kb.WikiConfig.SynthesisFallbackModelID != "" &&
+		kb.WikiConfig.SynthesisFallbackModelID != synthesisModelID {
+		ctx = withWikiFallbackModel(ctx, kb.WikiConfig.SynthesisFallbackModelID)
 	}
 
 	// Resolve per-KB tunables once. WikiConfig.IngestBatchSize /

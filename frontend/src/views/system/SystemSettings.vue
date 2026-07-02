@@ -234,7 +234,8 @@
             :disabled="savingKey === item.key"
             theme="normal"
             :step="1"
-            :min="0"
+            :min="(item as any).min ?? 0"
+            :max="(item as any).max ?? undefined"
             class="setting-input"
             @blur="onChange(item)"
           />

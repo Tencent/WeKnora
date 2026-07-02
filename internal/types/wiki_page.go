@@ -342,6 +342,13 @@ func (g WikiExtractionGranularity) Normalize() WikiExtractionGranularity {
 type WikiConfig struct {
 	// SynthesisModelID is the LLM model ID used for wiki page generation and updates
 	SynthesisModelID string `yaml:"synthesis_model_id" json:"synthesis_model_id"`
+	// SynthesisFallbackModelID is an OPTIONAL second model used only when the
+	// primary SynthesisModelID call exhausts its retries with a transient error
+	// (e.g. an upstream gateway timeout on long-output calls).
+	// The switch is per-call — only the failing call retries on the fallback —
+	// so its volume stays tiny; it exists to rescue long-output wiki calls the
+	// primary can't finish within the gateway timeout. Empty = no fallback.
+	SynthesisFallbackModelID string `yaml:"synthesis_fallback_model_id" json:"synthesis_fallback_model_id,omitempty"`
 	// MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)
 	MaxPagesPerIngest int `yaml:"max_pages_per_ingest" json:"max_pages_per_ingest"`
 	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts

@@ -1646,6 +1646,69 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	})
 }
 
+// ResumeEnrichment re-drives the enrichment subtasks (graph + wiki) for a
+// failed/finalizing knowledge WITHOUT clearing its chunks/embeddings/graph.
+// Optional query params: graph=true|false overrides the per-status default;
+// trigger_wiki=false suppresses the per-doc wiki trigger (for batch callers).
+func (h *KnowledgeHandler) ResumeEnrichment(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	// Editor permission — same gate as ReparseKnowledge.
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	var includeGraph *bool
+	if v := c.Query("graph"); v != "" {
+		b := v == "true" || v == "1"
+		includeGraph = &b
+	}
+	triggerWiki := true
+	if v := c.Query("trigger_wiki"); v == "false" || v == "0" {
+		triggerWiki = false
+	}
+	knowledge, err := h.kgService.ResumeEnrichment(effCtx, id, includeGraph, triggerWiki)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_id": id})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	logger.Infof(ctx, "Knowledge enrichment resume submitted, knowledge ID: %s", id)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Knowledge enrichment resume submitted",
+		"data":    knowledge,
+	})
+}
+
+// TriggerWikiBatch enqueues a single wiki ingest trigger for the KB (:id is the
+// KB id). Used after a batch of resume-enrichment calls to drain all queued
+// wiki pending ops with one serial worker chain.
+func (h *KnowledgeHandler) TriggerWikiBatch(c *gin.Context) {
+	ctx := c.Request.Context()
+	kb, _, effTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	effCtx := context.WithValue(ctx, types.TenantIDContextKey, effTenantID)
+	if err := h.kgService.TriggerWikiBatch(effCtx, kb.ID); err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	logger.Infof(ctx, "Wiki batch trigger enqueued for KB: %s", kb.ID)
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Wiki batch trigger enqueued"})
+}
+
 // CancelKnowledgeParse godoc
 // @Summary      取消知识解析
 // @Description  取消进行中的知识解析任务。当前已写入的 chunk / 索引保留，可通过 reparse 接口重新触发解析。已完成 / 已失败 / 删除中的知识不支持取消。

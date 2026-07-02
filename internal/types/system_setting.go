@@ -53,6 +53,11 @@ type SystemSetting struct {
 	// `gorm:"-"` so GORM never tries to read/write the column.
 	Enum []string `gorm:"-" json:"enum,omitempty"`
 
+	// Min and Max constrain the numeric input range for int settings.
+	// Not persisted; derived from the in-code registry per request.
+	Min *int64 `gorm:"-" json:"min,omitempty"`
+	Max *int64 `gorm:"-" json:"max,omitempty"`
+
 	// LastModifiedByName is a display label resolved from LastModifiedBy
 	// (the user's UUID) at handler time — username when available,
 	// otherwise email. Empty for virtual rows that were never persisted

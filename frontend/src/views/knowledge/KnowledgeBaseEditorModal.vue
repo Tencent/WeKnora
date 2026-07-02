@@ -135,6 +135,32 @@
                         <p class="form-tip granularity-hint">{{ granularityHint }}</p>
                       </div>
 
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.mapParallelLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.mapParallelTip') }}</p>
+                        <t-input-number
+                          v-model="formData.wikiConfig.ingestMapParallel"
+                          :min="0"
+                          :max="20"
+                          :step="1"
+                          :placeholder="$t('knowledgeEditor.wiki.parallelPlaceholderAuto')"
+                          theme="normal"
+                        />
+                      </div>
+
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.reduceParallelLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.reduceParallelTip') }}</p>
+                        <t-input-number
+                          v-model="formData.wikiConfig.ingestReduceParallel"
+                          :min="0"
+                          :max="20"
+                          :step="1"
+                          :placeholder="$t('knowledgeEditor.wiki.parallelPlaceholderAuto')"
+                          theme="normal"
+                        />
+                      </div>
+
                       <div class="form-item" data-guide="kb-create-name">
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.nameLabel') }}</label>
                         <t-input 
@@ -642,6 +668,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       llmModelId: '',
       embeddingModelId: '',
       wikiSynthesisModelId: '',
+      wikiSynthesisFallbackModelId: '',
     },
     chunkingConfig: {
       chunkSize: 512,
@@ -689,6 +716,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     wikiConfig: {
       synthesisModelId: '',
       maxPagesPerIngest: 0,
+      ingestMapParallel: 0,
+      ingestReduceParallel: 0,
       extractionGranularity: 'standard' as 'focused' | 'standard' | 'exhaustive',
     },
     indexingStrategy: {
@@ -754,7 +783,8 @@ const loadKBData = async () => {
       modelConfig: {
         llmModelId: kb.summary_model_id || '',
         embeddingModelId: kb.embedding_model_id || '',
-        wikiSynthesisModelId: kb.wiki_config?.synthesis_model_id || ''
+        wikiSynthesisModelId: kb.wiki_config?.synthesis_model_id || '',
+        wikiSynthesisFallbackModelId: kb.wiki_config?.synthesis_fallback_model_id || ''
       },
       chunkingConfig: {
         chunkSize: kb.chunking_config?.chunk_size || 512,
@@ -799,6 +829,8 @@ const loadKBData = async () => {
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
         maxPagesPerIngest: kb.wiki_config?.max_pages_per_ingest || 0,
+        ingestMapParallel: kb.wiki_config?.ingest_map_parallel || 0,
+        ingestReduceParallel: kb.wiki_config?.ingest_reduce_parallel || 0,
         extractionGranularity: (
           kb.wiki_config?.extraction_granularity === 'focused' ||
           kb.wiki_config?.extraction_granularity === 'exhaustive'
@@ -1134,7 +1166,10 @@ const buildSubmitData = () => {
   if (formData.value.type !== 'faq') {
     data.wiki_config = {
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
+      synthesis_fallback_model_id: formData.value.modelConfig?.wikiSynthesisFallbackModelId || '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
+      ingest_map_parallel: formData.value.wikiConfig?.ingestMapParallel || 0,
+      ingest_reduce_parallel: formData.value.wikiConfig?.ingestReduceParallel || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
     }
   }
@@ -1231,7 +1266,10 @@ const doSubmit = async () => {
       if (formData.value.wikiConfig && formData.value.type !== 'faq') {
         updateConfig.wiki_config = {
           synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
+          synthesis_fallback_model_id: formData.value.modelConfig?.wikiSynthesisFallbackModelId || '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
+          ingest_map_parallel: formData.value.wikiConfig.ingestMapParallel || 0,
+          ingest_reduce_parallel: formData.value.wikiConfig.ingestReduceParallel || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
         }
       }

@@ -543,6 +543,11 @@ export default {
     rebuildSubmitted: 'Rebuild task submitted',
     rebuildFailed: 'Rebuild failed. Please try again later',
     rebuildInProgress: 'This document is currently being parsed. Please try again later',
+    resumeEnrichment: 'Resume Enrichment',
+    resumeEnrichmentConfirm: 'Resume enrichment for "{fileName}"? Only missing graph extraction and Wiki synthesis will run; existing chunks and vectors are kept — no re-parse.',
+    resumeEnrichmentConfirmAction: 'Resume',
+    resumeSubmitted: 'Enrichment task submitted. Refresh to check status.',
+    resumeFailed: 'Enrichment failed. Please try again later.',
     cancelParse: 'Stop parsing',
     cancelParseConfirmBody: 'Stop parsing "{title}"? Already-written chunks are kept and can be re-parsed later via "Rebuild"; pending optimization tasks (summary / Q&A / knowledge graph) will be dropped immediately.',
     cancelParseSubmitted: 'Parsing stopped',
@@ -2535,6 +2540,14 @@ export default {
       synthesisModelLabel: 'Wiki Synthesis Model',
       synthesisModelPlaceholder: 'Select the LLM model for Wiki generation',
       synthesisModelTip: 'Falls back to the summary model if not set',
+      synthesisFallbackModelLabel: 'Enrichment Fallback Model (optional)',
+      synthesisFallbackModelPlaceholder: 'Select fallback for primary model timeout',
+      synthesisFallbackModelTip: 'If the primary model times out during Wiki synthesis or graph extraction, the system automatically retries with this fallback. Choose a model without strict timeout limits that handles long outputs well. Leave empty to disable.',
+      mapParallelLabel: 'Parse concurrency',
+      mapParallelTip: 'How many documents are processed per generation run. 0 = auto. Raising it shortens large-batch time but uses proportionally more model-call quota.',
+      reduceParallelLabel: 'Merge concurrency',
+      reduceParallelTip: 'Parallelism of the cross-document merge phase. Usually fine to match parse concurrency. 0 = auto.',
+      parallelPlaceholderAuto: '0 (auto)',
       languageLabel: 'Wiki Language',
       maxPagesLabel: 'Max Pages Per Ingest',
       maxPagesTip: 'Maximum number of pages to create/update per ingest (0 = no limit)',
@@ -3432,7 +3445,11 @@ export default {
           default_storage_quota_gb: 'Default storage quota for new tenants (GB)',
         },
         asynq: {
-          concurrency: 'Async task worker concurrency',
+          concurrency: 'Document processing concurrency',
+        },
+        wiki: {
+          fallback_concurrency: 'Fallback model concurrency',
+          primary_max_attempts: 'Primary model attempts',
         },
       },
       keyDescriptions: {
@@ -3452,7 +3469,13 @@ export default {
         },
         asynq: {
           concurrency:
-            'Async task worker concurrency (asynq thread-pool size). Document parsing, embedding, and similar tasks are mostly I/O-bound, so raising this value can shorten queue time for bulk uploads. Requires a service process restart to take effect.',
+            'Maximum number of document tasks processed at once. Increasing it shortens queue time during bulk imports; too high raises overall system load. Takes effect after a service restart.',
+        },
+        wiki: {
+          fallback_concurrency:
+            'Max concurrent calls to the fallback model when the primary cannot handle long output. Higher drains the backlog faster; too high can overload the fallback itself. Range 1-12, takes effect immediately.',
+          primary_max_attempts:
+            'After the primary model fails this many times in a row, the call switches to the fallback model. Lower values switch sooner - handy when the primary often fails on long content. Range 1-3, takes effect immediately.',
         },
       },
       enumLabels: {

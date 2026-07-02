@@ -172,6 +172,12 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	if err != nil {
 		return nil, err
 	}
+	// Route completions through the adaptive raw-HTTP path so the response
+	// transport (stream vs non-stream) is negotiated against whatever the
+	// upstream/gateway actually returns, instead of assuming one fixed shape.
+	// Some OpenAI-compatible gateways stream even for non-stream requests, or
+	// only accept streaming; the raw path adapts to both.
+	useRawHTTP = true
 	if useRawHTTP {
 		return c.chatWithRawHTTP(timeoutCtx, endpoint, body)
 	}
@@ -199,62 +205,160 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	return result, nil
 }
 
-// chatWithRawHTTP 使用原始 HTTP 请求进行聊天（供自定义请求使用）
+// chatWithRawHTTP performs a non-stream chat over raw HTTP, ADAPTING to whatever
+// the upstream/gateway actually does instead of hard-assuming one transport:
+//   - channel honours stream:false          -> application/json, parsed directly
+//   - channel only supports streaming        -> rejects the non-stream request;
+//     we transparently retry as a real stream and accumulate the chunks
+//   - gateway streams even for stream:false  -> SSE body, also handled via retry
+//
+// This keeps both "non-stream JSON" channels and "stream-only" channels working
+// WITHOUT binding to any model name or base_url — robustness for large-scale
+// graph-extraction LLM calls where channels behave differently.
 func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, customReq any) (*types.ChatResponse, error) {
+	res, err, retryAsStream := c.rawHTTPCompletion(ctx, endpoint, customReq)
+	if retryAsStream {
+		logger.Warnf(ctx, "[LLM] model=%s: upstream rejected non-stream request (%v); retrying as stream and accumulating",
+			c.modelName, err)
+		return c.rawHTTPStreamAccumulate(ctx, endpoint, customReq)
+	}
+	return res, err
+}
+
+// rawHTTPCompletion sends customReq as a non-stream request and adapts to the
+// response shape. retryAsStream=true means the upstream rejected the non-stream
+// form (or streamed anyway) and the caller should retry as a stream.
+func (c *RemoteAPIChat) rawHTTPCompletion(
+	ctx context.Context, endpoint string, customReq any,
+) (*types.ChatResponse, error, bool) {
 	jsonData, err := json.Marshal(customReq)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err), false
+	}
+	// Request a non-stream JSON completion explicitly: some gateways omit-default
+	// to SSE when "stream" is absent.
+	var m map[string]interface{}
+	if json.Unmarshal(jsonData, &m) == nil {
+		m["stream"] = false
+		if rb, e2 := json.Marshal(m); e2 == nil {
+			jsonData = rb
+		}
 	}
 
 	if endpoint == "" {
 		endpoint = c.baseURL + "/chat/completions"
 	}
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
-		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
+		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err), false
 	}
-	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, raw HTTP request:\n%s",
-		endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
+	logger.Infof(ctx, "[LLM Request] Remote HTTP (non-stream), endpoint=%s, model=%s",
+		endpoint, c.modelName)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err), false
 	}
-
 	httpReq.Header.Set("Content-Type", "application/json")
 	c.adapter.Auth(httpReq, c.authCreds(), jsonData)
-
-	// 注入用户自定义 header（保留头会在工具内部自动跳过）
 	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
-
-	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s",
-		endpoint, c.modelName)
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, fmt.Errorf("send request: %w", err), false
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+		if upstreamRequiresStreaming(resp.StatusCode, body) {
+			return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(body)), true
+		}
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body)), false
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+	// Adapt to the actual body shape regardless of what we requested: a gateway
+	// may stream (SSE) even for a non-stream request — retry-as-stream handles it.
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	if strings.Contains(ct, "text/event-stream") || bytes.HasPrefix(bytes.TrimSpace(body), []byte("data:")) {
+		return nil, fmt.Errorf("upstream returned SSE for a non-stream request"), true
 	}
 
 	var chatResp openai.ChatCompletionResponse
 	if err := json.Unmarshal(body, &chatResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, fmt.Errorf("decode response: %w", err), false
 	}
-
 	result, err := c.parseCompletionResponse(&chatResp)
+	if err != nil {
+		return nil, err, false
+	}
+	c.applyCompletionToolCallMetadata(body, result)
+	logUsage(ctx, c.modelName, &result.Usage)
+	return result, nil, false
+}
+
+// upstreamRequiresStreaming detects a non-stream rejection (or an SSE body for a
+// non-stream request) signalling the caller should retry as a stream. Kept
+// conservative so genuine errors are still surfaced verbatim.
+func upstreamRequiresStreaming(status int, body []byte) bool {
+	if status == http.StatusOK {
+		return false
+	}
+	low := strings.ToLower(string(body))
+	switch {
+	case strings.Contains(low, "stream response content-type"):
+		return true
+	case strings.Contains(low, "content-type") && strings.Contains(low, "stream"):
+		return true
+	case strings.Contains(low, "only") && strings.Contains(low, "stream"):
+		return true
+	case strings.Contains(low, "stream") && strings.Contains(low, "required"):
+		return true
+	}
+	return false
+}
+
+// rawHTTPStreamAccumulate sends the request as a stream and folds the SSE chunks
+// into a single completion, so a non-stream caller still receives a full result.
+// This is the adaptive path for stream-only upstream channels.
+func (c *RemoteAPIChat) rawHTTPStreamAccumulate(
+	ctx context.Context, endpoint string, customReq any,
+) (*types.ChatResponse, error) {
+	jsonData, err := json.Marshal(customReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	var m map[string]interface{}
+	if json.Unmarshal(jsonData, &m) != nil {
+		m = map[string]interface{}{}
+	}
+	m["stream"] = true
+
+	ch, err := c.chatStreamWithRawHTTP(ctx, endpoint, m)
 	if err != nil {
 		return nil, err
 	}
-	c.applyCompletionToolCallMetadata(body, result)
+	var content strings.Builder
+	var toolCalls []types.LLMToolCall
+	var usage types.TokenUsage
+	finish := ""
+	for sr := range ch {
+		content.WriteString(sr.Content)
+		if len(sr.ToolCalls) > 0 {
+			toolCalls = append(toolCalls, sr.ToolCalls...)
+		}
+		if sr.Usage != nil {
+			usage = *sr.Usage
+		}
+		if sr.FinishReason != "" {
+			finish = sr.FinishReason
+		}
+	}
+	result := &types.ChatResponse{
+		Content:      content.String(),
+		ToolCalls:    toolCalls,
+		FinishReason: finish,
+		Usage:        usage,
+	}
 	logUsage(ctx, c.modelName, &result.Usage)
 	return result, nil
 }

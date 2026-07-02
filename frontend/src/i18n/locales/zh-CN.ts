@@ -544,6 +544,11 @@ export default {
     rebuildSubmitted: "重建任务已提交",
     rebuildFailed: "重建失败，请稍后再试",
     rebuildInProgress: "当前文档正在解析中，请稍后重试",
+    resumeEnrichment: "补全富集",
+    resumeEnrichmentConfirm: '确认补全"{fileName}"？仅重跑未完成的知识图谱与 Wiki，已有分块和向量保留不变，不重新解析。',
+    resumeEnrichmentConfirmAction: "补全",
+    resumeSubmitted: "补全任务已提交，稍后刷新查看进度",
+    resumeFailed: "补全失败，请稍后再试",
     cancelParse: "停止解析",
     cancelParseConfirmBody: '确认停止解析"{title}"？已写入的分块会保留，可稍后通过"重建"重新触发；优化阶段（摘要 / 问答 / 知识图谱）的待执行任务会被立即丢弃。',
     cancelParseSubmitted: "已停止解析",
@@ -2444,7 +2449,11 @@ export default {
           default_storage_quota_gb: "新租户默认存储配额 (GB)",
         },
         asynq: {
-          concurrency: "异步任务并发数",
+          concurrency: "文档处理并发数",
+        },
+        wiki: {
+          fallback_concurrency: "富集兜底并发数",
+          primary_max_attempts: "主模型尝试次数",
         },
       },
       keyDescriptions: {
@@ -2469,9 +2478,16 @@ export default {
         },
         asynq: {
           concurrency:
-            "异步任务 worker 并发数（asynq 线程池大小）。" +
-            "文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
-            "修改后需重启服务进程方可生效。",
+            "同时处理的文档任务数上限。调高后批量导入排队时间缩短，过高时系统整体负载也会升高。" +
+            "修改后需重启服务方可生效。",
+        },
+        wiki: {
+          fallback_concurrency:
+            "主模型遇到超长内容、无法完成时，最多同时调用几路备用模型处理。" +
+            "调高更快消化积压，过高可能拖垮备用模型。范围 1-12，修改后立即生效。",
+          primary_max_attempts:
+            "主模型连续失败达到此次数后，本次调用自动改用备用模型。" +
+            "值越小越早切到备用，适合主模型常因内容过长而失败的场景。范围 1-3，修改后立即生效。",
         },
       },
       enumLabels: {
@@ -3440,6 +3456,14 @@ export default {
       synthesisModelLabel: "Wiki 合成模型",
       synthesisModelPlaceholder: "选择用于 Wiki 生成的 LLM 模型",
       synthesisModelTip: "不设置时将回退使用摘要模型",
+      synthesisFallbackModelLabel: "富集兜底模型（可选）",
+      synthesisFallbackModelPlaceholder: "选择主模型超时时的备用模型",
+      synthesisFallbackModelTip: "主模型在执行 Wiki 合成或知识图谱抽取等长输出任务时若超时失败，系统自动切换至此备用模型重试。建议选择不受超时限制、适合处理长文本的模型。留空则不启用。",
+      mapParallelLabel: "解析并行数",
+      mapParallelTip: "每次生成时同时处理多少份文档。0 为系统自动。适当调高缩短大批量生成时长，过高会更快消耗模型调用额度。",
+      reduceParallelLabel: "归并并行数",
+      reduceParallelTip: "跨文档整合阶段的并行度，通常与解析并行数一致即可。0 为系统自动。",
+      parallelPlaceholderAuto: "0（系统自动）",
       languageLabel: "Wiki 语言",
       maxPagesLabel: "单次最大页面数",
       maxPagesTip: "每次 Ingest 最多创建/更新的页面数（0 表示不限制）",

@@ -38,7 +38,7 @@ const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'resume' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem): void;
   (e: 'tag-edit', item: KnowledgeItem): void;
 }>();
 
@@ -189,7 +189,15 @@ const canCancelParse = (item: KnowledgeItem) =>
 
 const isParseInFlight = (item: KnowledgeItem) => canCancelParse(item);
 
-const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem) => {
+// Resume-enrichment applies to docs whose main pipeline finished but stalled
+// on the enrichment tail (graph/wiki): failed (housekeeping-reaped) or
+// finalizing. It precisely re-drives only the missing graph chunks + wiki,
+// keeping existing chunks/vectors/graph/wiki intact (unlike reparse).
+const RESUMABLE_PARSE_STATUSES = new Set(['failed', 'finalizing']);
+const canResumeEnrichment = (item: KnowledgeItem) =>
+  RESUMABLE_PARSE_STATUSES.has(String(item.parse_status ?? ''));
+
+const handleAction = (action: 'edit' | 'reparse' | 'resume' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem) => {
   moreOpen.value = null;
   item.isMore = false;
   emit('action', action, item);
@@ -312,6 +320,16 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
                   <div class="row-menu-item" @click.stop>
                     <t-icon class="icon" name="refresh" />
                     <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                  </div>
+                </t-popconfirm>
+                <t-popconfirm v-if="canResumeEnrichment(item)" theme="default"
+                  :content="t('knowledgeBase.resumeEnrichmentConfirm', { fileName: item.file_name || '' })"
+                  :confirm-btn="{ content: t('knowledgeBase.resumeEnrichmentConfirmAction'), theme: 'primary' }"
+                  :cancel-btn="{ content: t('common.cancel') }" placement="left"
+                  @confirm="handleAction('resume', item)">
+                  <div class="row-menu-item" @click.stop>
+                    <t-icon class="icon" name="play-circle-stroke" />
+                    <span>{{ t('knowledgeBase.resumeEnrichment') }}</span>
                   </div>
                 </t-popconfirm>
                 <t-popconfirm v-if="canCancelParse(item)" theme="warning"

@@ -77,6 +77,24 @@
         </div>
       </div>
 
+      <!-- 富集兜底模型 (可选): 主模型在 Wiki 合成或知识图谱抽取等长输出任务超时失败时, 自动切换至此模型重试; 覆盖 wiki 与图谱两类长调用 -->
+      <div v-if="wikiEnabled" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.wiki.synthesisFallbackModelLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.wiki.synthesisFallbackModelTip') }}</p>
+        </div>
+        <div class="setting-control">
+          <ModelSelector
+            model-type="KnowledgeQA"
+            :selected-model-id="config.wikiSynthesisFallbackModelId"
+            :all-models="allModels"
+            @update:selected-model-id="handleWikiFallbackModelChange"
+            @add-model="handleAddModel('knowledgeqa')"
+            :placeholder="$t('knowledgeEditor.wiki.synthesisFallbackModelPlaceholder')"
+          />
+        </div>
+      </div>
+
     </div>
   </div>
 </template>
@@ -92,6 +110,7 @@ interface ModelConfig {
   embeddingModelId?: string
   vllmModelId?: string
   wikiSynthesisModelId?: string
+  wikiSynthesisFallbackModelId?: string
 }
 
 interface Props {
@@ -132,6 +151,13 @@ const handleWikiModelChange = (modelId: string) => {
   emit('update:config', {
     ...props.config,
     wikiSynthesisModelId: modelId
+  })
+}
+
+const handleWikiFallbackModelChange = (modelId: string) => {
+  emit('update:config', {
+    ...props.config,
+    wikiSynthesisFallbackModelId: modelId
   })
 }
 
