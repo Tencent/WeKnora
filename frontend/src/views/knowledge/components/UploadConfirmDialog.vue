@@ -1342,4 +1342,190 @@ const handleConfirm = () => {
 .modal-leave-to {
   opacity: 0;
 }
+
+@media (max-width: 900px) {
+  .upload-confirm-modal {
+    width: min(100vw, 100vw);
+    height: min(100dvh, 100vh);
+    border-radius: 0;
+  }
+
+  .upload-confirm-container {
+    flex-direction: column;
+  }
+
+  .files-panel {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .files-panel-header {
+    padding: 16px 16px 12px;
+  }
+
+  .files-list {
+    max-height: 180px;
+    padding-bottom: 8px;
+  }
+
+  .manual-source-panel,
+  .files-empty {
+    padding-bottom: 14px;
+  }
+
+  .main-header {
+    padding: 18px 52px 0 16px;
+  }
+
+  .main-body {
+    padding: 14px 16px 16px;
+  }
+
+  .overview-row {
+    grid-template-columns: minmax(84px, 108px) 1fr 20px;
+    gap: 10px;
+    padding: 14px 14px;
+  }
+}
+
+@media (max-width: 720px) {
+  .upload-confirm-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    background: var(--td-mask-active);
+    backdrop-filter: none;
+  }
+
+  .upload-confirm-modal {
+    width: 100vw;
+    height: 100dvh;
+  }
+
+  .close-btn {
+    top: 12px;
+    right: 12px;
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+  }
+
+  .files-panel {
+    flex: none;
+    padding-top: 8px;
+    background: var(--td-bg-color-container);
+  }
+
+  .files-panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 14px 12px;
+  }
+
+  .files-panel-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .files-panel-title {
+    font-size: 14px;
+    line-height: 22px;
+    width: 100%;
+  }
+
+  .files-list {
+    display: flex;
+    gap: 10px;
+    padding: 0 14px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    max-height: none;
+    scroll-snap-type: x proximity;
+  }
+
+  .file-item {
+    min-width: min(260px, calc(100vw - 56px));
+    padding: 10px 12px;
+    border: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-secondarycontainer);
+    scroll-snap-align: start;
+  }
+
+  .manual-source-panel,
+  .files-empty {
+    padding: 0 14px 14px;
+  }
+
+  .main-header {
+    padding: 14px 52px 0 14px;
+  }
+
+  .main-title {
+    font-size: 17px;
+    line-height: 24px;
+  }
+
+  .main-desc,
+  .edit-desc {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .edit-title {
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .main-body {
+    padding: 12px 14px 14px;
+  }
+
+  .overview-row {
+    grid-template-columns: 1fr 16px;
+    grid-template-areas:
+      "label chevron"
+      "value chevron";
+    align-items: start;
+    gap: 4px 10px;
+    padding: 12px 14px;
+  }
+
+  .overview-label {
+    grid-area: label;
+  }
+
+  .overview-value {
+    grid-area: value;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .overview-chevron {
+    grid-area: chevron;
+    align-self: center;
+  }
+
+  .kb-embedded-settings {
+    .setting-row--toggle {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+    }
+
+    .setting-control {
+      width: 100%;
+    }
+  }
+
+  .modal-footer {
+    justify-content: stretch;
+    gap: 10px;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+
+    :deep(.t-button) {
+      flex: 1 1 0;
+    }
+  }
+}
 </style>

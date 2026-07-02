@@ -122,6 +122,8 @@ const TRACE_DRAWER_MIN_WIDTH = 560;
 
 const timelineDrawerWidth = ref(TRACE_DRAWER_DEFAULT_WIDTH);
 const timelineDrawerResizing = ref(false);
+const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280);
+const isCompactDrawerLayout = computed(() => viewportWidth.value <= 960);
 
 let traceResizeStartX = 0;
 let traceResizeStartWidth = 0;
@@ -175,6 +177,7 @@ function onTraceDrawerResizeEnd() {
 }
 
 function onTraceDrawerWindowResize() {
+  viewportWidth.value = window.innerWidth;
   timelineDrawerWidth.value = clampTraceDrawerWidth(timelineDrawerWidth.value);
   mainDrawerWidth.value = clampMainDrawerWidth(mainDrawerWidth.value);
 }
@@ -194,6 +197,12 @@ const MAIN_DRAWER_MIN_WIDTH = 480;
 
 const mainDrawerWidth = ref(MAIN_DRAWER_DEFAULT_WIDTH);
 const mainDrawerResizing = ref(false);
+const mainDrawerSize = computed(() =>
+  isCompactDrawerLayout.value ? `${viewportWidth.value}px` : `${mainDrawerWidth.value}px`,
+);
+const timelineDrawerSize = computed(() =>
+  isCompactDrawerLayout.value ? `${viewportWidth.value}px` : `${timelineDrawerWidth.value}px`,
+);
 
 let mainResizeStartX = 0;
 let mainResizeStartWidth = 0;
@@ -414,6 +423,7 @@ const bindDrawerScroll = () => {
 };
 
 onMounted(() => {
+  viewportWidth.value = window.innerWidth;
   loadTraceDrawerWidth();
   loadMainDrawerWidth();
   window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
@@ -1078,12 +1088,13 @@ const handleDetailsScroll = () => {
 <template>
   <div class="doc_content" ref="mdContentWrap">
     <teleport to="body">
-      <div v-if="visible" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px` }" role="separator"
-        aria-orientation="vertical" @mousedown.prevent="onMainDrawerResizeStart">
+      <div v-if="visible && !isCompactDrawerLayout" class="doc-drawer-resize-handle"
+        :style="{ right: `${mainDrawerWidth}px` }" role="separator" aria-orientation="vertical"
+        @mousedown.prevent="onMainDrawerResizeStart">
         <div class="doc-drawer-resize-line" />
       </div>
     </teleport>
-    <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
+    <t-drawer :visible="visible" :zIndex="2000" :size="mainDrawerSize" attach="body" :closeBtn="true"
       :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
       @close="handleClose">
       <template #header>
@@ -1123,14 +1134,14 @@ const handleDetailsScroll = () => {
 
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
       <teleport to="body">
-        <div v-if="timelineDrawerVisible" class="trace-drawer-resize-handle"
+        <div v-if="timelineDrawerVisible && !isCompactDrawerLayout" class="trace-drawer-resize-handle"
           :style="{ right: `${timelineDrawerWidth}px` }" role="separator" aria-orientation="vertical"
           :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
           @mousedown.prevent="onTraceDrawerResizeStart">
           <div class="trace-drawer-resize-line" />
         </div>
       </teleport>
-      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="`${timelineDrawerWidth}px`" attach="body"
+      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="timelineDrawerSize" attach="body"
         :closeBtn="false" :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true"
         placement="right" :class="['kp-secondary-drawer', { 'kp-secondary-drawer--resizing': timelineDrawerResizing }]"
         @close="closeTimeline">
@@ -1878,6 +1889,54 @@ const handleDetailsScroll = () => {
   gap: 4px;
   margin-top: 12px;
 }
+
+@media (max-width: 960px) {
+  .doc-drawer-header {
+    align-items: flex-start;
+    gap: 12px;
+    padding-right: 20px;
+  }
+
+  .doc-drawer-header-title {
+    white-space: normal;
+  }
+
+  .doc-detail-row,
+  .doc-content-section-head,
+  .chunk-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .doc-detail-row {
+    gap: 4px;
+  }
+
+  .doc-detail-label {
+    flex: none;
+  }
+
+  .doc-content-section-head-left {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .view-mode-buttons,
+  .chunk-header-right {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .view-mode-buttons .view-mode-btn {
+    flex: 1 1 0;
+  }
+
+  .chunk-item,
+  .audio-player-section {
+    padding: 12px;
+  }
+}
 </style>
 
 <!-- Non-scoped padding/background overrides for the secondary drawer.
@@ -1978,5 +2037,22 @@ body:has(.t-drawer.kp-secondary-drawer--resizing) .trace-drawer-resize-line {
 
 .t-drawer.kp-secondary-drawer--resizing .t-drawer__content {
   transition: none !important;
+}
+
+@media (max-width: 960px) {
+  .t-drawer.doc-main-drawer {
+    .t-drawer__header {
+      padding: 12px 14px;
+    }
+
+    .t-drawer__body {
+      padding: 12px 14px 16px;
+    }
+  }
+
+  .doc-drawer-resize-handle,
+  .trace-drawer-resize-handle {
+    display: none;
+  }
 }
 </style>

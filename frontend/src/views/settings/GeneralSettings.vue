@@ -444,4 +444,41 @@ const handleFontSizeChange = (val: FontSizeKey) => {
     text-overflow: ellipsis;
   }
 }
+
+@media (max-width: 720px) {
+  .section-header {
+    margin-bottom: 20px;
+  }
+
+  .setting-row {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 0;
+  }
+
+  .setting-info {
+    max-width: none;
+    width: 100%;
+    padding-right: 0;
+  }
+
+  .setting-control,
+  .font-preview {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .setting-control {
+    justify-content: flex-start;
+  }
+
+  .setting-control--stacked {
+    align-items: stretch;
+  }
+
+  :deep(.t-select),
+  :deep(.t-radio-group) {
+    width: 100% !important;
+  }
+}
 </style>

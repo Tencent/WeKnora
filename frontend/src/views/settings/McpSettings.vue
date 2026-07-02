@@ -633,4 +633,19 @@ onMounted(() => {
   text-overflow: ellipsis;
   min-width: 0;
 }
+
+@media (max-width: 720px) {
+  .services-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .service-card {
+    padding: 12px;
+  }
+
+  .service-card__header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
 </style>

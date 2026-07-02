@@ -960,6 +960,17 @@ const drawerConfirmText = computed(() => {
       >
     </template>
 
+    <template #headerActions>
+      <button
+        type="button"
+        class="datasource-close-btn"
+        :aria-label="t('common.close')"
+        @click="handleClose"
+      >
+        <t-icon name="close" size="18px" />
+      </button>
+    </template>
+
     <template v-if="step === 1" #footer-left>
       <t-button v-if="!isEdit" variant="outline" @click="step = 0">
         {{ t('datasource.back') }}
@@ -2268,5 +2279,26 @@ const drawerConfirmText = computed(() => {
   width: 24px;
   height: 24px;
   object-fit: contain;
+}
+
+.datasource-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.datasource-close-btn:hover,
+.datasource-close-btn:focus-visible {
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  outline: none;
 }
 </style>

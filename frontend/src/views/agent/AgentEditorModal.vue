@@ -5426,6 +5426,136 @@ const handleSave = async () => {
   background: rgba(0, 180, 42, 0.1);
 }
 
+@media (max-width: 900px) {
+  .settings-modal {
+    width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .settings-container {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .sidebar-header {
+    padding: 14px 52px 10px 14px;
+  }
+
+  .settings-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    padding: 8px 10px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .settings-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+
+  .nav-label {
+    flex: 0 0 auto;
+  }
+
+  .content-wrapper {
+    padding: 24px 22px 32px;
+
+    &--prompts {
+      padding-bottom: 24px;
+    }
+  }
+}
+
+@media (max-width: 720px) {
+  .settings-overlay {
+    padding: 0;
+  }
+
+  .settings-modal {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .settings-container {
+    flex-direction: column;
+  }
+
+  .close-btn {
+    top: 10px;
+    right: 10px;
+  }
+
+  .sidebar-header {
+    padding: 12px 52px 8px 14px;
+  }
+
+  .settings-nav {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 6px 10px 10px;
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item {
+    padding: 6px 10px;
+  }
+
+  .content-wrapper {
+    padding: 18px 14px 22px;
+
+    &--prompts {
+      padding-bottom: 18px;
+    }
+  }
+
+  .setting-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .setting-info {
+    max-width: 100%;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+
+  .settings-footer {
+    padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+    flex-wrap: wrap;
+  }
+}
+
 </style>
 
 <!-- Non-scoped styles: TDesign teleports the popup outside this component, so

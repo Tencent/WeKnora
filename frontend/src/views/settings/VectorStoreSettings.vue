@@ -1275,6 +1275,21 @@ onMounted(async () => {
   &.available { color: var(--td-brand-color); }
   &.unavailable { color: var(--td-error-color); }
 }
+
+@media (max-width: 720px) {
+  .store-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .store-card {
+    padding: 12px;
+  }
+
+  .store-card__header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
 </style>
 
 <!--

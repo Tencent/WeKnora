@@ -30,6 +30,9 @@
             <slot name="subtitle">{{ description }}</slot>
           </div>
         </div>
+        <div v-if="$slots.headerActions" class="setting-drawer__header-actions">
+          <slot name="headerActions" />
+        </div>
       </div>
     </template>
 
@@ -274,6 +277,7 @@ const handleCancel = () => {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  flex: 1;
 }
 
 .setting-drawer__title {
@@ -290,6 +294,14 @@ const handleCancel = () => {
   font-size: 12px;
   line-height: 1.45;
   color: var(--td-text-color-secondary);
+}
+
+.setting-drawer__header-actions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 /* ---------- Body ---------- */
@@ -470,5 +482,60 @@ const handleCancel = () => {
 
 .t-drawer.setting-drawer--resizing .t-drawer__content {
   transition: none !important;
+}
+
+@media (max-width: 900px) {
+  .t-drawer.setting-drawer .t-drawer__content-wrapper,
+  .t-drawer.setting-drawer .t-drawer__content {
+    width: min(640px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .setting-drawer-resize-handle {
+    display: none;
+  }
+
+  .t-drawer.setting-drawer .t-drawer__content-wrapper,
+  .t-drawer.setting-drawer .t-drawer__content {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100dvh;
+  }
+
+  .setting-drawer {
+    .t-drawer__header {
+      padding: 12px 14px;
+    }
+
+    .t-drawer__body {
+      padding: 14px;
+    }
+
+    .t-drawer__footer {
+      padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+    }
+  }
+
+  .setting-drawer__header {
+    align-items: flex-start;
+  }
+
+  .setting-drawer__subtitle {
+    white-space: normal;
+  }
+
+  .setting-drawer__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .setting-drawer__footer-left,
+  .setting-drawer__footer-right {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
 }
 </style>

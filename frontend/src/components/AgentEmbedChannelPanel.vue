@@ -1549,4 +1549,54 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   left: 10px;
   top: 10px;
 }
+
+@media (max-width: 720px) {
+  .im-steps {
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 10px;
+    scrollbar-width: none;
+  }
+
+  .im-steps::-webkit-scrollbar {
+    display: none;
+  }
+
+  .im-step {
+    flex: 0 0 auto;
+    min-width: max-content;
+  }
+
+  .setting-row,
+  .enable-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .setting-info {
+    max-width: 100%;
+    padding-right: 0;
+  }
+
+  .setting-control,
+  .form-number {
+    width: 100%;
+    max-width: none;
+  }
+
+  .channel-key-control,
+  .code-panel__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .code-panel__actions {
+    justify-content: flex-end;
+  }
+
+  .snippet-tabs :deep(.t-tabs__nav-scroll) {
+    overflow-x: auto;
+  }
+}
 </style>

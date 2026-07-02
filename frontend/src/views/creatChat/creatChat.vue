@@ -262,6 +262,8 @@ const handleKBEditorSuccess = (kbId: string) => {
     :deep(.answers-input) {
         position: static;
         transform: translateX(0);
+        width: 100%;
+        max-width: 100%;
     }
 }
 
@@ -363,45 +365,45 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
+@media (max-width: 960px) {
+    .dialogue-wrap {
+        align-items: stretch;
+        justify-content: stretch;
+        min-height: 100%;
+        padding: 12px 10px max(12px, env(safe-area-inset-bottom));
+        box-sizing: border-box;
     }
 
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
+    .dialogue-answers {
+        max-width: 100%;
+        min-height: 0;
+        flex: 1;
+        gap: 14px;
+        justify-content: flex-start;
+
+        :deep(.answers-input) {
+            margin-top: auto;
+            flex-shrink: 0;
+        }
+    }
+
+    .dialogue-title {
+        justify-content: center;
+        text-align: center;
+        font-size: 22px;
+        line-height: 30px;
+        margin-top: 12px;
+    }
+
+    .suggested-questions-container {
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0;
     }
 }
 
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
-    }
-}
 </style>
 <style lang="less">
 .del-menu-popup {

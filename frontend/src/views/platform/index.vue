@@ -1,5 +1,18 @@
 <template>
-    <div class="main" ref="dropzone">
+    <div class="main" :class="{ 'main--responsive-sidebar': uiStore.responsiveSidebarCollapsed }" ref="dropzone">
+        <div v-if="uiStore.responsiveSidebarCollapsed" class="mobile-topbar">
+            <button class="mobile-sidebar-icon-button" type="button" :aria-label="t('menu.expandSidebar')"
+                @click="uiStore.toggleSidebar">
+                <svg viewBox="0 0 20 20" width="20" height="20" fill="none" aria-hidden="true"
+                    xmlns="http://www.w3.org/2000/svg">
+                    <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
+                    <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
+                    <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                        stroke-linecap="round" />
+                </svg>
+            </button>
+            <img class="mobile-topbar-logo" src="@/assets/img/weknora.png" alt="WEKNORA">
+        </div>
         <Menu></Menu>
         <div v-if="isRouterAlive" class="platform-route-outlet">
             <RouterView />
@@ -33,6 +46,7 @@ import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useUIStore } from '@/stores/ui'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -41,9 +55,12 @@ let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
+const uiStore = useUIStore();
 let ismask = ref(false)
 let uploadInput = ref();
 const { t } = useI18n();
+const RESPONSIVE_SIDEBAR_QUERY = '(max-width: 960px)'
+let disposeResponsiveSidebar: (() => void) | null = null
 
 const isRouterAlive = ref(true)
 const reloadApp = () => {
@@ -205,6 +222,20 @@ const handleGlobalDrop = async (event: DragEvent) => {
 
 // 组件挂载时添加全局事件监听器
 onMounted(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        const query = window.matchMedia(RESPONSIVE_SIDEBAR_QUERY)
+        const syncResponsiveSidebar = (matches: boolean) => {
+            uiStore.setResponsiveSidebarCollapsed(matches)
+        }
+        const handleResponsiveSidebarChange = (event: MediaQueryListEvent) => {
+            syncResponsiveSidebar(event.matches)
+        }
+        syncResponsiveSidebar(query.matches)
+        query.addEventListener('change', handleResponsiveSidebarChange)
+        disposeResponsiveSidebar = () => {
+            query.removeEventListener('change', handleResponsiveSidebarChange)
+        }
+    }
     document.addEventListener('dragenter', handleGlobalDragEnter, true);
     document.addEventListener('dragover', handleGlobalDragOver, true);
     document.addEventListener('dragleave', handleGlobalDragLeave, true);
@@ -240,6 +271,9 @@ function maybeOpenCmdkFromRoute() {
 
 // 组件卸载时移除全局事件监听器
 onUnmounted(() => {
+    disposeResponsiveSidebar?.()
+    disposeResponsiveSidebar = null
+    uiStore.setResponsiveSidebarCollapsed(false)
     document.removeEventListener('dragenter', handleGlobalDragEnter, true);
     document.removeEventListener('dragover', handleGlobalDragOver, true);
     document.removeEventListener('dragleave', handleGlobalDragLeave, true);
@@ -261,7 +295,7 @@ onUnmounted(() => {
     align-items: stretch;
     width: 100%;
     height: 100%;
-    min-width: 600px;
+    min-width: 0;
     min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
@@ -275,6 +309,65 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+@media (max-width: 960px) {
+    .main--responsive-sidebar {
+        position: relative;
+    }
+
+    .main--responsive-sidebar .platform-route-outlet {
+        padding-top: 44px;
+        box-sizing: border-box;
+    }
+
+    .mobile-topbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 930;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--td-bg-color-container);
+        border-bottom: 1px solid var(--td-component-stroke);
+    }
+
+    .mobile-sidebar-icon-button {
+        position: absolute;
+        left: 10px;
+        top: 2px;
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        color: var(--td-text-color-primary);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+    }
+
+    .mobile-sidebar-icon-button:active {
+        color: var(--td-brand-color);
+    }
+
+    .mobile-topbar-logo {
+        display: block;
+        height: auto;
+        width: auto;
+        max-width: 120px;
+        object-fit: contain;
+    }
+
+    html[theme-mode="dark"] .mobile-topbar-logo {
+        filter: invert(1) hue-rotate(180deg);
+    }
 }
 
 .upload-mask {

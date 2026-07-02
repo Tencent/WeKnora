@@ -800,4 +800,144 @@ onUnmounted(() => {
     line-height: 1.6;
   }
 }
+
+@media (max-width: 900px) {
+  .settings-overlay {
+    padding: 12px;
+  }
+
+  .settings-modal {
+    max-width: none;
+    width: 100%;
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .settings-container {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .sidebar-header {
+    padding: 14px 14px 10px;
+  }
+
+  .settings-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-height: auto;
+    padding: 8px 10px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .settings-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+
+  .nav-label {
+    flex: 0 0 auto;
+  }
+
+  .submenu {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  .submenu-item {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+
+  .content-wrapper {
+    max-width: none;
+    padding: 28px 22px 32px;
+
+    &--wide,
+    &--full {
+      padding: 24px 22px 32px;
+    }
+  }
+}
+
+@media (max-width: 720px) {
+  .settings-overlay {
+    padding: 0;
+  }
+
+  .settings-modal {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .close-btn {
+    top: 10px;
+    right: 10px;
+  }
+
+  .settings-sidebar {
+    max-height: none;
+  }
+
+  .sidebar-header {
+    padding-right: 52px;
+  }
+
+  .settings-nav {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 6px 10px 10px;
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item {
+    padding: 6px 10px;
+  }
+
+  .nav-icon {
+    margin-right: 6px;
+  }
+
+  .content-wrapper {
+    padding: 22px 14px 24px;
+
+    &--wide,
+    &--full {
+      padding: 18px 14px 24px;
+    }
+  }
+
+  .role-denied {
+    padding: 40px 16px;
+  }
+}
 </style>

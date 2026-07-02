@@ -2400,6 +2400,75 @@ defineExpose({
 }
 
 // 响应式布局
+@media (max-width: 720px) {
+  .agent-list-container {
+    flex-direction: column;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .agent-list-content {
+    padding: 12px 12px 0;
+  }
+
+  .agent-list-main {
+    padding: 0 0 12px;
+  }
+
+  .header {
+    margin-bottom: 12px;
+    padding-right: 0;
+
+    .header-title {
+      min-width: 0;
+    }
+
+    .title-row {
+      gap: 6px;
+    }
+
+    h2 {
+      font-size: 21px;
+      line-height: 28px;
+    }
+  }
+
+  .header-subtitle {
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  .agent-card-wrap {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .agent-card {
+    min-width: 0;
+  }
+
+  .empty-state {
+    padding: 36px 16px;
+
+    .empty-img {
+      width: 120px;
+      height: 120px;
+      margin-bottom: 14px;
+    }
+
+    .empty-txt {
+      font-size: 15px;
+      line-height: 22px;
+    }
+
+    .empty-desc {
+      text-align: center;
+      font-size: 13px;
+      line-height: 20px;
+    }
+  }
+}
+
 @media (min-width: 900px) {
   .agent-card-wrap {
     grid-template-columns: repeat(2, 1fr);

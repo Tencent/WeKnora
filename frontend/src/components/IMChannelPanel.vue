@@ -1368,6 +1368,55 @@ onUnmounted(() => {
   color: var(--td-text-color-secondary);
   text-align: center;
 }
+
+@media (max-width: 720px) {
+  .im-steps {
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 10px;
+    scrollbar-width: none;
+  }
+
+  .im-steps::-webkit-scrollbar {
+    display: none;
+  }
+
+  .im-step {
+    flex: 0 0 auto;
+    min-width: max-content;
+  }
+
+  .setting-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .setting-info {
+    max-width: 100%;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .callback-url-control,
+  .platform-link-hint {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .option-chips {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .qr-container {
+    width: min(200px, 68vw);
+    height: min(200px, 68vw);
+  }
+}
 </style>
 
 <style lang="less">
