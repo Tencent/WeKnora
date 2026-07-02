@@ -270,3 +270,20 @@ func (s *ChunkFeedbackService) GetDislikeReasonOptions() []string {
 func (s *ChunkFeedbackService) SetConfig(config *types.ChunkFeedbackConfig) {
 	s.config = config
 }
+
+// GetUserFeedback 获取用户对指定消息的反馈状态
+func (s *ChunkFeedbackService) GetUserFeedback(ctx context.Context, messageID, userID string) (*types.UserFeedbackResponse, error) {
+	feedback, err := s.feedbackRepo.GetByMessageAndUser(ctx, messageID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if feedback == nil {
+		return nil, nil
+	}
+	return &types.UserFeedbackResponse{
+		MessageID:     feedback.MessageID,
+		IsPositive:    &feedback.IsPositive,
+		DislikeReason: feedback.DislikeReason,
+		CreatedAt:     feedback.CreatedAt.Format("2006-01-02 15:04:05"),
+	}, nil
+}

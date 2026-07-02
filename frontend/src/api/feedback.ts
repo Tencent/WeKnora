@@ -92,3 +92,19 @@ export function getChunkWeightLogs(chunkId: string, limit?: number) {
     { params: { limit } }
   )
 }
+
+// UserFeedbackResponse 用户反馈状态响应
+export interface UserFeedbackResponse {
+  message_id: string
+  is_positive: boolean | null
+  dislike_reason?: string
+  created_at?: string
+}
+
+// 获取用户对某条消息的反馈状态
+export function getUserFeedback(messageId: string) {
+  return get<{ success: boolean; data: UserFeedbackResponse | null }>(
+    `/api/v1/feedback/user-feedback`,
+    { params: { message_id: messageId } }
+  )
+}

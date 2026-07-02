@@ -6234,4 +6234,21 @@ export default {
       generic: "操作失败，请稍后重试。",
     },
   },
+  chunkFeedback: {
+    like: "有帮助",
+    dislike: "没帮助",
+    feedbackSubmitted: "感谢您的反馈",
+    feedbackFailed: "反馈提交失败，请稍后重试",
+    dislikeReasonTitle: "选择原因（可选）",
+    dislikeReasonPlaceholder: "请选择或输入原因",
+    dislikeReasons: {
+      inaccurate: "回答不准确",
+      incomplete: "信息不完整",
+      unclear: "表述不清晰",
+      unrelated: "与问题无关",
+      other: "其他"
+    },
+    submitReason: "提交原因",
+    cancel: "取消"
+  },
 };
