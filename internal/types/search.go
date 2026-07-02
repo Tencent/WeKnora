@@ -143,6 +143,10 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+
+	// RecallWeight is the feedback weight for this chunk (1.0 = default, >1.0 boosted, <1.0 penalized)
+	// Loaded from chunks table by ChunkWeightLoader plugin
+	RecallWeight float64 `json:"recall_weight,omitempty"`
 }
 
 // SearchParams represents the search parameters
