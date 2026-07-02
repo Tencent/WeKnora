@@ -699,7 +699,7 @@ import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
-import { hydrateProtectedFileImages } from '@/utils/security'
+import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
 import { createSessions } from '@/api/chat'
@@ -1398,8 +1398,8 @@ function renderMarkdown(content: string): string {
     return `<a href="#" class="wiki-content-link" data-slug="${slug}">${display}</a>`
   })
 
-  // Use marked to render the markdown to HTML
-  return marked.parse(preprocessed, { breaks: true, async: false }) as string
+  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string
+  return sanitizeMarkdownHTML(html)
 }
 
 async function openGraphDrawer(slug: string) {

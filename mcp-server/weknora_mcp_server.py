@@ -12,6 +12,8 @@ import json
 import logging
 import os
 import re
+import secrets
+import sys
 from typing import Any, Dict
 
 import urllib3
@@ -35,6 +37,63 @@ try:
 except ValueError:
     logger.warning("WEKNORA_CHAT_TIMEOUT is not a valid integer; falling back to 300s.")
     WEKNORA_CHAT_TIMEOUT = 300
+
+
+def network_transport_auth_token() -> str:
+    """Shared secret clients must present for SSE/HTTP transports."""
+    return os.getenv("MCP_SERVER_AUTH_TOKEN", "").strip()
+
+
+def require_network_transport_auth(transport: str) -> str:
+    """SSE/HTTP must not start without a configured auth token."""
+    token = network_transport_auth_token()
+    if transport in ("sse", "http") and not token:
+        logger.error(
+            "MCP_SERVER_AUTH_TOKEN is required for %s transport. "
+            "Set a strong shared secret; clients must send "
+            "Authorization: Bearer <token> or X-MCP-Auth-Token.",
+            transport,
+        )
+        sys.exit(1)
+    return token
+
+
+class MCPAuthMiddleware:
+    """ASGI middleware that gates network MCP transports behind a shared secret."""
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self.token = token
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
+        provided = ""
+        auth = headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            provided = auth[7:].strip()
+        elif "x-mcp-auth-token" in headers:
+            provided = headers["x-mcp-auth-token"]
+
+        if not provided or not secrets.compare_digest(provided, self.token):
+            body = b'{"error":"unauthorized"}'
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [[b"content-type", b"application/json"]],
+                }
+            )
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        await self.app(scope, receive, send)
 
 
 class WeKnoraClient:
@@ -1283,6 +1342,7 @@ async def run_stdio():
 
 async def run_sse(host: str, port: int):
     """Run the MCP server using SSE transport (legacy MCP clients)"""
+    auth_token = require_network_transport_auth("sse")
     try:
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
@@ -1307,6 +1367,7 @@ async def run_sse(host: str, port: int):
             Mount("/messages/", app=sse.handle_post_message),
         ]
     )
+    starlette_app = MCPAuthMiddleware(starlette_app, auth_token)
 
     logger.info("Starting SSE MCP server on %s:%d", host, port)
     logger.info("SSE endpoint:  http://%s:%d/sse", host, port)
@@ -1317,6 +1378,7 @@ async def run_sse(host: str, port: int):
 
 async def run_http(host: str, port: int):
     """Run the MCP server using Streamable HTTP transport (MCP 2025-03-26 spec)"""
+    auth_token = require_network_transport_auth("http")
     try:
         from contextlib import asynccontextmanager
         from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -1344,6 +1406,7 @@ async def run_http(host: str, port: int):
         routes=[Mount("/", app=session_manager.handle_request)],
         lifespan=lifespan,
     )
+    starlette_app = MCPAuthMiddleware(starlette_app, auth_token)
 
     logger.info("Starting Streamable HTTP MCP server on %s:%d", host, port)
     logger.info("MCP endpoint:  http://%s:%d/mcp", host, port)
@@ -1373,8 +1436,8 @@ def main():
     )
     parser.add_argument(
         "--host",
-        default=os.getenv("MCP_HOST", "0.0.0.0"),
-        help="Bind host for network transports (default: 0.0.0.0)",
+        default=os.getenv("MCP_HOST", "127.0.0.1"),
+        help="Bind host for network transports (default: 127.0.0.1)",
     )
     parser.add_argument(
         "--port",
