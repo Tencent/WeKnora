@@ -363,45 +363,6 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
-    }
-}
 </style>
 <style lang="less">
 .del-menu-popup {

@@ -909,6 +909,15 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
+@media (max-width: 600px) {
+    .chat {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        padding: 12px 0;
+    }
+}
+
 .chat_scroll_box {
     flex: 1;
     // Without min-height: 0, a flex-column child defaults to min-height: auto
