@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/assets"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -1377,15 +1378,16 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	config := map[string]interface{}{
 		"hasFiles": hasFiles,
 	}
+	includeIntegrationDetail := dto.CanViewIntegrationSecrets(ctx)
 
 	// 按类型分组模型
 	for _, model := range models {
 		if model == nil {
 			continue
 		}
-		// Hide sensitive information for builtin models
+		// Hide sensitive information for builtin models and viewers.
 		baseURL := model.Parameters.BaseURL
-		if model.IsBuiltin {
+		if model.IsBuiltin || !includeIntegrationDetail {
 			baseURL = ""
 		}
 
@@ -1415,7 +1417,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 				"modelName": model.Name,
 				"baseUrl":   baseURL,
 				"credentials": map[string]bool{
-					"apiKey": model.Parameters.APIKey != "",
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
 				},
 			}
 		case types.ModelTypeVLLM:

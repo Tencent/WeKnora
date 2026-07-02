@@ -326,15 +326,22 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 1, "msg": "请求体格式错误"})
 		return
 	}
-	overrides := body.ToOverridesMap()
+	var existing *types.ParserEngineConfig
+	var tenant *types.Tenant
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
+		if t, ok := v.(*types.Tenant); ok && t != nil {
+			tenant = t
+			existing = t.ParserEngineConfig
+		}
+	}
+	merged := types.MergeParserEngineConfigForUpdate(&body, existing)
+	overrides := merged.ToOverridesMap()
+	if tenant != nil {
+		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+			if overrides == nil {
+				overrides = make(map[string]string)
 			}
+			overrides["weknoracloud_app_id"] = creds.AppID
 		}
 	}
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
