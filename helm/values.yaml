@@ -221,6 +221,36 @@ docreader:
   env:
     STORAGE_TYPE: local
 
+  # -- Shared volume configuration for document parsing artifacts (images, etc.)
+  # Docreader writes to /tmp/docreader, app reads from it (read-only).
+  # In docker-compose.yml this is the "docreader-tmp" named volume.
+  # Note: emptyDir is pod-scoped and CANNOT share data between the app and
+  # docreader Deployments (they are separate pods). To share artifacts across
+  # pods, set enabled=true and type="pvc" with a ReadWriteMany storage class
+  # (e.g., cephfs, NFS). Disabled by default to preserve backward compatibility.
+  sharedVolume:
+    # -- Enable shared volume for docreader artifacts
+    # When true, both docreader (RW) and app (RO) mount /tmp/docreader.
+    # Requires type="pvc" with ReadWriteMany access for cross-pod sharing.
+    enabled: false
+    # -- Volume type: "emptyDir" (pod-local, no cross-pod sharing) or "pvc"
+    type: emptyDir
+    # -- Size limit for emptyDir (only used when type=emptyDir)
+    sizeLimit: 5Gi
+    # -- PVC name (only used when type=pvc)
+    # If empty and type=pvc, a PVC is created automatically with name:
+    # <release-name>-docreader-tmp
+    pvcName: ""
+    # -- Storage class for the auto-created PVC (only used when type=pvc
+    # and pvcName is empty). Use a ReadWriteMany-capable class (e.g., cephfs,
+    # NFS) for multi-pod sharing.
+    storageClass: ""
+    # -- Access mode for the auto-created PVC (only used when type=pvc
+    # and pvcName is empty). Use ReadWriteMany for multi-pod sharing.
+    accessMode: ReadWriteMany
+    # -- PVC size (only used when type=pvc and pvcName is empty)
+    size: 5Gi
+
   # -- Service configuration
   service:
     type: ClusterIP
