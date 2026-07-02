@@ -7,11 +7,13 @@ import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import UploadConfirmHost from '@/components/UploadConfirmHost.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
+import { useUIStore } from '@/stores/ui'
 import { getCurrentUser, userInfoFromApi } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
+import { evalBreakpoint, startListening, isMobile } from '@/composables/useBreakpoint'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -24,6 +26,7 @@ const { formatRole, roleIcon } = useRoleLabel()
 const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
+const uiStore = useUIStore()
 
 const tdLocaleMap: Record<string, object> = {
   'en-US': enUSConfig,
@@ -190,6 +193,15 @@ watch(
   { immediate: true },
 )
 
+// 同步断点响应式状态到 UI Store
+watch(isMobile, (val) => {
+  uiStore.setMobile(val)
+  // 从移动端切换到桌面端时，关闭移动端菜单
+  if (!val) {
+    uiStore.closeMobileMenu()
+  }
+})
+
 // 切换租户后会 hard reload；切换前 stash 的 toast 这里 consume 并弹出，
 // 这样 toast 显示在新页面上，duration 才真正生效。
 const showPendingTenantSwitchToast = () => {
@@ -219,6 +231,10 @@ const showPendingTenantSwitchToast = () => {
 }
 
 onMounted(() => {
+  // 初始化全局响应式断点监听，同步到 UI Store
+  startListening()
+  evalBreakpoint()
+
   handleGlobalOIDCCallback()
   showPendingTenantSwitchToast()
 

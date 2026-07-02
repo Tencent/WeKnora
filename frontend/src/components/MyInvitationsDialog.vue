@@ -321,5 +321,33 @@ watch(
     gap: 6px;
     flex-shrink: 0;
   }
+
+  // 移动端：卡片纵向堆叠 + 弹窗全宽
+  @media screen and (max-width: 767px) {
+    .invitation-card {
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .invitation-card-actions {
+      flex-direction: row;
+      justify-content: flex-end;
+    }
+
+    :deep(.t-dialog) {
+      width: 100vw !important;
+      max-width: 100vw !important;
+      margin: 0 !important;
+      border-radius: 0 !important;
+    }
+
+    :deep(.t-dialog__header) {
+      padding: 14px 16px;
+    }
+
+    :deep(.t-dialog__body) {
+      padding: 16px;
+    }
+  }
 }
 </style>

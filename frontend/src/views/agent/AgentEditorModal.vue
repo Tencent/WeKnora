@@ -5428,6 +5428,253 @@ const handleSave = async () => {
   background: rgba(0, 180, 42, 0.1);
 }
 
+// ============================================================
+// 移动端适配：全屏弹窗 + 顶部标签栏 + 表单纵向堆叠
+// ============================================================
+@media screen and (max-width: 767px) {
+  .settings-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .settings-modal {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .settings-container {
+    flex-direction: column;
+  }
+
+  // 侧边栏 → 顶部水平滚动标签栏
+  .settings-sidebar {
+    width: 100%;
+    flex-shrink: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--td-component-stroke);
+    overflow: visible;
+    background: var(--td-bg-color-container);
+  }
+
+  .sidebar-header {
+    display: none;
+  }
+
+  .settings-nav {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 10px 12px;
+    gap: 2px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .nav-group-title {
+    display: none;
+  }
+
+  .nav-item {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 7px 12px;
+    margin-bottom: 0;
+    border-radius: 20px;
+    font-size: 13px;
+    min-height: 36px;
+
+    .nav-icon {
+      margin-right: 4px;
+      font-size: 15px;
+    }
+
+    &.active {
+      background: var(--td-brand-color-light);
+      color: var(--td-brand-color);
+    }
+  }
+
+  .nav-badge {
+    margin-left: 2px;
+    font-size: 10px;
+    min-width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 8px;
+    background: var(--td-brand-color);
+    color: #fff;
+  }
+
+  // 内容区
+  .settings-content {
+    flex: 1;
+  }
+
+  .content-wrapper {
+    padding: 20px 16px;
+    max-width: 100%;
+
+    &--prompts {
+      padding: 16px 12px;
+    }
+  }
+
+  .section-header {
+    margin-bottom: 14px;
+
+    h2 {
+      font-size: 18px;
+    }
+
+    .section-description {
+      font-size: 13px;
+    }
+  }
+
+  // 表单行：移动端纵向堆叠
+  .setting-row {
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 0;
+
+    &.setting-row-vertical {
+      gap: 8px;
+    }
+
+    &.setting-row--emphasize {
+      padding-left: 10px;
+    }
+  }
+
+  .setting-info {
+    max-width: 100% !important;
+    padding-right: 0 !important;
+    flex: none;
+
+    label {
+      font-size: 14px;
+    }
+
+    .desc {
+      font-size: 12px;
+    }
+  }
+
+  .setting-control {
+    flex: none;
+    width: 100%;
+    max-width: 100%;
+
+    &.setting-control-full {
+      width: 100%;
+    }
+  }
+
+  // 选择器、输入框全宽
+  .setting-control :deep(.t-select),
+  .setting-control :deep(.t-input),
+  .setting-control :deep(.t-textarea) {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  // 名称输入框容器
+  .name-input-wrapper {
+    flex-wrap: wrap;
+  }
+
+  .close-btn {
+    top: 8px;
+    right: 8px;
+    z-index: 20;
+    width: 36px;
+    height: 36px;
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    border-radius: 50%;
+  }
+
+  // 提示词面板
+  .prompts-panel__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .prompts-outline {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .prompts-outline__pill {
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+
+  // 工具卡片网格单列
+  .tool-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+// ============================================================
+// 平板适配
+// ============================================================
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .settings-overlay {
+    padding: 10px;
+  }
+
+  .settings-modal {
+    width: 95vw;
+    max-width: 100%;
+    height: calc(100vh - 20px);
+    max-height: none;
+  }
+
+  .settings-sidebar {
+    width: 160px;
+  }
+
+  .sidebar-header {
+    padding: 14px 10px 10px;
+  }
+
+  .sidebar-title {
+    font-size: 14px;
+  }
+
+  .nav-item {
+    padding: 5px 10px;
+    font-size: 13px;
+  }
+
+  .nav-icon {
+    margin-right: 5px;
+    font-size: 14px;
+  }
+
+  .content-wrapper {
+    padding: 20px 24px;
+  }
+
+  .setting-row {
+    padding: 14px 0;
+  }
+
+  .setting-info {
+    padding-right: 20px;
+  }
+}
 </style>
 
 <!-- Non-scoped styles: TDesign teleports the popup outside this component, so

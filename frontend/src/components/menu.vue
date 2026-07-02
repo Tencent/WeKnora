@@ -1,7 +1,7 @@
 <template>
-    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
-        <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
-        <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
+    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed && variant !== 'drawer', 'aside_box--drawer': variant === 'drawer' }">
+        <!-- 展开时：Logo + 搜索/折叠按钮同行（drawer 模式下仅 Logo + 搜索，无折叠按钮） -->
+        <div class="logo_row" v-if="!uiStore.sidebarCollapsed || variant === 'drawer'">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
@@ -19,7 +19,7 @@
                         <img class="header-icon-img" :src="getImgSrc('search.svg')" alt="">
                     </div>
                 </t-tooltip>
-                <div class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
+                <div v-if="variant !== 'drawer'" class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
                     <svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
                         <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
@@ -29,8 +29,8 @@
                 </div>
             </div>
         </div>
-        <!-- 折叠时：展开按钮 -->
-        <t-tooltip v-else :content="t('menu.expandSidebar')" placement="right">
+        <!-- 折叠时：展开按钮（drawer 模式下不显示） -->
+        <t-tooltip v-else-if="variant !== 'drawer'" :content="t('menu.expandSidebar')" placement="right">
             <div class="menu_item sidebar-toggle-item" @click="uiStore.toggleSidebar">
                 <div class="menu_item-box">
                     <div class="menu_icon">
@@ -52,8 +52,8 @@
         <!-- 租户选择器：仅在用户可切换租户时显示 -->
         <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
 
-        <!-- 折叠时右侧拖拽展开手柄 -->
-        <div v-if="uiStore.sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
+        <!-- 折叠时右侧拖拽展开手柄（drawer 模式下不显示） -->
+        <div v-if="uiStore.sidebarCollapsed && variant !== 'drawer'" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
 
         <!-- 上半部分：新对话吸顶 + 知识库/智能体/共享空间/历史会话随滚动一起滚走 -->
         <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
@@ -210,6 +210,17 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+
+// 响应式适配 props
+const props = withDefaults(defineProps<{
+  variant?: 'sidebar' | 'drawer'
+}>(), {
+  variant: 'sidebar'
+})
+
+const emit = defineEmits<{
+  navigate: []
+}>()
 import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages, pinSession, unpinSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
@@ -1088,6 +1099,10 @@ const handleMenuClick = async (path: string) => {
     } else {
         gotopage(path)
     }
+    // 移动端 Drawer 中点击后关闭菜单
+    if (props.variant === 'drawer') {
+        emit('navigate')
+    }
 }
 
 // 处理退出登录确认
@@ -1225,6 +1240,26 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         .menu_top {
             margin-right: 0;
             padding-right: 0;
+        }
+    }
+
+    // Drawer 模式：全宽，无折叠
+    &--drawer {
+        min-width: 100%;
+        width: 100%;
+        padding: 8px 6px 6px;
+        border-right: none;
+        box-shadow: none;
+
+        .menu_item {
+            min-height: 44px; // 触摸友好
+            height: auto;
+            padding: 10px 10px 10px var(--sidebar-inset-x);
+        }
+
+        .menu_title {
+            font-size: 15px;
+            max-width: none;
         }
     }
 

@@ -2513,6 +2513,46 @@ defineExpose({
     }
   }
 }
+
+// 移动端适配
+@media screen and (max-width: 767px) {
+  .agent-list-content {
+    padding: 12px 0 0 16px;
+  }
+
+  .header {
+    padding-right: 16px;
+    margin-bottom: 12px;
+
+    h2 {
+      font-size: 20px;
+      line-height: 28px;
+    }
+  }
+
+  .agent-list-main {
+    padding: 0 16px 8px 0;
+  }
+
+  .card-container {
+    gap: 8px;
+  }
+}
+
+// 平板适配
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .agent-list-content {
+    padding: 16px 0 0 20px;
+  }
+
+  .header {
+    padding-right: 20px;
+  }
+
+  .agent-list-main {
+    padding: 0 20px 8px 0;
+  }
+}
 </style>
 
 <style lang="less">

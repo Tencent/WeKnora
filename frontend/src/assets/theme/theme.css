@@ -97,6 +97,80 @@
 
     }
 
+/* ============================================================
+   响应式断点 CSS 变量（与 useBreakpoint.ts / responsive.less 保持一致）
+   ============================================================ */
+:root {
+  --breakpoint-mobile-max: 767px;
+  --breakpoint-tablet-min: 768px;
+  --breakpoint-tablet-max: 1023px;
+  --breakpoint-desktop-min: 1024px;
+  --app-min-touch-target: 44px;
+}
+
+/* ============================================================
+   移动端全局样式增强
+   ============================================================ */
+
+/* 触摸设备：会话行右侧操作按钮始终可见（不要仅 hover 才显示） */
+@media (hover: none) {
+  .aside_box :deep(.menu-more-wrap) {
+    opacity: 0.85;
+  }
+
+  .aside_box .submenu_item_p.session-chat-row:hover .session-list-row {
+    background: transparent;
+  }
+
+  /* 下拉菜单项最小触摸区域 */
+  .t-dropdown__item {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  /* 表单按钮 */
+  .t-button {
+    min-height: 40px;
+  }
+
+  /* 小按钮可以小一些 */
+  .t-button.t-size-s {
+    min-height: 32px;
+  }
+}
+
+/* ============================================================
+   移动端全局排版调整
+   ============================================================ */
+@media screen and (max-width: 767px) {
+  /* 移动端基础字号略大，补偿手持距离 */
+  body,
+  html {
+    font-size: 15px;
+  }
+
+  /* TDesign 表格/列表在移动端的水平滚动 */
+  .t-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 标签在小屏幕上换行 */
+  .t-tag {
+    white-space: normal;
+    word-break: break-word;
+  }
+}
+
+/* 平板端微调 */
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  body,
+  html {
+    font-size: 14px;
+  }
+}
+
 /* 全局深色模式滚动条样式 */
 :root[theme-mode="dark"] *::-webkit-scrollbar-thumb {
     background-color: #4b4b4b !important;

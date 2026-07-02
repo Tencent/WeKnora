@@ -1752,6 +1752,38 @@ onMounted(async () => {
     display: none;
   }
 }
+
+// 超小屏手机适配（如 iPhone SE 375px）
+@media (max-width: 380px) {
+  .showcase-section {
+    min-height: auto;
+    padding: 24px 16px;
+  }
+
+  .form-section {
+    padding: 16px 12px;
+  }
+
+  .form-card {
+    padding: 24px 16px;
+  }
+
+  .header-logo {
+    top: 12px;
+    left: 16px;
+
+    .logo-image {
+      width: 60px;
+    }
+  }
+}
+
+// 触摸设备：增大登录按钮点击区域
+@media (hover: none) {
+  .form-card :deep(.t-button) {
+    min-height: 44px;
+  }
+}
 </style>
 
 <style lang="less">

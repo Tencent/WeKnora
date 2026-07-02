@@ -2857,6 +2857,46 @@ const handleUploadFinishedEvent = (event: Event) => {
     }
   }
 }
+
+// 移动端适配
+@media screen and (max-width: 767px) {
+  .kb-list-content {
+    padding: 12px 0 0 16px;
+  }
+
+  .header {
+    padding-right: 16px;
+    margin-bottom: 12px;
+
+    h2 {
+      font-size: 20px;
+      line-height: 28px;
+    }
+  }
+
+  .kb-list-main {
+    padding: 0 16px 8px 0;
+  }
+
+  .kb-card-wrap {
+    gap: 8px;
+  }
+}
+
+// 平板适配
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .kb-list-content {
+    padding: 16px 0 0 20px;
+  }
+
+  .header {
+    padding-right: 20px;
+  }
+
+  .kb-list-main {
+    padding: 0 20px 8px 0;
+  }
+}
 </style>
 
 <style lang="less">
@@ -3023,6 +3063,43 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .shared-detail-drawer {
     transform: translateX(100%);
+  }
+}
+
+// 移动端：全宽抽屉
+@media screen and (max-width: 767px) {
+  .shared-detail-drawer {
+    width: 100vw;
+    max-width: 100vw;
+  }
+
+  .shared-detail-drawer-header {
+    padding: 16px 18px;
+  }
+
+  .shared-detail-drawer-title {
+    font-size: 16px;
+  }
+
+  .shared-detail-drawer-body {
+    padding: 18px;
+    gap: 16px;
+  }
+
+  .shared-detail-drawer-body .shared-detail-row {
+    gap: 4px;
+  }
+
+  .shared-detail-drawer-footer {
+    padding: 14px 18px;
+  }
+}
+
+// 平板：适应宽度
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .shared-detail-drawer {
+    width: 420px;
+    max-width: 85vw;
   }
 }
 

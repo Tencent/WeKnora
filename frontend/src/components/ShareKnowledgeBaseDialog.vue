@@ -461,6 +461,31 @@ function handleGoToOrgSettings(orgId: string) {
     color: var(--td-text-color-secondary);
     opacity: 0.75;
   }
+  // 移动端：弹窗全宽
+  @media screen and (max-width: 767px) {
+    :deep(.t-dialog) {
+      width: 100vw !important;
+      max-width: 100vw !important;
+      margin: 0 !important;
+      border-radius: 0 !important;
+    }
+
+    :deep(.t-dialog__header) {
+      padding: 14px 16px;
+    }
+
+    :deep(.t-dialog__body) {
+      padding: 16px;
+    }
+
+    :deep(.t-dialog__footer) {
+      padding: 12px 16px;
+    }
+
+    .share-form {
+      padding: 0;
+    }
+  }
 }
 </style>
 

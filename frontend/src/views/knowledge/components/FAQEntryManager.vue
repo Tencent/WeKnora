@@ -2948,6 +2948,18 @@ watch(() => entries.value.map(e => ({
 
 <style lang="less">
 /* 下拉菜单样式已统一至 @/assets/dropdown-menu.less */
+
+// 移动端：FAQ 编辑器/搜索抽屉全屏
+@media screen and (max-width: 767px) {
+  .faq-editor-drawer,
+  .faq-search-drawer {
+    .t-drawer__content-wrapper,
+    .t-drawer__content {
+      width: 100vw !important;
+      max-width: 100vw !important;
+    }
+  }
+}
 </style>
 <style scoped lang="less">
 .faq-manager {
@@ -5891,5 +5903,92 @@ watch(() => entries.value.map(e => ({
   overflow-wrap: break-word;
   white-space: normal;
   line-height: 1.4;
+}
+
+// ============================================================
+// 移动端适配
+// ============================================================
+@media screen and (max-width: 767px) {
+  // 标签面板 → 顶部水平滚动条
+  .faq-content {
+    flex-direction: column;
+  }
+
+  .faq-tag-panel {
+    width: 100%;
+    flex-shrink: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--td-component-stroke);
+    padding: 10px 12px;
+    max-height: none;
+    overflow: visible;
+
+    .sidebar-header {
+      display: none;
+    }
+
+    // 标签列表横向滚动
+    :deep(.tag-list) {
+      display: flex;
+      flex-direction: row;
+      overflow-x: auto;
+      gap: 6px;
+      padding: 0;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar { display: none; }
+    }
+
+    :deep(.tag-item) {
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+  }
+
+  .faq-card-area {
+    padding: 8px 8px 0;
+  }
+
+  // 导入/批量标签弹窗全屏
+  .faq-import-modal,
+  .batch-tag-modal {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+  }
+
+  .faq-import-overlay,
+  .batch-tag-overlay {
+    padding: 0 !important;
+    align-items: stretch !important;
+  }
+
+  // 骨架网格单列
+  .faq-skeleton-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .faq-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+// ============================================================
+// 平板适配
+// ============================================================
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .faq-tag-panel {
+    width: 140px;
+    padding: 0 12px 0 0;
+  }
+
+  .faq-card-area {
+    padding-left: 12px;
+  }
 }
 </style>

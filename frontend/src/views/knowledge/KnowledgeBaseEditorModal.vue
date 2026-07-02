@@ -1895,5 +1895,118 @@ watch(
     font-weight: 500;
   }
 }
+
+// ============================================================
+// 移动端适配
+// ============================================================
+@media screen and (max-width: 767px) {
+  .settings-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .settings-modal {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .settings-container {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    flex-shrink: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--td-component-stroke);
+    overflow: visible;
+    background: var(--td-bg-color-container);
+  }
+
+  .sidebar-header { display: none; }
+
+  .settings-nav {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 10px 12px;
+    gap: 2px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar { display: none; }
+  }
+
+  .nav-group-title { display: none; }
+
+  .nav-item {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 7px 12px;
+    margin-bottom: 0;
+    border-radius: 20px;
+    font-size: 13px;
+    min-height: 36px;
+
+    .nav-icon { margin-right: 4px; font-size: 15px; }
+
+    &.active {
+      background: var(--td-brand-color-light);
+      color: var(--td-brand-color);
+    }
+  }
+
+  .settings-content { flex: 1; }
+
+  .content-wrapper {
+    max-width: 100%;
+    padding: 20px 16px;
+  }
+
+  .close-btn {
+    top: 8px;
+    right: 8px;
+    z-index: 20;
+    width: 36px;
+    height: 36px;
+    background: var(--td-bg-color-container);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    border-radius: 50%;
+  }
+
+  // 底部按钮栏
+  .settings-footer {
+    padding: 12px 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+// 平板适配
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .settings-overlay { padding: 10px; }
+
+  .settings-modal {
+    width: 95vw;
+    max-width: 100%;
+    height: calc(100vh - 20px);
+    max-height: none;
+  }
+
+  .settings-sidebar { width: 160px; }
+
+  .content-wrapper {
+    max-width: 100%;
+    padding: 24px 20px;
+  }
+
+  .sidebar-header { padding: 14px 10px 10px; }
+  .nav-item { padding: 5px 10px; font-size: 13px; }
+  .nav-icon { margin-right: 5px; font-size: 14px; }
+}
 </style>
 

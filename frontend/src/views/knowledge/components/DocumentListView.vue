@@ -757,4 +757,106 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     }
   }
 }
+
+// ============================================================
+// 移动端适配：精简列，保留核心信息
+// ============================================================
+@media screen and (max-width: 767px) {
+  .doc-list-header,
+  .doc-list-row {
+    grid-template-columns:
+      36px // checkbox
+      1fr // name
+      auto // status + actions 合并
+      0px; // 隐藏 actions 列（合并到 status 列后）
+    column-gap: 4px;
+    padding: 0 8px;
+  }
+
+  // 隐藏次要列的表头
+  .cell-tag,
+  .cell-source,
+  .cell-size,
+  .cell-time,
+  .cell-actions {
+    display: none !important;
+  }
+
+  .cell-check {
+    width: 36px;
+    min-width: 36px;
+    padding: 0 4px;
+
+    :deep(.t-checkbox) {
+      transform: scale(0.9);
+    }
+  }
+
+  .cell-name {
+    min-width: 0;
+    padding: 8px 4px;
+  }
+
+  .row-file-name {
+    font-size: 13px;
+  }
+
+  .row-file-desc {
+    display: none; // 描述文字在移动端隐藏
+  }
+
+  .cell-status {
+    min-width: 0;
+    padding: 0 4px;
+    justify-content: flex-end;
+
+    .row-status-tag {
+      font-size: 11px;
+    }
+  }
+
+  // 行高缩小
+  .doc-list-row {
+    min-height: 50px;
+  }
+
+  .doc-list-header {
+    height: 36px;
+    font-size: 11px;
+  }
+
+  // 操作按钮移动到行内末尾
+  .row-more-btn {
+    display: inline-flex !important;
+    width: 24px;
+    height: 24px;
+    opacity: 0.7;
+  }
+}
+
+// ============================================================
+// 平板适配：隐藏标签和来源列，保留核心列
+// ============================================================
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .doc-list-header,
+  .doc-list-row {
+    grid-template-columns:
+      40px // checkbox
+      minmax(180px, 2fr) // name
+      minmax(80px, 0.8fr) // tag (keep)
+      0px // source (hide)
+      80px // size
+      minmax(80px, 0.6fr) // status
+      120px // time
+      44px; // actions
+  }
+
+  .cell-source {
+    display: none !important;
+  }
+
+  .doc-list-row {
+    min-height: 52px;
+  }
+}
 </style>
