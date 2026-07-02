@@ -729,3 +729,14 @@ func NormalizeQueryText(q string) string {
 func IsChineseChar(r rune) bool {
 	return unicode.Is(unicode.Han, r)
 }
+
+// KnowledgeGeneratedQuestion represents a single AI-generated question
+// associated with a specific chunk of a knowledge item.
+type KnowledgeGeneratedQuestion struct {
+	// ChunkID is the ID of the chunk this question was generated from.
+	ChunkID string `json:"chunk_id"`
+	// QuestionID is the unique identifier of this generated question within the chunk.
+	QuestionID string `json:"question_id"`
+	// Question is the generated question text.
+	Question string `json:"question"`
+}
