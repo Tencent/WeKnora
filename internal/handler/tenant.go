@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1168,6 +1169,10 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 		return
 	}
 	merged := types.MergeParserEngineConfigForUpdate(&cfg, tenant.ParserEngineConfig)
+	if err := validateParserEngineOutboundURLs(merged); err != nil {
+		c.Error(errors.NewValidationError(err.Error()))
+		return
+	}
 	tenant.ParserEngineConfig = merged
 	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
 	if err != nil {
@@ -1464,4 +1469,21 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		"data":    updatedTenant.RetrievalConfig,
 		"message": "Retrieval configuration updated successfully",
 	})
+}
+
+func validateParserEngineOutboundURLs(cfg *types.ParserEngineConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	if endpoint := strings.TrimSpace(cfg.MinerUEndpoint); endpoint != "" {
+		if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+			return fmt.Errorf("mineru_endpoint failed SSRF validation: %v", err)
+		}
+	}
+	if vlmURL := strings.TrimSpace(cfg.MinerUVLMServerURL); vlmURL != "" {
+		if err := secutils.ValidateURLForSSRF(vlmURL); err != nil {
+			return fmt.Errorf("mineru_vlm_server_url failed SSRF validation: %v", err)
+		}
+	}
+	return nil
 }
