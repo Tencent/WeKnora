@@ -163,12 +163,13 @@ const debouncedFetch = () => {
     debounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
 };
 
-// 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention
+// 监听 Agent / 知识库 / 文件 / 文件夹 / 标签 / MCP / Skill @mention
 watch(
     () => ({
         agentId: settingsStore.selectedAgentId,
         kbs: settingsStore.settings.selectedKnowledgeBases,
         files: settingsStore.settings.selectedFiles,
+        folders: settingsStore.settings.selectedFolderIds,
         tags: settingsStore.settings.selectedTags,
         mcps: settingsStore.settings.selectedMCPServices,
         skills: settingsStore.settings.selectedSkills,
@@ -192,6 +193,7 @@ const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFil
 async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = []) {
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
+    const selectedFolders = settingsStore.settings.selectedFolderIds || [];
 
     // 构建 session 数据，包含 Agent 配置
     const sessionData: any = {};
@@ -205,6 +207,13 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
         knowledge_ids: selectedFiles,  // 所有选中的普通知识/文件
         allowed_tools: settingsStore.agentConfig.allowedTools
     };
+
+    // 如果选中了文件夹，自动把文件夹所属 KB 加入知识库列表
+    for (const f of selectedFolders) {
+        if (f.kbId && f.id !== '__root__' && !sessionData.agent_config.knowledge_bases.includes(f.kbId)) {
+            sessionData.agent_config.knowledge_bases.push(f.kbId);
+        }
+    }
 
     try {
         const res = await createSessions(sessionData);

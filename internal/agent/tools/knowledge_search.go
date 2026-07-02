@@ -534,6 +534,11 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 							VectorThreshold:  vectorThreshold,
 							KeywordThreshold: keywordThreshold,
 						}
+						// Propagate folder scope from the first full-KB target.
+						if len(targets) > 0 {
+							searchParams.FolderIDs = targets[0].FolderIDs
+							searchParams.IncludeSubfolders = targets[0].IncludeSubfolders
+						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], searchParams)
 						if err != nil {
 							logger.Warnf(ctx, "[Tool][KnowledgeSearch] Combined search failed for KBs %v: %v", fullKBIDs, err)
@@ -567,6 +572,8 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 							KeywordThreshold: keywordThreshold,
 							KnowledgeIDs:     st.KnowledgeIDs,
 							TagIDs:           st.TagIDs,
+							FolderIDs:        st.FolderIDs,
+							IncludeSubfolders: st.IncludeSubfolders,
 						}
 						kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
 						if err != nil {

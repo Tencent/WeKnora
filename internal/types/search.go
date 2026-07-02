@@ -36,6 +36,11 @@ type SearchTarget struct {
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
 	// TagIDs limits retrieval to chunks/documents carrying any of these KB-local tags.
 	TagIDs []string `json:"tag_ids,omitempty"`
+	// FolderIDs restricts retrieval to knowledge entries in the specified folders.
+	FolderIDs []string `json:"folder_ids,omitempty"`
+	// IncludeSubfolders, when true alongside non-empty FolderIDs, includes
+	// knowledge entries from all descendant subfolders.
+	IncludeSubfolders bool `json:"include_subfolders,omitempty"`
 }
 
 // SearchTargets is a list of search targets, pre-computed at request entry point
@@ -165,6 +170,11 @@ type SearchParams struct {
 	// in processSearchResults. Used by the chat pipeline where context assembly
 	// is handled separately in the merge stage.
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+	// FolderIDs restricts retrieval to knowledge entries in the specified folders.
+	FolderIDs []string `json:"folder_ids,omitempty"`
+	// IncludeSubfolders, when true alongside non-empty FolderIDs, includes
+	// knowledge entries from all descendant subfolders.
+	IncludeSubfolders bool `json:"include_subfolders,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

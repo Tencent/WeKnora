@@ -415,6 +415,8 @@ func (p *PluginSearch) searchByTargets(
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
+						FolderIDs:             chatManage.FolderIDs,
+						IncludeSubfolders:     chatManage.IncludeSubfolders,
 						SkipContextEnrichment: true,
 					}
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)
@@ -503,6 +505,8 @@ func (p *PluginSearch) searchSingleTarget(
 		KeywordThreshold:      chatManage.KeywordThreshold,
 		MatchCount:            chatManage.EmbeddingTopK,
 		TagIDs:                t.TagIDs,
+		FolderIDs:             t.FolderIDs,
+		IncludeSubfolders:     t.IncludeSubfolders,
 		SkipContextEnrichment: true,
 	}
 	if t.Type == types.SearchTargetTypeKnowledge {

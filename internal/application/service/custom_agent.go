@@ -456,6 +456,8 @@ func (s *customAgentService) GetSuggestedQuestions(
 	kbIDs []string,
 	knowledgeIDs []string,
 	tagIDs []string,
+	folderIDs []string,
+	includeSubfolders bool,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
 	if limit <= 0 {
@@ -499,6 +501,36 @@ func (s *customAgentService) GetSuggestedQuestions(
 			return s.truncateQuestions(result, limit), nil
 		}
 		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolved)
+		if len(knowledgeIDs) == 0 {
+			return s.truncateQuestions(result, limit), nil
+		}
+	}
+
+	// Resolve folder scope — map folderIDs to knowledgeIDs so chunk queries
+	// are automatically scoped. Uses the already-loaded agent for KB resolution.
+	if len(folderIDs) > 0 {
+		var folderKnowledgeIDs []string
+		resolveKBs := kbIDs
+		if len(resolveKBs) == 0 {
+			switch agent.Config.KBSelectionMode {
+			case "all":
+				kbs, _ := s.kbService.ListKnowledgeBases(ctx)
+				for _, kb := range kbs {
+					resolveKBs = append(resolveKBs, kb.ID)
+				}
+			case "selected":
+				resolveKBs = agent.Config.KnowledgeBases
+			}
+		}
+		for _, kbID := range resolveKBs {
+			ids, err := s.knowledgeRepo.ListKnowledgeIDsByFolderIDs(ctx, tenantID, kbID, folderIDs, includeSubfolders)
+			if err != nil {
+				logger.Warnf(ctx, "Failed to resolve folder IDs for suggested questions: %v", err)
+				continue
+			}
+			folderKnowledgeIDs = append(folderKnowledgeIDs, ids...)
+		}
+		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, folderKnowledgeIDs)
 		if len(knowledgeIDs) == 0 {
 			return s.truncateQuestions(result, limit), nil
 		}

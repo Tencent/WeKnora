@@ -24,6 +24,7 @@ const handleCancel = () => {
     :reparse-preview="uploadConfirmStore.reparse"
     :accept-file-types="uploadConfirmStore.acceptFileTypes"
     :supported-file-types="uploadConfirmStore.supportedFileTypes"
+    :current-folder-id="uploadConfirmStore.currentFolderId"
     @confirm="handleConfirm"
     @cancel="handleCancel"
   />

@@ -35,6 +35,7 @@ type KnowledgeHandler struct {
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
+	folderService     interfaces.KnowledgeFolderService
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -45,6 +46,7 @@ func NewKnowledgeHandler(
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
+	folderService interfaces.KnowledgeFolderService,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		kgService:         kgService,
@@ -53,6 +55,7 @@ func NewKnowledgeHandler(
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
+		folderService:     folderService,
 	}
 }
 
@@ -366,8 +369,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 	channel := c.PostForm("channel")
 
+	// Get target folder ID (if specified)
+	folderID := c.PostForm("folder_id")
+	var folderIDPtr *string
+	if folderID != "" {
+		folderIDPtr = &folderID
+	}
+
 	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides, folderIDPtr)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
@@ -436,6 +446,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
+		FolderID         *string                          `json:"folder_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
@@ -464,7 +475,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 
 	// Create knowledge entry from the URL
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
+		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig, req.FolderID,
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
@@ -870,6 +881,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+		FolderID:    c.Query("folder_id"),
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
@@ -1050,16 +1062,84 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
-	// Single batch fetch to validate that every id exists and belongs to the
-	// requested KB. The service-layer DeleteKnowledgeList only enforces tenant
+	// Separate folder IDs from knowledge IDs. The frontend may send
+	// both in the same batch delete request.
+	var (
+		folderIDs    []string
+		knowledgeIDs []string
+	)
+	for _, id := range ids {
+		folder, fErr := h.folderService.GetFolder(ctx, id)
+		if fErr == nil && folder != nil && folder.KnowledgeBaseID == kbID {
+			folderIDs = append(folderIDs, id)
+		} else {
+			knowledgeIDs = append(knowledgeIDs, id)
+		}
+	}
+
+	// Before deleting folders, collect all knowledge IDs inside them so they
+	// can be included in the async deletion task. This prevents knowledge from
+	// "leaking" to root level after force-deleting the containing folder.
+	if len(folderIDs) > 0 {
+		childKnowledgeIDs, err := h.kgService.ListKnowledgeIDsByFolderIDs(
+			ctx, effectiveTenantID, kbID, folderIDs, true)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"folder_ids": folderIDs,
+			})
+		} else {
+			// Deduplicate: child knowledge IDs that were already explicitly
+			// selected in the batch request should not be added again.
+			existing := make(map[string]struct{}, len(knowledgeIDs))
+			for _, id := range knowledgeIDs {
+				existing[id] = struct{}{}
+			}
+			for _, id := range childKnowledgeIDs {
+				if _, dup := existing[id]; !dup {
+					knowledgeIDs = append(knowledgeIDs, id)
+					existing[id] = struct{}{}
+				}
+			}
+		}
+
+		// Delete folders (force=true to cascade-delete subfolders; root-level
+		// knowledge is already collected above and will be async-deleted below).
+		for _, folderID := range folderIDs {
+			if err := h.folderService.DeleteFolder(ctx, folderID, true); err != nil {
+				logger.ErrorWithFields(ctx, err, map[string]interface{}{
+					"folder_id": secutils.SanitizeForLog(folderID),
+				})
+				c.Error(errors.NewBadRequestError(
+					fmt.Sprintf("Failed to delete folder: %s", err.Error())))
+				return
+			}
+		}
+	}
+
+	// If there are no knowledge IDs to delete, we're done.
+	if len(knowledgeIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "Batch delete completed",
+			"data": gin.H{
+				"deleted_count":     len(folderIDs),
+				"deleted_folders":   len(folderIDs),
+				"deleted_knowledge": 0,
+			},
+		})
+		return
+	}
+
+	// Single batch fetch to validate that every knowledge id exists and belongs
+	// to the requested KB. The service-layer DeleteKnowledgeList only enforces tenant
 	// scope, not KB scope, so the handler must guard against cross-KB deletion.
-	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, knowledgeIDs)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
-	if len(knowledgeList) != len(ids) {
+	if len(knowledgeList) != len(knowledgeIDs) {
 		c.Error(errors.NewBadRequestError("One or more knowledge entries not found"))
 		return
 	}
@@ -1072,22 +1152,25 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		}
 	}
 
-	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, knowledgeIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
 		return
 	}
 
-	logger.Infof(ctx, "Batch knowledge delete task enqueued: %s, kb_id: %s, count: %d",
-		taskID, secutils.SanitizeForLog(kbID), len(ids))
+	totalCount := len(knowledgeIDs) + len(folderIDs)
+	logger.Infof(ctx, "Batch delete task enqueued: %s, kb_id: %s, knowledge: %d, folders: %d",
+		taskID, secutils.SanitizeForLog(kbID), len(knowledgeIDs), len(folderIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Batch delete task submitted",
 		"data": gin.H{
-			"task_id":       taskID,
-			"deleted_count": len(ids),
+			"task_id":           taskID,
+			"deleted_count":     totalCount,
+			"deleted_folders":   len(folderIDs),
+			"deleted_knowledge": len(knowledgeIDs),
 		},
 	})
 }

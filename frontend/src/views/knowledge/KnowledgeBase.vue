@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
-import { MessagePlugin } from "tdesign-vue-next";
+import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timeline.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
@@ -37,6 +37,7 @@ import {
   getKnowledgeSpans,
   getKnowledgeDetails,
 } from "@/api/knowledge-base/index";
+import { createFolder } from "@/api/knowledge-folder";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
@@ -55,6 +56,9 @@ import {
   shouldRefreshWikiStatusAfterKnowledgePoll,
 } from './wikiStatusRefresh';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
+import FolderManageDialog from '@/views/knowledge/components/FolderManageDialog.vue';
+import { useKnowledgeFolder } from '@/composables/useKnowledgeFolder';
+import type { KnowledgeFolder } from '@/types/knowledgeFolder';
 import { useI18n } from 'vue-i18n';
 import { formatStringDate } from '@/utils';
 import { formatFileSize } from '@/utils/files';
@@ -566,6 +570,97 @@ const sourceOptions = computed(() => [
 const updatedTimeRange = ref<string[]>([]);
 // Disable any date after today so users cannot filter into the future.
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
+// Folder state
+const {
+  currentFolderId,
+  folders,
+  breadcrumbPath,
+  folderTree,
+  foldersLoading,
+  treeLoading,
+  currentFolderPath,
+  navigateToFolder,
+  loadFolderTree,
+  loadFolders,
+  handleDeleteFolder,
+} = useKnowledgeFolder(kbId);
+
+// Folder management dialog state
+const folderDialogVisible = ref(false);
+const folderDialogMode = ref<'create' | 'edit'>('create');
+const currentEditFolder = ref<KnowledgeFolder | null>(null);
+
+// Load folders when kbId or currentFolderId changes
+watch([kbId, currentFolderId], ([newKbId, newFolderId]) => {
+  if (newKbId) {
+    loadFolders(newFolderId);
+    loadFolderTree();
+  }
+}, { immediate: true });
+
+// Reload files when folder changes
+watch(currentFolderId, () => {
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
+});
+
+const handleFolderNavigate = async (folderId: string | null) => {
+  await navigateToFolder(folderId);
+};
+
+const handleCreateFolder = () => {
+  folderDialogMode.value = 'create';
+  currentEditFolder.value = null;
+  folderDialogVisible.value = true;
+};
+
+const confirmDeleteFolder = (folder: KnowledgeFolder) => {
+  const name = folder.name || '';
+  const count = folder.knowledge_count || 0;
+  const msg = count > 0
+    ? t('knowledgeFolder.confirmDeleteFolderWithContent', { name, count })
+    : t('knowledgeFolder.confirmDeleteFolder', { name });
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeFolder.deleteFolder'),
+    body: msg,
+    confirmBtn: { content: t('common.confirm'), theme: 'danger' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.update({ confirmLoading: true });
+      const ok = await handleDeleteFolder(folder.id, count > 0);
+      dialog.destroy();
+      if (ok) {
+        loadKnowledgeFiles(kbId.value);
+        loadFolders(currentFolderId.value);
+        loadFolderTree();
+      }
+    },
+  });
+};
+
+const handleFolderDialogSuccess = () => {
+  loadFolders(currentFolderId.value);
+  loadFolderTree();
+};
+
+// Prepend folder items to cardList for display
+const folderCardItems = computed(() => {
+  return folders.value.map((f) => ({
+    ...f,
+    id: f.id,
+    file_name: f.name,
+    type: 'folder',
+    isFolder: true,
+    knowledge_count: f.knowledge_count || 0,
+    created_at: f.created_at,
+    updated_at: f.updated_at || f.created_at,
+  }));
+});
+
+const displayCardList = computed(() => {
+  return [...folderCardItems.value, ...cardList.value];
+});
+
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
   return {
@@ -576,6 +671,7 @@ const filterParams = computed(() => {
     source: selectedSource.value || undefined,
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
+    folder_id: currentFolderId.value || '__root__',
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -1524,15 +1620,6 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
-const getFolderUploadFileName = (file: File) => {
-  const relativePath = (file as any).webkitRelativePath;
-  if (!relativePath) return undefined;
-  const pathParts = relativePath.split('/');
-  if (pathParts.length <= 2) return undefined;
-  const subPath = pathParts.slice(1, -1).join('/');
-  return `${subPath}/${file.name}`;
-};
-
 const showUploadResultMessages = (
   successCount: number,
   failCount: number,
@@ -1566,9 +1653,60 @@ const showUploadResultMessages = (
   }
 };
 
+/**
+ * Build KB folder structure from uploaded folder paths.
+ * Maps each webkitRelativePath prefix to its KB folder_id.
+ */
+const buildFolderStructure = async (
+  files: File[],
+  targetKbId: string,
+  baseParentId: string | null,
+): Promise<Map<string, string>> => {
+  const pathToId = new Map<string, string>();
+  // Collect unique folder paths (all intermediate directory prefixes)
+  const folderPaths = new Set<string>();
+  for (const file of files) {
+    const rp = (file as any).webkitRelativePath as string | undefined;
+    if (!rp) continue;
+    const parts = rp.split('/');
+    // parts[0] is the top-level folder name; collect all deeper prefixes
+    for (let i = 1; i < parts.length; i++) {
+      folderPaths.add(parts.slice(0, i).join('/'));
+    }
+  }
+  if (folderPaths.size === 0) return pathToId;
+
+  // Sort by depth so parents are created before children
+  const sorted = Array.from(folderPaths).sort((a, b) => a.split('/').length - b.split('/').length);
+
+  for (const folderPath of sorted) {
+    try {
+      const parts = folderPath.split('/');
+      const folderName = parts[parts.length - 1];
+      let parentId = baseParentId;
+      if (parts.length > 1) {
+        const parentPath = parts.slice(0, -1).join('/');
+        parentId = pathToId.get(parentPath) || baseParentId;
+      }
+      // Create folder (skip duplicates silently via backend, or reuse existing)
+      const created: any = await createFolder(targetKbId, {
+        name: folderName,
+        parent_folder_id: parentId,
+      });
+      if (created?.id) {
+        pathToId.set(folderPath, created.id);
+      }
+    } catch {
+      // Folder may already exist; try listing to find it
+      // If creation fails, files go to base parent
+    }
+  }
+  return pathToId;
+};
+
 const executeUploadBatch = async (
   files: File[],
-  options: { processConfig?: KnowledgeProcessOverrides } = {},
+  options: { processConfig?: KnowledgeProcessOverrides; folderId?: string | null } = {},
 ) => {
   const targetKbId = kbId.value;
   if (!targetKbId || files.length === 0) {
@@ -1581,8 +1719,19 @@ const executeUploadBatch = async (
   const totalCount = files.length;
   const hasFolderPaths = files.some((file) => {
     const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-    return !!relativePath && relativePath.split('/').length > 2;
+    return !!relativePath && relativePath.split('/').length > 1;
   });
+
+  // Build folder structure from uploaded folder paths
+  let folderPathMap: Map<string, string> = new Map();
+  if (hasFolderPaths) {
+    MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: totalCount }));
+    folderPathMap = await buildFolderStructure(
+      files,
+      targetKbId,
+      options.folderId || null,
+    );
+  }
 
   for (const file of files) {
     try {
@@ -1590,11 +1739,30 @@ const executeUploadBatch = async (
         file: File
         tag_ids?: string[]
         fileName?: string
+        folder_id?: string
         process_config?: KnowledgeProcessOverrides
       } = { file, tag_ids: tagIdsToUpload };
 
-      const fileName = getFolderUploadFileName(file);
-      if (fileName) uploadData.fileName = fileName;
+      // Determine which KB folder this file belongs to
+      const relativePath = (file as any).webkitRelativePath as string | undefined;
+      if (relativePath) {
+        const parts = relativePath.split('/');
+        if (parts.length > 1) {
+          // File is inside a subfolder: get the parent folder's KB ID
+          const parentPath = parts.slice(0, -1).join('/');
+          const kbFolderId = folderPathMap.get(parentPath);
+          if (kbFolderId) {
+            uploadData.folder_id = kbFolderId;
+          }
+        }
+        // Use original filename (last segment) for display
+        if (parts.length >= 2) {
+          uploadData.fileName = parts.slice(1).join('/');
+        }
+      } else if (options.folderId) {
+        uploadData.folder_id = options.folderId;
+      }
+
       if (options.processConfig) {
         uploadData.process_config = options.processConfig;
       }
@@ -1636,11 +1804,11 @@ const executeUploadBatch = async (
     }));
   }
 
-  showUploadResultMessages(successCount, failCount, totalCount, hasFolderPaths ? 'folder' : 'document');
+  showUploadResultMessages(successCount, failCount, totalCount, folderPathMap.size > 0 ? 'folder' : 'document');
   return { successCount, failCount };
 };
 
-const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
+const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides, folderId?: string | null) => {
   const targetKbId = kbId.value;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
@@ -1649,11 +1817,15 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
 
   const tagIdsToUpload = selectedTagIds.value.length > 0 ? [...selectedTagIds.value] : undefined;
   try {
-    const responseData: any = await createKnowledgeFromURL(targetKbId, {
+    const urlData: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; folder_id?: string; process_config?: KnowledgeProcessOverrides } = {
       url,
       tag_ids: tagIdsToUpload,
       process_config: processConfig,
-    });
+    };
+    if (folderId) {
+      urlData.folder_id = folderId;
+    }
+    const responseData: any = await createKnowledgeFromURL(targetKbId, urlData);
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
       detail: { kbId: targetKbId },
     }));
@@ -1689,21 +1861,23 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const files = result.files || [];
   const urls = result.urls || [];
   const processConfig = result.processConfig;
+  const folderId = result.folderId;
 
   if (files.length > 0) {
-    const hasFolderPaths = files.some((file) => {
-      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-      return !!relativePath && relativePath.split('/').length > 2;
-    });
-    if (hasFolderPaths) {
-      MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
-    }
-    await executeUploadBatch(files, { processConfig });
+    await executeUploadBatch(files, { processConfig, folderId });
   }
 
   for (const url of urls) {
-    await executeUrlImport(url, processConfig);
+    await executeUrlImport(url, processConfig, folderId);
   }
+
+  // Refresh current directory view
+  resetPage();
+  await loadKnowledgeFiles(kbId.value);
+  loadTags(kbId.value, true);
+  // Refresh folder list in case new folders were created
+  loadFolders(currentFolderId.value);
+  loadFolderTree();
 };
 
 const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
@@ -1717,6 +1891,7 @@ const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
       urls,
       acceptFileTypes: acceptFileTypes.value,
       supportedFileTypes: [...supportedFileTypes.value],
+      currentFolderId: currentFolderId.value,
     });
     await handleUploadConfirmResult(result);
   } catch {
@@ -1894,7 +2069,8 @@ const getDoc = (page: number) => {
 };
 
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
-  const items = cardList.value || [];
+  // Use displayCardList which includes both folderCardItems and cardList
+  const items = displayCardList.value;
   const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
   if (shiftKey && lastSelectedIndex >= 0 && idx >= 0) {
     const [s, e] = idx < lastSelectedIndex
@@ -1917,10 +2093,13 @@ const onCardGridCheckboxChange = (id: string, checked: boolean, ctx?: { e?: Even
 };
 
 const toggleSelectAll = (checked: boolean) => {
-  if (checked) {
-    for (const item of cardList.value || []) selectedIds.value.add(item.id);
-  } else {
-    for (const item of cardList.value || []) selectedIds.value.delete(item.id);
+  // displayCardList includes both folderCardItems and cardList (files)
+  for (const item of displayCardList.value) {
+    if (checked) {
+      selectedIds.value.add(item.id);
+    } else {
+      selectedIds.value.delete(item.id);
+    }
   }
 };
 
@@ -1989,9 +2168,13 @@ const openKnowledgeItem = (item: KnowledgeCard) => {
   openCardDetails(item);
 };
 
-const onCardClick = (item: KnowledgeCard) => {
+const onCardClick = (item: KnowledgeCard & { isFolder?: boolean }) => {
   if (batchMode.value) {
     onCardGridCheckboxChange(item.id, !selectedIds.value.has(item.id));
+    return;
+  }
+  if (item.isFolder) {
+    handleFolderNavigate(item.id);
     return;
   }
   openKnowledgeItem(item);
@@ -2006,10 +2189,20 @@ const confirmBatchDelete = async () => {
     const res: any = await batchDeleteKnowledge(kbId.value, ids);
     if (res?.success) {
       MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
+      // If the current folder was deleted, navigate to its parent (or root)
+      if (currentFolderId.value && deletedIdSet.has(currentFolderId.value)) {
+        const bc = breadcrumbPath.value || [];
+        const parentFolderId = bc.length >= 2 ? bc[bc.length - 2]?.id ?? null : null;
+        await navigateToFolder(parentFolderId);
+      }
       clearSelection();
       batchMode.value = false;
       resetPage();
-      // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
+      // Reload folders immediately (folders are deleted synchronously on the backend)
+      loadFolders(currentFolderId.value);
+      loadFolderTree();
+      // Backend enqueues knowledge deletion as async task; short-poll until
+      // the list no longer contains the deleted IDs or timeout.
       const maxPolls = 30;
       const delayMs = 400;
       for (let i = 0; i < maxPolls; i++) {
@@ -2043,8 +2236,15 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
   action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete',
-  item: KnowledgeCard,
+  item: KnowledgeCard & { isFolder?: boolean },
 ) => {
+  // Handle folder deletion
+  if ((item as any).isFolder) {
+    if (action === 'delete') {
+      confirmDeleteFolder(item as any);
+    }
+    return;
+  }
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
@@ -2212,6 +2412,24 @@ async function createNewSession(value: string): Promise<void> {
       </div>
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
+        <!-- Folder breadcrumb -->
+        <div v-if="breadcrumbPath.length > 0 && !isFAQ" class="folder-breadcrumb-bar">
+          <t-icon name="folder-open" class="folder-breadcrumb-icon" />
+          <button type="button" class="folder-breadcrumb-link" @click="handleFolderNavigate(null)">
+            {{ $t('knowledgeFolder.rootFolder') }}
+          </button>
+          <template v-for="(f, idx) in breadcrumbPath" :key="f.id">
+            <t-icon name="chevron-right" class="folder-breadcrumb-sep" />
+            <button
+              type="button"
+              class="folder-breadcrumb-link"
+              :class="{ current: idx === breadcrumbPath.length - 1 }"
+              @click="handleFolderNavigate(f.id)"
+            >
+              {{ f.name }}
+            </button>
+          </template>
+        </div>
         <div class="knowledge-main">
           <div class="tag-content">
             <div class="doc-card-area">
@@ -2367,6 +2585,11 @@ async function createNewSession(value: string): Promise<void> {
                   </t-tooltip>
                 </div>
                 <div v-if="canEdit" class="doc-filter-actions">
+                  <t-tooltip :content="$t('knowledgeFolder.createFolder')" placement="top">
+                    <button type="button" class="content-bar-icon-btn" @click="handleCreateFolder">
+                      <t-icon name="folder-add" size="16px" />
+                    </button>
+                  </t-tooltip>
                   <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
                     :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
                     trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
@@ -2375,7 +2598,7 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </div>
               <div class="doc-scroll-container"
-                :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
+                :class="{ 'is-empty': !displayCardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
                 <div v-if="docMarqueeVisible" class="doc-marquee-box"
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
@@ -2396,8 +2619,35 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="cardList.length && viewMode === 'grid'">
+                <template v-else-if="displayCardList.length && viewMode === 'grid'">
                   <div class="doc-card-list doc-card-list-animated">
+                    <!-- 文件夹卡片 -->
+                    <div
+                      v-for="f in folderCardItems"
+                      :key="f.id"
+                      class="knowledge-card knowledge-card--folder"
+                      @click="handleFolderNavigate(f.id)"
+                    >
+                      <div class="card-content">
+                        <div class="card-content-nav">
+                          <t-icon name="folder" size="20px" class="folder-card-icon" />
+                          <span class="card-content-title" :title="f.file_name">{{ f.file_name }}</span>
+                          <t-tooltip :content="$t('knowledgeFolder.deleteFolder')" placement="top">
+                            <button
+                              type="button"
+                              class="folder-card-delete"
+                              @click.stop="confirmDeleteFolder(f)"
+                            >
+                              <t-icon name="delete" size="14px" />
+                            </button>
+                          </t-tooltip>
+                        </div>
+                      </div>
+                      <div class="card-bottom">
+                        <span class="card-bottom-tag">{{ $t('knowledgeFolder.itemCount', { count: f.knowledge_count || 0 }) }}</span>
+                        <span class="card-bottom-time">{{ formatDocTime(f.created_at) }}</span>
+                      </div>
+                    </div>
                     <!-- 现有文档卡片 -->
                     <div class="knowledge-card"
                       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
@@ -2700,10 +2950,12 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </Teleport>
                 </template>
-                <template v-else-if="cardList.length && viewMode === 'list'">
-                  <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
-                    :can-edit="canEdit" @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
-                    @toggle-all="toggleSelectAll" @action="(action: any, item: any) => handleListAction(action, item)"
+                <template v-else-if="displayCardList.length && viewMode === 'list'">
+                  <DocumentListView :items="displayCardList" :selected-ids="selectedIds" :tag-list="tagList"
+                    :can-edit="canEdit" @open="(item: any) => openKnowledgeItem(item)"
+                    @enter-folder="(folderId: string) => handleFolderNavigate(folderId)"
+                    @toggle-row="toggleSelectRow" @toggle-all="toggleSelectAll"
+                    @action="(action: any, item: any) => handleListAction(action, item)"
                     @tag-edit="(item: any) => openTagEditDialog(item)" />
                 </template>
                 <template v-else-if="!docListLoading">
@@ -2753,6 +3005,16 @@ async function createNewSession(value: string): Promise<void> {
     :kb-id="kbId"
     :is-faq="isFAQ"
     @changed="onTagManageChanged"
+  />
+
+  <!-- Folder management dialog -->
+  <FolderManageDialog
+    v-model:visible="folderDialogVisible"
+    :kb-id="kbId"
+    :mode="folderDialogMode"
+    :folder="currentEditFolder"
+    :parent-folder-id="currentFolderId"
+    @success="handleFolderDialogSuccess"
   />
 </template>
 <style>
@@ -3247,6 +3509,9 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .doc-filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     flex-shrink: 0;
 
     :deep(.content-bar-icon-btn) {
@@ -4437,5 +4702,95 @@ async function createNewSession(value: string): Promise<void> {
 
 .del-card {
   vertical-align: middle;
+}
+
+/* ---- Folder breadcrumb bar ---- */
+.folder-breadcrumb-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  margin: 0 0 4px;
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.folder-breadcrumb-icon {
+  font-size: 16px;
+  color: var(--td-warning-color);
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.folder-breadcrumb-link {
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.12s ease;
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &.current {
+    color: var(--td-text-color-primary);
+    font-weight: 600;
+  }
+}
+
+.folder-breadcrumb-sep {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+/* ---- Folder card in grid ---- */
+.knowledge-card--folder {
+  cursor: pointer;
+
+  .card-content-nav {
+    gap: 6px;
+  }
+
+  .folder-card-icon {
+    color: var(--td-warning-color);
+    flex-shrink: 0;
+  }
+
+  .folder-card-delete {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s, color 0.12s;
+    margin-left: auto;
+    flex-shrink: 0;
+
+    &:hover {
+      color: var(--td-error-color);
+      background: var(--td-error-color-1);
+    }
+  }
+
+  &:hover .folder-card-delete {
+    opacity: 1;
+  }
+
+  &:hover {
+    border-color: var(--td-warning-color);
+  }
 }
 </style>

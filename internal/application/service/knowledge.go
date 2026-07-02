@@ -916,3 +916,27 @@ func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes 
 	}
 	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 }
+
+// MoveToFolder moves a single knowledge entry to a specified folder or to root.
+func (s *knowledgeService) MoveToFolder(ctx context.Context, knowledgeID string, folderID *string) error {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	// Verify the knowledge entry exists and belongs to the tenant
+	_, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return err
+	}
+	return s.repo.UpdateKnowledgeFolderID(ctx, knowledgeID, folderID)
+}
+
+// BatchMoveToFolder moves multiple knowledge entries to a specified folder or to root.
+func (s *knowledgeService) BatchMoveToFolder(ctx context.Context, knowledgeIDs []string, folderID *string) error {
+	if len(knowledgeIDs) == 0 {
+		return nil
+	}
+	return s.repo.BatchUpdateKnowledgeFolderID(ctx, knowledgeIDs, folderID)
+}
+
+// ListKnowledgeIDsByFolderIDs returns knowledge IDs belonging to the specified folders.
+func (s *knowledgeService) ListKnowledgeIDsByFolderIDs(ctx context.Context, tenantID uint64, kbID string, folderIDs []string, recursive bool) ([]string, error) {
+	return s.repo.ListKnowledgeIDsByFolderIDs(ctx, tenantID, kbID, folderIDs, recursive)
+}
