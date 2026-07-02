@@ -216,6 +216,45 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_seq_id ON chunks(seq_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb_tenant ON chunks(knowledge_base_id, tenant_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_knowledge_enabled ON chunks(knowledge_id, is_enabled, deleted_at);
 
+CREATE TABLE IF NOT EXISTS graph_extraction_caches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    cache_key VARCHAR(64) NOT NULL,
+    content_key VARCHAR(64) NOT NULL,
+    model_id VARCHAR(128) NOT NULL DEFAULT '',
+    config_hash VARCHAR(64) NOT NULL,
+    schema_ver VARCHAR(32) NOT NULL,
+    graph TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, cache_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_graph_extraction_caches_content_key
+    ON graph_extraction_caches(content_key);
+CREATE INDEX IF NOT EXISTS idx_graph_extraction_caches_tenant_model
+    ON graph_extraction_caches(tenant_id, model_id);
+
+CREATE TABLE IF NOT EXISTS wiki_map_caches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    cache_key VARCHAR(64) NOT NULL,
+    kind VARCHAR(64) NOT NULL,
+    content_key VARCHAR(64) NOT NULL,
+    model_id VARCHAR(128) NOT NULL DEFAULT '',
+    config_hash VARCHAR(64) NOT NULL,
+    schema_ver VARCHAR(32) NOT NULL,
+    payload TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, cache_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_map_caches_kind_content
+    ON wiki_map_caches(kind, content_key);
+CREATE INDEX IF NOT EXISTS idx_wiki_map_caches_tenant_kind_model
+    ON wiki_map_caches(tenant_id, kind, model_id);
+
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,
     username VARCHAR(100) NOT NULL UNIQUE,

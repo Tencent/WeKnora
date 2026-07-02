@@ -157,6 +157,8 @@ type ProcessChunksOptions struct {
 	QuestionCount            int
 	EnableMultimodel         bool
 	StoredImages             []docparser.StoredImage
+	ReuseUnchangedChunks     bool
+	AllowLegacyChunkReuse    bool
 	// ParentChunks holds parent chunk data when parent-child chunking is enabled.
 	// When set, the chunks passed to processChunks are child chunks, and each
 	// child's ParentIndex references an entry in this slice.
@@ -249,6 +251,165 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 	return
 }
 
+type chunkReuseState struct {
+	oldByFingerprint map[string][]*types.Chunk
+	oldByID          map[string]*types.Chunk
+	reusedIDs        map[string]struct{}
+	oldChunkIDs      map[string]struct{}
+	enabled          bool
+}
+
+func newChunkReuseState(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	oldChunks []*types.Chunk,
+	allowLegacyChunkReuse bool,
+) *chunkReuseState {
+	state := &chunkReuseState{
+		oldByFingerprint: make(map[string][]*types.Chunk),
+		oldByID:          make(map[string]*types.Chunk),
+		reusedIDs:        make(map[string]struct{}),
+		oldChunkIDs:      make(map[string]struct{}),
+		enabled:          true,
+	}
+	for _, c := range oldChunks {
+		if c == nil {
+			continue
+		}
+		state.oldChunkIDs[c.ID] = struct{}{}
+		state.oldByID[c.ID] = c
+		if c.ChunkType != types.ChunkTypeText {
+			continue
+		}
+		fingerprint := strings.TrimSpace(c.ContentHash)
+		if fingerprint == "" {
+			fingerprint = documentChunkFingerprintForKnowledge(knowledge, c.Content, c.ContextHeader)
+		}
+		if fingerprint == "" {
+			continue
+		}
+		state.oldByFingerprint[fingerprint] = append(state.oldByFingerprint[fingerprint], c)
+		if allowLegacyChunkReuse && c.ContentHash == "" {
+			legacyFingerprint := c.DocumentFingerprint()
+			if legacyFingerprint != "" && legacyFingerprint != fingerprint {
+				state.oldByFingerprint[legacyFingerprint] = append(state.oldByFingerprint[legacyFingerprint], c)
+			}
+		}
+	}
+	logger.Infof(ctx, "Prepared chunk reuse state: old_chunks=%d reusable_text_fingerprints=%d",
+		len(oldChunks), len(state.oldByFingerprint))
+	return state
+}
+
+func (s *chunkReuseState) takeTextChunk(fingerprint string) (*types.Chunk, bool) {
+	if s == nil || !s.enabled || fingerprint == "" {
+		return nil, false
+	}
+	candidates := s.oldByFingerprint[fingerprint]
+	for len(candidates) > 0 {
+		chunk := candidates[0]
+		candidates = candidates[1:]
+		s.oldByFingerprint[fingerprint] = candidates
+		if chunk == nil {
+			continue
+		}
+		if _, used := s.reusedIDs[chunk.ID]; used {
+			continue
+		}
+		s.reusedIDs[chunk.ID] = struct{}{}
+		return chunk, true
+	}
+	return nil, false
+}
+
+func (s *chunkReuseState) staleChunkIDs() []string {
+	if s == nil || !s.enabled {
+		return nil
+	}
+	ids := make([]string, 0, len(s.oldChunkIDs)-len(s.reusedIDs))
+	for id := range s.oldChunkIDs {
+		if _, reused := s.reusedIDs[id]; !reused {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (s *chunkReuseState) staleImageInfos() []string {
+	if s == nil || !s.enabled {
+		return nil
+	}
+	imageInfos := make([]string, 0)
+	for id, chunk := range s.oldByID {
+		if chunk == nil || chunk.ImageInfo == "" {
+			continue
+		}
+		if _, reused := s.reusedIDs[id]; reused {
+			continue
+		}
+		imageInfos = append(imageInfos, chunk.ImageInfo)
+	}
+	return imageInfos
+}
+
+func documentChunkFingerprintForKnowledge(knowledge *types.Knowledge, content, contextHeader string) string {
+	title := ""
+	modelID := ""
+	if knowledge != nil {
+		title = strings.TrimSpace(knowledge.Title)
+		modelID = strings.TrimSpace(knowledge.EmbeddingModelID)
+	}
+	return types.DocumentChunkScopedFingerprint(content, contextHeader, "document_chunk_v2", title, modelID)
+}
+
+func textChunkIndexInfo(knowledge *types.Knowledge, chunk *types.Chunk) *types.IndexInfo {
+	titlePrefix := ""
+	if t := strings.TrimSpace(knowledge.Title); t != "" {
+		titlePrefix = t + "\n"
+	}
+	return &types.IndexInfo{
+		Content:         titlePrefix + chunk.EmbeddingContent(),
+		SourceID:        chunk.ID,
+		SourceType:      types.ChunkSourceType,
+		ChunkID:         chunk.ID,
+		KnowledgeID:     knowledge.ID,
+		KnowledgeBaseID: knowledge.KnowledgeBaseID,
+		IsEnabled:       true,
+	}
+}
+
+func (s *knowledgeService) deleteExtractedImagesFromInfo(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	imageInfos []string,
+) {
+	imageURLs := collectImageURLs(ctx, imageInfos)
+	if len(imageURLs) == 0 {
+		return
+	}
+	fileSvc := s.resolveFileService(ctx, kb)
+	deleteExtractedImages(ctx, fileSvc, imageURLs)
+}
+
+func (s *knowledgeService) deleteExtractedImagesForKnowledge(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	tenantID uint64,
+	knowledgeID string,
+) {
+	chunkImageInfos, imgErr := s.chunkService.GetRepository().ListImageInfoByKnowledgeIDs(ctx, tenantID, []string{knowledgeID})
+	if imgErr != nil {
+		logger.GetLogger(ctx).WithField("error", imgErr).Warnf("Failed to collect image URLs for cleanup")
+		return
+	}
+	imageInfos := make([]string, 0, len(chunkImageInfos))
+	for _, ci := range chunkImageInfos {
+		imageInfos = append(imageInfos, ci.ImageInfo)
+	}
+	s.deleteExtractedImagesFromInfo(ctx, kb, imageInfos)
+}
+
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
@@ -281,29 +442,63 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
 
-	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
-	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
-
-	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
-		// 不返回错误，继续处理（可能没有旧数据）
-	}
-
-	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
-	if err == nil && embeddingModel != nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
-			// 不返回错误，继续处理（可能没有旧数据）
+	if err != nil && kb.NeedsEmbeddingModel() {
+		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks init retrieve engine failed")
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = err.Error()
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return
+	}
+
+	hasPendingMultimodalInput := options.EnableMultimodel && len(options.StoredImages) > 0
+	reuseEnabled := options.ReuseUnchangedChunks && !hasPendingMultimodalInput && len(options.ParentChunks) == 0
+	if options.ReuseUnchangedChunks && !reuseEnabled {
+		logger.Infof(ctx, "Chunk reuse disabled for knowledge %s: multimodal_inputs=%v parent_child=%v",
+			knowledge.ID, hasPendingMultimodalInput, len(options.ParentChunks) > 0)
+	}
+	var reuseState *chunkReuseState
+	var oldChunks []*types.Chunk
+	if reuseEnabled {
+		var listErr error
+		oldChunks, listErr = s.chunkService.ListAllChunksByKnowledgeID(ctx, knowledge.ID)
+		if listErr != nil {
+			logger.Warnf(ctx, "Failed to list existing chunks for reuse, falling back to full cleanup: %v", listErr)
+			reuseEnabled = false
 		} else {
-			logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
+			reuseState = newChunkReuseState(ctx, knowledge, oldChunks, options.AllowLegacyChunkReuse)
 		}
 	}
 
-	// 删除知识图谱数据（如果存在）
+	if !reuseEnabled {
+		// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
+		logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
+		s.deleteExtractedImagesForKnowledge(ctx, kb, tenantInfo.ID, knowledge.ID)
+
+		// 删除旧的chunks
+		if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+			logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
+			// 不返回错误，继续处理（可能没有旧数据）
+		}
+
+		// 删除旧的索引数据 — only when vector/keyword indexing is enabled
+		if err == nil && embeddingModel != nil {
+			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
+				logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
+				// 不返回错误，继续处理（可能没有旧数据）
+			} else {
+				logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
+			}
+		}
+	} else {
+		logger.Infof(ctx, "Chunk reuse enabled for knowledge %s: old_chunks=%d", knowledge.ID, len(oldChunks))
+	}
+
+	// 删除知识图谱数据（如果存在）。GraphRAG 目前没有 chunk 级删除/复用语义，
+	// 因此这里仍按知识粒度重建，避免旧图谱和新图谱混在一起。
 	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
 	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
 		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
@@ -410,6 +605,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// 重新分配容量，考虑图片相关的Chunk + parent chunks
 	parentCount := len(options.ParentChunks)
 	insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount+parentCount)
+	reusedTextChunkCount := 0
+	newTextChunkCount := 0
 	// Add parent chunks first (they go into DB but NOT into the vector index)
 	if hasParentChild {
 		insertChunks = append(insertChunks, parentDBChunks...)
@@ -420,6 +617,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			continue
 		}
 
+		fingerprint := documentChunkFingerprintForKnowledge(knowledge, chunkData.Content, chunkData.ContextHeader)
 		// 创建主文本Chunk
 		textChunk := &types.Chunk{
 			ID:              uuid.New().String(),
@@ -435,6 +633,27 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			StartAt:         int(chunkData.Start),
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
+			ContentHash:     fingerprint,
+		}
+
+		if oldChunk, ok := reuseState.takeTextChunk(fingerprint); ok {
+			textChunk.ID = oldChunk.ID
+			textChunk.SeqID = oldChunk.SeqID
+			if meta, metaErr := oldChunk.DocumentMetadata(); metaErr == nil && meta != nil && len(meta.GeneratedQuestions) > 0 {
+				textChunk.Metadata = oldChunk.Metadata
+			}
+			textChunk.CreatedAt = oldChunk.CreatedAt
+			textChunk.ImageInfo = oldChunk.ImageInfo
+			textChunk.TagID = oldChunk.TagID
+			textChunk.Flags = oldChunk.Flags
+			textChunk.Status = oldChunk.Status
+			textChunk.IsEnabled = oldChunk.IsEnabled
+			if textChunk.CreatedAt.IsZero() {
+				textChunk.CreatedAt = time.Now()
+			}
+			reusedTextChunkCount++
+		} else {
+			newTextChunkCount++
 		}
 
 		// Wire up ParentChunkID for child chunks
@@ -485,16 +704,56 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
+	reusedChunkIDs := map[string]struct{}{}
+	if reuseState != nil {
+		reusedChunkIDs = reuseState.reusedIDs
+	}
+	createChunks := make([]*types.Chunk, 0, len(insertChunks))
+	updateChunks := make([]*types.Chunk, 0, len(reusedChunkIDs))
+	for _, c := range insertChunks {
+		if _, reused := reusedChunkIDs[c.ID]; reused {
+			updateChunks = append(updateChunks, c)
+			continue
+		}
+		createChunks = append(createChunks, c)
+	}
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
-	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
+	if len(createChunks) > 0 {
+		if err := s.chunkService.CreateChunks(ctx, createChunks); err != nil {
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = err.Error()
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.failStage(ctx, knowledge.ID, types.StageChunking,
+				werrors.ErrCodeChunkingFailed, "create chunks failed", err)
+			return
+		}
+	}
+	for _, chunk := range updateChunks {
+		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = err.Error()
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.failStage(ctx, knowledge.ID, types.StageChunking,
+				werrors.ErrCodeChunkingFailed, "update reused chunk failed", err)
+			return
+		}
+	}
+
+	staleChunkIDs := []string(nil)
+	if reuseEnabled && reuseState != nil {
+		staleChunkIDs = reuseState.staleChunkIDs()
+	}
+	if len(insertChunks) == 0 && len(staleChunkIDs) == 0 {
 		knowledge.ParseStatus = types.ParseStatusFailed
-		knowledge.ErrorMessage = err.Error()
+		knowledge.ErrorMessage = "no chunks generated"
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
-			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
+			werrors.ErrCodeChunkingFailed, "no chunks generated", nil)
 		return
 	}
 	totalChunkChars := 0
@@ -503,48 +762,49 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 	s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_written":   len(insertChunks),
+		"chunks_created":   len(createChunks),
+		"chunks_reused":    len(updateChunks),
+		"chunks_to_delete": len(staleChunkIDs),
 		"total_text_chars": totalChunkChars,
 	})
+	logger.Infof(ctx, "Chunk reuse result for knowledge %s: text_reused=%d text_new=%d stale_deleted=%d",
+		knowledge.ID, reusedTextChunkCount, newTextChunkCount, len(staleChunkIDs))
 
 	// Create index information and perform vector indexing — only when vector/keyword is enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
+	var storageDelta int64
 	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
 		embedInput := types.JSONMap{
-			"chunks_to_embed": len(textChunks),
-			"model_id":        kb.EmbeddingModelID,
+			"model_id": kb.EmbeddingModelID,
 		}
 		if dim := embeddingModel.GetDimensions(); dim > 0 {
 			embedInput["dim"] = dim
 		}
-		s.beginStage(ctx, knowledge.ID, types.StageEmbedding, embedInput)
 		// Create index information — only for child/flat chunks, NOT parent chunks.
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
 		// question-style queries and statement-style chunk content.
+		allIndexInfoList := make([]*types.IndexInfo, 0, len(textChunks))
 		indexInfoList := make([]*types.IndexInfo, 0, len(textChunks))
-		titlePrefix := ""
-		if t := strings.TrimSpace(knowledge.Title); t != "" {
-			titlePrefix = t + "\n"
-		}
 		for _, chunk := range textChunks {
 			// chunk.EmbeddingContent prepends ContextHeader (heading breadcrumb)
 			// when the chunker populated it during Tier-1 splitting; falls back
 			// to plain Content otherwise. Title prefix sits outermost.
-			indexContent := titlePrefix + chunk.EmbeddingContent()
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         indexContent,
-				SourceID:        chunk.ID,
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				IsEnabled:       true,
-			})
+			info := textChunkIndexInfo(knowledge, chunk)
+			allIndexInfoList = append(allIndexInfoList, info)
+			if _, reused := reusedChunkIDs[chunk.ID]; reused {
+				continue
+			}
+			indexInfoList = append(indexInfoList, info)
 		}
+		embedInput["chunks_to_embed"] = len(indexInfoList)
+		embedInput["chunks_reused"] = len(updateChunks)
+		s.beginStage(ctx, knowledge.ID, types.StageEmbedding, embedInput)
 
 		// Calculate storage size required for embeddings
-		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
+		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, allIndexInfoList)
+		storageDelta = totalStorageSize - knowledge.StorageSize
 		if tenantInfo.StorageQuota > 0 {
 			// Re-fetch tenant storage information
 			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
@@ -556,7 +816,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				return
 			}
 			// Check if there's enough storage quota available
-			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
+			if storageDelta > 0 && tenantInfo.StorageUsed+storageDelta > tenantInfo.StorageQuota {
 				knowledge.ParseStatus = types.ParseStatusFailed
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
@@ -578,37 +838,55 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return
 		}
 
-		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
-		if err != nil {
-			knowledge.ParseStatus = types.ParseStatusFailed
-			knowledge.ErrorMessage = err.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+		if len(indexInfoList) > 0 {
+			err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
+			if err != nil {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = err.Error()
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
 
-			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-				logger.Errorf(ctx, "Delete chunks failed: %v", err)
-			}
+				if reuseEnabled {
+					newChunkIDs := make([]string, 0, len(createChunks))
+					for _, chunk := range createChunks {
+						newChunkIDs = append(newChunkIDs, chunk.ID)
+					}
+					if len(newChunkIDs) > 0 {
+						if err := s.chunkService.DeleteChunks(ctx, newChunkIDs); err != nil {
+							logger.Errorf(ctx, "Delete newly created chunks failed: %v", err)
+						}
+						if err := retrieveEngine.DeleteByChunkIDList(ctx, newChunkIDs, embeddingModel.GetDimensions(), kb.Type); err != nil {
+							logger.Errorf(ctx, "Delete newly created indexes failed: %v", err)
+						}
+					}
+				} else {
+					// delete failed chunks
+					if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+						logger.Errorf(ctx, "Delete chunks failed: %v", err)
+					}
 
-			// delete index
-			if err := retrieveEngine.DeleteByKnowledgeIDList(
-				ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
-			); err != nil {
-				logger.Errorf(ctx, "Delete index failed: %v", err)
+					// delete index
+					if err := retrieveEngine.DeleteByKnowledgeIDList(
+						ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
+					); err != nil {
+						logger.Errorf(ctx, "Delete index failed: %v", err)
+					}
+				}
+				// Map vector store / embedding rate-limit errors to a
+				// stable code so the UI can offer "retry later" hints.
+				code := werrors.ErrCodeVectorStoreWriteFailed
+				if isLikelyRateLimitError(err) {
+					code = werrors.ErrCodeEmbeddingRateLimit
+				}
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					code, "batch index failed", err)
+				return
 			}
-			// Map vector store / embedding rate-limit errors to a
-			// stable code so the UI can offer "retry later" hints.
-			code := werrors.ErrCodeVectorStoreWriteFailed
-			if isLikelyRateLimitError(err) {
-				code = werrors.ErrCodeEmbeddingRateLimit
-			}
-			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
-				code, "batch index failed", err)
-			return
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
 		s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
 			"vectors_written": len(indexInfoList),
+			"vectors_reused":  len(updateChunks),
 			"storage_bytes":   totalStorageSize,
 		})
 
@@ -631,6 +909,32 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
 		s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
+	}
+
+	if reuseEnabled && len(staleChunkIDs) > 0 {
+		if embeddingModel != nil && retrieveEngine != nil {
+			if err := retrieveEngine.DeleteByChunkIDList(ctx, staleChunkIDs, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = err.Error()
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					werrors.ErrCodeVectorStoreWriteFailed, "delete stale chunk indexes failed", err)
+				return
+			}
+		}
+		if reuseState != nil {
+			s.deleteExtractedImagesFromInfo(ctx, kb, reuseState.staleImageInfos())
+		}
+		if err := s.chunkService.DeleteChunks(ctx, staleChunkIDs); err != nil {
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = err.Error()
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.failStage(ctx, knowledge.ID, types.StageChunking,
+				werrors.ErrCodeChunkingFailed, "delete stale chunks failed", err)
+			return
+		}
 	}
 
 	// Check if this document has extracted images that will be processed asynchronously
@@ -686,9 +990,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Update tenant's storage usage
-	tenantInfo.StorageUsed += totalStorageSize
-	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, totalStorageSize); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
+	if storageDelta != 0 {
+		tenantInfo.StorageUsed += storageDelta
+		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageDelta); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
+		}
 	}
 	logger.GetLogger(ctx).Infof("processChunks successfully")
 }
@@ -1478,6 +1784,9 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			emptyContentChunks++
 			continue
 		}
+		if meta, metaErr := chunk.DocumentMetadata(); metaErr == nil && meta != nil && len(meta.GeneratedQuestions) > 0 {
+			continue
+		}
 
 		// Build context from adjacent chunks
 		var prevContent, nextContent string
@@ -1509,9 +1818,8 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		// Update chunk metadata with unique IDs for each question
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
 		for j, question := range questions {
-			questionID := fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j))
 			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       questionID,
+				ID:       types.StableGeneratedQuestionID(question, j),
 				Question: question,
 			}
 		}
@@ -1813,6 +2121,9 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			emptyChunks++
 			continue
 		}
+		if meta, metaErr := chunk.DocumentMetadata(); metaErr == nil && meta != nil && len(meta.GeneratedQuestions) > 0 {
+			continue
+		}
 
 		questions, gerr := s.generateQuestionsWithContext(
 			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount)
@@ -1833,7 +2144,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
 		for j, question := range questions {
 			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j)),
+				ID:       types.StableGeneratedQuestionID(question, j),
 				Question: question,
 			}
 		}
@@ -2001,6 +2312,7 @@ func (s *knowledgeService) ReparseKnowledge(
 
 	processOverrides, _ = existing.ProcessOverrides()
 	reparseEff := ResolveProcessConfig(kb, processOverrides)
+	allowLegacyChunkReuse := existing.EmbeddingModelID == "" || existing.EmbeddingModelID == kb.EmbeddingModelID
 
 	// Keep wiki's pending queue consistent across both manual and non-manual
 	// paths. The destructive work (swapping old wiki contributions for new)
@@ -2051,16 +2363,9 @@ func (s *knowledgeService) ReparseKnowledge(
 		return existing, nil
 	}
 
-	// For non-manual knowledge, cleanup synchronously then enqueue document processing
-	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
-		return nil, err
-	}
-
-	// Step 2: Update knowledge status and metadata
+	// For non-manual knowledge, keep existing chunks until the worker can
+	// compare them with the newly parsed chunks and delete only misses.
+	// processChunks remains responsible for full cleanup when reuse is disabled.
 	existing.ParseStatus = "pending"
 	existing.EnableStatus = "disabled"
 	existing.Description = ""
@@ -2109,6 +2414,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			QuestionCount:            questionCount,
 			Language:                 lang,
 			Attempt:                  reparseAttempt,
+			ReuseUnchangedChunks:     true,
+			AllowLegacyChunkReuse:    allowLegacyChunkReuse,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -2162,6 +2469,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			QuestionCount:            questionCount,
 			Language:                 lang,
 			Attempt:                  reparseAttempt,
+			ReuseUnchangedChunks:     true,
+			AllowLegacyChunkReuse:    allowLegacyChunkReuse,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -2208,6 +2517,8 @@ func (s *knowledgeService) ReparseKnowledge(
 			QuestionCount:            questionCount,
 			Language:                 lang,
 			Attempt:                  reparseAttempt,
+			ReuseUnchangedChunks:     true,
+			AllowLegacyChunkReuse:    allowLegacyChunkReuse,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -2921,6 +3232,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		passageOpts := ProcessChunksOptions{
 			EnableQuestionGeneration: payload.EnableQuestionGeneration,
 			QuestionCount:            payload.QuestionCount,
+			ReuseUnchangedChunks:     payload.ReuseUnchangedChunks,
+			AllowLegacyChunkReuse:    payload.AllowLegacyChunkReuse,
 		}
 		s.processChunks(ctx, kb, knowledge, passageChunks, passageOpts)
 		return nil
@@ -3026,6 +3339,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		QuestionCount:            payload.QuestionCount,
 		EnableMultimodel:         payload.EnableMultimodel,
 		StoredImages:             storedImages,
+		ReuseUnchangedChunks:     payload.ReuseUnchangedChunks,
+		AllowLegacyChunkReuse:    payload.AllowLegacyChunkReuse,
 	}
 
 	if convertResult != nil {

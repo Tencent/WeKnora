@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -162,6 +164,7 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	graphCacheRepo    interfaces.GraphExtractionCacheRepository
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -176,6 +179,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	graphCacheRepo interfaces.GraphExtractionCacheRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -185,6 +189,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		graphCacheRepo:    graphCacheRepo,
 		spanTracker:       spanTracker,
 	}
 }
@@ -194,6 +199,120 @@ func (s *ChunkExtractService) tracker() SpanTracker {
 		return noopSpanTracker{}
 	}
 	return s.spanTracker
+}
+
+func graphExtractionContentKey(content string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(content)))
+	return hex.EncodeToString(sum[:])
+}
+
+func graphExtractionConfigHash(template *types.PromptTemplateStructured) string {
+	b, _ := json.Marshal(struct {
+		Schema      string            `json:"schema"`
+		Description string            `json:"description"`
+		Tags        []string          `json:"tags,omitempty"`
+		Examples    []types.GraphData `json:"examples,omitempty"`
+		Limits      string            `json:"limits,omitempty"`
+	}{
+		Schema:      types.GraphExtractionCacheSchemaVersion,
+		Description: template.Description,
+		Tags:        template.Tags,
+		Examples:    template.Examples,
+		Limits:      chatpipeline.GraphExtractionLimitSignature(),
+	})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func graphExtractionCacheKey(contentKey, modelSignature, configHash string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		types.GraphExtractionCacheSchemaVersion,
+		contentKey,
+		modelSignature,
+		configHash,
+	}, "\x00")))
+	return hex.EncodeToString(sum[:])
+}
+
+func cloneGraphData(graph *types.GraphData) *types.GraphData {
+	if graph == nil {
+		return &types.GraphData{}
+	}
+	cloned := &types.GraphData{
+		Text:     graph.Text,
+		Node:     make([]*types.GraphNode, 0, len(graph.Node)),
+		Relation: make([]*types.GraphRelation, 0, len(graph.Relation)),
+	}
+	for _, node := range graph.Node {
+		if node == nil {
+			continue
+		}
+		n := *node
+		if node.Chunks != nil {
+			n.Chunks = append([]string(nil), node.Chunks...)
+		}
+		if node.Attributes != nil {
+			n.Attributes = append([]string(nil), node.Attributes...)
+		}
+		cloned.Node = append(cloned.Node, &n)
+	}
+	for _, rel := range graph.Relation {
+		if rel == nil {
+			continue
+		}
+		r := *rel
+		cloned.Relation = append(cloned.Relation, &r)
+	}
+	return cloned
+}
+
+func bindGraphToChunk(graph *types.GraphData, chunkID string) *types.GraphData {
+	bound := cloneGraphData(graph)
+	for _, node := range bound.Node {
+		node.Chunks = []string{chunkID}
+	}
+	return bound
+}
+
+func graphFromCache(cache *types.GraphExtractionCache) (*types.GraphData, error) {
+	if cache == nil || len(cache.Graph) == 0 {
+		return nil, nil
+	}
+	var graph types.GraphData
+	if err := json.Unmarshal(cache.Graph, &graph); err != nil {
+		return nil, err
+	}
+	return &graph, nil
+}
+
+func isGraphJSONParseError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "failed to parse json content")
+}
+
+func extractGraphWithJSONRetry(
+	ctx context.Context,
+	extractor chatpipeline.Extractor,
+	content string,
+	chunkID string,
+	graphOut types.JSONMap,
+) (*types.GraphData, error) {
+	graph, err := extractor.Extract(ctx, content)
+	if err == nil || !isGraphJSONParseError(err) {
+		graphOut["extract_attempts"] = 1
+		return graph, err
+	}
+
+	logger.Warnf(ctx, "graph extraction JSON parse failed for chunk %s, retry once: %v", chunkID, err)
+	graphOut["extract_retry_reason"] = "json_parse_failed"
+	graphOut["extract_attempts"] = 2
+	graph, retryErr := extractor.Extract(ctx, content)
+	if retryErr != nil {
+		return nil, retryErr
+	}
+	return graph, nil
 }
 
 // Handle handles the chunk extraction task
@@ -326,11 +445,68 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+	modelID := chatModel.GetModelID()
+	if modelID == "" {
+		modelID = p.ModelID
+	}
+	modelSignature := strings.Join([]string{modelID, chatModel.GetModelName()}, "\x00")
+	contentKey := graphExtractionContentKey(chunk.Content)
+	configHash := graphExtractionConfigHash(template)
+	cacheKey := graphExtractionCacheKey(contentKey, modelSignature, configHash)
+	graphOut["cache_key"] = cacheKey
+	graphOut["cache_schema"] = types.GraphExtractionCacheSchemaVersion
+
+	var graph *types.GraphData
+	cacheHit := false
+	if s.graphCacheRepo != nil {
+		cache, cacheErr := s.graphCacheRepo.GetByKey(ctx, p.TenantID, cacheKey)
+		if cacheErr != nil {
+			logger.Warnf(ctx, "graph extraction cache lookup failed for chunk %s: %v", p.ChunkID, cacheErr)
+			graphOut["cache_error"] = cacheErr.Error()
+		} else if cache != nil {
+			cachedGraph, parseErr := graphFromCache(cache)
+			if parseErr != nil {
+				logger.Warnf(ctx, "graph extraction cache decode failed for chunk %s: %v", p.ChunkID, parseErr)
+				graphOut["cache_error"] = parseErr.Error()
+			} else {
+				graph = cachedGraph
+				cacheHit = true
+				graphOut["cache_hit"] = true
+			}
+		}
+	}
+	if graph == nil {
+		graphOut["cache_hit"] = false
+		extractor := chatpipeline.NewExtractor(chatModel, template)
+		graph, err = extractGraphWithJSONRetry(ctx, extractor, chunk.Content, p.ChunkID, graphOut)
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		if s.graphCacheRepo != nil {
+			cacheGraph := cloneGraphData(graph)
+			for _, node := range cacheGraph.Node {
+				node.Chunks = nil
+			}
+			rawGraph, marshalErr := json.Marshal(cacheGraph)
+			if marshalErr != nil {
+				logger.Warnf(ctx, "graph extraction cache marshal failed for chunk %s: %v", p.ChunkID, marshalErr)
+				graphOut["cache_error"] = marshalErr.Error()
+			} else {
+				if cacheErr := s.graphCacheRepo.Upsert(ctx, &types.GraphExtractionCache{
+					TenantID:   p.TenantID,
+					CacheKey:   cacheKey,
+					ContentKey: contentKey,
+					ModelID:    modelID,
+					ConfigHash: configHash,
+					SchemaVer:  types.GraphExtractionCacheSchemaVersion,
+					Graph:      types.JSON(rawGraph),
+				}); cacheErr != nil {
+					logger.Warnf(ctx, "graph extraction cache upsert failed for chunk %s: %v", p.ChunkID, cacheErr)
+					graphOut["cache_error"] = cacheErr.Error()
+				}
+			}
+		}
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -340,9 +516,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
-	for _, node := range graph.Node {
-		node.Chunks = []string{chunk.ID}
-	}
+	graph = bindGraphToChunk(graph, chunk.ID)
 	if err = s.graphEngine.AddGraph(ctx,
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
 		[]*types.GraphData{graph},
@@ -350,6 +524,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		logger.Errorf(ctx, "failed to add graph: %v", err)
 		handleErr = err
 		return err
+	}
+	if cacheHit {
+		logger.Infof(ctx, "graph extraction cache hit for chunk %s", p.ChunkID)
 	}
 	graphOut["nodes_added"] = len(graph.Node)
 	graphOut["relations_added"] = len(graph.Relation)
