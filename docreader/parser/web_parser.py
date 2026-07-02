@@ -139,7 +139,7 @@ class StdWebParser(BaseParser):
         """
         self.title = title
         # Get proxy configuration from config if available
-        self.proxy = CONFIG.external_https_proxy
+        self.proxy = CONFIG.external_https_proxy or CONFIG.external_http_proxy
         super().__init__(file_name=title, **kwargs)
         logger.info(f"Initialized WebParser with title: {title}")
 
