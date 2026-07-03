@@ -16,9 +16,13 @@ import (
 
 var _ datasource.Connector = (*Connector)(nil)
 
-type Connector struct{}
+type Connector struct {
+	contentFetchers []dingtalkContentFetcher
+}
 
-func NewConnector() *Connector { return &Connector{} }
+func NewConnector() *Connector {
+	return &Connector{contentFetchers: defaultDingTalkContentFetchers()}
+}
 
 func (c *Connector) Type() string { return types.ConnectorTypeDingTalk }
 
@@ -220,37 +224,9 @@ func (c *Connector) walk(
 			}
 			seenDocs[docResourceID] = true
 
-			blocks, err := cli.QueryDocBlocks(ctx, doc.docKey())
+			item, hash, err := c.fetchDingTalkItem(ctx, cli, doc, workspaceID, selectedResourceID)
 			if err != nil {
-				out = append(out, types.FetchedItem{
-					ExternalID:       docResourceID,
-					Title:            doc.displayName(),
-					SourceResourceID: selectedResourceID,
-					Metadata: map[string]string{
-						"channel":      types.ChannelDingtalk,
-						"workspace_id": workspaceID,
-						"node_id":      doc.NodeID,
-						"doc_key":      doc.docKey(),
-						"error":        err.Error(),
-					},
-				})
-				continue
-			}
-
-			content, hash, err := renderDocumentContent(blocks)
-			if err != nil {
-				out = append(out, types.FetchedItem{
-					ExternalID:       docResourceID,
-					Title:            doc.displayName(),
-					SourceResourceID: selectedResourceID,
-					Metadata: map[string]string{
-						"channel":      types.ChannelDingtalk,
-						"workspace_id": workspaceID,
-						"node_id":      doc.NodeID,
-						"doc_key":      doc.docKey(),
-						"error":        err.Error(),
-					},
-				})
+				out = append(out, errorFetchedItem(doc, workspaceID, selectedResourceID, err))
 				continue
 			}
 			next.ResourceDocHashes[selectedResourceID][docResourceID] = hash
@@ -263,24 +239,7 @@ func (c *Connector) walk(
 				}
 			}
 
-			out = append(out, types.FetchedItem{
-				ExternalID:       docResourceID,
-				Title:            doc.displayName(),
-				Content:          content,
-				ContentType:      "text/markdown",
-				FileName:         markdownFileName(doc.displayName()),
-				URL:              doc.URL,
-				UpdatedAt:        parseDingTalkTime(modified),
-				SourceResourceID: selectedResourceID,
-				Metadata: map[string]string{
-					"channel":      types.ChannelDingtalk,
-					"workspace_id": workspaceID,
-					"node_id":      doc.NodeID,
-					"doc_key":      doc.docKey(),
-					"category":     doc.Category,
-					"content_hash": hash,
-				},
-			})
+			out = append(out, *item)
 		}
 
 		if incremental && prev != nil && prev.ResourceDocTimes != nil {

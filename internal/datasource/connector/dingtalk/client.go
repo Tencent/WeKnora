@@ -15,7 +15,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 )
 
-const dingtalkMaxAttempts = 2
+const (
+	dingtalkMaxAttempts     = 2
+	dingtalkMaxDownloadSize = 100 * 1024 * 1024
+)
 
 type client struct {
 	cfg        *Config
@@ -202,29 +205,93 @@ func (c *client) QueryDocBlocks(ctx context.Context, docKey string) ([]docBlock,
 		return nil, err
 	}
 
-	var out []docBlock
-	nextToken := ""
-	for {
-		query := url.Values{}
-		query.Set("operatorId", operatorID)
-		query.Set("maxResults", "100")
-		if nextToken != "" {
-			query.Set("nextToken", nextToken)
-		}
-
-		path := "/v1.0/doc/suites/documents/" + url.PathEscape(docKey) + "/blocks"
-		var resp blockListResponse
-		if err := c.getAPI(ctx, path, query, &resp); err != nil {
-			return nil, fmt.Errorf("query dingtalk doc blocks %s: %w", docKey, err)
-		}
-		items, next, hasMore := resp.items()
-		out = append(out, items...)
-		if !hasMore || next == "" {
-			break
-		}
-		nextToken = next
+	query := url.Values{}
+	query.Set("operatorId", operatorID)
+	var resp blockListResponse
+	if err := c.getAPI(ctx, "/v1.0/doc/suites/documents/"+url.PathEscape(docKey)+"/blocks", query, &resp); err != nil {
+		return nil, fmt.Errorf("query dingtalk doc blocks %s: %w", docKey, err)
 	}
-	return out, nil
+	return resp.blocks(), nil
+}
+
+func (c *client) GetDentryIDByUUID(ctx context.Context, dentryUUID string) (dentryIdentity, error) {
+	operatorID, err := c.operatorUnionID(ctx)
+	if err != nil {
+		return dentryIdentity{}, err
+	}
+
+	query := url.Values{}
+	query.Set("operatorId", operatorID)
+	var resp dentryIdentityResponse
+	path := "/v2.0/doc/dentries/" + url.PathEscape(dentryUUID) + "/queryDentryId"
+	if err := c.getAPI(ctx, path, query, &resp); err != nil {
+		return dentryIdentity{}, fmt.Errorf("get dingtalk dentry id by uuid %s: %w", dentryUUID, err)
+	}
+	identity := resp.identity()
+	if strings.TrimSpace(identity.SpaceID) == "" || strings.TrimSpace(identity.DentryID) == "" {
+		return dentryIdentity{}, fmt.Errorf("get dingtalk dentry id by uuid %s: empty spaceId or dentryId", dentryUUID)
+	}
+	return identity, nil
+}
+
+func (c *client) GetDownloadInfo(ctx context.Context, spaceID, dentryID string) (downloadInfo, error) {
+	operatorID, err := c.operatorUnionID(ctx)
+	if err != nil {
+		return downloadInfo{}, err
+	}
+
+	query := url.Values{}
+	query.Set("unionId", operatorID)
+	var resp downloadInfoResponse
+	body := map[string]interface{}{
+		"option": map[string]interface{}{
+			"preferIntranet": false,
+		},
+	}
+	path := "/v1.0/storage/spaces/" + url.PathEscape(spaceID) + "/dentries/" + url.PathEscape(dentryID) + "/downloadInfos/query"
+	if err := c.postAPI(ctx, path, query, body, &resp); err != nil {
+		return downloadInfo{}, fmt.Errorf("get dingtalk download info %s/%s: %w", spaceID, dentryID, err)
+	}
+	info := resp.info()
+	if strings.TrimSpace(info.downloadURL()) == "" {
+		return downloadInfo{}, fmt.Errorf("get dingtalk download info %s/%s: empty download url", spaceID, dentryID)
+	}
+	return info, nil
+}
+
+func (c *client) DownloadFile(ctx context.Context, info downloadInfo) ([]byte, error) {
+	endpoint := info.downloadURL()
+	if strings.TrimSpace(endpoint) == "" {
+		return nil, fmt.Errorf("dingtalk download url is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range info.Headers {
+		if strings.TrimSpace(key) == "" || value == nil {
+			continue
+		}
+		req.Header.Set(key, fmt.Sprint(value))
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, dingtalkStatusError(resp, body)
+	}
+	content, err := io.ReadAll(io.LimitReader(resp.Body, dingtalkMaxDownloadSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("read dingtalk file download: %w", err)
+	}
+	if len(content) > dingtalkMaxDownloadSize {
+		return nil, fmt.Errorf("dingtalk file download exceeds %d bytes", dingtalkMaxDownloadSize)
+	}
+	return content, nil
 }
 
 func (c *client) getAPI(ctx context.Context, path string, query url.Values, out interface{}) error {
@@ -241,6 +308,29 @@ func (c *client) getAPI(ctx context.Context, path string, query url.Values, out 
 	if err != nil {
 		return err
 	}
+	req.Header.Set("x-acs-dingtalk-access-token", token)
+	return c.do(req, out)
+}
+
+func (c *client) postAPI(ctx context.Context, path string, query url.Values, body interface{}, out interface{}) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	token, err := c.accessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	endpoint := c.cfg.GetBaseURL() + path
+	if len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-acs-dingtalk-access-token", token)
 	return c.do(req, out)
 }

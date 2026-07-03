@@ -4,7 +4,8 @@
 //   - app credentials -> tenant access token
 //   - operator user ID -> union ID
 //   - wiki workspace/node APIs -> selectable resources
-//   - document block API -> Markdown content
+//   - drive download API -> original uploaded files
+//   - document block API -> best-effort Markdown content
 package dingtalk
 
 import (
@@ -198,6 +199,11 @@ type wikiNode struct {
 	Type         string `json:"type"`
 	Category     string `json:"category"`
 	DocKey       string `json:"docKey"`
+	DentryUUID   string `json:"dentryUuid"`
+	WorkspaceID  string `json:"workspaceId"`
+	SpaceID      string `json:"spaceId"`
+	DentryID     string `json:"dentryId"`
+	Extension    string `json:"extension"`
 	URL          string `json:"url"`
 	ModifiedTime string `json:"modifiedTime"`
 	UpdatedTime  string `json:"updatedTime"`
@@ -243,53 +249,155 @@ func (n wikiNode) isFolder() bool {
 }
 
 func (n wikiNode) isSupportedDocument() bool {
+	return n.isOnlineDocument() || n.isDownloadableFile()
+}
+
+func (n wikiNode) isOnlineDocument() bool {
 	t := strings.ToUpper(strings.TrimSpace(n.Type))
 	category := strings.ToUpper(strings.TrimSpace(n.Category))
 	return (t == "FILE" || t == "DOCUMENT" || t == "") && (category == "ALIDOC" || category == "DOC" || category == "")
 }
 
+func (n wikiNode) isDownloadableFile() bool {
+	t := strings.ToUpper(strings.TrimSpace(n.Type))
+	category := strings.ToUpper(strings.TrimSpace(n.Category))
+	if t != "FILE" && t != "DOCUMENT" && t != "" {
+		return false
+	}
+	switch category {
+	case "ALIDOC", "DOC", "AXLS", "ASHEET", "ASLIDE", "ADRAW", "AMIND", "":
+		return false
+	default:
+		return true
+	}
+}
+
+func (n wikiNode) downloadSpaceID(workspaceID string) string {
+	return firstNonEmpty(n.SpaceID, n.WorkspaceID, workspaceID)
+}
+
+func (n wikiNode) downloadDentryID() string {
+	return firstNonEmpty(n.DentryID, n.NodeID)
+}
+
+func (n wikiNode) downloadDentryUUID() string {
+	return firstNonEmpty(n.DentryUUID, n.NodeID)
+}
+
+func (n wikiNode) downloadFileName() string {
+	name := n.displayName()
+	ext := strings.TrimSpace(n.Extension)
+	if ext == "" {
+		ext = strings.ToLower(strings.TrimSpace(n.Category))
+	}
+	if ext == "" || strings.Contains(strings.ToLower(name), "."+strings.ToLower(strings.TrimPrefix(ext, "."))) {
+		return name
+	}
+	return name + "." + strings.TrimPrefix(ext, ".")
+}
+
 type blockListResponse struct {
-	Blocks    []docBlock `json:"blocks"`
-	NextToken string     `json:"nextToken"`
-	HasMore   bool       `json:"hasMore"`
-	Data      struct {
-		Blocks    []docBlock `json:"blocks"`
-		NextToken string     `json:"nextToken"`
-		HasMore   bool       `json:"hasMore"`
+	Blocks []docBlock `json:"blocks"`
+	Data   struct {
+		Blocks []docBlock `json:"blocks"`
 	} `json:"data"`
-	// DingTalk's block API may wrap the actual block list in result.data.
 	Result struct {
-		Data      []docBlock `json:"data"`
-		Blocks    []docBlock `json:"blocks"`
-		NextToken string     `json:"nextToken"`
-		HasMore   bool       `json:"hasMore"`
+		Data   []docBlock `json:"data"`
+		Blocks []docBlock `json:"blocks"`
 	} `json:"result"`
 }
 
-func (r blockListResponse) items() ([]docBlock, string, bool) {
-	if len(r.Blocks) > 0 || r.NextToken != "" || r.HasMore {
-		return r.Blocks, r.NextToken, r.HasMore
+func (r blockListResponse) blocks() []docBlock {
+	if len(r.Blocks) > 0 {
+		return r.Blocks
 	}
-	if len(r.Result.Data) > 0 || r.Result.NextToken != "" || r.Result.HasMore {
-		return r.Result.Data, r.Result.NextToken, r.Result.HasMore
+	if len(r.Result.Data) > 0 {
+		return r.Result.Data
 	}
 	if len(r.Result.Blocks) > 0 {
-		return r.Result.Blocks, r.Result.NextToken, r.Result.HasMore
+		return r.Result.Blocks
 	}
-	return r.Data.Blocks, r.Data.NextToken, r.Data.HasMore
+	return r.Data.Blocks
+}
+
+type downloadInfoResponse struct {
+	DownloadInfo downloadInfo `json:"downloadInfo"`
+	Data         struct {
+		DownloadInfo downloadInfo `json:"downloadInfo"`
+	} `json:"data"`
+	Result struct {
+		DownloadInfo downloadInfo `json:"downloadInfo"`
+	} `json:"result"`
+}
+
+func (r downloadInfoResponse) info() downloadInfo {
+	if strings.TrimSpace(r.DownloadInfo.ResourceURL) != "" ||
+		strings.TrimSpace(r.DownloadInfo.InternalResourceURL) != "" {
+		return r.DownloadInfo
+	}
+	if strings.TrimSpace(r.Data.DownloadInfo.ResourceURL) != "" ||
+		strings.TrimSpace(r.Data.DownloadInfo.InternalResourceURL) != "" {
+		return r.Data.DownloadInfo
+	}
+	return r.Result.DownloadInfo
+}
+
+type dentryIdentityResponse struct {
+	SpaceID  string `json:"spaceId"`
+	DentryID string `json:"dentryId"`
+	Data     struct {
+		SpaceID  string `json:"spaceId"`
+		DentryID string `json:"dentryId"`
+	} `json:"data"`
+	Result struct {
+		SpaceID  string `json:"spaceId"`
+		DentryID string `json:"dentryId"`
+	} `json:"result"`
+}
+
+func (r dentryIdentityResponse) identity() dentryIdentity {
+	if strings.TrimSpace(r.SpaceID) != "" || strings.TrimSpace(r.DentryID) != "" {
+		return dentryIdentity{SpaceID: r.SpaceID, DentryID: r.DentryID}
+	}
+	if strings.TrimSpace(r.Data.SpaceID) != "" || strings.TrimSpace(r.Data.DentryID) != "" {
+		return dentryIdentity{SpaceID: r.Data.SpaceID, DentryID: r.Data.DentryID}
+	}
+	return dentryIdentity{SpaceID: r.Result.SpaceID, DentryID: r.Result.DentryID}
+}
+
+type dentryIdentity struct {
+	SpaceID  string
+	DentryID string
+}
+
+type downloadInfo struct {
+	ResourceURL         string                 `json:"resourceUrl"`
+	InternalResourceURL string                 `json:"internalResourceUrl"`
+	Headers             map[string]interface{} `json:"headers"`
+}
+
+func (i downloadInfo) downloadURL() string {
+	return firstNonEmpty(i.ResourceURL, i.InternalResourceURL)
 }
 
 type docBlock struct {
-	Type       string     `json:"type"`
-	BlockType  string     `json:"blockType,omitempty"`
-	Text       string     `json:"text,omitempty"`
-	Heading    blockText  `json:"heading,omitempty"`
-	Paragraph  blockText  `json:"paragraph,omitempty"`
-	Bullet     blockText  `json:"bullet,omitempty"`
-	Ordered    blockText  `json:"ordered,omitempty"`
-	Blockquote blockText  `json:"blockquote,omitempty"`
-	Callout    blockText  `json:"callout,omitempty"`
-	Children   []docBlock `json:"children,omitempty"`
+	Type          string                 `json:"type"`
+	BlockType     string                 `json:"blockType,omitempty"`
+	Text          string                 `json:"text,omitempty"`
+	Heading       blockText              `json:"heading,omitempty"`
+	Paragraph     blockText              `json:"paragraph,omitempty"`
+	Bullet        blockText              `json:"bullet,omitempty"`
+	Ordered       blockText              `json:"ordered,omitempty"`
+	Blockquote    blockText              `json:"blockquote,omitempty"`
+	Callout       blockText              `json:"callout,omitempty"`
+	Code          blockText              `json:"code,omitempty"`
+	Image         mediaBlock             `json:"image,omitempty"`
+	OrderedList   blockText              `json:"orderedList,omitempty"`
+	UnorderedList blockText              `json:"unorderedList,omitempty"`
+	Table         tableBlock             `json:"table,omitempty"`
+	Children      []json.RawMessage      `json:"children,omitempty"`
+	Blocks        []docBlock             `json:"blocks,omitempty"`
+	Properties    map[string]interface{} `json:"properties,omitempty"`
 }
 
 func (b docBlock) kind() string {
@@ -297,6 +405,58 @@ func (b docBlock) kind() string {
 		return strings.TrimSpace(b.Type)
 	}
 	return strings.TrimSpace(b.BlockType)
+}
+
+func (b docBlock) childBlocks() []docBlock {
+	if len(b.Children) == 0 {
+		return b.Blocks
+	}
+	blocks := make([]docBlock, 0, len(b.Children))
+	for _, raw := range b.Children {
+		var child docBlock
+		if err := json.Unmarshal(raw, &child); err != nil {
+			continue
+		}
+		if child.isBlockElement() {
+			blocks = append(blocks, child)
+		}
+	}
+	return blocks
+}
+
+func (b docBlock) inlineChildren() []richTextElement {
+	if len(b.Children) == 0 {
+		return nil
+	}
+	elements := make([]richTextElement, 0, len(b.Children))
+	for _, raw := range b.Children {
+		var child richTextElement
+		if err := json.Unmarshal(raw, &child); err != nil {
+			continue
+		}
+		if child.isInlineElement() {
+			elements = append(elements, child)
+		}
+	}
+	return elements
+}
+
+func (b docBlock) isBlockElement() bool {
+	if strings.TrimSpace(b.kind()) != "" {
+		return true
+	}
+	return blockTextContent(b.Paragraph) != "" ||
+		blockTextContent(b.Heading) != "" ||
+		blockTextContent(b.Bullet) != "" ||
+		blockTextContent(b.Ordered) != "" ||
+		blockTextContent(b.OrderedList) != "" ||
+		blockTextContent(b.UnorderedList) != "" ||
+		blockTextContent(b.Blockquote) != "" ||
+		blockTextContent(b.Callout) != "" ||
+		blockTextContent(b.Code) != "" ||
+		imageURL(b.Image) != "" ||
+		len(b.Table.Cells) > 0 ||
+		len(b.Blocks) > 0
 }
 
 type blockText struct {
@@ -308,11 +468,54 @@ type blockText struct {
 }
 
 type richTextElement struct {
-	Text    string `json:"text,omitempty"`
-	Content string `json:"content,omitempty"`
-	TextRun struct {
+	Text        string `json:"text,omitempty"`
+	Content     string `json:"content,omitempty"`
+	Type        string `json:"type,omitempty"`
+	ElementType string `json:"elementType,omitempty"`
+	URL         string `json:"url,omitempty"`
+	TextRun     struct {
 		Content string `json:"content,omitempty"`
 	} `json:"textRun,omitempty"`
+	Link struct {
+		Text string `json:"text,omitempty"`
+		URL  string `json:"url,omitempty"`
+	} `json:"link,omitempty"`
+	Image      mediaBlock             `json:"image,omitempty"`
+	Properties map[string]interface{} `json:"properties,omitempty"`
+	Children   []richTextElement      `json:"children,omitempty"`
+	Bold       bool                   `json:"bold,omitempty"`
+	Italic     bool                   `json:"italic,omitempty"`
+	Strike     bool                   `json:"strike,omitempty"`
+	Stike      bool                   `json:"stike,omitempty"`
+	Underline  bool                   `json:"underline,omitempty"`
+	Fonts      string                 `json:"fonts,omitempty"`
+}
+
+func (el richTextElement) isInlineElement() bool {
+	return strings.TrimSpace(el.Text) != "" ||
+		strings.TrimSpace(el.Content) != "" ||
+		strings.TrimSpace(el.TextRun.Content) != "" ||
+		strings.TrimSpace(el.Type) != "" ||
+		strings.TrimSpace(el.ElementType) != "" ||
+		strings.TrimSpace(el.URL) != "" ||
+		strings.TrimSpace(el.Link.URL) != "" ||
+		imageURL(el.Image) != "" ||
+		len(el.Properties) > 0 ||
+		len(el.Children) > 0
+}
+
+type mediaBlock struct {
+	Alt         string                 `json:"alt,omitempty"`
+	URL         string                 `json:"url,omitempty"`
+	SourceURL   string                 `json:"sourceUrl,omitempty"`
+	ResourceURL string                 `json:"resourceUrl,omitempty"`
+	ResourceID  string                 `json:"resourceId,omitempty"`
+	Token       string                 `json:"token,omitempty"`
+	Properties  map[string]interface{} `json:"properties,omitempty"`
+}
+
+type tableBlock struct {
+	Cells [][]string `json:"cells,omitempty"`
 }
 
 type dingtalkCursor struct {
@@ -377,16 +580,27 @@ func sanitizeFileName(name string) string {
 }
 
 func markdownFileName(title string) string {
+	return fileNameWithExtension(title, ".md")
+}
+
+func exportedDocxFileName(title string) string {
+	return fileNameWithExtension(title, ".docx")
+}
+
+func fileNameWithExtension(title, ext string) string {
 	name := sanitizeFileName(title)
 	lower := strings.ToLower(name)
-	for _, ext := range []string{".md", ".markdown", ".adoc", ".asciidoc", ".txt"} {
-		if strings.HasSuffix(lower, ext) {
-			name = strings.TrimSpace(name[:len(name)-len(ext)])
+	for _, currentExt := range []string{".md", ".markdown", ".adoc", ".asciidoc", ".txt", ".doc", ".docx"} {
+		if strings.HasSuffix(lower, currentExt) {
+			name = strings.TrimSpace(name[:len(name)-len(currentExt)])
 			break
 		}
 	}
 	if name == "" {
 		name = "untitled"
 	}
-	return name + ".md"
+	if !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	return name + ext
 }

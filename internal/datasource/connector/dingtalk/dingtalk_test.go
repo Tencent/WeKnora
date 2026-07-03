@@ -89,7 +89,7 @@ func TestConnectorValidateAndListResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list child resources: %v", err)
 	}
-	if got := resourceIDs(children); strings.Join(got, ",") != "ws1:doc1,ws1:folder1,ws1:sheet1" {
+	if got := resourceIDs(children); strings.Join(got, ",") != "ws1:doc1,ws1:file1,ws1:folder1,ws1:sheet1" {
 		t.Fatalf("unexpected child resources: %v", got)
 	}
 }
@@ -113,7 +113,7 @@ func TestResolveResourceAncestorsForNestedSelection(t *testing.T) {
 	}
 }
 
-func TestFetchAllRecursivelyRendersMarkdownAndSkipsUnsupportedNodes(t *testing.T) {
+func TestFetchAllRecursivelyFetchesSupportedResourcesAndSkipsUnsupportedNodes(t *testing.T) {
 	server := newFakeDingTalkServer(t)
 	defer server.Close()
 
@@ -122,33 +122,48 @@ func TestFetchAllRecursivelyRendersMarkdownAndSkipsUnsupportedNodes(t *testing.T
 	if err != nil {
 		t.Fatalf("fetch all: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected two DingTalk docs, got %d: %#v", len(items), items)
+	if len(items) != 3 {
+		t.Fatalf("expected two online docs and one uploaded file, got %d: %#v", len(items), items)
 	}
 
 	byID := map[string]types.FetchedItem{}
 	for _, item := range items {
 		byID[item.ExternalID] = item
-		if item.ContentType != "text/markdown" {
-			t.Fatalf("content type for %s = %q", item.ExternalID, item.ContentType)
-		}
-		if !strings.HasSuffix(item.FileName, ".md") {
-			t.Fatalf("expected markdown filename for %s, got %q", item.ExternalID, item.FileName)
-		}
 		if item.Metadata["channel"] != types.ChannelDingtalk {
 			t.Fatalf("missing dingtalk channel metadata: %#v", item.Metadata)
 		}
 	}
 
-	if got := string(byID["ws1:doc1"].Content); !strings.Contains(got, "# Architecture") ||
-		!strings.Contains(got, "Hello DingTalk") {
-		t.Fatalf("doc1 markdown not rendered as expected:\n%s", got)
+	if byID["ws1:doc1"].ContentType != "text/markdown" ||
+		!strings.HasSuffix(byID["ws1:doc1"].FileName, ".md") ||
+		byID["ws1:doc1"].Metadata["fetcher"] != "block" ||
+		byID["ws1:doc1"].Metadata["fidelity"] != "best_effort" {
+		t.Fatalf("unexpected online doc item: %#v", byID["ws1:doc1"])
 	}
-	if got := string(byID["ws1:doc2"].Content); !strings.Contains(got, "Nested document") {
-		t.Fatalf("doc2 markdown not rendered as expected:\n%s", got)
+	if got := string(byID["ws1:doc1"].Content); !strings.Contains(got, "docx:doc1:v1") ||
+		!strings.Contains(got, "![架构图](https://example.com/arch.png)") {
+		t.Fatalf("doc1 markdown content = %q", got)
+	}
+	if got := string(byID["ws1:doc2"].Content); !strings.Contains(got, "docx:doc2:v1") {
+		t.Fatalf("doc2 markdown content = %q", got)
+	}
+	if byID["ws1:file1"].ContentType != "application/octet-stream" ||
+		byID["ws1:file1"].FileName != "Design.pdf" ||
+		string(byID["ws1:file1"].Content) != "fake-pdf-content" ||
+		byID["ws1:file1"].Metadata["fetcher"] != "file" ||
+		byID["ws1:file1"].Metadata["category"] != "PDF" ||
+		byID["ws1:file1"].Metadata["dentry_id"] != "798001" ||
+		byID["ws1:file1"].Metadata["dentry_uuid"] != "file1" {
+		t.Fatalf("unexpected uploaded file item: %#v", byID["ws1:file1"])
 	}
 	if _, ok := byID["ws1:sheet1"]; ok {
 		t.Fatalf("unsupported sheet node should be skipped")
+	}
+	if got := atomic.LoadInt32(&server.blockCalls); got != 2 {
+		t.Fatalf("online docs should use block fallback by default, got %d block calls", got)
+	}
+	if got := atomic.LoadInt32(&server.downloadInfoCalls); got != 1 {
+		t.Fatalf("uploaded files should use download info API, got %d calls", got)
 	}
 }
 
@@ -166,24 +181,189 @@ func TestFetchAllDeduplicatesOverlappingSelections(t *testing.T) {
 	for _, item := range items {
 		seen[item.ExternalID]++
 	}
-	if len(items) != 2 || seen["ws1:doc1"] != 1 || seen["ws1:doc2"] != 1 {
+	if len(items) != 3 || seen["ws1:doc1"] != 1 || seen["ws1:doc2"] != 1 || seen["ws1:file1"] != 1 {
 		t.Fatalf("expected unique docs from overlapping selections, got items=%#v counts=%#v", items, seen)
+	}
+}
+
+func TestFetchAllCanUseConfiguredExporterBeforeOpenAPIFallback(t *testing.T) {
+	server := newFakeDingTalkServer(t)
+	defer server.Close()
+
+	connector := &Connector{
+		contentFetchers: []dingtalkContentFetcher{
+			testExportFetcher{},
+			fileFetcher{},
+			blockFetcher{},
+		},
+	}
+	items, err := connector.FetchAll(context.Background(), newTestConfig(server.URL), []string{"ws1:root"})
+	if err != nil {
+		t.Fatalf("fetch all: %v", err)
+	}
+
+	byID := map[string]types.FetchedItem{}
+	for _, item := range items {
+		byID[item.ExternalID] = item
+	}
+	if byID["ws1:doc1"].Metadata["fetcher"] != "export" ||
+		string(byID["ws1:doc1"].Content) != "exported:Architecture" {
+		t.Fatalf("expected configured export fetcher to handle online doc, got %#v", byID["ws1:doc1"])
+	}
+	if byID["ws1:file1"].Metadata["fetcher"] != "file" {
+		t.Fatalf("expected uploaded file to fall back to file fetcher, got %#v", byID["ws1:file1"])
+	}
+	if got := atomic.LoadInt32(&server.blockCalls); got != 0 {
+		t.Fatalf("configured export fetcher should run before block API, got %d block calls", got)
+	}
+	if got := atomic.LoadInt32(&server.downloadInfoCalls); got != 1 {
+		t.Fatalf("uploaded file should still use download info API, got %d calls", got)
 	}
 }
 
 func TestMarkdownFileNameNormalizesDocumentExtensions(t *testing.T) {
 	tests := map[string]string{
-		"WeKnora测试.adoc":    "WeKnora测试.md",
-		"guide.asciidoc":    "guide.md",
-		"already.md":        "already.md",
-		"notes.markdown":    "notes.md",
-		"bad/name:doc.adoc": "bad_name_doc.md",
-		"   ":               "untitled.md",
+		"WeKnora测试.adoc": "WeKnora测试.md",
+		"guide.asciidoc": "guide.md",
+		"already.docx":   "already.md",
+		"notes.md":       "notes.md",
+		"   ":            "untitled.md",
 	}
 
 	for title, want := range tests {
 		if got := markdownFileName(title); got != want {
 			t.Fatalf("markdownFileName(%q) = %q, want %q", title, got, want)
+		}
+	}
+}
+
+func TestRenderBlocksMarkdownPreservesNestedTextAndImages(t *testing.T) {
+	var resp blockListResponse
+	if err := json.Unmarshal([]byte(`{
+		"result": {
+			"data": [
+				{
+					"blockType": "paragraph",
+					"paragraph": {
+						"elements": [
+							{"textRun": {"content": "第一段"}},
+							{"text": "，包含复杂文本"}
+						]
+					}
+				},
+				{
+					"blockType": "callout",
+					"children": [
+						{
+							"blockType": "paragraph",
+							"paragraph": {"richTextElements": [{"content": "高亮块里的文字"}]}
+						}
+					]
+				},
+				{
+					"blockType": "image",
+					"image": {
+						"alt": "架构图",
+						"url": "https://example.com/arch.png"
+					}
+				}
+			]
+		}
+	}`), &resp); err != nil {
+		t.Fatalf("unmarshal block response: %v", err)
+	}
+
+	got := renderBlocksMarkdown(resp.blocks())
+	for _, want := range []string{
+		"第一段，包含复杂文本",
+		"> 高亮块里的文字",
+		"![架构图](https://example.com/arch.png)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered markdown missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderBlocksMarkdownPreservesOfficialInlineChildren(t *testing.T) {
+	var resp blockListResponse
+	if err := json.Unmarshal([]byte(`{
+		"result": {
+			"data": [
+				{
+					"blockType": "paragraph",
+					"paragraph": {},
+					"children": [
+						{"text": "图片前"},
+						{"elementType": "image", "properties": {"src": "https://example.com/pic.jpg"}},
+						{
+							"elementType": "link",
+							"properties": {"href": "https://www.dingtalk.com"},
+							"children": [{"text": "钉钉官网"}]
+						}
+					]
+				},
+				{
+					"blockType": "heading",
+					"heading": {"level": 2},
+					"children": [{"text": "二级标题"}]
+				}
+			]
+		}
+	}`), &resp); err != nil {
+		t.Fatalf("unmarshal block response: %v", err)
+	}
+
+	got := renderBlocksMarkdown(resp.blocks())
+	for _, want := range []string{
+		"图片前![image](https://example.com/pic.jpg)[钉钉官网](https://www.dingtalk.com)",
+		"## 二级标题",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered markdown missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderBlocksMarkdownPreservesOfficialListsAndTables(t *testing.T) {
+	var resp blockListResponse
+	if err := json.Unmarshal([]byte(`{
+		"result": {
+			"data": [
+				{
+					"blockType": "unorderedList",
+					"unorderedList": {"list": {"level": 0}},
+					"children": [{"text": "无序列表项"}]
+				},
+				{
+					"blockType": "orderedList",
+					"orderedList": {"list": {"level": 0}},
+					"children": [{"text": "有序列表项"}]
+				},
+				{
+					"blockType": "table",
+					"table": {
+						"cells": [
+							["功能", "状态"],
+							["图片", "已同步"]
+						]
+					}
+				}
+			]
+		}
+	}`), &resp); err != nil {
+		t.Fatalf("unmarshal block response: %v", err)
+	}
+
+	got := renderBlocksMarkdown(resp.blocks())
+	for _, want := range []string{
+		"- 无序列表项",
+		"1. 有序列表项",
+		"| 功能 | 状态 |",
+		"| 图片 | 已同步 |",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered markdown missing %q:\n%s", want, got)
 		}
 	}
 }
@@ -201,8 +381,8 @@ func TestFetchIncrementalSkipsUnchangedAndDetectsDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("initial incremental fetch: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected initial fetch to return two docs, got %d", len(items))
+	if len(items) != 3 {
+		t.Fatalf("expected initial fetch to return two docs and one file, got %d", len(items))
 	}
 	if cursor == nil || cursor.ConnectorCursor == nil {
 		t.Fatalf("expected connector cursor")
@@ -248,17 +428,17 @@ func TestFetchIncrementalDetectsContentChangeWithUnchangedModifiedTime(t *testin
 	if len(items) != 1 || items[0].ExternalID != "ws1:doc1" {
 		t.Fatalf("expected only doc1 to be resynced, got %#v", items)
 	}
-	if !strings.Contains(string(items[0].Content), "Hello DingTalk updated") {
-		t.Fatalf("expected updated content, got:\n%s", string(items[0].Content))
+	if got := string(items[0].Content); !strings.Contains(got, "docx:doc1:v2") {
+		t.Fatalf("expected updated markdown content, got %q", got)
 	}
 }
 
-func TestFetchAllReturnsErrorItemForEmptyRenderedContent(t *testing.T) {
+func TestFetchAllReturnsErrorItemForFailedBlockQuery(t *testing.T) {
 	server := newFakeDingTalkServer(t)
 	defer server.Close()
-	atomic.StoreInt32(&server.doc1Empty, 1)
+	atomic.StoreInt32(&server.doc1BlockFailed, 1)
 
-	connector := NewConnector()
+	connector := &Connector{contentFetchers: []dingtalkContentFetcher{fileFetcher{}, blockFetcher{}}}
 	items, err := connector.FetchAll(context.Background(), newTestConfig(server.URL), []string{"ws1:root"})
 	if err != nil {
 		t.Fatalf("fetch all: %v", err)
@@ -269,11 +449,11 @@ func TestFetchAllReturnsErrorItemForEmptyRenderedContent(t *testing.T) {
 		byID[item.ExternalID] = item
 	}
 	doc := byID["ws1:doc1"]
-	if doc.Metadata["error"] == "" || !strings.Contains(doc.Metadata["error"], "empty") {
-		t.Fatalf("expected empty-content error metadata, got %#v", doc)
+	if doc.Metadata["error"] == "" || !strings.Contains(doc.Metadata["error"], "blocks") {
+		t.Fatalf("expected block query error metadata, got %#v", doc)
 	}
 	if len(doc.Content) != 0 {
-		t.Fatalf("empty-content item should not carry normal content, got %q", string(doc.Content))
+		t.Fatalf("failed block query item should not carry normal content, got %q", string(doc.Content))
 	}
 }
 
@@ -396,44 +576,6 @@ func TestClientDoAddsPermissionSuggestionForScopeErrors(t *testing.T) {
 	}
 }
 
-func TestRenderBlocksMarkdown(t *testing.T) {
-	md := renderBlocksMarkdown([]docBlock{
-		{Type: "HEADING", Heading: blockText{Text: "Title", Level: 2}},
-		{Type: "PARAGRAPH", Paragraph: blockText{Text: "A paragraph"}},
-		{Type: "BULLET", Bullet: blockText{Text: "First"}},
-		{Type: "ORDERED", Ordered: blockText{Text: "Second"}},
-		{Type: "BLOCKQUOTE", Blockquote: blockText{Text: "Quote"}},
-	})
-
-	for _, want := range []string{"## Title", "A paragraph", "- First", "1. Second", "> Quote"} {
-		if !strings.Contains(md, want) {
-			t.Fatalf("markdown missing %q:\n%s", want, md)
-		}
-	}
-}
-
-func TestBlockListResponseSupportsResultData(t *testing.T) {
-	var resp blockListResponse
-	if err := json.Unmarshal([]byte(`{
-		"success": true,
-		"result": {
-			"data": [
-				{"blockType": "paragraph", "paragraph": {"text": "Real DingTalk content"}}
-			]
-		}
-	}`), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-
-	blocks, _, _ := resp.items()
-	if len(blocks) != 1 {
-		t.Fatalf("expected one result.data block, got %d", len(blocks))
-	}
-	if got := renderBlocksMarkdown(blocks); !strings.Contains(got, "Real DingTalk content") {
-		t.Fatalf("markdown did not include result.data content:\n%s", got)
-	}
-}
-
 func newTestConfig(baseURL string) *types.DataSourceConfig {
 	return &types.DataSourceConfig{
 		Type: types.ConnectorTypeDingTalk,
@@ -457,10 +599,12 @@ func resourceIDs(resources []types.Resource) []string {
 
 type fakeDingTalkServer struct {
 	*httptest.Server
-	userDetailCalls int32
-	doc2Deleted     int32
-	doc1Revision    int32
-	doc1Empty       int32
+	userDetailCalls   int32
+	blockCalls        int32
+	downloadInfoCalls int32
+	doc2Deleted       int32
+	doc1Revision      int32
+	doc1BlockFailed   int32
 }
 
 func newFakeDingTalkServer(t *testing.T) *fakeDingTalkServer {
@@ -473,7 +617,10 @@ func newFakeDingTalkServer(t *testing.T) *fakeDingTalkServer {
 	mux.HandleFunc("/v2.0/wiki/workspaces", fake.handleWorkspaces)
 	mux.HandleFunc("/v2.0/wiki/nodes", fake.handleNodes)
 	mux.HandleFunc("/v2.0/wiki/nodes/", fake.handleNodeDetail)
+	mux.HandleFunc("/v2.0/doc/dentries/", fake.handleQueryDentryID)
 	mux.HandleFunc("/v1.0/doc/suites/documents/", fake.handleBlocks)
+	mux.HandleFunc("/v1.0/storage/spaces/", fake.handleStorageDownloadInfo)
+	mux.HandleFunc("/download/file1", fake.handleFileDownload)
 
 	fake.Server = httptest.NewServer(mux)
 	return fake
@@ -544,6 +691,7 @@ func (s *fakeDingTalkServer) handleNodes(w http.ResponseWriter, r *http.Request)
 		nodes = append(nodes,
 			nodeJSON("doc1", "Architecture", "FILE", "ALIDOC", "root", false, "2026-06-30T10:00:00Z"),
 			nodeJSON("folder1", "Guides", "FOLDER", "", "root", true, "2026-06-30T10:01:00Z"),
+			nodeJSON("file1", "Design.pdf", "FILE", "PDF", "root", false, "2026-06-30T10:02:30Z"),
 			nodeJSON("sheet1", "Budget", "FILE", "AXLS", "root", false, "2026-06-30T10:02:00Z"),
 		)
 	case "folder1":
@@ -570,6 +718,8 @@ func (s *fakeDingTalkServer) handleNodeDetail(w http.ResponseWriter, r *http.Req
 		node = nodeJSON("doc1", "Architecture", "FILE", "ALIDOC", "root", false, "2026-06-30T10:00:00Z")
 	case "doc2":
 		node = nodeJSON("doc2", "Nested", "FILE", "ALIDOC", "folder1", false, "2026-06-30T10:03:00Z")
+	case "file1":
+		node = nodeJSON("file1", "Design.pdf", "FILE", "PDF", "root", false, "2026-06-30T10:02:30Z")
 	default:
 		http.NotFound(w, r)
 		return
@@ -578,38 +728,119 @@ func (s *fakeDingTalkServer) handleNodeDetail(w http.ResponseWriter, r *http.Req
 }
 
 func (s *fakeDingTalkServer) handleBlocks(w http.ResponseWriter, r *http.Request) {
+	atomic.AddInt32(&s.blockCalls, 1)
 	if err := assertOperatorID(r.URL.Query()); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	docKey := strings.TrimPrefix(r.URL.Path, "/v1.0/doc/suites/documents/")
 	docKey = strings.TrimSuffix(docKey, "/blocks")
-
-	var blocks []map[string]interface{}
+	if docKey == "doc1" && atomic.LoadInt32(&s.doc1BlockFailed) == 1 {
+		writeJSON(w, map[string]interface{}{
+			"success": false,
+			"code":    "DocBlocksQueryFailed",
+			"message": "blocks failed for test",
+		})
+		return
+	}
 	switch docKey {
 	case "doc1":
-		if atomic.LoadInt32(&s.doc1Empty) == 1 {
-			writeJSON(w, map[string]interface{}{"blocks": blocks})
-			return
-		}
-		text := "Hello DingTalk"
+		text := "docx:doc1:v1"
 		if atomic.LoadInt32(&s.doc1Revision) == 1 {
-			text = "Hello DingTalk updated"
+			text = "docx:doc1:v2"
 		}
-		blocks = []map[string]interface{}{
-			{"type": "HEADING", "heading": map[string]interface{}{"level": 1, "text": "Architecture"}},
-			{"type": "PARAGRAPH", "paragraph": map[string]interface{}{"text": text}},
-			{"type": "BULLET", "bullet": map[string]interface{}{"text": "A bullet"}},
-		}
+		writeJSON(w, map[string]interface{}{
+			"result": map[string]interface{}{
+				"data": []map[string]interface{}{
+					{
+						"blockType": "paragraph",
+						"paragraph": map[string]interface{}{
+							"elements": []map[string]interface{}{
+								{"textRun": map[string]interface{}{"content": text}},
+							},
+						},
+					},
+					{
+						"blockType": "image",
+						"image": map[string]interface{}{
+							"alt": "架构图",
+							"url": "https://example.com/arch.png",
+						},
+					},
+				},
+			},
+		})
 	case "doc2":
-		blocks = []map[string]interface{}{
-			{"type": "PARAGRAPH", "paragraph": map[string]interface{}{"text": "Nested document"}},
-		}
+		writeJSON(w, map[string]interface{}{
+			"blocks": []map[string]interface{}{
+				{
+					"blockType": "paragraph",
+					"paragraph": map[string]interface{}{
+						"richTextElements": []map[string]interface{}{
+							{"content": "docx:doc2:v1"},
+						},
+					},
+				},
+			},
+		})
 	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *fakeDingTalkServer) handleQueryDentryID(w http.ResponseWriter, r *http.Request) {
+	if err := assertOperatorID(r.URL.Query()); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Path != "/v2.0/doc/dentries/file1/queryDentryId" {
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, map[string]interface{}{"blocks": blocks})
+	writeJSON(w, map[string]interface{}{
+		"spaceId":  "854001",
+		"dentryId": "798001",
+	})
+}
+
+func (s *fakeDingTalkServer) handleStorageDownloadInfo(w http.ResponseWriter, r *http.Request) {
+	if err := assertUnionID(r.URL.Query()); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Path != "/v1.0/storage/spaces/854001/dentries/798001/downloadInfos/query" {
+		http.NotFound(w, r)
+		return
+	}
+	atomic.AddInt32(&s.downloadInfoCalls, 1)
+	writeJSON(w, map[string]interface{}{
+		"downloadInfo": map[string]interface{}{
+			"resourceUrl": s.URL + "/download/file1",
+			"headers": map[string]interface{}{
+				"x-test-download": "ok",
+			},
+		},
+	})
+}
+
+func (s *fakeDingTalkServer) handleFileDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("x-test-download") != "ok" {
+		http.Error(w, "missing download header", http.StatusBadRequest)
+		return
+	}
+	_, _ = w.Write([]byte("fake-pdf-content"))
 }
 
 func nodeJSON(id, name, nodeType, category, parent string, hasChildren bool, modified string) map[string]interface{} {
@@ -623,6 +854,7 @@ func nodeJSON(id, name, nodeType, category, parent string, hasChildren bool, mod
 		"parentNodeId": parent,
 		"hasChildren":  hasChildren,
 		"url":          "https://dingtalk.example/wiki/" + id,
+		"workspaceId":  "ws1",
 		"modifiedTime": modified,
 	}
 }
@@ -634,7 +866,45 @@ func assertOperatorID(query url.Values) error {
 	return nil
 }
 
+func assertUnionID(query url.Values) error {
+	if got := query.Get("unionId"); got != "union-001" {
+		return fmt.Errorf("unexpected unionId %s", got)
+	}
+	return nil
+}
+
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+type testExportFetcher struct{}
+
+func (testExportFetcher) Fetch(
+	_ context.Context,
+	_ *client,
+	doc wikiNode,
+	workspaceID string,
+	selectedResourceID string,
+) (*types.FetchedItem, string, bool, error) {
+	if !doc.isOnlineDocument() {
+		return nil, "", false, nil
+	}
+	content := []byte("exported:" + doc.displayName())
+	hash := contentHash(content)
+	return &types.FetchedItem{
+		ExternalID:       makeResourceID(workspaceID, doc.NodeID),
+		Title:            doc.displayName(),
+		Content:          content,
+		ContentType:      "text/markdown",
+		FileName:         markdownFileName(doc.displayName()),
+		SourceResourceID: selectedResourceID,
+		Metadata: map[string]string{
+			"channel":      types.ChannelDingtalk,
+			"workspace_id": workspaceID,
+			"node_id":      doc.NodeID,
+			"fetcher":      "export",
+			"content_hash": hash,
+		},
+	}, hash, true, nil
 }
