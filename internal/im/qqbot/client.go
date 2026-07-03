@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 type Client struct {
@@ -35,12 +38,23 @@ func NewClient(appID, clientSecret, apiBaseURL, gatewayURL string) (*Client, err
 	if apiBaseURL == "" {
 		apiBaseURL = defaultAPIBaseURL
 	}
+	apiBaseURL = strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
+	if err := validateHTTPAPIBaseURL(apiBaseURL); err != nil {
+		return nil, err
+	}
+	gatewayURL = strings.TrimSpace(gatewayURL)
+	if err := validateGatewayURL(gatewayURL); err != nil {
+		return nil, err
+	}
 	return &Client{
 		appID:        appID,
 		clientSecret: clientSecret,
-		apiBaseURL:   strings.TrimRight(apiBaseURL, "/"),
-		gatewayURL:   strings.TrimSpace(gatewayURL),
-		httpClient:   &http.Client{Timeout: 15 * time.Second},
+		apiBaseURL:   apiBaseURL,
+		gatewayURL:   gatewayURL,
+		httpClient: secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+			Timeout:      15 * time.Second,
+			MaxRedirects: 5,
+		}),
 	}, nil
 }
 
@@ -55,7 +69,46 @@ func (c *Client) GatewayURL(ctx context.Context) (string, error) {
 	if result.URL == "" {
 		return "", fmt.Errorf("empty qqbot gateway url")
 	}
+	if err := validateGatewayURL(result.URL); err != nil {
+		return "", fmt.Errorf("invalid qqbot gateway url: %w", err)
+	}
 	return result.URL, nil
+}
+
+func validateHTTPAPIBaseURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid qqbot api_base_url: must be a valid http(s) URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("invalid qqbot api_base_url: must use http or https")
+	}
+	if err := secutils.ValidateURLForSSRF(raw); err != nil {
+		return fmt.Errorf("invalid qqbot api_base_url: %w (for private deployments, add the hostname to SSRF_WHITELIST)", err)
+	}
+	return nil
+}
+
+func validateGatewayURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("gateway_url must be a valid wss URL")
+	}
+	if u.Scheme != "wss" {
+		return fmt.Errorf("gateway_url must use wss")
+	}
+	checkURL := *u
+	checkURL.Scheme = "https"
+	if err := secutils.ValidateURLForSSRF(checkURL.String()); err != nil {
+		return fmt.Errorf(
+			"gateway_url failed SSRF validation: %w (for private deployments, add the hostname to SSRF_WHITELIST)",
+			err,
+		)
+	}
+	return nil
 }
 
 func (c *Client) SendC2CMessage(ctx context.Context, openID, content, msgID string) error {

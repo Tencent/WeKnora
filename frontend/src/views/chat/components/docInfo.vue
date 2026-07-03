@@ -55,7 +55,7 @@
     </div>
 </template>
 <script setup>
-import { defineProps, computed, ref, reactive } from "vue";
+import { computed, ref, reactive } from "vue";
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';

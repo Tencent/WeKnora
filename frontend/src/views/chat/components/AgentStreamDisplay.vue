@@ -651,7 +651,8 @@ const wikiDrawerContent = computed(() => {
     return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
   });
 
-  return wrapChatMarkdownTables(marked.parse(preprocessed, { breaks: true, async: false }) as string);
+  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string;
+  return sanitizeMarkdownHTML(wrapChatMarkdownTables(html));
 });
 
 watch(wikiDrawerContent, async () => {
@@ -721,6 +722,7 @@ interface SessionData {
   isAgentMode?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
+  [key: string]: unknown;
 }
 
 const props = defineProps<{
@@ -1622,7 +1624,7 @@ const onRootClick = (e: Event) => {
     const slug = wikiEl.getAttribute('data-slug');
 
     // Determine the relevant KB ID
-    const kbId = getKbIdForWiki(slug);
+    const kbId = getKbIdForWiki(slug || '');
 
     if (kbId && slug) {
       openWikiDrawer(kbId, slug);

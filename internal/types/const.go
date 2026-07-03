@@ -37,6 +37,12 @@ const (
 	LangfuseTraceContextKey ContextKey = "LangfuseTrace"
 	// SystemAdminContextKey is the context key indicating whether the user is a system administrator
 	SystemAdminContextKey ContextKey = "SystemAdmin"
+	// MCPOAuthNonInteractiveContextKey marks a request whose channel cannot
+	// resolve an in-conversation MCP OAuth prompt (e.g. an IM bot: there is no
+	// live client to click "Authorize" and call the resolve endpoint). When set,
+	// the agent emits a one-shot authorization notice and continues instead of
+	// blocking until the OAuth wait times out. See IsMCPOAuthNonInteractive.
+	MCPOAuthNonInteractiveContextKey ContextKey = "MCPOAuthNonInteractive"
 )
 
 // String returns the string representation of the context key

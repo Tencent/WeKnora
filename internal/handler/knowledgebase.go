@@ -1107,6 +1107,10 @@ func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Task ID cannot be empty"))
 		return
 	}
+	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		c.Error(err)
+		return
+	}
 
 	progress, err := h.knowledgeService.GetKBCloneProgress(ctx, taskID)
 	if err != nil {

@@ -143,6 +143,26 @@ func (m *OAuthManager) StartAuthorization(
 	return authURL, nil
 }
 
+// StartAuthorizationForService loads the MCP service by ID and starts the
+// authorization-code flow, returning the URL the user must open. It is a
+// convenience for callers (e.g. IM channels) that only hold a service ID and
+// cannot reach the MCP service lookup directly.
+func (m *OAuthManager) StartAuthorizationForService(
+	ctx context.Context,
+	tenantID uint64,
+	principal types.Principal,
+	serviceID, redirectURI, frontendRedirect string,
+) (string, error) {
+	service, err := m.serviceRepo.GetByID(ctx, tenantID, serviceID)
+	if err != nil {
+		return "", fmt.Errorf("failed to load MCP service: %w", err)
+	}
+	if service == nil {
+		return "", fmt.Errorf("MCP service not found")
+	}
+	return m.StartAuthorization(ctx, service, tenantID, principal, redirectURI, frontendRedirect)
+}
+
 // CompleteAuthorization handles the provider callback: it validates state,
 // exchanges the code for tokens (PKCE), and persists the per-user token.
 // Returns the frontend redirect URL recorded at StartAuthorization time.

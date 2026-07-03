@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/sse"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -47,7 +48,7 @@ func answerEvent(content string) *sdk.AgentStreamResponse {
 	return &sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeAnswer, Content: content}
 }
 func doneEvent() *sdk.AgentStreamResponse {
-	return &sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeAnswer, Done: true}
+	return &sdk.AgentStreamResponse{ResponseType: sdk.AgentResponseTypeComplete, Done: true}
 }
 func toolCallEvent(id, name string) *sdk.AgentStreamResponse {
 	return &sdk.AgentStreamResponse{
@@ -69,19 +70,19 @@ func textOpts() *cmdutil.FormatOptions {
 	return &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 }
 
-// ndjsonOpts returns a FormatOptions for the NDJSON event-stream path.
-// --format json routes here too for streaming commands.
+// ndjsonOpts returns a FormatOptions for the NDJSON event-stream path
+// (--format ndjson: raw SDK agent events, one per line).
 func ndjsonOpts() *cmdutil.FormatOptions {
 	return &cmdutil.FormatOptions{Mode: cmdutil.FormatNDJSON}
 }
 
-// jsonOpts returns a FormatOptions configured for the JSON path.
-// In v0.7 --format json routes to the NDJSON stream path for streaming commands.
+// jsonOpts returns a FormatOptions configured for the JSON object path
+// (--format json: one accumulated {ok,data} envelope).
 func jsonOpts() *cmdutil.FormatOptions {
 	return &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
 }
 
-// TestSessionAsk_NDJSON_FirstLineIsInit verifies that the NDJSON path (--format json)
+// TestSessionAsk_NDJSON_FirstLineIsInit verifies that the NDJSON path (--format ndjson)
 // always injects an "init" line first, carrying session_id and agent_id.
 func TestSessionAsk_NDJSON_FirstLineIsInit(t *testing.T) {
 	out, errBuf := iostreams.SetForTest(t)
@@ -92,7 +93,7 @@ func TestSessionAsk_NDJSON_FirstLineIsInit(t *testing.T) {
 		},
 	}
 	opts := &AskOptions{AgentID: "ag_x", Query: "ping"}
-	if err := runAsk(context.Background(), opts, jsonOpts(), svc); err != nil {
+	if err := runAsk(context.Background(), opts, ndjsonOpts(), svc); err != nil {
 		t.Fatalf("runAsk: %v", err)
 	}
 
@@ -134,7 +135,7 @@ func TestSessionAsk_NDJSON_PassthroughEvents(t *testing.T) {
 		},
 	}
 	opts := &AskOptions{AgentID: "ag_x", Query: "hi"}
-	if err := runAsk(context.Background(), opts, jsonOpts(), svc); err != nil {
+	if err := runAsk(context.Background(), opts, ndjsonOpts(), svc); err != nil {
 		t.Fatalf("runAsk: %v", err)
 	}
 
@@ -152,29 +153,155 @@ func TestSessionAsk_NDJSON_PassthroughEvents(t *testing.T) {
 	}
 }
 
-// TestSessionAsk_NDJSON_JSONEqualsNDJSON verifies that --format json and --format ndjson
-// produce identical NDJSON streams for session ask.
-func TestSessionAsk_NDJSON_JSONEqualsNDJSON(t *testing.T) {
-	events := []*sdk.AgentStreamResponse{
-		answerEvent("hello"),
+// TestSessionAsk_FormatJSON_EmitsSingleEnvelope verifies that default JSON
+// keeps answer events only.
+func TestSessionAsk_FormatJSON_EmitsSingleEnvelope(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &scriptedAskSvc{events: []*sdk.AgentStreamResponse{
+		// Per-event Done markers are not terminal for the whole agent run.
+		{ResponseType: sdk.AgentResponseTypeThinking, Content: "hidden reasoning", Done: true},
+		toolCallEvent("call_1", "knowledge_search"),
+		referencesEvent([]*sdk.SearchResult{{ID: "c1", Content: "BULKY PASSAGE", KnowledgeTitle: "Doc"}}),
+		answerEvent("the answer"),
+		{ResponseType: sdk.AgentResponseTypeAnswer, Done: true},
 		doneEvent(),
+	}}
+	opts := &AskOptions{AgentID: "ag_x", Query: "hi"}
+	if err := runAsk(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc); err != nil {
+		t.Fatalf("runAsk: %v", err)
 	}
-
-	runWith := func(mode cmdutil.FormatMode) string {
-		out, _ := iostreams.SetForTest(t)
-		svc := &scriptedAskSvc{events: events}
-		opts := &AskOptions{AgentID: "ag_x", Query: "q"}
-		fopts := &cmdutil.FormatOptions{Mode: mode}
-		if err := runAsk(context.Background(), opts, fopts, svc); err != nil {
-			t.Fatalf("runAsk(%s): %v", mode, err)
+	// A single envelope, not multiple NDJSON lines.
+	outStr := strings.TrimRight(out.String(), "\n")
+	if strings.Contains(outStr, "\n") {
+		t.Fatalf("expected single-line envelope, got multiple lines:\n%s", outStr)
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Events    []sse.ProjectedEvent `json:"events"`
+			SessionID string               `json:"session_id"`
+			AgentID   string               `json:"agent_id"`
+			Query     string               `json:"query"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(outStr), &env); err != nil {
+		t.Fatalf("envelope not JSON: %v\n%s", err, outStr)
+	}
+	if !env.OK {
+		t.Error("ok=false, want true")
+	}
+	if len(env.Data.Events) != 2 {
+		t.Fatalf("events=%+v, want two answer frames", env.Data.Events)
+	}
+	for i, event := range env.Data.Events {
+		if event.ResponseType != "answer" {
+			t.Errorf("events[%d].response_type=%q, want answer", i, event.ResponseType)
 		}
-		return out.String()
 	}
+	if env.Data.Events[0].Content != "the answer" {
+		t.Errorf("answer content=%q", env.Data.Events[0].Content)
+	}
+	if env.Data.AgentID != "ag_x" || env.Data.Query != "hi" {
+		t.Errorf("echo fields: agent_id=%q query=%q", env.Data.AgentID, env.Data.Query)
+	}
+	if env.Data.SessionID == "" {
+		t.Error("session_id empty")
+	}
+}
 
-	jsonOut := runWith(cmdutil.FormatJSON)
-	ndjsonOut := runWith(cmdutil.FormatNDJSON)
-	if jsonOut != ndjsonOut {
-		t.Errorf("--format json and --format ndjson differ:\n  json:   %q\n  ndjson: %q", jsonOut, ndjsonOut)
+func TestSessionAsk_FormatJSON_VerboseAndReferenceIncludeBothDetailClasses(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &scriptedAskSvc{events: []*sdk.AgentStreamResponse{
+		{ID: "think", ResponseType: sdk.AgentResponseTypeThinking, Content: "reasoning", Done: true},
+		toolCallEvent("call_1", "knowledge_search"),
+		referencesEvent([]*sdk.SearchResult{{ID: "c1", KnowledgeBaseID: "kb1", ParentChunkID: "p1", Content: "BULK"}}),
+		answerEvent("answer [chunk:c1]"),
+		doneEvent(),
+	}}
+	opts := &AskOptions{AgentID: "ag_x", Query: "hi", Verbose: true, Reference: true}
+	if err := runAsk(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc); err != nil {
+		t.Fatalf("runAsk: %v", err)
+	}
+	var env struct {
+		Data struct {
+			Events []sse.ProjectedEvent `json:"events"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"thinking", "tool_call", "references", "answer", "complete"}
+	if len(env.Data.Events) != len(want) {
+		t.Fatalf("events=%+v", env.Data.Events)
+	}
+	for i, responseType := range want {
+		if env.Data.Events[i].ResponseType != responseType {
+			t.Errorf("events[%d]=%q, want %q", i, env.Data.Events[i].ResponseType, responseType)
+		}
+	}
+	refs := env.Data.Events[2].KnowledgeReferences
+	if len(refs) != 1 || refs[0].KBID != "kb1" || refs[0].ChunkID != "c1" || refs[0].ParentChunkID != "p1" {
+		t.Errorf("reference indexes=%+v", refs)
+	}
+}
+
+// TestSessionAsk_Text_VerboseIncludesThinking verifies the --format text path
+// honors --verbose: the agent's thinking streams inline with the answer.
+// (Regresses the original bug: runAskText ignored opts.Verbose entirely, so
+// thinking never appeared in text mode under any flag.)
+func TestSessionAsk_Text_VerboseIncludesThinking(t *testing.T) {
+	out, _ := iostreams.SetForTestWithTTY(t)
+	svc := &scriptedAskSvc{events: []*sdk.AgentStreamResponse{
+		{ResponseType: sdk.AgentResponseTypeThinking, Content: "REASONING"},
+		answerEvent("answer"),
+		doneEvent(),
+	}}
+	opts := &AskOptions{AgentID: "ag_x", Query: "hi", Verbose: true}
+	if err := runAsk(context.Background(), opts, textOpts(), svc); err != nil {
+		t.Fatalf("runAsk: %v", err)
+	}
+	if !strings.Contains(out.String(), "REASONING") {
+		t.Errorf("verbose text output missing thinking: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "answer") {
+		t.Errorf("answer body missing: %q", out.String())
+	}
+}
+
+func TestSessionAsk_Text_NonTTYVerboseIncludesThinking(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &scriptedAskSvc{events: []*sdk.AgentStreamResponse{
+		{ResponseType: sdk.AgentResponseTypeThinking, Content: "REASONING", Done: true},
+		answerEvent("answer"),
+		doneEvent(),
+	}}
+	opts := &AskOptions{AgentID: "ag_x", Query: "hi", Verbose: true}
+	if err := runAsk(context.Background(), opts, textOpts(), svc); err != nil {
+		t.Fatalf("runAsk: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "REASONING") || !strings.Contains(got, "answer") {
+		t.Errorf("non-TTY verbose output missing thinking or answer: %q", got)
+	}
+}
+
+// TestSessionAsk_Text_HidesThinkingByDefault: without --verbose the text path
+// must NOT stream the reasoning pass, only the answer.
+func TestSessionAsk_Text_HidesThinkingByDefault(t *testing.T) {
+	out, _ := iostreams.SetForTestWithTTY(t)
+	svc := &scriptedAskSvc{events: []*sdk.AgentStreamResponse{
+		{ResponseType: sdk.AgentResponseTypeThinking, Content: "REASONING"},
+		answerEvent("answer"),
+		doneEvent(),
+	}}
+	opts := &AskOptions{AgentID: "ag_x", Query: "hi"}
+	if err := runAsk(context.Background(), opts, textOpts(), svc); err != nil {
+		t.Fatalf("runAsk: %v", err)
+	}
+	if strings.Contains(out.String(), "REASONING") {
+		t.Errorf("non-verbose text output leaked thinking: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "answer") {
+		t.Errorf("answer body missing: %q", out.String())
 	}
 }
 
@@ -280,6 +407,25 @@ func TestSessionAsk_NoDoneEvent_MapsToSSEStreamAborted(t *testing.T) {
 	}
 }
 
+func TestSessionAsk_FormatJSON_StreamErrorIncludesSessionDetail(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &scriptedAskSvc{streamErr: errors.New("connection reset")}
+	err := runAsk(
+		context.Background(),
+		&AskOptions{AgentID: "ag", Query: "x"},
+		jsonOpts(),
+		svc,
+	)
+	var typed *cmdutil.Error
+	if !errors.As(err, &typed) {
+		t.Fatalf("expected *cmdutil.Error, got %v", err)
+	}
+	detail, ok := typed.Detail.(map[string]any)
+	if !ok || detail["session_id"] != "sess_auto" {
+		t.Errorf("error detail=%v, want auto-created session_id", typed.Detail)
+	}
+}
+
 func TestSessionAsk_CreateSessionFails_MapsToSessionCreateFailed(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &scriptedAskSvc{createErr: errors.New("connection refused")}
@@ -311,8 +457,8 @@ func TestSessionAsk_Cancellation_MapsToOperationCancelled(t *testing.T) {
 	}
 }
 
-// Sanity: text-mode output writes the answer body and a tool-trace footer.
-func TestSessionAsk_Text_Accumulate_PrintsAnswerAndFooter(t *testing.T) {
+// Default text writes answer events but filters tool events.
+func TestSessionAsk_Text_DefaultHidesTools(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &scriptedAskSvc{events: []*sdk.AgentStreamResponse{
 		answerEvent("hello"),
@@ -327,8 +473,8 @@ func TestSessionAsk_Text_Accumulate_PrintsAnswerAndFooter(t *testing.T) {
 	if !strings.Contains(got, "hello") {
 		t.Errorf("answer body missing: %q", got)
 	}
-	if !strings.Contains(got, "Tool trace") {
-		t.Errorf("tool trace footer missing: %q", got)
+	if strings.Contains(got, "tool_call") || strings.Contains(got, "knowledge_search") {
+		t.Errorf("default text output leaked tool event: %q", got)
 	}
 }
 
@@ -437,7 +583,7 @@ func TestSessionAsk_NDJSON_IncludesReferencesViaSDKEvent(t *testing.T) {
 		},
 	}
 	opts := &AskOptions{AgentID: "ag_x", Query: "ping"}
-	if err := runAsk(context.Background(), opts, jsonOpts(), svc); err != nil {
+	if err := runAsk(context.Background(), opts, ndjsonOpts(), svc); err != nil {
 		t.Fatalf("runAsk: %v", err)
 	}
 
@@ -461,5 +607,56 @@ func TestSessionAsk_NDJSON_IncludesReferencesViaSDKEvent(t *testing.T) {
 	}
 	if refsLine["response_type"] != string(sdk.AgentResponseTypeReferences) {
 		t.Errorf("expected references event at line 3, got response_type=%v", refsLine["response_type"])
+	}
+}
+
+func TestSessionAsk_NDJSON_PreservesReferencesAndThinking(t *testing.T) {
+	// NDJSON is the raw protocol surface: reasoning and full reference payloads
+	// pass through unchanged. Index projection is limited to JSON/text/MCP.
+	svc := &scriptedAskSvc{
+		events: []*sdk.AgentStreamResponse{
+			{ResponseType: sdk.AgentResponseTypeThinking, Content: "reasoning"},
+			referencesEvent([]*sdk.SearchResult{{ID: "c1", Content: "BULKY PASSAGE", KnowledgeTitle: "Doc"}}),
+			answerEvent("hello"),
+			doneEvent(),
+		},
+	}
+	out, _ := iostreams.SetForTest(t)
+
+	opts := &AskOptions{AgentID: "ag_x", Query: "hi"}
+	if err := runAsk(context.Background(), opts, ndjsonOpts(), svc); err != nil {
+		t.Fatalf("runAsk: %v", err)
+	}
+
+	var refsLine map[string]any
+	sawThinking := false
+	for _, line := range strings.Split(strings.TrimRight(out.String(), "\n"), "\n") {
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+		if ev["response_type"] == "thinking" {
+			sawThinking = true
+		}
+		if ev["response_type"] == "references" {
+			refsLine = ev
+		}
+	}
+	if !sawThinking {
+		t.Error("thinking event was filtered from raw NDJSON output")
+	}
+	if refsLine == nil {
+		t.Fatal("references event not emitted")
+	}
+	refs, _ := refsLine["knowledge_references"].([]any)
+	if len(refs) != 1 {
+		t.Fatalf("knowledge_references=%d, want 1", len(refs))
+	}
+	first, _ := refs[0].(map[string]any)
+	if first["content"] != "BULKY PASSAGE" {
+		t.Errorf("references[0].content=%v, want original content", first["content"])
+	}
+	if first["id"] != "c1" {
+		t.Errorf("references[0].id=%v, want c1", first["id"])
 	}
 }

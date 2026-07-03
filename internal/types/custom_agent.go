@@ -135,6 +135,9 @@ type CustomAgentConfig struct {
 	MCPSelectionMode string `yaml:"mcp_selection_mode" json:"mcp_selection_mode"`
 	// Selected MCP service IDs (only used when MCPSelectionMode is "selected")
 	MCPServices []string `yaml:"mcp_services" json:"mcp_services"`
+	// MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth
+	// authorization before skipping. <=0 uses the gate's configured timeout.
+	MCPAuthWaitTimeout int `yaml:"mcp_auth_wait_timeout,omitempty" json:"mcp_auth_wait_timeout,omitempty"`
 
 	// ===== Skills Settings (only for smart-reasoning mode) =====
 	// Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills

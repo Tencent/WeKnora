@@ -14,6 +14,7 @@ from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.utils import endecode
+from docreader.utils.ssrf import is_ssrf_safe_url
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,22 @@ async def read_visible_text(page: Page) -> str:
     )
 
 
+async def install_ssrf_route_guard(page: Page) -> None:
+    """Block navigation/subresource requests to SSRF-restricted targets (incl. redirects)."""
+
+    async def handle_route(route) -> None:
+        safe, reason = is_ssrf_safe_url(route.request.url)
+        if not safe:
+            logger.warning(
+                "SSRF guard blocked request to %s: %s", route.request.url, reason
+            )
+            await route.abort("blockedbyclient")
+            return
+        await route.continue_()
+
+    await page.route("**/*", handle_route)
+
+
 class StdWebParser(BaseParser):
     """Standard web page parser using Playwright and Trafilatura.
 
@@ -154,6 +171,10 @@ class StdWebParser(BaseParser):
         """
         logger.info(f"Starting web page scraping for URL: {url}")
         empty = _ScrapeResult(html="", visible_text="", page_title="")
+        safe, reason = is_ssrf_safe_url(url)
+        if not safe:
+            logger.error("URL blocked by SSRF guard before navigation: %s", reason)
+            return empty
         try:
             async with async_playwright() as p:
                 kwargs = {}
@@ -163,6 +184,7 @@ class StdWebParser(BaseParser):
                 logger.info("Launching WebKit browser")
                 browser = await p.webkit.launch(**kwargs)
                 page = await browser.new_page()
+                await install_ssrf_route_guard(page)
 
                 logger.info(f"Navigating to URL: {url}")
                 try:

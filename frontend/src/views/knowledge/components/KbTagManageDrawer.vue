@@ -68,7 +68,7 @@
                   class="tag-tile__input"
                   :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
                   @enter="submitCreateTag"
-                  @keydown="(_v, ctx) => onEditKeydown(ctx, cancelCreateTag)"
+                  @keydown="(_v: string, ctx?: { e?: KeyboardEvent }) => onEditKeydown(ctx, cancelCreateTag)"
                 />
               </div>
               <div class="tag-tile__actions">
@@ -116,7 +116,7 @@
                     class="tag-tile__input"
                     :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
                     @enter="submitEditTag"
-                    @keydown="(_v, ctx) => onEditKeydown(ctx, cancelEditTag)"
+                    @keydown="(_v: string, ctx?: { e?: KeyboardEvent }) => onEditKeydown(ctx, cancelEditTag)"
                   />
                 </div>
                 <div class="tag-tile__actions">
@@ -276,7 +276,7 @@ const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
 const getDeleteConfirmContent = (tag: { name: string }) =>
   t(props.isFaq ? 'knowledgeBase.tagDeleteDesc' : 'knowledgeBase.tagDeleteDescDoc', { name: tag.name });
 
-const onEditKeydown = (ctx: { e?: KeyboardEvent }, cancel: () => void) => {
+const onEditKeydown = (ctx: { e?: KeyboardEvent } | undefined, cancel: () => void) => {
   if (ctx?.e?.key === 'Escape') {
     ctx.e.stopPropagation();
     ctx.e.preventDefault();

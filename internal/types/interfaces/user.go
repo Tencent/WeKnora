@@ -61,6 +61,9 @@ type UserService interface {
 	RefreshToken(ctx context.Context, refreshToken string) (accessToken, newRefreshToken string, err error)
 	// RevokeToken revokes a token
 	RevokeToken(ctx context.Context, token string) error
+	// Logout revokes every outstanding access/refresh token for the user
+	// identified by the presented JWT.
+	Logout(ctx context.Context, token string) error
 	// GetCurrentUser gets current user from context
 	GetCurrentUser(ctx context.Context) (*types.User, error)
 	// SearchUsers searches users by username or email

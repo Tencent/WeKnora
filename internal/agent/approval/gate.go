@@ -117,6 +117,10 @@ type OAuthPendingRequest struct {
 	ServiceName        string
 	MCPToolName        string
 	ToolCallID         string
+	// WaitTimeout overrides the gate's default wait timeout when > 0. The wait
+	// is always bounded (either by this value, the gate default, or ctx
+	// cancellation) so the blocked goroutine never leaks.
+	WaitTimeout time.Duration
 }
 
 var _ MCPApproval = (*Gate)(nil)
@@ -446,7 +450,12 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 		g.mu.Unlock()
 	}()
 
-	timeoutSec := int(g.timeout / time.Second)
+	waitTimeout := g.timeout
+	if req.WaitTimeout > 0 {
+		waitTimeout = req.WaitTimeout
+	}
+
+	timeoutSec := int(waitTimeout / time.Second)
 	if timeoutSec < 1 {
 		timeoutSec = 1
 	}
@@ -497,7 +506,7 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 		})
 	}
 
-	timer := time.NewTimer(g.timeout)
+	timer := time.NewTimer(waitTimeout)
 	defer timer.Stop()
 
 	var d Decision

@@ -1,12 +1,29 @@
+import os
 import unittest
+from unittest.mock import patch
 
 from docreader.parser.web_parser import (
     build_visible_text_fallback,
     extract_markdown_from_html,
+    install_ssrf_route_guard,
 )
+from docreader.utils.ssrf import is_ssrf_safe_url, reset_ssrf_whitelist_cache_for_test
 
 
 class TestWebParserHelpers(unittest.TestCase):
+    def setUp(self) -> None:
+        self._env_patch = patch.dict(
+            os.environ,
+            {"SSRF_WHITELIST": "", "SSRF_WHITELIST_EXTRA": ""},
+            clear=False,
+        )
+        self._env_patch.start()
+        reset_ssrf_whitelist_cache_for_test()
+
+    def tearDown(self) -> None:
+        self._env_patch.stop()
+        reset_ssrf_whitelist_cache_for_test()
+
     def test_extract_markdown_empty_html(self):
         self.assertIsNone(extract_markdown_from_html(""))
         self.assertIsNone(extract_markdown_from_html("   "))
@@ -36,6 +53,14 @@ class TestWebParserHelpers(unittest.TestCase):
         text = "B" * 60
         md = build_visible_text_fallback(text, page_title="")
         self.assertEqual(md, text)
+
+    def test_install_ssrf_route_guard_is_importable(self):
+        self.assertTrue(callable(install_ssrf_route_guard))
+
+    def test_redirect_target_blocked_before_navigation(self):
+        safe, reason = is_ssrf_safe_url("http://127.0.0.1:39127/audit.txt")
+        self.assertFalse(safe)
+        self.assertTrue(reason)
 
 
 if __name__ == "__main__":

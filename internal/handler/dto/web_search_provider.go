@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"context"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -34,9 +35,19 @@ type WebSearchProviderParametersDTO struct {
 }
 
 // NewWebSearchProviderResponse converts a stored entity into its response shape.
-func NewWebSearchProviderResponse(e *types.WebSearchProviderEntity) *WebSearchProviderResponse {
+func NewWebSearchProviderResponse(ctx context.Context, e *types.WebSearchProviderEntity) *WebSearchProviderResponse {
 	if e == nil {
 		return nil
+	}
+	params := WebSearchProviderParametersDTO{
+		EngineID:    e.Parameters.EngineID,
+		BaseURL:     e.Parameters.BaseURL,
+		ProxyURL:    e.Parameters.ProxyURL,
+		ExtraConfig: e.Parameters.ExtraConfig,
+	}
+	if !CanViewIntegrationSecrets(ctx) {
+		params.ProxyURL = ""
+		params.ExtraConfig = nil
 	}
 	return &WebSearchProviderResponse{
 		ID:          e.ID,
@@ -44,25 +55,20 @@ func NewWebSearchProviderResponse(e *types.WebSearchProviderEntity) *WebSearchPr
 		Name:        e.Name,
 		Provider:    e.Provider,
 		Description: e.Description,
-		Parameters: WebSearchProviderParametersDTO{
-			EngineID:    e.Parameters.EngineID,
-			BaseURL:     e.Parameters.BaseURL,
-			ProxyURL:    e.Parameters.ProxyURL,
-			ExtraConfig: e.Parameters.ExtraConfig,
-		},
-		IsDefault: e.IsDefault,
-		CreatedAt: e.CreatedAt,
-		UpdatedAt: e.UpdatedAt,
+		Parameters:  params,
+		IsDefault:   e.IsDefault,
+		CreatedAt:   e.CreatedAt,
+		UpdatedAt:   e.UpdatedAt,
 		Credentials: map[string]CredentialFieldMetadata{
 			"api_key": {Configured: e.Parameters.APIKey != ""},
 		},
 	}
 }
 
-func NewWebSearchProviderResponses(es []*types.WebSearchProviderEntity) []*WebSearchProviderResponse {
+func NewWebSearchProviderResponses(ctx context.Context, es []*types.WebSearchProviderEntity) []*WebSearchProviderResponse {
 	out := make([]*WebSearchProviderResponse, 0, len(es))
 	for _, e := range es {
-		out = append(out, NewWebSearchProviderResponse(e))
+		out = append(out, NewWebSearchProviderResponse(ctx, e))
 	}
 	return out
 }

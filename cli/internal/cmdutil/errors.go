@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/cli/internal/output"
+	sdk "github.com/Tencent/WeKnora/client"
 )
 
 // ErrorCode is a namespaced stable identifier emitted on stderr in the
@@ -266,6 +267,21 @@ func Wrapf(code ErrorCode, cause error, format string, args ...any) *Error {
 // enumerates the codes this helper can yield.
 func WrapHTTP(cause error, format string, args ...any) *Error {
 	return Wrapf(ClassifyHTTPError(cause), cause, format, args...)
+}
+
+// ClassifySDKError maps SDK transport, HTTP, and terminal SSE stream errors to
+// the canonical ErrorCode. SSE terminal frames classify as server.error rather
+// than network.error.
+func ClassifySDKError(err error) ErrorCode {
+	if sdk.IsSSEStreamError(err) {
+		return CodeServerError
+	}
+	return ClassifyHTTPError(err)
+}
+
+// WrapStream wraps an SDK streaming error with ClassifySDKError.
+func WrapStream(cause error, format string, args ...any) *Error {
+	return Wrapf(ClassifySDKError(cause), cause, format, args...)
 }
 
 // FlagError signals user-visible flag/argument problems; the root command

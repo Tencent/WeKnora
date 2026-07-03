@@ -16,8 +16,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -29,6 +31,7 @@ import (
 
 // KnowledgeHandler processes HTTP requests related to knowledge resources
 type KnowledgeHandler struct {
+	cfg               *config.Config
 	kgService         interfaces.KnowledgeService
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
@@ -39,6 +42,7 @@ type KnowledgeHandler struct {
 
 // NewKnowledgeHandler creates a new knowledge handler instance
 func NewKnowledgeHandler(
+	cfg *config.Config,
 	kgService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
@@ -47,6 +51,7 @@ func NewKnowledgeHandler(
 	spanRepo repository.KnowledgeSpanRepository,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
+		cfg:               cfg,
 		kgService:         kgService,
 		kbService:         kbService,
 		kbShareService:    kbShareService,
@@ -54,6 +59,32 @@ func NewKnowledgeHandler(
 		asynqClient:       asynqClient,
 		spanRepo:          spanRepo,
 	}
+}
+
+// requireKBOwnershipOrAdmin enforces the same "KB creator OR Admin+" matrix
+// used by OwnedKBOrAdmin for routes whose KB id comes from the request body.
+func (h *KnowledgeHandler) requireKBOwnershipOrAdmin(c *gin.Context, kbID string) error {
+	creator, err := resolveKBCreatorByKBID(c, h.kbService, kbID)
+	evalErr := middleware.EvaluateOwnershipOrRole(
+		c.Request.Context(),
+		h.cfg,
+		types.TenantRoleAdmin,
+		creator,
+		err,
+	)
+	if evalErr == nil {
+		return nil
+	}
+	if goerrors.Is(evalErr, middleware.ErrResourceNotFound) {
+		return errors.NewNotFoundError("knowledge base not found")
+	}
+	if goerrors.Is(evalErr, middleware.ErrOwnershipForbidden) {
+		return errors.NewForbiddenError("No permission to operate on this knowledge base")
+	}
+	logger.ErrorWithFields(c.Request.Context(), evalErr, map[string]interface{}{
+		"kb_id": secutils.SanitizeForLog(kbID),
+	})
+	return errors.NewInternalServerError("cannot verify knowledge base ownership")
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
@@ -1048,6 +1079,10 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
 		return
 	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		c.Error(err)
+		return
+	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
 	// Single batch fetch to validate that every id exists and belongs to the
@@ -1232,49 +1267,8 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 
 // mimeTypeByExt returns the MIME type for a given file extension.
 func mimeTypeByExt(filename string) string {
-	ext := strings.ToLower(filename)
-	if idx := strings.LastIndex(ext, "."); idx >= 0 {
-		ext = ext[idx:]
-	} else {
-		ext = ""
-	}
-	m := map[string]string{
-		".pdf":      "application/pdf",
-		".docx":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-		".doc":      "application/msword",
-		".pptx":     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-		".ppt":      "application/vnd.ms-powerpoint",
-		".xlsx":     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-		".xls":      "application/vnd.ms-excel",
-		".csv":      "text/csv",
-		".jpg":      "image/jpeg",
-		".jpeg":     "image/jpeg",
-		".png":      "image/png",
-		".gif":      "image/gif",
-		".bmp":      "image/bmp",
-		".webp":     "image/webp",
-		".svg":      "image/svg+xml",
-		".tiff":     "image/tiff",
-		".txt":      "text/plain; charset=utf-8",
-		".md":       "text/markdown; charset=utf-8",
-		".markdown": "text/markdown; charset=utf-8",
-		".json":     "application/json; charset=utf-8",
-		".xml":      "application/xml; charset=utf-8",
-		".html":     "text/html; charset=utf-8",
-		".css":      "text/css; charset=utf-8",
-		".js":       "text/javascript; charset=utf-8",
-		".ts":       "text/typescript; charset=utf-8",
-		".py":       "text/x-python; charset=utf-8",
-		".go":       "text/x-go; charset=utf-8",
-		".java":     "text/x-java; charset=utf-8",
-		".yaml":     "text/yaml; charset=utf-8",
-		".yml":      "text/yaml; charset=utf-8",
-		".sh":       "text/x-shellscript; charset=utf-8",
-	}
-	if ct, ok := m[ext]; ok {
-		return ct
-	}
-	return "application/octet-stream"
+	ct, _ := secutils.SafeContentTypeByFilename(filename)
+	return ct
 }
 
 // PreviewKnowledgeFile godoc
@@ -1312,9 +1306,14 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	contentType := mimeTypeByExt(filename)
+	contentType, inline := secutils.SafeContentTypeByFilename(filename)
 	c.Header("Content-Type", contentType)
-	c.Header("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
+	c.Header("X-Content-Type-Options", "nosniff")
+	disposition := "inline"
+	if !inline {
+		disposition = "attachment"
+	}
+	c.Header("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filename}))
 	c.Header("Cache-Control", "private, max-age=3600")
 
 	c.Stream(func(w io.Writer) bool {
@@ -2057,6 +2056,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		c.Error(errors.NewForbiddenError("No permission to access source knowledge base"))
 		return
 	}
+	if err := h.requireKBOwnershipOrAdmin(c, req.SourceKBID); err != nil {
+		c.Error(err)
+		return
+	}
 
 	// Validate target KB
 	targetKB, err := h.kbService.GetKnowledgeBaseByID(ctx, req.TargetKBID)
@@ -2070,6 +2073,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	}
 	if targetKB.TenantID != tenantID.(uint64) {
 		c.Error(errors.NewForbiddenError("No permission to access target knowledge base"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, req.TargetKBID); err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -2195,6 +2202,10 @@ func (h *KnowledgeHandler) GetKnowledgeMoveProgress(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
 		c.Error(errors.NewBadRequestError("Task ID cannot be empty"))
+		return
+	}
+	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		c.Error(err)
 		return
 	}
 

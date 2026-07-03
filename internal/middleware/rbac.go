@@ -248,6 +248,54 @@ func rbacEnforcementEnabled(cfg *config.Config) bool {
 	return cfg != nil && cfg.Tenant.IsRBACEnforced()
 }
 
+// ErrOwnershipForbidden is returned by EvaluateOwnershipOrRole when the
+// caller is neither the resource creator nor meets the minimum role.
+var ErrOwnershipForbidden = errors.New("rbac: ownership or role insufficient")
+
+// EvaluateOwnershipOrRole applies the same decision matrix as
+// RequireOwnershipOrRole for handlers that resolve creator_id out-of-band
+// (e.g. KB id carried in a JSON body rather than a URL param).
+//
+// Returns nil when access is allowed. ErrResourceNotFound means the
+// handler should issue its own 404. ErrOwnershipForbidden maps to 403.
+// Any other error is a transient lookup failure (503).
+func EvaluateOwnershipOrRole(
+	ctx context.Context,
+	cfg *config.Config,
+	min types.TenantRole,
+	creatorID string,
+	lookupErr error,
+) error {
+	role := types.TenantRoleFromContext(ctx)
+	if role.HasPermission(min) {
+		return nil
+	}
+	if IsCrossTenantSuperuser(ctx, cfg) {
+		return nil
+	}
+	if !rbacEnforcementEnabled(cfg) {
+		uid, _ := types.UserIDFromContext(ctx)
+		logger.Warnf(ctx,
+			"[rbac] ownership/role would be checked (enforcement off, lookup skipped): user=%s have=%s need=%s",
+			uid, role, min)
+		return nil
+	}
+	if errors.Is(lookupErr, ErrResourceNotFound) {
+		return ErrResourceNotFound
+	}
+	if lookupErr != nil {
+		return lookupErr
+	}
+	uid, _ := types.UserIDFromContext(ctx)
+	if creatorID != "" && creatorID == uid {
+		return nil
+	}
+	logger.Warnf(ctx,
+		"[rbac] ownership/role insufficient: user=%s have=%s need=%s creator=%q",
+		uid, role, min, creatorID)
+	return ErrOwnershipForbidden
+}
+
 // isCrossTenantSuperuser was moved to access.go (renamed to
 // IsCrossTenantSuperuser, exported, and made flag-aware) so the same
 // helper backs the X-Tenant-ID gate in auth.go and the RequireRole /

@@ -77,21 +77,27 @@ token (emitting as a JSON array is planned for v0.8).
 `detail` carries structured per-error context (e.g. `unknown_subcommand`'s
 `available[]` list).
 
-### NDJSON event stream (chat / session ask)
+### Buffered JSON and NDJSON streams (chat / session ask)
 
-`--format json` and `--format ndjson` both produce one JSON event per line —
-no envelope wrapping. The CLI injects exactly one event (`init`) at the head;
-all subsequent events pass through verbatim from the SDK:
+`--format json` (the default) buffers the SSE stream and emits one normal
+success envelope whose `data.events` contains answer events by default.
+`--reference` adds `kb_id` / `chunk_id` / `parent_chunk_id` indexes;
+`--verbose` adds reasoning, tool, metadata, and lifecycle events. `--format
+text` renders the same projection live.
+`--format ndjson` is the raw event/debug surface: the CLI injects exactly one
+`init` event at the head and passes all subsequent SDK events through verbatim:
 
 ```
 {"type":"init","session_id":"...","kb_id":"...","profile":"...","agent_id":"..."}
-{"type":"thinking","content":"..."}
-{"type":"answer","content":"Hello"}
-{"type":"tool_call","name":"...","input":{}}
-{"type":"complete","done":true}
+{"response_type":"thinking","content":"..."}
+{"response_type":"answer","content":"Hello"}
+{"response_type":"tool_call","tool_calls":[...]}
+{"response_type":"complete","done":true}
 ```
 
-For prose rendering, pass `--format text`.
+MCP `chat` / `session_ask` return the same `events` shape and accept
+`reference` / `verbose` booleans. NDJSON ignores both presentation flags and
+always stays raw.
 
 ### `_notice` evolution policy
 
@@ -170,8 +176,8 @@ is or isn't aligned with.
 
 | | |
 |---|---|
-| **WeKnora** | streaming commands (`chat`, `session ask`) emit bare `{type:...}` per line; no envelope |
-| **Rationale** | This matches established practice across NDJSON-emitting CLIs and webhook protocols. A streaming envelope requires unwrap before dispatch — net burden with no benefit. |
+| **WeKnora** | `chat` / `session ask --format ndjson` emit bare `{type:...}` per line; default JSON buffers a bounded answer-event projection into one envelope |
+| **Rationale** | This matches established practice across NDJSON-emitting CLIs and webhook protocols. Each complete line can be decoded and dispatched as it arrives; the buffered envelope is reserved for normal JSON mode. |
 
 ### 5. No `schema_version` field in payload
 
@@ -217,7 +223,7 @@ Key packages:
 - `internal/iostreams/` — global IO singleton + TTY detection + `SetForTest` swap
 - `internal/secrets/` — `Store` interface; `KeyringStore` primary, `FileStore` 0600 fallback, `MemStore` for tests
 - `internal/prompt/` — `TTYPrompter` (password no-echo) + `AgentPrompter` (non-TTY no-prompt sentinel)
-- `internal/sse/` — `Accumulator` for chat / session ask SSE streams
+- `internal/sse/` — `Projector` for chat / session ask bounded output; `Accumulator` remains for legacy/tests
 - `internal/mcp/` — curated 10-tool stdio MCP server (wired by `cmd/mcp/serve.go`); see [MCP tool surface](#mcp-tool-surface) for the curation rationale and inventory
 - `client/` (parent module) — generated SDK
 

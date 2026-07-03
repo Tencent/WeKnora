@@ -324,11 +324,7 @@ func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.
 	}
 	switch cfg.Mode {
 	case types.APIPrincipalModeDirect:
-		name := strings.TrimSpace(cfg.DirectHeaderName)
-		if name == "" {
-			name = defaultExternalUserIDHeader
-		}
-		externalUserID := strings.TrimSpace(header.Get(name))
+		externalUserID := strings.TrimSpace(header.Get(defaultExternalUserIDHeader))
 		if externalUserID == "" {
 			if cfg.RequireDirectHeader {
 				return types.Principal{}, errMissingDirectHeader
@@ -343,11 +339,7 @@ func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.
 			ID:   strconv.FormatUint(tenantID, 10) + ":" + externalUserID,
 		}, nil
 	case types.APIPrincipalModeSignedToken:
-		name := strings.TrimSpace(cfg.SignedTokenHeaderName)
-		if name == "" {
-			name = defaultExternalUserTokenHeader
-		}
-		externalUserID, err := verifyExternalUserJWT(header.Get(name), tenantID, cfg.HMACSecret)
+		externalUserID, err := verifyExternalUserJWT(header.Get(defaultExternalUserTokenHeader), tenantID, cfg.HMACSecret)
 		if err != nil || externalUserID == "" {
 			logger.Warnf(ctx, "invalid external user token for tenant=%d: %v", tenantID, err)
 			return types.Principal{}, fmt.Errorf("%w: %w", errInvalidExternalUserToken, err)
