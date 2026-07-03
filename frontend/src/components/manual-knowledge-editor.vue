@@ -68,6 +68,7 @@ const visible = computed({
 
 const mode = computed(() => uiStore.manualEditorMode)
 const knowledgeId = computed(() => uiStore.manualEditorKnowledgeId)
+const currentKnowledgeId = ref<string | null>(null)
 
 const form = reactive({
   kbId: '' as string,
@@ -382,7 +383,7 @@ const toolbarGroups = computed<ToolbarGroup[]>(() => [
 ])
 
 const isPreviewMode = computed(() => activeTab.value === 'preview')
-const viewToggleIcon = computed(() => (isPreviewMode.value ? 'edit' : 'view-module'))
+const viewToggleIcon = computed(() => (isPreviewMode.value ? 'edit-1' : 'browse'))
 const viewToggleLabel = computed(() =>
   isPreviewMode.value ? t('manualEditor.view.editLabel') : t('manualEditor.view.previewLabel'),
 )
@@ -506,12 +507,12 @@ const parseManualMetadata = (
 }
 
 const loadKnowledgeContent = async () => {
-  if (!knowledgeId.value) {
+  if (!currentKnowledgeId.value) {
     return
   }
   contentLoading.value = true
   try {
-    const res: any = await getKnowledgeDetails(knowledgeId.value)
+    const res: any = await getKnowledgeDetails(currentKnowledgeId.value)
     const data: KnowledgeDetailResponse | undefined = res?.data
     if (!data) {
       MessagePlugin.error(t('manualEditor.error.fetchDetailFailed'))
@@ -546,6 +547,7 @@ const loadKnowledgeContent = async () => {
 }
 
 const resetForm = () => {
+  currentKnowledgeId.value = knowledgeId.value || null
   form.kbId = uiStore.manualEditorKBId || ''
   form.title = uiStore.manualEditorInitialTitle || ''
   form.content = uiStore.manualEditorInitialContent || ''
@@ -646,7 +648,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
           kbInfo,
           manual: {
             kbId: form.kbId,
-            knowledgeId: knowledgeId.value || undefined,
+            knowledgeId: currentKnowledgeId.value || undefined,
             title: payload.title,
             content: payload.content,
             tagIds: tagIdsToUpload,
@@ -659,14 +661,16 @@ const handleSave = async (targetStatus: ManualStatus) => {
     }
 
     let response: any
-    let knowledgeID = knowledgeId.value
+    let knowledgeID = currentKnowledgeId.value
     let kbId = form.kbId
 
-    if (mode.value === 'edit' && knowledgeId.value) {
-      response = await updateManualKnowledge(knowledgeId.value, payload)
+    if (mode.value === 'edit' && currentKnowledgeId.value) {
+      response = await updateManualKnowledge(currentKnowledgeId.value, payload)
     } else {
       response = await createManualKnowledge(form.kbId, payload)
       knowledgeID = response?.data?.id || knowledgeID
+      currentKnowledgeId.value = knowledgeID || null
+      uiStore.manualEditorKnowledgeId = currentKnowledgeId.value
       kbId = form.kbId
     }
 
@@ -740,30 +744,48 @@ onBeforeUnmount(() => {
     :max-width="1280"
     storage-key="setting-drawer:width:manual-markdown-editor"
     :hide-footer="!initialLoaded"
-    :confirm-loading="saving && savingAction === 'publish'"
-    :confirm-text="$t('manualEditor.actions.publish')"
-    :cancel-text="$t('manualEditor.actions.cancel')"
     @update:visible="(v: boolean) => { visible = v }"
-    @confirm="handleSave('publish')"
   >
     <template #footer-left>
-      <t-button
-        variant="text"
-        theme="primary"
-        class="toggle-view-btn"
-        @click="toggleEditorView"
-      >
-        <template #icon><t-icon :name="viewToggleIcon" /></template>
-        {{ viewToggleLabel }}
-      </t-button>
-      <t-button
-        variant="outline"
-        theme="default"
-        @click="handleSave('draft')"
-        :loading="saving && savingAction === 'draft'"
-      >
-        {{ $t('manualEditor.actions.saveDraft') }}
-      </t-button>
+      <div class="manual-editor-footer-meta">
+        <t-tag size="small" theme="warning" variant="light" v-if="form.status === 'draft'">
+          {{ $t('manualEditor.status.draftTag') }}
+        </t-tag>
+        <t-tag size="small" theme="success" variant="light" v-else>
+          {{ $t('manualEditor.status.publishedTag') }}
+        </t-tag>
+      </div>
+    </template>
+
+    <template #footer-right>
+      <div class="manual-editor-footer-actions">
+        <t-button
+          theme="default"
+          variant="outline"
+          class="manual-editor-cancel-btn"
+          :disabled="saving"
+          @click="handleClose"
+        >
+          {{ $t('manualEditor.actions.cancel') }}
+        </t-button>
+        <t-button
+          variant="outline"
+          theme="default"
+          @click="handleSave('draft')"
+          :loading="saving && savingAction === 'draft'"
+          :disabled="saving && savingAction !== 'draft'"
+        >
+          {{ $t('manualEditor.actions.saveDraft') }}
+        </t-button>
+        <t-button
+          theme="primary"
+          @click="handleSave('publish')"
+          :loading="saving && savingAction === 'publish'"
+          :disabled="saving && savingAction !== 'publish'"
+        >
+          {{ $t('manualEditor.actions.publish') }}
+        </t-button>
+      </div>
     </template>
 
     <div class="manual-editor" v-if="initialLoaded">
@@ -815,27 +837,42 @@ onBeforeUnmount(() => {
 
         <div class="editor-area">
           <div class="editor-toolbar">
-            <template v-for="(group, groupIndex) in toolbarGroups" :key="group.key">
-              <div class="toolbar-group">
-                <template v-for="btn in group.buttons" :key="btn.key">
-                  <t-tooltip :content="btn.tooltip" placement="top">
-                    <button
-                      type="button"
-                      class="toolbar-btn"
-                      :class="`btn-${btn.key}`"
-                      @mousedown.prevent
-                      @click="handleToolbarAction(btn.action)"
-                    >
-                      <t-icon :name="btn.icon" size="18px" />
-                    </button>
-                  </t-tooltip>
-                </template>
-              </div>
-              <div
-                v-if="groupIndex < toolbarGroups.length - 1"
-                class="toolbar-divider"
-              ></div>
-            </template>
+            <div class="editor-toolbar__format">
+              <template v-for="(group, groupIndex) in toolbarGroups" :key="group.key">
+                <div class="toolbar-group">
+                  <template v-for="btn in group.buttons" :key="btn.key">
+                    <t-tooltip :content="btn.tooltip" placement="top">
+                      <button
+                        type="button"
+                        class="toolbar-btn"
+                        :class="`btn-${btn.key}`"
+                        @mousedown.prevent
+                        @click="handleToolbarAction(btn.action)"
+                      >
+                        <t-icon :name="btn.icon" size="18px" />
+                      </button>
+                    </t-tooltip>
+                  </template>
+                </div>
+                <div
+                  v-if="groupIndex < toolbarGroups.length - 1"
+                  class="toolbar-divider"
+                ></div>
+              </template>
+            </div>
+            <div class="editor-toolbar__view">
+              <t-button
+                variant="text"
+                theme="primary"
+                size="small"
+                :class="['toggle-view-btn', { 'is-preview': isPreviewMode }]"
+                :disabled="saving"
+                @click="toggleEditorView"
+              >
+                <template #icon><t-icon :name="viewToggleIcon" /></template>
+                {{ viewToggleLabel }}
+              </t-button>
+            </div>
           </div>
 
           <div class="editor-pane" v-show="activeTab === 'edit'">
@@ -868,6 +905,38 @@ onBeforeUnmount(() => {
 .manual-editor {
   display: flex;
   flex-direction: column;
+}
+
+.manual-editor-footer-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--td-text-color-placeholder);
+}
+
+.manual-editor-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+
+  :deep(.t-button) {
+    min-width: 88px;
+  }
+}
+
+.manual-editor-cancel-btn {
+  border-color: transparent;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+
+  &:hover {
+    border-color: var(--td-component-stroke);
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
 }
 
 .form-item {
@@ -923,15 +992,69 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 12px;
   padding: 6px 8px;
   background: var(--td-bg-color-secondarycontainer);
   border-bottom: 1px solid var(--td-component-stroke);
-  overflow-x: auto;
+  overflow: hidden;
   flex-shrink: 0;
+}
+
+.editor-toolbar__format {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
 
   &::-webkit-scrollbar {
     height: 0;
+  }
+}
+
+.editor-toolbar__view {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  border-left: 1px solid var(--td-component-stroke);
+}
+
+.toggle-view-btn {
+  min-width: 92px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 7px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+
+  &:hover {
+    border-color: rgba(7, 192, 95, 0.45);
+    background: rgba(7, 192, 95, 0.06);
+    color: var(--td-brand-color);
+    box-shadow: 0 2px 6px rgba(7, 192, 95, 0.1);
+  }
+
+  &.is-preview {
+    border-color: rgba(7, 192, 95, 0.5);
+    background: rgba(7, 192, 95, 0.1);
+    color: var(--td-brand-color);
+  }
+
+  &:active {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+
+  :deep(.t-button__icon) {
+    margin-right: 5px;
+    font-size: 15px;
   }
 }
 
