@@ -4987,6 +4987,8 @@ export default {
     parser: {
       title: "解析引擎",
       description: "为不同文件类型选择文档解析引擎。未配置的文件类型将使用内置解析引擎。",
+      tableStructure: "表格识别",
+      tableStructureDesc: "按文件类型启用结构化表格提取。",
       loading: "加载中...",
       noEngineAvailable: "暂无可用解析引擎，或文档解析服务未配置。",
       default: "默认",

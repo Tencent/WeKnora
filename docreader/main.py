@@ -159,6 +159,8 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         cfg = request.config
         parser_engine = cfg.parser_engine if cfg else ""
         engine_overrides = dict(cfg.parser_engine_overrides) if cfg else {}
+        enable_table_structure = bool(cfg.enable_table_structure) if cfg else False
+        table_structure_file_types = list(cfg.table_structure_file_types) if cfg else []
 
         if request.url:
             logger.info("Read(URL): url=%s", request.url)
@@ -167,6 +169,8 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 request.title,
                 parser_engine=parser_engine,
                 engine_overrides=engine_overrides,
+                enable_table_structure=enable_table_structure,
+                table_structure_file_types=table_structure_file_types,
             )
             return result, request.url
 
@@ -183,6 +187,8 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
             request.file_content,
             parser_engine=parser_engine,
             engine_overrides=engine_overrides,
+            enable_table_structure=enable_table_structure,
+            table_structure_file_types=table_structure_file_types,
         )
         return result, request.file_name
 

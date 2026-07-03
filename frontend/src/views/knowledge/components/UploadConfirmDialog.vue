@@ -122,7 +122,11 @@
                       embedded
                       :relevant-extensions="batchFileExts"
                       :parser-engine-rules="uiState.chunkingConfig.parserEngineRules"
+                      :enable-table-structure="uiState.chunkingConfig.enableTableStructure"
+                      :table-structure-file-types="uiState.chunkingConfig.tableStructureFileTypes"
                       @update:parser-engine-rules="handleParserEngineRulesUpdate"
+                      @update:enable-table-structure="handleEnableTableStructureUpdate"
+                      @update:table-structure-file-types="handleTableStructureFileTypesUpdate"
                     />
                     <div v-if="hasPdf" class="kb-embedded-settings" style="margin-top: 16px;">
                       <div class="setting-row setting-row--toggle">
@@ -280,6 +284,8 @@ interface ChunkingUIConfig {
   chunkOverlap: number
   separators: string[]
   parserEngineRules?: Array<{ file_types: string[]; engine: string }>
+  enableTableStructure: boolean
+  tableStructureFileTypes: string[]
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
@@ -629,6 +635,8 @@ function createDefaultUIState(): UploadUIState {
       chunkOverlap: 80,
       separators: ['\n\n', '\n', '。', '！', '？', ';', '；'],
       parserEngineRules: undefined,
+      enableTableStructure: false,
+      tableStructureFileTypes: [],
       enableParentChild: true,
       parentChunkSize: 4096,
       childChunkSize: 384,
@@ -663,6 +671,8 @@ function initFromKbInfo(kb: any) {
       chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
       separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
       parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
+      enableTableStructure: kb.chunking_config?.enable_table_structure || false,
+      tableStructureFileTypes: kb.chunking_config?.table_structure_file_types || [],
       enableParentChild: kb.chunking_config?.enable_parent_child ?? false,
       parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
       childChunkSize: kb.chunking_config?.child_chunk_size || 384,
@@ -708,6 +718,8 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       chunk_size: chunking.chunkSize,
       chunk_overlap: chunking.chunkOverlap,
       separators: chunking.separators,
+      enable_table_structure: chunking.enableTableStructure,
+      table_structure_file_types: chunking.tableStructureFileTypes,
       enable_parent_child: chunking.enableParentChild,
       parent_chunk_size: chunking.parentChunkSize,
       child_chunk_size: chunking.childChunkSize,
@@ -756,6 +768,8 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (cc.chunk_size != null) s.chunkingConfig.chunkSize = cc.chunk_size
     if (cc.chunk_overlap != null) s.chunkingConfig.chunkOverlap = cc.chunk_overlap
     if (cc.separators) s.chunkingConfig.separators = cc.separators
+    if (cc.enable_table_structure != null) s.chunkingConfig.enableTableStructure = cc.enable_table_structure
+    if (cc.table_structure_file_types) s.chunkingConfig.tableStructureFileTypes = cc.table_structure_file_types
     if (cc.enable_parent_child != null) s.chunkingConfig.enableParentChild = cc.enable_parent_child
     if (cc.parent_chunk_size != null) s.chunkingConfig.parentChunkSize = cc.parent_chunk_size
     if (cc.child_chunk_size != null) s.chunkingConfig.childChunkSize = cc.child_chunk_size
@@ -862,6 +876,14 @@ const removeFile = (index: number) => {
 
 const handleParserEngineRulesUpdate = (rules: Array<{ file_types: string[]; engine: string }>) => {
   uiState.value.chunkingConfig.parserEngineRules = rules
+}
+
+const handleEnableTableStructureUpdate = (enabled: boolean) => {
+  uiState.value.chunkingConfig.enableTableStructure = enabled
+}
+
+const handleTableStructureFileTypesUpdate = (fileTypes: string[]) => {
+  uiState.value.chunkingConfig.tableStructureFileTypes = fileTypes
 }
 
 const handleChunkingConfigUpdate = (config: ChunkingUIConfig) => {
