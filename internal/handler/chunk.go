@@ -7,6 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -222,29 +223,17 @@ func parseChunkFeedbackListFilter(c *gin.Context) (*types.ChunkFeedbackListFilte
 }
 
 func (h *ChunkHandler) canManageChunkFeedback(c *gin.Context) bool {
-	ctx := c.Request.Context()
-	if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
-		return true
+	if access, ok := middleware.KBAccessFromContext(c); ok && access != nil {
+		return access.Permission.HasPermission(types.OrgRoleAdmin)
 	}
-	userID, ok := types.UserIDFromContext(ctx)
-	if !ok || userID == "" {
-		return false
-	}
-	creatorID, err := h.KBCreatorLookupFromKnowledgeIDParam(c)
-	return err == nil && creatorID != "" && creatorID == userID
+	return false
 }
 
 func (h *ChunkHandler) canManageChunkFeedbackByChunkID(c *gin.Context) bool {
-	ctx := c.Request.Context()
-	if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
-		return true
+	if access, ok := middleware.KBAccessFromContext(c); ok && access != nil {
+		return access.Permission.HasPermission(types.OrgRoleAdmin)
 	}
-	userID, ok := types.UserIDFromContext(ctx)
-	if !ok || userID == "" {
-		return false
-	}
-	creatorID, err := h.KBCreatorLookupFromChunkIDParam(c)
-	return err == nil && creatorID != "" && creatorID == userID
+	return false
 }
 
 func clearChunkFeedbackGovernanceFields(chunk *types.Chunk) {

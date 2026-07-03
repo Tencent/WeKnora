@@ -583,11 +583,11 @@ const reloadChunksWithFeedbackFilter = () => {
 };
 
 const feedbackSortOptions = computed(() => [
-  { label: '默认排序', value: '' },
-  { label: '低好评率优先', value: 'positive_rate' },
-  { label: '点赞最多', value: 'like_count' },
-  { label: '点踩最多', value: 'dislike_count' },
-  { label: '最近反馈', value: 'last_feedback_at' },
+  { label: t('knowledgeBase.feedbackSortDefault'), value: '' },
+  { label: t('knowledgeBase.feedbackSortLowPositiveRate'), value: 'positive_rate' },
+  { label: t('knowledgeBase.feedbackSortMostLikes'), value: 'like_count' },
+  { label: t('knowledgeBase.feedbackSortMostDislikes'), value: 'dislike_count' },
+  { label: t('knowledgeBase.feedbackSortRecent'), value: 'last_feedback_at' },
 ]);
 
 const formatPositiveRate = (rate: number | null | undefined) => {
@@ -976,8 +976,8 @@ const handleResetChunkFeedback = async (item: any) => {
   }
 
   const confirmDialog = DialogPlugin.confirm({
-    header: '重置分块反馈',
-    body: '将清空该分块的累计点赞、点踩、好评率和待优化标记，并把召回权重恢复为默认值。',
+    header: t('knowledgeBase.feedbackResetTitle'),
+    body: t('knowledgeBase.feedbackResetConfirmBody'),
     confirmBtn: t('common.confirm'),
     cancelBtn: t('common.cancel'),
     onConfirm: async () => {
@@ -988,7 +988,7 @@ const handleResetChunkFeedback = async (item: any) => {
         if (result?.success && result?.data) {
           Object.assign(item, result.data);
         }
-        MessagePlugin.success('反馈统计已重置');
+        MessagePlugin.success(t('knowledgeBase.feedbackResetSuccess'));
       } catch (error: any) {
         MessagePlugin.error(error?.message || t('common.operationFailed'));
       } finally {
@@ -1018,7 +1018,7 @@ const refreshFeedbackWeightLogs = async (showSuccess = true) => {
       feedbackWeightLogs.value = result.data;
     }
     if (showSuccess) {
-      MessagePlugin.success('权重日志已刷新');
+      MessagePlugin.success(t('knowledgeBase.feedbackWeightLogsRefreshed'));
     }
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'));
@@ -1381,10 +1381,10 @@ const handleDetailsScroll = () => {
 
           <div v-if="viewMode === 'chunks' && canManageChunkFeedback" class="chunk-feedback-filter-bar">
             <t-checkbox v-model="feedbackOnlyWithFeedback" @change="reloadChunksWithFeedbackFilter">
-              仅看有反馈
+              {{ $t('knowledgeBase.feedbackOnlyWithFeedback') }}
             </t-checkbox>
             <t-checkbox v-model="feedbackNeedsOptimizationOnly" @change="reloadChunksWithFeedbackFilter">
-              仅看待优化
+              {{ $t('knowledgeBase.feedbackOnlyNeedsOptimization') }}
             </t-checkbox>
             <t-select v-model="feedbackSortBy" size="small" class="chunk-feedback-sort"
               :options="feedbackSortOptions" @change="reloadChunksWithFeedbackFilter" />
@@ -1425,11 +1425,21 @@ const handleDetailsScroll = () => {
                   </div>
                 </div>
                 <div v-if="canManageChunkFeedback" class="chunk-feedback-bar">
-                  <t-tag size="small" theme="success" variant="light">赞 {{ chunk.feedback.likeCount }}</t-tag>
-                  <t-tag size="small" theme="danger" variant="light">踩 {{ chunk.feedback.dislikeCount }}</t-tag>
-                  <t-tag size="small" theme="primary" variant="light">好评率 {{ chunk.feedback.positiveRate }}</t-tag>
-                  <t-tag size="small" theme="default" variant="light">权重 {{ chunk.feedback.recallWeight }}</t-tag>
-                  <t-tag size="small" theme="default" variant="light">关联会话 {{ chunk.feedback.sessionCount }}</t-tag>
+                  <t-tag size="small" theme="success" variant="light">
+                    {{ $t('knowledgeBase.feedbackLikes') }} {{ chunk.feedback.likeCount }}
+                  </t-tag>
+                  <t-tag size="small" theme="danger" variant="light">
+                    {{ $t('knowledgeBase.feedbackDislikes') }} {{ chunk.feedback.dislikeCount }}
+                  </t-tag>
+                  <t-tag size="small" theme="primary" variant="light">
+                    {{ $t('knowledgeBase.feedbackPositiveRate') }} {{ chunk.feedback.positiveRate }}
+                  </t-tag>
+                  <t-tag size="small" theme="default" variant="light">
+                    {{ $t('knowledgeBase.feedbackRecallWeight') }} {{ chunk.feedback.recallWeight }}
+                  </t-tag>
+                  <t-tag size="small" theme="default" variant="light">
+                    {{ $t('knowledgeBase.feedbackSessionCount') }} {{ chunk.feedback.sessionCount }}
+                  </t-tag>
                   <t-tooltip v-if="chunk.feedback.dislikeReasons.length" placement="top">
                     <template #content>
                       <div v-for="reason in chunk.feedback.dislikeReasons" :key="reason.reason">
@@ -1437,20 +1447,20 @@ const handleDetailsScroll = () => {
                       </div>
                     </template>
                     <t-tag size="small" theme="warning" variant="light">
-                      点踩原因 {{ chunk.feedback.dislikeReasons.length }}
+                      {{ $t('knowledgeBase.feedbackDislikeReasons') }} {{ chunk.feedback.dislikeReasons.length }}
                     </t-tag>
                   </t-tooltip>
                   <t-tag v-if="chunk.feedback.needsOptimization" size="small" theme="warning" variant="light">
-                    待优化
+                    {{ $t('knowledgeBase.feedbackNeedsOptimization') }}
                   </t-tag>
                   <t-button v-if="chunk.feedback.hasFeedback" size="small" variant="text"
                     theme="primary" :loading="resettingFeedbackChunk === chunk.original.id"
                     @click.stop="handleResetChunkFeedback(chunk.original)">
-                    重置
+                    {{ $t('knowledgeBase.feedbackReset') }}
                   </t-button>
                   <t-button size="small" variant="text" theme="default"
                     @click.stop="openFeedbackWeightLogs(chunk.original)">
-                    权重日志
+                    {{ $t('knowledgeBase.feedbackWeightLogs') }}
                   </t-button>
                 </div>
                 <div class="md-content" v-html="chunk.processedContent"></div>
@@ -1503,7 +1513,7 @@ const handleDetailsScroll = () => {
     </t-drawer>
     <t-drawer
       v-model:visible="feedbackLogDrawerVisible"
-      header="权重变更日志"
+      :header="$t('knowledgeBase.feedbackWeightLogTitle')"
       size="520px"
       attach="body"
       :zIndex="2300"
@@ -1512,11 +1522,11 @@ const handleDetailsScroll = () => {
     >
       <div class="feedback-log-drawer">
         <div v-if="feedbackLogChunk" class="feedback-log-summary">
-          <span>当前权重：{{ Number(feedbackLogChunk.recall_weight ?? 1).toFixed(2) }}</span>
-          <span>好评率：{{ formatPositiveRate(feedbackLogChunk.positive_rate) }}</span>
+          <span>{{ $t('knowledgeBase.feedbackCurrentWeight') }}：{{ Number(feedbackLogChunk.recall_weight ?? 1).toFixed(2) }}</span>
+          <span>{{ $t('knowledgeBase.feedbackPositiveRate') }}：{{ formatPositiveRate(feedbackLogChunk.positive_rate) }}</span>
         </div>
-        <t-loading v-if="feedbackLogLoading" text="加载中..." />
-        <t-empty v-else-if="feedbackWeightLogs.length === 0" description="暂无权重变更记录" />
+        <t-loading v-if="feedbackLogLoading" :text="$t('common.loading')" />
+        <t-empty v-else-if="feedbackWeightLogs.length === 0" :description="$t('knowledgeBase.feedbackNoWeightLogs')" />
         <div v-else class="feedback-log-list">
           <div v-for="log in feedbackWeightLogs" :key="log.id" class="feedback-log-item">
             <div class="feedback-log-item__main">
@@ -1525,11 +1535,11 @@ const handleDetailsScroll = () => {
               </span>
               <t-tag size="small" variant="light"
                 :theme="log.trigger_source === 'admin_reset' ? 'warning' : 'primary'">
-                {{ log.trigger_source === 'admin_reset' ? '管理员重置' : '用户反馈' }}
+                {{ log.trigger_source === 'admin_reset' ? $t('knowledgeBase.feedbackTriggerAdminReset') : $t('knowledgeBase.feedbackTriggerUserFeedback') }}
               </t-tag>
             </div>
             <div class="feedback-log-item__meta">
-              好评率 {{ formatWeightLogRate(log.old_positive_rate) }} -> {{ formatWeightLogRate(log.new_positive_rate) }}
+              {{ $t('knowledgeBase.feedbackPositiveRate') }} {{ formatWeightLogRate(log.old_positive_rate) }} -> {{ formatWeightLogRate(log.new_positive_rate) }}
             </div>
             <div class="feedback-log-item__meta">
               {{ formatDate(log.created_at) }}
@@ -1539,10 +1549,10 @@ const handleDetailsScroll = () => {
         </div>
         <div class="feedback-log-actions">
           <t-button variant="outline" :loading="feedbackLogLoading" @click="refreshFeedbackWeightLogs(true)">
-            刷新日志
+            {{ $t('knowledgeBase.feedbackRefreshLogs') }}
           </t-button>
           <t-button theme="primary" @click="closeFeedbackWeightLogs">
-            关闭
+            {{ $t('common.close') }}
           </t-button>
         </div>
       </div>

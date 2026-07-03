@@ -49,6 +49,9 @@ func (s *messageFeedbackService) UpsertFeedback(
 	if message.Role != "assistant" {
 		return nil, errors.New("feedback can only be submitted for assistant messages")
 	}
+	if !message.IsCompleted {
+		return nil, errors.New("feedback can only be submitted after the assistant message is completed")
+	}
 
 	userID := types.SessionOwnerIDFromContext(ctx)
 	feedback := &types.MessageFeedback{
