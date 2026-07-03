@@ -96,6 +96,13 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		}
 	}
 
+	thinkingOverride := parseThinkingOverride(chatConfig.ExtraConfig)
+	if providerName == provider.ProviderOpenRouter {
+		if effort := parseOpenRouterReasoningEffort(chatConfig.ExtraConfig); effort != "" {
+			thinkingOverride = openRouterReasoningEffort{effort: effort}
+		}
+	}
+
 	return &RemoteAPIChat{
 		modelName:        modelName,
 		client:           openai.NewClientWithConfig(config),
@@ -107,7 +114,7 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		appSecret:        chatConfig.AppSecret,
 		customHeaders:    chatConfig.CustomHeaders,
 		adapter:          resolveProvider(providerName, modelName),
-		thinkingOverride: parseThinkingOverride(chatConfig.ExtraConfig),
+		thinkingOverride: thinkingOverride,
 	}, nil
 }
 

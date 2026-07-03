@@ -136,6 +136,22 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 		_, ok := body.(*openai.ChatCompletionRequest)
 		assert.True(t, ok)
 	})
+
+	t.Run("openrouter reasoning effort uses nested reasoning field", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderOpenRouter), "deepseek/deepseek-v4-flash",
+			map[string]string{
+				ExtraConfigThinkingControl: "thinking_type",
+				ExtraConfigReasoningEffort: "xhigh",
+			})
+		body, _, useRaw, err := c.buildOutbound(msgs, nil, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"model":"deepseek/deepseek-v4-flash"`)
+		assert.Contains(t, js, `"reasoning":{"effort":"xhigh"}`)
+		assert.NotContains(t, js, `"thinking"`)
+		assert.NotContains(t, js, "reasoning_effort")
+	})
 }
 
 // TestBuildOutbound_ShapeRequest covers the param-shaping providers that used

@@ -108,6 +108,23 @@ func TestChatTemplateKwargs(t *testing.T) {
 	assert.Contains(t, string(body), "chat_template_kwargs")
 }
 
+func TestOpenRouterReasoningEffort(t *testing.T) {
+	s := openRouterReasoningEffort{effort: " xhigh "}
+	req := openai.ChatCompletionRequest{Model: "deepseek/deepseek-v4-flash"}
+
+	custom, raw := s.Apply(&req, nil, true)
+	require.True(t, raw)
+	out, ok := custom.(OpenRouterReasoningChatCompletionRequest)
+	require.True(t, ok)
+	require.NotNil(t, out.Reasoning)
+	assert.Equal(t, "xhigh", out.Reasoning.Effort)
+
+	body, err := json.Marshal(custom)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"reasoning":{"effort":"xhigh"}`)
+	assert.NotContains(t, string(body), "reasoning_effort")
+}
+
 func TestParseThinkingOverride(t *testing.T) {
 	cases := map[string]ThinkingStrategy{
 		"none":                 noThinking{},
@@ -126,6 +143,14 @@ func TestParseThinkingOverride(t *testing.T) {
 	assert.Nil(t, parseThinkingOverride(map[string]string{ExtraConfigThinkingControl: ""}))
 }
 
+func TestParseOpenRouterReasoningEffort(t *testing.T) {
+	assert.Equal(t, "xhigh", parseOpenRouterReasoningEffort(map[string]string{
+		ExtraConfigReasoningEffort: " XHIGH ",
+	}))
+	assert.Empty(t, parseOpenRouterReasoningEffort(nil))
+	assert.Empty(t, parseOpenRouterReasoningEffort(map[string]string{}))
+}
+
 func TestEffectiveThinkingControl(t *testing.T) {
 	assert.Equal(t, "enable_thinking", EffectiveThinkingControl(&ChatConfig{
 		Provider:  "aliyun",
@@ -140,5 +165,13 @@ func TestEffectiveThinkingControl(t *testing.T) {
 		Provider:    "generic",
 		ModelName:   "qwen3",
 		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "none"},
+	}))
+	assert.Equal(t, "reasoning_effort", EffectiveThinkingControl(&ChatConfig{
+		Provider:  "openrouter",
+		ModelName: "deepseek/deepseek-v4-flash",
+		ExtraConfig: map[string]string{
+			ExtraConfigThinkingControl: "thinking_type",
+			ExtraConfigReasoningEffort: "xhigh",
+		},
 	}))
 }

@@ -14,6 +14,10 @@ import (
 // "chat_template_kwargs".
 const ExtraConfigThinkingControl = "thinking_control"
 
+// ExtraConfigReasoningEffort is the model parameters.extra_config key for
+// OpenRouter's nested `reasoning.effort` request option.
+const ExtraConfigReasoningEffort = "reasoning_effort"
+
 // Wire-format request bodies used by providers that express extended-thinking
 // through a non-standard top-level field. They embed the standard OpenAI
 // request so all other fields are marshalled unchanged.
@@ -35,6 +39,21 @@ type ThinkingConfig struct {
 type ThinkingChatCompletionRequest struct {
 	openai.ChatCompletionRequest
 	Thinking *ThinkingConfig `json:"thinking,omitempty"`
+}
+
+// OpenRouterReasoningConfig is OpenRouter's `{ "reasoning": { "effort": ... } }`
+// block. OpenRouter accepts efforts such as "high" and "xhigh" on models that
+// advertise them.
+type OpenRouterReasoningConfig struct {
+	Effort string `json:"effort"`
+}
+
+// OpenRouterReasoningChatCompletionRequest adds OpenRouter's nested reasoning
+// object. This must go through raw HTTP because the OpenAI SDK only exposes the
+// different top-level `reasoning_effort` field.
+type OpenRouterReasoningChatCompletionRequest struct {
+	openai.ChatCompletionRequest
+	Reasoning *OpenRouterReasoningConfig `json:"reasoning,omitempty"`
 }
 
 // ThinkingStrategy encodes how ChatOptions.Thinking is mapped onto a provider's
@@ -117,6 +136,23 @@ func (chatTemplateKwargs) Apply(req *openai.ChatCompletionRequest, opts *ChatOpt
 	return req, true
 }
 
+// openRouterReasoningEffort pins OpenRouter's model-level reasoning budget.
+// Unlike ChatOptions.Thinking, this is configured on the model and is sent even
+// when the caller does not pass an explicit per-request thinking flag.
+type openRouterReasoningEffort struct {
+	effort string
+}
+
+func (s openRouterReasoningEffort) Apply(req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool) (any, bool) {
+	effort := normalizeReasoningEffort(s.effort)
+	if effort == "" {
+		return nil, false
+	}
+	r := OpenRouterReasoningChatCompletionRequest{ChatCompletionRequest: *req}
+	r.Reasoning = &OpenRouterReasoningConfig{Effort: effort}
+	return r, true
+}
+
 // parseThinkingOverride reads extra_config.thinking_control and returns the
 // strategy it selects, or nil when unset (the provider adapter's default
 // strategy then applies). An unrecognized non-empty value falls back to
@@ -140,6 +176,17 @@ func parseThinkingOverride(extraConfig map[string]string) ThinkingStrategy {
 	}
 }
 
+func parseOpenRouterReasoningEffort(extraConfig map[string]string) string {
+	if extraConfig == nil {
+		return ""
+	}
+	return normalizeReasoningEffort(extraConfig[ExtraConfigReasoningEffort])
+}
+
+func normalizeReasoningEffort(effort string) string {
+	return strings.ToLower(strings.TrimSpace(effort))
+}
+
 // EffectiveThinkingControl reports the provider field that will carry
 // ChatOptions.Thinking. It intentionally shares the same adapter/override
 // resolution as the real request path so diagnostics do not guess from the
@@ -148,18 +195,23 @@ func EffectiveThinkingControl(config *ChatConfig) string {
 	if config == nil {
 		return "none"
 	}
-	if override := parseThinkingOverride(config.ExtraConfig); override != nil {
-		return thinkingStrategyName(override)
-	}
 	providerName := provider.ProviderName(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
+	}
+	if providerName == provider.ProviderOpenRouter && parseOpenRouterReasoningEffort(config.ExtraConfig) != "" {
+		return "reasoning_effort"
+	}
+	if override := parseThinkingOverride(config.ExtraConfig); override != nil {
+		return thinkingStrategyName(override)
 	}
 	return thinkingStrategyName(resolveProvider(providerName, config.ModelName).Thinking())
 }
 
 func thinkingStrategyName(strategy ThinkingStrategy) string {
 	switch strategy.(type) {
+	case openRouterReasoningEffort:
+		return "reasoning_effort"
 	case enableThinking:
 		return "enable_thinking"
 	case thinkingTypeField:
