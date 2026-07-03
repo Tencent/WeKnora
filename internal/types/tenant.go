@@ -21,6 +21,7 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 	},
 	"elasticsearch_v7": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
 	},
 	"elasticsearch_v8": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
