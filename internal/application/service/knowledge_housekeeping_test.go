@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     type            TEXT NOT NULL DEFAULT 'document',
     embedding_model_id TEXT NOT NULL DEFAULT '',
     storage_size    BIGINT NOT NULL DEFAULT 0,
+    processed_at    DATETIME,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at      DATETIME
@@ -68,12 +69,25 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
 );
 `
 
+const housekeepingPendingOpsDDL = `
+CREATE TABLE IF NOT EXISTS task_pending_ops (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_type   VARCHAR(64) NOT NULL,
+    scope       VARCHAR(64) NOT NULL,
+    scope_id    VARCHAR(128) NOT NULL,
+    op          VARCHAR(64) NOT NULL,
+    dedup_key   VARCHAR(128) NOT NULL DEFAULT '',
+    payload     TEXT NOT NULL DEFAULT '{}'
+);
+`
+
 func setupHousekeepingDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(knowledgeTestDDL).Error)
 	require.NoError(t, db.Exec(housekeepingSpansDDL).Error)
+	require.NoError(t, db.Exec(housekeepingPendingOpsDDL).Error)
 	return db
 }
 
@@ -88,12 +102,38 @@ func insertKnowledge(t *testing.T, db *gorm.DB, id, status string, updatedAt tim
 	).Error)
 }
 
+func insertKnowledgeWithPending(t *testing.T, db *gorm.DB, id, status string, pending int, updatedAt time.Time) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, parse_status, pending_subtasks_count, updated_at) VALUES (?, ?, ?, ?)`,
+		id, status, pending, updatedAt,
+	).Error)
+}
+
 func insertSpan(t *testing.T, db *gorm.DB, kid string, attempt int, spanID, status string, updatedAt time.Time) {
 	t.Helper()
 	require.NoError(t, db.Exec(
 		`INSERT INTO knowledge_processing_spans (knowledge_id, attempt, span_id, name, kind, status, updated_at)
 		 VALUES (?, ?, ?, 'docreader', 'stage', ?, ?)`,
 		kid, attempt, spanID, status, updatedAt,
+	).Error)
+}
+
+func insertNamedSpan(t *testing.T, db *gorm.DB, kid string, attempt int, spanID, name, kind, status string, updatedAt time.Time) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_processing_spans (knowledge_id, attempt, span_id, name, kind, status, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		kid, attempt, spanID, name, kind, status, updatedAt,
+	).Error)
+}
+
+func insertPendingOp(t *testing.T, db *gorm.DB, knowledgeID string) {
+	t.Helper()
+	require.NoError(t, db.Exec(
+		`INSERT INTO task_pending_ops (task_type, scope, scope_id, op, dedup_key, payload)
+		 VALUES ('wiki:ingest', 'knowledge_base', 'kb', 'ingest', ?, '{}')`,
+		knowledgeID,
 	).Error)
 }
 
@@ -211,17 +251,70 @@ func TestHousekeeping_NoFalseKill_TasksStillQueued(t *testing.T) {
 	stale := time.Now().Add(-3 * time.Hour)
 	// finalizing + stale knowledge + stale span: span-only heuristics
 	// would flag this as stuck, but the queue still holds its subtasks.
-	insertKnowledge(t, db, "kid-backlogged", types.ParseStatusFinalizing, stale)
+	insertKnowledgeWithPending(t, db, "kid-backlogged", types.ParseStatusFinalizing, 1, stale)
 	insertSpan(t, db, "kid-backlogged", 1, "post-1", types.SpanStatusRunning, stale)
 
 	svc.runSweep(context.Background())
 
 	var status string
+	var pending int
 	require.NoError(t, db.Raw(
-		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-backlogged",
-	).Row().Scan(&status))
+		`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`, "kid-backlogged",
+	).Row().Scan(&status, &pending))
 	assert.Equal(t, types.ParseStatusFinalizing, status,
 		"finalizing row with tasks still queued must NOT be flipped to failed")
+	assert.Equal(t, 1, pending)
+}
+
+// TestHousekeeping_ReconcilesOrphanedFinalizingToCompleted covers the
+// user-visible #1794 case: the latest attempt is already terminal and no
+// queue task references the knowledge, but a stale finalizing counter and
+// historical running span keep the UI stuck in "optimizing".
+func TestHousekeeping_ReconcilesOrphanedFinalizingToCompleted(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledgeWithPending(t, db, "kid-orphan", types.ParseStatusFinalizing, 5, stale)
+	insertNamedSpan(t, db, "kid-orphan", 1, "wiki-old", "postprocess.wiki", types.SpanKindSubSpan, types.SpanStatusRunning, stale)
+	insertNamedSpan(t, db, "kid-orphan", 2, "root", "knowledge_processing", types.SpanKindRoot, types.SpanStatusDone, stale)
+	insertNamedSpan(t, db, "kid-orphan", 2, "post", types.StagePostProcess, types.SpanKindStage, types.SpanStatusDone, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	var pending int
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`, "kid-orphan",
+	).Row().Scan(&status, &pending))
+	assert.Equal(t, types.ParseStatusCompleted, status)
+	assert.Equal(t, 0, pending)
+
+	var oldStatus, oldCode string
+	require.NoError(t, db.Raw(
+		`SELECT status, error_code FROM knowledge_processing_spans WHERE knowledge_id = ? AND span_id = ?`,
+		"kid-orphan", "wiki-old",
+	).Row().Scan(&oldStatus, &oldCode))
+	assert.Equal(t, types.SpanStatusCancelled, oldStatus)
+	assert.Equal(t, "TASK_ORPHANED", oldCode)
+}
+
+func TestHousekeeping_PreservesFinalizingWithPendingOp(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledgeWithPending(t, db, "kid-pending-op", types.ParseStatusFinalizing, 1, stale)
+	insertPendingOp(t, db, "kid-pending-op")
+	insertNamedSpan(t, db, "kid-pending-op", 2, "root", "knowledge_processing", types.SpanKindRoot, types.SpanStatusDone, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	var pending int
+	require.NoError(t, db.Raw(
+		`SELECT parse_status, pending_subtasks_count FROM knowledges WHERE id = ?`, "kid-pending-op",
+	).Row().Scan(&status, &pending))
+	assert.Equal(t, types.ParseStatusFinalizing, status)
+	assert.Equal(t, 1, pending)
 }
 
 // TestHousekeeping_QueueProbeError_FailsSafe confirms the fail-safe
