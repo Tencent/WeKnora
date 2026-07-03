@@ -32,7 +32,7 @@ func TestClearStoredParserEngineRules_RemovesRulesAndKeepsOtherOverrides(t *test
 	k := &types.Knowledge{
 		ID:       "k-1",
 		TenantID: 1,
-		Metadata: types.JSON(`{"process_overrides":{"parser_engine_rules":[{"file_types":["pdf"],"engine":"builtin"}],"chunking_config":{"chunk_size":1024}}}`),
+		Metadata: types.JSON(`{"process_overrides":{"parser_engine_rules":[{"file_types":["pdf"],"engine":"builtin"}],"chunking_config":{"chunk_size":1024,"parser_engine_rules":[{"file_types":["docx"],"engine":"docreader"}]}}}`),
 	}
 	repo := &clearParserRulesRepoStub{knowledge: k}
 	svc := &knowledgeService{repo: repo}
@@ -48,6 +48,7 @@ func TestClearStoredParserEngineRules_RemovesRulesAndKeepsOtherOverrides(t *test
 	require.NotNil(t, updated)
 	require.Empty(t, updated.ParserEngineRules)
 	require.NotNil(t, updated.ChunkingConfig)
+	require.Empty(t, updated.ChunkingConfig.ParserEngineRules)
 	require.Equal(t, 1024, updated.ChunkingConfig.ChunkSize)
 }
 

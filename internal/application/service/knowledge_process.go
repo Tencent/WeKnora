@@ -3446,6 +3446,9 @@ func (s *knowledgeService) clearStoredParserEngineRules(ctx context.Context, kno
 	}
 
 	overrides.ParserEngineRules = nil
+	if overrides.ChunkingConfig != nil {
+		overrides.ChunkingConfig.ParserEngineRules = nil
+	}
 	if err := k.SetProcessOverrides(overrides); err != nil {
 		return err
 	}
