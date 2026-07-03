@@ -519,22 +519,29 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		}
 	}
 
-	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 {
-		logger.Error(ctx, "No knowledge base IDs or knowledge IDs provided")
-		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids or knowledge_ids must be provided"))
+	tagScopes := mergeTagScopesFromRequestIDs(
+		tagScopesFromMentionedItems(request.MentionedItems),
+		dedupRequestStrings(request.TagIDs),
+		secutils.SanitizeForLogArray(knowledgeBaseIDs),
+	)
+
+	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 && len(tagScopes) == 0 {
+		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, or tag scopes provided")
+		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, or scoped tag must be provided"))
 		return
 	}
 
 	logger.Infof(
 		ctx,
-		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, query: %s",
+		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
 		secutils.SanitizeForLogArray(knowledgeBaseIDs),
 		secutils.SanitizeForLogArray(request.KnowledgeIDs),
+		len(tagScopes),
 		secutils.SanitizeForLog(request.Query),
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))

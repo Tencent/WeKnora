@@ -669,6 +669,17 @@ func (s *knowledgeService) SetKnowledgeTags(ctx context.Context, knowledgeID str
 	return s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs)
 }
 
+// ListKnowledgeIDsByTagIDs returns document knowledge IDs carrying any of the
+// specified KB-local tags.
+func (s *knowledgeService) ListKnowledgeIDsByTagIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagIDs []string,
+) ([]string, error) {
+	return s.repo.ListIDsByTagIDs(ctx, tenantID, kbID, tagIDs)
+}
+
 // validateKnowledgeTagIDs ensures every tag exists and belongs to the given knowledge base.
 func (s *knowledgeService) validateKnowledgeTagIDs(
 	ctx context.Context,
