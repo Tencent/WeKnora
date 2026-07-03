@@ -122,10 +122,10 @@ type rbacGuards struct {
 	// Contributor who owns the KB can edit/delete its sub-resources
 	// (documents, chunks, wiki pages); a Contributor who merely belongs
 	// to the tenant gets 403 unless they're also Admin+.
-	knowledgeKBCreator    middleware.CreatorLookup
-	chunkKBCreator        middleware.CreatorLookup
-	chunkKBCreatorFromID  middleware.CreatorLookup // chunk routes that address chunks by :id (no knowledge id in URL)
-	wikiKBCreator         middleware.CreatorLookup
+	knowledgeKBCreator   middleware.CreatorLookup
+	chunkKBCreator       middleware.CreatorLookup
+	chunkKBCreatorFromID middleware.CreatorLookup // chunk routes that address chunks by :id (no knowledge id in URL)
+	wikiKBCreator        middleware.CreatorLookup
 
 	// Services for the KB-access guard (own / org-shared / via shared
 	// agent). Captured here so route lines can reference g.KBAccess()
@@ -256,6 +256,37 @@ func (g *rbacGuards) OwnedChunkKBOrAdmin() gin.HandlerFunc {
 // wasn't wired; that's now plumbed through KBCreatorLookupFromChunkIDParam.
 func (g *rbacGuards) OwnedChunkKBOrAdminFromChunkID() gin.HandlerFunc {
 	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.chunkKBCreatorFromID, g.cfg)
+}
+
+// ChunkFeedbackGovernanceFromKnowledgeIDParam keeps the chunk list readable
+// for Viewer+ users while limiting feedback governance filters/sorts to the
+// same KB creator OR Admin+ matrix used by chunk mutations.
+func (g *rbacGuards) ChunkFeedbackGovernanceFromKnowledgeIDParam() gin.HandlerFunc {
+	guard := middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.chunkKBCreator, g.cfg)
+	return func(c *gin.Context) {
+		if !hasChunkFeedbackGovernanceQuery(c) {
+			c.Next()
+			return
+		}
+		guard(c)
+	}
+}
+
+func hasChunkFeedbackGovernanceQuery(c *gin.Context) bool {
+	queryKeys := []string{
+		"min_positive_rate",
+		"max_positive_rate",
+		"needs_optimization",
+		"only_with_feedback",
+		"feedback_sort_by",
+		"feedback_sort_order",
+	}
+	for _, key := range queryKeys {
+		if _, ok := c.GetQuery(key); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // OwnedWikiKBOrAdmin: wiki page CRUD and maintenance ops. Wiki routes

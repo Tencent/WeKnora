@@ -179,6 +179,48 @@ var registry = map[string]settingSpec{
 			"文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
 			"修改后需重启服务进程方可生效。",
 	},
+	"chunk_feedback.high_positive_rate_percent": {
+		Type:        "int",
+		EnvName:     "WEKNORA_CHUNK_FEEDBACK_HIGH_RATE_PERCENT",
+		Default:     int64(80),
+		Category:    "chunk_feedback",
+		Description: "知识片段好评率达到该百分比及以上时，提升召回权重。修改后对新的反馈计算立即生效。",
+	},
+	"chunk_feedback.low_positive_rate_percent": {
+		Type:        "int",
+		EnvName:     "WEKNORA_CHUNK_FEEDBACK_LOW_RATE_PERCENT",
+		Default:     int64(50),
+		Category:    "chunk_feedback",
+		Description: "知识片段好评率低于该百分比时，降低召回权重。修改后对新的反馈计算立即生效。",
+	},
+	"chunk_feedback.optimize_rate_percent": {
+		Type:        "int",
+		EnvName:     "WEKNORA_CHUNK_FEEDBACK_OPTIMIZE_RATE_PERCENT",
+		Default:     int64(30),
+		Category:    "chunk_feedback",
+		Description: "知识片段好评率低于该百分比时，自动标记为待优化，提醒后台人工整改。",
+	},
+	"chunk_feedback.high_recall_weight_percent": {
+		Type:        "int",
+		EnvName:     "WEKNORA_CHUNK_FEEDBACK_HIGH_WEIGHT_PERCENT",
+		Default:     int64(120),
+		Category:    "chunk_feedback",
+		Description: "高好评率片段使用的召回权重百分比，120 表示 1.20 倍。",
+	},
+	"chunk_feedback.default_recall_weight_percent": {
+		Type:        "int",
+		EnvName:     "WEKNORA_CHUNK_FEEDBACK_DEFAULT_WEIGHT_PERCENT",
+		Default:     int64(100),
+		Category:    "chunk_feedback",
+		Description: "中等好评率或无反馈片段使用的默认召回权重百分比，100 表示 1.00 倍。",
+	},
+	"chunk_feedback.low_recall_weight_percent": {
+		Type:        "int",
+		EnvName:     "WEKNORA_CHUNK_FEEDBACK_LOW_WEIGHT_PERCENT",
+		Default:     int64(80),
+		Category:    "chunk_feedback",
+		Description: "低好评率片段使用的召回权重百分比，80 表示 0.80 倍。",
+	},
 }
 
 // systemSettingService wires the repository, audit log, and (P2)

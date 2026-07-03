@@ -22,6 +22,7 @@ type chunkService struct {
 	modelService    interfaces.ModelService
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
+	systemSetting   interfaces.SystemSettingService
 }
 
 // NewChunkService creates a new chunk service
@@ -37,6 +38,7 @@ func NewChunkService(
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
+	systemSetting interfaces.SystemSettingService,
 ) interfaces.ChunkService {
 	return &chunkService{
 		chunkRepository: chunkRepository,
@@ -44,6 +46,7 @@ func NewChunkService(
 		modelService:    modelService,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
+		systemSetting:   systemSetting,
 	}
 }
 
@@ -156,7 +159,7 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 //   - *types.PageResult: Paginated result containing chunks and pagination metadata
 //   - error: Any error encountered during retrieval
 func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
-	knowledgeID string, page *types.Pagination, chunkType []types.ChunkType,
+	knowledgeID string, page *types.Pagination, chunkType []types.ChunkType, feedbackFilter *types.ChunkFeedbackListFilter,
 ) (*types.PageResult, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	chunks, total, err := s.chunkRepository.ListPagedChunksByKnowledgeID(
@@ -170,6 +173,7 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 		"",
 		"",
 		"",
+		feedbackFilter,
 	)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -181,6 +185,34 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 
 	logger.Infof(ctx, "Retrieved %d chunks out of %d total chunks", len(chunks), total)
 	return types.NewPageResult(total, page, chunks), nil
+}
+
+// ResetChunkFeedback clears aggregated feedback counters for a chunk.
+func (s *chunkService) ResetChunkFeedback(ctx context.Context, chunkID string, resetWeight bool) (*types.Chunk, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	chunk, err := s.chunkRepository.ResetChunkFeedback(ctx, tenantID, chunkID, resetWeight, resolveChunkFeedbackConfig(ctx, s.systemSetting))
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"chunk_id":  chunkID,
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+	return chunk, nil
+}
+
+// ListChunkFeedbackWeightLogs returns paged recall-weight change records.
+func (s *chunkService) ListChunkFeedbackWeightLogs(ctx context.Context, chunkID string, page *types.Pagination) (*types.PageResult, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	logs, total, err := s.chunkRepository.ListChunkFeedbackWeightLogs(ctx, tenantID, chunkID, page)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"chunk_id":  chunkID,
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+	return types.NewPageResult(total, page, logs), nil
 }
 
 // updateChunk updates a chunk
