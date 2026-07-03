@@ -3058,6 +3058,27 @@ export default {
     referencesDocAndWebCount: 'Referenced {docCount} document(s) and {webCount} web page(s)',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
+    feedbackLike: 'Like',
+    feedbackDislike: 'Dislike',
+    feedbackReasonTitle: 'Dislike reason',
+    feedbackReasonPlaceholder: 'Optional: add a short note so the issue is easier to spot',
+    feedbackReasonOptionMismatch: 'Off topic',
+    feedbackReasonOptionMismatchDesc: 'The answer and question seem to be in different rooms.',
+    feedbackReasonOptionWrong: 'Inaccurate',
+    feedbackReasonOptionWrongDesc: 'Facts, numbers, or references look unreliable.',
+    feedbackReasonOptionTooLong: 'Too long',
+    feedbackReasonOptionTooLongDesc: 'The useful bit is buried deeper than it needs to be.',
+    feedbackReasonOptionTooHard: 'Too complex',
+    feedbackReasonOptionTooHardDesc: 'Too many terms, not enough plain language.',
+    feedbackReasonOptionMissing: 'Missing key point',
+    feedbackReasonOptionMissingDesc: 'The direction is right, but the important part is missing.',
+    feedbackReasonOptionOther: 'Other',
+    feedbackReasonOptionOtherDesc: 'Something else. A short note will help.',
+    feedbackSubmitted: 'Feedback submitted',
+    feedbackThanks: 'Thanks for the feedback. The knowledge base just got a little smarter.',
+    feedbackCanceled: 'Feedback canceled',
+    feedbackFailed: 'Feedback failed',
+    feedbackUnavailable: 'Feedback is unavailable for this answer',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',
@@ -3434,6 +3455,14 @@ export default {
         asynq: {
           concurrency: 'Async task worker concurrency',
         },
+        chunk_feedback: {
+          high_positive_rate_percent: 'High positive-rate threshold (%)',
+          low_positive_rate_percent: 'Low positive-rate threshold (%)',
+          optimize_rate_percent: 'Needs-optimization threshold (%)',
+          high_recall_weight_percent: 'High-quality recall weight (%)',
+          default_recall_weight_percent: 'Default recall weight (%)',
+          low_recall_weight_percent: 'Low-quality recall weight (%)',
+        },
       },
       keyDescriptions: {
         auth: {
@@ -3453,6 +3482,20 @@ export default {
         asynq: {
           concurrency:
             'Async task worker concurrency (asynq thread-pool size). Document parsing, embedding, and similar tasks are mostly I/O-bound, so raising this value can shorten queue time for bulk uploads. Requires a service process restart to take effect.',
+        },
+        chunk_feedback: {
+          high_positive_rate_percent:
+            'Chunks with a positive rate at or above this percentage receive the high-quality recall weight. Takes effect the next time feedback is submitted or reset.',
+          low_positive_rate_percent:
+            'Chunks with a positive rate below this percentage receive the low-quality recall weight. Values between the low and high thresholds keep the default weight.',
+          optimize_rate_percent:
+            'Chunks below this positive-rate percentage are marked as needs optimization in the chunk view.',
+          high_recall_weight_percent:
+            'Recall weight applied to high-quality chunks. 120 means 1.20x ranking weight.',
+          default_recall_weight_percent:
+            'Recall weight applied to neutral chunks and when feedback stats are reset. 100 means 1.00x ranking weight.',
+          low_recall_weight_percent:
+            'Recall weight applied to low-quality chunks. 80 means 0.80x ranking weight.',
         },
       },
       enumLabels: {

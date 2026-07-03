@@ -287,6 +287,7 @@
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
                 </t-button>
+                <MessageFeedbackButtons v-if="showFeedbackControls" :session-id="sessionId" :message="session" />
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
@@ -439,6 +440,7 @@ import 'katex/dist/katex.min.css';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
+import MessageFeedbackButtons from './MessageFeedbackButtons.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -744,6 +746,9 @@ const embedAuthProps = computed(() => ({
 
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
+);
+const showFeedbackControls = computed(
+  () => !props.embeddedMode && !!props.sessionId && !!props.session?.id && !!(props.session as any)?.is_completed,
 );
 
 const {

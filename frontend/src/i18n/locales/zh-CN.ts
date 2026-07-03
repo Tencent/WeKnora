@@ -925,6 +925,27 @@ export default {
     referencesDocAndWebCount: "引用了{docCount}篇文档和{webCount}条网页",
     referenceChunkCount: "{count}个片段",
     fallbackHint: "未从知识库中检索到相关内容，以上为模型直接回答",
+    feedbackLike: "点赞",
+    feedbackDislike: "点踩",
+    feedbackReasonTitle: "点踩原因",
+    feedbackReasonPlaceholder: "可选：补一句具体情况，方便定位问题",
+    feedbackReasonOptionMismatch: "答非所问",
+    feedbackReasonOptionMismatchDesc: "像走错片场，问题和回答没对上。",
+    feedbackReasonOptionWrong: "信息不准确",
+    feedbackReasonOptionWrongDesc: "事实、数据或引用看起来不太靠谱。",
+    feedbackReasonOptionTooLong: "太冗长",
+    feedbackReasonOptionTooLongDesc: "重点藏太深，我只是想快点找到答案。",
+    feedbackReasonOptionTooHard: "解释太绕",
+    feedbackReasonOptionTooHardDesc: "术语有点密，读完还要再缓缓。",
+    feedbackReasonOptionMissing: "缺少关键点",
+    feedbackReasonOptionMissingDesc: "回答方向对了，但少了最想看的部分。",
+    feedbackReasonOptionOther: "其他",
+    feedbackReasonOptionOtherDesc: "这个问题比较特别，我来简单补充。",
+    feedbackSubmitted: "反馈已提交",
+    feedbackThanks: "谢谢反馈，知识库正在变聪明一点点",
+    feedbackCanceled: "反馈已取消",
+    feedbackFailed: "反馈操作失败",
+    feedbackUnavailable: "当前回复暂不支持评价",
     requestInfoTitle: "请求信息",
     requestInfoRequestId: "Request ID",
     requestInfoMessageId: "消息 ID",
@@ -2446,6 +2467,14 @@ export default {
         asynq: {
           concurrency: "异步任务并发数",
         },
+        chunk_feedback: {
+          high_positive_rate_percent: "高好评率阈值 (%)",
+          low_positive_rate_percent: "低好评率阈值 (%)",
+          optimize_rate_percent: "待优化阈值 (%)",
+          high_recall_weight_percent: "高质量召回权重 (%)",
+          default_recall_weight_percent: "默认召回权重 (%)",
+          low_recall_weight_percent: "低质量召回权重 (%)",
+        },
       },
       keyDescriptions: {
         auth: {
@@ -2472,6 +2501,20 @@ export default {
             "异步任务 worker 并发数（asynq 线程池大小）。" +
             "文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
             "修改后需重启服务进程方可生效。",
+        },
+        chunk_feedback: {
+          high_positive_rate_percent:
+            "分块好评率大于等于该百分比时，使用高质量召回权重。用户提交或重置反馈后生效。",
+          low_positive_rate_percent:
+            "分块好评率低于该百分比时，使用低质量召回权重；介于低阈值和高阈值之间时保持默认权重。",
+          optimize_rate_percent:
+            "分块好评率低于该百分比时，在分块视图中标记为「待优化」。",
+          high_recall_weight_percent:
+            "高质量分块使用的召回权重，120 表示 1.20 倍排序权重。",
+          default_recall_weight_percent:
+            "普通分块和反馈统计重置后使用的召回权重，100 表示 1.00 倍排序权重。",
+          low_recall_weight_percent:
+            "低质量分块使用的召回权重，80 表示 0.80 倍排序权重。",
         },
       },
       enumLabels: {
