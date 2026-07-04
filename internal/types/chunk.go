@@ -152,7 +152,9 @@ type Chunk struct {
 	IndirectRelationChunks JSON `json:"indirect_relation_chunks" gorm:"type:json"`
 	// Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
-	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
+	// ContentHash stores a stable hash for fast matching. FAQ uses it for
+	// duplicate detection; document reparsing uses it to identify reusable
+	// chunks whose embedding inputs have not changed.
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
@@ -167,6 +169,30 @@ type Chunk struct {
 	// when generating embeddings. NOT persisted — populated by the chunker
 	// during initial splitting and discarded after indexing.
 	ContextHeader string `json:"-" gorm:"-"`
+}
+
+// DocumentChunkReuseFingerprint returns the stable fingerprint used to decide
+// whether a document chunk can safely reuse its previous row and vector index.
+// It intentionally includes embedding-relevant inputs, because a cache hit here
+// means the existing vector can be kept without another embedding call.
+func DocumentChunkReuseFingerprint(
+	content string,
+	contextHeader string,
+	chunkType ChunkType,
+	embeddingModelID string,
+	embeddingDimension int,
+	chunkingFingerprint string,
+	title string,
+) string {
+	return CacheFingerprint("document-chunk-reuse", map[string]any{
+		"content":             strings.TrimSpace(content),
+		"context_header":      strings.TrimSpace(contextHeader),
+		"chunk_type":          strings.TrimSpace(chunkType),
+		"embedding_model_id":  strings.TrimSpace(embeddingModelID),
+		"embedding_dimension": embeddingDimension,
+		"chunking":            strings.TrimSpace(chunkingFingerprint),
+		"title":               strings.TrimSpace(title),
+	})
 }
 
 // EmbeddingContent returns the chunk content with ContextHeader prepended

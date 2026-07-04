@@ -201,6 +201,7 @@ type wikiIngestService struct {
 	logEntrySvc    interfaces.WikiLogEntryService
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
+	wikiMapCache   interfaces.WikiMapCacheRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
@@ -226,6 +227,7 @@ func NewWikiIngestService(
 	logEntrySvc interfaces.WikiLogEntryService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
+	wikiMapCache interfaces.WikiMapCacheRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
@@ -240,6 +242,7 @@ func NewWikiIngestService(
 		logEntrySvc:    logEntrySvc,
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
+		wikiMapCache:   wikiMapCache,
 		redisClient:    redisClient,
 		spanTracker:    spanTracker,
 	}
@@ -1301,6 +1304,7 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 	}
 	return strings.TrimSpace(buf.String())
 }
+
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs
