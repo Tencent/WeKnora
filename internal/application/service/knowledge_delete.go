@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -692,90 +692,8 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 }
 
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {
-	logger.GetLogger(ctx).Infof("Cleaning knowledge resources before manual update, knowledge ID: %s", knowledge.ID)
-
-	var cleanupErr error
-
-	if knowledge.ParseStatus == types.ManualKnowledgeStatusDraft && knowledge.StorageSize == 0 {
-		// Draft without indexed data, skip cleanup.
-		return nil
-	}
-
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if knowledge.EmbeddingModelID != "" {
-		// Load KB to discover its VectorStoreID binding. Falls back to tenant
-		// effective engines if the KB has no binding or the load fails.
-		//
-		// Silent fallback risk: if a bound KB fails to load here due to a
-		// transient DB error, the cleanup will delete from env engines and
-		// leave orphan vectors in the bound store. Warn so operators can spot it.
-		var boundStoreID *string
-		if kb, loadErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); loadErr == nil && kb != nil {
-			boundStoreID = kb.VectorStoreID
-		} else if loadErr != nil {
-			logger.GetLogger(ctx).WithField("error", loadErr).WithField("knowledge_base_id", knowledge.KnowledgeBaseID).
-				Warnf("cleanupKnowledgeResources: failed to load KB for vector store resolution; falling back to tenant effective engines")
-		}
-		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-			ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, boundStoreID)
-		if err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Error("Failed to init retrieve engine during cleanup")
-			cleanupErr = errors.Join(cleanupErr, err)
-		} else {
-			embeddingModel, modelErr := s.modelService.GetEmbeddingModel(ctx, knowledge.EmbeddingModelID)
-			if modelErr != nil {
-				logger.GetLogger(ctx).WithField("error", modelErr).Error("Failed to get embedding model during cleanup")
-				cleanupErr = errors.Join(cleanupErr, modelErr)
-			} else {
-				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-					logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge index")
-					cleanupErr = errors.Join(cleanupErr, err)
-				}
-			}
-		}
-	}
-
-	// Collect image URLs before chunks are deleted
-	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
-	fileSvc := s.resolveFileService(ctx, kb)
-	chunkImageInfos, imgErr := s.chunkService.GetRepository().ListImageInfoByKnowledgeIDs(ctx, tenantInfo.ID, []string{knowledge.ID})
-	if imgErr != nil {
-		logger.GetLogger(ctx).WithField("error", imgErr).Error("Failed to collect image URLs for cleanup")
-		cleanupErr = errors.Join(cleanupErr, imgErr)
-	}
-	var imageInfoStrs []string
-	for _, ci := range chunkImageInfos {
-		imageInfoStrs = append(imageInfoStrs, ci.ImageInfo)
-	}
-	imageURLs := collectImageURLs(ctx, imageInfoStrs)
-
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge chunks")
-		cleanupErr = errors.Join(cleanupErr, err)
-	}
-
-	// Delete extracted images after chunks are deleted
-	deleteExtractedImages(ctx, fileSvc, imageURLs)
-
-	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge graph data")
-		cleanupErr = errors.Join(cleanupErr, err)
-	}
-
-	if knowledge.StorageSize > 0 {
-		tenantInfo.StorageUsed -= knowledge.StorageSize
-		if tenantInfo.StorageUsed < 0 {
-			tenantInfo.StorageUsed = 0
-		}
-		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Error("Failed to adjust storage usage during manual cleanup")
-			cleanupErr = errors.Join(cleanupErr, err)
-		}
-		knowledge.StorageSize = 0
-	}
-
-	return cleanupErr
+	logger.GetLogger(ctx).Infof("cleanupKnowledgeResources is a no-op (diff-aware cleanup in processChunks handles deletion), knowledge ID: %s", knowledge.ID)
+	return nil
 }
 
 // ProcessKnowledgeListDelete handles Asynq knowledge list delete tasks
@@ -810,4 +728,77 @@ func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *as
 
 	logger.Infof(ctx, "Successfully deleted %d knowledge items", len(payload.KnowledgeIDs))
 	return nil
+}
+
+// diffAwareCleanup removes chunks that existed before but are not in newIDs.
+// It deletes the removed chunk rows from the DB and, when embeddingModel /
+// retrieveEngine are provided, also removes their vectors from the index.
+// When newIDs is nil/empty, ALL existing chunks are removed (full delete).
+func (s *knowledgeService) diffAwareCleanup(
+	ctx context.Context, tenantID uint64, knowledge *types.Knowledge,
+	newIDs []string, embeddingModel embedding.Embedder,
+	retrieveEngine *retriever.CompositeRetrieveEngine,
+) error {
+	oldIDs, err := s.chunkRepo.ListChunkIDsByKnowledgeID(ctx, tenantID, knowledge.ID)
+	if err != nil {
+		return err
+	}
+
+	removed := removedChunkIDs(oldIDs, newIDs)
+	if len(removed) == 0 {
+		return nil
+	}
+
+	// Delete removed chunk rows from DB
+	if err := s.chunkRepo.DeleteChunksByIDList(ctx, tenantID, knowledge.ID, removed); err != nil {
+		logger.Warnf(ctx, "diffAwareCleanup: DeleteChunksByIDList failed: %v", err)
+	}
+
+	// Delete vectors for removed chunks from the retrieve engine.
+	// Uses DeleteByChunkIDList (per-chunk precise delete) instead of
+	// DeleteByKnowledgeIDList (whole-knowledge delete) so that kept chunks'
+	// vectors survive across reparse.
+	if embeddingModel != nil && retrieveEngine != nil {
+		if err := retrieveEngine.DeleteByChunkIDList(ctx, removed, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
+			logger.Warnf(ctx, "diffAwareCleanup: vector delete failed: %v", err)
+		}
+	}
+
+	// Clean graph data for this knowledge
+	if s.graphEngine != nil {
+		namespace := types.NameSpace{
+			KnowledgeBase: knowledge.KnowledgeBaseID,
+			Knowledge:     knowledge.ID,
+		}
+		_ = s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace})
+	}
+	return nil
+}
+
+// collectChunkIDs extracts the ID from each chunk in the slice.
+func collectChunkIDs(chunks []*types.Chunk) []string {
+	ids := make([]string, 0, len(chunks))
+	for _, c := range chunks {
+		ids = append(ids, c.ID)
+	}
+	return ids
+}
+
+// removedChunkIDs returns IDs present in oldIDs but absent from newIDs.
+// If newIDs is empty, all oldIDs are returned (full removal).
+func removedChunkIDs(oldIDs, newIDs []string) []string {
+	if len(newIDs) == 0 {
+		return append([]string(nil), oldIDs...)
+	}
+	newSet := make(map[string]bool, len(newIDs))
+	for _, id := range newIDs {
+		newSet[id] = true
+	}
+	var removed []string
+	for _, id := range oldIDs {
+		if !newSet[id] {
+			removed = append(removed, id)
+		}
+	}
+	return removed
 }

@@ -78,6 +78,11 @@ type ChunkRepository interface {
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
+	// DeleteChunksByIDList deletes the given chunk IDs within a knowledge scope.
+	DeleteChunksByIDList(ctx context.Context, tenantID uint64, knowledgeID string, ids []string) error
+	// ListChunkIDsByKnowledgeID returns the IDs of all chunks under a knowledge,
+	// ordered by chunk_index for stable diff.
+	ListChunkIDsByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]string, error)
 	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
 	ListImageInfoByKnowledgeIDs(ctx context.Context, tenantID uint64, knowledgeIDs []string) ([]ChunkImageInfo, error)
 	// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item

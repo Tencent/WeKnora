@@ -1513,9 +1513,9 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			if entry.IsEnabled != nil {
 				isEnabled = *entry.IsEnabled
 			}
-			// ChunkIndex计算：startChunkIndex + (i+idx) + initialProcessed
+			// ChunkIndex计算：(i+idx) — FAQ entries are new, start from 0
 			chunk := &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              ComputeChunkStableID(faqKnowledge.ID, "text", i+idx, buildFAQChunkContent(meta, indexMode)),
 				TenantID:        tenantID,
 				KnowledgeID:     faqKnowledge.ID,
 				KnowledgeBaseID: kb.ID,

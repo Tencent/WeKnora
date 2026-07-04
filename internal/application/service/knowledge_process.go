@@ -287,26 +287,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
 
-	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
-	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
-
-	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
-		// 不返回错误，继续处理（可能没有旧数据）
-	}
-
-	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
+	// Initialize composite retrieve engine for later use (indexing + diff-aware cleanup).
+	// The old "delete all chunks + delete all vectors + delete graph" cleanup is now
+	// replaced by diffAwareCleanup, which runs AFTER insertChunks are built with stable IDs
+	// (see step 1-5 of the content-addressed cache PR).
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
 	if err == nil && embeddingModel != nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
-			// 不返回错误，继续处理（可能没有旧数据）
-		} else {
-			logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
-		}
+		// Nothing to delete here. diffAwareCleanup will handle vectors later.
 	}
 
 	// 删除知识图谱数据（如果存在）
@@ -428,7 +417,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// 创建主文本Chunk
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              ComputeChunkStableID(knowledge.ID, "text", int(chunkData.Seq), chunkData.Content),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -456,6 +445,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	sort.Slice(insertChunks, func(i, j int) bool {
 		return insertChunks[i].ChunkIndex < insertChunks[j].ChunkIndex
 	})
+
+	// Diff-aware cleanup: remove only chunks whose stable ID disappeared between old and new.
+	// With ComputeChunkStableID, unchanged chunks keep the same ID and survive across reparse —
+	// their vectors, questions, faq metadata, wiki refs all remain valid.
+	// When newIDs is empty (nil), diffAwareCleanup removes ALL existing chunks (full delete).
+	newIDs := collectChunkIDs(insertChunks)
+	if err := s.diffAwareCleanup(ctx, knowledge.TenantID, knowledge, newIDs, embeddingModel, retrieveEngine); err != nil {
+		logger.Warnf(ctx, "Failed to diff-aware cleanup (may not exist): %v", err)
+	}
 
 	// 仅为文本类型的Chunk设置前后关系（child chunks only, parents already linked above）
 	textChunks := make([]*types.Chunk, 0, len(chunks))
@@ -574,7 +572,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) before indexing: %s", status, knowledge.ID)
 			if status == types.ParseStatusDeleting {
-				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+				if err := s.diffAwareCleanup(ctx, knowledge.TenantID, knowledge, newIDs, nil, nil); err != nil {
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 			}
@@ -589,7 +587,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			s.repo.UpdateKnowledge(ctx, knowledge)
 
 			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+			if err := s.diffAwareCleanup(ctx, knowledge.TenantID, knowledge, newIDs, nil, nil); err != nil {
 				logger.Errorf(ctx, "Delete chunks failed: %v", err)
 			}
 
@@ -622,7 +620,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) after indexing: %s", status, knowledge.ID)
 			if status == types.ParseStatusDeleting {
-				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+				if err := s.diffAwareCleanup(ctx, knowledge.TenantID, knowledge, newIDs, nil, nil); err != nil {
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
@@ -1201,7 +1199,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
 		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              ComputeChunkStableID(knowledge.ID, "text", maxChunkIndex+1, fmt.Sprintf("# Document\n%s\n\n# Summary\n%s", knowledge.FileName, summary)),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -2826,7 +2824,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new caption chunk if it doesn't exist and we have caption data
 	if !hasCaptionChunk && image.Caption != "" {
 		captionChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              ComputeChunkStableID(chunk.KnowledgeID, "caption", chunk.ChunkIndex, image.Caption),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
@@ -2842,7 +2840,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new OCR chunk if it doesn't exist and we have OCR data
 	if !hasOCRChunk && image.OCRText != "" {
 		ocrChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              ComputeChunkStableID(chunk.KnowledgeID, "ocr", chunk.ChunkIndex, image.OCRText),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,

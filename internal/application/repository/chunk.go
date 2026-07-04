@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrChunkRevisionConflict = errors.New("chunk revision conflict")
@@ -65,7 +66,12 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
 	// explicitly inserted, bypassing GORM's default value behavior.
 	// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
-	return db.Select("*").CreateInBatches(chunks, 100).Error
+	// OnConflict DoNothing: with content-addressed chunk IDs (PR-1), a reparse
+	// may try to re-insert a chunk whose ID already exists (unchanged content).
+	// The DB-side DO NOTHING makes this idempotent without requiring a pre-check.
+	return db.Select("*").
+		Clauses(clause.OnConflict{DoNothing: true}).
+		CreateInBatches(chunks, 100).Error
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID
@@ -1277,4 +1283,30 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	}
 
 	return chunks, nil
+}
+
+// DeleteChunksByIDList deletes the given chunk IDs within a knowledge scope.
+func (r *chunkRepository) DeleteChunksByIDList(ctx context.Context, tenantID uint64, knowledgeID string, ids []string) error {
+	if tenantID == 0 || knowledgeID == "" || len(ids) == 0 {
+		return nil
+	}
+	if err := r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_id = ? AND id IN ?", tenantID, knowledgeID, ids).
+		Delete(&types.Chunk{}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// ListChunkIDsByKnowledgeID returns the IDs of all chunks under a knowledge,
+// ordered by chunk_index for stable diff.
+func (r *chunkRepository) ListChunkIDsByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]string, error) {
+	var ids []string
+	if err := r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Order("chunk_index").
+		Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
