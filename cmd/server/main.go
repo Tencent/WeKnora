@@ -32,6 +32,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -67,6 +68,7 @@ func main() {
 		router *gin.Engine,
 		resourceCleaner interfaces.ResourceCleaner,
 		systemSettingSvc interfaces.SystemSettingService,
+		cacheGC *service.CacheHousekeepingService,
 	) error {
 		// Create HTTP server
 		server := &http.Server{
@@ -89,6 +91,8 @@ func main() {
 		if err := systemSettingSvc.SubscribeRedis(ctx); err != nil {
 			logger.Warnf(ctx, "[system_settings] subscribe failed: %v", err)
 		}
+
+		cacheGC.Start(ctx)
 
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, shutdownSignals...)
@@ -116,6 +120,7 @@ func main() {
 
 			if err := server.Shutdown(shutdownCtx); err != nil {
 				logger.Errorf(context.Background(), "Server forced to shutdown: %v", err)
+				cacheGC.Stop()
 				server.Close()
 			}
 

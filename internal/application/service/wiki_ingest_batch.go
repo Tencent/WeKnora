@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
@@ -832,6 +833,37 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
+	//check cache
+	contentHash := ComputeChunkContentHash(content)
+	cacheKey := interfaces.WikiDocMapCacheKey{
+		ContentHash:   contentHash,
+		Granularity:   string(batchCtx.ExtractionGranularity),
+		ChatModelID:   chatModel.GetModelID(),
+		PromptVersion: "v1",
+	}
+
+	if data, hit, _ := s.wikiDocMapCache.Get(ctx, cacheKey); hit {
+		var cached struct {
+			DocTitle    string
+			Summary     string
+			Pages       []types.WikiLogPageRef
+			MapStats    types.JSONMap
+			SlugUpdates []SlugUpdate
+		}
+		if err := json.Unmarshal(data, &cached); err == nil {
+			logger.Infof(ctx, "wiki ingest: map phase cache hit for %s", knowledgeID)
+
+			docResult := &docIngestResult{
+				KnowledgeID: knowledgeID,
+				DocTitle:    cached.DocTitle,
+				Summary:     cached.Summary,
+				Pages:       cached.Pages,
+				MapStats:    cached.MapStats,
+				WikiSpan:    wikiSpan,
+			}
+			return docResult, cached.SlugUpdates, nil
+		}
+	}
 	docTitle := knowledgeID
 	if kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID); err == nil && kn != nil && kn.Title != "" {
 		docTitle = kn.Title
@@ -1200,6 +1232,26 @@ func (s *wikiIngestService) mapOneDocument(
 		"pass0_fallback":   pass0Failed,
 		"classify_batches": batchCount,
 		"summary_preview":  previewText(docSummaryLine, 160),
+	}
+
+	//set cache when all above succeed
+	cachaData, err := json.Marshal(struct {
+		DocTitle    string
+		Summary     string
+		Pages       []types.WikiLogPageRef
+		MapStats    types.JSONMap
+		SlugUpdates []SlugUpdate
+	}{
+		DocTitle:    docTitle,
+		Summary:     docSummaryLine,
+		Pages:       extractedPages,
+		MapStats:    mapStats,
+		SlugUpdates: updates,
+	})
+	if err != nil {
+		logger.Errorf(ctx, "wiki ingest: failed to marshal cache data for %s: %v", knowledgeID, err)
+	} else {
+		s.wikiDocMapCache.Set(ctx, cacheKey, cachaData)
 	}
 
 	return &docIngestResult{

@@ -33,12 +33,25 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	// CacheGC configures the background LRU garbage collection for cache tables.
+	CacheGC *CacheGCConfig `yaml:"cache_gc" json:"cache_gc"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// CacheGCConfig controls the periodic LRU garbage collection for all cache tables
+// (vlm_cache, embedding_cache, wiki_doc_map_cache, graph_chunk_cache).
+type CacheGCConfig struct {
+	// IntervalMinutes is how often the GC runs (default: 60).
+	IntervalMinutes int `yaml:"interval_minutes" json:"interval_minutes"`
+	// RetentionHours is how long a cache entry survives without access (default: 168 = 7 days).
+	RetentionHours int `yaml:"retention_hours" json:"retention_hours"`
+	// MaxRows is the per-table row cap; excess rows are LRU-evicted (default: 100000).
+	MaxRows int64 `yaml:"max_rows" json:"max_rows"`
 }
 
 // AgentConfig represents the global agent settings.

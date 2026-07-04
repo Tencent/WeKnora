@@ -107,6 +107,12 @@ extract:
       Please randomly generate a text with freely chosen content, with a word count between [50-200].
 
 
+# Cache GC configuration (LRU garbage collection for cache tables)
+cache_gc:
+  interval_minutes: 60       # How often GC runs (default: 60)
+  retention_hours: 168       # Entries older than this are purged (default: 168 = 7 days)
+  max_rows: 100000           # Per-table row cap; excess rows LRU-evicted
+
 # Tenant configuration
 tenant:
   # Enable cross-tenant access (can be enabled for intranet environments)

@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 )
@@ -71,10 +72,11 @@ type graphBuilder struct {
 	chatModel        chat.Chat
 	chunkGraph       map[string]map[string]*ChunkRelation // Document chunk relationship graph
 	mutex            sync.RWMutex                         // Mutex for concurrent operations
+	wikiGraphCache   interfaces.WikiGraphCache
 }
 
 // NewGraphBuilder creates a new graph builder
-func NewGraphBuilder(config *config.Config, chatModel chat.Chat) types.GraphBuilder {
+func NewGraphBuilder(config *config.Config, chatModel chat.Chat, cacheRepo interfaces.WikiGraphCache) types.GraphBuilder {
 	logger.Info(context.Background(), "Creating new graph builder")
 	return &graphBuilder{
 		config:           config,
@@ -83,6 +85,7 @@ func NewGraphBuilder(config *config.Config, chatModel chat.Chat) types.GraphBuil
 		entityMapByTitle: make(map[string]*types.Entity),
 		relationshipMap:  make(map[string]*types.Relationship),
 		chunkGraph:       make(map[string]map[string]*ChunkRelation),
+		wikiGraphCache:   cacheRepo,
 	}
 }
 
@@ -116,6 +119,21 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			Role:    "user",
 			Content: chunk.Content,
 		},
+	}
+	//check cache
+	contentHash := ComputeChunkContentHash(chunk.Content)
+	cacheKey := interfaces.WikiGraphCacheKey{
+		ContentHash:   contentHash,
+		ChatModelID:   b.chatModel.GetModelID(),
+		PromptVersion: "v1",
+	}
+	if data, hit, _ := b.wikiGraphCache.Get(ctx, cacheKey); hit {
+		var extractedEntities []*types.Entity
+		if err := json.Unmarshal(data, &extractedEntities); err != nil {
+			log.WithError(err).Errorf("Failed to unmarshal entity extraction response, rsp content: %s", data)
+			return nil, fmt.Errorf("failed to unmarshal entity extraction response: %w", err)
+		}
+		return extractedEntities, nil
 	}
 
 	// Call LLM to extract entities
@@ -186,6 +204,11 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 	}
 
 	log.Infof("Completed entity extraction for chunk %s: %d entities", chunk.ID, len(entities))
+	if len(extractedEntities) > 0 {
+		if cacheData, err := json.Marshal(extractedEntities); err == nil {
+			b.wikiGraphCache.Set(ctx, cacheKey, cacheData)
+		}
+	}
 	return entities, nil
 }
 

@@ -191,17 +191,18 @@ type WikiPendingOp struct {
 // both of which are correctness-critical short-lived flags rather
 // than data the system should survive without.
 type wikiIngestService struct {
-	wikiService    interfaces.WikiPageService
-	kbService      interfaces.KnowledgeBaseService
-	knowledgeSvc   interfaces.KnowledgeService
-	knowledgeRepo  interfaces.KnowledgeRepository
-	chunkRepo      interfaces.ChunkRepository
-	modelService   interfaces.ModelService
-	task           interfaces.TaskEnqueuer
-	logEntrySvc    interfaces.WikiLogEntryService
-	pendingRepo    interfaces.TaskPendingOpsRepository
-	deadLetterRepo interfaces.TaskDeadLetterRepository
-	redisClient    *redis.Client // nil in Lite mode (no Redis)
+	wikiService     interfaces.WikiPageService
+	kbService       interfaces.KnowledgeBaseService
+	knowledgeSvc    interfaces.KnowledgeService
+	knowledgeRepo   interfaces.KnowledgeRepository
+	chunkRepo       interfaces.ChunkRepository
+	modelService    interfaces.ModelService
+	task            interfaces.TaskEnqueuer
+	logEntrySvc     interfaces.WikiLogEntryService
+	pendingRepo     interfaces.TaskPendingOpsRepository
+	deadLetterRepo  interfaces.TaskDeadLetterRepository
+	wikiDocMapCache interfaces.WikiDocMapCache
+	redisClient     *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
 	// postprocess.wiki subspan in the knowledge trace tree. Async
 	// batch design means we look up the parent attempt by knowledge
@@ -226,22 +227,24 @@ func NewWikiIngestService(
 	logEntrySvc interfaces.WikiLogEntryService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
+	wikiDocMapCache interfaces.WikiDocMapCache,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
-		wikiService:    wikiService,
-		kbService:      kbService,
-		knowledgeSvc:   knowledgeSvc,
-		knowledgeRepo:  knowledgeRepo,
-		chunkRepo:      chunkRepo,
-		modelService:   modelService,
-		task:           task,
-		logEntrySvc:    logEntrySvc,
-		pendingRepo:    pendingRepo,
-		deadLetterRepo: deadLetterRepo,
-		redisClient:    redisClient,
-		spanTracker:    spanTracker,
+		wikiService:     wikiService,
+		kbService:       kbService,
+		knowledgeSvc:    knowledgeSvc,
+		knowledgeRepo:   knowledgeRepo,
+		chunkRepo:       chunkRepo,
+		modelService:    modelService,
+		task:            task,
+		logEntrySvc:     logEntrySvc,
+		pendingRepo:     pendingRepo,
+		deadLetterRepo:  deadLetterRepo,
+		wikiDocMapCache: wikiDocMapCache,
+		redisClient:     redisClient,
+		spanTracker:     spanTracker,
 	}
 	return svc
 }
@@ -1301,6 +1304,7 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 	}
 	return strings.TrimSpace(buf.String())
 }
+
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs

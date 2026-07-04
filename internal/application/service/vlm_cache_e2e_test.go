@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -40,8 +39,16 @@ func TestVLMCache_E2E_Reparse_Saving_Money(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
 	assert.NoError(t, err)
 
-	// Fix 2: Add {} and remove the duplicate block
-	err = db.AutoMigrate(&types.VLMCache{})
+	// Create table manually with SQLite-compatible schema
+	err = db.Exec(`CREATE TABLE IF NOT EXISTS vlm_cache (
+		image_hash     TEXT NOT NULL,
+		vlm_model_id   TEXT NOT NULL,
+		prompt_version TEXT NOT NULL,
+		result_text    TEXT NOT NULL,
+		created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (image_hash, vlm_model_id, prompt_version)
+	)`).Error
 	assert.NoError(t, err)
 
 	cacheRepo := repository.NewVLMCacheRepo(db)
