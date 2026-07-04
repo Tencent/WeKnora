@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,6 +61,16 @@ func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
 }
 
+// vlmPromptVersion binds a stable prompt-family tag to a hash of the actual
+// prompt text. Prompts now vary by language and per-KB custom instructions, so
+// the cache key must reflect the real prompt — otherwise two requests with the
+// same base tag but different instructions/language would collide and return
+// each other's cached VLM output.
+func vlmPromptVersion(base, prompt string) string {
+	sum := sha256.Sum256([]byte(prompt))
+	return base + ":" + hex.EncodeToString(sum[:8])
+}
+
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
 // performs OCR and VLM caption, and creates child chunks.
@@ -73,6 +85,7 @@ type ImageMultimodalService struct {
 	ollamaService  *ollama.OllamaService
 	taskEnqueuer   interfaces.TaskEnqueuer
 	redisClient    *redis.Client
+	vlmCache       interfaces.VlmCacheRepo
 	// fileSvc is the globally configured default FileService used as a fallback
 	// when the tenant-scoped storage config cannot produce a usable service
 	// (e.g. images were saved using the global MINIO_* env vars while the
@@ -101,6 +114,7 @@ func NewImageMultimodalService(
 	ollamaService *ollama.OllamaService,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
+	vlmCache interfaces.VlmCacheRepo,
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
@@ -117,6 +131,7 @@ func NewImageMultimodalService(
 		ollamaService:   ollamaService,
 		taskEnqueuer:    taskEnqueuer,
 		redisClient:     redisClient,
+		vlmCache:        vlmCache,
 		fileSvc:         fileSvc,
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
@@ -252,6 +267,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 	imgOut["image_bytes"] = len(imgBytes)
 
+	imageHashByte := sha256.Sum256(imgBytes)
+	imageHash := hex.EncodeToString(imageHashByte[:])
+
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
 		OriginalURL: payload.ImageURL,
@@ -259,8 +277,10 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if payload.EnableOCR {
 		prompt := vlmOCRPrompt
+		promptVer := "ocr.default.v1"
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
+			promptVer = "ocr.scanned_pdf.v1"
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 			imgOut["ocr_prompt"] = "scanned_pdf"
 		} else {
@@ -268,11 +288,21 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrKey := interfaces.VLMCacheKey{
+			ImageHash:     imageHash,
+			ModelID:       vlmModel.GetModelID(),
+			PromptVersion: vlmPromptVersion(promptVer, prompt),
+		}
+		ocrText, hit, ocrErr := s.vlmCache.GetOrCompute(ctx, ocrKey, func() (string, error) {
+			return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		})
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
+			if hit {
+				logger.Infof(ctx, "[ImageMultimodal] OCR cache hit for %s", payload.ImageURL)
+			}
 			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
@@ -286,14 +316,29 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
+	captionKey := interfaces.VLMCacheKey{
+		ImageHash:     imageHash,
+		ModelID:       vlmModel.GetModelID(),
+		PromptVersion: vlmPromptVersion("caption.default.v1", captionPrompt),
+	}
+	caption, hit, capErr := s.vlmCache.GetOrCompute(ctx, captionKey, func() (string, error) {
+		return vlmModel.Predict(ctx, [][]byte{imgBytes}, captionPrompt)
+	})
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	} else {
+		if hit {
+			logger.Infof(ctx, "[ImageMultimodal] Caption cache hit for %s", payload.ImageURL)
+		}
+		if caption != "" {
+			imageInfo.Caption = caption
+			imgOut["caption_chars"] = len([]rune(caption))
+			imgOut["caption_preview"] = previewText(caption, 200)
+		} else {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption returned empty/invalid content for %s, discarded", payload.ImageURL)
+		}
 	}
 
 	// Build child chunks for OCR and caption results
