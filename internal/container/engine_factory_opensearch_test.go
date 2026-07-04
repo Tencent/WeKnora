@@ -39,7 +39,7 @@ func TestCreateOpenSearchEngine_WiresClientAndRepo(t *testing.T) {
 		EngineType:       types.OpenSearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{Addr: ts.URL},
 	}
-	svc, err := createOpenSearchEngine(context.Background(), store, nil)
+	svc, err := createOpenSearchEngine(context.Background(), store, nil, nil)
 	if err != nil {
 		t.Fatalf("createOpenSearchEngine: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestCreateOpenSearchEngine_RejectsBadCluster(t *testing.T) {
 	defer ts.Close()
 	_, err := createOpenSearchEngine(context.Background(),
 		types.VectorStore{EngineType: types.OpenSearchRetrieverEngineType,
-			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL}}, nil)
+			ConnectionConfig: types.ConnectionConfig{Addr: ts.URL}}, nil, nil)
 	if err == nil {
 		t.Error("elasticsearch cluster should be rejected at engine creation")
 	}
