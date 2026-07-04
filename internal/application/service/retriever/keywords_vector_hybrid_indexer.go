@@ -82,24 +82,36 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		contentHash := computeHash(indexInfo.Content)
+		sanitized := sanitizeForEmbedding(ctx, indexInfo.Content)
+		contentHash := computeHash(sanitized)
 		key := interfaces.VLMEmbeddingKey{
 			ContentHash: contentHash,
 			ModelID:     embedder.GetModelID(),
 			Dimension:   int32(embedder.GetDimensions()),
 		}
 
-		embedding, hit, err := v.embeddingCache.Get(ctx, key)
-		if !hit {
-			embedding, err = embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
-			if err == nil {
-				if embErr := v.embeddingCache.Set(ctx, key, embedding); embErr != nil {
-					logger.Warnf(ctx, "failed to set embedding cache for single index: %v", embErr)
-				}
+		var embedding []float32
+		var err error
+		if v.embeddingCache != nil {
+			embedding, hit, err := v.embeddingCache.Get(ctx, key)
+			if err != nil {
+				logger.Warnf(ctx, "failed to get embedding from cache for single index: %v", err)
+			} else if hit {
+				embeddingMap[indexInfo.SourceID] = embedding
+				_ = embedding // use cached result
+				params["embedding"] = embeddingMap
+				return v.indexRepository.Save(ctx, indexInfo, params)
 			}
 		}
+
+		embedding, err = embedder.Embed(ctx, sanitized)
 		if err != nil {
 			return err
+		}
+		if v.embeddingCache != nil {
+			if embErr := v.embeddingCache.Set(ctx, key, embedding); embErr != nil {
+				logger.Warnf(ctx, "failed to set embedding cache for single index: %v", embErr)
+			}
 		}
 		embeddingMap[indexInfo.SourceID] = embedding
 	}
@@ -124,25 +136,26 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		var missIndex []int
 		var missContent []string
 
-		// Phase 1: Check cache for all items
+		// Phase 1: Check cache for all items (keyed on sanitized content)
 		for i, indexInfo := range indexInfoList {
-			contentHash := computeHash(indexInfo.Content)
+			sanitized := sanitizeForEmbedding(ctx, indexInfo.Content)
+			contentHash := computeHash(sanitized)
 			key := interfaces.VLMEmbeddingKey{
 				ContentHash: contentHash,
 				ModelID:     modelID,
 				Dimension:   dimension,
 			}
-			embedding, hit, err := v.embeddingCache.Get(ctx, key)
-			if err != nil {
-				logger.Warnf(ctx, "failed to get embedding from cache: %v", err)
-				hit = false
+			if v.embeddingCache != nil {
+				embedding, hit, err := v.embeddingCache.Get(ctx, key)
+				if err != nil {
+					logger.Warnf(ctx, "failed to get embedding from cache: %v", err)
+				} else if hit {
+					embeddings[i] = embedding
+					continue
+				}
 			}
-			if !hit {
-				missIndex = append(missIndex, i)
-				missContent = append(missContent, sanitizeForEmbedding(ctx, indexInfo.Content))
-			} else {
-				embeddings[i] = embedding
-			}
+			missIndex = append(missIndex, i)
+			missContent = append(missContent, sanitized)
 		}
 
 		// Phase 2: Compute missed embeddings in batch
@@ -155,13 +168,15 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 			// Phase 3: Update local results and write back to cache
 			for i, idx := range missIndex {
 				embeddings[idx] = computed[i]
-				key := interfaces.VLMEmbeddingKey{
-					ContentHash: computeHash(indexInfoList[idx].Content),
-					ModelID:     modelID,
-					Dimension:   dimension,
-				}
-				if embErr := v.embeddingCache.Set(ctx, key, computed[i]); embErr != nil {
-					logger.Warnf(ctx, "failed to set embedding cache: %v", embErr)
+				if v.embeddingCache != nil {
+					key := interfaces.VLMEmbeddingKey{
+						ContentHash: computeHash(missContent[i]),
+						ModelID:     modelID,
+						Dimension:   dimension,
+					}
+					if embErr := v.embeddingCache.Set(ctx, key, computed[i]); embErr != nil {
+						logger.Warnf(ctx, "failed to set embedding cache: %v", embErr)
+					}
 				}
 			}
 		}

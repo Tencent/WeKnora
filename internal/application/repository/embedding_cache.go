@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -53,7 +54,7 @@ func (e *embeddingCacheRepo) Get(ctx context.Context, key interfaces.VLMEmbeddin
 		e.db.WithContext(ctx).Model(&cacheEntry).UpdateColumn("last_accessed_at", gorm.Expr("CURRENT_TIMESTAMP"))
 		return vec, true, nil
 	}
-	if err != gorm.ErrRecordNotFound {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, false, fmt.Errorf("failed to query embedding cache: %w", err)
 	}
 	return nil, false, nil

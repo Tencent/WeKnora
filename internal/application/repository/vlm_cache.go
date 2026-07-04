@@ -3,6 +3,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -26,9 +27,11 @@ func (r *vlmCacheRepo) GetOrCompute(ctx context.Context, key interfaces.VLMCache
 	//check cache
 	err := r.db.WithContext(ctx).Where("image_hash = ? AND vlm_model_id = ? AND prompt_version = ?", key.ImageHash, key.ModelID, key.PromptVersion).First(&cacheEntry).Error
 	if err == nil {
+		// LRU touch
+		_ = r.db.WithContext(ctx).Model(&cacheEntry).UpdateColumn("last_accessed_at", gorm.Expr("CURRENT_TIMESTAMP")).Error
 		return cacheEntry.ResultText, true, nil
 	}
-	if err != gorm.ErrRecordNotFound {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", false, fmt.Errorf("failed to query vlm cache: %w", err)
 	}
 	//missed cache, compute result, use singleflight to prevent duplicate computation

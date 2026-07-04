@@ -691,8 +691,11 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	return nil
 }
 
+// cleanupKnowledgeResources is a no-op for the document reparse flow.
+// diff-aware cleanup in processChunks handles chunk/vector/graph deletion
+// by comparing old vs new chunk IDs. Extracted image cleanup for removed
+// chunks is handled within diffAwareCleanup's scope.
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {
-	logger.GetLogger(ctx).Infof("cleanupKnowledgeResources is a no-op (diff-aware cleanup in processChunks handles deletion), knowledge ID: %s", knowledge.ID)
 	return nil
 }
 

@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS vlm_cache (
     prompt_version   VARCHAR(64)  NOT NULL,
     result_text      TEXT         NOT NULL,
     created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    last_accessed_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_accessed_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     PRIMARY KEY (image_hash, vlm_model_id, prompt_version)
 );
 

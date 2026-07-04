@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 )
@@ -71,10 +72,11 @@ type graphBuilder struct {
 	chatModel        chat.Chat
 	chunkGraph       map[string]map[string]*ChunkRelation // Document chunk relationship graph
 	mutex            sync.RWMutex                         // Mutex for concurrent operations
+	wikiGraphCache   interfaces.WikiGraphCache
 }
 
 // NewGraphBuilder creates a new graph builder
-func NewGraphBuilder(config *config.Config, chatModel chat.Chat) types.GraphBuilder {
+func NewGraphBuilder(config *config.Config, chatModel chat.Chat, cacheRepo interfaces.WikiGraphCache) types.GraphBuilder {
 	logger.Info(context.Background(), "Creating new graph builder")
 	return &graphBuilder{
 		config:           config,
@@ -83,6 +85,7 @@ func NewGraphBuilder(config *config.Config, chatModel chat.Chat) types.GraphBuil
 		entityMapByTitle: make(map[string]*types.Entity),
 		relationshipMap:  make(map[string]*types.Relationship),
 		chunkGraph:       make(map[string]map[string]*ChunkRelation),
+		wikiGraphCache:   cacheRepo,
 	}
 }
 
@@ -116,6 +119,52 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			Role:    "user",
 			Content: chunk.Content,
 		},
+	}
+	//check cache
+	contentHash := ComputeChunkContentHash(chunk.Content)
+	cacheKey := interfaces.WikiGraphCacheKey{
+		ContentHash:   contentHash,
+		ChatModelID:   b.chatModel.GetModelID(),
+		PromptVersion: "v1",
+	}
+	if data, hit, err := b.wikiGraphCache.Get(ctx, cacheKey); err != nil {
+		log.Warnf("failed to read graph chunk cache for chunk %s: %v", chunk.ID, err)
+	} else if hit {
+		var cachedEntities []*types.Entity
+		if err := json.Unmarshal(data, &cachedEntities); err != nil {
+			log.WithError(err).Errorf("Failed to unmarshal cached entity extraction response, rsp content: %s", data)
+			// Fall through to re-extract via LLM
+		} else {
+			log.Infof("Graph cache hit for chunk %s, %d cached entities", chunk.ID, len(cachedEntities))
+			// Post-process cached entities the same way as freshly extracted ones:
+			// populate entityMapByTitle/entityMap, assign stable IDs, track ChunkIDs.
+			var entities []*types.Entity
+			b.mutex.Lock()
+			for _, entity := range cachedEntities {
+				if entity == nil || entity.Title == "" || entity.Description == "" {
+					continue
+				}
+				if existEntity, exists := b.entityMapByTitle[entity.Title]; !exists {
+					entity.ID = uuid.New().String()
+					entity.ChunkIDs = []string{chunk.ID}
+					entity.Frequency = 1
+					b.entityMapByTitle[entity.Title] = entity
+					b.entityMap[entity.ID] = entity
+					entities = append(entities, entity)
+				} else {
+					if existEntity == nil {
+						continue
+					}
+					if !slices.Contains(existEntity.ChunkIDs, chunk.ID) {
+						existEntity.ChunkIDs = append(existEntity.ChunkIDs, chunk.ID)
+					}
+					existEntity.Frequency++
+					entities = append(entities, existEntity)
+				}
+			}
+			b.mutex.Unlock()
+			return entities, nil
+		}
 	}
 
 	// Call LLM to extract entities
@@ -186,6 +235,11 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 	}
 
 	log.Infof("Completed entity extraction for chunk %s: %d entities", chunk.ID, len(entities))
+	if len(extractedEntities) > 0 {
+		if cacheData, err := json.Marshal(extractedEntities); err == nil {
+			b.wikiGraphCache.Set(ctx, cacheKey, cacheData)
+		}
+	}
 	return entities, nil
 }
 

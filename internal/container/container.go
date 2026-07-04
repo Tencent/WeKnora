@@ -373,8 +373,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewOrganizationHandler))
 
 	// Cache gc
-	must(container.Provide(func(db *gorm.DB) *service.CacheHousekeepingService {
-		return service.NewCacheHouseKeepingService(db)
+	must(container.Provide(func(db *gorm.DB, cfg *config.Config) *service.CacheHousekeepingService {
+		return service.NewCacheHouseKeepingService(db, cfg)
 	}))
 
 	// Data source handler

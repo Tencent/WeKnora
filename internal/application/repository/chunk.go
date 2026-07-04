@@ -1290,10 +1290,17 @@ func (r *chunkRepository) DeleteChunksByIDList(ctx context.Context, tenantID uin
 	if tenantID == 0 || knowledgeID == "" || len(ids) == 0 {
 		return nil
 	}
-	if err := r.db.WithContext(ctx).Model(&types.Chunk{}).
-		Where("tenant_id = ? AND knowledge_id = ? AND id IN ?", tenantID, knowledgeID, ids).
-		Delete(&types.Chunk{}).Error; err != nil {
-		return err
+	const batchSize = 5000
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := r.db.WithContext(ctx).
+			Where("tenant_id = ? AND knowledge_id = ? AND id IN ?", tenantID, knowledgeID, ids[i:end]).
+			Delete(&types.Chunk{}).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -55,5 +55,14 @@ Claude.md
 configure-ollama.sh
 fix-docker.sh
 
+# Dev scaffold files (should never be committed)
+fix_*.py
+*.patch
+*.orig
+*.rej
+
+# Local suggestion/notes folder
+a-suggestion/
+
 # WeChat Mini Program local/private configuration
 miniprogram/project.private.config.json

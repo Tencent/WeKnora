@@ -16,6 +16,9 @@ type capturingEmbedder struct {
 	batchTexts []string
 }
 
+func (e *capturingEmbedder) GetModelID() string { return "test-model" }
+func (e *capturingEmbedder) GetDimensions() int { return 1 }
+
 func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	e.text = text
 	return []float32{1}, nil
@@ -50,10 +53,23 @@ func (r *saveOnlyRepository) BatchSave(
 	return nil
 }
 
+// noopEmbeddingCache implements EmbeddingCacheRepo with no-op behavior for tests.
+type noopEmbeddingCache struct{}
+
+func (n *noopEmbeddingCache) Get(_ context.Context, _ interfaces.VLMEmbeddingKey) ([]float32, bool, error) {
+	return nil, false, nil
+}
+func (n *noopEmbeddingCache) Set(_ context.Context, _ interfaces.VLMEmbeddingKey, _ []float32) error {
+	return nil
+}
+
 func TestIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 	ctx := context.Background()
 	embedder := &capturingEmbedder{}
-	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &saveOnlyRepository{}}
+	service := &KeywordsVectorHybridRetrieveEngineService{
+		indexRepository: &saveOnlyRepository{},
+		embeddingCache:  &noopEmbeddingCache{},
+	}
 	payload := strings.Repeat("A", 300)
 	content := "before <img src=\"data:image/png;base64," + payload + "\"> after"
 
@@ -70,7 +86,10 @@ func TestIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 func TestBatchIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 	ctx := context.Background()
 	embedder := &capturingEmbedder{}
-	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &saveOnlyRepository{}}
+	service := &KeywordsVectorHybridRetrieveEngineService{
+		indexRepository: &saveOnlyRepository{},
+		embeddingCache:  &noopEmbeddingCache{},
+	}
 	payload := strings.Repeat("A", 300)
 	content := "before ![chart](data:image/png;base64," + payload + ") after"
 
@@ -90,7 +109,10 @@ func TestBatchIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 func TestBatchIndexTruncatesOversizedEmbeddingInput(t *testing.T) {
 	ctx := context.Background()
 	embedder := &capturingEmbedder{}
-	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &saveOnlyRepository{}}
+	service := &KeywordsVectorHybridRetrieveEngineService{
+		indexRepository: &saveOnlyRepository{},
+		embeddingCache:  &noopEmbeddingCache{},
+	}
 
 	err := service.BatchIndex(ctx, embedder, []*types.IndexInfo{{
 		Content:  strings.Repeat("x", safetyMaxChars+10),
