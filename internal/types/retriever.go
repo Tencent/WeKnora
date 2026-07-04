@@ -14,6 +14,7 @@ const (
 	WeaviateRetrieverEngineType        RetrieverEngineType = "weaviate"
 	DorisRetrieverEngineType           RetrieverEngineType = "doris"
 	SQLiteRetrieverEngineType          RetrieverEngineType = "sqlite"
+	MySQLRetrieverEngineType           RetrieverEngineType = "mysql"
 	TencentVectorDBRetrieverEngineType RetrieverEngineType = "tencent_vectordb"
 	// OpenSearchRetrieverEngineType identifies the OpenSearch k-NN driver
 	// introduced in Phase 3 (see issue tracker). The driver itself ships

@@ -88,7 +88,8 @@ app:
   # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
   env:
     GIN_MODE: release
-    # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
+    # -- Retrieval driver. When database.driver=mysql and this is empty/postgres,
+    # the app template renders mysql to match the primary DB.
     RETRIEVE_DRIVER: postgres
     # -- Storage type: local, minio, cos, tos, s3
     STORAGE_TYPE: local
@@ -97,6 +98,7 @@ app:
     STREAM_MANAGER_TYPE: redis
     CONCURRENCY_POOL_SIZE: "5"
     ENABLE_GRAPH_RAG: "false"
+    SSRF_WHITELIST_EXTRA: qdrant,milvus,weaviate,mysql
     TZ: UTC
 
   # -- Additional environment variables
@@ -236,6 +238,18 @@ docreader:
   affinity: {}
 
 # -----------------------------------------------------------------------------
+# 数据库
+# -----------------------------------------------------------------------------
+database:
+  # -- 主业务数据库驱动：postgres 或 mysql
+  driver: postgres
+  # -- 外部数据库连接。host 留空时，使用 database.driver 选中的内置
+  # PostgreSQL/MySQL 工作负载。
+  external:
+    host: ""
+    port: ""
+
+# -----------------------------------------------------------------------------
 # PostgreSQL (ParadeDB - Vector + BM25 Search)
 # -----------------------------------------------------------------------------
 postgresql:
@@ -279,6 +293,50 @@ postgresql:
   tolerations: []
 
   # -- Affinity rules
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# MySQL
+# -----------------------------------------------------------------------------
+mysql:
+  # -- 启用内置 MySQL。需要同时设置 database.driver=mysql。
+  enabled: false
+
+  image:
+    # -- 镜像仓库
+    repository: mysql
+    # -- 镜像标签
+    tag: "8.0.37"
+
+  # -- 资源请求和限制
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # -- 容器安全上下文
+  securityContext:
+    allowPrivilegeEscalation: false
+
+  # -- 持久化配置
+  persistence:
+    # -- 启用持久化
+    enabled: true
+    # -- PVC 容量
+    size: 10Gi
+    # -- 使用已有 PVC（留空则新建）
+    existingClaim: ""
+
+  # -- 节点选择器
+  nodeSelector: {}
+
+  # -- 容忍配置
+  tolerations: []
+
+  # -- 亲和性规则
   affinity: {}
 
 # -----------------------------------------------------------------------------

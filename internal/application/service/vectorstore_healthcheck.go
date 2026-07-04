@@ -48,6 +48,8 @@ func (s *vectorStoreService) TestConnection(
 		return testWeaviateConnection(ctx, config)
 	case types.DorisRetrieverEngineType:
 		return testDorisConnection(ctx, config)
+	case types.MySQLRetrieverEngineType:
+		return testMySQLConnection(ctx, config)
 	case types.OpenSearchRetrieverEngineType:
 		return testOpenSearchConnection(ctx, config)
 	case types.SQLiteRetrieverEngineType:
@@ -264,6 +266,47 @@ func testWeaviateConnection(ctx context.Context, config types.ConnectionConfig) 
 	}
 
 	return meta.Version, nil
+}
+
+func testMySQLConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
+	defer cancel()
+
+	if config.Addr == "" {
+		return "", errors.NewBadRequestError("failed to create mysql connection: addr is required")
+	}
+	if config.Database == "" {
+		return "", errors.NewBadRequestError("failed to create mysql connection: database is required")
+	}
+
+	cfg := mysql.NewConfig()
+	cfg.User = config.Username
+	cfg.Passwd = config.Password
+	cfg.Net = "tcp"
+	cfg.Addr = config.Addr
+	cfg.DBName = config.Database
+	cfg.Params = map[string]string{"charset": "utf8mb4"}
+	cfg.ParseTime = true
+	cfg.Loc = time.Local
+	cfg.InterpolateParams = true
+	cfg.Timeout = 5 * time.Second
+	db, err := sql.Open("mysql", cfg.FormatDSN())
+	if err != nil {
+		return "", errors.NewBadRequestError("failed to create mysql connection: invalid configuration")
+	}
+	defer db.Close()
+
+	if err := db.PingContext(testCtx); err != nil {
+		logger.Warnf(ctx, "MySQL connection test failed: %v", err)
+		return "", errors.NewBadRequestError("failed to connect to mysql: connection refused or authentication failed")
+	}
+
+	var version string
+	if err := db.QueryRowContext(testCtx, "SELECT VERSION()").Scan(&version); err != nil {
+		logger.Warnf(ctx, "MySQL version detection failed: %v", err)
+		return "", nil
+	}
+	return version, nil
 }
 
 // testDorisConnection 通过 MySQL 协议（database/sql + go-sql-driver）

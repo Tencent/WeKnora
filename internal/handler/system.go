@@ -245,8 +245,11 @@ func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	}
 
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
-	connected := reader != nil && reader.IsConnected()
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
+	connected := h.isDocReaderConnected(c.Request.Context(), reader)
+	var remoteEngines []types.ParserEngineInfo
+	if connected {
+		remoteEngines = h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
+	}
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
@@ -305,6 +308,11 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 			}
 		}
 	}
+	if err := h.documentReader.HealthCheck(c.Request.Context()); err != nil {
+		logger.Errorf(c.Request.Context(), "DocReader health check failed after reconnect to %s: %v", addr, err)
+		c.JSON(200, gin.H{"code": 1, "msg": fmt.Sprintf("杩炴帴澶辫触: %v", err), "docreader_addr": addr, "connected": false})
+		return
+	}
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), h.documentReader, overrides)
 	engines := docparser.ListAllEngines(true, overrides, remoteEngines)
 
@@ -346,8 +354,11 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		}
 	}
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
-	connected := reader != nil && reader.IsConnected()
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
+	connected := h.isDocReaderConnected(c.Request.Context(), reader)
+	var remoteEngines []types.ParserEngineInfo
+	if connected {
+		remoteEngines = h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
+	}
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
@@ -375,7 +386,7 @@ func transportFromDocReaderAddr(addr string) string {
 // Returns nil on any error (e.g. not connected), letting the caller
 // fall back to Go's static registry only.
 func (h *SystemHandler) fetchRemoteEngines(ctx context.Context, reader interfaces.DocumentReader, overrides map[string]string) []types.ParserEngineInfo {
-	if reader == nil || !reader.IsConnected() {
+	if reader == nil {
 		return nil
 	}
 	engines, err := reader.ListEngines(ctx, overrides)
@@ -384,6 +395,13 @@ func (h *SystemHandler) fetchRemoteEngines(ctx context.Context, reader interface
 		return nil
 	}
 	return engines
+}
+
+func (h *SystemHandler) isDocReaderConnected(ctx context.Context, reader interfaces.DocumentReader) bool {
+	if reader == nil {
+		return false
+	}
+	return reader.HealthCheck(ctx) == nil
 }
 
 // getKeywordIndexEngine returns the keyword index engine name

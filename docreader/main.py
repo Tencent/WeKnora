@@ -8,6 +8,7 @@ from concurrent import futures
 from typing import Optional
 
 import grpc
+from grpc_health.v1 import health_pb2
 from grpc_health.v1 import health_pb2_grpc
 from grpc_health.v1.health import HealthServicer
 
@@ -305,6 +306,8 @@ def main():
     docreader_pb2_grpc.add_DocReaderServicer_to_server(DocReaderServicer(), server)
 
     health_servicer = HealthServicer()
+    health_servicer.set("", health_pb2.HealthCheckResponse.SERVING)
+    health_servicer.set("docreader.DocReader", health_pb2.HealthCheckResponse.SERVING)
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
     try:

@@ -62,6 +62,12 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		"DORIS_USERNAME":              "root",
 		"DORIS_PASSWORD":              "doris-pass",
 		"DORIS_TABLE_PREFIX":          "weknora_embeddings",
+		"MYSQL_HOST":                  "mysql",
+		"MYSQL_PORT":                  "3306",
+		"MYSQL_USERNAME":              "weknora",
+		"MYSQL_PASSWORD":              "mysql-pass",
+		"MYSQL_DATABASE":              "weknora",
+		"MYSQL_TABLE_PREFIX":          "mysql_embeddings",
 	}
 	lookup := mockEnvLookup(envMap)
 
@@ -108,8 +114,8 @@ func TestBuildEnvVectorStores(t *testing.T) {
 	})
 
 	t.Run("all supported drivers", func(t *testing.T) {
-		stores := BuildEnvVectorStores("postgres,sqlite,elasticsearch_v8,elasticsearch_v7,qdrant,milvus,weaviate,doris,tencent_vectordb", lookup)
-		require.Len(t, stores, 9)
+		stores := BuildEnvVectorStores("postgres,sqlite,mysql,elasticsearch_v8,elasticsearch_v7,qdrant,milvus,weaviate,doris,tencent_vectordb", lookup)
+		require.Len(t, stores, 10)
 
 		ids := make([]string, len(stores))
 		for i, s := range stores {
@@ -117,6 +123,7 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		}
 		assert.Contains(t, ids, "__env_postgres__")
 		assert.Contains(t, ids, "__env_sqlite__")
+		assert.Contains(t, ids, "__env_mysql__")
 		assert.Contains(t, ids, "__env_elasticsearch_v8__")
 		assert.Contains(t, ids, "__env_elasticsearch_v7__")
 		assert.Contains(t, ids, "__env_qdrant__")
@@ -178,6 +185,35 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		require.Len(t, stores, 1)
 		assert.Equal(t, 0, stores[0].ConnectionConfig.HTTPPort) // falls back to 0 (factory will default to 8030)
 	})
+
+	t.Run("mysql env store", func(t *testing.T) {
+		stores := BuildEnvVectorStores("mysql", lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "__env_mysql__", stores[0].ID)
+		assert.Equal(t, MySQLRetrieverEngineType, stores[0].EngineType)
+		assert.Equal(t, "mysql:3306", stores[0].ConnectionConfig.Addr)
+		assert.Equal(t, "weknora", stores[0].ConnectionConfig.Username)
+		assert.Equal(t, "mysql-pass", stores[0].ConnectionConfig.Password)
+		assert.Equal(t, "weknora", stores[0].ConnectionConfig.Database)
+		assert.Equal(t, "mysql_embeddings", stores[0].IndexConfig.CollectionPrefix)
+	})
+
+	t.Run("mysql env store reuses DB config only when DB_DRIVER is mysql", func(t *testing.T) {
+		stores := BuildEnvVectorStores("mysql", mockEnvLookup(map[string]string{
+			"DB_DRIVER":   "mysql",
+			"DB_HOST":     "main-db",
+			"DB_PORT":     "3307",
+			"DB_USER":     "app",
+			"DB_PASSWORD": "secret",
+			"DB_NAME":     "main",
+		}))
+		require.Len(t, stores, 1)
+		assert.Equal(t, "main-db:3307", stores[0].ConnectionConfig.Addr)
+		assert.Equal(t, "app", stores[0].ConnectionConfig.Username)
+		assert.Equal(t, "secret", stores[0].ConnectionConfig.Password)
+		assert.Equal(t, "main", stores[0].ConnectionConfig.Database)
+	})
+
 }
 
 func TestFindEnvVectorStore(t *testing.T) {
@@ -246,7 +282,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 	types := GetVectorStoreTypes()
 
 	t.Run("returns supported external engine types (excludes postgres and sqlite)", func(t *testing.T) {
-		assert.Len(t, types, 7)
+		assert.Len(t, types, 8)
 	})
 
 	t.Run("type names match engine constants", func(t *testing.T) {
@@ -260,6 +296,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.Contains(t, typeNames, "tencent_vectordb")
 		assert.Contains(t, typeNames, "weaviate")
 		assert.Contains(t, typeNames, "doris")
+		assert.Contains(t, typeNames, "mysql")
 		assert.Contains(t, typeNames, "opensearch")
 		assert.NotContains(t, typeNames, "postgres")
 		assert.NotContains(t, typeNames, "sqlite")
@@ -284,6 +321,36 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.True(t, seen["addr"].Required)
 		assert.True(t, seen["database"].Required)
 		assert.True(t, seen["password"].Sensitive)
+	})
+
+	t.Run("mysql has required addr and database fields", func(t *testing.T) {
+		var mysqlType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "mysql" {
+				mysqlType = typ
+				break
+			}
+		}
+		require.NotEmpty(t, mysqlType.ConnectionFields)
+		require.NotEmpty(t, mysqlType.IndexFields)
+
+		seen := map[string]VectorStoreFieldInfo{}
+		for _, f := range mysqlType.ConnectionFields {
+			seen[f.Name] = f
+		}
+		assert.True(t, seen["addr"].Required)
+		assert.Equal(t, "mysql:3306", seen["addr"].Default)
+		assert.True(t, seen["database"].Required)
+		assert.Equal(t, "weknora", seen["database"].Default)
+		assert.False(t, seen["username"].Required)
+		assert.Equal(t, "root", seen["username"].Default)
+		assert.True(t, seen["password"].Sensitive)
+
+		indexSeen := map[string]VectorStoreFieldInfo{}
+		for _, f := range mysqlType.IndexFields {
+			indexSeen[f.Name] = f
+		}
+		assert.Equal(t, "weknora_embeddings", indexSeen["collection_prefix"].Default)
 	})
 
 	t.Run("milvus exposes optional database connection field", func(t *testing.T) {
@@ -442,6 +509,7 @@ func TestIsValidEngineType(t *testing.T) {
 		MilvusRetrieverEngineType,
 		WeaviateRetrieverEngineType,
 		DorisRetrieverEngineType,
+		MySQLRetrieverEngineType,
 		TencentVectorDBRetrieverEngineType,
 	}
 	for _, et := range validTypes {
@@ -797,6 +865,19 @@ func TestIndexConfig_GetIndexNameOrDefault(t *testing.T) {
 			config:     IndexConfig{},
 			engineType: SQLiteRetrieverEngineType,
 			expected:   "",
+		},
+		// MySQL 配置
+		{
+			name:       "mysql with custom collection prefix",
+			config:     IndexConfig{CollectionPrefix: "mysql_prefix"},
+			engineType: MySQLRetrieverEngineType,
+			expected:   "mysql_prefix",
+		},
+		{
+			name:       "mysql default",
+			config:     IndexConfig{},
+			engineType: MySQLRetrieverEngineType,
+			expected:   "weknora_embeddings",
 		},
 	}
 	for _, tt := range tests {

@@ -2,6 +2,8 @@ package types
 
 import (
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // AuditAction names a single audited action class. Action constants are
@@ -155,3 +157,10 @@ type AuditLog struct {
 // TableName pins the table name even if a future GORM convention
 // pluralisation refactor would otherwise rename it.
 func (AuditLog) TableName() string { return "audit_logs" }
+
+func (a *AuditLog) BeforeCreate(tx *gorm.DB) error {
+	if len(a.Details) == 0 {
+		a.Details = JSON([]byte("{}"))
+	}
+	return nil
+}

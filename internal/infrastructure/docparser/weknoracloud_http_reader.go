@@ -20,6 +20,7 @@ import (
 
 const (
 	weKnoraCloudReaderBaseURL = "https://weknora.weixin.qq.com/api/v1/doc"
+	weKnoraCloudHealthURL     = "https://weknora.weixin.qq.com/api/v1/health"
 )
 
 // WeKnoraCloudSignedDocumentReader implements the docreader HTTP protocol with WeKnoraCloud signing.
@@ -60,7 +61,30 @@ func (p *WeKnoraCloudSignedDocumentReader) Reconnect(addr string) error {
 	return nil
 }
 
-func (p *WeKnoraCloudSignedDocumentReader) IsConnected() bool { return true }
+func (p *WeKnoraCloudSignedDocumentReader) IsConnected() bool {
+	return p.HealthCheck(context.Background()) == nil
+}
+
+func (p *WeKnoraCloudSignedDocumentReader) HealthCheck(ctx context.Context) error {
+	healthCtx, cancel := withDefaultTimeout(ctx, docReaderHealthCheckTimeout)
+	defer cancel()
+
+	httpReq, err := p.newSignedRequest(healthCtx, http.MethodGet, weKnoraCloudHealthURL, nil)
+	if err != nil {
+		return fmt.Errorf("weknoracloud docreader health request: %w", err)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("weknoracloud docreader health failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return nil
+	}
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return &httpStatusError{op: "weknoracloud-health", status: resp.StatusCode, body: string(bodyBytes)}
+}
 
 func (p *WeKnoraCloudSignedDocumentReader) ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
 	return []types.ParserEngineInfo{{

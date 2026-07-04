@@ -169,6 +169,7 @@ helm install weknora ./helm \
 | `app.image.tag` | Image tag | `""` (uses appVersion) |
 | `app.resources` | Resource limits | See values.yaml |
 | `app.env` | Environment variables | See values.yaml |
+| `app.env.RETRIEVE_DRIVER` | Retrieval driver; renders as `mysql` when `database.driver=mysql` and this is empty/default `postgres` | `postgres` |
 | `app.extraEnv` | Additional env vars | `[]` |
 
 ### Frontend
@@ -184,11 +185,24 @@ helm install weknora ./helm \
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `postgresql.enabled` | Enable PostgreSQL | `true` |
+| `database.driver` | 主业务数据库驱动（`postgres` 或 `mysql`） | `postgres` |
+| `database.external.host` | 外部数据库主机覆盖值 | `""` |
+| `database.external.port` | 外部数据库端口覆盖值 | `""` |
+| `postgresql.enabled` | 启用 PostgreSQL | `true` |
 | `postgresql.image.repository` | Image repository | `paradedb/paradedb` |
 | `postgresql.image.tag` | Image tag | `v0.18.9-pg17` |
 | `postgresql.persistence.enabled` | Enable persistence | `true` |
 | `postgresql.persistence.size` | PVC size | `10Gi` |
+
+### MySQL
+
+| 参数 | 说明 | 默认值 |
+|-----------|-------------|---------|
+| `mysql.enabled` | 当 `database.driver=mysql` 时启用内置 MySQL | `false` |
+| `mysql.image.repository` | 镜像仓库 | `mysql` |
+| `mysql.image.tag` | 镜像标签 | `8.0.37` |
+| `mysql.persistence.enabled` | 启用持久化 | `true` |
+| `mysql.persistence.size` | PVC 容量 | `10Gi` |
 
 ### Redis
 

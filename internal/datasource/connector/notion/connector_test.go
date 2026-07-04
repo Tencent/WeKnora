@@ -6,7 +6,15 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+func allowNotionLocalSSRFForTest(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+}
 
 func makeNotionConfig(cfg *Config, baseURL string, resourceIDs []string) *types.DataSourceConfig {
 	return &types.DataSourceConfig{
@@ -29,6 +37,8 @@ func TestConnectorType(t *testing.T) {
 }
 
 func TestConnectorValidate(t *testing.T) {
+	allowNotionLocalSSRFForTest(t)
+
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -40,6 +50,8 @@ func TestConnectorValidate(t *testing.T) {
 }
 
 func TestConnectorValidate_BadToken(t *testing.T) {
+	allowNotionLocalSSRFForTest(t)
+
 	ts, _ := fakeNotion()
 	defer ts.Close()
 
@@ -53,6 +65,8 @@ func TestConnectorValidate_BadToken(t *testing.T) {
 }
 
 func TestConnectorListResources(t *testing.T) {
+	allowNotionLocalSSRFForTest(t)
+
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -74,6 +88,8 @@ func TestConnectorListResources(t *testing.T) {
 }
 
 func TestConnectorFetchAll(t *testing.T) {
+	allowNotionLocalSSRFForTest(t)
+
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -109,6 +125,8 @@ func TestConnectorFetchAll(t *testing.T) {
 }
 
 func TestConnectorFetchAll_Database(t *testing.T) {
+	allowNotionLocalSSRFForTest(t)
+
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -152,6 +170,8 @@ func TestConnectorFetchAll_Database(t *testing.T) {
 // row by ID routes through fetchPage's record-detection branch and produces an
 // item via buildRecordItem (instead of being silently dropped as an empty page).
 func TestConnectorFetchAll_SingleRecord(t *testing.T) {
+	allowNotionLocalSSRFForTest(t)
+
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 
@@ -175,6 +195,8 @@ func TestConnectorFetchAll_SingleRecord(t *testing.T) {
 }
 
 func TestConnectorFetchIncremental_NoChanges(t *testing.T) {
+	allowNotionLocalSSRFForTest(t)
+
 	ts, cfg := fakeNotion()
 	defer ts.Close()
 

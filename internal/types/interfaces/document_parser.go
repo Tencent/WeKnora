@@ -18,6 +18,9 @@ type DocumentReader interface {
 	DocReader
 	Reconnect(addr string) error
 	IsConnected() bool
+	// HealthCheck 主动验证已配置的远程解析服务是否可达。
+	// 实现应快速返回，并遵守 ctx 的取消信号。
+	HealthCheck(ctx context.Context) error
 	// ListEngines queries the remote docreader for its registered parser engines.
 	// Returns engines the remote service supports, allowing auto-discovery of
 	// newly added engines without Go code changes.

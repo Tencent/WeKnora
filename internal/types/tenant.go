@@ -46,6 +46,10 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: SQLiteRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: SQLiteRetrieverEngineType},
 	},
+	"mysql": {
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: MySQLRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: MySQLRetrieverEngineType},
+	},
 	"tencent_vectordb": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: TencentVectorDBRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: TencentVectorDBRetrieverEngineType},

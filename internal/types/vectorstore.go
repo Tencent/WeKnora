@@ -90,6 +90,7 @@ var validEngineTypes = map[RetrieverEngineType]bool{
 	MilvusRetrieverEngineType:          true,
 	WeaviateRetrieverEngineType:        true,
 	DorisRetrieverEngineType:           true,
+	MySQLRetrieverEngineType:           true,
 	TencentVectorDBRetrieverEngineType: true,
 	OpenSearchRetrieverEngineType:      true,
 }
@@ -316,6 +317,14 @@ func (c IndexConfig) GetIndexNameOrDefault(engineType RetrieverEngineType) strin
 	case DorisRetrieverEngineType:
 		// Doris uses the prefix as the table base name; per-dimension tables are
 		// suffixed with _<dim> at runtime by the repository layer.
+		if c.CollectionPrefix != "" {
+			return c.CollectionPrefix
+		}
+		if c.CollectionName != "" {
+			return c.CollectionName
+		}
+		return "weknora_embeddings"
+	case MySQLRetrieverEngineType:
 		if c.CollectionPrefix != "" {
 			return c.CollectionPrefix
 		}
@@ -761,6 +770,19 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			},
 		},
 		{
+			Type:        "mysql",
+			DisplayName: "MySQL",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "addr", Type: "string", Required: true, Description: "地址", Default: "mysql:3306"},
+				{Name: "database", Type: "string", Required: true, Description: "数据库", Default: "weknora"},
+				{Name: "username", Type: "string", Required: false, Description: "用户名", Default: "root"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "密码"},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "collection_prefix", Type: "string", Required: false, Description: "表前缀", Default: "weknora_embeddings"},
+			},
+		},
+		{
 			Type:        "opensearch",
 			DisplayName: "OpenSearch",
 			ConnectionFields: []VectorStoreFieldInfo{
@@ -848,6 +870,52 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			ID:         "__env_sqlite__",
 			Name:       "SQLite",
 			EngineType: SQLiteRetrieverEngineType,
+		}
+	case "mysql":
+		host := envLookup("MYSQL_HOST")
+		port := envLookup("MYSQL_PORT")
+		username := envLookup("MYSQL_USERNAME")
+		password := envLookup("MYSQL_PASSWORD")
+		database := envLookup("MYSQL_DATABASE")
+		if envLookup("DB_DRIVER") == "mysql" {
+			if host == "" {
+				host = envLookup("DB_HOST")
+			}
+			if port == "" {
+				port = envLookup("DB_PORT")
+			}
+			if username == "" {
+				username = envLookup("DB_USER")
+			}
+			if password == "" {
+				password = envLookup("DB_PASSWORD")
+			}
+			if database == "" {
+				database = envLookup("DB_NAME")
+			}
+		}
+		if host == "" {
+			host = "localhost"
+		}
+		if port == "" {
+			port = "3306"
+		}
+		if username == "" {
+			username = "root"
+		}
+		return &VectorStore{
+			ID:         "__env_mysql__",
+			Name:       "MySQL",
+			EngineType: MySQLRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:     host + ":" + port,
+				Database: database,
+				Username: username,
+				Password: password,
+			},
+			IndexConfig: IndexConfig{
+				CollectionPrefix: envLookup("MYSQL_TABLE_PREFIX"),
+			},
 		}
 	case "elasticsearch_v8":
 		return &VectorStore{

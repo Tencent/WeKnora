@@ -46,18 +46,18 @@ spec:
               name: http
               protocol: TCP
           env:
-            # Application settings
+            # 应用设置
             - name: GIN_MODE
               value: {{ .Values.app.env.GIN_MODE | quote }}
             - name: TZ
               value: {{ .Values.app.env.TZ | quote }}
-            # Database configuration
+            # 数据库配置
             - name: DB_DRIVER
-              value: "postgres"
+              value: {{ include "weknora.database.driver" . | quote }}
             - name: DB_HOST
-              value: "postgres"
+              value: {{ include "weknora.database.host" . | quote }}
             - name: DB_PORT
-              value: "5432"
+              value: {{ include "weknora.database.port" . | quote }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
@@ -73,7 +73,32 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: DB_NAME
-            # Redis configuration
+            {{- if eq (include "weknora.database.driver" .) "mysql" }}
+            # MySQL 检索器默认值。RETRIEVE_DRIVER=mysql 且未设置
+            # MYSQL_* 覆盖项时，应用也会回退使用 DB_*。
+            - name: MYSQL_HOST
+              value: {{ include "weknora.database.host" . | quote }}
+            - name: MYSQL_PORT
+              value: {{ include "weknora.database.port" . | quote }}
+            - name: MYSQL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_NAME
+            - name: MYSQL_TABLE_PREFIX
+              value: "weknora_embeddings"
+            {{- end }}
+            # Redis 配置
             - name: REDIS_ADDR
               value: "redis:6379"
             - name: REDIS_USERNAME
@@ -111,11 +136,13 @@ spec:
                   key: SYSTEM_AES_KEY
             # Retrieval & Storage
             - name: RETRIEVE_DRIVER
-              value: {{ .Values.app.env.RETRIEVE_DRIVER | quote }}
+              value: {{ include "weknora.retrieve.driver" . | quote }}
             - name: STORAGE_TYPE
               value: {{ .Values.app.env.STORAGE_TYPE | quote }}
             - name: LOCAL_STORAGE_BASE_DIR
               value: {{ .Values.app.env.LOCAL_STORAGE_BASE_DIR | quote }}
+            - name: SSRF_WHITELIST_EXTRA
+              value: {{ .Values.app.env.SSRF_WHITELIST_EXTRA | quote }}
             # Document reader
             - name: DOCREADER_ADDR
               value: "docreader:50051"

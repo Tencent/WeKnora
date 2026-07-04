@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/status"
 )
@@ -91,9 +93,32 @@ func (p *GRPCDocumentReader) Reconnect(addr string) error {
 }
 
 func (p *GRPCDocumentReader) IsConnected() bool {
+	return p.HealthCheck(context.Background()) == nil
+}
+
+func (p *GRPCDocumentReader) snapshot() (string, proto.DocReaderClient, *grpc.ClientConn) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.conn != nil
+	return p.addr, p.client, p.conn
+}
+
+func (p *GRPCDocumentReader) HealthCheck(ctx context.Context) error {
+	addr, _, conn := p.snapshot()
+	if strings.TrimSpace(addr) == "" || conn == nil {
+		return errNotConnected
+	}
+
+	healthCtx, cancel := withDefaultTimeout(ctx, docReaderHealthCheckTimeout)
+	defer cancel()
+
+	resp, err := healthpb.NewHealthClient(conn).Check(healthCtx, &healthpb.HealthCheckRequest{})
+	if err != nil {
+		return fmt.Errorf("docreader health check failed: %w", err)
+	}
+	if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		return fmt.Errorf("docreader health check status: %s", resp.GetStatus().String())
+	}
+	return nil
 }
 
 func (p *GRPCDocumentReader) Close() error {
@@ -108,9 +133,7 @@ func (p *GRPCDocumentReader) Close() error {
 var errNotConnected = fmt.Errorf("docreader service not connected")
 
 func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
-	p.mu.RLock()
-	client := p.client
-	p.mu.RUnlock()
+	addr, client, _ := p.snapshot()
 	if client == nil {
 		return nil, errNotConnected
 	}
@@ -128,15 +151,42 @@ func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 		},
 	}
 
-	// Use the streaming RPC so documents with many page images (large scanned
-	// PDFs) are not capped by the unary message-size limit. The meta frame
-	// arrives first, followed by one frame per image.
+	result, err := p.readWithClient(ctx, client, protoReq)
+	if err != nil {
+		if isRetryableGRPCError(err) {
+			logger.Warnf(ctx, "docreader Read failed, reconnecting once: %v", err)
+			retryClient, reconnectErr := p.reconnectForRetry(addr)
+			if reconnectErr != nil {
+				return nil, fmt.Errorf("%w (reconnect failed: %v)", err, reconnectErr)
+			}
+			return p.readWithClient(ctx, retryClient, protoReq)
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+func (p *GRPCDocumentReader) reconnectForRetry(addr string) (proto.DocReaderClient, error) {
+	if strings.TrimSpace(addr) == "" {
+		return nil, errNotConnected
+	}
+	if err := p.Reconnect(addr); err != nil {
+		return nil, err
+	}
+	_, client, _ := p.snapshot()
+	if client == nil {
+		return nil, errNotConnected
+	}
+	return client, nil
+}
+
+func (p *GRPCDocumentReader) readWithClient(
+	ctx context.Context, client proto.DocReaderClient, protoReq *proto.ReadRequest,
+) (*types.ReadResult, error) {
+	// 优先使用流式 RPC，避免图片较多的大文档受一元 RPC 消息大小限制；
+	// 旧版 docreader 不支持流式接口时回退到一元 RPC。
 	result, err := p.readStream(ctx, client, protoReq)
 	if err != nil {
-		// An older docreader build may not implement ReadStream. Fall back to
-		// the unary Read RPC so a version-skewed deployment still parses
-		// documents (small/medium docs only — the unary path remains capped by
-		// the gRPC message-size limit, which is exactly what streaming avoids).
 		if status.Code(err) == codes.Unimplemented {
 			logger.Warnf(ctx, "docreader ReadStream unimplemented, falling back to unary Read: %v", err)
 			return p.readUnary(ctx, client, protoReq)
@@ -229,18 +279,31 @@ func (p *GRPCDocumentReader) readUnary(
 }
 
 func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
-	p.mu.RLock()
-	client := p.client
-	p.mu.RUnlock()
+	addr, client, _ := p.snapshot()
 	if client == nil {
 		return nil, errNotConnected
 	}
 
 	resp, err := client.ListEngines(ctx, &proto.ListEnginesRequest{ConfigOverrides: overrides})
 	if err != nil {
+		if isRetryableGRPCError(err) {
+			logger.Warnf(ctx, "docreader ListEngines failed, reconnecting once: %v", err)
+			retryClient, reconnectErr := p.reconnectForRetry(addr)
+			if reconnectErr != nil {
+				return nil, fmt.Errorf("gRPC ListEngines failed: %w (reconnect failed: %v)", err, reconnectErr)
+			}
+			resp, err = retryClient.ListEngines(ctx, &proto.ListEnginesRequest{ConfigOverrides: overrides})
+			if err == nil {
+				return parserEngineInfoFromProto(resp), nil
+			}
+		}
 		return nil, fmt.Errorf("gRPC ListEngines failed: %w", err)
 	}
 
+	return parserEngineInfoFromProto(resp), nil
+}
+
+func parserEngineInfoFromProto(resp *proto.ListEnginesResponse) []types.ParserEngineInfo {
 	result := make([]types.ParserEngineInfo, 0, len(resp.GetEngines()))
 	for _, e := range resp.GetEngines() {
 		result = append(result, types.ParserEngineInfo{
@@ -251,5 +314,5 @@ func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 			UnavailableReason: e.GetUnavailableReason(),
 		})
 	}
-	return result, nil
+	return result
 }

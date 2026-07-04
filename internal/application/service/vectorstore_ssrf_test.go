@@ -67,6 +67,18 @@ func TestValidateConnectionAddrSSRF(t *testing.T) {
 			wantError:  true,
 		},
 		{
+			name:       "mysql private IP blocked",
+			engineType: types.MySQLRetrieverEngineType,
+			config:     types.ConnectionConfig{Addr: "192.168.1.10:3306"},
+			wantError:  true,
+		},
+		{
+			name:       "mysql whitelisted host allowed",
+			engineType: types.MySQLRetrieverEngineType,
+			config:     types.ConnectionConfig{Addr: "vector.allowed.test:3306"},
+			wantError:  false,
+		},
+		{
 			name:       "qdrant host+port private IP blocked",
 			engineType: types.QdrantRetrieverEngineType,
 			config:     types.ConnectionConfig{Host: "10.1.2.3", Port: 6334},

@@ -13,15 +13,6 @@ import (
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
 
-// escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
-// so they are treated as literal characters.
-func escapeLikeKeyword(keyword string) string {
-	keyword = strings.ReplaceAll(keyword, `\`, `\\`)
-	keyword = strings.ReplaceAll(keyword, "%", `\%`)
-	keyword = strings.ReplaceAll(keyword, "_", `\_`)
-	return keyword
-}
-
 // omitFieldsOnUpdate defines fields to omit when updating knowledge.
 //
 // PendingSubtasksCount is deliberately omitted from every full-row Save:
@@ -486,7 +477,6 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 // Only returns documents from document-type knowledge bases (excludes FAQ)
 // Returns (results, hasMore, error)
 // FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
-// Uses Postgres jsonb operator: metadata->>'key' = 'value'.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,
 	tenantID uint64,
@@ -495,10 +485,17 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
-		First(&knowledge).Error
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+	switch dialectName(r.db) {
+	case "postgres":
+		query = query.Where("metadata->>? = ?", key, value)
+	case "mysql":
+		query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, ?)) = ?", jsonPathForKey(key), value)
+	default:
+		query = query.Where("json_extract(metadata, ?) = ?", jsonPathForKey(key), value)
+	}
+	err := query.First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

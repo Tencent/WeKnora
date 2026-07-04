@@ -17,12 +17,14 @@ import (
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
 	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
 	"google.golang.org/grpc"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
+	mysqlRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/mysql"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
@@ -71,6 +73,8 @@ func createEngineServiceFromStore(
 		return createWeaviateEngine(store)
 	case types.DorisRetrieverEngineType:
 		return createDorisEngine(store)
+	case types.MySQLRetrieverEngineType:
+		return createMySQLEngine(store)
 	case types.SQLiteRetrieverEngineType:
 		return createSQLiteEngine(store, db)
 	case types.TencentVectorDBRetrieverEngineType:
@@ -122,6 +126,52 @@ func createPostgresEngine(store types.VectorStore, db *gorm.DB) (interfaces.Retr
 func createSQLiteEngine(_ types.VectorStore, db *gorm.DB) (interfaces.RetrieveEngineService, error) {
 	repo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.SQLiteRetrieverEngineType), nil
+}
+
+func createMySQLEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+	cc := store.ConnectionConfig
+	if cc.Addr == "" {
+		return nil, fmt.Errorf("mysql connection requires addr (host:port)")
+	}
+	if cc.Database == "" {
+		return nil, fmt.Errorf("mysql connection requires database")
+	}
+
+	mc := mysql.NewConfig()
+	mc.User = cc.Username
+	mc.Passwd = cc.Password
+	mc.Net = "tcp"
+	mc.Addr = cc.Addr
+	mc.DBName = cc.Database
+	mc.Params = map[string]string{"charset": "utf8mb4"}
+	mc.ParseTime = true
+	mc.Loc = time.Local
+	mc.InterpolateParams = true
+
+	return createMySQLEngineWithDialector(store, gormmysql.Open(mc.FormatDSN()))
+}
+
+func createMySQLEngineWithDialector(
+	store types.VectorStore, dialector gorm.Dialector,
+) (interfaces.RetrieveEngineService, error) {
+	db, err := gorm.Open(dialector, &gorm.Config{
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create mysql client: %w", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get mysql sql db: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(20)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+
+	repo := mysqlRepo.NewMySQLRetrieveEngineRepository(db, store.ConnectionConfig.Database, &store.IndexConfig)
+	return retriever.NewKVHybridRetrieveEngine(repo, types.MySQLRetrieverEngineType), nil
 }
 
 func createElasticsearchEngine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
