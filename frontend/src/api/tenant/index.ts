@@ -8,7 +8,6 @@ export interface TenantInfo {
   id: number
   name: string
   description?: string
-  api_key?: string
   status?: string
   business?: string
   storage_quota?: number
@@ -47,6 +46,30 @@ export interface APIPrincipalTestToken {
   expires_in_seconds: number
   expires_at_unix: number
   external_user_id: string
+}
+
+export type TenantAPIKeyScope = 'read' | 'write' | 'admin'
+
+export interface TenantAPIKey {
+  id: number
+  name: string
+  api_key: string
+  scopes: TenantAPIKeyScope[]
+  knowledge_base_ids: string[]
+  last_used_at?: string
+  expires_at?: string
+  created_at: string
+}
+
+export interface CreatedTenantAPIKey extends TenantAPIKey {
+  token?: string
+}
+
+export interface CreateTenantAPIKeyPayload {
+  name: string
+  scopes: TenantAPIKeyScope[]
+  knowledge_base_ids?: string[]
+  expires_at_unix?: number
 }
 
 // 搜索租户参数
@@ -146,6 +169,50 @@ export async function createAPIPrincipalTestToken(
   }
 }
 
+export async function listTenantAPIKeys(
+  tenantId: number,
+): Promise<{ success: boolean; data?: TenantAPIKey[]; message?: string }> {
+  try {
+    const response = await get(`/api/v1/tenants/${tenantId}/api-keys`)
+    return response as unknown as { success: boolean; data?: TenantAPIKey[]; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.listApiKeysFailed'),
+    }
+  }
+}
+
+export async function createTenantAPIKey(
+  tenantId: number,
+  payload: CreateTenantAPIKeyPayload,
+): Promise<{ success: boolean; data?: CreatedTenantAPIKey; message?: string }> {
+  try {
+    const response = await post(`/api/v1/tenants/${tenantId}/api-keys`, payload)
+    return response as unknown as { success: boolean; data?: CreatedTenantAPIKey; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.createApiKeyFailed'),
+    }
+  }
+}
+
+export async function deleteTenantAPIKey(
+  tenantId: number,
+  keyId: number,
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const response = await del(`/api/v1/tenants/${tenantId}/api-keys/${keyId}`)
+    return response as unknown as { success: boolean; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.deleteApiKeyFailed'),
+    }
+  }
+}
+
 /**
  * 更新租户信息（目前暴露名称、描述两个字段的编辑入口）。
  * 后端 `PUT /tenants/:id` 用指针字段区分"未传"和"显式空串"，未传的列不会
@@ -186,8 +253,8 @@ export async function deleteTenant(
 
 /**
  * 创建新工作区（任意已登录用户均可调用）。
- * 后端会自动把调用者写成新租户的 Owner，并生成 api_key、默认 storage_quota
- * 等服务端字段，所以这里只暴露 name + description。
+ * 后端会自动把调用者写成新租户的 Owner，并填充默认 storage_quota
+ * 等服务端字段；API Key 由用户在集成页手动创建。
  * 路由：POST /api/v1/tenants（router 上不挂 g.CrossTenant()，自助场景使用）。
  */
 export async function createTenant(

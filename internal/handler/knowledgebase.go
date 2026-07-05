@@ -602,6 +602,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 			}
 			kbs = filtered
 		}
+		kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
 
 		// `all` mode: authoritative server-side capability filter so a client
 		// that bypassed the frontend (old tab, curl, rogue plugin) can't @ a
@@ -669,6 +670,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		}
 		kbs = filtered
 	}
+	kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
 
 	// Get share counts for all knowledge bases
 	if len(kbs) > 0 && h.kbShareService != nil {
@@ -699,6 +701,20 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		"success": true,
 		"data":    h.buildKBListResponse(ctx, kbs, callerTenantID),
 	})
+}
+
+func filterKnowledgeBasesForAPIKeyScope(ctx context.Context, kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || len(scope.KnowledgeBaseIDs) == 0 {
+		return kbs
+	}
+	filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil && scope.AllowsKnowledgeBase(kb.ID) {
+			filtered = append(filtered, kb)
+		}
+	}
+	return filtered
 }
 
 // enrichKBCreatorNames 把 KB 列表里的 CreatorID 批量解析成展示名（username

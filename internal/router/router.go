@@ -51,6 +51,7 @@ type RouterParams struct {
 	KnowledgeHandler             *handler.KnowledgeHandler
 	TenantHandler                *handler.TenantHandler
 	TenantService                interfaces.TenantService
+	TenantAPIKeyService          interfaces.TenantAPIKeyService
 	TenantMemberService          interfaces.TenantMemberService
 	TenantMemberHandler          *handler.TenantMemberHandler
 	TenantInvitationHandler      *handler.TenantInvitationHandler
@@ -157,7 +158,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	RegisterEmbedPublicRoutes(r, params.EmbedChannelHandler, params.EmbedChannelService, params.TenantService, params.RedisClient, params.FileService)
 
 	// 认证中间件
-	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.Config))
+	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
 	serveFiles(r, params.FileService)
@@ -571,6 +572,9 @@ func RegisterTenantRoutes(
 			tenantByID.PUT("", g.Owner(), handler.UpdateTenant)
 			tenantByID.DELETE("", g.Owner(), handler.DeleteTenant)
 			tenantByID.POST("/api-key", g.Owner(), handler.ResetAPIKey)
+			tenantByID.GET("/api-keys", g.Owner(), handler.ListAPIKeys)
+			tenantByID.POST("/api-keys", g.Owner(), handler.CreateAPIKey)
+			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), handler.DeleteAPIKey)
 			tenantByID.GET("/api-principal-config", g.Owner(), handler.GetAPIPrincipalConfig)
 			tenantByID.PUT("/api-principal-config", g.Owner(), handler.UpdateAPIPrincipalConfig)
 			tenantByID.POST("/api-principal-test-token", g.Owner(), handler.CreateAPIPrincipalTestToken)

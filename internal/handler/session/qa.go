@@ -129,6 +129,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
+	if err := authorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+		return nil, nil, err
+	}
 
 	// The built-in wiki fixer is invoked from a KB page, not from a tenant's
 	// regular agent picker. When the KB is shared, run it in the source tenant
@@ -524,6 +527,10 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids or knowledge_ids must be provided"))
 		return
 	}
+	if err := authorizeTenantAPIKeyKnowledgeTargets(ctx, knowledgeBaseIDs, request.KnowledgeIDs); err != nil {
+		c.Error(err)
+		return
+	}
 
 	logger.Infof(
 		ctx,
@@ -546,6 +553,20 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		"success": true,
 		"data":    searchResults,
 	})
+}
+
+func authorizeTenantAPIKeyKnowledgeTargets(ctx context.Context, kbIDs []string, knowledgeIDs []string) error {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
+		return nil
+	}
+	if len(knowledgeIDs) > 0 {
+		return errors.NewForbiddenError("API key scope does not allow knowledge_ids without a verified knowledge base")
+	}
+	if !scope.AllowsKnowledgeBases(kbIDs) {
+		return errors.NewForbiddenError("API key scope does not allow one or more knowledge bases")
+	}
+	return nil
 }
 
 // KnowledgeQA godoc

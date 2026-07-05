@@ -238,6 +238,11 @@ func RequireKBAccess(
 		}
 
 		ctx := c.Request.Context()
+		if err := authorizeTenantAPIKeyKnowledgeBase(ctx, kbID); err != nil {
+			_ = c.Error(apperrors.NewForbiddenError("API key scope does not allow this knowledge base"))
+			c.Abort()
+			return
+		}
 
 		// Rollout window: enforcement off -> log the would-be check and
 		// pass through. We still resolve the KB (best-effort) so the

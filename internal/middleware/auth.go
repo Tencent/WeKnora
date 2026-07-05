@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,6 +82,7 @@ func Auth(
 	tenantService interfaces.TenantService,
 	userService interfaces.UserService,
 	memberService interfaces.TenantMemberService,
+	apiKeyService interfaces.TenantAPIKeyService,
 	cfg *config.Config,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -211,92 +211,60 @@ func Auth(
 		// 尝试X-API-Key认证（兼容模式）
 		apiKey := c.GetHeader("X-API-Key")
 		if apiKey != "" {
-			// Get tenant information
-			tenantID, err := tenantService.ExtractTenantIDFromAPIKey(apiKey)
-			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": "Unauthorized: invalid API key format",
-				})
-				c.Abort()
-				return
-			}
-
-			// Verify API key validity (matches the one in database)
-			t, err := tenantService.GetTenantByID(c.Request.Context(), tenantID)
-			if err != nil {
-				log.Printf("Error getting tenant by ID: %v, tenantID: %d", err, tenantID)
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": "Unauthorized: invalid API key",
-				})
-				c.Abort()
-				return
-			}
-
-			if t == nil || subtle.ConstantTimeCompare([]byte(t.APIKey), []byte(apiKey)) != 1 {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": "Unauthorized: invalid API key",
-				})
-				c.Abort()
-				return
-			}
-
-			// 存储租户和用户信息到上下文
-			c.Set(types.TenantIDContextKey.String(), tenantID)
-			c.Set(types.TenantInfoContextKey.String(), t)
-
-			ctx := context.WithValue(
-				context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID),
-				types.TenantInfoContextKey, t,
-			)
-
-			// 通过 TenantID 关联查询用户；找不到时构造系统虚拟用户，
-			// 确保所有依赖 UserContextKey 的下游 handler 正常工作。
-			user, err := userService.GetUserByTenantID(c.Request.Context(), tenantID)
-			if err != nil || user == nil {
-				// Synthetic user. The "system-<tenantID>" shape is recognised
-				// by types.IsSyntheticUserID, which RBAC service-layer code
-				// uses to skip recording these IDs as a resource creator.
-				// Do NOT change the prefix or numeric suffix without
-				// updating that helper, otherwise KB/Agent CreatorID will
-				// silently start pointing at the synthetic user again.
-				user = &types.User{
-					ID:       fmt.Sprintf("system-%d", tenantID),
-					Username: fmt.Sprintf("system-%d", tenantID),
-					Email:    fmt.Sprintf("system-%d@api-key.local", tenantID),
-					TenantID: tenantID,
-					IsActive: true,
+			if apiKeyService != nil {
+				if key, err := apiKeyService.AuthenticateAPIKey(c.Request.Context(), apiKey); err == nil && key != nil {
+					attachAPIKeyAuthContext(c, tenantService, userService, key.TenantID, key)
+					if c.IsAborted() {
+						return
+					}
+					if err := authorizeTenantAPIKeyOperation(c.Request.Context(), c.Request.Method); err != nil {
+						c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this operation"})
+						c.Abort()
+						return
+					}
+					if err := authorizeTenantAPIKeyRoute(c.Request.Context(), c.Request.Method, c.Request.URL.Path); err != nil {
+						c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this route"})
+						c.Abort()
+						return
+					}
+					c.Next()
+					return
 				}
-				log.Printf("No user found for tenant %d via API key, using synthetic system user %s", tenantID, user.ID)
-			}
-			// API-Key 走的是程序化全租户访问，固定授予 Admin 角色：可以做几乎所有事情，
-			// 但保留 Owner-only 操作（删除租户、修改租户级配置）的边界。
-			//
-			// 显式拒绝 SystemAdmin：API key 通常被存放在 CI / IaC / sidecar 里，
-			// 泄露面比 JWT 大得多。即便 key 关联的 user 在 DB 里恰好是 SystemAdmin
-			// （例如部署里只有一个用户、自己创建了 tenant 又生成了 API key），
-			// 也绝不允许通过这条通道走平台级管理操作（promote/revoke、全局设置）。
-			// 平台管理必须走交互式 JWT 登录，留下可追责的人类身份。
-			c.Set(types.UserContextKey.String(), user)
-			c.Set(types.UserIDContextKey.String(), user.ID)
-			principal, principalErr := resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
-			if principalErr != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": apiPrincipalAuthErrorMessage(principalErr),
-				})
+				tenantID, err := tenantService.ExtractTenantIDFromAPIKey(apiKey)
+				if err != nil {
+					c.JSON(http.StatusUnauthorized, gin.H{
+						"error": "Unauthorized: invalid API key format",
+					})
+					c.Abort()
+					return
+				}
+				if key, err := apiKeyService.AuthenticateTenantAPIKey(
+					c.Request.Context(), tenantID, apiKey,
+				); err == nil && key != nil {
+					attachAPIKeyAuthContext(c, tenantService, userService, tenantID, key)
+					if c.IsAborted() {
+						return
+					}
+					if err := authorizeTenantAPIKeyOperation(c.Request.Context(), c.Request.Method); err != nil {
+						c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this operation"})
+						c.Abort()
+						return
+					}
+					if err := authorizeTenantAPIKeyRoute(c.Request.Context(), c.Request.Method, c.Request.URL.Path); err != nil {
+						c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this route"})
+						c.Abort()
+						return
+					}
+					c.Next()
+					return
+				}
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API key"})
 				c.Abort()
 				return
 			}
-			c.Set(types.PrincipalContextKey.String(), principal)
-			c.Set(types.TenantRoleContextKey.String(), types.TenantRoleAdmin)
-			c.Set(types.SystemAdminContextKey.String(), false)
-			ctx = context.WithValue(ctx, types.UserContextKey, user)
-			ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
-			ctx = types.WithPrincipal(ctx, principal)
-			ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
-			ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
 
-			c.Request = c.Request.WithContext(ctx)
-			c.Next()
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: API key service is not configured"})
+			c.Abort()
 			return
 		}
 
@@ -304,6 +272,66 @@ func Auth(
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication"})
 		c.Abort()
 	}
+}
+
+func attachAPIKeyAuthContext(
+	c *gin.Context,
+	tenantService interfaces.TenantService,
+	userService interfaces.UserService,
+	tenantID uint64,
+	key *types.TenantAPIKey,
+) {
+	t, err := tenantService.GetTenantByID(c.Request.Context(), tenantID)
+	if err != nil {
+		log.Printf("Error getting tenant by ID: %v, tenantID: %d", err, tenantID)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API key"})
+		c.Abort()
+		return
+	}
+
+	c.Set(types.TenantIDContextKey.String(), tenantID)
+	c.Set(types.TenantInfoContextKey.String(), t)
+	ctx := context.WithValue(
+		context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID),
+		types.TenantInfoContextKey, t,
+	)
+
+	user, err := userService.GetUserByTenantID(c.Request.Context(), tenantID)
+	if err != nil || user == nil {
+		user = &types.User{
+			ID:       fmt.Sprintf("system-%d", tenantID),
+			Username: fmt.Sprintf("system-%d", tenantID),
+			Email:    fmt.Sprintf("system-%d@api-key.local", tenantID),
+			TenantID: tenantID,
+			IsActive: true,
+		}
+		log.Printf("No user found for tenant %d via API key, using synthetic system user %s", tenantID, user.ID)
+	}
+
+	c.Set(types.UserContextKey.String(), user)
+	c.Set(types.UserIDContextKey.String(), user.ID)
+	principal, principalErr := resolveAPIPrincipal(c.Request.Context(), t, c.Request.Header)
+	if principalErr != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": apiPrincipalAuthErrorMessage(principalErr)})
+		c.Abort()
+		return
+	}
+	c.Set(types.PrincipalContextKey.String(), principal)
+	c.Set(types.TenantRoleContextKey.String(), types.TenantRoleAdmin)
+	c.Set(types.SystemAdminContextKey.String(), false)
+	ctx = context.WithValue(ctx, types.UserContextKey, user)
+	ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+	ctx = types.WithPrincipal(ctx, principal)
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
+	ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
+	if key != nil {
+		ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{
+			KeyID:            key.ID,
+			Scopes:           key.Scopes,
+			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
+		})
+	}
+	c.Request = c.Request.WithContext(ctx)
 }
 
 func resolveAPIPrincipal(ctx context.Context, tenant *types.Tenant, header http.Header) (types.Principal, error) {

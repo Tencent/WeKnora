@@ -13,11 +13,10 @@ import (
 	"strings"
 	"time"
 
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/Tencent/WeKnora/internal/utils"
-	werrors "github.com/Tencent/WeKnora/internal/errors"
 )
 
 var apiKeySecret = func() []byte {
@@ -53,8 +52,8 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 
 	logger.Infof(ctx, "Creating tenant, name: %s", tenant.Name)
 
-	// Create tenant with initial values
-	tenant.APIKey = s.generateApiKey(0)
+	// New tenants do not receive an API key by default. Integrations create
+	// keys explicitly through tenant_api_keys.
 	tenant.Status = "active"
 	tenant.CreatedAt = time.Now()
 	tenant.UpdatedAt = time.Now()
@@ -74,29 +73,7 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 		return nil, err
 	}
 
-	logger.Infof(ctx, "Tenant created successfully, ID: %d, generating official API Key", tenant.ID)
-	plaintextAPIKey := s.generateApiKey(tenant.ID)
-	tenant.APIKey = plaintextAPIKey
-
-	// Manually encrypt APIKey before update, because db.Updates() does not trigger BeforeSave hook
-	if key := utils.GetAESKey(); key != nil && tenant.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(tenant.APIKey, key); err == nil {
-			tenant.APIKey = encrypted
-		}
-	}
-
-	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id":   tenant.ID,
-			"tenant_name": tenant.Name,
-		})
-		return nil, err
-	}
-
-	// Restore plaintext for the response so callers don't see enc:v1: ciphertext.
-	tenant.APIKey = plaintextAPIKey
-
-	logger.Infof(ctx, "Tenant creation and update completed, ID: %d, name: %s", tenant.ID, tenant.Name)
+	logger.Infof(ctx, "Tenant created successfully, ID: %d, name: %s", tenant.ID, tenant.Name)
 	return tenant, nil
 }
 
@@ -149,12 +126,6 @@ func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) 
 			"tenant_id": tenant.ID,
 		})
 		return nil, err
-	}
-
-	// Generate new API key if empty
-	if tenant.APIKey == "" {
-		logger.Info(ctx, "API Key is empty, generating new API Key")
-		tenant.APIKey = s.generateApiKey(tenant.ID)
 	}
 
 	tenant.UpdatedAt = time.Now()
@@ -228,23 +199,8 @@ func (s *tenantService) UpdateAPIKey(ctx context.Context, id uint64) (string, er
 
 	logger.Infof(ctx, "Generating new API Key for tenant, ID: %d", id)
 	plaintextAPIKey := s.generateApiKey(tenant.ID)
-	tenant.APIKey = plaintextAPIKey
 
-	// Manually encrypt APIKey before update, because db.Updates() does not trigger BeforeSave hook
-	if key := utils.GetAESKey(); key != nil && tenant.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(tenant.APIKey, key); err == nil {
-			tenant.APIKey = encrypted
-		}
-	}
-
-	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": id,
-		})
-		return "", err
-	}
-
-	logger.Infof(ctx, "Tenant API Key updated successfully, ID: %d", id)
+	logger.Infof(ctx, "Tenant API Key generated successfully, ID: %d", id)
 	return plaintextAPIKey, nil
 }
 

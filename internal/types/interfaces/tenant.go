@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -63,4 +64,35 @@ type TenantRepository interface {
 	AdjustStorageUsed(ctx context.Context, tenantID uint64, delta int64) error
 	// BulkSetStorageQuota — see TenantService.BulkSetStorageQuota.
 	BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error)
+}
+
+type TenantAPIKeyCreateRequest struct {
+	TenantID         uint64
+	Name             string
+	Scopes           []string
+	KnowledgeBaseIDs []string
+	ExpiresAt        *time.Time
+}
+
+type TenantAPIKeyCreateResult struct {
+	APIKey *types.TenantAPIKey
+	Token  string
+}
+
+type TenantAPIKeyRepository interface {
+	CreateAPIKey(ctx context.Context, key *types.TenantAPIKey) error
+	GetAPIKeyByHash(ctx context.Context, hash string) (*types.TenantAPIKey, error)
+	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
+	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
+	UpdateAPIKeyHash(ctx context.Context, id uint64, hash string) error
+	UpdateAPIKeyLastUsed(ctx context.Context, id uint64, at time.Time) error
+}
+
+type TenantAPIKeyService interface {
+	CreateAPIKey(ctx context.Context, req TenantAPIKeyCreateRequest) (*TenantAPIKeyCreateResult, error)
+	AuthenticateAPIKey(ctx context.Context, token string) (*types.TenantAPIKey, error)
+	AuthenticateTenantAPIKey(ctx context.Context, tenantID uint64, token string) (*types.TenantAPIKey, error)
+	EnsureTenantAPIKey(ctx context.Context, tenantID uint64, apiKey string) error
+	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
+	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
 }
