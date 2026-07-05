@@ -11,14 +11,9 @@ import (
 
 var errTenantAPIKeyScopeForbidden = stderrors.New("tenant api key scope forbidden")
 
-func authorizeTenantAPIKeyOperation(ctx context.Context, method string) error {
-	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); !ok {
-		return nil
-	}
-	return nil
-}
-
-func authorizeTenantAPIKeyRoute(ctx context.Context, method, path string) error {
+// authorizeTenantAPIKeyAccess enforces per-key operation and route scopes for
+// X-API-Key callers. Non-API-key principals are not restricted.
+func authorizeTenantAPIKeyAccess(ctx context.Context, method, path string) error {
 	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
 	if !ok {
 		return nil
@@ -99,22 +94,20 @@ func isKnowledgeScopedUnsafePath(path string) bool {
 
 func allowsTenantAPIKeyRead(scope types.TenantAPIKeyScope) bool {
 	scope = scope.Normalize()
-	return len(scope.Scopes) == 0 ||
-		scope.HasScope(types.TenantAPIKeyScopeRead) ||
+	return scope.HasScope(types.TenantAPIKeyScopeRead) ||
 		scope.HasScope(types.TenantAPIKeyScopeWrite) ||
 		scope.HasScope(types.TenantAPIKeyScopeAdmin)
 }
 
 func allowsTenantAPIKeyWrite(scope types.TenantAPIKeyScope) bool {
 	scope = scope.Normalize()
-	return len(scope.Scopes) == 0 ||
-		scope.HasScope(types.TenantAPIKeyScopeWrite) ||
+	return scope.HasScope(types.TenantAPIKeyScopeWrite) ||
 		scope.HasScope(types.TenantAPIKeyScopeAdmin)
 }
 
 func allowsTenantAPIKeyAdmin(scope types.TenantAPIKeyScope) bool {
 	scope = scope.Normalize()
-	return len(scope.Scopes) == 0 || scope.HasScope(types.TenantAPIKeyScopeAdmin)
+	return scope.HasScope(types.TenantAPIKeyScopeAdmin)
 }
 
 func isTenantAPIKeyReadUnsafePath(method, path string) bool {

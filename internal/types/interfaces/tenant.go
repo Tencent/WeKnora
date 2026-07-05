@@ -23,8 +23,6 @@ type TenantService interface {
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error)
 	// DeleteTenant deletes a tenant
 	DeleteTenant(ctx context.Context, id uint64) error
-	// UpdateAPIKey updates the API key
-	UpdateAPIKey(ctx context.Context, id uint64) (string, error)
 	// ExtractTenantIDFromAPIKey extracts the tenant ID from the API key
 	ExtractTenantIDFromAPIKey(apiKey string) (uint64, error)
 	// ListAllTenants lists all tenants (for users with cross-tenant access permission)
@@ -84,6 +82,7 @@ type TenantAPIKeyRepository interface {
 	GetAPIKeyByHash(ctx context.Context, hash string) (*types.TenantAPIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
+	RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error
 	UpdateAPIKeyHash(ctx context.Context, id uint64, hash string) error
 	UpdateAPIKeyLastUsed(ctx context.Context, id uint64, at time.Time) error
 }
@@ -92,7 +91,7 @@ type TenantAPIKeyService interface {
 	CreateAPIKey(ctx context.Context, req TenantAPIKeyCreateRequest) (*TenantAPIKeyCreateResult, error)
 	AuthenticateAPIKey(ctx context.Context, token string) (*types.TenantAPIKey, error)
 	AuthenticateTenantAPIKey(ctx context.Context, tenantID uint64, token string) (*types.TenantAPIKey, error)
-	EnsureTenantAPIKey(ctx context.Context, tenantID uint64, apiKey string) error
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
+	RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error
 }

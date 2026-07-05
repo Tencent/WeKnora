@@ -212,54 +212,9 @@ func Auth(
 		apiKey := c.GetHeader("X-API-Key")
 		if apiKey != "" {
 			if apiKeyService != nil {
-				if key, err := apiKeyService.AuthenticateAPIKey(c.Request.Context(), apiKey); err == nil && key != nil {
-					attachAPIKeyAuthContext(c, tenantService, userService, key.TenantID, key)
-					if c.IsAborted() {
-						return
-					}
-					if err := authorizeTenantAPIKeyOperation(c.Request.Context(), c.Request.Method); err != nil {
-						c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this operation"})
-						c.Abort()
-						return
-					}
-					if err := authorizeTenantAPIKeyRoute(c.Request.Context(), c.Request.Method, c.Request.URL.Path); err != nil {
-						c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this route"})
-						c.Abort()
-						return
-					}
+				if authenticateAPIKeyRequest(c, tenantService, userService, apiKeyService, apiKey) {
 					c.Next()
-					return
 				}
-				tenantID, err := tenantService.ExtractTenantIDFromAPIKey(apiKey)
-				if err != nil {
-					c.JSON(http.StatusUnauthorized, gin.H{
-						"error": "Unauthorized: invalid API key format",
-					})
-					c.Abort()
-					return
-				}
-				if key, err := apiKeyService.AuthenticateTenantAPIKey(
-					c.Request.Context(), tenantID, apiKey,
-				); err == nil && key != nil {
-					attachAPIKeyAuthContext(c, tenantService, userService, tenantID, key)
-					if c.IsAborted() {
-						return
-					}
-					if err := authorizeTenantAPIKeyOperation(c.Request.Context(), c.Request.Method); err != nil {
-						c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this operation"})
-						c.Abort()
-						return
-					}
-					if err := authorizeTenantAPIKeyRoute(c.Request.Context(), c.Request.Method, c.Request.URL.Path); err != nil {
-						c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this route"})
-						c.Abort()
-						return
-					}
-					c.Next()
-					return
-				}
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API key"})
-				c.Abort()
 				return
 			}
 
@@ -272,6 +227,45 @@ func Auth(
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication"})
 		c.Abort()
 	}
+}
+
+func authenticateAPIKeyRequest(
+	c *gin.Context,
+	tenantService interfaces.TenantService,
+	userService interfaces.UserService,
+	apiKeyService interfaces.TenantAPIKeyService,
+	apiKey string,
+) bool {
+	ctx := c.Request.Context()
+	var key *types.TenantAPIKey
+	var tenantID uint64
+
+	if authenticated, err := apiKeyService.AuthenticateAPIKey(ctx, apiKey); err == nil && authenticated != nil {
+		key = authenticated
+		tenantID = key.TenantID
+	} else if tenantIDFromKey, extractErr := tenantService.ExtractTenantIDFromAPIKey(apiKey); extractErr == nil {
+		if authenticated, err := apiKeyService.AuthenticateTenantAPIKey(ctx, tenantIDFromKey, apiKey); err == nil && authenticated != nil {
+			key = authenticated
+			tenantID = tenantIDFromKey
+		}
+	}
+
+	if key == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API key"})
+		c.Abort()
+		return false
+	}
+
+	attachAPIKeyAuthContext(c, tenantService, userService, tenantID, key)
+	if c.IsAborted() {
+		return false
+	}
+	if err := authorizeTenantAPIKeyAccess(ctx, c.Request.Method, c.Request.URL.Path); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this operation"})
+		c.Abort()
+		return false
+	}
+	return true
 }
 
 func attachAPIKeyAuthContext(
@@ -317,12 +311,19 @@ func attachAPIKeyAuthContext(
 		return
 	}
 	c.Set(types.PrincipalContextKey.String(), principal)
-	c.Set(types.TenantRoleContextKey.String(), types.TenantRoleAdmin)
+	apiKeyRole := types.TenantRoleViewer
+	if key != nil {
+		apiKeyRole = types.TenantAPIKeyScope{
+			Scopes:           key.Scopes,
+			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
+		}.TenantRole()
+	}
+	c.Set(types.TenantRoleContextKey.String(), apiKeyRole)
 	c.Set(types.SystemAdminContextKey.String(), false)
 	ctx = context.WithValue(ctx, types.UserContextKey, user)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
 	ctx = types.WithPrincipal(ctx, principal)
-	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, apiKeyRole)
 	ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
 	if key != nil {
 		ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{

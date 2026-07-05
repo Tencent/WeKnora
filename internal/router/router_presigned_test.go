@@ -51,9 +51,6 @@ func (s *stubTenantService) UpdateTenant(context.Context, *types.Tenant) (*types
 	panic("unexpected")
 }
 func (s *stubTenantService) DeleteTenant(context.Context, uint64) error { panic("unexpected") }
-func (s *stubTenantService) UpdateAPIKey(context.Context, uint64) (string, error) {
-	panic("unexpected")
-}
 func (s *stubTenantService) ExtractTenantIDFromAPIKey(string) (uint64, error) { panic("unexpected") }
 func (s *stubTenantService) ListAllTenants(context.Context) ([]*types.Tenant, error) {
 	panic("unexpected")

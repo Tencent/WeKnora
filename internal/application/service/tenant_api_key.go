@@ -110,31 +110,6 @@ func (s *tenantAPIKeyService) AuthenticateTenantAPIKey(
 	return nil, apprepo.ErrTenantAPIKeyNotFound
 }
 
-func (s *tenantAPIKeyService) EnsureTenantAPIKey(ctx context.Context, tenantID uint64, apiKey string) error {
-	if tenantID == 0 || strings.TrimSpace(apiKey) == "" {
-		return nil
-	}
-	token := strings.TrimSpace(apiKey)
-	hash := hashTenantAPIKey(token)
-	if existing, err := s.repo.GetAPIKeyByHash(ctx, hash); err == nil && existing != nil {
-		return nil
-	} else if err != nil && !errors.Is(err, apprepo.ErrTenantAPIKeyNotFound) {
-		return err
-	}
-	key := &types.TenantAPIKey{
-		TenantID: tenantID,
-		Name:     "Tenant API key",
-		KeyHash:  hash,
-		APIKey:   token,
-		Scopes: types.StringArray{
-			types.TenantAPIKeyScopeRead,
-			types.TenantAPIKeyScopeWrite,
-			types.TenantAPIKeyScopeAdmin,
-		},
-	}
-	return s.repo.CreateAPIKey(ctx, key)
-}
-
 func (s *tenantAPIKeyService) ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error) {
 	keys, err := s.repo.ListAPIKeys(ctx, tenantID)
 	if err != nil {
@@ -150,6 +125,13 @@ func (s *tenantAPIKeyService) ListAPIKeys(ctx context.Context, tenantID uint64) 
 
 func (s *tenantAPIKeyService) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {
 	return s.repo.RevokeAPIKey(ctx, tenantID, id)
+}
+
+func (s *tenantAPIKeyService) RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error {
+	if tenantID == 0 {
+		return nil
+	}
+	return s.repo.RevokeAllAPIKeys(ctx, tenantID)
 }
 
 func generateTenantAPIKeyToken() (string, error) {

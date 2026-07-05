@@ -537,7 +537,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 
 // ResetAPIKey godoc
 // @Summary      重置租户 API Key
-// @Description  为指定租户生成一个新的 API Key，旧 Key 立即失效
+// @Description  吊销该租户全部现有 API Key 后创建一把新的全权限 Key
 // @Tags         租户管理
 // @Accept       json
 // @Produce      json
@@ -560,6 +560,11 @@ func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
 	logger.Infof(ctx, "Resetting API key for tenant, ID: %d", id)
 	if h.apiKeyService == nil {
 		c.Error(errors.NewInternalServerError("API key service is not configured"))
+		return
+	}
+	if err := h.apiKeyService.RevokeAllAPIKeys(ctx, id); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": id})
+		c.Error(errors.NewInternalServerError("Failed to reset API key").WithDetails(err.Error()))
 		return
 	}
 	result, err := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{

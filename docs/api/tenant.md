@@ -15,7 +15,10 @@
 | GET    | `/tenants/:id`             | 获取指定租户信息                                  |
 | PUT    | `/tenants/:id`             | 更新租户信息                                      |
 | DELETE | `/tenants/:id`             | 删除租户                                          |
-| POST   | `/tenants/:id/api-key`     | 重置租户 API Key                                  |
+| POST   | `/tenants/:id/api-key`     | 重置租户 API Key（吊销该租户全部旧 Key 后创建一把新的全权限 Key） |
+| GET    | `/tenants/:id/api-keys`    | 列出租户 API Key（Owner）                         |
+| POST   | `/tenants/:id/api-keys`    | 创建带 scope 的 API Key（Owner）                  |
+| DELETE | `/tenants/:id/api-keys/:key_id` | 吊销指定 API Key（Owner）                   |
 | GET    | `/tenants/:id/api-principal-config` | 获取 API Key 用户身份配置（Owner）          |
 | PUT    | `/tenants/:id/api-principal-config` | 更新 API Key 用户身份配置（Owner）          |
 | GET    | `/tenants`                 | 获取当前用户可见的租户列表                        |
@@ -108,7 +111,7 @@ curl --location 'http://localhost:8080/api/v1/tenants/search?keyword=weknora&pag
 
 ## POST `/tenants` - 创建新租户
 
-创建一个新的租户，服务端会自动生成租户 ID 与 API Key。
+创建一个新的租户。**不会**自动发放 API Key；请在创建后通过 `POST /tenants/:id/api-keys` 或 `POST /tenants/:id/api-key` 获取密钥。从旧版本升级时，原有 `tenants.api_key` 会迁移到 `tenant_api_keys` 表并继续可用，直至被吊销。
 
 **参数说明（请求体）**:
 
@@ -329,7 +332,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/tenants/10000' \
 
 ## POST `/tenants/:id/api-key` - 重置租户 API Key
 
-为指定租户生成新的 API Key，旧 Key 立即失效。访问规则同 `GET /tenants/:id`。
+为指定租户生成新的 API Key，并**吊销该租户下所有现有 Key**（含迁移进来的旧 Key）。新 Key 拥有 `read` + `write` + `admin` 全权限。访问规则同 `GET /tenants/:id`。
 
 **路径参数**:
 
@@ -356,6 +359,17 @@ curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-k
 }
 ```
 
+## 租户 API Key 管理（`tenant_api_keys`）
+
+自 scoped API Key 改造后，密钥以独立记录存储，支持：
+
+- **scopes**：`read`（只读 + 语义检索 POST）、`write`（知识库写入）、`admin`（租户级管理，不含 `/api-keys` 管理面）
+- **knowledge_base_ids**：可选，将 Key 限制在指定知识库
+- **吊销**：`DELETE /tenants/:id/api-keys/:key_id`
+- **过期**：创建时可选 `expires_at_unix`
+
+认证上下文中的租户角色由 scope 映射：`read` → Viewer，`write` → Contributor，`admin` → Admin。路由级 scope 校验与 KB 访问守卫在 `X-API-Key` 认证后强制执行。
+
 ## API Key Principal：隔离边界与安全说明
 
 `api-principal-config` 控制 `X-API-Key` 请求如何映射为终端 **Principal**。请先理解以下边界，再选择模式。
@@ -368,7 +382,7 @@ Principal **仅**用于按终端用户隔离以下能力：
 - **MCP OAuth** 访问令牌（同一租户下不同外部用户各自授权，token 互不共用）
 - 对话内 MCP OAuth 提示、MCP 工具审批等与终端用户绑定的流程
 
-Principal **不会**缩小 API Key 的 API 权限：`X-API-Key` 认证仍授予租户内 **Admin** 角色，知识库、Agent 配置等接口**不按**外部用户做 RBAC 隔离。
+Principal **不会**缩小 API Key 的 HTTP 路由权限：路由访问由 Key 的 `scopes` 控制；租户内 RBAC 角色由 scope 映射为 Viewer / Contributor / Admin。知识库、Agent 等资源的细粒度访问另受 scope 与 KB 守卫约束。
 
 ### 模式与安全假设
 

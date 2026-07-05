@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -178,62 +176,6 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 
 	logger.Infof(ctx, "Tenant deleted successfully, ID: %d", id)
 	return nil
-}
-
-// UpdateAPIKey updates the API key for a specific tenant
-func (s *tenantService) UpdateAPIKey(ctx context.Context, id uint64) (string, error) {
-	logger.Info(ctx, "Start updating tenant API Key")
-
-	if id == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
-		return "", errors.New("tenant ID cannot be 0")
-	}
-
-	tenant, err := s.repo.GetTenantByID(ctx, id)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": id,
-		})
-		return "", err
-	}
-
-	logger.Infof(ctx, "Generating new API Key for tenant, ID: %d", id)
-	plaintextAPIKey := s.generateApiKey(tenant.ID)
-
-	logger.Infof(ctx, "Tenant API Key generated successfully, ID: %d", id)
-	return plaintextAPIKey, nil
-}
-
-// generateApiKey generates a secure API key for tenant authentication
-func (r *tenantService) generateApiKey(tenantID uint64) string {
-	// 1. Convert tenant_id to bytes
-	idBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(idBytes, uint64(tenantID))
-
-	// 2. Encrypt tenant_id using AES-GCM
-	block, err := aes.NewCipher(apiKeySecret())
-	if err != nil {
-		panic("Failed to create AES cipher: " + err.Error())
-	}
-
-	nonce := make([]byte, 12)
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		panic(err.Error())
-	}
-
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		panic("Failed to create GCM cipher: " + err.Error())
-	}
-
-	ciphertext := aesgcm.Seal(nil, nonce, idBytes, nil)
-
-	// 3. Combine nonce and ciphertext, then encode with base64
-	combined := append(nonce, ciphertext...)
-	encoded := base64.RawURLEncoding.EncodeToString(combined)
-
-	// Create final API Key in format: sk-{encrypted_part}
-	return "sk-" + encoded
 }
 
 // ExtractTenantIDFromAPIKey extracts the tenant ID from an API key

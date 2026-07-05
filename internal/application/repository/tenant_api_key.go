@@ -62,6 +62,14 @@ func (r *tenantAPIKeyRepository) RevokeAPIKey(ctx context.Context, tenantID uint
 	return nil
 }
 
+func (r *tenantAPIKeyRepository) RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&types.TenantAPIKey{}).
+		Where("tenant_id = ? AND revoked_at IS NULL", tenantID).
+		Update("revoked_at", &now).Error
+}
+
 func (r *tenantAPIKeyRepository) UpdateAPIKeyHash(ctx context.Context, id uint64, hash string) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantAPIKey{}).

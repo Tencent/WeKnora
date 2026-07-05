@@ -99,12 +99,18 @@ func (s TenantAPIKeyScope) HasScope(scope string) bool {
 	return false
 }
 
-func (s TenantAPIKeyScope) AllowsUnsafeOperation() bool {
+// TenantRole maps API-key scopes to the tenant RBAC role carried in request
+// context. Admin scope -> Admin; write -> Contributor; read-only -> Viewer.
+func (s TenantAPIKeyScope) TenantRole() TenantRole {
 	s = s.Normalize()
-	if len(s.Scopes) == 0 {
-		return true
+	switch {
+	case s.HasScope(TenantAPIKeyScopeAdmin):
+		return TenantRoleAdmin
+	case s.HasScope(TenantAPIKeyScopeWrite):
+		return TenantRoleContributor
+	default:
+		return TenantRoleViewer
 	}
-	return s.HasScope(TenantAPIKeyScopeWrite) || s.HasScope(TenantAPIKeyScopeAdmin)
 }
 
 func (s TenantAPIKeyScope) AllowsKnowledgeBase(kbID string) bool {
@@ -157,6 +163,9 @@ func normalizeScopeArray(in StringArray) StringArray {
 		}
 		seen[item] = struct{}{}
 		out = append(out, item)
+	}
+	if len(out) == 0 {
+		out = StringArray{TenantAPIKeyScopeRead}
 	}
 	return out
 }

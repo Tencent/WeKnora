@@ -85,6 +85,16 @@ func (r *fakeTenantAPIKeyRepo) RevokeAPIKey(_ context.Context, tenantID uint64, 
 	return apprepo.ErrTenantAPIKeyNotFound
 }
 
+func (r *fakeTenantAPIKeyRepo) RevokeAllAPIKeys(_ context.Context, tenantID uint64) error {
+	now := time.Now()
+	for _, key := range r.byHash {
+		if key.TenantID == tenantID && key.RevokedAt == nil {
+			key.RevokedAt = &now
+		}
+	}
+	return nil
+}
+
 func (r *fakeTenantAPIKeyRepo) UpdateAPIKeyHash(_ context.Context, id uint64, hash string) error {
 	for oldHash, key := range r.byHash {
 		if key.ID == id && key.RevokedAt == nil {
@@ -104,32 +114,6 @@ func (r *fakeTenantAPIKeyRepo) UpdateAPIKeyLastUsed(_ context.Context, id uint64
 		}
 	}
 	return nil
-}
-
-func TestTenantAPIKeyServiceEnsureTenantAPIKeyBackfillsMetadata(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeTenantAPIKeyRepo()
-	svc := NewTenantAPIKeyService(repo)
-	token := "sk-42-migrated-secret-value"
-
-	if err := svc.EnsureTenantAPIKey(ctx, 42, token); err != nil {
-		t.Fatalf("EnsureTenantAPIKey returned error: %v", err)
-	}
-
-	keys, err := svc.ListAPIKeys(ctx, 42)
-	if err != nil {
-		t.Fatalf("ListAPIKeys returned error: %v", err)
-	}
-	if len(keys) != 1 {
-		t.Fatalf("tenant keys count = %d, want 1", len(keys))
-	}
-	key := keys[0]
-	if key.APIKey != token {
-		t.Fatalf("tenant key api_key = %q, want %q", key.APIKey, token)
-	}
-	if !(types.TenantAPIKeyScope{Scopes: key.Scopes}).HasScope(types.TenantAPIKeyScopeAdmin) {
-		t.Fatalf("tenant key should include admin scope")
-	}
 }
 
 func TestTenantAPIKeyServiceAuthenticateTenantAPIKeyRepairsMigratedHash(t *testing.T) {
@@ -156,5 +140,45 @@ func TestTenantAPIKeyServiceAuthenticateTenantAPIKeyRepairsMigratedHash(t *testi
 	}
 	if _, err := svc.AuthenticateAPIKey(ctx, token); err != nil {
 		t.Fatalf("AuthenticateAPIKey after repair returned error: %v", err)
+	}
+}
+
+func TestTenantAPIKeyServiceRevokeAllAPIKeys(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+
+	first, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID: 42,
+		Name:     "first",
+		Scopes:   []string{types.TenantAPIKeyScopeRead},
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey first returned error: %v", err)
+	}
+	second, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID: 42,
+		Name:     "second",
+		Scopes:   []string{types.TenantAPIKeyScopeRead},
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey second returned error: %v", err)
+	}
+
+	if err := svc.RevokeAllAPIKeys(ctx, 42); err != nil {
+		t.Fatalf("RevokeAllAPIKeys returned error: %v", err)
+	}
+	if _, err := svc.AuthenticateAPIKey(ctx, first.Token); err == nil {
+		t.Fatal("first key should be revoked")
+	}
+	if _, err := svc.AuthenticateAPIKey(ctx, second.Token); err == nil {
+		t.Fatal("second key should be revoked")
+	}
+	keys, err := svc.ListAPIKeys(ctx, 42)
+	if err != nil {
+		t.Fatalf("ListAPIKeys returned error: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Fatalf("active keys count = %d, want 0", len(keys))
 	}
 }
