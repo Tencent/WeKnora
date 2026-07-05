@@ -395,7 +395,8 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base
+// validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base.
+// Enforces per-API-key KB scope before tenant/share/agent resolution.
 // Returns the knowledge base, knowledge base ID, effective tenant ID for embedding, permission level, and any errors encountered
 // For owned KBs, effectiveTenantID is the caller's tenant ID
 // For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
@@ -418,6 +419,9 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, "", 0, "", apperrors.NewBadRequestError("Knowledge base ID cannot be empty")
+	}
+	if err := requireTenantAPIKeyKnowledgeBase(ctx, id); err != nil {
+		return nil, id, 0, "", err
 	}
 
 	// Verify tenant has permission to access this knowledge base
@@ -958,6 +962,14 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
 		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	kbIDs := []string{req.SourceID}
+	if req.TargetID != "" {
+		kbIDs = append(kbIDs, req.TargetID)
+	}
+	if err := requireTenantAPIKeyKnowledgeBases(ctx, kbIDs...); err != nil {
+		c.Error(err)
 		return
 	}
 

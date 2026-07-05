@@ -177,3 +177,23 @@ func TestCloneContextPreservesPrincipal(t *testing.T) {
 		t.Fatalf("SessionOwnerIDFromContext(cloned) = %q", got)
 	}
 }
+
+func TestCloneContextPreservesTenantAPIKeyScope(t *testing.T) {
+	t.Parallel()
+
+	want := types.TenantAPIKeyScope{
+		KeyID:            7,
+		Scopes:           types.StringArray{types.TenantAPIKeyScopeRead},
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+	}
+	ctx := types.WithTenantAPIKeyScope(context.Background(), want)
+	cloned := CloneContext(ctx)
+
+	got, ok := types.TenantAPIKeyScopeFromContext(cloned)
+	if !ok {
+		t.Fatal("TenantAPIKeyScopeFromContext(cloned) = false, want true")
+	}
+	if got.KeyID != want.KeyID || !got.AllowsKnowledgeBase("kb-1") || got.AllowsKnowledgeBase("kb-2") {
+		t.Fatalf("cloned scope = %#v, want key_id=7 scoped to kb-1", got)
+	}
+}
