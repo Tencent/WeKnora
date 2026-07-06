@@ -52,6 +52,16 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
+                <t-button size="small" variant="outline" shape="round"
+                    :class="['answer-feedback-btn', { 'is-active': answerFeedback.type === 'like' }]" title="点赞"
+                    @click.stop="handleLikeAnswer">
+                    <t-icon name="thumb-up" />
+                </t-button>
+                <t-button size="small" variant="outline" shape="round"
+                    :class="['answer-feedback-btn', 'is-negative', { 'is-active': answerFeedback.type === 'dislike' }]"
+                    title="点踩" @click.stop="handleDislikeAnswer">
+                    <t-icon name="thumb-down" />
+                </t-button>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -68,6 +78,17 @@
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
                 :on-leave="scheduleCitationClose" />
         </Teleport>
+        <t-dialog v-model:visible="dislikeDialogVisible" header="反馈原因" width="420px" :confirm-btn="'提交'"
+            :cancel-btn="'取消'" @confirm="submitDislikeFeedback">
+            <div class="answer-feedback-dialog">
+                <t-radio-group v-model="dislikeReason">
+                    <t-radio v-for="reason in feedbackReasonOptions" :key="reason" :value="reason">
+                        {{ reason }}
+                    </t-radio>
+                </t-radio-group>
+                <t-textarea v-model="dislikeReason" placeholder="也可以补充具体原因" :autosize="{ minRows: 3, maxRows: 5 }" />
+            </div>
+        </t-dialog>
     </div>
 </template>
 <script setup>
@@ -256,6 +277,37 @@ const handleAddToKnowledge = () => {
     });
 
     MessagePlugin.info(t('chat.editorOpened'));
+};
+
+const answerFeedback = reactive({
+    type: '',
+    reason: '',
+});
+const dislikeDialogVisible = ref(false);
+const dislikeReason = ref('');
+const feedbackReasonOptions = [
+    '回答不准确',
+    '没有解决问题',
+    '引用内容不相关',
+    '表达不清晰',
+];
+
+const handleLikeAnswer = () => {
+    answerFeedback.type = 'like';
+    answerFeedback.reason = '';
+    MessagePlugin.success('感谢反馈');
+};
+
+const handleDislikeAnswer = () => {
+    dislikeReason.value = answerFeedback.reason || '';
+    dislikeDialogVisible.value = true;
+};
+
+const submitDislikeFeedback = () => {
+    answerFeedback.type = 'dislike';
+    answerFeedback.reason = dislikeReason.value.trim();
+    dislikeDialogVisible.value = false;
+    MessagePlugin.success('感谢反馈，我们会继续改进');
 };
 
 // 处理 markdown-content 中图片的点击事件

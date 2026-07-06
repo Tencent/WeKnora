@@ -291,6 +291,16 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <t-button size="small" variant="outline" shape="round"
+                  :class="['answer-feedback-btn', { 'is-active': getAnswerFeedbackType(event) === 'like' }]"
+                  title="点赞" @click.stop="handleLikeAnswer(event)">
+                  <t-icon name="thumb-up" />
+                </t-button>
+                <t-button size="small" variant="outline" shape="round"
+                  :class="['answer-feedback-btn', 'is-negative', { 'is-active': getAnswerFeedbackType(event) === 'dislike' }]"
+                  title="点踩" @click.stop="handleDislikeAnswer(event)">
+                  <t-icon name="thumb-down" />
+                </t-button>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -404,6 +414,18 @@
   <!-- Image Preview -->
   <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
 
+  <t-dialog v-model:visible="dislikeDialogVisible" header="反馈原因" width="420px" :confirm-btn="'提交'"
+    :cancel-btn="'取消'" @confirm="submitDislikeFeedback">
+    <div class="answer-feedback-dialog">
+      <t-radio-group v-model="dislikeReason">
+        <t-radio v-for="reason in feedbackReasonOptions" :key="reason" :value="reason">
+          {{ reason }}
+        </t-radio>
+      </t-radio-group>
+      <t-textarea v-model="dislikeReason" placeholder="也可以补充具体原因" :autosize="{ minRows: 3, maxRows: 5 }" />
+    </div>
+  </t-dialog>
+
   <!-- Wiki Page Detail Drawer -->
   <t-drawer v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
     placement="right" attach="body" :show-overlay="true" :close-btn="true" :close-on-overlay-click="true"
@@ -432,7 +454,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
@@ -2204,6 +2226,57 @@ const handleAddToKnowledge = (answerEvent: any) => {
   });
 
   MessagePlugin.info(t('agentStream.saveToKb.editorOpened'));
+};
+
+type AnswerFeedbackType = 'like' | 'dislike';
+
+const answerFeedbackState = reactive<Record<string, { type: AnswerFeedbackType; reason?: string }>>({});
+const dislikeDialogVisible = ref(false);
+const dislikeReason = ref('');
+const pendingDislikeKey = ref('');
+
+const feedbackReasonOptions = [
+  '回答不准确',
+  '没有解决问题',
+  '引用内容不相关',
+  '表达不清晰',
+];
+
+const getAnswerFeedbackKey = (answerEvent: any) => {
+  if (answerEvent?.event_id) return `event:${answerEvent.event_id}`;
+  if (answerEvent?.id) return `event:${answerEvent.id}`;
+
+  const sessionKey = props.session?.id || props.sessionId || 'current';
+  const content = getActualContent(answerEvent);
+  return `${sessionKey}:${content.slice(0, 80)}`;
+};
+
+const getAnswerFeedbackType = (answerEvent: any) => {
+  return answerFeedbackState[getAnswerFeedbackKey(answerEvent)]?.type;
+};
+
+const handleLikeAnswer = (answerEvent: any) => {
+  const key = getAnswerFeedbackKey(answerEvent);
+  answerFeedbackState[key] = { type: 'like' };
+  MessagePlugin.success('感谢反馈');
+};
+
+const handleDislikeAnswer = (answerEvent: any) => {
+  const key = getAnswerFeedbackKey(answerEvent);
+  pendingDislikeKey.value = key;
+  dislikeReason.value = answerFeedbackState[key]?.reason || '';
+  dislikeDialogVisible.value = true;
+};
+
+const submitDislikeFeedback = () => {
+  if (!pendingDislikeKey.value) return;
+
+  answerFeedbackState[pendingDislikeKey.value] = {
+    type: 'dislike',
+    reason: dislikeReason.value.trim(),
+  };
+  dislikeDialogVisible.value = false;
+  MessagePlugin.success('感谢反馈，我们会继续改进');
 };
 </script>
 
