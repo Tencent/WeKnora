@@ -114,7 +114,7 @@
                     <tr>
                       <th>{{ $t('integrations.api.apiKeyName') }}</th>
                       <th>{{ $t('integrations.api.apiKeyValue') }}</th>
-                      <th>{{ $t('integrations.api.apiKeyScopes') }}</th>
+                      <th>{{ $t('integrations.api.apiKeyAccessRole') }}</th>
                       <th>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</th>
                       <th>{{ $t('integrations.api.createdAt') }}</th>
                       <th class="api-key-table__actions-heading">{{ $t('integrations.api.actions') }}</th>
@@ -129,11 +129,9 @@
                         <code class="api-key-fingerprint">{{ formatKeyMaskedValue(key) }}</code>
                       </td>
                       <td>
-                        <div class="scope-tags">
-                          <t-tag v-for="scope in key.scopes" :key="scope" size="small" variant="light">
-                            {{ scope }}
-                          </t-tag>
-                        </div>
+                        <t-tag size="small" variant="light">
+                          {{ formatApiKeyAccessRoleLabel(key.scopes) }}
+                        </t-tag>
                       </td>
                       <td>
                         <span class="api-key-knowledge-scope">
@@ -145,14 +143,6 @@
                       </td>
                       <td>
                         <div class="api-key-table__actions">
-                          <t-button
-                            shape="square"
-                            variant="text"
-                            :title="$t('integrations.api.toggleApiKeyVisible')"
-                            @click="toggleAPIKeyVisible(key.id)"
-                          >
-                            <t-icon :name="isAPIKeyVisible(key.id) ? 'browse-off' : 'browse'" />
-                          </t-button>
                           <t-button
                             shape="square"
                             variant="text"
@@ -440,7 +430,7 @@
     <t-dialog
       v-model:visible="apiKeyDialogVisible"
       :footer="false"
-      width="400px"
+      width="450px"
       dialog-class-name="api-key-create-dialog"
       :close-on-overlay-click="false"
       destroy-on-close
@@ -449,7 +439,7 @@
         <div class="api-key-create-heading">
           <div class="api-key-create-heading-row">
             <span class="api-key-create-heading-mark">
-              <t-icon name="secured" size="14px" aria-hidden="true" />
+              <t-icon name="lock-on" size="16px" aria-hidden="true" />
             </span>
             <span class="api-key-create-title">{{ $t('integrations.api.createApiKey') }}</span>
           </div>
@@ -464,33 +454,23 @@
           </div>
           <t-input
             v-model="apiKeyForm.name"
-            size="small"
             :placeholder="$t('integrations.api.apiKeyNamePlaceholder')"
           />
         </div>
 
         <div class="api-key-dialog-row">
           <div class="api-key-dialog-row__label">
-            <label>{{ $t('integrations.api.apiKeyScopes') }}</label>
+            <label>{{ $t('integrations.api.apiKeyAccessRole') }}</label>
           </div>
-          <t-checkbox-group v-model="apiKeyForm.scopes" class="scope-checkbox-group">
-            <t-checkbox value="read" class="scope-checkbox-option">{{ $t('integrations.api.scopeRead') }}</t-checkbox>
-            <t-checkbox value="write" class="scope-checkbox-option">{{ $t('integrations.api.scopeWrite') }}</t-checkbox>
-            <t-checkbox value="admin" class="scope-checkbox-option">{{ $t('integrations.api.scopeAdmin') }}</t-checkbox>
-          </t-checkbox-group>
-          <div class="scope-help">
-            <p>
-              <strong>{{ $t('integrations.api.scopeRead') }}</strong>
-              <span>{{ $t('integrations.api.scopeReadDesc') }}</span>
-            </p>
-            <p>
-              <strong>{{ $t('integrations.api.scopeWrite') }}</strong>
-              <span>{{ $t('integrations.api.scopeWriteDesc') }}</span>
-            </p>
-            <p>
-              <strong>{{ $t('integrations.api.scopeAdmin') }}</strong>
-              <span>{{ $t('integrations.api.scopeAdminDesc') }}</span>
-            </p>
+          <t-radio-group v-model="apiKeyForm.role" class="mode-radio api-key-role-radio">
+            <t-radio-button value="viewer">{{ $t('integrations.api.accessRoleViewer') }}</t-radio-button>
+            <t-radio-button value="contributor">{{ $t('integrations.api.accessRoleContributor') }}</t-radio-button>
+            <t-radio-button value="admin">{{ $t('integrations.api.accessRoleAdmin') }}</t-radio-button>
+          </t-radio-group>
+          <p class="scope-role-hint">{{ $t('integrations.api.apiKeyAccessRoleHint') }}</p>
+          <div class="scope-help scope-help--role">
+            <p class="scope-help__role">{{ formatApiKeyAccessRoleLabel(accessRoleToScopes(apiKeyForm.role)) }}</p>
+            <p class="scope-help__desc">{{ apiKeyFormRoleDesc }}</p>
           </div>
         </div>
 
@@ -500,7 +480,6 @@
           </div>
           <t-select
             v-model="apiKeyForm.knowledge_base_ids"
-            size="small"
             multiple
             filterable
             clearable
@@ -563,7 +542,6 @@ const apiKeys = ref<TenantAPIKey[]>([])
 const apiKeysLoading = ref(false)
 const apiKeyDialogVisible = ref(false)
 const apiKeyCreating = ref(false)
-const visibleAPIKeyIDs = ref<Set<number>>(new Set())
 const knowledgeBasesLoading = ref(false)
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
 const secretInput = ref('')
@@ -590,10 +568,51 @@ const form = reactive({
   require_direct_header: false,
 })
 
+type ApiKeyAccessRole = 'viewer' | 'contributor' | 'admin'
+
 const apiKeyForm = reactive({
   name: '',
-  scopes: ['read'] as TenantAPIKeyScope[],
+  role: 'viewer' as ApiKeyAccessRole,
   knowledge_base_ids: [] as string[],
+})
+
+function scopesToAccessRole(scopes: TenantAPIKeyScope[] | undefined): ApiKeyAccessRole {
+  const normalized = (scopes ?? []).map((scope) => scope.toLowerCase())
+  if (normalized.includes('admin')) return 'admin'
+  if (normalized.includes('write')) return 'contributor'
+  return 'viewer'
+}
+
+function accessRoleToScopes(role: ApiKeyAccessRole): TenantAPIKeyScope[] {
+  switch (role) {
+    case 'admin':
+      return ['admin']
+    case 'contributor':
+      return ['write']
+    default:
+      return ['read']
+  }
+}
+
+function formatApiKeyAccessRoleLabel(scopes: TenantAPIKeyScope[] | undefined): string {
+  const role = scopesToAccessRole(scopes)
+  const labels: Record<ApiKeyAccessRole, string> = {
+    viewer: t('integrations.api.accessRoleViewer'),
+    contributor: t('integrations.api.accessRoleContributor'),
+    admin: t('integrations.api.accessRoleAdmin'),
+  }
+  return labels[role]
+}
+
+const apiKeyFormRoleDesc = computed(() => {
+  switch (apiKeyForm.role) {
+    case 'admin':
+      return t('integrations.api.accessRoleAdminDesc')
+    case 'contributor':
+      return t('integrations.api.accessRoleContributorDesc')
+    default:
+      return t('integrations.api.accessRoleViewerDesc')
+  }
 })
 
 type PlaygroundStatus = '' | 'running' | 'success' | 'failed' | 'stopped'
@@ -1118,7 +1137,7 @@ function openApiDoc() {
 
 function openCreateAPIKeyDialog() {
   apiKeyForm.name = ''
-  apiKeyForm.scopes = ['read']
+  apiKeyForm.role = 'viewer'
   apiKeyForm.knowledge_base_ids = []
   apiKeyDialogVisible.value = true
   void loadKnowledgeBaseOptions()
@@ -1129,15 +1148,11 @@ async function createScopedAPIKey() {
     MessagePlugin.error(t('integrations.api.apiKeyNameRequired'))
     return
   }
-  if (apiKeyForm.scopes.length === 0) {
-    MessagePlugin.error(t('integrations.api.apiKeyScopeRequired'))
-    return
-  }
   apiKeyCreating.value = true
   try {
     const resp = await createTenantAPIKey(tenantId.value, {
       name: apiKeyForm.name.trim(),
-      scopes: apiKeyForm.scopes,
+      scopes: accessRoleToScopes(apiKeyForm.role),
       knowledge_base_ids: apiKeyForm.knowledge_base_ids,
     })
     if (!resp.success || !resp.data?.api_key) {
@@ -1145,7 +1160,6 @@ async function createScopedAPIKey() {
     }
     apiKeyDialogVisible.value = false
     apiKey.value = resp.data.api_key
-    visibleAPIKeyIDs.value = new Set([...visibleAPIKeyIDs.value, resp.data.id])
     MessagePlugin.success(t('integrations.api.apiKeyCreated'))
     await loadAPIKeys()
   } catch (err: any) {
@@ -1185,24 +1199,9 @@ function formatKeyKnowledgeScope(ids: string[] = []) {
   return names.join(', ')
 }
 
-function isAPIKeyVisible(id: number) {
-  return visibleAPIKeyIDs.value.has(id)
-}
-
-function toggleAPIKeyVisible(id: number) {
-  const next = new Set(visibleAPIKeyIDs.value)
-  if (next.has(id)) {
-    next.delete(id)
-  } else {
-    next.add(id)
-  }
-  visibleAPIKeyIDs.value = next
-}
-
 function formatKeyMaskedValue(key: TenantAPIKey) {
   const value = key.api_key || ''
   if (!value) return '-'
-  if (isAPIKeyVisible(key.id)) return value
   return maskAPIKey(value)
 }
 
@@ -1694,12 +1693,6 @@ onBeforeUnmount(stopPlayground)
   white-space: nowrap;
 }
 
-.scope-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  min-width: 0;
-}
 
 .api-key-dialog {
   display: flex;
@@ -1730,11 +1723,12 @@ onBeforeUnmount(stopPlayground)
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  color: var(--td-text-color-secondary);
-  border-radius: 4px;
-  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-brand-color);
+  line-height: 0;
+
+  :deep(.t-icon) {
+    display: inline-flex;
+  }
 }
 
 .api-key-create-title {
@@ -1746,12 +1740,11 @@ onBeforeUnmount(stopPlayground)
 }
 
 .api-key-create-desc {
-  max-width: 300px;
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
-  line-height: 18px;
+  line-height: 20px;
 }
 
 .api-key-dialog-row {
@@ -1777,7 +1770,7 @@ onBeforeUnmount(stopPlayground)
       align-items: center;
       gap: 8px;
       color: var(--td-text-color-primary);
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
       line-height: 1.45;
 
@@ -1817,44 +1810,46 @@ onBeforeUnmount(stopPlayground)
   }
 }
 
-.scope-checkbox-group {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+.api-key-role-radio {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+
+  :deep(.t-radio-group) {
+    display: flex;
+    width: 100%;
+  }
+
+  :deep(.t-radio-button) {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  :deep(.t-radio-button__former) {
+    position: absolute;
+    width: 0;
+    height: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  :deep(.t-radio-button__input) {
+    display: none;
+  }
+
+  :deep(.t-radio-button__label) {
+    flex: 0 1 auto;
+    margin-left: 0;
+    text-align: center;
+  }
 }
 
-.scope-checkbox-option {
-  min-width: 0;
-  height: 30px;
-  margin-right: 0 !important;
-  padding: 0 8px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 4px;
-  background: transparent;
-  transition: border-color 0.15s ease, background 0.15s ease;
-
-  &:hover {
-    border-color: var(--td-component-border);
-    background: var(--td-bg-color-secondarycontainer);
-  }
-
-  :deep(.t-checkbox__input) {
-    flex: 0 0 auto;
-  }
-
-  :deep(.t-checkbox__input .t-checkbox__inner) {
-    width: 14px;
-    height: 14px;
-  }
-
-  :deep(.t-checkbox__label) {
-    color: var(--td-text-color-secondary);
-    font-size: 12px;
-    line-height: 30px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+.scope-role-hint {
+  margin: 8px 0 0;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .scope-help {
@@ -1865,23 +1860,23 @@ onBeforeUnmount(stopPlayground)
   border-radius: 4px;
   background: var(--td-bg-color-secondarycontainer);
 
-  p {
-    display: flex;
-    gap: 6px;
+  &--role {
+    margin-top: 8px;
+  }
+
+  &__role {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 20px;
+  }
+
+  &__desc {
     margin: 0;
     color: var(--td-text-color-placeholder);
-    font-size: 11px;
-    line-height: 17px;
-  }
-
-  strong {
-    flex: 0 0 auto;
-    color: var(--td-text-color-secondary);
-    font-weight: 600;
-  }
-
-  span {
-    min-width: 0;
+    font-size: 12px;
+    line-height: 18px;
   }
 }
 
