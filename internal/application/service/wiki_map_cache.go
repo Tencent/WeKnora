@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -14,6 +16,28 @@ import (
 
 type wikiCachedTextPayload struct {
 	Text string `json:"text"`
+}
+
+func renderPreviousWikiSlugs(oldPageSlugs map[string]bool) string {
+	if len(oldPageSlugs) == 0 {
+		return "(none — this is a new document)"
+	}
+	slugs := make([]string, 0, len(oldPageSlugs))
+	for slug := range oldPageSlugs {
+		if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
+			continue
+		}
+		slugs = append(slugs, slug)
+	}
+	if len(slugs) == 0 {
+		return "(none — this is a new document)"
+	}
+	sort.Strings(slugs)
+	var sb strings.Builder
+	for _, slug := range slugs {
+		fmt.Fprintf(&sb, "- %s\n", slug)
+	}
+	return sb.String()
 }
 
 func wikiMapContentKey(kind string, data map[string]string) string {
