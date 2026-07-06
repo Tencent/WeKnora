@@ -26,7 +26,7 @@ func TestAuthLoginResponse_ViewerOmitsActiveTenantSecrets(t *testing.T) {
 	assert.NotContains(t, s, "parser-secret-123")
 }
 
-func TestAuthLoginResponse_OwnerGetsAPIKey(t *testing.T) {
+func TestAuthLoginResponse_OwnerOmitsLegacyTenantAPIKey(t *testing.T) {
 	tenant := sampleSecretTenant()
 	resp := NewAuthLoginResponse(&types.LoginResponse{
 		Success:      true,
@@ -38,7 +38,10 @@ func TestAuthLoginResponse_OwnerGetsAPIKey(t *testing.T) {
 	})
 	body, err := json.Marshal(resp)
 	require.NoError(t, err)
-	assert.Contains(t, string(body), "tenant-api-key-123")
+	s := string(body)
+	assert.NotContains(t, s, `"api_key"`)
+	assert.NotContains(t, s, "legacy-search-secret-999")
+	assert.Contains(t, s, "web_search_config")
 }
 
 func TestAuthOIDCCallbackResponse_ViewerOmitsTenantSecrets(t *testing.T) {
