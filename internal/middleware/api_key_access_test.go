@@ -11,6 +11,31 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestRejectTenantAPIKeyManagementPath(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		Role: types.TenantRoleAdmin,
+	})
+
+	for _, path := range []string{
+		"/api/v1/tenants/1/api-keys",
+		"/api/v1/tenants/1/api-key",
+		"/api/v1/tenants/1/api-principal-config",
+		"/api/v1/tenants/1/api-principal-test-token",
+	} {
+		err := rejectTenantAPIKeyManagementPath(ctx, path)
+		if !stderrors.Is(err, errTenantAPIKeyScopeForbidden) {
+			t.Fatalf("management path %s error = %v, want errTenantAPIKeyScopeForbidden", path, err)
+		}
+	}
+
+	if err := rejectTenantAPIKeyManagementPath(ctx, "/api/v1/knowledge-bases"); err != nil {
+		t.Fatalf("non-management path should pass: %v", err)
+	}
+	if err := rejectTenantAPIKeyManagementPath(context.Background(), "/api/v1/tenants/1/api-keys"); err != nil {
+		t.Fatalf("non-api-key principal should pass: %v", err)
+	}
+}
+
 func TestRequireAPIKeyDenyBlocksAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
@@ -75,5 +100,15 @@ func TestRequireAPIKeyMinRoleEnforcesOnPost(t *testing.T) {
 	RequireAPIKeyMinRole(types.TenantRoleViewer)(c)
 	if c.IsAborted() {
 		t.Fatal("viewer key should pass viewer min role on POST")
+	}
+}
+
+func TestRequireAPIKeyMinRoleForUnsafeAllowsContributorKnowledgeWrite(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		Role:             types.TenantRoleContributor,
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+	})
+	if err := requireTenantAPIKeyMinRole(ctx, types.TenantRoleContributor); err != nil {
+		t.Fatalf("scoped knowledge write should pass route guard: %v", err)
 	}
 }

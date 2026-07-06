@@ -24,22 +24,21 @@ func TestTenantAPIKeyRouteScopeManifest(t *testing.T) {
 	baselineCases := []struct {
 		name    string
 		ctx     context.Context
-		method  string
 		path    string
 		allowed bool
 	}{
-		{name: "read get kb list", ctx: readCtx, method: http.MethodGet, path: "/api/v1/knowledge-bases", allowed: true},
-		{name: "read get wiki page", ctx: readCtx, method: http.MethodGet, path: "/api/v1/knowledgebase/kb-1/wiki/pages", allowed: true},
-		{name: "admin reset api key blocked", ctx: adminCtx, method: http.MethodPost, path: "/api/v1/tenants/1/api-key", allowed: false},
-		{name: "admin api principal blocked", ctx: adminCtx, method: http.MethodGet, path: "/api/v1/tenants/1/api-principal-config", allowed: false},
+		{name: "read get kb list", ctx: readCtx, path: "/api/v1/knowledge-bases", allowed: true},
+		{name: "read get wiki page", ctx: readCtx, path: "/api/v1/knowledgebase/kb-1/wiki/pages", allowed: true},
+		{name: "admin reset api key blocked", ctx: adminCtx, path: "/api/v1/tenants/1/api-key", allowed: false},
+		{name: "admin api principal blocked", ctx: adminCtx, path: "/api/v1/tenants/1/api-principal-config", allowed: false},
 	}
 	for _, tc := range baselineCases {
 		t.Run("baseline/"+tc.name, func(t *testing.T) {
-			err := authorizeTenantAPIKeyAccess(tc.ctx, tc.method, tc.path)
+			err := rejectTenantAPIKeyManagementPath(tc.ctx, tc.path)
 			got := err == nil
 			if got != tc.allowed {
-				t.Fatalf("authorizeTenantAPIKeyAccess(%s %s) allowed=%v, want %v (err=%v)",
-					tc.method, tc.path, got, tc.allowed, err)
+				t.Fatalf("rejectTenantAPIKeyManagementPath(%s) allowed=%v, want %v (err=%v)",
+					tc.path, got, tc.allowed, err)
 			}
 		})
 	}

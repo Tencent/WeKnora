@@ -260,7 +260,7 @@ func authenticateAPIKeyRequest(
 	if c.IsAborted() {
 		return false
 	}
-	if err := authorizeTenantAPIKeyAccess(c.Request.Context(), c.Request.Method, c.Request.URL.Path); err != nil {
+	if err := rejectTenantAPIKeyManagementPath(c.Request.Context(), c.Request.URL.Path); err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this operation"})
 		c.Abort()
 		return false

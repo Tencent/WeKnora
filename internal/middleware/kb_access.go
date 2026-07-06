@@ -238,8 +238,8 @@ func RequireKBAccess(
 		}
 
 		ctx := c.Request.Context()
-		if err := authorizeTenantAPIKeyKnowledgeBase(ctx, kbID); err != nil {
-			_ = c.Error(apperrors.NewForbiddenError("API key scope does not allow this knowledge base"))
+		if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+			_ = c.Error(err)
 			c.Abort()
 			return
 		}

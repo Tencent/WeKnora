@@ -10,8 +10,8 @@ import (
 )
 
 // TestAuthenticateAPIKeyScopeUsesRequestContextAfterAttach verifies the
-// authorizeTenantAPIKeyAccess call in authenticateAPIKeyRequest reads scope
-// from c.Request.Context() after attachAPIKeyAuthContext, not the pre-attach ctx.
+// rejectTenantAPIKeyManagementPath call in authenticateAPIKeyRequest reads
+// scope from c.Request.Context() after attachAPIKeyAuthContext.
 func TestAuthenticateAPIKeyScopeUsesRequestContextAfterAttach(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -20,15 +20,15 @@ func TestAuthenticateAPIKeyScopeUsesRequestContextAfterAttach(t *testing.T) {
 
 	preAttach := c.Request.Context()
 	c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(preAttach, types.TenantAPIKeyScope{
-		KeyID:  1,
-		Role:   types.TenantRoleViewer,
+		KeyID: 1,
+		Role:  types.TenantRoleViewer,
 	}))
 
-	if err := authorizeTenantAPIKeyAccess(preAttach, c.Request.Method, c.Request.URL.Path); err != nil {
+	if err := rejectTenantAPIKeyManagementPath(preAttach, c.Request.URL.Path); err != nil {
 		t.Fatalf("pre-attach ctx should not carry scope and must not block: %v", err)
 	}
-	if err := authorizeTenantAPIKeyAccess(c.Request.Context(), c.Request.Method, c.Request.URL.Path); err != nil {
-		t.Fatalf("baseline defers unsafe DELETE to route guards: %v", err)
+	if err := rejectTenantAPIKeyManagementPath(c.Request.Context(), c.Request.URL.Path); err != nil {
+		t.Fatalf("non-management path should pass auth baseline: %v", err)
 	}
 	if err := requireTenantAPIKeyMinRole(c.Request.Context(), types.TenantRoleContributor); err == nil {
 		t.Fatal("viewer key must not satisfy contributor route guard on DELETE")
