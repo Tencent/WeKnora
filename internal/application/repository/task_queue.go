@@ -91,6 +91,24 @@ func (r *taskPendingOpsRepository) DeleteByIDs(ctx context.Context, ids []int64)
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
 	var newCount int
+	if !isPostgres(r.db) {
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			res := tx.Model(&types.TaskPendingOp{}).
+				Where("id = ?", id).
+				UpdateColumn("fail_count", gorm.Expr("fail_count + 1"))
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				return nil
+			}
+			return tx.Model(&types.TaskPendingOp{}).
+				Select("fail_count").
+				Where("id = ?", id).
+				Scan(&newCount).Error
+		})
+		return newCount, err
+	}
 	err := r.db.WithContext(ctx).Raw(
 		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
 		id,

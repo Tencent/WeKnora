@@ -467,6 +467,13 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 		if config.Database == "" {
 			return errors.NewValidationError("database is required for doris")
 		}
+	case types.MySQLRetrieverEngineType:
+		if config.Addr == "" {
+			return errors.NewValidationError("addr is required for mysql")
+		}
+		if config.Database == "" {
+			return errors.NewValidationError("database is required for mysql")
+		}
 	case types.OpenSearchRetrieverEngineType:
 		if config.Addr == "" {
 			return errors.NewValidationError("addr is required for opensearch")
@@ -506,7 +513,8 @@ func validateConnectionAddrSSRF(engineType types.RetrieverEngineType, config typ
 		types.OpenSearchRetrieverEngineType,
 		types.MilvusRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
-		types.DorisRetrieverEngineType:
+		types.DorisRetrieverEngineType,
+		types.MySQLRetrieverEngineType:
 		// Single address field: a URL (es/opensearch) or bare host:port
 		// (milvus/tencent/doris). ValidateURLForSSRF normalises both.
 		return check(config.Addr)

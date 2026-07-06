@@ -96,7 +96,7 @@ services:
       - LANGFUSE_REQUEST_TIMEOUT=${LANGFUSE_REQUEST_TIMEOUT:-}
       - LANGFUSE_SAMPLE_RATE=${LANGFUSE_SAMPLE_RATE:-}
       - LANGFUSE_DEBUG=${LANGFUSE_DEBUG:-}
-      - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-}
+      - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-postgres}
       - ELASTICSEARCH_ADDR=${ELASTICSEARCH_ADDR:-}
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
@@ -130,6 +130,12 @@ services:
       - DORIS_PASSWORD=${DORIS_PASSWORD:-}
       - DORIS_TABLE_PREFIX=${DORIS_TABLE_PREFIX:-weknora_embeddings}
       - DORIS_COMPAT_MODE=${DORIS_COMPAT_MODE:-auto}
+      - MYSQL_HOST=${MYSQL_HOST:-}
+      - MYSQL_PORT=${MYSQL_PORT:-}
+      - MYSQL_USERNAME=${MYSQL_USERNAME:-}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-}
+      - MYSQL_TABLE_PREFIX=${MYSQL_TABLE_PREFIX:-weknora_embeddings}
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
       - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
@@ -169,7 +175,7 @@ services:
       # overrides don't clobber it. (postgres is intentionally NOT listed: it
       # is not a user-registerable vector store, and whitelisting the app's own
       # DB host would skip the 5432 port block.)
-      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe}
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe,mysql}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
@@ -198,8 +204,6 @@ services:
     depends_on:
       redis:
         condition: service_started
-      postgres:
-        condition: service_healthy
       docreader:
         condition: service_healthy
     networks:
@@ -308,6 +312,28 @@ services:
     restart: unless-stopped
     # 添加停机时的优雅退出时间
     stop_grace_period: 1m
+
+  mysql:
+    image: mysql:8.0.37
+    container_name: WeKnora-mysql
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-${MYSQL_PASSWORD:-${DB_PASSWORD}}}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-${DB_NAME:-weknora}}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - WeKnora-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    profiles:
+      - mysql
 
   redis:
     image: redis:7.0-alpine
@@ -789,6 +815,7 @@ networks:
 
 volumes:
   postgres-data:
+  mysql_data:
   data-files:
   docreader-tmp:
   minio_data:

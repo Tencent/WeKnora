@@ -104,6 +104,67 @@ Secret name - supports existing secret
 {{- end }}
 
 {{/*
+主业务数据库驱动。
+*/}}
+{{- define "weknora.database.driver" -}}
+{{- default "postgres" .Values.database.driver }}
+{{- end }}
+
+{{/*
+主业务数据库主机。
+*/}}
+{{- define "weknora.database.host" -}}
+{{- $driver := include "weknora.database.driver" . }}
+{{- if .Values.database.external.host }}
+{{- .Values.database.external.host }}
+{{- else if eq $driver "mysql" }}
+{{- "mysql" }}
+{{- else }}
+{{- "postgres" }}
+{{- end }}
+{{- end }}
+
+{{/*
+主业务数据库端口。
+*/}}
+{{- define "weknora.database.port" -}}
+{{- $driver := include "weknora.database.driver" . }}
+{{- if .Values.database.external.port }}
+{{- .Values.database.external.port }}
+{{- else if eq $driver "mysql" }}
+{{- "3306" }}
+{{- else }}
+{{- "5432" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Effective database user.
+*/}}
+{{- define "weknora.database.user" -}}
+{{- $driver := include "weknora.database.driver" . }}
+{{- $user := default "postgres" .Values.secrets.dbUser }}
+{{- if and (eq $driver "mysql") (or (eq $user "") (eq $user "postgres")) }}
+{{- "root" }}
+{{- else }}
+{{- $user }}
+{{- end }}
+{{- end }}
+
+{{/*
+Default retrieval driver.
+*/}}
+{{- define "weknora.retrieve.driver" -}}
+{{- $dbDriver := include "weknora.database.driver" . }}
+{{- $retrieveDriver := default "" .Values.app.env.RETRIEVE_DRIVER }}
+{{- if and (eq $dbDriver "mysql") (or (eq $retrieveDriver "") (eq $retrieveDriver "postgres")) }}
+{{- "mysql" }}
+{{- else }}
+{{- default "postgres" $retrieveDriver }}
+{{- end }}
+{{- end }}
+
+{{/*
 Return the app image with tag.
 Defaults to Chart.appVersion if tag is not specified.
 */}}
@@ -131,6 +192,13 @@ Return the PostgreSQL image with tag.
 */}}
 {{- define "weknora.postgresql.image" -}}
 {{- printf "%s:%s" .Values.postgresql.image.repository .Values.postgresql.image.tag }}
+{{- end }}
+
+{{/*
+返回带标签的 MySQL 镜像。
+*/}}
+{{- define "weknora.mysql.image" -}}
+{{- printf "%s:%s" .Values.mysql.image.repository .Values.mysql.image.tag }}
 {{- end }}
 
 {{/*

@@ -19,6 +19,7 @@ import (
 const (
 	PathRead        = "/read"
 	PathListEngines = "/list-engines"
+	PathHealth      = "/health"
 )
 
 // --- JSON DTOs ---
@@ -89,14 +90,48 @@ func (p *HTTPDocumentReader) Reconnect(addr string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.baseURL = strings.TrimSuffix(addr, "/")
+	if closer, ok := p.client.Transport.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
 	logger.Infof(context.Background(), "INFO: HTTP docreader base URL set to %s", p.baseURL)
 	return nil
 }
 
 func (p *HTTPDocumentReader) IsConnected() bool {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.baseURL != ""
+	return p.HealthCheck(context.Background()) == nil
+}
+
+func (p *HTTPDocumentReader) HealthCheck(ctx context.Context) error {
+	base := p.base()
+	if base == "" {
+		return errNotConnected
+	}
+
+	healthCtx, cancel := withDefaultTimeout(ctx, docReaderHealthCheckTimeout)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(healthCtx, http.MethodGet, base+PathHealth, nil)
+	if err != nil {
+		return fmt.Errorf("http health request: %w", err)
+	}
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("http health failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return nil
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		_, err := p.listEnginesOnce(healthCtx, nil)
+		if err != nil {
+			return fmt.Errorf("http health fallback failed: %w", err)
+		}
+		return nil
+	}
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return &httpStatusError{op: "health", status: resp.StatusCode, body: string(bodyBytes)}
 }
 
 func (p *HTTPDocumentReader) Close() error { return nil }
@@ -118,6 +153,19 @@ type httpListEnginesResponse struct {
 }
 
 func (p *HTTPDocumentReader) ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
+	engines, err := p.listEnginesOnce(ctx, overrides)
+	if err == nil || !isRetryableHTTPError(err) {
+		return engines, err
+	}
+	addr := p.base()
+	logger.Warnf(ctx, "HTTP docreader ListEngines failed, reconnecting once: %v", err)
+	if reconnectErr := p.Reconnect(addr); reconnectErr != nil {
+		return nil, fmt.Errorf("%w (reconnect failed: %v)", err, reconnectErr)
+	}
+	return p.listEnginesOnce(ctx, overrides)
+}
+
+func (p *HTTPDocumentReader) listEnginesOnce(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
 	base := p.base()
 	if base == "" {
 		return nil, errNotConnected
@@ -141,8 +189,8 @@ func (p *HTTPDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		respBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("http list-engines status %d: %s", resp.StatusCode, string(respBytes))
+		respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &httpStatusError{op: "list-engines", status: resp.StatusCode, body: string(respBytes)}
 	}
 
 	var out httpListEnginesResponse
@@ -183,6 +231,19 @@ func fromHTTPReadResponse(resp *httpReadResponse) *types.ReadResult {
 }
 
 func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	result, err := p.readOnce(ctx, req)
+	if err == nil || !isRetryableHTTPError(err) {
+		return result, err
+	}
+	addr := p.base()
+	logger.Warnf(ctx, "HTTP docreader Read failed, reconnecting once: %v", err)
+	if reconnectErr := p.Reconnect(addr); reconnectErr != nil {
+		return nil, fmt.Errorf("%w (reconnect failed: %v)", err, reconnectErr)
+	}
+	return p.readOnce(ctx, req)
+}
+
+func (p *HTTPDocumentReader) readOnce(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	base := p.base()
 	if base == "" {
 		return nil, errNotConnected
@@ -220,8 +281,8 @@ func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("http read status %d: %s", resp.StatusCode, string(bodyBytes))
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &httpStatusError{op: "read", status: resp.StatusCode, body: string(bodyBytes)}
 	}
 	var out httpReadResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {

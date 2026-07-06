@@ -9,7 +9,9 @@ import (
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -106,6 +108,8 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	migrationsPath := "file://migrations/versioned"
 	if strings.HasPrefix(dsn, "sqlite3://") {
 		migrationsPath = "file://migrations/sqlite"
+	} else if strings.HasPrefix(dsn, "mysql://") {
+		migrationsPath = "file://migrations/mysql"
 	}
 
 	var m *migrate.Migrate
@@ -300,6 +304,7 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
+	migrationsPath := "file://migrations/versioned"
 	dbURL := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
 		os.Getenv("DB_USER"),
@@ -308,8 +313,37 @@ func GetMigrationVersion() (uint, bool, error) {
 		os.Getenv("DB_PORT"),
 		os.Getenv("DB_NAME"),
 	)
-
-	migrationsPath := "file://migrations/versioned"
+	switch os.Getenv("DB_DRIVER") {
+	case "sqlite":
+		dbPath := os.Getenv("DB_PATH")
+		if dbPath == "" {
+			dbPath = "./data/weknora.db"
+		}
+		migrationsPath = "file://migrations/sqlite"
+		dbURL = "sqlite3://" + dbPath
+	case "mysql":
+		host := os.Getenv("DB_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		port := os.Getenv("DB_PORT")
+		if port == "" {
+			port = "3306"
+		}
+		user := os.Getenv("DB_USER")
+		if user == "" {
+			user = "root"
+		}
+		migrationsPath = "file://migrations/mysql"
+		cfg := mysqlDriver.NewConfig()
+		cfg.User = user
+		cfg.Passwd = os.Getenv("DB_PASSWORD")
+		cfg.Net = "tcp"
+		cfg.Addr = host + ":" + port
+		cfg.DBName = os.Getenv("DB_NAME")
+		cfg.Params = map[string]string{"multiStatements": "true"}
+		dbURL = "mysql://" + cfg.FormatDSN()
+	}
 
 	m, err := migrate.New(migrationsPath, dbURL)
 	if err != nil {

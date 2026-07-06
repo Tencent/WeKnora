@@ -20,6 +20,41 @@ for dir in "${MOUNT_DIRS[@]}"; do
     fi
 done
 
+wait_for_database() {
+    if [ "${DB_WAIT_DISABLED:-false}" = "true" ]; then
+        return 0
+    fi
+
+    case "${DB_DRIVER:-postgres}" in
+        postgres|mysql)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+
+    local host="${DB_HOST:-postgres}"
+    local port="${DB_PORT:-5432}"
+    if [ "${DB_DRIVER:-postgres}" = "mysql" ]; then
+        host="${DB_HOST:-mysql}"
+        port="${DB_PORT:-3306}"
+    fi
+
+    local timeout_seconds="${DB_WAIT_TIMEOUT:-90}"
+    local elapsed=0
+    echo "Waiting for ${DB_DRIVER:-postgres} database at ${host}:${port}..."
+    while ! timeout 1 bash -c "cat < /dev/null > /dev/tcp/${host}/${port}" 2>/dev/null; do
+        elapsed=$((elapsed + 1))
+        if [ "$elapsed" -ge "$timeout_seconds" ]; then
+            echo "Timed out waiting for database at ${host}:${port}" >&2
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+wait_for_database
+
 # ─── Merge built-in skills into preloaded ───
 # Built-in skills are backed up at /app/skills/_builtin during image build.
 # After a bind-mount replaces /app/skills/preloaded, copy back any

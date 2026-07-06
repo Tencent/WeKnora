@@ -3,7 +3,10 @@ package container
 import (
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
+	gormmysql "gorm.io/driver/mysql"
 )
 
 func TestBuildMilvusClientConfig_UsesDatabaseName(t *testing.T) {
@@ -43,4 +46,31 @@ func TestBuildMilvusClientConfig_DefaultsAddressWhenMissing(t *testing.T) {
 	if len(cfg.DialOptions) != 1 {
 		t.Fatalf("expected one dial option, got %d", len(cfg.DialOptions))
 	}
+}
+
+func TestCreateMySQLEngine_WithMockDB(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	store := types.VectorStore{
+		ID:         "store-mysql",
+		Name:       "mysql",
+		EngineType: types.MySQLRetrieverEngineType,
+		ConnectionConfig: types.ConnectionConfig{
+			Addr:     "mysql:3306",
+			Database: "weknora",
+			Username: "root",
+			Password: "p@ss:word/with/slash",
+		},
+		IndexConfig: types.IndexConfig{CollectionPrefix: "tenant_embeddings"},
+	}
+
+	svc, err := createMySQLEngineWithDialector(store, gormmysql.New(gormmysql.Config{
+		Conn:                      db,
+		SkipInitializeWithVersion: true,
+	}))
+	require.NoError(t, err)
+	require.Equal(t, types.MySQLRetrieverEngineType, svc.EngineType())
+	require.NoError(t, mock.ExpectationsWereMet())
 }

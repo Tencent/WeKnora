@@ -178,3 +178,9 @@ func TestAuditAction_Phase3WireValues(t *testing.T) {
 		assert.Equal(t, c.wire, string(c.constant))
 	}
 }
+
+func TestAuditLogBeforeCreateDefaultsDetails(t *testing.T) {
+	entry := &AuditLog{}
+	assert.NoError(t, entry.BeforeCreate(nil))
+	assert.JSONEq(t, `{}`, string(entry.Details))
+}

@@ -3,7 +3,9 @@ package sandbox
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -71,6 +73,8 @@ func TestValidateConfig(t *testing.T) {
 }
 
 func TestLocalSandboxExecute(t *testing.T) {
+	requireFunctionalCommandForTest(t, "bash", "-c", "true")
+
 	// Create a temporary script
 	tmpDir, err := os.MkdirTemp("", "sandbox-test")
 	if err != nil {
@@ -123,6 +127,8 @@ echo "Args: $@"
 }
 
 func TestLocalSandboxTimeout(t *testing.T) {
+	requireFunctionalCommandForTest(t, "bash", "-c", "true")
+
 	// Create a temporary script that sleeps
 	tmpDir, err := os.MkdirTemp("", "sandbox-test")
 	if err != nil {
@@ -232,6 +238,8 @@ func TestExecuteResultHelpers(t *testing.T) {
 }
 
 func TestPythonScriptExecution(t *testing.T) {
+	requireFunctionalCommandForTest(t, "python3", "--version")
+
 	// Create a temporary Python script
 	tmpDir, err := os.MkdirTemp("", "sandbox-test")
 	if err != nil {
@@ -272,4 +280,17 @@ print(f"Arguments: {sys.argv[1:]}")
 	}
 
 	t.Logf("Python script output: %s", result.Stdout)
+}
+
+func requireFunctionalCommandForTest(t *testing.T, name string, args ...string) {
+	t.Helper()
+	if _, err := exec.LookPath(name); err != nil {
+		t.Skipf("%s is required for this local sandbox execution test: %v", name, err)
+	}
+	if runtime.GOOS == "windows" && name == "bash" {
+		t.Skip("bash script execution requires a functional POSIX shell; Windows WSL shim is not enough")
+	}
+	if err := exec.Command(name, args...).Run(); err != nil {
+		t.Skipf("%s is not functional in this test environment: %v", name, err)
+	}
 }

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -241,7 +242,10 @@ func (r *userRepository) SearchUsers(ctx context.Context, query string, limit in
 	searchPattern := "%" + query + "%"
 
 	dbQuery := r.db.WithContext(ctx).
-		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where(
+			caseInsensitiveLikeExpr(r.db, "username")+" OR "+caseInsensitiveLikeExpr(r.db, "email"),
+			searchPattern, searchPattern,
+		).
 		Where("is_active = ?", true).
 		Order("username ASC")
 
@@ -305,7 +309,7 @@ func (r *authTokenRepository) DeleteToken(ctx context.Context, id string) error 
 
 // DeleteExpiredTokens deletes all expired tokens
 func (r *authTokenRepository) DeleteExpiredTokens(ctx context.Context) error {
-	return r.db.WithContext(ctx).Where("expires_at < NOW()").Delete(&types.AuthToken{}).Error
+	return r.db.WithContext(ctx).Where("expires_at < ?", time.Now().UTC()).Delete(&types.AuthToken{}).Error
 }
 
 // RevokeTokensByUserID revokes all tokens for a user

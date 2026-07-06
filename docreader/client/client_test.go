@@ -17,7 +17,8 @@ func init() {
 }
 
 func TestReadURL(t *testing.T) {
-	client, err := NewClient("localhost:50051")
+	addr := requireDocReaderIntegrationAddr(t)
+	client, err := NewClient(addr)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -47,7 +48,8 @@ func TestReadURL(t *testing.T) {
 }
 
 func TestReadFile(t *testing.T) {
-	client, err := NewClient("localhost:50051")
+	addr := requireDocReaderIntegrationAddr(t)
+	client, err := NewClient(addr)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -82,4 +84,13 @@ func TestReadFile(t *testing.T) {
 
 	imageRefs := GetImageRefsFromResponse(resp)
 	log.Printf("INFO: content_len=%d, images=%d", len(resp.MarkdownContent), len(imageRefs))
+}
+
+func requireDocReaderIntegrationAddr(t *testing.T) string {
+	t.Helper()
+	addr := os.Getenv("DOCREADER_TEST_ADDR")
+	if addr == "" {
+		t.Skip("set DOCREADER_TEST_ADDR to run DocReader client integration tests")
+	}
+	return addr
 }

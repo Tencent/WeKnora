@@ -185,38 +185,44 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 
 			// FAQ type: search based on searchField
 			// 根据数据库类型使用不同的 JSON 查询语法
-			isPostgres := db.Dialector.Name() == "postgres"
-
 			switch searchField {
 			case "standard_question":
 				// Search only in standard_question field of metadata
-				if isPostgres {
+				if isPostgres(db) {
 					db = db.Where("metadata->>'standard_question' ILIKE ?", like)
+				} else if isMySQL(db) {
+					db = db.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question')) LIKE ?", like)
 				} else {
 					// MySQL: metadata->>'$.standard_question' (MySQL 5.7.13+)
 					// 也可以用 JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))
-					db = db.Where("metadata->>'$.standard_question' LIKE ?", like)
+					db = db.Where("json_extract(metadata, '$.standard_question') LIKE ?", like)
 				}
 			case "similar_questions":
 				// Search in similar_questions array of metadata
-				if isPostgres {
+				if isPostgres(db) {
 					db = db.Where("(metadata->'similar_questions')::text ILIKE ?", like)
+				} else if isMySQL(db) {
+					db = db.Where("CAST(JSON_EXTRACT(metadata, '$.similar_questions') AS CHAR) LIKE ?", like)
 				} else {
-					db = db.Where("JSON_EXTRACT(metadata, '$.similar_questions') LIKE ?", like)
+					db = db.Where("json_extract(metadata, '$.similar_questions') LIKE ?", like)
 				}
 			case "answers":
 				// Search in answers array of metadata
-				if isPostgres {
+				if isPostgres(db) {
 					db = db.Where("(metadata->'answers')::text ILIKE ?", like)
+				} else if isMySQL(db) {
+					db = db.Where("CAST(JSON_EXTRACT(metadata, '$.answers') AS CHAR) LIKE ?", like)
 				} else {
-					db = db.Where("JSON_EXTRACT(metadata, '$.answers') LIKE ?", like)
+					db = db.Where("json_extract(metadata, '$.answers') LIKE ?", like)
 				}
 			default:
 				// Search in all fields (content and metadata)
-				if isPostgres {
+				if isPostgres(db) {
 					db = db.Where("(content ILIKE ? OR metadata::text ILIKE ?)", like, like)
-				} else {
+				} else if isMySQL(db) {
 					db = db.Where("(content LIKE ? OR CAST(metadata AS CHAR) LIKE ?)", like, like)
+				} else {
+					db = db.Where("(content LIKE ? OR metadata LIKE ?)", like, like)
 				}
 			}
 		}
@@ -377,10 +383,8 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
-
 	var sql string
-	if isPostgres {
+	if isPostgres(r.db) {
 		sql = fmt.Sprintf(`
 			UPDATE chunks SET
 				content = CASE %s END,
@@ -388,7 +392,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = (CASE %s END)::integer,
 				status = (CASE %s END)::integer,
-				updated_at = NOW()
+				updated_at = %s
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -396,6 +400,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(tagIDCases, " "),
 			strings.Join(flagsCases, " "),
 			strings.Join(statusCases, " "),
+			nowExpr(r.db),
 			strings.Join(inPlaceholders, ","),
 		)
 	} else {
@@ -406,7 +411,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = CASE %s END,
 				status = CASE %s END,
-				updated_at = datetime('now')
+				updated_at = %s
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -414,6 +419,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(tagIDCases, " "),
 			strings.Join(flagsCases, " "),
 			strings.Join(statusCases, " "),
+			nowExpr(r.db),
 			strings.Join(inPlaceholders, ","),
 		)
 	}
@@ -663,7 +669,7 @@ func (r *chunkRepository) FindFAQChunkWithDuplicateQuestion(
 		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status = ? AND id != ?",
 			tenantID, kbID, types.ChunkTypeFAQ, types.ChunkStatusIndexed, excludeChunkID)
 
-	switch r.db.Name() {
+	switch dialectName(r.db) {
 	case "mysql":
 		// MySQL 5.7+: JSON_EXTRACT for standard_question, JSON_CONTAINS for similar_questions
 		parts := []string{
@@ -810,10 +816,6 @@ func (r *chunkRepository) UpdateChunkFlagsBatch(
 		inPlaceholders[i] = "?"
 	}
 
-	nowFunc := "NOW()"
-	if r.db.Dialector.Name() == "sqlite" {
-		nowFunc = "datetime('now')"
-	}
 	sql := fmt.Sprintf(`
 	UPDATE chunks
     SET flags = (flags | (%s)) & ~(%s),
@@ -821,7 +823,7 @@ func (r *chunkRepository) UpdateChunkFlagsBatch(
     WHERE tenant_id = ?
       AND knowledge_base_id = ?
       AND id IN (%s)
-`, setExpr, clearExpr, nowFunc, strings.Join(inPlaceholders, ","))
+`, setExpr, clearExpr, nowExpr(r.db), strings.Join(inPlaceholders, ","))
 
 	args = append(args, tenantID, kbID)
 	for _, id := range allIDs {
@@ -1036,7 +1038,7 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	}
 
 	// Query chunks that have non-empty generated_questions in metadata
-	switch r.db.Name() {
+	switch dialectName(r.db) {
 	case "postgres":
 		if err := baseQuery.
 			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").
