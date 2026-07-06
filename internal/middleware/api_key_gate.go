@@ -135,6 +135,25 @@ func (a *APIKeyRouteAuthorizer) authorize(scope types.TenantAPIKeyScope, method,
 	return nil
 }
 
+// DenyAPIKeyPrincipal returns a middleware that rejects any X-API-Key
+// principal outright. Use it on routes registered directly on the engine
+// (outside the /api/v1 group) where the APIKeyRouteAuthorizer.Middleware
+// gate does NOT run — the JWT role guards (RequireRole / RequireSystemAdmin
+// / RequireOwnershipOrRole) short-circuit API-key principals on the
+// assumption the gate already authorized them, so an ungated route would
+// otherwise let any valid key through. JWT sessions pass straight through.
+func DenyAPIKeyPrincipal() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := types.TenantAPIKeyScopeFromContext(c.Request.Context()); ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "Forbidden: API keys cannot access this endpoint",
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
 func isSafeHTTPMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:

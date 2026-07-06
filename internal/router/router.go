@@ -1668,7 +1668,12 @@ func servePresignedPreview(r *gin.Engine, cfg *config.Config) {
 	}
 	absDir, _ := filepath.Abs(baseDir)
 
+	// This route is registered on the engine root, NOT the /api/v1 group,
+	// so the APIKeyGate never runs for it. RequireRole short-circuits
+	// API-key principals (deferring to that absent gate), which would let
+	// any valid key past the Admin check. Deny API keys explicitly first.
 	r.GET("/api/v1/files/presigned-preview",
+		middleware.DenyAPIKeyPrincipal(),
 		middleware.RequireRole(types.TenantRoleAdmin, cfg),
 		func(c *gin.Context) {
 			ctx := c.Request.Context()

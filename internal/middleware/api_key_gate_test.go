@@ -151,6 +151,50 @@ func TestGateKBScopeDoesNotBlockDataPlane(t *testing.T) {
 	}
 }
 
+// runDenyAPIKey mounts DenyAPIKeyPrincipal ahead of a handler and reports
+// whether the request reached the handler.
+func runDenyAPIKey(t *testing.T, scope *types.TenantAPIKeyScope) (reached bool, status int) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		if scope != nil {
+			c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(c.Request.Context(), *scope))
+		}
+		c.Next()
+	})
+	engine.GET("/api/v1/files/presigned-preview", DenyAPIKeyPrincipal(), func(c *gin.Context) {
+		reached = true
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/files/presigned-preview", nil))
+	return reached, w.Code
+}
+
+// TestDenyAPIKeyPrincipalBlocksAPIKeys guards the gate-bypass class of bug:
+// engine-root routes (outside /api/v1) that rely on RequireRole must not be
+// reachable by API-key principals, since RequireRole short-circuits them.
+func TestDenyAPIKeyPrincipalBlocksAPIKeys(t *testing.T) {
+	// Even an Owner-role API key must be rejected outright.
+	reached, status := runDenyAPIKey(t, &types.TenantAPIKeyScope{Role: types.TenantRoleOwner})
+	if reached {
+		t.Fatal("API-key principal must not reach a DenyAPIKeyPrincipal-guarded handler")
+	}
+	if status != http.StatusForbidden {
+		t.Fatalf("expected 403 for API-key principal, got %d", status)
+	}
+}
+
+// TestDenyAPIKeyPrincipalAllowsJWT confirms JWT sessions (no API-key scope)
+// pass straight through.
+func TestDenyAPIKeyPrincipalAllowsJWT(t *testing.T) {
+	reached, status := runDenyAPIKey(t, nil)
+	if !reached || status != http.StatusOK {
+		t.Fatalf("JWT session should pass DenyAPIKeyPrincipal: reached=%v status=%d", reached, status)
+	}
+}
+
 func TestNormalizeRoutePath(t *testing.T) {
 	cases := map[string]string{
 		"/api/v1//models": "/api/v1/models",
