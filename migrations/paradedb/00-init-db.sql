@@ -159,6 +159,44 @@ COMMENT ON COLUMN messages.agent_steps IS 'Agent execution steps (reasoning proc
 -- Create Index for messages
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id); 
 
+CREATE TABLE IF NOT EXISTS message_feedbacks (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id BIGINT NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    feedback_type VARCHAR(20) NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_feedbacks_message ON message_feedbacks(message_id);
+CREATE INDEX IF NOT EXISTS idx_message_feedbacks_tenant ON message_feedbacks(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_message_feedbacks_session ON message_feedbacks(session_id);
+CREATE INDEX IF NOT EXISTS idx_message_feedbacks_type ON message_feedbacks(feedback_type);
+
+CREATE TABLE IF NOT EXISTS message_knowledge_chunk_relations (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id BIGINT NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) DEFAULT '',
+    knowledge_base_id VARCHAR(36) DEFAULT '',
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_chunk_relation ON message_knowledge_chunk_relations(message_id, chunk_id);
+CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_tenant ON message_knowledge_chunk_relations(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_session ON message_knowledge_chunk_relations(session_id);
+CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_chunk ON message_knowledge_chunk_relations(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_knowledge ON message_knowledge_chunk_relations(knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_kb ON message_knowledge_chunk_relations(knowledge_base_id);
+
 
 CREATE TABLE IF NOT EXISTS chunks (
     id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),

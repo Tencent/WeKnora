@@ -57,6 +57,15 @@ type MessageService interface {
 
 	// GetChatHistoryKBStats returns statistics about the chat history knowledge base (indexed message count, etc.)
 	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
+
+	// SaveMessageKnowledgeChunkRelations replaces the assistant answer-to-knowledge chunk relations.
+	SaveMessageKnowledgeChunkRelations(ctx context.Context, sessionID, messageID string, refs []types.MessageKnowledgeChunkReference) ([]*types.MessageKnowledgeChunkRelation, error)
+
+	// SaveMessageFeedback creates or updates the user's feedback for one assistant answer.
+	SaveMessageFeedback(ctx context.Context, sessionID, messageID, feedbackType, reason string) (*types.MessageFeedback, error)
+
+	// DeleteMessageFeedback removes the user's feedback for one assistant answer.
+	DeleteMessageFeedback(ctx context.Context, sessionID, messageID string) error
 }
 
 // MessageRepository defines the message repository interface
@@ -95,4 +104,10 @@ type MessageRepository interface {
 	GetKnowledgeIDsBySessionID(ctx context.Context, sessionID string) ([]string, error)
 	// UpdateMessageKnowledgeID updates the knowledge_id field for a message
 	UpdateMessageKnowledgeID(ctx context.Context, messageID string, knowledgeID string) error
+	// ReplaceMessageKnowledgeChunkRelations replaces all normalized chunk relations for one assistant message.
+	ReplaceMessageKnowledgeChunkRelations(ctx context.Context, sessionID, messageID string, relations []*types.MessageKnowledgeChunkRelation) error
+	// UpsertMessageFeedback creates or updates feedback for one assistant message.
+	UpsertMessageFeedback(ctx context.Context, feedback *types.MessageFeedback) error
+	// DeleteMessageFeedback deletes feedback for one assistant message.
+	DeleteMessageFeedback(ctx context.Context, sessionID, messageID string) error
 }

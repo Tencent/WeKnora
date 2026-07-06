@@ -130,6 +130,42 @@ CREATE TABLE messages (
 
 CREATE INDEX idx_messages_session_role ON messages(session_id, role); 
 
+CREATE TABLE message_feedbacks (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    feedback_type VARCHAR(20) NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    UNIQUE KEY idx_message_feedbacks_message (message_id),
+    KEY idx_message_feedbacks_tenant (tenant_id),
+    KEY idx_message_feedbacks_session (session_id),
+    KEY idx_message_feedbacks_type (feedback_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE message_knowledge_chunk_relations (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) DEFAULT '',
+    knowledge_base_id VARCHAR(36) DEFAULT '',
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    UNIQUE KEY idx_message_chunk_relation (message_id, chunk_id),
+    KEY idx_msg_chunk_rel_tenant (tenant_id),
+    KEY idx_msg_chunk_rel_session (session_id),
+    KEY idx_msg_chunk_rel_chunk (chunk_id),
+    KEY idx_msg_chunk_rel_knowledge (knowledge_id),
+    KEY idx_msg_chunk_rel_kb (knowledge_base_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE chunks (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,

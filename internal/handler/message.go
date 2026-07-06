@@ -237,6 +237,170 @@ func (h *MessageHandler) SearchMessages(c *gin.Context) {
 	})
 }
 
+// SaveMessageFeedback godoc
+// @Summary      Save answer feedback
+// @Description  Persist like/dislike feedback for one assistant answer.
+// @Tags         messages
+// @Accept       json
+// @Produce      json
+// @Param        session_id  path      string  true  "Session ID"
+// @Param        id          path      string  true  "Assistant message ID"
+// @Param        request     body      SaveMessageFeedbackRequest  true  "Feedback"
+// @Success      200         {object}  map[string]interface{}  "Saved feedback"
+// @Failure      400         {object}  errors.AppError         "Invalid request"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/{session_id}/{id}/feedback [post]
+func (h *MessageHandler) SaveMessageFeedback(c *gin.Context) {
+	ctx := c.Request.Context()
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	messageID := secutils.SanitizeForLog(c.Param("id"))
+	if sessionID == "" || messageID == "" {
+		c.Error(errors.NewBadRequestError("session_id and message id are required"))
+		return
+	}
+
+	var request SaveMessageFeedbackRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		logger.Error(ctx, "Failed to parse message feedback request", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	feedback, err := h.MessageService.SaveMessageFeedback(ctx, sessionID, messageID, request.FeedbackType, request.Reason)
+	if err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"session_id": sessionID,
+			"message_id": messageID,
+		})
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    feedback,
+	})
+}
+
+// DeleteMessageFeedback godoc
+// @Summary      Delete answer feedback
+// @Description  Remove like/dislike feedback for one assistant answer.
+// @Tags         messages
+// @Produce      json
+// @Param        session_id  path      string  true  "Session ID"
+// @Param        id          path      string  true  "Assistant message ID"
+// @Success      200         {object}  map[string]interface{}  "Deleted feedback"
+// @Failure      400         {object}  errors.AppError         "Invalid request"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/{session_id}/{id}/feedback [delete]
+func (h *MessageHandler) DeleteMessageFeedback(c *gin.Context) {
+	ctx := c.Request.Context()
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	messageID := secutils.SanitizeForLog(c.Param("id"))
+	if sessionID == "" || messageID == "" {
+		c.Error(errors.NewBadRequestError("session_id and message id are required"))
+		return
+	}
+
+	if err := h.MessageService.DeleteMessageFeedback(ctx, sessionID, messageID); err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"session_id": sessionID,
+			"message_id": messageID,
+		})
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// SaveMessageKnowledgeChunks godoc
+// @Summary      Save answer knowledge chunk relations
+// @Description  Persist the normalized relation between an assistant answer and referenced knowledge chunks.
+// @Tags         messages
+// @Accept       json
+// @Produce      json
+// @Param        session_id  path      string  true  "Session ID"
+// @Param        id          path      string  true  "Assistant message ID"
+// @Param        request     body      SaveMessageKnowledgeChunksRequest  true  "Referenced chunks"
+// @Success      200         {object}  map[string]interface{}  "Saved relations"
+// @Failure      400         {object}  errors.AppError         "Invalid request"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/{session_id}/{id}/knowledge-chunks [post]
+func (h *MessageHandler) SaveMessageKnowledgeChunks(c *gin.Context) {
+	ctx := c.Request.Context()
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
+	messageID := secutils.SanitizeForLog(c.Param("id"))
+	if sessionID == "" || messageID == "" {
+		c.Error(errors.NewBadRequestError("session_id and message id are required"))
+		return
+	}
+
+	var request SaveMessageKnowledgeChunksRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		logger.Error(ctx, "Failed to parse message knowledge chunks request", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	refs := request.References
+	if len(refs) == 0 && len(request.ChunkIDs) > 0 {
+		refs = make([]types.MessageKnowledgeChunkReference, 0, len(request.ChunkIDs))
+		for _, chunkID := range request.ChunkIDs {
+			chunkID = strings.TrimSpace(chunkID)
+			if chunkID == "" {
+				continue
+			}
+			refs = append(refs, types.MessageKnowledgeChunkReference{ChunkID: chunkID})
+		}
+	}
+
+	relations, err := h.MessageService.SaveMessageKnowledgeChunkRelations(ctx, sessionID, messageID, refs)
+	if err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"session_id": sessionID,
+			"message_id": messageID,
+		})
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    relations,
+	})
+}
+
+// SaveMessageFeedbackRequest defines the request body for answer feedback persistence.
+type SaveMessageFeedbackRequest struct {
+	FeedbackType string `json:"feedback_type" binding:"required"`
+	Reason       string `json:"reason"`
+}
+
+// SaveMessageKnowledgeChunksRequest defines the request body for answer-to-chunk relation persistence.
+type SaveMessageKnowledgeChunksRequest struct {
+	References []types.MessageKnowledgeChunkReference `json:"references"`
+	ChunkIDs   []string                               `json:"chunk_ids"`
+}
+
 // SearchMessagesRequest defines the request structure for searching messages
 type SearchMessagesRequest struct {
 	// Query text for search

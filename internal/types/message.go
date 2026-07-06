@@ -285,6 +285,55 @@ func (m *Message) BeforeCreate(tx *gorm.DB) (err error) {
 	return nil
 }
 
+// MessageFeedback records the user's rating for one assistant answer.
+type MessageFeedback struct {
+	ID           string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID     uint64    `json:"tenant_id" gorm:"index;not null"`
+	SessionID    string    `json:"session_id" gorm:"type:varchar(36);index;not null"`
+	MessageID    string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex;index;not null"`
+	FeedbackType string    `json:"feedback_type" gorm:"type:varchar(20);not null"`
+	Reason       string    `json:"reason,omitempty" gorm:"type:text"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func (f *MessageFeedback) BeforeCreate(tx *gorm.DB) (err error) {
+	if f.ID == "" {
+		f.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// MessageKnowledgeChunkReference is the compact payload used to persist which
+// knowledge chunks supported an assistant answer.
+type MessageKnowledgeChunkReference struct {
+	ChunkID         string `json:"chunk_id"`
+	KnowledgeID     string `json:"knowledge_id,omitempty"`
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	ChunkIndex      int    `json:"chunk_index,omitempty"`
+}
+
+// MessageKnowledgeChunkRelation stores the normalized answer-to-chunk relation.
+type MessageKnowledgeChunkRelation struct {
+	ID              string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64    `json:"tenant_id" gorm:"index;not null"`
+	SessionID       string    `json:"session_id" gorm:"type:varchar(36);index;not null"`
+	MessageID       string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_message_chunk_relation;index;not null"`
+	ChunkID         string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_message_chunk_relation;index;not null"`
+	KnowledgeID     string    `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`
+	KnowledgeBaseID string    `json:"knowledge_base_id,omitempty" gorm:"type:varchar(36);index"`
+	ChunkIndex      int       `json:"chunk_index,omitempty" gorm:"default:0"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+func (r *MessageKnowledgeChunkRelation) BeforeCreate(tx *gorm.DB) (err error) {
+	if r.ID == "" {
+		r.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // MessageSearchMode represents the search mode for message search
 type MessageSearchMode string
 

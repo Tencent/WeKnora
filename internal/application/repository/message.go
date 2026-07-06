@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -266,4 +267,45 @@ func (r *messageRepository) UpdateMessageKnowledgeID(
 		Model(&types.Message{}).
 		Where("id = ?", messageID).
 		Update("knowledge_id", knowledgeID).Error
+}
+
+// ReplaceMessageKnowledgeChunkRelations atomically replaces all chunk relations
+// for one assistant message. Passing an empty relation slice clears old rows.
+func (r *messageRepository) ReplaceMessageKnowledgeChunkRelations(
+	ctx context.Context,
+	sessionID, messageID string,
+	relations []*types.MessageKnowledgeChunkRelation,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where(
+			"session_id = ? AND message_id = ?", sessionID, messageID,
+		).Delete(&types.MessageKnowledgeChunkRelation{}).Error; err != nil {
+			return err
+		}
+		if len(relations) == 0 {
+			return nil
+		}
+		return tx.Create(&relations).Error
+	})
+}
+
+// UpsertMessageFeedback creates or updates feedback for one assistant message.
+func (r *messageRepository) UpsertMessageFeedback(ctx context.Context, feedback *types.MessageFeedback) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "message_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"tenant_id",
+			"session_id",
+			"feedback_type",
+			"reason",
+			"updated_at",
+		}),
+	}).Create(feedback).Error
+}
+
+// DeleteMessageFeedback deletes feedback for one assistant message.
+func (r *messageRepository) DeleteMessageFeedback(ctx context.Context, sessionID, messageID string) error {
+	return r.db.WithContext(ctx).
+		Where("session_id = ? AND message_id = ?", sessionID, messageID).
+		Delete(&types.MessageFeedback{}).Error
 }

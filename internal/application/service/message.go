@@ -259,6 +259,103 @@ func (s *messageService) UpdateMessageRenderedContent(ctx context.Context, sessi
 	return s.messageRepo.UpdateMessageRenderedContent(ctx, sessionID, messageID, renderedContent)
 }
 
+// SaveMessageFeedback persists a user's like/dislike feedback for one assistant answer.
+func (s *messageService) SaveMessageFeedback(
+	ctx context.Context,
+	sessionID, messageID, feedbackType, reason string,
+) (*types.MessageFeedback, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	if _, err := s.sessionRepo.Get(ctx, tenantID, sessionUserIDForLookup(ctx), sessionID); err != nil {
+		return nil, err
+	}
+
+	message, err := s.messageRepo.GetMessage(ctx, sessionID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if message.Role != "assistant" {
+		return nil, fmt.Errorf("message %s is not an assistant answer", messageID)
+	}
+
+	feedbackType = strings.TrimSpace(feedbackType)
+	if feedbackType != "like" && feedbackType != "dislike" {
+		return nil, fmt.Errorf("feedback_type must be like or dislike")
+	}
+
+	feedback := &types.MessageFeedback{
+		TenantID:     tenantID,
+		SessionID:    sessionID,
+		MessageID:    messageID,
+		FeedbackType: feedbackType,
+		Reason:       strings.TrimSpace(reason),
+	}
+	if err := s.messageRepo.UpsertMessageFeedback(ctx, feedback); err != nil {
+		return nil, err
+	}
+	return feedback, nil
+}
+
+// DeleteMessageFeedback removes feedback for one assistant answer.
+func (s *messageService) DeleteMessageFeedback(ctx context.Context, sessionID, messageID string) error {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	if _, err := s.sessionRepo.Get(ctx, tenantID, sessionUserIDForLookup(ctx), sessionID); err != nil {
+		return err
+	}
+
+	message, err := s.messageRepo.GetMessage(ctx, sessionID, messageID)
+	if err != nil {
+		return err
+	}
+	if message.Role != "assistant" {
+		return fmt.Errorf("message %s is not an assistant answer", messageID)
+	}
+
+	return s.messageRepo.DeleteMessageFeedback(ctx, sessionID, messageID)
+}
+
+func (s *messageService) SaveMessageKnowledgeChunkRelations(
+	ctx context.Context,
+	sessionID, messageID string,
+	refs []types.MessageKnowledgeChunkReference,
+) ([]*types.MessageKnowledgeChunkRelation, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	if _, err := s.sessionRepo.Get(ctx, tenantID, sessionUserIDForLookup(ctx), sessionID); err != nil {
+		return nil, err
+	}
+
+	message, err := s.messageRepo.GetMessage(ctx, sessionID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if message.Role != "assistant" {
+		return nil, fmt.Errorf("message %s is not an assistant answer", messageID)
+	}
+
+	seen := make(map[string]bool, len(refs))
+	relations := make([]*types.MessageKnowledgeChunkRelation, 0, len(refs))
+	for _, ref := range refs {
+		chunkID := strings.TrimSpace(ref.ChunkID)
+		if chunkID == "" || seen[chunkID] {
+			continue
+		}
+		seen[chunkID] = true
+		relations = append(relations, &types.MessageKnowledgeChunkRelation{
+			TenantID:        tenantID,
+			SessionID:       sessionID,
+			MessageID:       messageID,
+			ChunkID:         chunkID,
+			KnowledgeID:     strings.TrimSpace(ref.KnowledgeID),
+			KnowledgeBaseID: strings.TrimSpace(ref.KnowledgeBaseID),
+			ChunkIndex:      ref.ChunkIndex,
+		})
+	}
+
+	if err := s.messageRepo.ReplaceMessageKnowledgeChunkRelations(ctx, sessionID, messageID, relations); err != nil {
+		return nil, err
+	}
+	return relations, nil
+}
+
 // DeleteMessage removes a message from a session, also cleaning up its Knowledge entry in the chat history KB.
 func (s *messageService) DeleteMessage(ctx context.Context, sessionID string, messageID string) error {
 	logger.Info(ctx, "Start deleting message")

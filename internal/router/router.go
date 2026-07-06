@@ -444,6 +444,9 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 		messages.POST("/search", g.Viewer(), handler.SearchMessages)
 		messages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
 		messages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
+		messages.POST("/:session_id/:id/feedback", g.Viewer(), handler.SaveMessageFeedback)
+		messages.DELETE("/:session_id/:id/feedback", g.Viewer(), handler.DeleteMessageFeedback)
+		messages.POST("/:session_id/:id/knowledge-chunks", g.Viewer(), handler.SaveMessageKnowledgeChunks)
 		messages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
 	}
 }
