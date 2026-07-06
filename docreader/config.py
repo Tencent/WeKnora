@@ -20,6 +20,15 @@ def _get_str(keys: Iterable[str], default: str = "") -> str:
     return default if v is None else str(v)
 
 
+def _get_non_empty_str(keys: Iterable[str], default: str = "") -> str:
+    for k in keys:
+        if k in os.environ:
+            v = os.environ.get(k)
+            if v is not None and str(v).strip() != "":
+                return str(v)
+    return default
+
+
 def _get_int(keys: Iterable[str], default: int) -> int:
     v, _ = _get_first_env(keys)
     if v is None or str(v).strip() == "":
@@ -117,10 +126,10 @@ def load_config() -> DocReaderConfig:
     # dense CJK text legible for OCR while keeping page images well under ~1MB.
     pdf_render_max_edge = _get_int(["DOCREADER_PDF_RENDER_MAX_EDGE"], 2000)
 
-    external_http_proxy = _get_str(
+    external_http_proxy = _get_non_empty_str(
         ["DOCREADER_EXTERNAL_HTTP_PROXY", "EXTERNAL_HTTP_PROXY"], ""
     )
-    external_https_proxy = _get_str(
+    external_https_proxy = _get_non_empty_str(
         ["DOCREADER_EXTERNAL_HTTPS_PROXY", "EXTERNAL_HTTPS_PROXY"], ""
     )
 
