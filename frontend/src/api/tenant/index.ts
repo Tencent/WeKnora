@@ -48,13 +48,13 @@ export interface APIPrincipalTestToken {
   external_user_id: string
 }
 
-export type TenantAPIKeyScope = 'read' | 'write' | 'admin'
+export type TenantAPIKeyRole = 'viewer' | 'contributor' | 'admin'
 
 export interface TenantAPIKey {
   id: number
   name: string
   api_key: string
-  scopes: TenantAPIKeyScope[]
+  role: TenantAPIKeyRole
   knowledge_base_ids: string[]
   last_used_at?: string
   expires_at?: string
@@ -67,7 +67,7 @@ export interface CreatedTenantAPIKey extends TenantAPIKey {
 
 export interface CreateTenantAPIKeyPayload {
   name: string
-  scopes: TenantAPIKeyScope[]
+  role: TenantAPIKeyRole
   knowledge_base_ids?: string[]
   expires_at_unix?: number
 }

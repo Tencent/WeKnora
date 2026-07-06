@@ -313,10 +313,10 @@ func attachAPIKeyAuthContext(
 	c.Set(types.PrincipalContextKey.String(), principal)
 	apiKeyRole := types.TenantRoleViewer
 	if key != nil {
-		apiKeyRole = types.TenantAPIKeyScope{
-			Scopes:           key.Scopes,
-			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
-		}.TenantRole()
+		apiKeyRole = types.NormalizeTenantAPIKeyRole(key.Role)
+		if apiKeyRole == "" {
+			apiKeyRole = types.TenantRoleViewer
+		}
 	}
 	c.Set(types.TenantRoleContextKey.String(), apiKeyRole)
 	c.Set(types.SystemAdminContextKey.String(), false)
@@ -328,7 +328,7 @@ func attachAPIKeyAuthContext(
 	if key != nil {
 		ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{
 			KeyID:            key.ID,
-			Scopes:           key.Scopes,
+			Role:             apiKeyRole,
 			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
 		})
 	}

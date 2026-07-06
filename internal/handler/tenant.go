@@ -135,7 +135,7 @@ type apiPrincipalTestTokenResponse struct {
 
 type tenantAPIKeyCreateRequest struct {
 	Name             string   `json:"name"`
-	Scopes           []string `json:"scopes"`
+	Role             string   `json:"role"`
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
 	ExpiresAt        *int64   `json:"expires_at_unix"`
 }
@@ -144,7 +144,7 @@ type tenantAPIKeyResponse struct {
 	ID               uint64            `json:"id"`
 	Name             string            `json:"name"`
 	APIKey           string            `json:"api_key"`
-	Scopes           types.StringArray `json:"scopes"`
+	Role             types.TenantRole  `json:"role"`
 	KnowledgeBaseIDs types.StringArray `json:"knowledge_base_ids"`
 	LastUsedAt       *time.Time        `json:"last_used_at,omitempty"`
 	ExpiresAt        *time.Time        `json:"expires_at,omitempty"`
@@ -570,11 +570,7 @@ func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
 	result, err := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: id,
 		Name:     "Tenant API key",
-		Scopes: []string{
-			types.TenantAPIKeyScopeRead,
-			types.TenantAPIKeyScopeWrite,
-			types.TenantAPIKeyScopeAdmin,
-		},
+		Role:     types.TenantRoleAdmin,
 	})
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -631,6 +627,10 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	role := types.NormalizeTenantAPIKeyRole(types.TenantRole(strings.TrimSpace(req.Role)))
+	if role == "" {
+		role = types.TenantRoleViewer
+	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
 		t := time.Unix(*req.ExpiresAt, 0)
@@ -643,7 +643,7 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	result, err := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID:         id,
 		Name:             req.Name,
-		Scopes:           req.Scopes,
+		Role:             role,
 		KnowledgeBaseIDs: req.KnowledgeBaseIDs,
 		ExpiresAt:        expiresAt,
 	})
@@ -687,7 +687,7 @@ func tenantAPIKeyForResponse(key *types.TenantAPIKey) tenantAPIKeyResponse {
 		ID:               key.ID,
 		Name:             key.Name,
 		APIKey:           key.APIKey,
-		Scopes:           key.Scopes,
+		Role:             types.NormalizeTenantAPIKeyRole(key.Role),
 		KnowledgeBaseIDs: key.KnowledgeBaseIDs,
 		LastUsedAt:       key.LastUsedAt,
 		ExpiresAt:        key.ExpiresAt,
@@ -704,12 +704,8 @@ func validateTenantAPIKeyRequest(
 	if strings.TrimSpace(req.Name) == "" {
 		return errors.NewValidationError("name is required")
 	}
-	for _, scope := range req.Scopes {
-		switch strings.ToLower(strings.TrimSpace(scope)) {
-		case types.TenantAPIKeyScopeRead, types.TenantAPIKeyScopeWrite, types.TenantAPIKeyScopeAdmin:
-		default:
-			return errors.NewValidationError("scopes must contain only read, write, or admin")
-		}
+	if role := types.NormalizeTenantAPIKeyRole(types.TenantRole(strings.TrimSpace(req.Role))); req.Role != "" && role == "" {
+		return errors.NewValidationError("role must be viewer, contributor, or admin")
 	}
 	for _, kbID := range req.KnowledgeBaseIDs {
 		kbID = strings.TrimSpace(kbID)

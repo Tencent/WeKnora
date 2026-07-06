@@ -170,6 +170,10 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 		c.JSON(status, gin.H{"error": msg})
 		return
 	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
 
 	dataSources, err := h.service.ListDataSources(ctx, kbID)
 	if err != nil {

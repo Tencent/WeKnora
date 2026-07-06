@@ -21,13 +21,16 @@ func TestAuthenticateAPIKeyScopeUsesRequestContextAfterAttach(t *testing.T) {
 	preAttach := c.Request.Context()
 	c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(preAttach, types.TenantAPIKeyScope{
 		KeyID:  1,
-		Scopes: types.StringArray{types.TenantAPIKeyScopeRead},
+		Role:   types.TenantRoleViewer,
 	}))
 
 	if err := authorizeTenantAPIKeyAccess(preAttach, c.Request.Method, c.Request.URL.Path); err != nil {
 		t.Fatalf("pre-attach ctx should not carry scope and must not block: %v", err)
 	}
-	if err := authorizeTenantAPIKeyAccess(c.Request.Context(), c.Request.Method, c.Request.URL.Path); err == nil {
-		t.Fatal("post-attach request context must enforce read scope on DELETE")
+	if err := authorizeTenantAPIKeyAccess(c.Request.Context(), c.Request.Method, c.Request.URL.Path); err != nil {
+		t.Fatalf("baseline defers unsafe DELETE to route guards: %v", err)
+	}
+	if err := requireTenantAPIKeyMinRole(c.Request.Context(), types.TenantRoleContributor); err == nil {
+		t.Fatal("viewer key must not satisfy contributor route guard on DELETE")
 	}
 }

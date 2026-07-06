@@ -245,7 +245,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 // has not yet expired are kept out by the role check, matching the
 // rest of the RBAC matrix in this file.
 func RegisterChunkerDebugRoutes(r *gin.RouterGroup, g *rbacGuards) {
-	r.POST("/chunker/preview", g.Viewer(), handler.PreviewChunking)
+	r.POST("/chunker/preview", g.Viewer(), g.APIKeyViewer(), handler.PreviewChunking)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由
@@ -256,7 +256,7 @@ func RegisterChunkerDebugRoutes(r *gin.RouterGroup, g *rbacGuards) {
 // same "creator-of-the-KB OR Admin+" rule applies to chunk edits.
 func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *rbacGuards) {
 	// 分块路由组
-	chunks := r.Group("/chunks")
+	chunks := r.Group("/chunks", g.APIKeyContributor())
 	{
 		// 获取分块列表 — Viewer+ 且对父 KB 有 read 权限（own / shared / via shared agent）
 		chunks.GET("/:knowledge_id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("knowledge_id"), handler.ListKnowledgeChunks)
@@ -289,7 +289,7 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 // a single owning KB to check against.
 func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler, g *rbacGuards) {
 	// 知识库下的知识路由组（URL :id is the KB id）
-	kb := r.Group("/knowledge-bases/:id/knowledge")
+	kb := r.Group("/knowledge-bases/:id/knowledge", g.APIKeyContributor())
 	{
 		kb.POST("/file", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
 		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
@@ -297,11 +297,11 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
 		// Clearing all contents under a KB is a destructive op; gate
 		// behind Admin instead of Contributor.
-		kb.DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
+		kb.DELETE("", g.Admin(), g.KBAccessWrite("id"), g.APIKeyAdmin(), handler.ClearKnowledgeBaseContents)
 	}
 
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
-	k := r.Group("/knowledge")
+	k := r.Group("/knowledge", g.APIKeyContributor())
 	{
 		// Cross-knowledge endpoints (no :id) can't be gated on a single
 		// KB — they accept arbitrary knowledge IDs and the handler must
@@ -323,11 +323,11 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		// single owning KB to walk back to. A future PR could add a
 		// "must own every targeted KB" guard if the requirement
 		// surfaces.
-		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
-		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
+		k.PUT("/tags", g.Contributor(), g.APIKeyDeny(), handler.UpdateKnowledgeTagBatch)
+		k.POST("/batch-reparse", g.Contributor(), g.APIKeyDeny(), handler.BatchReparseKnowledge)
 		k.GET("/search", g.Viewer(), handler.SearchKnowledge)
-		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
-		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		k.POST("/batch-delete", g.Contributor(), g.APIKeyDeny(), handler.BatchDeleteKnowledge)
+		k.POST("/move", g.Contributor(), g.APIKeyDeny(), handler.MoveKnowledge)
 		k.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
 	}
 }
@@ -345,7 +345,7 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 	// 等价于修改 KB 内容，必须遵循 KB 的"creator OR Admin+"矩阵 ——
 	// 跟 chunks / wiki pages 保持一致。Viewer+ 可以读，Contributor 不能
 	// 改不属于自己的 KB 的 FAQ。
-	faq := r.Group("/knowledge-bases/:id/faq")
+	faq := r.Group("/knowledge-bases/:id/faq", g.APIKeyContributor())
 	{
 		// KBAccessRead/Write resolve own/shared/agent-visible access and
 		// rewrite the request's tenant context — handler no longer
@@ -361,7 +361,7 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 		faq.PUT("/entries/fields", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntryFieldsBatch)
 		faq.PUT("/entries/tags", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntryTagBatch)
 		faq.DELETE("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteEntries)
-		faq.POST("/search", g.Viewer(), g.KBAccessRead("id"), handler.SearchFAQ)
+		faq.POST("/search", g.Viewer(), g.KBAccessRead("id"), g.APIKeyViewer(), handler.SearchFAQ)
 		// FAQ import result display status
 		faq.PUT("/import/last-result/display", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateLastImportResultDisplayStatus)
 	}
@@ -377,16 +377,16 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	// 知识库路由组
 	kb := r.Group("/knowledge-bases")
 	{
-		// 创建知识库 — Contributor+ (no :id, role-only floor)
-		kb.POST("", g.Contributor(), handler.CreateKnowledgeBase)
+		// 创建知识库 — Contributor+ (no :id, role-only floor); API keys may not create KBs.
+		kb.POST("", g.Contributor(), g.APIKeyDeny(), handler.CreateKnowledgeBase)
 		// 获取知识库列表 — Viewer+ (no :id, role-only floor)
 		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
 		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id", g.Viewer(), g.KBAccessRead("id"), handler.GetKnowledgeBase)
 		// 更新知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
-		kb.PUT("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeBase)
+		kb.PUT("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), g.APIKeyContributor(), handler.UpdateKnowledgeBase)
 		// 删除知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
-		kb.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeBase)
+		kb.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), g.APIKeyContributor(), handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
 		// Pin state is now per-(user, kb) (migration 000050). Anyone with
 		// at least Viewer-level read access to the KB — including users
@@ -394,13 +394,13 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// no edit permission is required. The OwnedKBOrAdmin guard was
 		// removed accordingly. The route still requires KB read access
 		// so callers can't poke at KBs they can't see.
-		kb.PUT("/:id/pin", g.Viewer(), g.KBAccessRead("id"), handler.TogglePinKnowledgeBase)
+		kb.PUT("/:id/pin", g.Viewer(), g.KBAccessRead("id"), g.APIKeyContributor(), handler.TogglePinKnowledgeBase)
 		// 混合搜索 — Viewer+ 且对 KB 有 read 权限 (read-only)
 		// POST is preferred; GET with JSON body is kept for backward compatibility (#1727).
-		kb.POST("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
+		kb.POST("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), g.APIKeyViewer(), handler.HybridSearch)
 		kb.GET("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
 		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)
-		kb.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
+		kb.POST("/copy", g.Contributor(), g.APIKeyDeny(), handler.CopyKnowledgeBase)
 		// 获取知识库复制进度 — Viewer+
 		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
@@ -420,7 +420,7 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 	// Tags 是 KB 的子资源 — 创建/编辑/删除标签会改变 KB 内容的检索分类
 	// 行为，应该与 KB 主体的"creator OR Admin+"矩阵一致，避免一个无
 	// 关 Contributor 在他人 KB 里乱建/删标签影响 KB owner 的内容组织。
-	kbTags := r.Group("/knowledge-bases/:id/tags")
+	kbTags := r.Group("/knowledge-bases/:id/tags", g.APIKeyContributor())
 	{
 		// KBAccessRead/Write resolve own/shared/agent-visible access and
 		// rewrite the request's tenant context to the effective tenant
@@ -442,10 +442,10 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, g *rbacGuards) {
 	messages := r.Group("/messages")
 	{
-		messages.POST("/search", g.Viewer(), handler.SearchMessages)
+		messages.POST("/search", g.Viewer(), g.APIKeyViewer(), handler.SearchMessages)
 		messages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
 		messages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
-		messages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
+		messages.DELETE("/:session_id/:id", g.Viewer(), g.APIKeyAdmin(), handler.DeleteMessage)
 	}
 }
 
@@ -457,7 +457,7 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 // per-session ownership in the middleware layer the same way KB/agent
 // routes do today.
 func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
-	sessions := r.Group("/sessions", g.Viewer())
+	sessions := r.Group("/sessions", g.Viewer(), g.APIKeyContributor())
 	{
 		sessions.POST("", handler.CreateSession)
 		sessions.DELETE("/batch", handler.BatchDeleteSessions)
@@ -483,19 +483,19 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbac
 // surfaces; Viewer+ is sufficient because per-session/per-agent
 // authorisation is enforced inside the handlers.
 func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
-	knowledgeChat := r.Group("/knowledge-chat", g.Viewer())
+	knowledgeChat := r.Group("/knowledge-chat", g.Viewer(), g.APIKeyViewer())
 	{
 		knowledgeChat.POST("/:session_id", handler.KnowledgeQA)
 	}
 
 	// Agent-based chat
-	agentChat := r.Group("/agent-chat", g.Viewer())
+	agentChat := r.Group("/agent-chat", g.Viewer(), g.APIKeyViewer())
 	{
 		agentChat.POST("/:session_id", handler.AgentQA)
 	}
 
 	// 新增知识检索接口，不需要session_id
-	knowledgeSearch := r.Group("/knowledge-search", g.Viewer())
+	knowledgeSearch := r.Group("/knowledge-search", g.Viewer(), g.APIKeyViewer())
 	{
 		knowledgeSearch.POST("", handler.SearchKnowledge)
 	}
@@ -555,7 +555,7 @@ func RegisterTenantRoutes(
 		// 安全说明：这里不挂 g.CrossTenant()，因为 self-service 创建
 		// 不需要跨租户特权；handler 也不读写 X-Tenant-ID 指向的现有
 		// 租户，所以越过 PathTenantMatch 守卫不会扩大攻击面。
-		tenantRoutes.POST("", handler.CreateTenant)
+		tenantRoutes.POST("", g.APIKeyDeny(), handler.CreateTenant)
 		tenantRoutes.GET("", handler.ListTenants)
 
 		// Generic KV configuration management (tenant-level). Tenant ID
@@ -563,7 +563,7 @@ func RegisterTenantRoutes(
 		// config key, not a tenant ID, so these stay outside the
 		// PathTenantMatch group.
 		tenantRoutes.GET("/kv/:key", g.Viewer(), handler.GetTenantKV)
-		tenantRoutes.PUT("/kv/:key", g.Admin(), handler.UpdateTenantKV)
+		tenantRoutes.PUT("/kv/:key", g.Admin(), g.APIKeyAdmin(), handler.UpdateTenantKV)
 
 		// Per-tenant endpoints share PathTenantMatch at the group level.
 		tenantByID := tenantRoutes.Group("/:id", g.PathTenantMatch())
@@ -571,13 +571,13 @@ func RegisterTenantRoutes(
 			tenantByID.GET("", g.Viewer(), handler.GetTenant)
 			tenantByID.PUT("", g.Owner(), handler.UpdateTenant)
 			tenantByID.DELETE("", g.Owner(), handler.DeleteTenant)
-			tenantByID.POST("/api-key", g.Owner(), handler.ResetAPIKey)
-			tenantByID.GET("/api-keys", g.Owner(), handler.ListAPIKeys)
-			tenantByID.POST("/api-keys", g.Owner(), handler.CreateAPIKey)
-			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), handler.DeleteAPIKey)
-			tenantByID.GET("/api-principal-config", g.Owner(), handler.GetAPIPrincipalConfig)
-			tenantByID.PUT("/api-principal-config", g.Owner(), handler.UpdateAPIPrincipalConfig)
-			tenantByID.POST("/api-principal-test-token", g.Owner(), handler.CreateAPIPrincipalTestToken)
+			tenantByID.POST("/api-key", g.Owner(), g.APIKeyDeny(), handler.ResetAPIKey)
+			tenantByID.GET("/api-keys", g.Owner(), g.APIKeyDeny(), handler.ListAPIKeys)
+			tenantByID.POST("/api-keys", g.Owner(), g.APIKeyDeny(), handler.CreateAPIKey)
+			tenantByID.DELETE("/api-keys/:key_id", g.Owner(), g.APIKeyDeny(), handler.DeleteAPIKey)
+			tenantByID.GET("/api-principal-config", g.Owner(), g.APIKeyDeny(), handler.GetAPIPrincipalConfig)
+			tenantByID.PUT("/api-principal-config", g.Owner(), g.APIKeyDeny(), handler.UpdateAPIPrincipalConfig)
+			tenantByID.POST("/api-principal-test-token", g.Owner(), g.APIKeyDeny(), handler.CreateAPIPrincipalTestToken)
 
 			// Tenant member management (PR 3 of #1303). Listing is
 			// Viewer+ so any active member can see the roster; mutation
@@ -635,7 +635,7 @@ func RegisterModelRoutes(
 	g *rbacGuards,
 ) {
 	// 模型路由组
-	models := r.Group("/models")
+	models := r.Group("/models", g.APIKeyAdmin())
 	{
 		// 获取模型厂商列表 — Viewer+
 		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
@@ -664,7 +664,7 @@ func RegisterModelRoutes(
 func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHandler, g *rbacGuards) {
 	evaluationRoutes := r.Group("/evaluation")
 	{
-		evaluationRoutes.POST("/", g.Admin(), handler.Evaluation)
+		evaluationRoutes.POST("/", g.Admin(), g.APIKeyAdmin(), handler.Evaluation)
 		evaluationRoutes.GET("/", g.Viewer(), handler.GetEvaluationResult)
 	}
 }
@@ -727,29 +727,29 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 	r.GET("/initialization/config/:kbId", g.Viewer(), g.KBAccessRead("kbId"), handler.GetCurrentConfigByKB)
 	// InitializeByKB / UpdateKBConfig 都是改 KB 的核心模型/storage 配置 —
 	// 跟 PUT /knowledge-bases/:id 同等敏感，挂同款 OwnedKB 矩阵。
-	r.POST("/initialization/initialize/:kbId", g.OwnedKBOrAdminFromKbIDParam(), handler.InitializeByKB)
-	r.PUT("/initialization/config/:kbId", g.OwnedKBOrAdminFromKbIDParam(), handler.UpdateKBConfig)
+	r.POST("/initialization/initialize/:kbId", g.OwnedKBOrAdminFromKbIDParam(), g.APIKeyContributor(), handler.InitializeByKB)
+	r.PUT("/initialization/config/:kbId", g.OwnedKBOrAdminFromKbIDParam(), g.APIKeyContributor(), handler.UpdateKBConfig)
 
 	// Ollama / 远程 API / 抽取等系统级检测/下载操作。这些不绑某个 KB，
 	// 但会改租户级模型配置或拉远端模型 — 一律 Admin+。Viewer+ 的检测
 	// 入口已经在 settings 页面隐藏，但服务端仍要兜底。
 	r.GET("/initialization/ollama/status", g.Viewer(), handler.CheckOllamaStatus)
 	r.GET("/initialization/ollama/models", g.Viewer(), handler.ListOllamaModels)
-	r.POST("/initialization/ollama/models/check", g.Admin(), handler.CheckOllamaModels)
-	r.POST("/initialization/ollama/models/download", g.Admin(), handler.DownloadOllamaModel)
+	r.POST("/initialization/ollama/models/check", g.Admin(), g.APIKeyAdmin(), handler.CheckOllamaModels)
+	r.POST("/initialization/ollama/models/download", g.Admin(), g.APIKeyAdmin(), handler.DownloadOllamaModel)
 	r.GET("/initialization/ollama/download/progress/:taskId", g.Viewer(), handler.GetDownloadProgress)
 	r.GET("/initialization/ollama/download/tasks", g.Viewer(), handler.ListDownloadTasks)
 
 	// 远程API相关接口
-	r.POST("/initialization/remote/check", g.Admin(), handler.CheckRemoteModel)
-	r.POST("/initialization/embedding/test", g.Admin(), handler.TestEmbeddingModel)
-	r.POST("/initialization/rerank/check", g.Admin(), handler.CheckRerankModel)
-	r.POST("/initialization/asr/check", g.Admin(), handler.CheckASRModel)
-	r.POST("/initialization/multimodal/test", g.Admin(), handler.TestMultimodalFunction)
+	r.POST("/initialization/remote/check", g.Admin(), g.APIKeyAdmin(), handler.CheckRemoteModel)
+	r.POST("/initialization/embedding/test", g.Admin(), g.APIKeyAdmin(), handler.TestEmbeddingModel)
+	r.POST("/initialization/rerank/check", g.Admin(), g.APIKeyAdmin(), handler.CheckRerankModel)
+	r.POST("/initialization/asr/check", g.Admin(), g.APIKeyAdmin(), handler.CheckASRModel)
+	r.POST("/initialization/multimodal/test", g.Admin(), g.APIKeyAdmin(), handler.TestMultimodalFunction)
 
-	r.POST("/initialization/extract/text-relation", g.Admin(), handler.ExtractTextRelations)
-	r.POST("/initialization/extract/fabri-tag", g.Admin(), handler.FabriTag)
-	r.POST("/initialization/extract/fabri-text", g.Admin(), handler.FabriText)
+	r.POST("/initialization/extract/text-relation", g.Admin(), g.APIKeyAdmin(), handler.ExtractTextRelations)
+	r.POST("/initialization/extract/fabri-tag", g.Admin(), g.APIKeyAdmin(), handler.FabriTag)
+	r.POST("/initialization/extract/fabri-text", g.Admin(), g.APIKeyAdmin(), handler.FabriText)
 }
 
 // RegisterSystemRoutes registers system information routes
@@ -760,7 +760,7 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 // remote services with tenant credentials and could trigger network
 // fanout, so they're Admin+.
 func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g *rbacGuards) {
-	systemRoutes := r.Group("/system")
+	systemRoutes := r.Group("/system", g.APIKeyAdmin())
 	{
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
 		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngines)
@@ -853,7 +853,7 @@ func RegisterMCPServiceRoutes(
 	// redirect carries no WeKnora bearer — the single-use state authenticates.
 	r.GET("/mcp-oauth/callback", oauthHandler.Callback)
 
-	mcpServices := r.Group("/mcp-services")
+	mcpServices := r.Group("/mcp-services", g.APIKeyAdmin())
 	{
 		// Create MCP service — Admin+
 		mcpServices.POST("", g.Admin(), handler.CreateMCPService)
@@ -886,7 +886,7 @@ func RegisterMCPServiceRoutes(
 		mcpServices.DELETE("/:id/oauth/token", g.Viewer(), oauthHandler.Revoke)
 	}
 
-	agentTool := r.Group("/agent")
+	agentTool := r.Group("/agent", g.APIKeyDeny())
 	{
 		// Resolving a pending tool-approval is gated to tenant members
 		// (Viewer+). The approval card surfaces inside an agent chat the
@@ -923,7 +923,7 @@ func RegisterWebSearchProviderRoutes(
 	credHandler *handler.WebSearchProviderCredentialsHandler,
 	g *rbacGuards,
 ) {
-	providers := r.Group("/web-search-providers")
+	providers := r.Group("/web-search-providers", g.APIKeyAdmin())
 	{
 		// List available provider types (metadata for UI forms) — Viewer+
 		providers.GET("/types", g.Viewer(), h.ListProviderTypes)
@@ -949,7 +949,7 @@ func RegisterWebSearchProviderRoutes(
 // writes (and connection tests, which probe external systems with stored
 // credentials) are Admin+.
 func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler, g *rbacGuards) {
-	stores := r.Group("/vector-stores")
+	stores := r.Group("/vector-stores", g.APIKeyAdmin())
 	{
 		// List available engine types (metadata for UI forms) — Viewer+
 		stores.GET("/types", g.Viewer(), h.ListStoreTypes)
@@ -973,7 +973,7 @@ func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler
 // (IsBuiltin=true) have an empty creator and are always Admin+. Reads
 // are Viewer+, copy is Contributor+ (the copy is owned by the caller).
 func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler, g *rbacGuards) {
-	agents := r.Group("/agents")
+	agents := r.Group("/agents", g.APIKeyAdmin())
 	{
 		// Get placeholder definitions (must be before /:id to avoid conflict) — Viewer+
 		agents.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
@@ -1004,7 +1004,7 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 // don't follow the OwnedXOrAdmin pattern: favorites aren't owned by the
 // resource's creator, they're owned by the user *doing* the starring.
 func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavoriteHandler, g *rbacGuards) {
-	favs := r.Group("/user/favorites")
+	favs := r.Group("/user/favorites", g.APIKeyDeny())
 	{
 		favs.GET("", g.Viewer(), h.ListFavorites)
 		favs.POST("", g.Viewer(), h.AddFavorite)
@@ -1028,7 +1028,7 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler,
 // RegisterOrganizationRoutes registers organization and sharing routes
 func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.OrganizationHandler, g *rbacGuards) {
 	// Organization routes
-	orgs := r.Group("/organizations")
+	orgs := r.Group("/organizations", g.APIKeyAdmin())
 	{
 		// Create organization (Admin+ in caller's tenant only)
 		orgs.POST("", g.Admin(), orgHandler.CreateOrganization)
@@ -1109,7 +1109,7 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// 分享 KB 到组织 = 让组织里所有人能读这个 KB；这跟"修改 KB 元信息"
 	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己租户里
 	// 也不能私自把 KB 暴露出去。
-	kbShares := r.Group("/knowledge-bases/:id/shares")
+	kbShares := r.Group("/knowledge-bases/:id/shares", g.APIKeyDeny())
 	{
 		// Share knowledge base
 		kbShares.POST("", g.OwnedKBOrAdmin(), orgHandler.ShareKnowledgeBase)
@@ -1128,7 +1128,7 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// 校验（与 ListSharesByKnowledgeBase 不对称），如果路由层只挂 Viewer
 	// 任何同租户成员都能枚举他人 agent 的分享去向——这里把 owner 校验
 	// 兜底到路由层，匹配 POST/DELETE 的矩阵。
-	agentShares := r.Group("/agents/:id/shares")
+	agentShares := r.Group("/agents/:id/shares", g.APIKeyDeny())
 	{
 		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
 		agentShares.GET("", g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
@@ -1142,7 +1142,7 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// "Disable by me" 是租户级偏好（写到 tenant_disabled_shared_agents），
 	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
 	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
-	r.POST("/shared-agents/disabled", g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
+	r.POST("/shared-agents/disabled", g.Admin(), g.APIKeyAdmin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
 // RegisterEmbedPublicRoutes registers anonymous embed endpoints secured by publish tokens.
@@ -1186,12 +1186,12 @@ func RegisterEmbedChannelRoutes(r *gin.RouterGroup, embedHandler *handler.EmbedC
 	if embedHandler == nil {
 		return
 	}
-	agentEmbed := r.Group("/agents/:id/embed-channels")
+	agentEmbed := r.Group("/agents/:id/embed-channels", g.APIKeyAdmin())
 	{
 		agentEmbed.POST("", g.Admin(), embedHandler.CreateEmbedChannel)
 		agentEmbed.GET("", g.Viewer(), embedHandler.ListEmbedChannels)
 	}
-	channels := r.Group("/embed-channels")
+	channels := r.Group("/embed-channels", g.APIKeyAdmin())
 	{
 		channels.GET("", g.Viewer(), embedHandler.ListAllEmbedChannels)
 		channels.GET("/:channel_id", g.Viewer(), embedHandler.GetEmbedChannel)
@@ -1220,14 +1220,14 @@ func RegisterIMRoutes(r *gin.Engine, imHandler *handler.IMHandler) {
 // (which can hijack a personal WeChat session) is Admin+.
 func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler, g *rbacGuards) {
 	// Channel CRUD under agents
-	agentChannels := r.Group("/agents/:id/im-channels")
+	agentChannels := r.Group("/agents/:id/im-channels", g.APIKeyAdmin())
 	{
 		agentChannels.POST("", g.Admin(), imHandler.CreateIMChannel)
 		agentChannels.GET("", g.Viewer(), imHandler.ListIMChannels)
 	}
 
 	// Channel operations by channel ID
-	channels := r.Group("/im-channels")
+	channels := r.Group("/im-channels", g.APIKeyAdmin())
 	{
 		channels.GET("", g.Viewer(), imHandler.ListAllIMChannels)
 		channels.PUT("/:id", g.Admin(), imHandler.UpdateIMChannel)
@@ -1237,7 +1237,7 @@ func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler, g
 
 	// WeChat QR code login (requires authentication) — Admin+: a successful
 	// scan binds a personal WeChat account to the tenant.
-	wechatGroup := r.Group("/wechat")
+	wechatGroup := r.Group("/wechat", g.APIKeyAdmin())
 	{
 		wechatGroup.POST("/qrcode", g.Admin(), imHandler.WeChatGetQRCode)
 		wechatGroup.POST("/qrcode/status", g.Admin(), imHandler.WeChatPollQRCodeStatus)
@@ -1697,7 +1697,7 @@ func RegisterDataSourceRoutes(
 	g *rbacGuards,
 ) {
 	// Data source routes
-	ds := r.Group("/datasource")
+	ds := r.Group("/datasource", g.APIKeyAdmin())
 	{
 		// Get available connector types — Viewer+
 		ds.GET("/types", g.Viewer(), handler.GetAvailableConnectors)
@@ -1739,7 +1739,7 @@ func RegisterDataSourceRoutes(
 // management endpoints. SaveCredentials persists external SaaS keys
 // for the tenant (Admin+), Status is a low-risk readiness probe (Viewer+).
 func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler, g *rbacGuards) {
-	r.POST("/weknoracloud/credentials", g.Admin(), handler.SaveCredentials)
+	r.POST("/weknoracloud/credentials", g.Admin(), g.APIKeyAdmin(), handler.SaveCredentials)
 	r.GET("/models/weknoracloud/status", g.Viewer(), handler.Status)
 }
 
@@ -1753,7 +1753,7 @@ func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraClou
 // :kb_id resolves directly to the owning KB so a Contributor who owns
 // the KB can manage its wiki, while a non-owner Contributor gets 403.
 func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler, g *rbacGuards) {
-	wiki := r.Group("/knowledgebase/:kb_id/wiki")
+	wiki := r.Group("/knowledgebase/:kb_id/wiki", g.APIKeyContributor())
 	{
 		// Page CRUD
 		wiki.GET("/pages", g.Viewer(), g.KBAccessRead("kb_id"), wikiHandler.ListPages)

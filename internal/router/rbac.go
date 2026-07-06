@@ -198,6 +198,25 @@ func (g *rbacGuards) Owner() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleOwner, g.cfg)
 }
 
+// API-key guards — orthogonal to JWT role guards. They only constrain
+// X-API-Key principals; bearer sessions pass through unchanged.
+
+func (g *rbacGuards) APIKeyDeny() gin.HandlerFunc {
+	return middleware.RequireAPIKeyDeny()
+}
+
+func (g *rbacGuards) APIKeyViewer() gin.HandlerFunc {
+	return middleware.RequireAPIKeyMinRole(types.TenantRoleViewer)
+}
+
+func (g *rbacGuards) APIKeyContributor() gin.HandlerFunc {
+	return middleware.RequireAPIKeyMinRoleForUnsafe(types.TenantRoleContributor)
+}
+
+func (g *rbacGuards) APIKeyAdmin() gin.HandlerFunc {
+	return middleware.RequireAPIKeyMinRoleForUnsafe(types.TenantRoleAdmin)
+}
+
 func (g *rbacGuards) SystemAdmin() gin.HandlerFunc {
 	return middleware.RequireSystemAdmin(g.cfg)
 }

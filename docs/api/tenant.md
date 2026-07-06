@@ -17,7 +17,7 @@
 | DELETE | `/tenants/:id`             | 删除租户                                          |
 | POST   | `/tenants/:id/api-key`     | 重置租户 API Key（吊销该租户全部旧 Key 后创建一把新的全权限 Key） |
 | GET    | `/tenants/:id/api-keys`    | 列出租户 API Key（Owner）                         |
-| POST   | `/tenants/:id/api-keys`    | 创建带 scope 的 API Key（Owner）                  |
+| POST   | `/tenants/:id/api-keys`    | 创建带角色的 API Key（Owner）                  |
 | DELETE | `/tenants/:id/api-keys/:key_id` | 吊销指定 API Key（Owner）                   |
 | GET    | `/tenants/:id/api-principal-config` | 获取 API Key 用户身份配置（Owner）          |
 | PUT    | `/tenants/:id/api-principal-config` | 更新 API Key 用户身份配置（Owner）          |
@@ -363,12 +363,12 @@ curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-k
 
 自 scoped API Key 改造后，密钥以独立记录存储，支持：
 
-- **scopes**：`read`（只读 + 语义检索 POST）、`write`（知识库写入）、`admin`（租户级管理，不含 `/api-keys` 管理面）
+- **role**：`viewer`（只读 + 语义检索 POST）、`contributor`（知识库写入）、`admin`（租户级管理，不含 `/api-keys` 管理面）
 - **knowledge_base_ids**：可选，将 Key 限制在指定知识库
 - **吊销**：`DELETE /tenants/:id/api-keys/:key_id`
 - **过期**：创建时可选 `expires_at_unix`
 
-认证上下文中的租户角色由 scope 映射：`read` → Viewer，`write` → Contributor，`admin` → Admin。路由级 scope 校验与 KB 访问守卫在 `X-API-Key` 认证后强制执行。
+认证上下文中的租户角色与 Key 的 `role` 一致（`viewer` / `contributor` / `admin`）。路由级 API Key 鉴权与 KB 访问守卫在 `X-API-Key` 认证后强制执行。
 
 ## API Key Principal：隔离边界与安全说明
 
@@ -382,7 +382,7 @@ Principal **仅**用于按终端用户隔离以下能力：
 - **MCP OAuth** 访问令牌（同一租户下不同外部用户各自授权，token 互不共用）
 - 对话内 MCP OAuth 提示、MCP 工具审批等与终端用户绑定的流程
 
-Principal **不会**缩小 API Key 的 HTTP 路由权限：路由访问由 Key 的 `scopes` 控制；租户内 RBAC 角色由 scope 映射为 Viewer / Contributor / Admin。知识库、Agent 等资源的细粒度访问另受 scope 与 KB 守卫约束。
+Principal **不会**缩小 API Key 的 HTTP 路由权限：路由访问由 Key 的 `role` 控制；租户内 RBAC 角色与 `role` 一致。知识库、Agent 等资源的细粒度访问另受 KB 守卫约束。
 
 ### 模式与安全假设
 

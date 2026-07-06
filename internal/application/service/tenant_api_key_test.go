@@ -25,7 +25,7 @@ func TestTenantAPIKeyServiceCreateAPIKeyUsesSKPrefix(t *testing.T) {
 	result, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: 42,
 		Name:     "integration",
-		Scopes:   []string{types.TenantAPIKeyScopeRead},
+		Role:     types.TenantRoleViewer,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey returned error: %v", err)
@@ -126,7 +126,7 @@ func TestTenantAPIKeyServiceAuthenticateTenantAPIKeyRepairsMigratedHash(t *testi
 		Name:     "Tenant API key",
 		KeyHash:  "migrated-tenant-42",
 		APIKey:   token,
-		Scopes:   types.StringArray{types.TenantAPIKeyScopeAdmin},
+		Role:   types.TenantRoleAdmin,
 	}
 	if err := repo.CreateAPIKey(ctx, key); err != nil {
 		t.Fatalf("CreateAPIKey returned error: %v", err)
@@ -151,7 +151,7 @@ func TestTenantAPIKeyServiceRevokeAllAPIKeys(t *testing.T) {
 	first, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: 42,
 		Name:     "first",
-		Scopes:   []string{types.TenantAPIKeyScopeRead},
+		Role:   types.TenantRoleViewer,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey first returned error: %v", err)
@@ -159,7 +159,7 @@ func TestTenantAPIKeyServiceRevokeAllAPIKeys(t *testing.T) {
 	second, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: 42,
 		Name:     "second",
-		Scopes:   []string{types.TenantAPIKeyScopeRead},
+		Role:   types.TenantRoleViewer,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey second returned error: %v", err)

@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
     name VARCHAR(128) NOT NULL,
     key_hash VARCHAR(64) NOT NULL UNIQUE,
     api_key TEXT NOT NULL DEFAULT '',
-    scopes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    role VARCHAR(32) NOT NULL DEFAULT 'viewer',
     knowledge_base_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     last_used_at TIMESTAMP,
     expires_at TIMESTAMP,
@@ -25,7 +25,7 @@ INSERT INTO tenant_api_keys (
     name,
     key_hash,
     api_key,
-    scopes,
+    role,
     knowledge_base_ids,
     created_at,
     updated_at
@@ -35,7 +35,7 @@ SELECT
     'Tenant API key',
     'migrated-tenant-' || id::text,
     api_key,
-    '["read","write","admin"]'::jsonb,
+    'admin',
     '[]'::jsonb,
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP

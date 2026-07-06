@@ -130,7 +130,7 @@
                       </td>
                       <td>
                         <t-tag size="small" variant="light">
-                          {{ formatApiKeyAccessRoleLabel(key.scopes) }}
+                          {{ formatApiKeyAccessRoleLabel(key.role) }}
                         </t-tag>
                       </td>
                       <td>
@@ -469,7 +469,7 @@
           </t-radio-group>
           <p class="scope-role-hint">{{ $t('integrations.api.apiKeyAccessRoleHint') }}</p>
           <div class="scope-help scope-help--role">
-            <p class="scope-help__role">{{ formatApiKeyAccessRoleLabel(accessRoleToScopes(apiKeyForm.role)) }}</p>
+            <p class="scope-help__role">{{ formatApiKeyAccessRoleLabel(apiKeyForm.role) }}</p>
             <p class="scope-help__desc">{{ apiKeyFormRoleDesc }}</p>
           </div>
         </div>
@@ -522,7 +522,7 @@ import {
   type APIPrincipalConfig,
   type APIPrincipalMode,
   type TenantAPIKey,
-  type TenantAPIKeyScope,
+  type TenantAPIKeyRole,
 } from '@/api/tenant'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { getApiBaseUrl } from '@/utils/api-base'
@@ -576,32 +576,14 @@ const apiKeyForm = reactive({
   knowledge_base_ids: [] as string[],
 })
 
-function scopesToAccessRole(scopes: TenantAPIKeyScope[] | undefined): ApiKeyAccessRole {
-  const normalized = (scopes ?? []).map((scope) => scope.toLowerCase())
-  if (normalized.includes('admin')) return 'admin'
-  if (normalized.includes('write')) return 'contributor'
-  return 'viewer'
-}
-
-function accessRoleToScopes(role: ApiKeyAccessRole): TenantAPIKeyScope[] {
-  switch (role) {
-    case 'admin':
-      return ['admin']
-    case 'contributor':
-      return ['write']
-    default:
-      return ['read']
-  }
-}
-
-function formatApiKeyAccessRoleLabel(scopes: TenantAPIKeyScope[] | undefined): string {
-  const role = scopesToAccessRole(scopes)
+function formatApiKeyAccessRoleLabel(role: ApiKeyAccessRole | TenantAPIKeyRole | undefined): string {
+  const normalized = (role ?? 'viewer') as ApiKeyAccessRole
   const labels: Record<ApiKeyAccessRole, string> = {
     viewer: t('integrations.api.accessRoleViewer'),
     contributor: t('integrations.api.accessRoleContributor'),
     admin: t('integrations.api.accessRoleAdmin'),
   }
-  return labels[role]
+  return labels[normalized] ?? labels.viewer
 }
 
 const apiKeyFormRoleDesc = computed(() => {
@@ -1152,7 +1134,7 @@ async function createScopedAPIKey() {
   try {
     const resp = await createTenantAPIKey(tenantId.value, {
       name: apiKeyForm.name.trim(),
-      scopes: accessRoleToScopes(apiKeyForm.role),
+      role: apiKeyForm.role,
       knowledge_base_ids: apiKeyForm.knowledge_base_ids,
     })
     if (!resp.success || !resp.data?.api_key) {

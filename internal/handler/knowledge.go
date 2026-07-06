@@ -2439,14 +2439,7 @@ func requireTenantAPIKeyKnowledgeBase(ctx context.Context, kbID string) error {
 }
 
 func requireTenantAPIKeyKnowledgeBases(ctx context.Context, kbIDs ...string) error {
-	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
-	if !ok || !scope.IsKnowledgeBaseRestricted() {
-		return nil
-	}
-	if !scope.AllowsKnowledgeBases(kbIDs) {
-		return errors.NewForbiddenError("API key scope does not allow one or more knowledge bases")
-	}
-	return nil
+	return types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbIDs...)
 }
 
 func tenantAPIKeyAllowedKBSet(ctx context.Context) map[string]bool {

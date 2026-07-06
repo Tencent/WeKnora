@@ -43,12 +43,12 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 		Name:             name,
 		KeyHash:          hashTenantAPIKey(token),
 		APIKey:           token,
-		Scopes:           normalizeAPIKeyScopes(req.Scopes),
+		Role:             types.NormalizeTenantAPIKeyRole(req.Role),
 		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
 		ExpiresAt:        req.ExpiresAt,
 	}
-	if len(key.Scopes) == 0 {
-		key.Scopes = types.StringArray{types.TenantAPIKeyScopeRead}
+	if key.Role == "" {
+		key.Role = types.TenantRoleViewer
 	}
 	if err := s.repo.CreateAPIKey(ctx, key); err != nil {
 		return nil, err
@@ -160,25 +160,6 @@ func (s *tenantAPIKeyService) ensureAPIKeyHash(ctx context.Context, key *types.T
 	}
 	key.KeyHash = hash
 	return nil
-}
-
-func normalizeAPIKeyScopes(in []string) types.StringArray {
-	out := types.StringArray{}
-	seen := map[string]struct{}{}
-	for _, scope := range in {
-		scope = strings.ToLower(strings.TrimSpace(scope))
-		switch scope {
-		case types.TenantAPIKeyScopeRead, types.TenantAPIKeyScopeWrite, types.TenantAPIKeyScopeAdmin:
-		default:
-			continue
-		}
-		if _, ok := seen[scope]; ok {
-			continue
-		}
-		seen[scope] = struct{}{}
-		out = append(out, scope)
-	}
-	return out
 }
 
 func normalizeAPIKeyIDs(in []string) types.StringArray {

@@ -62,35 +62,35 @@ type TenantListResponse struct {
 	} `json:"data"`
 }
 
-// TenantAPIKeyScope is an operation scope for revocable tenant API keys.
-type TenantAPIKeyScope string
+// TenantAPIKeyRole is the tenant RBAC role bound to a revocable API key.
+type TenantAPIKeyRole string
 
 const (
-	TenantAPIKeyScopeRead  TenantAPIKeyScope = "read"
-	TenantAPIKeyScopeWrite TenantAPIKeyScope = "write"
-	TenantAPIKeyScopeAdmin TenantAPIKeyScope = "admin"
+	TenantAPIKeyRoleViewer      TenantAPIKeyRole = "viewer"
+	TenantAPIKeyRoleContributor TenantAPIKeyRole = "contributor"
+	TenantAPIKeyRoleAdmin       TenantAPIKeyRole = "admin"
 )
 
 // TenantAPIKey is the API key metadata returned by list/create APIs.
 type TenantAPIKey struct {
-	ID               uint64              `json:"id"`
-	TenantID         uint64              `json:"tenant_id"`
-	Name             string              `json:"name"`
-	APIKey           string              `json:"api_key"`
-	Scopes           []TenantAPIKeyScope `json:"scopes"`
-	KnowledgeBaseIDs []string            `json:"knowledge_base_ids"`
+	ID               uint64           `json:"id"`
+	TenantID         uint64           `json:"tenant_id"`
+	Name             string           `json:"name"`
+	APIKey           string           `json:"api_key"`
+	Role             TenantAPIKeyRole `json:"role"`
+	KnowledgeBaseIDs []string         `json:"knowledge_base_ids"`
 	LastUsedAt       *time.Time          `json:"last_used_at,omitempty"`
 	ExpiresAt        *time.Time          `json:"expires_at,omitempty"`
 	CreatedAt        time.Time           `json:"created_at"`
 	UpdatedAt        time.Time           `json:"updated_at"`
 }
 
-// CreateTenantAPIKeyRequest creates a scoped, revocable tenant API key.
+// CreateTenantAPIKeyRequest creates a revocable tenant API key.
 type CreateTenantAPIKeyRequest struct {
-	Name             string              `json:"name"`
-	Scopes           []TenantAPIKeyScope `json:"scopes,omitempty"`
-	KnowledgeBaseIDs []string            `json:"knowledge_base_ids,omitempty"`
-	ExpiresAtUnix    *int64              `json:"expires_at_unix,omitempty"`
+	Name             string           `json:"name"`
+	Role             TenantAPIKeyRole `json:"role,omitempty"`
+	KnowledgeBaseIDs []string         `json:"knowledge_base_ids,omitempty"`
+	ExpiresAtUnix    *int64           `json:"expires_at_unix,omitempty"`
 }
 
 // CreatedTenantAPIKey includes the created API key. Token is kept for

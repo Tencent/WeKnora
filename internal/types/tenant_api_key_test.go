@@ -2,30 +2,38 @@ package types
 
 import "testing"
 
-func TestTenantAPIKeyScopeNormalizeDefaultsEmptyScopesToRead(t *testing.T) {
-	scope := TenantAPIKeyScope{Scopes: StringArray{}}.Normalize()
-	if len(scope.Scopes) != 1 || scope.Scopes[0] != TenantAPIKeyScopeRead {
-		t.Fatalf("normalized scopes = %v, want [read]", scope.Scopes)
+func TestTenantAPIKeyScopeNormalizeDefaultsEmptyRoleToViewer(t *testing.T) {
+	scope := TenantAPIKeyScope{Role: ""}.Normalize()
+	if scope.Role != TenantRoleViewer {
+		t.Fatalf("normalized role = %q, want viewer", scope.Role)
 	}
 }
 
-func TestTenantAPIKeyScopeTenantRoleMapping(t *testing.T) {
+func TestNormalizeTenantAPIKeyRole(t *testing.T) {
 	tests := []struct {
 		name string
-		in   StringArray
+		in   TenantRole
 		want TenantRole
 	}{
-		{name: "read", in: StringArray{TenantAPIKeyScopeRead}, want: TenantRoleViewer},
-		{name: "write", in: StringArray{TenantAPIKeyScopeWrite}, want: TenantRoleContributor},
-		{name: "admin", in: StringArray{TenantAPIKeyScopeAdmin}, want: TenantRoleAdmin},
-		{name: "empty defaults read", in: StringArray{}, want: TenantRoleViewer},
+		{name: "viewer", in: TenantRoleViewer, want: TenantRoleViewer},
+		{name: "contributor", in: TenantRoleContributor, want: TenantRoleContributor},
+		{name: "admin", in: TenantRoleAdmin, want: TenantRoleAdmin},
+		{name: "empty defaults viewer", in: "", want: TenantRoleViewer},
+		{name: "invalid", in: "owner", want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := TenantAPIKeyScope{Scopes: tt.in}.TenantRole()
+			got := NormalizeTenantAPIKeyRole(tt.in)
 			if got != tt.want {
-				t.Fatalf("TenantRole() = %q, want %q", got, tt.want)
+				t.Fatalf("NormalizeTenantAPIKeyRole(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTenantAPIKeyScopeTenantRole(t *testing.T) {
+	got := TenantAPIKeyScope{Role: TenantRoleContributor}.TenantRole()
+	if got != TenantRoleContributor {
+		t.Fatalf("TenantRole() = %q, want contributor", got)
 	}
 }
