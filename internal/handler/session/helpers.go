@@ -98,12 +98,11 @@ func tagScopesFromMentionedItems(items []MentionedItemRequest) []types.TagScope 
 	return scopes
 }
 
-// mergeTagScopesFromRequestIDs supplements tag scopes built from mentioned_items
-// with bare tag_ids when the client did not send kb_id on each tag mention.
-// Orphan tag IDs are attached to the sole knowledge_base_id when unambiguous.
-func mergeTagScopesFromRequestIDs(scopes []types.TagScope, tagIDs, kbIDs []string) []types.TagScope {
+// orphanTagIDsForScope returns tag IDs from the request that are not already
+// covered by scoped mentions.
+func orphanTagIDsForScope(tagIDs []string, scopes []types.TagScope) []string {
 	if len(tagIDs) == 0 {
-		return scopes
+		return nil
 	}
 	covered := make(map[string]bool)
 	for _, scope := range scopes {
@@ -117,6 +116,25 @@ func mergeTagScopesFromRequestIDs(scopes []types.TagScope, tagIDs, kbIDs []strin
 			orphan = append(orphan, id)
 		}
 	}
+	return orphan
+}
+
+// validateUnscopedTagIDs rejects bare tag_ids that cannot be attached to a KB.
+func validateUnscopedTagIDs(orphan []string, kbIDs []string) error {
+	if len(orphan) == 0 {
+		return nil
+	}
+	if len(kbIDs) == 1 {
+		return nil
+	}
+	return fmt.Errorf("tag_ids must be scoped via mentioned_items or exactly one knowledge_base_id")
+}
+
+// mergeTagScopesFromRequestIDs supplements tag scopes built from mentioned_items
+// with bare tag_ids when the client did not send kb_id on each tag mention.
+// Orphan tag IDs are attached to the sole knowledge_base_id when unambiguous.
+func mergeTagScopesFromRequestIDs(scopes []types.TagScope, tagIDs, kbIDs []string) []types.TagScope {
+	orphan := orphanTagIDsForScope(tagIDs, scopes)
 	if len(orphan) == 0 {
 		return scopes
 	}

@@ -250,11 +250,12 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	//      had memory enabled in practice, keep that behaviour.
 	enableMemory := h.resolveEnableMemory(ctx, request.EnableMemory)
 
-	tagScopes := mergeTagScopesFromRequestIDs(
-		tagScopesFromMentionedItems(request.MentionedItems),
-		dedupRequestStrings(request.TagIDs),
-		secutils.SanitizeForLogArray(kbIDs),
-	)
+	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
+	requestTagIDs := dedupRequestStrings(request.TagIDs)
+	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(kbIDs)); err != nil {
+		return nil, nil, errors.NewBadRequestError(err.Error())
+	}
+	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
@@ -522,11 +523,14 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		}
 	}
 
-	tagScopes := mergeTagScopesFromRequestIDs(
-		tagScopesFromMentionedItems(request.MentionedItems),
-		dedupRequestStrings(request.TagIDs),
-		secutils.SanitizeForLogArray(knowledgeBaseIDs),
-	)
+	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
+	requestTagIDs := dedupRequestStrings(request.TagIDs)
+	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(knowledgeBaseIDs)); err != nil {
+		logger.Error(ctx, err.Error())
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(knowledgeBaseIDs))
 
 	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 && len(tagScopes) == 0 {
 		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, or tag scopes provided")
