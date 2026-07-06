@@ -3,7 +3,8 @@ import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
 import { updateMyPreferences, type UserPreferences } from "@/api/auth";
-import { isAgentStreamAgentId, reconcileBuiltinAgentMode } from "@/utils/agent-mode";
+import { isAgentStreamAgentId } from "@/utils/agent-mode";
+import { loadAndReconcileSettings } from "@/stores/settingsStorage";
 
 // 定义设置接口
 interface Settings {
@@ -110,35 +111,10 @@ const defaultSettings: Settings = {
   autoCheckUpdate: true,
 };
 
-/** Keep builtin agent id and isAgentEnabled in sync after localStorage reload. */
-function loadAndReconcileSettings(): Settings {
-  let loaded: Settings;
-  try {
-    const raw = localStorage.getItem("WeKnora_settings");
-    loaded = raw ? (JSON.parse(raw) as Settings) : { ...defaultSettings };
-  } catch (e) {
-    console.error("[settings] Failed to parse WeKnora_settings from localStorage, resetting to defaults:", e);
-    localStorage.removeItem("WeKnora_settings");
-    return { ...defaultSettings };
-  }
-  loaded.selectedTags ||= [];
-  loaded.selectedMCPServices ||= [];
-  loaded.selectedSkills ||= loaded.selectedTools || [];
-  loaded.selectedFileKbMap ||= {};
-  if (reconcileBuiltinAgentMode(loaded)) {
-    try {
-      localStorage.setItem("WeKnora_settings", JSON.stringify(loaded));
-    } catch {
-      /* quota exceeded — non-critical */
-    }
-  }
-  return loaded;
-}
-
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
     // 从本地存储加载设置，如果没有则使用默认设置
-    settings: loadAndReconcileSettings(),
+    settings: loadAndReconcileSettings(defaultSettings),
     // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
     // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
     _defaultsSnapshot: null as Settings | null,
