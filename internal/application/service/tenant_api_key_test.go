@@ -13,8 +13,9 @@ import (
 )
 
 type fakeTenantAPIKeyRepo struct {
-	byHash map[string]*types.TenantAPIKey
-	nextID uint64
+	byHash              map[string]*types.TenantAPIKey
+	nextID              uint64
+	lastUsedUpdateCount int
 }
 
 func TestTenantAPIKeyServiceCreateAPIKeyUsesSKPrefix(t *testing.T) {
@@ -118,6 +119,7 @@ func (r *fakeTenantAPIKeyRepo) ListKeysWithPlaceholderHash(_ context.Context) ([
 }
 
 func (r *fakeTenantAPIKeyRepo) UpdateAPIKeyLastUsed(_ context.Context, id uint64, at time.Time) error {
+	r.lastUsedUpdateCount++
 	for _, key := range r.byHash {
 		if key.ID == id && key.RevokedAt == nil {
 			key.LastUsedAt = &at
@@ -176,5 +178,34 @@ func TestTenantAPIKeyServiceRevokeAPIKey(t *testing.T) {
 	}
 	if _, err := svc.AuthenticateAPIKey(ctx, created.Token); err == nil {
 		t.Fatal("revoked key should not authenticate")
+	}
+}
+
+func TestTenantAPIKeyServiceAuthenticateThrottlesLastUsedUpdates(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+
+	created, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID: 42,
+		Name:     "integration",
+		Role:     types.TenantRoleViewer,
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		if _, err := svc.AuthenticateAPIKey(ctx, created.Token); err != nil {
+			t.Fatalf("AuthenticateAPIKey #%d returned error: %v", i+1, err)
+		}
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for repo.lastUsedUpdateCount == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if repo.lastUsedUpdateCount != 1 {
+		t.Fatalf("last_used update count = %d, want 1 (throttled async write)", repo.lastUsedUpdateCount)
 	}
 }

@@ -8,15 +8,23 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
+// apiKeyLastUsedMinInterval bounds how often we persist last_used_at per key.
+// The UI only needs minute-level freshness; throttling avoids a DB write on
+// every authenticated request under high QPS.
+const apiKeyLastUsedMinInterval = time.Minute
+
 type tenantAPIKeyService struct {
-	repo interfaces.TenantAPIKeyRepository
+	repo          interfaces.TenantAPIKeyRepository
+	lastUsedTouch sync.Map // key ID (uint64) -> time.Time of last persisted touch
 }
 
 func NewTenantAPIKeyService(repo interfaces.TenantAPIKeyRepository) interfaces.TenantAPIKeyService {
@@ -70,8 +78,28 @@ func (s *tenantAPIKeyService) AuthenticateAPIKey(ctx context.Context, token stri
 	if key.ExpiresAt != nil && time.Now().After(*key.ExpiresAt) {
 		return nil, apprepo.ErrTenantAPIKeyNotFound
 	}
-	_ = s.repo.UpdateAPIKeyLastUsed(ctx, key.ID, time.Now())
+	s.touchAPIKeyLastUsedAsync(key.ID)
 	return key, nil
+}
+
+// touchAPIKeyLastUsedAsync persists last_used_at at most once per key per
+// apiKeyLastUsedMinInterval. The write runs in a detached goroutine so auth
+// latency is not tied to an UPDATE on the hot path.
+func (s *tenantAPIKeyService) touchAPIKeyLastUsedAsync(keyID uint64) {
+	now := time.Now()
+	if v, ok := s.lastUsedTouch.Load(keyID); ok {
+		if now.Sub(v.(time.Time)) < apiKeyLastUsedMinInterval {
+			return
+		}
+	}
+	s.lastUsedTouch.Store(keyID, now)
+	go func(id uint64, at time.Time) {
+		if err := s.repo.UpdateAPIKeyLastUsed(context.Background(), id, at); err != nil {
+			logger.Warnf(context.Background(),
+				"failed to update tenant api key last_used_at (id=%d): %v", id, err)
+			s.lastUsedTouch.Delete(id)
+		}
+	}(keyID, now)
 }
 
 func (s *tenantAPIKeyService) ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error) {
