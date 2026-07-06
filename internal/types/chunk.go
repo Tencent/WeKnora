@@ -156,6 +156,23 @@ type Chunk struct {
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
+	// LikeCount is the cumulative thumbs-up count attributed to this chunk
+	// via message feedback. Incremented when a user likes an answer that
+	// cited this chunk.
+	LikeCount int `json:"like_count"                 gorm:"default:0"`
+	// DislikeCount is the cumulative thumbs-down count attributed to this chunk.
+	DislikeCount int `json:"dislike_count"            gorm:"default:0"`
+	// ApprovalRate = LikeCount / (LikeCount + DislikeCount), 0.0–1.0.
+	// Zero when no feedback has been received.
+	ApprovalRate float64 `json:"approval_rate"           gorm:"default:0"`
+	// RecallWeight is a multiplier applied to this chunk's retrieval score.
+	// Default 1.0 (neutral). Adjusted automatically based on ApprovalRate.
+	RecallWeight float64 `json:"recall_weight"          gorm:"default:1.0"`
+	// NeedsOptimization is set when ApprovalRate falls below a configurable
+	// threshold, signalling admins to review/improve the chunk.
+	NeedsOptimization bool `json:"needs_optimization"     gorm:"default:false"`
+	// FeedbackUpdatedAt records when feedback counters were last recomputed.
+	FeedbackUpdatedAt *time.Time `json:"feedback_updated_at,omitempty"`
 	// Chunk creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Chunk last update time

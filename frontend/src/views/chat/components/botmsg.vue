@@ -52,6 +52,18 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- 点赞按钮 -->
+                <t-button size="small" :variant="feedbackType === 'like' ? 'base' : 'outline'" shape="round"
+                    :class="{ 'feedback-active': feedbackType === 'like' }"
+                    @click.stop="handleLike" :title="$t('chat.like')" :loading="feedbackLoading">
+                    <t-icon name="thumb-up" />
+                </t-button>
+                <!-- 点踩按钮 -->
+                <t-button size="small" :variant="feedbackType === 'dislike' ? 'base' : 'outline'" shape="round"
+                    :class="{ 'feedback-active dislike': feedbackType === 'dislike' }"
+                    @click.stop="handleDislike" :title="$t('chat.dislike')" :loading="feedbackLoading">
+                    <t-icon name="thumb-down" />
+                </t-button>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -64,6 +76,24 @@
                 $t('common.loading') }}</span></div>
         </div>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
+        <!-- 点踩原因弹窗 -->
+        <t-dialog v-model:visible="dislikeDialogVisible" :header="$t('chat.dislikeReasonTitle')"
+            :confirm-btn="$t('common.confirm')" :cancel-btn="$t('common.cancel')" @confirm="submitDislike"
+            @cancel="dislikeDialogVisible = false" width="420px">
+            <div class="dislike-reason-form">
+                <t-radio-group v-model="dislikeReason" direction="vertical">
+                    <t-radio value="irrelevant">{{ $t('chat.dislikeReason.irrelevant') }}</t-radio>
+                    <t-radio value="incorrect">{{ $t('chat.dislikeReason.incorrect') }}</t-radio>
+                    <t-radio value="not_helpful">{{ $t('chat.dislikeReason.notHelpful') }}</t-radio>
+                    <t-radio value="too_long">{{ $t('chat.dislikeReason.tooLong') }}</t-radio>
+                    <t-radio value="outdated">{{ $t('chat.dislikeReason.outdated') }}</t-radio>
+                    <t-radio value="other">{{ $t('chat.dislikeReason.other') }}</t-radio>
+                </t-radio-group>
+                <t-textarea v-if="dislikeReason === 'other'" v-model="dislikeDetail"
+                    :placeholder="$t('chat.dislikeReason.detailPlaceholder')" :maxlength="500" :autosize="{ minRows: 2, maxRows: 4 }"
+                    style="margin-top: 12px;" />
+            </div>
+        </t-dialog>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
                 :on-leave="scheduleCitationClose" />
@@ -80,6 +110,7 @@ import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import { submitFeedback, getFeedback } from '@/api/chat/feedback';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -159,6 +190,98 @@ const props = defineProps({
 });
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+
+// --- Feedback (like/dislike) state ---
+const feedbackType = ref('');         // '' | 'like' | 'dislike'
+const feedbackLoading = ref(false);
+const dislikeDialogVisible = ref(false);
+const dislikeReason = ref('');
+const dislikeDetail = ref('');
+
+const messageId = computed(() => props.session?.id || props.session?.message_id || '');
+
+// Load existing feedback when the message is completed.
+watch(() => props.session?.is_completed, async (completed) => {
+    if (completed && messageId.value) {
+        try {
+            const res = await getFeedback(messageId.value);
+            if (res?.feedback) {
+                feedbackType.value = res.feedback.feedback_type;
+            }
+        } catch {
+            // Silently ignore — feedback is non-critical UI state.
+        }
+    }
+}, { immediate: true });
+
+const handleLike = async () => {
+    // Toggle: if already liked, cancel; otherwise like.
+    const newType = feedbackType.value === 'like' ? 'none' : 'like';
+    feedbackLoading.value = true;
+    try {
+        await submitFeedback({
+            session_id: props.sessionId,
+            message_id: messageId.value,
+            feedback_type: newType,
+        });
+        feedbackType.value = newType === 'none' ? '' : newType;
+    } catch (err) {
+        console.error('Failed to submit like:', err);
+    } finally {
+        feedbackLoading.value = false;
+    }
+};
+
+const handleDislike = () => {
+    // If already disliked, cancel directly; otherwise open reason dialog.
+    if (feedbackType.value === 'dislike') {
+        submitDislikeCancel();
+    } else {
+        dislikeReason.value = '';
+        dislikeDetail.value = '';
+        dislikeDialogVisible.value = true;
+    }
+};
+
+const submitDislikeCancel = async () => {
+    feedbackLoading.value = true;
+    try {
+        await submitFeedback({
+            session_id: props.sessionId,
+            message_id: messageId.value,
+            feedback_type: 'none',
+        });
+        feedbackType.value = '';
+    } catch (err) {
+        console.error('Failed to cancel dislike:', err);
+    } finally {
+        feedbackLoading.value = false;
+    }
+};
+
+const submitDislike = async () => {
+    if (!dislikeReason.value) {
+        MessagePlugin.warning(t('chat.dislikeReason.selectPrompt'));
+        return;
+    }
+    feedbackLoading.value = true;
+    try {
+        await submitFeedback({
+            session_id: props.sessionId,
+            message_id: messageId.value,
+            feedback_type: 'dislike',
+            reason: dislikeReason.value,
+            reason_detail: dislikeReason.value === 'other' ? dislikeDetail.value : '',
+        });
+        feedbackType.value = 'dislike';
+        dislikeDialogVisible.value = false;
+    } catch (err) {
+        console.error('Failed to submit dislike:', err);
+    } finally {
+        feedbackLoading.value = false;
+    }
+};
+// --- End feedback state ---
 
 const preview = (url) => {
     nextTick(() => {
@@ -354,6 +477,25 @@ onBeforeUnmount(() => {
     &:hover {
         color: var(--td-text-color-placeholder) !important;
         border-color: var(--td-component-border) !important;
+    }
+}
+
+// 点赞/点踩按钮激活状态
+.feedback-active {
+    color: var(--td-brand-color) !important;
+    border-color: var(--td-brand-color) !important;
+
+    &.dislike {
+        color: var(--td-error-color) !important;
+        border-color: var(--td-error-color) !important;
+    }
+}
+
+.dislike-reason-form {
+    padding: 4px 0;
+
+    :deep(.t-radio-group) {
+        gap: 8px;
     }
 }
 

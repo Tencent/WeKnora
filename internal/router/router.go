@@ -86,6 +86,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
+	FeedbackHandler              *handler.FeedbackHandler
 }
 
 // NewRouter 创建新的路由
@@ -231,6 +232,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
+		RegisterFeedbackRoutes(v1, params.FeedbackHandler, rbacGuards)
 	}
 
 	return r
@@ -245,6 +247,43 @@ func NewRouter(params RouterParams) *gin.Engine {
 // rest of the RBAC matrix in this file.
 func RegisterChunkerDebugRoutes(r *gin.RouterGroup, g *rbacGuards) {
 	r.POST("/chunker/preview", g.Viewer(), handler.PreviewChunking)
+}
+
+// RegisterFeedbackRoutes wires the like/dislike feedback feature routes.
+//
+// End-user feedback (submit/get) is Viewer+ — any tenant member can like or
+// dislike an answer. The feedback is attributed to all knowledge chunks
+// cited by the answer, updating per-chunk like/dislike counters and the
+// derived recall weight automatically.
+//
+// Admin-only endpoints:
+//   - Chunk feedback stats list/detail (Admin+ — operational analytics)
+//   - Weight change logs (Admin+ — audit trail)
+//   - Reset chunk feedback (Admin+ — manual counter reset)
+//   - Manual weight override (Admin+ — manual weight set)
+//   - Threshold config read (Viewer+ — informational)
+func RegisterFeedbackRoutes(r *gin.RouterGroup, h *handler.FeedbackHandler, g *rbacGuards) {
+	feedback := r.Group("/feedback")
+	{
+		// User-facing: submit like/dislike/cancel — Viewer+
+		feedback.POST("", g.Viewer(), h.SubmitFeedback)
+		// User-facing: get current user's feedback on a message — Viewer+
+		feedback.GET("/:message_id", g.Viewer(), h.GetFeedback)
+
+		// Admin analytics: chunk feedback stats — Admin+
+		feedback.GET("/chunks/stats", g.Admin(), h.ListChunkFeedbackStats)
+		feedback.GET("/chunks/:chunk_id/stats", g.Admin(), h.GetChunkFeedbackStats)
+
+		// Admin audit: weight change logs — Admin+
+		feedback.GET("/weight-logs", g.Admin(), h.ListWeightLogs)
+
+		// Admin operations: reset / manual weight — Admin+
+		feedback.POST("/chunks/:chunk_id/reset", g.Admin(), h.AdminResetChunkFeedback)
+		feedback.PUT("/chunks/:chunk_id/weight", g.Admin(), h.AdminSetChunkWeight)
+
+		// Threshold config (informational) — Viewer+
+		feedback.GET("/thresholds", g.Viewer(), h.GetFeedbackThresholds)
+	}
 }
 
 // RegisterChunkRoutes 注册分块相关的路由

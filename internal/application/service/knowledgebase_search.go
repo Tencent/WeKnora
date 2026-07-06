@@ -234,6 +234,13 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	}
 	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, retrievalCfg)
 
+	// Apply per-chunk recall weight based on user feedback (like/dislike).
+	// Chunks with high approval rates get boosted (score * weight > 1.0),
+	// while low-quality chunks get demoted (score * weight < 1.0). The
+	// weight is derived from the approval rate threshold mechanism in
+	// types.ComputeWeight. Results are re-sorted after applying weights.
+	deduplicatedChunks = s.applyRecallWeights(ctx, deduplicatedChunks)
+
 	kb.EnsureDefaults()
 
 	// FAQ-specific post-processing now operates on storeGroups so the
