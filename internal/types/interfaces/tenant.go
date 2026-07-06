@@ -85,6 +85,10 @@ type TenantAPIKeyRepository interface {
 	RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error
 	UpdateAPIKeyHash(ctx context.Context, id uint64, hash string) error
 	UpdateAPIKeyLastUsed(ctx context.Context, id uint64, at time.Time) error
+	// ListKeysWithPlaceholderHash returns keys whose key_hash is still the
+	// migration placeholder (never authenticated since the 000065 upgrade),
+	// so the real SHA-256 hash can be computed and backfilled.
+	ListKeysWithPlaceholderHash(ctx context.Context) ([]*types.TenantAPIKey, error)
 }
 
 type TenantAPIKeyService interface {
@@ -94,4 +98,9 @@ type TenantAPIKeyService interface {
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
 	RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error
+	// BackfillMissingKeyHashes computes and persists the SHA-256 key_hash
+	// for legacy keys still carrying the migration placeholder, so their
+	// first authentication does not fall back to an O(n) plaintext scan.
+	// Returns the number of keys backfilled.
+	BackfillMissingKeyHashes(ctx context.Context) (int, error)
 }

@@ -460,21 +460,34 @@
 
         <div class="api-key-dialog-row">
           <div class="api-key-dialog-row__label">
-            <label>{{ $t('integrations.api.apiKeyAccessRole') }}</label>
+            <label>{{ $t('integrations.api.apiKeyAccessType') }}</label>
+          </div>
+          <t-radio-group v-model="apiKeyAccessType" class="mode-radio api-key-role-radio">
+            <t-radio-button value="kb">{{ $t('integrations.api.accessTypeKnowledgeBase') }}</t-radio-button>
+            <t-radio-button value="tenant">{{ $t('integrations.api.accessTypeTenantFull') }}</t-radio-button>
+          </t-radio-group>
+          <p class="scope-role-hint">{{ $t('integrations.api.apiKeyAccessTypeHint') }}</p>
+        </div>
+
+        <div v-if="!apiKeyRoleIsOwner" class="api-key-dialog-row">
+          <div class="api-key-dialog-row__label">
+            <label>{{ $t('integrations.api.apiKeyPermissionLevel') }}</label>
           </div>
           <t-radio-group v-model="apiKeyForm.role" class="mode-radio api-key-role-radio">
             <t-radio-button value="viewer">{{ $t('integrations.api.accessRoleViewer') }}</t-radio-button>
             <t-radio-button value="contributor">{{ $t('integrations.api.accessRoleContributor') }}</t-radio-button>
             <t-radio-button value="admin">{{ $t('integrations.api.accessRoleAdmin') }}</t-radio-button>
           </t-radio-group>
-          <p class="scope-role-hint">{{ $t('integrations.api.apiKeyAccessRoleHint') }}</p>
+        </div>
+
+        <div class="api-key-dialog-row api-key-dialog-row--help">
           <div class="scope-help scope-help--role">
             <p class="scope-help__role">{{ formatApiKeyAccessRoleLabel(apiKeyForm.role) }}</p>
             <p class="scope-help__desc">{{ apiKeyFormRoleDesc }}</p>
           </div>
         </div>
 
-        <div class="api-key-dialog-row">
+        <div v-if="!apiKeyRoleIsOwner" class="api-key-dialog-row">
           <div class="api-key-dialog-row__label">
             <label>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</label>
           </div>
@@ -545,7 +558,6 @@ const apiKeyCreating = ref(false)
 const knowledgeBasesLoading = ref(false)
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
 const secretInput = ref('')
-const savedHMACSecret = ref('')
 const exampleTab = ref<'jwt' | 'curl'>('curl')
 const agents = ref<CustomAgent[]>([])
 const agentsLoading = ref(false)
@@ -568,7 +580,7 @@ const form = reactive({
   require_direct_header: false,
 })
 
-type ApiKeyAccessRole = 'viewer' | 'contributor' | 'admin'
+type ApiKeyAccessRole = 'viewer' | 'contributor' | 'admin' | 'owner'
 
 const apiKeyForm = reactive({
   name: '',
@@ -576,18 +588,50 @@ const apiKeyForm = reactive({
   knowledge_base_ids: [] as string[],
 })
 
+// The role picker is presented as two levels: a top-level access type
+// (knowledge-base vs. full tenant) and, for knowledge-base keys, a permission
+// level (viewer/contributor/admin). Owner is a full-access key, for which the
+// KB scope is meaningless and hidden.
+const apiKeyRoleIsOwner = computed(() => apiKeyForm.role === 'owner')
+type ApiKeyAccessType = 'kb' | 'tenant'
+const apiKeyAccessType = ref<ApiKeyAccessType>('kb')
+// Remember the last knowledge-base permission level so toggling back from
+// "tenant full" restores the user's previous choice instead of resetting.
+let lastKbRole: ApiKeyAccessRole = 'viewer'
+
+watch(apiKeyAccessType, (type) => {
+  if (type === 'tenant') {
+    apiKeyForm.role = 'owner'
+    apiKeyForm.knowledge_base_ids = []
+  } else if (apiKeyForm.role === 'owner') {
+    apiKeyForm.role = lastKbRole === 'owner' ? 'viewer' : lastKbRole
+  }
+})
+
+watch(
+  () => apiKeyForm.role,
+  (role) => {
+    if (role !== 'owner') {
+      lastKbRole = role
+    }
+  },
+)
+
 function formatApiKeyAccessRoleLabel(role: ApiKeyAccessRole | TenantAPIKeyRole | undefined): string {
   const normalized = (role ?? 'viewer') as ApiKeyAccessRole
   const labels: Record<ApiKeyAccessRole, string> = {
     viewer: t('integrations.api.accessRoleViewer'),
     contributor: t('integrations.api.accessRoleContributor'),
     admin: t('integrations.api.accessRoleAdmin'),
+    owner: t('integrations.api.accessRoleOwner'),
   }
   return labels[normalized] ?? labels.viewer
 }
 
 const apiKeyFormRoleDesc = computed(() => {
   switch (apiKeyForm.role) {
+    case 'owner':
+      return t('integrations.api.accessRoleOwnerDesc')
     case 'admin':
       return t('integrations.api.accessRoleAdminDesc')
     case 'contributor':
@@ -665,7 +709,10 @@ const directHeaderName = computed(() => DEFAULT_DIRECT_HEADER_NAME)
 const canAutoSave = computed(() => {
   if (!tenantId.value) return false
   if (form.mode === 'signed_token') {
-    return secretInput.value.trim() !== ''
+    // Either a secret is already stored server-side, or the user has just
+    // typed a new one. The plaintext secret is never returned by the API,
+    // so we rely on the has_hmac_secret presence flag.
+    return config.value?.has_hmac_secret === true || secretInput.value.trim() !== ''
   }
   return true
 })
@@ -686,7 +733,9 @@ const hasUnsavedPrincipalChanges = computed(() => {
   return (
     form.mode !== cfg.mode
     || form.require_direct_header !== cfg.require_direct_header
-    || secretInput.value.trim() !== savedHMACSecret.value.trim()
+    // A non-empty input always means the user intends to set a new secret;
+    // the existing secret is never echoed back so any typed value is a change.
+    || secretInput.value.trim() !== ''
   )
 })
 
@@ -831,8 +880,9 @@ async function load() {
     form.direct_header_name = DEFAULT_DIRECT_HEADER_NAME
     form.signed_token_header_name = DEFAULT_TOKEN_HEADER_NAME
     form.require_direct_header = cfgResp.data.require_direct_header === true
-    savedHMACSecret.value = cfgResp.data.hmac_secret || ''
-    secretInput.value = savedHMACSecret.value
+    // The plaintext secret is never returned; start with an empty input and
+    // rely on config.has_hmac_secret to reflect whether one is configured.
+    secretInput.value = ''
     ensurePlaygroundAgent()
   } catch (err: any) {
     error.value = err?.message || t('integrations.api.loadFailed')
@@ -956,7 +1006,9 @@ async function saveIfNeeded(options: { showSuccess?: boolean } = {}) {
       signed_token_header_name: DEFAULT_TOKEN_HEADER_NAME,
       require_direct_header: form.require_direct_header,
     }
-    if (secretInput.value.trim() !== savedHMACSecret.value.trim()) {
+    // Only send the secret when the user typed a new one; otherwise the
+    // backend keeps the stored value untouched.
+    if (secretInput.value.trim() !== '') {
       payload.hmac_secret = secretInput.value.trim()
     }
     const resp = await updateAPIPrincipalConfig(tenantId.value, payload)
@@ -964,8 +1016,7 @@ async function saveIfNeeded(options: { showSuccess?: boolean } = {}) {
       throw new Error(resp.message || t('integrations.api.saveFailed'))
     }
     config.value = resp.data
-    savedHMACSecret.value = resp.data.hmac_secret || payload.hmac_secret || ''
-    secretInput.value = savedHMACSecret.value
+    secretInput.value = ''
     if (options.showSuccess) {
       MessagePlugin.success(t('integrations.api.saveSuccess'))
     }
@@ -1121,6 +1172,8 @@ function openCreateAPIKeyDialog() {
   apiKeyForm.name = ''
   apiKeyForm.role = 'viewer'
   apiKeyForm.knowledge_base_ids = []
+  apiKeyAccessType.value = 'kb'
+  lastKbRole = 'viewer'
   apiKeyDialogVisible.value = true
   void loadKnowledgeBaseOptions()
 }
@@ -1135,7 +1188,8 @@ async function createScopedAPIKey() {
     const resp = await createTenantAPIKey(tenantId.value, {
       name: apiKeyForm.name.trim(),
       role: apiKeyForm.role,
-      knowledge_base_ids: apiKeyForm.knowledge_base_ids,
+      // Owner keys are full-access; KB scoping does not apply to them.
+      knowledge_base_ids: apiKeyRoleIsOwner.value ? [] : apiKeyForm.knowledge_base_ids,
     })
     if (!resp.success || !resp.data?.api_key) {
       throw new Error(resp.message || t('integrations.api.createApiKeyFailed'))

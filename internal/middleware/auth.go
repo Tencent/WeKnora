@@ -260,11 +260,9 @@ func authenticateAPIKeyRequest(
 	if c.IsAborted() {
 		return false
 	}
-	if err := rejectTenantAPIKeyManagementPath(c.Request.Context(), c.Request.URL.Path); err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden: API key scope does not allow this operation"})
-		c.Abort()
-		return false
-	}
+	// Per-route API-key authorization (role + KB scope + default-deny) is
+	// enforced by middleware.APIKeyRouteAuthorizer on the /api/v1 group.
+	// Key-management and any other undeclared route is denied there.
 	return true
 }
 

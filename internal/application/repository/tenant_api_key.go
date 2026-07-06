@@ -77,6 +77,24 @@ func (r *tenantAPIKeyRepository) UpdateAPIKeyHash(ctx context.Context, id uint64
 		Update("key_hash", hash).Error
 }
 
+// placeholderKeyHashPrefix mirrors the value written by migration
+// 000065_tenant_api_keys.up.sql ('migrated-tenant-' || id). Rows still
+// carrying it have never been authenticated since the upgrade, so their
+// key_hash is not the real SHA-256 of the API key yet.
+const placeholderKeyHashPrefix = "migrated-tenant-"
+
+func (r *tenantAPIKeyRepository) ListKeysWithPlaceholderHash(
+	ctx context.Context,
+) ([]*types.TenantAPIKey, error) {
+	var keys []*types.TenantAPIKey
+	// AfterFind decrypts api_key, so callers get the plaintext token needed
+	// to compute the real hash.
+	err := r.db.WithContext(ctx).
+		Where("key_hash LIKE ? AND revoked_at IS NULL", placeholderKeyHashPrefix+"%").
+		Find(&keys).Error
+	return keys, err
+}
+
 func (r *tenantAPIKeyRepository) UpdateAPIKeyLastUsed(ctx context.Context, id uint64, at time.Time) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantAPIKey{}).

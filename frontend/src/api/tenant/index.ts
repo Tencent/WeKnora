@@ -23,8 +23,8 @@ export interface APIPrincipalConfig {
   direct_header_name: string
   signed_token_header_name: string
   require_direct_header: boolean
+  // The server never returns the plaintext secret; only its presence.
   has_hmac_secret: boolean
-  hmac_secret?: string
 }
 
 export interface UpdateAPIPrincipalConfigPayload {
@@ -48,7 +48,7 @@ export interface APIPrincipalTestToken {
   external_user_id: string
 }
 
-export type TenantAPIKeyRole = 'viewer' | 'contributor' | 'admin'
+export type TenantAPIKeyRole = 'viewer' | 'contributor' | 'admin' | 'owner'
 
 export interface TenantAPIKey {
   id: number

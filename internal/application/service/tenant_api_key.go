@@ -134,6 +134,28 @@ func (s *tenantAPIKeyService) RevokeAllAPIKeys(ctx context.Context, tenantID uin
 	return s.repo.RevokeAllAPIKeys(ctx, tenantID)
 }
 
+func (s *tenantAPIKeyService) BackfillMissingKeyHashes(ctx context.Context) (int, error) {
+	keys, err := s.repo.ListKeysWithPlaceholderHash(ctx)
+	if err != nil {
+		return 0, err
+	}
+	backfilled := 0
+	for _, key := range keys {
+		if key == nil || strings.TrimSpace(key.APIKey) == "" {
+			continue
+		}
+		hash := hashTenantAPIKey(key.APIKey)
+		if key.KeyHash == hash {
+			continue
+		}
+		if err := s.repo.UpdateAPIKeyHash(ctx, key.ID, hash); err != nil {
+			return backfilled, err
+		}
+		backfilled++
+	}
+	return backfilled, nil
+}
+
 func generateTenantAPIKeyToken() (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {

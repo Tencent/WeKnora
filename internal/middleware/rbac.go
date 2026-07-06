@@ -68,6 +68,13 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+		// API-key principals are authorized solely by the APIKeyGate
+		// (role + KB scope + default-deny). The JWT role ladder does not
+		// apply to a machine principal, so short-circuit here.
+		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			c.Next()
+			return
+		}
 		role := types.TenantRoleFromContext(ctx)
 		if role.HasPermission(min) {
 			c.Next()
@@ -121,6 +128,15 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+		// API-key principals never gain system-admin authority, but the
+		// APIKeyGate is the single place that decides which routes they may
+		// reach. System routes are simply not declared there, so an API key
+		// is already rejected by default-deny before this guard runs. Short-
+		// circuit to avoid a misleading "system administrator required" 403.
+		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			c.Next()
+			return
+		}
 		if types.IsSystemAdminFromContext(ctx) {
 			c.Next()
 			return
@@ -169,6 +185,15 @@ func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *con
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+		// API-key principals are authorized solely by the APIKeyGate.
+		// Ownership ("creator OR Admin+") is a human concept that cannot
+		// apply to a machine principal (its synthetic system-user never
+		// matches creator_id), so short-circuit here. KB-scope for API
+		// keys is still enforced by the KBAccess guards + handler checks.
+		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			c.Next()
+			return
+		}
 		role := types.TenantRoleFromContext(ctx)
 
 		// 1. Fast path: role meets the bar.

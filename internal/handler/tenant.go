@@ -116,8 +116,9 @@ type apiPrincipalConfigResponse struct {
 	DirectHeaderName      string                 `json:"direct_header_name"`
 	SignedTokenHeaderName string                 `json:"signed_token_header_name"`
 	RequireDirectHeader   bool                   `json:"require_direct_header"`
-	HasHMACSecret         bool                   `json:"has_hmac_secret"`
-	HMACSecret            string                 `json:"hmac_secret,omitempty"`
+	// HasHMACSecret reports whether a signing secret is configured. The
+	// plaintext secret is NEVER returned — clients only learn presence.
+	HasHMACSecret bool `json:"has_hmac_secret"`
 }
 
 type apiPrincipalTestTokenRequest struct {
@@ -162,6 +163,11 @@ const (
 	defaultAPIPrincipalTestTokenTTL  = 15 * time.Minute
 	maxAPIPrincipalTestTokenTTL      = time.Hour
 	maxAPIPrincipalExternalUserIDLen = 128
+	// apiPrincipalSecretRedacted is the placeholder an update request may
+	// send in place of the HMAC secret to signal "leave the stored secret
+	// unchanged". The plaintext secret is never returned by GET, so the
+	// client cannot echo the real value back.
+	apiPrincipalSecretRedacted = "***"
 )
 
 // defaultMaxOwnedTenantsPerUser is the cap applied when
@@ -705,7 +711,7 @@ func validateTenantAPIKeyRequest(
 		return errors.NewValidationError("name is required")
 	}
 	if role := types.NormalizeTenantAPIKeyRole(types.TenantRole(strings.TrimSpace(req.Role))); req.Role != "" && role == "" {
-		return errors.NewValidationError("role must be viewer, contributor, or admin")
+		return errors.NewValidationError("role must be one of viewer, contributor, admin, or owner")
 	}
 	for _, kbID := range req.KnowledgeBaseIDs {
 		kbID = strings.TrimSpace(kbID)
@@ -737,7 +743,6 @@ func apiPrincipalConfigForResponse(cfg *types.APIPrincipalConfig) apiPrincipalCo
 		SignedTokenHeaderName: defaultAPIPrincipalTokenHeader,
 		RequireDirectHeader:   cfg.RequireDirectHeader,
 		HasHMACSecret:         strings.TrimSpace(cfg.HMACSecret) != "",
-		HMACSecret:            strings.TrimSpace(cfg.HMACSecret),
 	}
 }
 
@@ -826,7 +831,14 @@ func (h *TenantHandler) UpdateAPIPrincipalConfig(c *gin.Context) {
 	}
 	hmacSecret := existingSecret
 	if req.HMACSecret != nil {
-		hmacSecret = strings.TrimSpace(*req.HMACSecret)
+		provided := strings.TrimSpace(*req.HMACSecret)
+		// GET no longer discloses the plaintext secret, so a client that
+		// edits the config re-submits the redaction placeholder to mean
+		// "keep the existing secret". Treat it as a no-op instead of
+		// overwriting the real secret with "***".
+		if provided != apiPrincipalSecretRedacted {
+			hmacSecret = provided
+		}
 	}
 	cfg := &types.APIPrincipalConfig{
 		Mode:                  req.Mode,

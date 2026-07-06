@@ -18,8 +18,9 @@ func TestNormalizeTenantAPIKeyRole(t *testing.T) {
 		{name: "viewer", in: TenantRoleViewer, want: TenantRoleViewer},
 		{name: "contributor", in: TenantRoleContributor, want: TenantRoleContributor},
 		{name: "admin", in: TenantRoleAdmin, want: TenantRoleAdmin},
+		{name: "owner", in: TenantRoleOwner, want: TenantRoleOwner},
 		{name: "empty defaults viewer", in: "", want: TenantRoleViewer},
-		{name: "invalid", in: "owner", want: ""},
+		{name: "invalid", in: "superuser", want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

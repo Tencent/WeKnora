@@ -107,6 +107,17 @@ func (r *fakeTenantAPIKeyRepo) UpdateAPIKeyHash(_ context.Context, id uint64, ha
 	return apprepo.ErrTenantAPIKeyNotFound
 }
 
+func (r *fakeTenantAPIKeyRepo) ListKeysWithPlaceholderHash(_ context.Context) ([]*types.TenantAPIKey, error) {
+	out := []*types.TenantAPIKey{}
+	for _, key := range r.byHash {
+		if key.RevokedAt == nil && strings.HasPrefix(key.KeyHash, "migrated-tenant-") {
+			cp := *key
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
 func (r *fakeTenantAPIKeyRepo) UpdateAPIKeyLastUsed(_ context.Context, id uint64, at time.Time) error {
 	for _, key := range r.byHash {
 		if key.ID == id && key.RevokedAt == nil {
@@ -126,7 +137,7 @@ func TestTenantAPIKeyServiceAuthenticateTenantAPIKeyRepairsMigratedHash(t *testi
 		Name:     "Tenant API key",
 		KeyHash:  "migrated-tenant-42",
 		APIKey:   token,
-		Role:   types.TenantRoleAdmin,
+		Role:     types.TenantRoleAdmin,
 	}
 	if err := repo.CreateAPIKey(ctx, key); err != nil {
 		t.Fatalf("CreateAPIKey returned error: %v", err)
@@ -143,6 +154,40 @@ func TestTenantAPIKeyServiceAuthenticateTenantAPIKeyRepairsMigratedHash(t *testi
 	}
 }
 
+func TestTenantAPIKeyServiceBackfillMissingKeyHashes(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+
+	token := "sk-legacy-token-value"
+	legacy := &types.TenantAPIKey{
+		TenantID: 7,
+		Name:     "legacy",
+		KeyHash:  "migrated-tenant-7",
+		APIKey:   token,
+		Role:     types.TenantRoleAdmin,
+	}
+	if err := repo.CreateAPIKey(ctx, legacy); err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+
+	n, err := svc.BackfillMissingKeyHashes(ctx)
+	if err != nil {
+		t.Fatalf("BackfillMissingKeyHashes returned error: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("backfilled = %d, want 1", n)
+	}
+	// After backfill the key authenticates via the fast hash path.
+	if _, err := svc.AuthenticateAPIKey(ctx, token); err != nil {
+		t.Fatalf("AuthenticateAPIKey after backfill returned error: %v", err)
+	}
+	// Idempotent: a second run finds nothing to do.
+	if n, err := svc.BackfillMissingKeyHashes(ctx); err != nil || n != 0 {
+		t.Fatalf("second BackfillMissingKeyHashes = (%d, %v), want (0, nil)", n, err)
+	}
+}
+
 func TestTenantAPIKeyServiceRevokeAllAPIKeys(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeTenantAPIKeyRepo()
@@ -151,7 +196,7 @@ func TestTenantAPIKeyServiceRevokeAllAPIKeys(t *testing.T) {
 	first, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: 42,
 		Name:     "first",
-		Role:   types.TenantRoleViewer,
+		Role:     types.TenantRoleViewer,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey first returned error: %v", err)
@@ -159,7 +204,7 @@ func TestTenantAPIKeyServiceRevokeAllAPIKeys(t *testing.T) {
 	second, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: 42,
 		Name:     "second",
-		Role:   types.TenantRoleViewer,
+		Role:     types.TenantRoleViewer,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey second returned error: %v", err)

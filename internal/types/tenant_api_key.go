@@ -35,9 +35,14 @@ func (TenantAPIKey) TableName() string {
 
 func (k *TenantAPIKey) BeforeSave(tx *gorm.DB) error {
 	if key := utils.GetAESKey(); key != nil && k.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(k.APIKey, key); err == nil {
-			tx.Statement.SetColumn("api_key", encrypted)
+		encrypted, err := utils.EncryptAESGCM(k.APIKey, key)
+		if err != nil {
+			// Never fall through to storing the plaintext key: abort the
+			// write so the caller sees the failure instead of silently
+			// persisting an unencrypted secret.
+			return fmt.Errorf("encrypt tenant_api_keys.api_key (id=%d): %w", k.ID, err)
 		}
+		tx.Statement.SetColumn("api_key", encrypted)
 	}
 	return nil
 }
@@ -84,6 +89,8 @@ func (s TenantAPIKeyScope) Normalize() TenantAPIKeyScope {
 // NormalizeTenantAPIKeyRole maps stored/API role strings to tenant RBAC roles.
 func NormalizeTenantAPIKeyRole(role TenantRole) TenantRole {
 	switch strings.ToLower(strings.TrimSpace(string(role))) {
+	case string(TenantRoleOwner):
+		return TenantRoleOwner
 	case string(TenantRoleAdmin):
 		return TenantRoleAdmin
 	case string(TenantRoleContributor):
