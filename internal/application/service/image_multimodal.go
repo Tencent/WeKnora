@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,6 +73,7 @@ type ImageMultimodalService struct {
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ownership      retriever.TenantStoreOwnership
 	ollamaService  *ollama.OllamaService
+	imageCacheRepo interfaces.ImageMultimodalCacheRepository
 	taskEnqueuer   interfaces.TaskEnqueuer
 	redisClient    *redis.Client
 	// fileSvc is the globally configured default FileService used as a fallback
@@ -99,6 +102,7 @@ func NewImageMultimodalService(
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
 	ollamaService *ollama.OllamaService,
+	imageCacheRepo interfaces.ImageMultimodalCacheRepository,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
 	fileSvc interfaces.FileService,
@@ -115,6 +119,7 @@ func NewImageMultimodalService(
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
 		ollamaService:   ollamaService,
+		imageCacheRepo:  imageCacheRepo,
 		taskEnqueuer:    taskEnqueuer,
 		redisClient:     redisClient,
 		fileSvc:         fileSvc,
@@ -131,6 +136,69 @@ func (s *ImageMultimodalService) tracker() SpanTracker {
 		return noopSpanTracker{}
 	}
 	return s.spanTracker
+}
+
+type imageMultimodalCachePayload struct {
+	OCRText    string `json:"ocr_text,omitempty"`
+	Caption    string `json:"caption,omitempty"`
+	HasOCR     bool   `json:"has_ocr"`
+	HasCaption bool   `json:"has_caption"`
+}
+
+func imageMultimodalCacheModelID(cfg types.VLMConfig) string {
+	if modelID := strings.TrimSpace(cfg.ModelID); modelID != "" {
+		return modelID
+	}
+	if modelName := strings.TrimSpace(cfg.ModelName); modelName != "" {
+		return "legacy:" + modelName
+	}
+	return "legacy_inline"
+}
+
+func imageMultimodalCacheKeys(
+	imgBytes []byte,
+	vlmCfg types.VLMConfig,
+	ocrPrompt string,
+	captionPrompt string,
+) (contentKey, modelID, configHash, cacheKey string) {
+	contentKey = hashBytesHex(imgBytes)
+	modelID = imageMultimodalCacheModelID(vlmCfg)
+	configHash = hashJSONHex(struct {
+		Schema        string `json:"schema"`
+		ModelID       string `json:"model_id"`
+		ModelName     string `json:"model_name"`
+		BaseURL       string `json:"base_url"`
+		InterfaceType string `json:"interface_type"`
+		OCRPrompt     string `json:"ocr_prompt"`
+		CaptionPrompt string `json:"caption_prompt"`
+	}{
+		Schema:        types.ImageMultimodalCacheSchemaVersion,
+		ModelID:       strings.TrimSpace(vlmCfg.ModelID),
+		ModelName:     strings.TrimSpace(vlmCfg.ModelName),
+		BaseURL:       strings.TrimSpace(vlmCfg.BaseURL),
+		InterfaceType: strings.TrimSpace(vlmCfg.InterfaceType),
+		OCRPrompt:     hashStringHex(ocrPrompt),
+		CaptionPrompt: hashStringHex(captionPrompt),
+	})
+	cacheKey = hashStringHex(types.ImageMultimodalCacheSchemaVersion + "\x00" + contentKey + "\x00" + modelID + "\x00" + configHash)
+	return contentKey, modelID, configHash, cacheKey
+}
+
+func hashBytesHex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func hashStringHex(s string) string {
+	return hashBytesHex([]byte(s))
+}
+
+func hashJSONHex(v interface{}) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return hashStringHex(fmt.Sprintf("%#v", v))
+	}
+	return hashBytesHex(b)
 }
 
 // Handle implements asynq handler for TypeImageMultimodal.
@@ -257,43 +325,121 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		OriginalURL: payload.ImageURL,
 	}
 
-	if payload.EnableOCR {
-		prompt := vlmOCRPrompt
-		if payload.ImageSourceType == "scanned_pdf" {
-			prompt = vlmOCRScannedPDFPrompt
+	ocrPrompt := vlmOCRPrompt
+	if payload.ImageSourceType == "scanned_pdf" {
+		ocrPrompt = vlmOCRScannedPDFPrompt
+		if payload.EnableOCR {
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 			imgOut["ocr_prompt"] = "scanned_pdf"
-		} else {
-			imgOut["ocr_prompt"] = "default"
 		}
-		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
+	} else if payload.EnableOCR {
+		imgOut["ocr_prompt"] = "default"
+	}
+	ocrPrompt = types.AppendCustomPromptInstructions(ocrPrompt, vlmCfg.CustomInstructions, "image_ocr")
+	captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-			imgOut["ocr_error"] = ocrErr.Error()
-		} else {
-			ocrText = sanitizeOCRText(ocrText)
-			if ocrText != "" {
-				imageInfo.OCRText = ocrText
-				imgOut["ocr_chars"] = len([]rune(ocrText))
-				imgOut["ocr_preview"] = previewText(ocrText, 200)
+	contentKey, cacheModelID, cacheConfigHash, cacheKey := imageMultimodalCacheKeys(
+		imgBytes, vlmCfg, ocrPrompt, captionPrompt,
+	)
+	imgOut["cache_schema"] = types.ImageMultimodalCacheSchemaVersion
+	imgOut["image_content_key"] = contentKey
+	imgOut["cache_hit"] = false
+
+	cachePayload := imageMultimodalCachePayload{}
+	cacheDirty := false
+	if s.imageCacheRepo != nil {
+		cache, cacheErr := s.imageCacheRepo.GetByKey(ctx, payload.TenantID, cacheKey)
+		if cacheErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Cache lookup failed for image %s: %v", payload.ImageURL, cacheErr)
+			imgOut["cache_error"] = cacheErr.Error()
+		} else if cache != nil {
+			if err := json.Unmarshal(cache.Payload, &cachePayload); err != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] Cache payload invalid for image %s: %v", payload.ImageURL, err)
+				imgOut["cache_error"] = err.Error()
 			} else {
-				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
-				imgOut["ocr_chars"] = 0
-				imgOut["ocr_skipped"] = "empty_or_invalid"
+				imgOut["cache_hit"] = true
 			}
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	if payload.EnableOCR {
+		if cachePayload.HasOCR {
+			imageInfo.OCRText = cachePayload.OCRText
+			imgOut["ocr_cache_hit"] = true
+			imgOut["ocr_chars"] = len([]rune(cachePayload.OCRText))
+			if cachePayload.OCRText != "" {
+				imgOut["ocr_preview"] = previewText(cachePayload.OCRText, 200)
+			} else {
+				imgOut["ocr_skipped"] = "empty_or_invalid"
+			}
+		} else {
+			imgOut["ocr_cache_hit"] = false
+			ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, ocrPrompt)
+			if ocrErr != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
+				imgOut["ocr_error"] = ocrErr.Error()
+			} else {
+				ocrText = sanitizeOCRText(ocrText)
+				cachePayload.HasOCR = true
+				cachePayload.OCRText = ocrText
+				cacheDirty = true
+				if ocrText != "" {
+					imageInfo.OCRText = ocrText
+					imgOut["ocr_chars"] = len([]rune(ocrText))
+					imgOut["ocr_preview"] = previewText(ocrText, 200)
+				} else {
+					logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
+					imgOut["ocr_chars"] = 0
+					imgOut["ocr_skipped"] = "empty_or_invalid"
+				}
+			}
+		}
+	}
+
+	if cachePayload.HasCaption {
+		imageInfo.Caption = cachePayload.Caption
+		imgOut["caption_cache_hit"] = true
+		imgOut["caption_chars"] = len([]rune(cachePayload.Caption))
+		if cachePayload.Caption != "" {
+			imgOut["caption_preview"] = previewText(cachePayload.Caption, 200)
+		}
+	} else {
+		imgOut["caption_cache_hit"] = false
+		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, captionPrompt)
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else {
+			cachePayload.HasCaption = true
+			cachePayload.Caption = caption
+			cacheDirty = true
+			if caption != "" {
+				imageInfo.Caption = caption
+				imgOut["caption_chars"] = len([]rune(caption))
+				imgOut["caption_preview"] = previewText(caption, 200)
+			}
+		}
+	}
+
+	if cacheDirty && s.imageCacheRepo != nil {
+		cacheBytes, _ := json.Marshal(cachePayload)
+		now := time.Now()
+		if err := s.imageCacheRepo.Upsert(ctx, &types.ImageMultimodalCache{
+			TenantID:   payload.TenantID,
+			CacheKey:   cacheKey,
+			ContentKey: contentKey,
+			ModelID:    cacheModelID,
+			ConfigHash: cacheConfigHash,
+			SchemaVer:  types.ImageMultimodalCacheSchemaVersion,
+			Payload:    types.JSON(cacheBytes),
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}); err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Cache upsert failed for image %s: %v", payload.ImageURL, err)
+			imgOut["cache_write_error"] = err.Error()
+		} else {
+			imgOut["cache_stored"] = true
+		}
 	}
 
 	// Build child chunks for OCR and caption results

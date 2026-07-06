@@ -20,6 +20,7 @@ DROP TABLE IF EXISTS auth_tokens;
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS tenant_members;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS image_multimodal_caches;
 DROP TABLE IF EXISTS wiki_map_caches;
 DROP TABLE IF EXISTS graph_extraction_caches;
 DROP TABLE IF EXISTS chunks;
