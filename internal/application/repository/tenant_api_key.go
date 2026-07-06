@@ -62,14 +62,6 @@ func (r *tenantAPIKeyRepository) RevokeAPIKey(ctx context.Context, tenantID uint
 	return nil
 }
 
-func (r *tenantAPIKeyRepository) RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error {
-	now := time.Now()
-	return r.db.WithContext(ctx).
-		Model(&types.TenantAPIKey{}).
-		Where("tenant_id = ? AND revoked_at IS NULL", tenantID).
-		Update("revoked_at", &now).Error
-}
-
 func (r *tenantAPIKeyRepository) UpdateAPIKeyHash(ctx context.Context, id uint64, hash string) error {
 	return r.db.WithContext(ctx).
 		Model(&types.TenantAPIKey{}).
@@ -82,6 +74,23 @@ func (r *tenantAPIKeyRepository) UpdateAPIKeyHash(ctx context.Context, id uint64
 // carrying it have never been authenticated since the upgrade, so their
 // key_hash is not the real SHA-256 of the API key yet.
 const placeholderKeyHashPrefix = "migrated-tenant-"
+
+func (r *tenantAPIKeyRepository) HasKeysWithPlaceholderHash(ctx context.Context) (bool, error) {
+	var id uint64
+	err := r.db.WithContext(ctx).Session(&gorm.Session{SkipHooks: true}).
+		Model(&types.TenantAPIKey{}).
+		Select("id").
+		Where("key_hash LIKE ? AND revoked_at IS NULL", placeholderKeyHashPrefix+"%").
+		Limit(1).
+		Scan(&id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return id != 0, nil
+}
 
 func (r *tenantAPIKeyRepository) ListKeysWithPlaceholderHash(
 	ctx context.Context,

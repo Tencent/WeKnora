@@ -29,7 +29,6 @@ func TestAPIKeyGateDeniesTenantKeyManagementPaths(t *testing.T) {
 	v1 := engine.Group("/api/v1")
 	tenantByID := v1.Group("/tenants/:id")
 	{
-		tenantByID.POST("/api-key", reachedOK)
 		tenantByID.GET("/api-keys", reachedOK)
 		tenantByID.POST("/api-keys", reachedOK)
 		tenantByID.DELETE("/api-keys/:key_id", reachedOK)
@@ -46,7 +45,6 @@ func TestAPIKeyGateDeniesTenantKeyManagementPaths(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/api/v1/tenants/42/api-key"},
 		{http.MethodGet, "/api/v1/tenants/42/api-keys"},
 		{http.MethodPost, "/api/v1/tenants/42/api-keys"},
 		{http.MethodDelete, "/api/v1/tenants/42/api-keys/7"},

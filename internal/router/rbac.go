@@ -426,7 +426,7 @@ func (g *rbacGuards) CrossTenant() gin.HandlerFunc {
 // PathTenantMatch enforces that the URL :id matches the caller's
 // active tenant context (cross-tenant superusers bypass). Routes apply
 // it at the /tenants/:id group level so every per-tenant endpoint —
-// GetTenant / UpdateTenant / DeleteTenant / ResetAPIKey / member
+// GetTenant / UpdateTenant / DeleteTenant / member
 // management / leave — shares the same check. Replaces the
 // authorizeTenantAccess helper that used to live inside the tenant
 // handler.

@@ -660,6 +660,11 @@ definitions:
           ===== Agent Mode Settings =====
           Maximum iterations for ReAct loop (only for agent type)
         type: integer
+      mcp_auth_wait_timeout:
+        description: |-
+          MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth
+          authorization before skipping. <=0 uses the gate's configured timeout.
+        type: integer
       mcp_selection_mode:
         description: 'MCP service selection mode: "all" = all enabled MCP services,
           "selected" = specific services, "none" = no MCP'
@@ -2787,8 +2792,8 @@ definitions:
         type: string
       user_id:
         description: |-
-          UserID is the owner of the session. Empty for legacy rows (visible at
-          tenant level) and for IM-created sessions that do not map to a WeKnora user.
+          UserID is the owner scope for this session. WeKnora user UUIDs, API
+          external-user principals, and embed visitor principals all use this column.
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.SessionLastRequestState:
@@ -3044,9 +3049,6 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.Tenant:
     properties:
-      api_key:
-        description: API key
-        type: string
       business:
         description: Business
         type: string
@@ -4804,6 +4806,13 @@ definitions:
       require_direct_header:
         type: boolean
       signed_token_header_name:
+        type: string
+    type: object
+  internal_handler.apiPrincipalTestTokenRequest:
+    properties:
+      expires_in_seconds:
+        type: integer
+      external_user_id:
         type: string
     type: object
   internal_handler.auditLogListResponse:
@@ -12585,38 +12594,6 @@ paths:
       summary: 更新租户
       tags:
       - 租户管理
-  /tenants/{id}/api-key:
-    post:
-      consumes:
-      - application/json
-      description: 为指定租户生成一个新的 API Key，旧 Key 立即失效
-      parameters:
-      - description: 租户ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 新生成的 API Key
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "403":
-          description: 权限不足
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: 重置租户 API Key
-      tags:
-      - 租户管理
   /tenants/{id}/api-principal-config:
     get:
       consumes:
@@ -12684,6 +12661,44 @@ paths:
       security:
       - Bearer: []
       summary: 更新租户 API Key 用户身份配置
+      tags:
+      - 租户管理
+  /tenants/{id}/api-principal-test-token:
+    post:
+      consumes:
+      - application/json
+      description: 使用租户已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）
+      parameters:
+      - description: 租户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 测试 Token 参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.apiPrincipalTestTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 短期 JWT
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 生成 API Playground 测试 JWT
       tags:
       - 租户管理
   /tenants/{id}/audit-log:

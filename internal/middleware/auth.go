@@ -237,26 +237,16 @@ func authenticateAPIKeyRequest(
 	apiKey string,
 ) bool {
 	ctx := c.Request.Context()
-	var key *types.TenantAPIKey
-	var tenantID uint64
-
-	if authenticated, err := apiKeyService.AuthenticateAPIKey(ctx, apiKey); err == nil && authenticated != nil {
-		key = authenticated
-		tenantID = key.TenantID
-	} else if tenantIDFromKey, extractErr := tenantService.ExtractTenantIDFromAPIKey(apiKey); extractErr == nil {
-		if authenticated, err := apiKeyService.AuthenticateTenantAPIKey(ctx, tenantIDFromKey, apiKey); err == nil && authenticated != nil {
-			key = authenticated
-			tenantID = tenantIDFromKey
-		}
-	}
-
-	if key == nil {
+	// AuthenticateAPIKey resolves the key by SHA-256 hash (see startup
+	// BackfillMissingKeyHashes for migration 000065 placeholder rows).
+	key, err := apiKeyService.AuthenticateAPIKey(ctx, apiKey)
+	if err != nil || key == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: invalid API key"})
 		c.Abort()
 		return false
 	}
 
-	attachAPIKeyAuthContext(c, tenantService, userService, tenantID, key)
+	attachAPIKeyAuthContext(c, tenantService, userService, key.TenantID, key)
 	if c.IsAborted() {
 		return false
 	}

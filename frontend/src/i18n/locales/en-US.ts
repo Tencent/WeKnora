@@ -3634,7 +3634,6 @@ export default {
     tenant: {
       listFailed: 'Failed to list tenants',
       searchFailed: 'Failed to search tenants',
-      resetApiKeyFailed: 'Failed to reset API Key',
       getApiPrincipalConfigFailed: 'Failed to get API principal config',
       updateApiPrincipalConfigFailed: 'Failed to update API principal config',
       createApiPrincipalTestTokenFailed: 'Failed to create API test token',

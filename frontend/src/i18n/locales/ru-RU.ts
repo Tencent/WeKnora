@@ -2357,7 +2357,6 @@ export default {
     tenant: {
       listFailed: 'Не удалось получить список тенантов',
       searchFailed: 'Не удалось выполнить поиск тенантов',
-      resetApiKeyFailed: 'Не удалось сбросить API Key',
       getApiPrincipalConfigFailed: 'Не удалось получить конфигурацию API principal',
       updateApiPrincipalConfigFailed: 'Не удалось обновить конфигурацию API principal',
       createApiPrincipalTestTokenFailed: 'Не удалось создать тестовый API Token',

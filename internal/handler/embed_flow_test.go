@@ -104,7 +104,6 @@ func (f *flowTenantSvc) DeleteTenant(context.Context, uint64) error { return nil
 func (f *flowTenantSvc) ListTenants(context.Context) ([]*types.Tenant, error) {
 	return nil, nil
 }
-func (f *flowTenantSvc) ExtractTenantIDFromAPIKey(string) (uint64, error) { return 0, nil }
 func (f *flowTenantSvc) ListAllTenants(context.Context) ([]*types.Tenant, error) {
 	return nil, nil
 }

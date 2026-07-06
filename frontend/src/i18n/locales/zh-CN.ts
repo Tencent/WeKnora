@@ -2652,7 +2652,6 @@ export default {
     tenant: {
       listFailed: "获取空间列表失败",
       searchFailed: "搜索空间失败",
-      resetApiKeyFailed: "重置 API Key 失败",
       getApiPrincipalConfigFailed: "获取 API 用户身份配置失败",
       updateApiPrincipalConfigFailed: "更新 API 用户身份配置失败",
       createApiPrincipalTestTokenFailed: "生成 API 测试 Token 失败",

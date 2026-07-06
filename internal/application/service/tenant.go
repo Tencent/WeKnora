@@ -2,13 +2,7 @@ package service
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
-	"os"
-	"strings"
 	"time"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -16,10 +10,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
-
-var apiKeySecret = func() []byte {
-	return []byte(os.Getenv("TENANT_AES_KEY"))
-}
 
 // ListTenantsParams defines parameters for listing tenants with filtering and pagination
 type ListTenantsParams struct {
@@ -176,48 +166,6 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 
 	logger.Infof(ctx, "Tenant deleted successfully, ID: %d", id)
 	return nil
-}
-
-// ExtractTenantIDFromAPIKey extracts the tenant ID from an API key
-func (r *tenantService) ExtractTenantIDFromAPIKey(apiKey string) (uint64, error) {
-	// 1. Validate format and extract encrypted part
-	parts := strings.SplitN(apiKey, "-", 2)
-	if len(parts) != 2 || parts[0] != "sk" {
-		return 0, errors.New("invalid API key format")
-	}
-
-	// 2. Decode the base64 part
-	encryptedData, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return 0, errors.New("invalid API key encoding")
-	}
-
-	// 3. Separate nonce and ciphertext
-	if len(encryptedData) < 12 {
-		return 0, errors.New("invalid API key length")
-	}
-	nonce, ciphertext := encryptedData[:12], encryptedData[12:]
-
-	// 4. Decrypt
-	block, err := aes.NewCipher(apiKeySecret())
-	if err != nil {
-		return 0, errors.New("decryption error")
-	}
-
-	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return 0, errors.New("decryption error")
-	}
-
-	plaintext, err := aesgcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return 0, errors.New("API key is invalid or has been tampered with")
-	}
-
-	// 5. Convert back to tenant_id
-	tenantID := binary.LittleEndian.Uint64(plaintext)
-
-	return tenantID, nil
 }
 
 // ListAllTenants lists all tenants (for users with cross-tenant access permission)

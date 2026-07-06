@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -75,66 +74,22 @@ func (s *tenantAPIKeyService) AuthenticateAPIKey(ctx context.Context, token stri
 	return key, nil
 }
 
-func (s *tenantAPIKeyService) AuthenticateTenantAPIKey(
-	ctx context.Context, tenantID uint64, token string,
-) (*types.TenantAPIKey, error) {
-	token = strings.TrimSpace(token)
-	if tenantID == 0 || token == "" {
-		return nil, apprepo.ErrTenantAPIKeyNotFound
-	}
-	if key, err := s.AuthenticateAPIKey(ctx, token); err == nil && key != nil {
-		if key.TenantID != tenantID {
-			return nil, apprepo.ErrTenantAPIKeyNotFound
-		}
-		return key, nil
-	} else if err != nil && !errors.Is(err, apprepo.ErrTenantAPIKeyNotFound) {
-		return nil, err
-	}
-	keys, err := s.repo.ListAPIKeys(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	for _, key := range keys {
-		if key == nil || subtle.ConstantTimeCompare([]byte(key.APIKey), []byte(token)) != 1 {
-			continue
-		}
-		if key.ExpiresAt != nil && time.Now().After(*key.ExpiresAt) {
-			return nil, apprepo.ErrTenantAPIKeyNotFound
-		}
-		if err := s.ensureAPIKeyHash(ctx, key); err != nil {
-			return nil, err
-		}
-		_ = s.repo.UpdateAPIKeyLastUsed(ctx, key.ID, time.Now())
-		return key, nil
-	}
-	return nil, apprepo.ErrTenantAPIKeyNotFound
-}
-
 func (s *tenantAPIKeyService) ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error) {
-	keys, err := s.repo.ListAPIKeys(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	for _, key := range keys {
-		if err := s.ensureAPIKeyHash(ctx, key); err != nil {
-			return nil, err
-		}
-	}
-	return keys, nil
+	return s.repo.ListAPIKeys(ctx, tenantID)
 }
 
 func (s *tenantAPIKeyService) RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error {
 	return s.repo.RevokeAPIKey(ctx, tenantID, id)
 }
 
-func (s *tenantAPIKeyService) RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error {
-	if tenantID == 0 {
-		return nil
-	}
-	return s.repo.RevokeAllAPIKeys(ctx, tenantID)
-}
-
 func (s *tenantAPIKeyService) BackfillMissingKeyHashes(ctx context.Context) (int, error) {
+	has, err := s.repo.HasKeysWithPlaceholderHash(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if !has {
+		return 0, nil
+	}
 	keys, err := s.repo.ListKeysWithPlaceholderHash(ctx)
 	if err != nil {
 		return 0, err
@@ -167,21 +122,6 @@ func generateTenantAPIKeyToken() (string, error) {
 func hashTenantAPIKey(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
-}
-
-func (s *tenantAPIKeyService) ensureAPIKeyHash(ctx context.Context, key *types.TenantAPIKey) error {
-	if key == nil || strings.TrimSpace(key.APIKey) == "" {
-		return nil
-	}
-	hash := hashTenantAPIKey(key.APIKey)
-	if key.KeyHash == hash {
-		return nil
-	}
-	if err := s.repo.UpdateAPIKeyHash(ctx, key.ID, hash); err != nil {
-		return err
-	}
-	key.KeyHash = hash
-	return nil
 }
 
 func normalizeAPIKeyIDs(in []string) types.StringArray {

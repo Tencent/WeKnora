@@ -11950,56 +11950,6 @@
                 }
             }
         },
-        "/tenants/{id}/api-key": {
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "为指定租户生成一个新的 API Key，旧 Key 立即失效",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "租户管理"
-                ],
-                "summary": "重置租户 API Key",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "租户ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "新生成的 API Key",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
-                        }
-                    },
-                    "403": {
-                        "description": "权限不足",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
-                        }
-                    }
-                }
-            }
-        },
         "/tenants/{id}/api-principal-config": {
             "get": {
                 "security": [
@@ -12087,6 +12037,65 @@
                 "responses": {
                     "200": {
                         "description": "更新后的配置",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/tenants/{id}/api-principal-test-token": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "使用租户已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "租户管理"
+                ],
+                "summary": "生成 API Playground 测试 JWT",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "租户ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "测试 Token 参数",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiPrincipalTestTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "短期 JWT",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -14318,6 +14327,10 @@
                 },
                 "max_iterations": {
                     "description": "===== Agent Mode Settings =====\nMaximum iterations for ReAct loop (only for agent type)",
+                    "type": "integer"
+                },
+                "mcp_auth_wait_timeout": {
+                    "description": "MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth\nauthorization before skipping. \u003c=0 uses the gate's configured timeout.",
                     "type": "integer"
                 },
                 "mcp_selection_mode": {
@@ -17140,7 +17153,7 @@
                     "type": "string"
                 },
                 "user_id": {
-                    "description": "UserID is the owner of the session. Empty for legacy rows (visible at\ntenant level) and for IM-created sessions that do not map to a WeKnora user.",
+                    "description": "UserID is the owner scope for this session. WeKnora user UUIDs, API\nexternal-user principals, and embed visitor principals all use this column.",
                     "type": "string"
                 }
             }
@@ -17479,10 +17492,6 @@
         "github_com_Tencent_WeKnora_internal_types.Tenant": {
             "type": "object",
             "properties": {
-                "api_key": {
-                    "description": "API key",
-                    "type": "string"
-                },
                 "business": {
                     "description": "Business",
                     "type": "string"
@@ -19906,6 +19915,17 @@
                     "type": "boolean"
                 },
                 "signed_token_header_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.apiPrincipalTestTokenRequest": {
+            "type": "object",
+            "properties": {
+                "expires_in_seconds": {
+                    "type": "integer"
+                },
+                "external_user_id": {
                     "type": "string"
                 }
             }

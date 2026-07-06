@@ -3,7 +3,7 @@
 [返回目录](./README.md)
 
 包含两组接口：
-- 租户 CRUD（`/tenants`、`/tenants/:id`、`/tenants/:id/api-key`）：当前认证用户对自己所属租户进行管理；跨租户访问需要管理员权限。
+- 租户 CRUD（`/tenants`、`/tenants/:id`）：当前认证用户对自己所属租户进行管理；跨租户访问需要管理员权限。
 - 跨租户接口（`/tenants/all`、`/tenants/search`）：**需要服务端启用 `EnableCrossTenantAccess` 且当前用户具备 `CanAccessAllTenants` 权限**，否则返回 403。
 - 租户 KV 配置（`/tenants/kv/:key`）：当前租户级别的通用配置项，**`tenant_id` 从认证上下文中获取，不在 URL 中传入**。
 
@@ -15,7 +15,6 @@
 | GET    | `/tenants/:id`             | 获取指定租户信息                                  |
 | PUT    | `/tenants/:id`             | 更新租户信息                                      |
 | DELETE | `/tenants/:id`             | 删除租户                                          |
-| POST   | `/tenants/:id/api-key`     | 重置租户 API Key（吊销该租户全部旧 Key 后创建一把新的全权限 Key） |
 | GET    | `/tenants/:id/api-keys`    | 列出租户 API Key（Owner）                         |
 | POST   | `/tenants/:id/api-keys`    | 创建带角色的 API Key（Owner）                  |
 | DELETE | `/tenants/:id/api-keys/:key_id` | 吊销指定 API Key（Owner）                   |
@@ -111,7 +110,7 @@ curl --location 'http://localhost:8080/api/v1/tenants/search?keyword=weknora&pag
 
 ## POST `/tenants` - 创建新租户
 
-创建一个新的租户。**不会**自动发放 API Key；请在创建后通过 `POST /tenants/:id/api-keys` 或 `POST /tenants/:id/api-key` 获取密钥。从旧版本升级时，原有 `tenants.api_key` 会迁移到 `tenant_api_keys` 表并继续可用，直至被吊销。
+创建一个新的租户。**不会**自动发放 API Key；请在创建后通过 `POST /tenants/:id/api-keys` 创建密钥。从旧版本升级时，原有 `tenants.api_key` 会迁移到 `tenant_api_keys` 表并继续可用，直至被吊销。
 
 **参数说明（请求体）**:
 
@@ -326,35 +325,6 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/tenants/10000' \
 ```json
 {
     "message": "Tenant deleted successfully",
-    "success": true
-}
-```
-
-## POST `/tenants/:id/api-key` - 重置租户 API Key
-
-为指定租户生成新的 API Key，并**吊销该租户下所有现有 Key**（含迁移进来的旧 Key）。新 Key 拥有 `read` + `write` + `admin` 全权限。访问规则同 `GET /tenants/:id`。
-
-**路径参数**:
-
-| 字段 | 类型 | 说明    |
-| ---- | ---- | ------- |
-| id   | int  | 租户 ID |
-
-**请求**:
-
-```curl
-curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-key' \
---header 'X-API-Key: sk-aaLRAgvCRJcmtiL2vLMeB1FB5UV0Q-qB7DlTE1pJ9KA93XZG' \
---header 'Content-Type: application/json'
-```
-
-**响应**:
-
-```json
-{
-    "data": {
-        "api_key": "sk-IKtd9JGV4-aPGQ6RiL8YJu9Vzb3-ae4lgFkjFJZmhvUn2mLu"
-    },
     "success": true
 }
 ```

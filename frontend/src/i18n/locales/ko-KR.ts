@@ -2642,7 +2642,6 @@ export default {
     tenant: {
       listFailed: '테넌트 목록 조회 실패',
       searchFailed: '테넌트 검색 실패',
-      resetApiKeyFailed: 'API 키 재설정 실패',
       getApiPrincipalConfigFailed: 'API principal config 조회 실패',
       updateApiPrincipalConfigFailed: 'API principal config 업데이트 실패',
       createApiPrincipalTestTokenFailed: 'API 테스트 토큰 생성 실패',

@@ -23,8 +23,6 @@ type TenantService interface {
 	UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error)
 	// DeleteTenant deletes a tenant
 	DeleteTenant(ctx context.Context, id uint64) error
-	// ExtractTenantIDFromAPIKey extracts the tenant ID from the API key
-	ExtractTenantIDFromAPIKey(apiKey string) (uint64, error)
 	// ListAllTenants lists all tenants (for users with cross-tenant access permission)
 	ListAllTenants(ctx context.Context) ([]*types.Tenant, error)
 	// BulkSetStorageQuota overwrites every tenant's storage_quota with
@@ -82,25 +80,24 @@ type TenantAPIKeyRepository interface {
 	GetAPIKeyByHash(ctx context.Context, hash string) (*types.TenantAPIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
-	RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error
 	UpdateAPIKeyHash(ctx context.Context, id uint64, hash string) error
 	UpdateAPIKeyLastUsed(ctx context.Context, id uint64, at time.Time) error
 	// ListKeysWithPlaceholderHash returns keys whose key_hash is still the
 	// migration placeholder (never authenticated since the 000065 upgrade),
 	// so the real SHA-256 hash can be computed and backfilled.
 	ListKeysWithPlaceholderHash(ctx context.Context) ([]*types.TenantAPIKey, error)
+	// HasKeysWithPlaceholderHash is a cheap existence probe used at startup
+	// to skip loading/decrypting api_key rows once backfill is complete.
+	HasKeysWithPlaceholderHash(ctx context.Context) (bool, error)
 }
 
 type TenantAPIKeyService interface {
 	CreateAPIKey(ctx context.Context, req TenantAPIKeyCreateRequest) (*TenantAPIKeyCreateResult, error)
 	AuthenticateAPIKey(ctx context.Context, token string) (*types.TenantAPIKey, error)
-	AuthenticateTenantAPIKey(ctx context.Context, tenantID uint64, token string) (*types.TenantAPIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uint64) ([]*types.TenantAPIKey, error)
 	RevokeAPIKey(ctx context.Context, tenantID uint64, id uint64) error
-	RevokeAllAPIKeys(ctx context.Context, tenantID uint64) error
 	// BackfillMissingKeyHashes computes and persists the SHA-256 key_hash
-	// for legacy keys still carrying the migration placeholder, so their
-	// first authentication does not fall back to an O(n) plaintext scan.
+	// for legacy keys still carrying the migration placeholder.
 	// Returns the number of keys backfilled.
 	BackfillMissingKeyHashes(ctx context.Context) (int, error)
 }

@@ -39,10 +39,9 @@ const bootstrapEnvVar = "WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL"
 func runStartupBootstrap(c *dig.Container) {
 	ctx := context.Background()
 
-	// One-shot: backfill SHA-256 key_hash for legacy tenant API keys that
-	// migration 000065 seeded with a placeholder. Without this, the first
-	// authentication of each migrated key falls back to an O(n) plaintext
-	// scan of the tenant's keys. Best-effort: warn, never abort startup.
+	// Legacy hash repair for migration 000065 placeholder rows. Invoked each
+	// startup but short-circuits with a cheap EXISTS once every row is
+	// backfilled (no api_key decryption on the steady-state path).
 	if err := c.Invoke(func(apiKeySvc interfaces.TenantAPIKeyService) {
 		if n, err := apiKeySvc.BackfillMissingKeyHashes(ctx); err != nil {
 			logger.Warnf(ctx, "[bootstrap] tenant api key hash backfill failed: %v", err)

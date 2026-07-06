@@ -93,8 +93,8 @@ type createTenantRequest struct {
 // fields an Owner is permitted to mutate via the public API are bound;
 // everything else (storage_quota, status, business, api_key, agent /
 // retrieval / storage configs, ...) is intentionally NOT writable here
-// — those go through dedicated endpoints (POST /:id/api-key,
-// PUT /tenants/kv/:key, ...) that have their own validation.
+// — those go through dedicated endpoints (PUT /tenants/kv/:key, ...)
+// that have their own validation.
 //
 // Pointers so we can distinguish "not sent" from "explicit empty
 // string"; when nil we leave the existing column untouched.
@@ -477,7 +477,7 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	// Strict whitelist: only Name / Description are mutable through the
 	// public PUT. Storage quota, status, business, configs, api_key and
 	// every other privileged column live behind dedicated endpoints
-	// (POST /:id/api-key, PUT /tenants/kv/:key, ...). Without this, an
+	// (PUT /tenants/kv/:key, ...). Without this, an
 	// Owner — including any user who just self-served a tenant — could
 	// flip status / bump storage_quota by simply crafting an extended
 	// JSON body. Pointers distinguish "field omitted" from "explicit
@@ -538,63 +538,6 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    dto.NewTenantResponse(ctx, updatedTenant),
-	})
-}
-
-// ResetAPIKey godoc
-// @Summary      重置租户 API Key
-// @Description  吊销该租户全部现有 API Key 后创建一把新的全权限 Key
-// @Tags         租户管理
-// @Accept       json
-// @Produce      json
-// @Param        id   path      int  true  "租户ID"
-// @Success      200  {object}  map[string]interface{}  "新生成的 API Key"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      403  {object}  errors.AppError         "权限不足"
-// @Security     Bearer
-// @Router       /tenants/{id}/api-key [post]
-func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
-		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
-		return
-	}
-
-	logger.Infof(ctx, "Resetting API key for tenant, ID: %d", id)
-	if h.apiKeyService == nil {
-		c.Error(errors.NewInternalServerError("API key service is not configured"))
-		return
-	}
-	if err := h.apiKeyService.RevokeAllAPIKeys(ctx, id); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": id})
-		c.Error(errors.NewInternalServerError("Failed to reset API key").WithDetails(err.Error()))
-		return
-	}
-	result, err := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
-		TenantID: id,
-		Name:     "Tenant API key",
-		Role:     types.TenantRoleOwner,
-	})
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to reset API key: application error", appErr)
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to reset API key").WithDetails(err.Error()))
-		}
-		return
-	}
-
-	logger.Infof(ctx, "API key reset successfully, tenant ID: %d", id)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data": gin.H{
-			"api_key": result.APIKey.APIKey,
-		},
 	})
 }
 
