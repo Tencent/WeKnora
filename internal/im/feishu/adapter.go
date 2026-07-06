@@ -938,8 +938,13 @@ func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, conten
 
 // imageKeyForURL returns a Feishu image_key for the given URL, uploading it if
 // not already cached.
+//
+// Cache key is namespaced by appID: image_keys are scoped to a Feishu app's
+// tenant_access_token, so reusing one uploaded by app A when serving app B
+// triggers "invalid image keys". Namespace prevents cross-app leakage when a
+// single process serves multiple Feishu apps/tenants.
 func (a *Adapter) imageKeyForURL(ctx context.Context, accessToken, rawURL string) (string, error) {
-	key := imageCacheKey(rawURL)
+	key := a.appID + "|" + imageCacheKey(rawURL)
 
 	feishuImageKeyMu.Lock()
 	if v, ok := feishuImageKeyCache[key]; ok {

@@ -25,6 +25,10 @@ func NewWikiRenamePageTool(wikiPageService interfaces.WikiPageService, kbIDs []s
 			json.RawMessage(`{
 				"type": "object",
 				"properties": {
+					"knowledge_base_id": {
+						"type": "string",
+						"description": "The knowledge base ID of the page to rename. If not provided, uses the first available wiki KB."
+					},
 					"slug": {
 						"type": "string",
 						"description": "The current slug of the Wiki page"
@@ -44,18 +48,26 @@ func NewWikiRenamePageTool(wikiPageService interfaces.WikiPageService, kbIDs []s
 
 func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
-		Slug    string `json:"slug"`
-		NewSlug string `json:"new_slug"`
+		Slug            string `json:"slug"`
+		NewSlug         string `json:"new_slug"`
+		KnowledgeBaseID string `json:"knowledge_base_id"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to parse arguments: " + err.Error()}, nil
 	}
 
-	if len(t.kbIDs) == 0 {
+	var kbID string
+	if params.KnowledgeBaseID != "" {
+		if !containsString(t.kbIDs, params.KnowledgeBaseID) {
+			return &types.ToolResult{Success: false, Error: "knowledge_base_id not in allowed scope"}, nil
+		}
+		kbID = params.KnowledgeBaseID
+	} else if len(t.kbIDs) > 0 {
+		kbID = t.kbIDs[0]
+	} else {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for editing"}, nil
 	}
-	kbID := t.kbIDs[0]
 
 	if params.NewSlug == "" {
 		return &types.ToolResult{Success: false, Error: "new_slug is required"}, nil

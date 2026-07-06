@@ -26,6 +26,10 @@ func NewWikiDeletePageTool(wikiPageService interfaces.WikiPageService, kbIDs []s
 			json.RawMessage(`{
 				"type": "object",
 				"properties": {
+					"knowledge_base_id": {
+						"type": "string",
+						"description": "The knowledge base ID to delete from. If not provided, uses the first available wiki KB."
+					},
 					"slug": {
 						"type": "string",
 						"description": "The slug of the Wiki page to delete"
@@ -41,17 +45,25 @@ func NewWikiDeletePageTool(wikiPageService interfaces.WikiPageService, kbIDs []s
 
 func (t *wikiDeletePageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
-		Slug string `json:"slug"`
+		Slug            string `json:"slug"`
+		KnowledgeBaseID string `json:"knowledge_base_id"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to parse arguments: " + err.Error()}, nil
 	}
 
-	if len(t.kbIDs) == 0 {
+	var kbID string
+	if params.KnowledgeBaseID != "" {
+		if !containsString(t.kbIDs, params.KnowledgeBaseID) {
+			return &types.ToolResult{Success: false, Error: "knowledge_base_id not in allowed scope"}, nil
+		}
+		kbID = params.KnowledgeBaseID
+	} else if len(t.kbIDs) > 0 {
+		kbID = t.kbIDs[0]
+	} else {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for editing"}, nil
 	}
-	kbID := t.kbIDs[0]
 
 	if params.Slug == "" {
 		return &types.ToolResult{Success: false, Error: "slug is required"}, nil
