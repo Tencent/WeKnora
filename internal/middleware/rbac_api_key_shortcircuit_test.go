@@ -44,14 +44,14 @@ func TestRequireRole_ShortCircuitsAPIKey(t *testing.T) {
 	}
 }
 
-func TestRequireSystemAdmin_ShortCircuitsAPIKey(t *testing.T) {
+func TestRequireSystemAdmin_RejectsAPIKey(t *testing.T) {
 	w := apiKeyRBACHarness(
-		types.TenantAPIKeyScope{Role: types.TenantRoleAdmin},
-		types.TenantRoleAdmin,
+		types.TenantAPIKeyScope{Role: types.TenantRoleOwner},
+		types.TenantRoleOwner,
 		RequireSystemAdmin(cfgRBAC(true)),
 	)
-	if w.Code != http.StatusOK {
-		t.Fatalf("API-key principal should short-circuit RequireSystemAdmin, got %d", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("API-key principal must be rejected by RequireSystemAdmin, got %d", w.Code)
 	}
 }
 

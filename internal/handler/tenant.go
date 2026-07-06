@@ -576,7 +576,7 @@ func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
 	result, err := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: id,
 		Name:     "Tenant API key",
-		Role:     types.TenantRoleAdmin,
+		Role:     types.TenantRoleOwner,
 	})
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {

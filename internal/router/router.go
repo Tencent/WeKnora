@@ -1461,17 +1461,6 @@ func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFu
 			return
 		}
 
-		// /files is registered on the engine root, outside the /api/v1
-		// API-key gate. A KB-restricted API key must not fetch arbitrary
-		// tenant files: a raw storage path cannot be attributed to the
-		// key's KB allow-list, so serving it would bypass the KB scope.
-		if scope, ok := types.TenantAPIKeyScopeFromContext(c.Request.Context()); ok && scope.IsKnowledgeBaseRestricted() {
-			logger.Warnf(context.Background(),
-				"[Router] /files denied KB-restricted API key: tenant_id=%d file_path=%q", tenant.ID, filePath)
-			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: API key scope does not allow file access"})
-			return
-		}
-
 		if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
 			logger.Warnf(context.Background(), "[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v", tenant.ID, filePath, err)
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
@@ -1529,7 +1518,10 @@ func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFu
 
 func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
-	r.GET("/files", newFileServeHandler(globalFileService))
+	// /files sits outside the /api/v1 APIKeyGate; storage paths cannot be
+	// attributed to a key's KB allow-list, so API keys are denied outright
+	// (embed routes use their own /embed/.../files handler).
+	r.GET("/files", middleware.DenyAPIKeyPrincipal(), newFileServeHandler(globalFileService))
 }
 
 // servePresignedFiles serves files via HMAC-signed URLs without requiring authentication.

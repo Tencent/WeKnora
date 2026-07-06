@@ -35,7 +35,7 @@ SELECT
     'Tenant API key',
     'migrated-tenant-' || id::text,
     api_key,
-    'admin',
+    'owner',
     '[]'::jsonb,
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP
