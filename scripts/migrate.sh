@@ -14,58 +14,77 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
 fi
 
 # Database connection details (can be overridden by environment variables)
+DB_DRIVER=${DB_DRIVER:-postgres}
 DB_HOST=${DB_HOST:-localhost}
-DB_PORT=${DB_PORT:-5432}
+if [ -z "${DB_PORT:-}" ]; then
+    case "$DB_DRIVER" in
+        mysql) DB_PORT=3306 ;;
+        *) DB_PORT=5432 ;;
+    esac
+fi
 DB_USER=${DB_USER:-postgres}
-DB_PASSWORD=${DB_PASSWORD:-postgres}
+DB_PASSWORD=${DB_PASSWORD-postgres}
 DB_NAME=${DB_NAME:-WeKnora}
 
-# Use versioned migrations directory
-MIGRATIONS_DIR="${MIGRATIONS_DIR:-migrations/versioned}"
+# Use driver-specific migrations directory
+case "$DB_DRIVER" in
+    postgres) DEFAULT_MIGRATIONS_DIR="migrations/versioned" ;;
+    mysql) DEFAULT_MIGRATIONS_DIR="migrations/mysql" ;;
+    *) echo "Error: unsupported DB_DRIVER '$DB_DRIVER' (expected postgres or mysql)" && exit 1 ;;
+esac
+MIGRATIONS_DIR="${MIGRATIONS_DIR:-$DEFAULT_MIGRATIONS_DIR}"
 
 # Check if migrate tool is installed
 if ! command -v migrate &> /dev/null; then
     echo "Error: migrate tool is not installed"
-    echo "Install it with: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest"
+    echo "Install it with: go install -tags 'postgres mysql' github.com/golang-migrate/migrate/v4/cmd/migrate@latest"
     exit 1
 fi
 
 # Construct the database URL
-# If DB_URL is already set in .env, use it but ensure sslmode=disable is set
+# If DB_URL is already set in .env, use it. For postgres, ensure sslmode=disable is set
 # Otherwise, construct it from individual components
 if [ -n "$DB_URL" ]; then
-    # If DB_URL already exists, ensure sslmode=disable is set (unless sslmode is already specified)
-    if [[ "$DB_URL" != *"sslmode="* ]]; then
-        # Add sslmode=disable if not present
-        if [[ "$DB_URL" == *"?"* ]]; then
-            DB_URL="${DB_URL}&sslmode=disable"
-        else
-            DB_URL="${DB_URL}?sslmode=disable"
+    if [ "$DB_DRIVER" = "postgres" ]; then
+        if [[ "$DB_URL" != *"sslmode="* ]]; then
+            if [[ "$DB_URL" == *"?"* ]]; then
+                DB_URL="${DB_URL}&sslmode=disable"
+            else
+                DB_URL="${DB_URL}?sslmode=disable"
+            fi
+        elif [[ "$DB_URL" == *"sslmode=require"* ]] || [[ "$DB_URL" == *"sslmode=prefer"* ]]; then
+            DB_URL="${DB_URL//sslmode=require/sslmode=disable}"
+            DB_URL="${DB_URL//sslmode=prefer/sslmode=disable}"
         fi
-    elif [[ "$DB_URL" == *"sslmode=require"* ]] || [[ "$DB_URL" == *"sslmode=prefer"* ]]; then
-        # Replace sslmode=require/prefer with sslmode=disable for local dev
-        DB_URL="${DB_URL//sslmode=require/sslmode=disable}"
-        DB_URL="${DB_URL//sslmode=prefer/sslmode=disable}"
     fi
 else
-    # Use Python to properly URL encode password if it contains special characters
-    # This handles special characters in passwords correctly
     if command -v python3 &> /dev/null; then
-        ENCODED_PASSWORD=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DB_PASSWORD', safe=''))")
+        ENCODED_PASSWORD=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ.get("DB_PASSWORD", ""), safe=""))')
     else
-        # Fallback: try to use printf for basic encoding (may not work for all special chars)
         ENCODED_PASSWORD="$DB_PASSWORD"
     fi
-    DB_URL="postgres://${DB_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable"
+    case "$DB_DRIVER" in
+        postgres)
+            DB_URL="postgres://${DB_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable"
+            ;;
+        mysql)
+            DB_URL="mysql://${DB_USER}:${ENCODED_PASSWORD}@tcp(${DB_HOST}:${DB_PORT})/${DB_NAME}?charset=utf8mb4&collation=utf8mb4_unicode_ci&parseTime=true"
+            ;;
+    esac
 fi
 
 # Execute migration based on command
 case "$1" in
     up)
         echo "Running migrations up..."
-        echo "DB_URL: ${DB_URL}"
+        echo "DB_URL: <redacted>"
+        echo "DB_DRIVER: ${DB_DRIVER}"
         echo "DB_USER: ${DB_USER}"
-        echo "DB_PASSWORD: ${DB_PASSWORD}"
+        if [ -n "$DB_PASSWORD" ]; then
+            echo "DB_PASSWORD: ********"
+        else
+            echo "DB_PASSWORD: <empty>"
+        fi
         echo "DB_HOST: ${DB_HOST}"
         echo "DB_PORT: ${DB_PORT}"
         echo "DB_NAME: ${DB_NAME}"
@@ -119,4 +138,4 @@ case "$1" in
         ;;
 esac
 
-echo "Migration command completed successfully" 
+echo "Migration command completed successfully"

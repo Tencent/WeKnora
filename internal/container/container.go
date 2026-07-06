@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
-	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
+	godrvmysql "github.com/go-sql-driver/mysql"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
@@ -29,6 +30,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -455,7 +457,7 @@ func initRedisClient() (*redis.Client, error) {
 
 // initDatabase initializes database connection
 // Creates and configures database connection based on environment configuration
-// Supports multiple database backends (PostgreSQL)
+// Supports multiple database backends (PostgreSQL, MySQL, SQLite)
 // Parameters:
 //   - cfg: Application configuration
 //
@@ -510,6 +512,34 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
 		)
+	case "mysql":
+		mysqlCfg := godrvmysql.NewConfig()
+		mysqlCfg.User = os.Getenv("DB_USER")
+		mysqlCfg.Passwd = os.Getenv("DB_PASSWORD")
+		mysqlCfg.Net = "tcp"
+		mysqlCfg.Addr = net.JoinHostPort(os.Getenv("DB_HOST"), os.Getenv("DB_PORT"))
+		mysqlCfg.DBName = os.Getenv("DB_NAME")
+		mysqlCfg.ParseTime = true
+		mysqlCfg.Loc = time.UTC
+		mysqlCfg.Params = map[string]string{
+			"charset":   "utf8mb4",
+			"collation": "utf8mb4_unicode_ci",
+		}
+
+		mysqlDSN := mysqlCfg.FormatDSN()
+		dialector = gormmysql.Open(mysqlDSN)
+		migrateDSN = mysqlMigrationDSN(
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_PASSWORD"),
+			mysqlCfg.Addr,
+			os.Getenv("DB_NAME"),
+		)
+		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
 		if dbPath == "" {
@@ -538,15 +568,12 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// Sanity check: dialect-specific code in services (notably the
-	// vector_stores delete guard) compares Dialector.Name() to "postgres" /
-	// "sqlite" string literals. A future driver swap that produces a
-	// different name (e.g., a wrapper dialect for managed PG) would silently
-	// fall back to the SQLite path, dropping the row-level X-lock. Catching
-	// the mismatch at startup is loud and inexpensive.
-	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+	// Sanity check: dialect-specific code in repositories and services compares
+	// Dialector.Name() to string literals. A future driver swap that produces a
+	// different name would silently pick the wrong SQL branch.
+	if name := db.Dialector.Name(); name != "postgres" && name != "mysql" && name != "sqlite" {
 		return nil, fmt.Errorf(
-			"unsupported gorm dialector %q; expected postgres or sqlite "+
+			"unsupported gorm dialector %q; expected postgres, mysql or sqlite "+
 				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 
@@ -614,6 +641,16 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
 	return db, nil
+}
+
+func mysqlMigrationDSN(user, password, addr, dbName string) string {
+	return fmt.Sprintf(
+		"mysql://%s:%s@tcp(%s)/%s?charset=utf8mb4&collation=utf8mb4_unicode_ci&parseTime=true",
+		url.QueryEscape(user),
+		url.QueryEscape(password),
+		addr,
+		url.PathEscape(dbName),
+	)
 }
 
 // resolveStorageProviderPending replaces the "__pending_env__" sentinel in
