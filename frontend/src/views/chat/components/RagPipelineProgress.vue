@@ -19,15 +19,25 @@
       <div v-for="(step, index) in steps" :key="step.id" class="tree-child" :class="{
         'tree-child-last':
           !showDoneRow
-          && !hasReferences
           && !showThinkingStep
           && index === steps.length - 1,
       }">
         <div class="tree-branch" />
         <div class="tree-child-content">
           <div class="tool-event">
-            <div class="action-card">
-              <div class="action-header no-results">
+            <div
+              class="action-card"
+              :class="{ 'has-reference-trigger': step.canOpenReferences }"
+              :role="step.canOpenReferences ? 'button' : undefined"
+              :tabindex="step.canOpenReferences ? 0 : undefined"
+              @click="handleStepClick(step)"
+              @keydown.enter="handleStepClick(step)"
+              @keydown.space.prevent="handleStepClick(step)"
+            >
+              <div
+                class="action-header"
+                :class="{ 'no-results': !step.canOpenReferences }"
+              >
                 <div class="action-title">
                   <t-icon class="action-title-icon" :name="step.iconName" />
                   <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
@@ -36,25 +46,6 @@
               <div v-if="step.summaryHtml" class="search-results-summary-fixed">
                 <div class="results-summary-text" v-html="step.summaryHtml" />
               </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="hasReferences" class="tree-child rag-ref-step"
-        :class="{ 'tree-child-last': !showThinkingStep && !showDoneRow }">
-        <div class="tree-branch" />
-        <div class="tree-child-content">
-          <div class="tool-event">
-            <div class="action-card">
-              <div class="action-header" @click="toggleReferences">
-                <div class="action-title">
-                  <t-icon class="action-title-icon" name="file-search" />
-                  <span class="action-name">{{ referencesHeaderText }}</span>
-                </div>
-              </div>
-              <DocInfo v-show="refsExpanded" :session="session" :embedded-mode="embeddedMode" timeline-mode
-                content-only />
             </div>
           </div>
         </div>
@@ -106,26 +97,50 @@
 
     <div v-else class="tree-container">
       <div class="tool-event">
-        <div class="action-card tree-root" @click="toggleExpanded">
-          <div class="action-header">
-            <div class="action-title">
-              <span class="action-name tree-root-summary" v-html="collapsedSummaryHtml" />
-              <div class="action-show-icon">
-                <t-icon :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'" />
-              </div>
-            </div>
+        <div class="action-card tree-root">
+          <div class="tree-root-toolbar">
+            <button
+              type="button"
+              class="tree-root-expand"
+              :aria-expanded="showExpandedTimeline"
+              :aria-label="collapsedStatusText"
+              @click="toggleExpanded"
+            >
+              <span class="tree-root-status">{{ collapsedStatusText }}</span>
+              <span
+                v-if="referenceSummaryText"
+                class="tree-root-reference"
+              >
+                {{ referenceSummaryText }}
+              </span>
+              <t-icon
+                class="tree-root-expand__icon"
+                :name="showExpandedTimeline ? 'chevron-down' : 'chevron-right'"
+              />
+            </button>
           </div>
         </div>
       </div>
 
       <div v-if="showExpandedTimeline" class="tree-children tree-children-expanded">
         <div v-for="(step, index) in steps" :key="step.id" class="tree-child"
-          :class="{ 'tree-child-last': index === steps.length - 1 && !hasReferences && !showDoneRow && !showThinkingStep }">
+          :class="{ 'tree-child-last': index === steps.length - 1 && !showDoneRow && !showThinkingStep }">
           <div class="tree-branch" />
           <div class="tree-child-content">
             <div class="tool-event">
-              <div class="action-card">
-                <div class="action-header no-results">
+              <div
+                class="action-card"
+                :class="{ 'has-reference-trigger': step.canOpenReferences }"
+                :role="step.canOpenReferences ? 'button' : undefined"
+                :tabindex="step.canOpenReferences ? 0 : undefined"
+                @click="handleStepClick(step)"
+                @keydown.enter="handleStepClick(step)"
+                @keydown.space.prevent="handleStepClick(step)"
+              >
+                <div
+                  class="action-header"
+                  :class="{ 'no-results': !step.canOpenReferences }"
+                >
                   <div class="action-title">
                     <t-icon class="action-title-icon" :name="step.iconName" />
                     <span class="action-name" :class="{ 'is-running': step.pending }">{{ step.title }}</span>
@@ -134,25 +149,6 @@
                 <div v-if="step.summaryHtml" class="search-results-summary-fixed">
                   <div class="results-summary-text" v-html="step.summaryHtml" />
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="hasReferences" class="tree-child rag-ref-step"
-          :class="{ 'tree-child-last': !showThinkingStep && !showDoneRow }">
-          <div class="tree-branch" />
-          <div class="tree-child-content">
-            <div class="tool-event">
-              <div class="action-card">
-                <div class="action-header" @click="toggleReferences">
-                  <div class="action-title">
-                    <t-icon class="action-title-icon" name="file-search" />
-                    <span class="action-name">{{ referencesHeaderText }}</span>
-                  </div>
-                </div>
-                <DocInfo v-show="refsExpanded" :session="session" :embedded-mode="embeddedMode" timeline-mode
-                  content-only />
               </div>
             </div>
           </div>
@@ -207,7 +203,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import DocInfo from './docInfo.vue'
 import { getAgentToolIconName } from '@/utils/agent-tool-icons'
 import {
   getKnowledgeSearchSummaryHtml,
@@ -215,9 +210,12 @@ import {
   getRetrievalSearchSource,
 } from '@/utils/agent-tool-display'
 import { RAG_PIPELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
+import { buildReferenceSections } from '@/utils/referenceSources'
 
 const props = defineProps<{
   session?: {
+    id?: string | number
     agentEventStream?: Array<Record<string, unknown>>
     content?: string
     knowledge_references?: Array<{ chunk_type?: string; knowledge_id?: string; knowledge_title?: string }>
@@ -227,8 +225,8 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const referencesDrawer = useChatReferencesDrawer()
 const userExpanded = ref(false)
-const refsExpanded = ref(false)
 const thinkingExpanded = ref(true)
 const rootElement = ref<HTMLElement | null>(null)
 
@@ -266,6 +264,8 @@ const hasReferences = computed(
   () => (props.session?.knowledge_references?.length ?? 0) > 0,
 )
 
+const referenceSections = computed(() => buildReferenceSections(props.session?.knowledge_references))
+
 const steps = computed(() => {
   const stream = props.session?.agentEventStream
   if (!stream?.length) return []
@@ -294,6 +294,7 @@ const steps = computed(() => {
         !pending && isSearchTool && toolData
           ? getKnowledgeSearchSummaryHtml(t, toolData)
           : ''
+      const canOpenReferences = !pending && isSearchTool && hasReferences.value
 
       return {
         id: String(event.tool_call_id || `${toolName}-${event.timestamp || 0}`),
@@ -307,6 +308,7 @@ const steps = computed(() => {
           tool_data: toolData,
         }),
         summaryHtml,
+        canOpenReferences,
       }
     })
 })
@@ -364,25 +366,16 @@ const visible = computed(
   () => steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value,
 )
 
-const referenceDocCount = computed(() => {
-  const refs = props.session?.knowledge_references ?? []
-  const keys = new Set<string>()
-  for (const item of refs) {
-    if (item.chunk_type === 'web_search') continue
-    keys.add(item.knowledge_id || item.knowledge_title || 'doc')
+const collapsedStatusText = computed(() => {
+  if (steps.value.length === 0) {
+    return hasThinking.value ? t('agentStream.toolStatus.thinkingDone') : ''
   }
-  return keys.size
+  return t('agentStream.ragPipeline.searchDone')
 })
 
-const referenceWebCount = computed(() => {
-  const refs = props.session?.knowledge_references ?? []
-  return refs.filter((item) => item.chunk_type === 'web_search').length
-})
-
-const referencesHeaderText = computed(() => {
-  const docCount = referenceDocCount.value
-  const webCount = referenceWebCount.value
-  const total = props.session?.knowledge_references?.length ?? 0
+const referenceSummaryText = computed(() => {
+  const docCount = referenceSections.value.find((section) => section.id === 'documents')?.items.length ?? 0
+  const webCount = referenceSections.value.find((section) => section.id === 'web')?.items.length ?? 0
 
   if (docCount > 0 && webCount > 0) {
     return t('chat.referencesDocAndWebCount', { docCount, webCount })
@@ -393,48 +386,28 @@ const referencesHeaderText = computed(() => {
   if (webCount > 0) {
     return t('chat.referencesWebCount', { count: webCount })
   }
-  return t('chat.referencesTitle', { count: total })
+
+  return ''
 })
 
-const collapsedSummaryHtml = computed(() => {
-  if (steps.value.length === 0) {
-    return hasThinking.value ? t('agentStream.toolStatus.thinkingDone') : ''
-  }
+function toggleReferencesDrawer() {
+  const refs = props.session?.knowledge_references
+  if (!referencesDrawer || !refs?.length) return
+  referencesDrawer.toggle({
+    references: refs,
+    highlight: null,
+    messageId: props.session?.id ? String(props.session.id) : '',
+    sourceKey: `rag:${props.session?.id || refs.map((item) => item.knowledge_id || item.knowledge_title).join('|')}`,
+  })
+}
 
-  const parts: string[] = [t('agentStream.ragPipeline.searchDone')]
-  const docCount = referenceDocCount.value
-  const webCount = referenceWebCount.value
-
-  if (docCount > 0 && webCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedDocAndWeb', {
-        docCount: `<strong>${docCount}</strong>`,
-        webCount: `<strong>${webCount}</strong>`,
-      }),
-    )
-  } else if (docCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedDocs', {
-        count: `<strong>${docCount}</strong>`,
-      }),
-    )
-  } else if (webCount > 0) {
-    parts.push(
-      t('agentStream.ragPipeline.referencedWebs', {
-        count: `<strong>${webCount}</strong>`,
-      }),
-    )
-  }
-
-  return parts.join(t('agent.stepSummarySeparator'))
-})
+function handleStepClick(step: { canOpenReferences?: boolean }) {
+  if (!step.canOpenReferences) return
+  toggleReferencesDrawer()
+}
 
 function toggleExpanded() {
   userExpanded.value = !userExpanded.value
-}
-
-function toggleReferences() {
-  refsExpanded.value = !refsExpanded.value
 }
 
 function toggleThinking() {
@@ -488,46 +461,73 @@ watch(thinkingExpanded, (expanded) => {
 }
 
 .tree-container {
-  margin: 0 0 16px;
+  margin: 0 0 8px;
   position: relative;
 }
 
 .tree-root {
-  cursor: pointer;
-  color: var(--td-text-color-secondary);
   margin-bottom: 0;
 
-  .action-header {
+  .tree-root-toolbar {
     display: flex;
     align-items: center;
-    min-height: 24px;
-    padding: 0;
-  }
-
-  .action-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 1 auto;
+    justify-content: flex-start;
+    width: 100%;
     min-width: 0;
   }
 
-  .tree-root-summary {
-    font-size: 14px;
-    line-height: 1.55;
+  .tree-root-expand {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
     color: var(--td-text-color-secondary);
+    font-size: 14px;
+    line-height: 22px;
+    cursor: pointer;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
 
-    :deep(strong) {
-      font-weight: 600;
+    &:hover {
+      background: transparent;
       color: var(--td-text-color-primary);
     }
   }
 
-  .action-show-icon {
-    color: var(--td-text-color-placeholder);
-    font-size: 14px;
-    flex-shrink: 0;
+  .tree-root-status,
+  .tree-root-reference {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
   }
+
+  .tree-root-reference {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+
+    &::before {
+      content: '';
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.65;
+      flex-shrink: 0;
+    }
+  }
+
+  .tree-root-expand__icon {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: currentColor;
+  }
+
 }
 
 .tree-children {
@@ -570,38 +570,23 @@ watch(thinkingExpanded, (expanded) => {
   }
 }
 
-.rag-ref-step {
-  .action-header {
-    width: 100%;
-    gap: 8px;
-  }
-
-  .action-title {
-    gap: 12px;
-  }
-
-  .action-show-icon {
-    color: var(--td-text-color-placeholder);
-    font-size: 14px;
-    flex-shrink: 0;
-  }
-
-  :deep(.refer-timeline.refer) {
-    margin-top: 4px;
-    padding-left: 0;
-  }
-
-  :deep(.refer-timeline .doc-group-chunks) {
-    padding-left: 18px;
-  }
-}
-
 .tool-event {
   .action-card {
     position: relative;
     background: transparent;
     border: 0;
     box-shadow: none;
+
+    &.has-reference-trigger {
+      cursor: pointer;
+
+      &:hover {
+        .action-name,
+        .results-summary-text {
+          color: var(--td-text-color-primary);
+        }
+      }
+    }
   }
 
   .action-header {
@@ -687,6 +672,18 @@ watch(thinkingExpanded, (expanded) => {
 
   .action-pending .action-name {
     color: var(--td-text-color-secondary);
+  }
+}
+
+@media (max-width: 640px) {
+  .tree-root {
+    .tree-root-toolbar {
+      gap: 8px;
+    }
+
+    .tree-root-expand {
+      max-width: 100%;
+    }
   }
 }
 </style>

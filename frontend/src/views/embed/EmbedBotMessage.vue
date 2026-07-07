@@ -134,6 +134,9 @@ const { float: citationFloat, rebind: rebindCitations } = useEmbedCitationPopove
   parentMd,
   embedChannelIdRef,
   embedTokenRef,
+  {
+    getKnowledgeReferences: () => props.session?.knowledge_references,
+  },
 )
 
 let citationCloseTimer: number | null = null

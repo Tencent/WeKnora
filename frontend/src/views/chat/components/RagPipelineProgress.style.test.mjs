@@ -19,28 +19,32 @@ test('rag pipeline uses agent-style timeline structure', () => {
 
 test('rag pipeline persists and collapses after the answer arrives', () => {
   assert.match(source, /showCollapsedRoot/)
-  assert.match(source, /tree-root-summary/)
-  assert.match(source, /collapsedSummaryHtml/)
+  assert.match(source, /tree-root-status/)
+  assert.match(source, /collapsedStatusText/)
+  assert.match(source, /referenceSummaryText/)
   assert.match(source, /hasThinking\.value/)
   assert.match(source, /const visible = computed\([\s\S]*showPrePipelineWait\.value/)
 })
 
 test('rag pipeline toggles expand and collapse from the root header', () => {
-  assert.match(source, /class="action-card tree-root" @click="toggleExpanded"/)
+  assert.match(source, /class="tree-root-expand"/)
+  assert.match(source, /@click="toggleExpanded"/)
   assert.match(source, /showExpandedTimeline \? 'chevron-down' : 'chevron-right'/)
   assert.doesNotMatch(source, /refsExpanded \? 'chevron/)
   assert.doesNotMatch(source, /tree-collapse-bar/)
 })
 
 test('only the collapsed root summary shows an expand chevron', () => {
-  assert.match(source, /tree-root-summary[\s\S]*class="action-show-icon"/)
-  assert.equal((source.match(/class="action-show-icon"/g) || []).length, 1)
+  const template = source.split('<script')[0]
+  assert.match(template, /tree-root-expand__icon/)
+  assert.equal((template.match(/tree-root-expand__icon/g) || []).length, 1)
 })
 
-test('rag pipeline embeds references in the timeline instead of a separate card', () => {
-  assert.match(source, /timeline-mode/)
-  assert.match(source, /content-only/)
-  assert.match(source, /rag-ref-step[\s\S]*name="file-search"/)
+test('rag pipeline opens references from search steps and the drawer composable', () => {
+  assert.match(source, /useChatReferencesDrawer/)
+  assert.match(source, /toggleReferencesDrawer/)
+  assert.match(source, /has-reference-trigger/)
+  assert.match(source, /handleStepClick/)
 })
 
 test('rag pipeline keeps loading inside the thinking step instead of orphan dots', () => {
@@ -49,13 +53,6 @@ test('rag pipeline keeps loading inside the thinking step instead of orphan dots
   assert.match(source, /thinking-loading/)
   assert.match(source, /hasThinkingEvent/)
   assert.doesNotMatch(source, /showActivityIndicator/)
-})
-
-test('rag pipeline places references before the done row', () => {
-  const refsIndex = source.indexOf('class="tree-child rag-ref-step"')
-  const doneIndex = source.indexOf('agent-step-done')
-  assert.ok(refsIndex > -1 && doneIndex > -1)
-  assert.ok(refsIndex < doneIndex)
 })
 
 test('done row appears only after the full turn completes', () => {
@@ -75,11 +72,11 @@ test('rag pipeline renders model thinking inside the timeline before the done ro
 test('clickable timeline headers use pointer cursor', () => {
   assert.match(source, /\.tool-event \{[\s\S]*\.action-header \{[\s\S]*cursor: pointer/)
   assert.match(source, /\.action-header \{[\s\S]*&\.no-results \{[\s\S]*cursor: default/)
-  assert.match(source, /\.tree-root \{[\s\S]*cursor: pointer/)
+  assert.match(source, /\.has-reference-trigger \{[\s\S]*cursor: pointer/)
 })
 
-test('collapsed summary uses the same title-to-answer spacing as agent', () => {
-  assert.match(source, /\.tree-container \{\s*margin: 0 0 16px;/)
+test('collapsed summary uses compact spacing before the answer', () => {
+  assert.match(source, /\.tree-container \{\s*margin: 0 0 8px;/)
   assert.match(source, /\.rag-pipeline-progress \{[\s\S]*margin: 0;/)
 })
 

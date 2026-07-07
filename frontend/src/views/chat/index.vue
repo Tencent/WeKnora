@@ -1,5 +1,9 @@
 <template>
-    <div class="chat" :class="{ 'is-embedded': embeddedMode, 'is-sidebar-collapsed': uiStore.sidebarCollapsed }">
+    <div class="chat" :class="{
+        'is-embedded': embeddedMode,
+        'is-sidebar-collapsed': uiStore.sidebarCollapsed,
+        'has-references-panel': referencesDrawerVisible,
+    }">
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                 <!-- 消息列表骨架屏 -->
@@ -107,6 +111,7 @@
     <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
         :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
+    <ChatReferencesDrawer />
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
@@ -128,6 +133,10 @@ import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCrea
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler';
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
+import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
+import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+
+const { visible: referencesDrawerVisible } = provideChatReferencesDrawer();
 
 const props = defineProps({
     session_id: { type: String, default: '' },
@@ -879,6 +888,19 @@ onBeforeRouteUpdate((to, from, next) => {
         overflow-x: hidden;
     }
 
+    &:not(.is-embedded) {
+        @media (min-width: 960px) {
+            transition: padding-right 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+        }
+    }
+
+    &.has-references-panel:not(.is-embedded) {
+        @media (min-width: 960px) {
+            padding-right: 420px;
+            box-sizing: border-box;
+        }
+    }
+
     &.is-embedded :deep(.answers-input) {
         position: relative;
         transform: translateX(0);
@@ -1015,13 +1037,12 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .input-container {
     min-height: 115px;
-    // Keep the input visible when messages overflow: without flex-shrink: 0
-    // a tall .chat_scroll_box can squeeze this container down to 0 height.
     flex-shrink: 0;
     margin: 0 auto;
     width: 100%;
     max-width: 800px;
     box-sizing: border-box;
+    position: relative;
 
     &.is-embedded {
         max-width: 100%;
