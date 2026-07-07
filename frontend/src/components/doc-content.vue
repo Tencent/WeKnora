@@ -1,22 +1,34 @@
 <script setup lang="ts">
 // @ts-nocheck
 import { marked } from "marked";
-import markedKatex from 'marked-katex-extension';
-import 'katex/dist/katex.min.css';
+import markedKatex from "marked-katex-extension";
+import "katex/dist/katex.min.css";
 
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
+import {
+  downKnowledgeDetails,
+  deleteGeneratedQuestion,
+  getChunkByIdOnly,
+  previewKnowledgeFile,
+} from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
-import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
-import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
-import { openMermaidFullscreen } from '@/utils/mermaidViewer';
-import { useI18n } from 'vue-i18n';
-import { useAuthStore } from '@/stores/auth';
-import DocumentPreview from '@/components/document-preview.vue';
-import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
+import {
+  sanitizeHTML,
+  safeMarkdownToHTML,
+  createSafeImage,
+  isValidImageURL,
+  hydrateProtectedFileImages,
+  isValidURL,
+} from "@/utils/security";
+import { normalizeSpuriousTablePrefixes } from "@/utils/markdownTableNormalize";
+import { openMermaidFullscreen } from "@/utils/mermaidViewer";
+import { useI18n } from "vue-i18n";
+import { useAuthStore } from "@/stores/auth";
+import DocumentPreview from "@/components/document-preview.vue";
+import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timeline.vue";
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -28,7 +40,7 @@ const authStore = useAuthStore();
 // 传时按更严格的 Admin 兜底，避免 Viewer 看到一个会 403 的入口。
 const canDeleteGeneratedQuestion = computed(() => {
   if (props.canEditKB === true) return true;
-  return authStore.hasRole('admin');
+  return authStore.hasRole("admin");
 });
 
 const detailTags = computed(() => {
@@ -38,19 +50,20 @@ const detailTags = computed(() => {
 
 const headerIconName = computed(() => {
   switch (props.details?.type) {
-    case 'url':
-      return 'link';
-    case 'manual':
-      return 'edit';
+    case "url":
+      return "link";
+    case "manual":
+      return "edit";
     default:
-      return 'file';
+      return "file";
   }
 });
 
-const showSummarySection = computed(() =>
-  Boolean(props.details?.description)
-  || props.details?.summary_status === 'pending'
-  || props.details?.summary_status === 'processing',
+const showSummarySection = computed(
+  () =>
+    Boolean(props.details?.description) ||
+    props.details?.summary_status === "pending" ||
+    props.details?.summary_status === "processing",
 );
 
 // Mermaid 初始化计数器，用于生成唯一ID
@@ -59,13 +72,13 @@ let mermaidRenderCount = 0;
 // 初始化 Mermaid
 mermaid.initialize({
   startOnLoad: false,
-  theme: 'default',
-  securityLevel: 'strict',
-  fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
+  theme: "default",
+  securityLevel: "strict",
+  fontFamily: "PingFang SC, Microsoft YaHei, sans-serif",
   flowchart: {
     useMaxWidth: true,
     htmlLabels: true,
-    curve: 'basis'
+    curve: "basis",
   },
   sequence: {
     useMaxWidth: true,
@@ -73,7 +86,7 @@ mermaid.initialize({
     diagramMarginY: 8,
     actorMargin: 50,
     width: 150,
-    height: 65
+    height: 65,
   },
   gantt: {
     useMaxWidth: true,
@@ -81,26 +94,52 @@ mermaid.initialize({
     gridLineStartPadding: 35,
     barHeight: 20,
     barGap: 4,
-    topPadding: 50
-  }
+    topPadding: 50,
+  },
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status"]);
+const props = defineProps([
+  "visible",
+  "details",
+  "knowledgeType",
+  "sourceInfo",
+  "canEditKB",
+  "parse_status",
+]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 const hasTimelineSpans = ref(false);
 const timelineDrawerVisible = ref(false);
-const timelineSummary = ref<{ totalMs: number; status: string; stageIndex: number; stageTotal: number; stageLabel: string }>({
-  totalMs: 0, status: '', stageIndex: 0, stageTotal: 0, stageLabel: '',
+const timelineSummary = ref<{
+  totalMs: number;
+  status: string;
+  stageIndex: number;
+  stageTotal: number;
+  stageLabel: string;
+}>({
+  totalMs: 0,
+  status: "",
+  stageIndex: 0,
+  stageTotal: 0,
+  stageLabel: "",
 });
 
-watch(() => props.details?.id, () => {
-  hasTimelineSpans.value = false;
-  timelineDrawerVisible.value = false;
-  timelineSummary.value = { totalMs: 0, status: '', stageIndex: 0, stageTotal: 0, stageLabel: '' };
-});
+watch(
+  () => props.details?.id,
+  () => {
+    hasTimelineSpans.value = false;
+    timelineDrawerVisible.value = false;
+    timelineSummary.value = {
+      totalMs: 0,
+      status: "",
+      stageIndex: 0,
+      stageTotal: 0,
+      stageLabel: "",
+    };
+  },
+);
 
 function formatTimelineDuration(ms: number): string {
-  if (!ms || ms < 0) return '—';
+  if (!ms || ms < 0) return "—";
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`;
   const mins = Math.floor(ms / 60000);
@@ -116,7 +155,7 @@ function closeTimeline() {
   timelineDrawerVisible.value = false;
 }
 
-const TRACE_DRAWER_WIDTH_KEY = 'weknora-trace-drawer-width';
+const TRACE_DRAWER_WIDTH_KEY = "weknora-trace-drawer-width";
 const TRACE_DRAWER_DEFAULT_WIDTH = 820;
 const TRACE_DRAWER_MIN_WIDTH = 560;
 
@@ -127,11 +166,17 @@ let traceResizeStartX = 0;
 let traceResizeStartWidth = 0;
 
 function traceDrawerMaxWidth() {
-  return Math.min(1400, Math.max(TRACE_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.92)));
+  return Math.min(
+    1400,
+    Math.max(TRACE_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.92)),
+  );
 }
 
 function clampTraceDrawerWidth(width: number) {
-  return Math.max(TRACE_DRAWER_MIN_WIDTH, Math.min(traceDrawerMaxWidth(), width));
+  return Math.max(
+    TRACE_DRAWER_MIN_WIDTH,
+    Math.min(traceDrawerMaxWidth(), width),
+  );
 }
 
 function loadTraceDrawerWidth() {
@@ -150,25 +195,30 @@ function onTraceDrawerResizeStart(e: MouseEvent) {
   timelineDrawerResizing.value = true;
   traceResizeStartX = e.clientX;
   traceResizeStartWidth = timelineDrawerWidth.value;
-  document.addEventListener('mousemove', onTraceDrawerResizeMove);
-  document.addEventListener('mouseup', onTraceDrawerResizeEnd);
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
+  document.addEventListener("mousemove", onTraceDrawerResizeMove);
+  document.addEventListener("mouseup", onTraceDrawerResizeEnd);
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
 }
 
 function onTraceDrawerResizeMove(e: MouseEvent) {
   const delta = traceResizeStartX - e.clientX;
-  timelineDrawerWidth.value = clampTraceDrawerWidth(traceResizeStartWidth + delta);
+  timelineDrawerWidth.value = clampTraceDrawerWidth(
+    traceResizeStartWidth + delta,
+  );
 }
 
 function onTraceDrawerResizeEnd() {
-  document.removeEventListener('mousemove', onTraceDrawerResizeMove);
-  document.removeEventListener('mouseup', onTraceDrawerResizeEnd);
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
+  document.removeEventListener("mousemove", onTraceDrawerResizeMove);
+  document.removeEventListener("mouseup", onTraceDrawerResizeEnd);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
   timelineDrawerResizing.value = false;
   try {
-    localStorage.setItem(TRACE_DRAWER_WIDTH_KEY, String(timelineDrawerWidth.value));
+    localStorage.setItem(
+      TRACE_DRAWER_WIDTH_KEY,
+      String(timelineDrawerWidth.value),
+    );
   } catch {
     /* ignore */
   }
@@ -180,15 +230,15 @@ function onTraceDrawerWindowResize() {
 }
 
 function cleanupTraceDrawerResize() {
-  document.removeEventListener('mousemove', onTraceDrawerResizeMove);
-  document.removeEventListener('mouseup', onTraceDrawerResizeEnd);
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
+  document.removeEventListener("mousemove", onTraceDrawerResizeMove);
+  document.removeEventListener("mouseup", onTraceDrawerResizeEnd);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
   timelineDrawerResizing.value = false;
 }
 
 // ============== 主抽屉（文档详情）宽度可调 ==============
-const MAIN_DRAWER_WIDTH_KEY = 'weknora-doc-drawer-width';
+const MAIN_DRAWER_WIDTH_KEY = "weknora-doc-drawer-width";
 const MAIN_DRAWER_DEFAULT_WIDTH = 654;
 const MAIN_DRAWER_MIN_WIDTH = 480;
 
@@ -199,7 +249,10 @@ let mainResizeStartX = 0;
 let mainResizeStartWidth = 0;
 
 function mainDrawerMaxWidth() {
-  return Math.min(1600, Math.max(MAIN_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.95)));
+  return Math.min(
+    1600,
+    Math.max(MAIN_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.95)),
+  );
 }
 
 function clampMainDrawerWidth(width: number) {
@@ -222,10 +275,10 @@ function onMainDrawerResizeStart(e: MouseEvent) {
   mainDrawerResizing.value = true;
   mainResizeStartX = e.clientX;
   mainResizeStartWidth = mainDrawerWidth.value;
-  document.addEventListener('mousemove', onMainDrawerResizeMove);
-  document.addEventListener('mouseup', onMainDrawerResizeEnd);
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
+  document.addEventListener("mousemove", onMainDrawerResizeMove);
+  document.addEventListener("mouseup", onMainDrawerResizeEnd);
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
 }
 
 function onMainDrawerResizeMove(e: MouseEvent) {
@@ -235,10 +288,10 @@ function onMainDrawerResizeMove(e: MouseEvent) {
 }
 
 function onMainDrawerResizeEnd() {
-  document.removeEventListener('mousemove', onMainDrawerResizeMove);
-  document.removeEventListener('mouseup', onMainDrawerResizeEnd);
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
+  document.removeEventListener("mousemove", onMainDrawerResizeMove);
+  document.removeEventListener("mouseup", onMainDrawerResizeEnd);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
   mainDrawerResizing.value = false;
   try {
     localStorage.setItem(MAIN_DRAWER_WIDTH_KEY, String(mainDrawerWidth.value));
@@ -248,32 +301,32 @@ function onMainDrawerResizeEnd() {
 }
 
 function cleanupMainDrawerResize() {
-  document.removeEventListener('mousemove', onMainDrawerResizeMove);
-  document.removeEventListener('mouseup', onMainDrawerResizeEnd);
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
+  document.removeEventListener("mousemove", onMainDrawerResizeMove);
+  document.removeEventListener("mouseup", onMainDrawerResizeEnd);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
   mainDrawerResizing.value = false;
 }
 
 const traceEntryTheme = computed(() => {
-  const s = timelineSummary.value.status || '';
+  const s = timelineSummary.value.status || "";
   switch (s) {
-    case 'done':
-    case 'completed':
-      return 'success';
-    case 'failed':
-      return 'danger';
-    case 'running':
-    case 'processing':
-    case 'pending':
-      return 'warning';
+    case "done":
+    case "completed":
+      return "success";
+    case "failed":
+      return "danger";
+    case "running":
+    case "processing":
+    case "pending":
+      return "warning";
     default:
-      return 'default';
+      return "default";
   }
 });
 
 const traceEntryTitle = computed(() => {
-  let tip = t('knowledgeStages.viewTrace');
+  let tip = t("knowledgeStages.viewTrace");
   if (timelineSummary.value.totalMs > 0) {
     tip += ` · ${formatTimelineDuration(timelineSummary.value.totalMs)}`;
   } else if (timelineSummary.value.stageTotal > 0) {
@@ -288,18 +341,18 @@ const traceEntryTitle = computed(() => {
 defineExpose({ openTimeline });
 
 marked.use({
-  breaks: true,      // 启用单行换行转 <br>
-  gfm: true,         // 启用 GitHub Flavored Markdown
+  breaks: true, // 启用单行换行转 <br>
+  gfm: true, // 启用 GitHub Flavored Markdown
 });
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
 
 const preprocessMathDelimiters = (rawText: string): string => {
-  if (!rawText || typeof rawText !== 'string') {
-    return '';
+  if (!rawText || typeof rawText !== "string") {
+    return "";
   }
   return rawText
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+    .replace(/\\\[([\s\S]*?)\\\]/g, "$$$$$1$$$$")
+    .replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$$");
 };
 const renderer = new marked.Renderer();
 let page = 1;
@@ -309,16 +362,26 @@ let pendingChunksBeforeLoad = 0;
 const CHUNK_PAGE_SIZE = 25;
 /** Scroll container for the main doc drawer (not the first .t-drawer__body on the page). */
 let docScrollEl: HTMLElement | null = null;
-let mdContentWrap = ref()
+let mdContentWrap = ref();
 // Drawer uses attach="body", so markdown nodes live outside mdContentWrap in the DOM.
-const docMarkdownRoot = ref<HTMLElement | null>(null)
+const docMarkdownRoot = ref<HTMLElement | null>(null);
 
 const getMarkdownRenderRoot = (): ParentNode | null =>
-  docMarkdownRoot.value ?? (mdContentWrap.value as ParentNode | null) ?? null
-let url = ref('')
+  docMarkdownRoot.value ?? (mdContentWrap.value as ParentNode | null) ?? null;
+let url = ref("");
 // 视图模式：chunks / merged / preview
 // file 类型默认「预览」，URL / 手动创建 默认「全文」
-const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
+const viewMode = ref<"chunks" | "merged" | "preview">("merged");
+const feedbackStatsEnabled = ref(true);
+const lowQualityOnly = ref(false);
+const lowQualityRate = ref(0.6);
+const minFeedbackCount = ref(1);
+
+const chunkFeedbackQuery = computed(() => ({
+  feedback_stats: feedbackStatsEnabled.value,
+  max_positive_rate: lowQualityOnly.value ? lowQualityRate.value : undefined,
+  min_feedback_count: lowQualityOnly.value ? minFeedbackCount.value : undefined,
+}));
 
 // 合并后的文档内容（在下方通过 computed 定义）
 
@@ -334,11 +397,15 @@ const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
  *
  * @param positionOverlap 由 start/end 估算的重叠量，仅用于界定搜索窗口大小。
  */
-const appendChunkContent = (acc: string, next: string, positionOverlap: number): string => {
+const appendChunkContent = (
+  acc: string,
+  next: string,
+  positionOverlap: number,
+): string => {
   if (!acc) return next;
   if (!next) return acc;
 
-  const MIN_OVERLAP = 12;          // 过短的后缀容易误匹配（如分隔行），忽略
+  const MIN_OVERLAP = 12; // 过短的后缀容易误匹配（如分隔行），忽略
   const span = Math.max(positionOverlap, 0);
   // 搜索的后缀最大长度；按位置重叠量放大几倍兜底，并设下限
   const maxK = Math.min(acc.length, next.length, Math.max(span * 3, 400));
@@ -359,7 +426,7 @@ const appendChunkContent = (acc: string, next: string, positionOverlap: number):
  * 合并分块内容，还原完整文档。chunks 按 start_at 排序后逐段用文本重叠匹配拼接。
  */
 const mergeChunks = (chunks: any[]): string => {
-  if (!chunks || chunks.length === 0) return '';
+  if (!chunks || chunks.length === 0) return "";
 
   // 按 start_at 排序
   const sortedChunks = [...chunks].sort((a, b) => {
@@ -368,20 +435,20 @@ const mergeChunks = (chunks: any[]): string => {
     return startA - startB;
   });
 
-  let merged = sortedChunks[0].content || '';
+  let merged = sortedChunks[0].content || "";
   let mergedEnd = sortedChunks[0].end_at ?? 0;
 
   for (let i = 1; i < sortedChunks.length; i++) {
     const currentChunk = sortedChunks[i];
     const currentStartAt = currentChunk.start_at ?? 0;
     const currentEndAt = currentChunk.end_at ?? 0;
-    const currentContent = currentChunk.content || '';
+    const currentContent = currentChunk.content || "";
 
     if (!currentContent) continue;
 
     // 与上一段有明显间隙（位置不相邻），用空行分隔后整段拼接
     if (currentStartAt > mergedEnd && mergedEnd > 0) {
-      merged = merged + '\n\n' + currentContent;
+      merged = merged + "\n\n" + currentContent;
     } else {
       const positionOverlap = mergedEnd - currentStartAt;
       merged = appendChunkContent(merged, currentContent, positionOverlap);
@@ -396,11 +463,13 @@ const mergeChunks = (chunks: any[]): string => {
 };
 
 const findDocDrawerScrollEl = (): HTMLElement | null =>
-  document.querySelector('.doc-main-drawer .t-drawer__body') as HTMLElement | null;
+  document.querySelector(
+    ".doc-main-drawer .t-drawer__body",
+  ) as HTMLElement | null;
 
 const unbindDrawerScroll = () => {
   if (docScrollEl) {
-    docScrollEl.removeEventListener('scroll', handleDetailsScroll);
+    docScrollEl.removeEventListener("scroll", handleDetailsScroll);
     docScrollEl = null;
   }
 };
@@ -409,59 +478,72 @@ const bindDrawerScroll = () => {
   unbindDrawerScroll();
   docScrollEl = findDocDrawerScrollEl();
   if (docScrollEl) {
-    docScrollEl.addEventListener('scroll', handleDetailsScroll, { passive: true });
+    docScrollEl.addEventListener("scroll", handleDetailsScroll, {
+      passive: true,
+    });
   }
 };
 
 onMounted(() => {
   loadTraceDrawerWidth();
   loadMainDrawerWidth();
-  window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
+  window.addEventListener("resize", onTraceDrawerWindowResize, {
+    passive: true,
+  });
 });
 
-watch(() => props.visible, (visible) => {
-  if (visible) {
-    nextTick(() => {
-      bindDrawerScroll();
-      maybeLoadMoreChunks();
-    });
-  } else {
-    unbindDrawerScroll();
-  }
-});
-watch(() => props.details?.id, () => {
-  page = 1;
-  loadingChunks = false;
-  pendingRequestedPage = null;
-  pendingChunksBeforeLoad = 0;
-});
-watch(() => props.details?.chunkLoading, (val) => {
-  if (val === false) {
-    if (pendingRequestedPage !== null) {
-      const currentLength = props.details?.md?.length || 0;
-      const hasError = Boolean(props.details?.chunkLoadError);
-      if (hasError && currentLength <= pendingChunksBeforeLoad) {
-        page = Math.max(1, pendingRequestedPage - 1);
-        MessagePlugin.warning(props.details?.chunkLoadError);
-      }
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) {
+      nextTick(() => {
+        bindDrawerScroll();
+        maybeLoadMoreChunks();
+      });
+    } else {
+      unbindDrawerScroll();
     }
+  },
+);
+watch(
+  () => props.details?.id,
+  () => {
+    page = 1;
+    loadingChunks = false;
     pendingRequestedPage = null;
     pendingChunksBeforeLoad = 0;
-    loadingChunks = false;
-    if (props.visible) {
-      nextTick(() => maybeLoadMoreChunks());
+  },
+);
+watch(
+  () => props.details?.chunkLoading,
+  (val) => {
+    if (val === false) {
+      if (pendingRequestedPage !== null) {
+        const currentLength = props.details?.md?.length || 0;
+        const hasError = Boolean(props.details?.chunkLoadError);
+        if (hasError && currentLength <= pendingChunksBeforeLoad) {
+          page = Math.max(1, pendingRequestedPage - 1);
+          MessagePlugin.warning(props.details?.chunkLoadError);
+        }
+      }
+      pendingRequestedPage = null;
+      pendingChunksBeforeLoad = 0;
+      loadingChunks = false;
+      if (props.visible) {
+        nextTick(() => maybeLoadMoreChunks());
+      }
     }
-  }
-});
+  },
+);
 onUnmounted(() => {
-  window.removeEventListener('resize', onTraceDrawerWindowResize);
+  window.removeEventListener("resize", onTraceDrawerWindowResize);
   cleanupTraceDrawerResize();
   cleanupMainDrawerResize();
   unbindDrawerScroll();
   if (audioBlobUrl.value) {
     URL.revokeObjectURL(audioBlobUrl.value);
   }
-})
+});
 const checkImage = (url) => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -472,25 +554,25 @@ const checkImage = (url) => {
 };
 renderer.image = function ({ href, title, text }) {
   if (!isValidImageURL(href)) {
-    return `<p>${t('error.invalidImageLink')}</p>`;
+    return `<p>${t("error.invalidImageLink")}</p>`;
   }
 
-  const safeImage = createSafeImage(href, text || '', title || '');
+  const safeImage = createSafeImage(href, text || "", title || "");
   return `<figure>
                 ${safeImage}
-                <figcaption style="text-align: left;">${text || ''}</figcaption>
+                <figcaption style="text-align: left;">${text || ""}</figcaption>
             </figure>`;
 };
 
 // 自定义代码块渲染器，只显示语言标签
 renderer.code = function ({ text, lang }) {
   // 空值校验：防止 text 为 undefined 或 null
-  if (!text || typeof text !== 'string') {
-    text = '';
+  if (!text || typeof text !== "string") {
+    text = "";
   }
 
   // Mermaid 图表处理
-  if (lang === 'mermaid') {
+  if (lang === "mermaid") {
     // 生成唯一ID
     const id = `mermaid-${++mermaidRenderCount}`;
     // 返回带有 mermaid 类的 div，后续由 mermaid.run() 处理
@@ -498,7 +580,7 @@ renderer.code = function ({ text, lang }) {
   }
 
   let detectedLang = lang;
-  let highlighted = '';
+  let highlighted = "";
   if (lang && hljs.getLanguage(lang)) {
     try {
       highlighted = hljs.highlight(text, { language: lang }).value;
@@ -511,13 +593,13 @@ renderer.code = function ({ text, lang }) {
     highlighted = auto.value;
     detectedLang = auto.language || lang;
   }
-  const displayLang = detectedLang || 'Code';
+  const displayLang = detectedLang || "Code";
   return `
     <div class="code-block-wrapper">
       <div class="code-block-header">
         <span class="code-block-lang">${displayLang}</span>
       </div>
-      <pre class="code-block-pre"><code class="hljs language-${detectedLang || ''}">${highlighted}</code></pre>
+      <pre class="code-block-pre"><code class="hljs language-${detectedLang || ""}">${highlighted}</code></pre>
     </div>
   `;
 };
@@ -527,7 +609,7 @@ const mergedContent = computed(() => {
   if (newChunks && newChunks.length > 0) {
     return mergeChunks(newChunks);
   }
-  return '';
+  return "";
 });
 
 // 计算处理后的分块数据，避免在模板中频繁调用方法和 JSON.parse
@@ -539,23 +621,68 @@ const processedChunks = computed(() => {
       questions: getGeneratedQuestions(item),
       meta: getChunkMeta(item),
       hasParent: hasParentChunk(item),
-      chunkClass: getChunkClass(index)
+      chunkClass: getChunkClass(index),
     };
   });
 });
 
 const previewSupportedTypes = new Set([
-  'pdf', 'docx', 'pptx', 'ppt', 'xlsx', 'xls', 'csv',
-  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg',
-  'txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts',
-  'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml',
-  'ini', 'conf', 'log', 'sql', 'rs', 'rb', 'php', 'swift', 'kt',
-  'scala', 'r', 'lua', 'pl', 'toml',
-  'mp3', 'wav', 'm4a', 'flac', 'ogg',
+  "pdf",
+  "docx",
+  "pptx",
+  "ppt",
+  "xlsx",
+  "xls",
+  "csv",
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "webp",
+  "tiff",
+  "svg",
+  "txt",
+  "md",
+  "markdown",
+  "json",
+  "xml",
+  "html",
+  "css",
+  "js",
+  "ts",
+  "py",
+  "java",
+  "go",
+  "cpp",
+  "c",
+  "h",
+  "sh",
+  "yaml",
+  "yml",
+  "ini",
+  "conf",
+  "log",
+  "sql",
+  "rs",
+  "rb",
+  "php",
+  "swift",
+  "kt",
+  "scala",
+  "r",
+  "lua",
+  "pl",
+  "toml",
+  "mp3",
+  "wav",
+  "m4a",
+  "flac",
+  "ogg",
 ]);
 
 const canPreview = (): boolean => {
-  if (props.details?.type !== 'file') return false;
+  if (props.details?.type !== "file") return false;
   const ft = props.details?.file_type?.toLowerCase();
   if (!ft) return false;
   if (audioExtensions.has(ft)) return false; // 音频不走预览tab，播放器已内嵌
@@ -563,41 +690,66 @@ const canPreview = (): boolean => {
 };
 
 // 当文档详情加载完成时，file 类型自动切换到「预览」；音频类型使用 merged + 播放器
-watch(() => props.details?.id, (newId) => {
-  // 清理旧音频
-  if (audioBlobUrl.value) {
-    URL.revokeObjectURL(audioBlobUrl.value);
-    audioBlobUrl.value = '';
-  }
-  if (!newId) return;
-  if (isAudioFile(props.details?.file_type)) {
-    viewMode.value = 'merged'; // 音频默认全文视图，播放器已内嵌
-    loadAudioPreview();
-  } else if (props.details?.type === 'file' && canPreview()) {
-    viewMode.value = 'preview';
-  } else {
-    viewMode.value = 'merged';
-  }
-});
+watch(
+  () => props.details?.id,
+  (newId) => {
+    // 清理旧音频
+    if (audioBlobUrl.value) {
+      URL.revokeObjectURL(audioBlobUrl.value);
+      audioBlobUrl.value = "";
+    }
+    if (!newId) return;
+    if (isAudioFile(props.details?.file_type)) {
+      viewMode.value = "merged"; // 音频默认全文视图，播放器已内嵌
+      loadAudioPreview();
+    } else if (props.details?.type === "file" && canPreview()) {
+      viewMode.value = "preview";
+    } else {
+      viewMode.value = "merged";
+    }
+  },
+);
 
 const isTextFile = (fileType?: string): boolean => {
   if (!fileType) return false;
-  const textTypes = ['txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts', 'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml', 'ini', 'conf', 'log'];
+  const textTypes = [
+    "txt",
+    "md",
+    "markdown",
+    "json",
+    "xml",
+    "html",
+    "css",
+    "js",
+    "ts",
+    "py",
+    "java",
+    "go",
+    "cpp",
+    "c",
+    "h",
+    "sh",
+    "yaml",
+    "yml",
+    "ini",
+    "conf",
+    "log",
+  ];
   return textTypes.includes(fileType.toLowerCase());
 };
 const isMarkdownFile = (fileType?: string): boolean => {
   if (!fileType) return false;
-  const markdownTypes = ['md', 'markdown'];
+  const markdownTypes = ["md", "markdown"];
   return markdownTypes.includes(fileType.toLowerCase());
 };
 
 // 音频文件判断与播放器状态
-const audioExtensions = new Set(['mp3', 'wav', 'm4a', 'flac', 'ogg']);
+const audioExtensions = new Set(["mp3", "wav", "m4a", "flac", "ogg"]);
 const isAudioFile = (fileType?: string): boolean => {
   if (!fileType) return false;
   return audioExtensions.has(fileType.toLowerCase());
 };
-const audioBlobUrl = ref('');
+const audioBlobUrl = ref("");
 const audioLoading = ref(false);
 
 const loadAudioPreview = async () => {
@@ -607,7 +759,7 @@ const loadAudioPreview = async () => {
     const blob = await previewKnowledgeFile(props.details.id);
     audioBlobUrl.value = URL.createObjectURL(blob);
   } catch (err) {
-    console.error('Audio preview load failed:', err);
+    console.error("Audio preview load failed:", err);
   } finally {
     audioLoading.value = false;
   }
@@ -619,55 +771,73 @@ const runMarkdownPostRenderPipeline = async () => {
     return;
   }
   await hydrateProtectedFileImages(renderRoot);
-  const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
+  const images = renderRoot?.querySelectorAll?.("img.markdown-image") as
+    | NodeListOf<HTMLImageElement>
+    | undefined;
   if (images) {
-    images.forEach(async item => {
+    images.forEach(async (item) => {
       const isValid = await checkImage(item.src);
       if (!isValid) {
         item.remove();
       }
-    })
+    });
   }
   // 渲染 Mermaid 图表
   await renderMermaidDiagrams();
 };
 
-watch(() => props.details.md, () => {
-  runMarkdownPostRenderPipeline();
-}, { immediate: true, deep: true, flush: 'post' })
-
-watch(() => viewMode.value, (mode) => {
-  if ((mode === 'chunks' || mode === 'merged') && props.visible) {
+watch(
+  () => props.details.md,
+  () => {
     runMarkdownPostRenderPipeline();
-    if (mode === 'chunks') {
-      nextTick(() => maybeLoadMoreChunks());
+  },
+  { immediate: true, deep: true, flush: "post" },
+);
+
+watch(
+  () => viewMode.value,
+  (mode) => {
+    if ((mode === "chunks" || mode === "merged") && props.visible) {
+      runMarkdownPostRenderPipeline();
+      if (mode === "chunks") {
+        nextTick(() => maybeLoadMoreChunks());
+      }
     }
-  }
-}, { flush: 'post' });
+  },
+  { flush: "post" },
+);
 
-watch(() => props.visible, (visible) => {
-  if (visible && (viewMode.value === 'chunks' || viewMode.value === 'merged')) {
-    runMarkdownPostRenderPipeline();
-  }
-}, { flush: 'post' });
+watch(
+  () => props.visible,
+  (visible) => {
+    if (
+      visible &&
+      (viewMode.value === "chunks" || viewMode.value === "merged")
+    ) {
+      runMarkdownPostRenderPipeline();
+    }
+  },
+  { flush: "post" },
+);
 
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
   try {
-    const mermaidElements = getMarkdownRenderRoot()?.querySelectorAll('.mermaid');
-    console.log('[Mermaid] Found mermaid elements:', mermaidElements?.length);
+    const mermaidElements =
+      getMarkdownRenderRoot()?.querySelectorAll(".mermaid");
+    console.log("[Mermaid] Found mermaid elements:", mermaidElements?.length);
     if (mermaidElements && mermaidElements.length > 0) {
       await mermaid.run({
-        nodes: mermaidElements
+        nodes: mermaidElements,
       });
-      console.log('[Mermaid] Rendering complete');
+      console.log("[Mermaid] Rendering complete");
       // 渲染完成后绑定点击事件
       nextTick(() => {
         bindMermaidClickEvents();
       });
     }
   } catch (error) {
-    console.error('Mermaid rendering error:', error);
+    console.error("Mermaid rendering error:", error);
   }
 };
 
@@ -675,7 +845,7 @@ const renderMermaidDiagrams = async () => {
 const handleMermaidClick = (e: Event) => {
   e.stopPropagation();
   const target = e.currentTarget as HTMLElement;
-  const svg = target.querySelector('svg');
+  const svg = target.querySelector("svg");
   if (svg) {
     openMermaidFullscreen(svg.outerHTML);
   }
@@ -685,28 +855,31 @@ const handleMermaidClick = (e: Event) => {
 const bindMermaidClickEvents = () => {
   const renderRoot = getMarkdownRenderRoot();
   if (!renderRoot) {
-    console.log('[Mermaid] markdown render root is null');
+    console.log("[Mermaid] markdown render root is null");
     return;
   }
   // 绑定在 .mermaid div 上，而不是 SVG 上
-  const mermaidDivs = renderRoot.querySelectorAll('.mermaid');
-  console.log('[Mermaid] Found mermaid divs:', mermaidDivs.length);
+  const mermaidDivs = renderRoot.querySelectorAll(".mermaid");
+  console.log("[Mermaid] Found mermaid divs:", mermaidDivs.length);
   mermaidDivs.forEach((div, index) => {
     const divEl = div as HTMLElement;
-    divEl.style.cursor = 'pointer';
+    divEl.style.cursor = "pointer";
     // 移除旧的事件监听器（避免重复绑定）
-    divEl.removeEventListener('click', handleMermaidClick);
-    divEl.addEventListener('click', handleMermaidClick);
+    divEl.removeEventListener("click", handleMermaidClick);
+    divEl.addEventListener("click", handleMermaidClick);
     console.log(`[Mermaid] Bound click event to div ${index}`);
   });
 };
 
 // 安全地处理 Markdown 内容（使用 marked）
 const processMarkdown = (markdownText) => {
-  if (!markdownText || typeof markdownText !== 'string') return '';
+  if (!markdownText || typeof markdownText !== "string") return "";
 
   // 去除 Markdown 头部的 YAML Frontmatter（例如 --- title: xxx ---）
-  let processedText = markdownText.replace(/^\s*---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+  let processedText = markdownText.replace(
+    /^\s*---\r?\n[\s\S]*?\r?\n---\r?\n/,
+    "",
+  );
 
   // 先还原原始文本中的 HTML 实体，让它们作为普通字符参与渲染
   processedText = processedText
@@ -716,12 +889,15 @@ const processMarkdown = (markdownText) => {
     .replace(/&#34;/g, '"')
     .replace(/&#x22;/gi, '"')
     .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&');
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 
   // 处理被 <p> 包裹的表格行，转换为正常的表格行，并在前后补空行
-  processedText = processedText.replace(/<p>\s*(\|[\s\S]*?\|)\s*<\/p>/gi, '\n$1\n');
+  processedText = processedText.replace(
+    /<p>\s*(\|[\s\S]*?\|)\s*<\/p>/gi,
+    "\n$1\n",
+  );
 
   // MarkItDown 常在表格前插入空行 + 分隔行，渲染会出现多余空行
   processedText = normalizeSpuriousTablePrefixes(processedText);
@@ -737,7 +913,7 @@ const processMarkdown = (markdownText) => {
   let html = marked.parse(safeMarkdown) as string;
 
   // 还原被转义的 <br>
-  html = html.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
+  html = html.replace(/&lt;br\s*\/?&gt;/gi, "<br>");
 
   // 最终安全清理
   let result = sanitizeHTML(html);
@@ -748,111 +924,168 @@ const handleClose = () => {
   emit("closeDoc", false);
   const scrollEl = docScrollEl || findDocDrawerScrollEl();
   if (scrollEl) scrollEl.scrollTop = 0;
-  viewMode.value = 'merged';
+  viewMode.value = "merged";
 };
 
 // 获取显示标题
 const getDisplayTitle = () => {
-  if (!props.details.title) return '';
-  if (props.details.type === 'file') {
+  if (!props.details.title) return "";
+  if (props.details.type === "file") {
     // 文件类型去掉扩展名
     const lastDotIndex = props.details.title.lastIndexOf(".");
-    return lastDotIndex > 0 ? props.details.title.substring(0, lastDotIndex) : props.details.title;
+    return lastDotIndex > 0
+      ? props.details.title.substring(0, lastDotIndex)
+      : props.details.title;
   }
   // URL和手动创建直接返回标题
   return props.details.title;
 };
 
 const channelLabelMap: Record<string, string> = {
-  web: 'knowledgeBase.channelWeb',
-  api: 'knowledgeBase.channelApi',
-  browser_extension: 'knowledgeBase.channelBrowserExtension',
-  wechat: 'knowledgeBase.channelWechat',
-  wecom: 'knowledgeBase.channelWecom',
-  feishu: 'knowledgeBase.channelFeishu',
-  dingtalk: 'knowledgeBase.channelDingtalk',
-  slack: 'knowledgeBase.channelSlack',
-  im: 'knowledgeBase.channelIm',
+  web: "knowledgeBase.channelWeb",
+  api: "knowledgeBase.channelApi",
+  browser_extension: "knowledgeBase.channelBrowserExtension",
+  wechat: "knowledgeBase.channelWechat",
+  wecom: "knowledgeBase.channelWecom",
+  feishu: "knowledgeBase.channelFeishu",
+  dingtalk: "knowledgeBase.channelDingtalk",
+  slack: "knowledgeBase.channelSlack",
+  im: "knowledgeBase.channelIm",
 };
 
 const getChannelLabel = (channel: string) => {
   const key = channelLabelMap[channel];
-  return key ? t(key) : t('knowledgeBase.channelUnknown');
+  return key ? t(key) : t("knowledgeBase.channelUnknown");
 };
 
 // 获取类型标签
 const getTypeLabel = () => {
   switch (props.details.type) {
-    case 'url':
-      return t('knowledgeBase.typeURL');
-    case 'manual':
-      return t('knowledgeBase.typeManual');
-    case 'file':
-      return props.details.file_type ? props.details.file_type.toUpperCase() : t('knowledgeBase.typeFile');
+    case "url":
+      return t("knowledgeBase.typeURL");
+    case "manual":
+      return t("knowledgeBase.typeManual");
+    case "file":
+      return props.details.file_type
+        ? props.details.file_type.toUpperCase()
+        : t("knowledgeBase.typeFile");
     default:
-      return '';
+      return "";
   }
 };
 
 // 获取类型主题色
 const getTypeTheme = () => {
   switch (props.details.type) {
-    case 'url':
-      return 'primary';
-    case 'manual':
-      return 'success';
-    case 'file':
-      return 'default';
+    case "url":
+      return "primary";
+    case "manual":
+      return "success";
+    case "file":
+      return "default";
     default:
-      return 'default';
+      return "default";
   }
 };
 
 // 获取内容标签
 const getContentLabel = () => {
   switch (props.details.type) {
-    case 'url':
-      return t('knowledgeBase.webContent');
-    case 'manual':
-      return t('knowledgeBase.documentContent');
-    case 'file':
+    case "url":
+      return t("knowledgeBase.webContent");
+    case "manual":
+      return t("knowledgeBase.documentContent");
+    case "file":
     default:
-      return t('knowledgeBase.fileContent');
+      return t("knowledgeBase.fileContent");
   }
 };
 
 // 获取时间标签
 const getTimeLabel = () => {
   switch (props.details.type) {
-    case 'url':
-      return t('knowledgeBase.importTime');
-    case 'manual':
-      return t('knowledgeBase.createTime');
-    case 'file':
+    case "url":
+      return t("knowledgeBase.importTime");
+    case "manual":
+      return t("knowledgeBase.createTime");
+    case "file":
     default:
-      return t('knowledgeBase.uploadTime');
+      return t("knowledgeBase.uploadTime");
   }
 };
 
 // 获取Chunk样式类
 const getChunkClass = (index: number) => {
-  return index % 2 !== 0 ? 'chunk-odd' : 'chunk-even';
+  return index % 2 !== 0 ? "chunk-odd" : "chunk-even";
 };
 
 // 获取Chunk元数据
 const getChunkMeta = (item: any) => {
-  if (!item) return '';
+  if (!item) return "";
   const parts = [];
   if (item.char_count) {
-    parts.push(`${item.char_count} ${t('knowledgeBase.characters')}`);
+    parts.push(`${item.char_count} ${t("knowledgeBase.characters")}`);
   }
   if (item.token_count) {
     parts.push(`${item.token_count} tokens`);
   }
-  return parts.join(' · ');
+  return parts.join(" · ");
 };
 
 // 生成的问题类型
+
+const getFeedbackStats = (item: any) => {
+  const stats = item?.feedback_stats || {};
+  const likeCount =
+    Number(stats.like_count ?? item?.feedback_like_count ?? 0) || 0;
+  const dislikeCount =
+    Number(stats.dislike_count ?? item?.feedback_dislike_count ?? 0) || 0;
+  const total = likeCount + dislikeCount;
+  const positiveRate =
+    stats.positive_rate !== null && stats.positive_rate !== undefined
+      ? Number(stats.positive_rate)
+      : total > 0
+        ? likeCount / total
+        : undefined;
+
+  return {
+    ...stats,
+    like_count: likeCount,
+    dislike_count: dislikeCount,
+    positive_rate: positiveRate,
+    session_count: Number(stats.session_count ?? 0) || 0,
+    dislike_reasons: Array.isArray(stats.dislike_reasons)
+      ? stats.dislike_reasons
+      : [],
+  };
+};
+
+const formatPositiveRate = (item: any) => {
+  const rate = getFeedbackStats(item).positive_rate;
+  if (rate === null || rate === undefined) return "--";
+  return `${Math.round(Number(rate) * 100)}%`;
+};
+
+const getPositiveRateTheme = (item: any) => {
+  const rate = getFeedbackStats(item).positive_rate;
+  if (rate === null || rate === undefined) return "default";
+  if (rate < 0.6) return "danger";
+  if (rate < 0.8) return "warning";
+  return "success";
+};
+
+const getFeedbackReasonSummary = (item: any) => {
+  const reasons = getFeedbackStats(item).dislike_reasons || [];
+  if (!Array.isArray(reasons) || reasons.length === 0)
+    return "\u6682\u65e0\u70b9\u8e29\u539f\u56e0";
+  return reasons
+    .map(
+      (reason: any) =>
+        `${reason.reason || "\u672a\u586b\u5199"}\uff1a${reason.count || 0}`,
+    )
+    .join("\n");
+};
+
 interface GeneratedQuestion {
   id: string;
   question: string;
@@ -862,11 +1095,14 @@ interface GeneratedQuestion {
 const getGeneratedQuestions = (item: any): GeneratedQuestion[] => {
   if (!item || !item.metadata) return [];
   try {
-    const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+    const metadata =
+      typeof item.metadata === "string"
+        ? JSON.parse(item.metadata)
+        : item.metadata;
     const questions = metadata.generated_questions || [];
     // 兼容旧格式（字符串数组）和新格式（对象数组）
     return questions.map((q: string | GeneratedQuestion, index: number) => {
-      if (typeof q === 'string') {
+      if (typeof q === "string") {
         // 旧格式：字符串，生成临时ID
         return { id: `legacy-${index}`, question: q };
       }
@@ -893,60 +1129,77 @@ const toggleQuestions = (index: number) => {
 const isExpanded = (index: number) => expandedChunks.value.has(index);
 
 // 删除中的状态
-const deletingQuestion = ref<{ chunkIndex: number; questionId: string } | null>(null);
+const deletingQuestion = ref<{ chunkIndex: number; questionId: string } | null>(
+  null,
+);
 
 // 删除生成的问题
-const handleDeleteQuestion = async (item: any, chunkIndex: number, question: GeneratedQuestion) => {
+const handleDeleteQuestion = async (
+  item: any,
+  chunkIndex: number,
+  question: GeneratedQuestion,
+) => {
   if (!item || !item.id) {
-    MessagePlugin.error(t('common.error'));
+    MessagePlugin.error(t("common.error"));
     return;
   }
 
   // 检查是否是旧格式数据（无法删除）
-  if (question.id.startsWith('legacy-')) {
-    MessagePlugin.warning(t('knowledgeBase.legacyQuestionCannotDelete'));
+  if (question.id.startsWith("legacy-")) {
+    MessagePlugin.warning(t("knowledgeBase.legacyQuestionCannotDelete"));
     return;
   }
 
   const confirmDialog = DialogPlugin.confirm({
-    header: t('common.confirmDelete'),
-    body: t('knowledgeBase.confirmDeleteQuestion'),
-    confirmBtn: t('common.confirm'),
-    cancelBtn: t('common.cancel'),
+    header: t("common.confirmDelete"),
+    body: t("knowledgeBase.confirmDeleteQuestion"),
+    confirmBtn: t("common.confirm"),
+    cancelBtn: t("common.cancel"),
     onConfirm: async () => {
       confirmDialog.hide();
       deletingQuestion.value = { chunkIndex, questionId: question.id };
       try {
         await deleteGeneratedQuestion(item.id, question.id);
-        MessagePlugin.success(t('common.deleteSuccess'));
+        MessagePlugin.success(t("common.deleteSuccess"));
 
         // 更新本地数据
-        const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+        const metadata =
+          typeof item.metadata === "string"
+            ? JSON.parse(item.metadata)
+            : item.metadata;
         if (metadata && metadata.generated_questions) {
-          const idx = metadata.generated_questions.findIndex((q: GeneratedQuestion) => q.id === question.id);
+          const idx = metadata.generated_questions.findIndex(
+            (q: GeneratedQuestion) => q.id === question.id,
+          );
           if (idx > -1) {
             metadata.generated_questions.splice(idx, 1);
           }
-          item.metadata = typeof item.metadata === 'string' ? JSON.stringify(metadata) : metadata;
+          item.metadata =
+            typeof item.metadata === "string"
+              ? JSON.stringify(metadata)
+              : metadata;
         }
 
         // 通知父组件刷新数据
-        emit('questionDeleted', { chunkId: item.id, questionId: question.id });
+        emit("questionDeleted", { chunkId: item.id, questionId: question.id });
       } catch (error: any) {
-        MessagePlugin.error(error?.message || t('common.deleteFailed'));
+        MessagePlugin.error(error?.message || t("common.deleteFailed"));
       } finally {
         deletingQuestion.value = null;
       }
     },
     onClose: () => {
       confirmDialog.hide();
-    }
+    },
   });
 };
 
 // 检查是否正在删除某个问题
 const isDeleting = (chunkIndex: number, questionId: string) => {
-  return deletingQuestion.value?.chunkIndex === chunkIndex && deletingQuestion.value?.questionId === questionId;
+  return (
+    deletingQuestion.value?.chunkIndex === chunkIndex &&
+    deletingQuestion.value?.questionId === questionId
+  );
 };
 
 // 父 Chunk 上下文展开状态
@@ -956,7 +1209,8 @@ const parentContextLoading = ref<Set<number>>(new Set());
 
 const hasParentChunk = (item: any) => !!item?.parent_chunk_id;
 
-const isParentExpanded = (index: number) => parentContextExpanded.value.has(index);
+const isParentExpanded = (index: number) =>
+  parentContextExpanded.value.has(index);
 
 const toggleParentContext = async (item: any, index: number) => {
   if (parentContextExpanded.value.has(index)) {
@@ -972,11 +1226,11 @@ const toggleParentContext = async (item: any, index: number) => {
     try {
       const result: any = await getChunkByIdOnly(parentId);
       if (result.success && result.data) {
-        parentContextCache.value.set(parentId, result.data.content || '');
+        parentContextCache.value.set(parentId, result.data.content || "");
         parentContextCache.value = new Map(parentContextCache.value);
       }
     } catch (err) {
-      MessagePlugin.error(t('knowledgeBase.parentContextLoadFailed'));
+      MessagePlugin.error(t("knowledgeBase.parentContextLoadFailed"));
       return;
     } finally {
       parentContextLoading.value.delete(index);
@@ -990,7 +1244,7 @@ const toggleParentContext = async (item: any, index: number) => {
 };
 
 const getParentContent = (item: any) => {
-  return parentContextCache.value.get(item.parent_chunk_id) || '';
+  return parentContextCache.value.get(item.parent_chunk_id) || "";
 };
 
 const summaryExpanded = ref(false);
@@ -1000,15 +1254,21 @@ const summaryOverflow = ref(false);
 const checkSummaryOverflow = () => {
   nextTick(() => {
     const el = summaryRef.value;
-    if (!el) { summaryOverflow.value = false; return; }
+    if (!el) {
+      summaryOverflow.value = false;
+      return;
+    }
     summaryOverflow.value = el.scrollHeight > el.clientHeight + 1;
   });
 };
 
-watch(() => props.details?.description, () => {
-  summaryExpanded.value = false;
-  checkSummaryOverflow();
-});
+watch(
+  () => props.details?.description,
+  () => {
+    summaryExpanded.value = false;
+    checkSummaryOverflow();
+  },
+);
 watch(summaryRef, () => checkSummaryOverflow());
 
 const downloadFile = () => {
@@ -1022,21 +1282,32 @@ const downloadFile = () => {
         const link = document.createElement("a");
         link.style.display = "none";
         link.setAttribute("href", url.value);
-        const needsExt = props.details.type === 'manual' && !props.details.title.toLowerCase().endsWith('.md');
-        const ext = needsExt ? '.md' : '';
+        const needsExt =
+          props.details.type === "manual" &&
+          !props.details.title.toLowerCase().endsWith(".md");
+        const ext = needsExt ? ".md" : "";
         link.setAttribute("download", props.details.title + ext);
         document.body.appendChild(link);
         link.click();
         nextTick(() => {
           document.body.removeChild(link);
           URL.revokeObjectURL(url.value);
-        })
+        });
       }
     })
     .catch((err) => {
-      MessagePlugin.error(t('file.downloadFailed'));
+      MessagePlugin.error(t("file.downloadFailed"));
     });
 };
+const reloadChunksWithFeedbackFilter = () => {
+  if (!props.details?.id) return;
+  page = 1;
+  loadingChunks = true;
+  pendingRequestedPage = 1;
+  pendingChunksBeforeLoad = 0;
+  emit("getDoc", 1, chunkFeedbackQuery.value);
+};
+
 const requestNextChunkPage = () => {
   if (loadingChunks || props.details?.chunkLoading) return;
   const total = props.details?.total ?? 0;
@@ -1048,7 +1319,7 @@ const requestNextChunkPage = () => {
   loadingChunks = true;
   pendingRequestedPage = page;
   pendingChunksBeforeLoad = loaded;
-  emit('getDoc', page);
+  emit("getDoc", page, chunkFeedbackQuery.value);
 };
 
 /** When the list is shorter than the drawer, scroll never fires — prefetch until scrollable or done. */
@@ -1078,14 +1349,30 @@ const handleDetailsScroll = () => {
 <template>
   <div class="doc_content" ref="mdContentWrap">
     <teleport to="body">
-      <div v-if="visible" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px` }" role="separator"
-        aria-orientation="vertical" @mousedown.prevent="onMainDrawerResizeStart">
+      <div
+        v-if="visible"
+        class="doc-drawer-resize-handle"
+        :style="{ right: `${mainDrawerWidth}px` }"
+        role="separator"
+        aria-orientation="vertical"
+        @mousedown.prevent="onMainDrawerResizeStart"
+      >
         <div class="doc-drawer-resize-line" />
       </div>
     </teleport>
-    <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
-      :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
-      @close="handleClose">
+    <t-drawer
+      :visible="visible"
+      :zIndex="2000"
+      :size="`${mainDrawerWidth}px`"
+      attach="body"
+      :closeBtn="true"
+      :footer="false"
+      :class="[
+        'doc-main-drawer',
+        { 'doc-main-drawer--resizing': mainDrawerResizing },
+      ]"
+      @close="handleClose"
+    >
       <template #header>
         <div class="doc-drawer-header">
           <div class="doc-drawer-header-icon">
@@ -1095,15 +1382,30 @@ const handleDetailsScroll = () => {
             <div class="doc-drawer-header-title">{{ getDisplayTitle() }}</div>
           </div>
           <div class="header-actions">
-            <t-button v-if="details.type === 'file' || details.type === 'manual'" class="header-action-btn" size="small"
-              variant="text" shape="square" theme="default" :title="$t('common.download') || 'Download'"
-              @click="downloadFile()">
+            <t-button
+              v-if="details.type === 'file' || details.type === 'manual'"
+              class="header-action-btn"
+              size="small"
+              variant="text"
+              shape="square"
+              theme="default"
+              :title="$t('common.download') || 'Download'"
+              @click="downloadFile()"
+            >
               <template #icon>
                 <t-icon name="download" size="16px" />
               </template>
             </t-button>
-            <t-button v-if="details.id && hasTimelineSpans" class="header-action-btn trace-entry-btn" size="small"
-              variant="text" shape="square" :theme="traceEntryTheme" :title="traceEntryTitle" @click="openTimeline">
+            <t-button
+              v-if="details.id && hasTimelineSpans"
+              class="header-action-btn trace-entry-btn"
+              size="small"
+              variant="text"
+              shape="square"
+              :theme="traceEntryTheme"
+              :title="traceEntryTitle"
+              @click="openTimeline"
+            >
               <template #icon>
                 <t-icon name="chart-line" size="16px" />
               </template>
@@ -1116,52 +1418,104 @@ const handleDetailsScroll = () => {
            link's status dot / duration stays live even before the user
            opens the secondary drawer. -->
       <div class="kp-trigger-shadow" aria-hidden="true">
-        <KnowledgeProcessingTimeline v-if="details.id" :knowledge-id="details.id" :parse-status="details.parse_status"
-          :compact="true" :grace-poll="false" @update:has-spans="hasTimelineSpans = $event"
-          @update:summary="timelineSummary = $event" />
+        <KnowledgeProcessingTimeline
+          v-if="details.id"
+          :knowledge-id="details.id"
+          :parse-status="details.parse_status"
+          :compact="true"
+          :grace-poll="false"
+          @update:has-spans="hasTimelineSpans = $event"
+          @update:summary="timelineSummary = $event"
+        />
       </div>
 
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
       <teleport to="body">
-        <div v-if="timelineDrawerVisible" class="trace-drawer-resize-handle"
-          :style="{ right: `${timelineDrawerWidth}px` }" role="separator" aria-orientation="vertical"
-          :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
-          @mousedown.prevent="onTraceDrawerResizeStart">
+        <div
+          v-if="timelineDrawerVisible"
+          class="trace-drawer-resize-handle"
+          :style="{ right: `${timelineDrawerWidth}px` }"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-label="$t('knowledgeStages.resizeDrawer')"
+          :title="$t('knowledgeStages.resizeDrawer')"
+          @mousedown.prevent="onTraceDrawerResizeStart"
+        >
           <div class="trace-drawer-resize-line" />
         </div>
       </teleport>
-      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="`${timelineDrawerWidth}px`" attach="body"
-        :closeBtn="false" :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true"
-        placement="right" :class="['kp-secondary-drawer', { 'kp-secondary-drawer--resizing': timelineDrawerResizing }]"
-        @close="closeTimeline">
-        <div class="kp-drawer-shell" :class="{ 'kp-drawer-shell--resizing': timelineDrawerResizing }">
-          <KnowledgeProcessingTimeline v-if="details.id && timelineDrawerVisible" :knowledge-id="details.id"
-            :parse-status="details.parse_status" :doc-title="details.title" show-close @close="closeTimeline" />
+      <t-drawer
+        :visible="timelineDrawerVisible"
+        :zIndex="2100"
+        :size="`${timelineDrawerWidth}px`"
+        attach="body"
+        :closeBtn="false"
+        :footer="false"
+        :header="false"
+        :showOverlay="true"
+        :closeOnOverlayClick="true"
+        placement="right"
+        :class="[
+          'kp-secondary-drawer',
+          { 'kp-secondary-drawer--resizing': timelineDrawerResizing },
+        ]"
+        @close="closeTimeline"
+      >
+        <div
+          class="kp-drawer-shell"
+          :class="{ 'kp-drawer-shell--resizing': timelineDrawerResizing }"
+        >
+          <KnowledgeProcessingTimeline
+            v-if="details.id && timelineDrawerVisible"
+            :knowledge-id="details.id"
+            :parse-status="details.parse_status"
+            :doc-title="details.title"
+            show-close
+            @close="closeTimeline"
+          />
         </div>
       </t-drawer>
 
-      <div ref="docMarkdownRoot" class="doc-markdown-root doc-drawer-body setting-drawer__body">
+      <div
+        ref="docMarkdownRoot"
+        class="doc-markdown-root doc-drawer-body setting-drawer__body"
+      >
         <section v-if="details.id" class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.detailSectionMeta') }}</h4>
+          <h4 class="setting-drawer__section-title">
+            {{ $t("knowledgeBase.detailSectionMeta") }}
+          </h4>
           <div class="doc-detail-rows">
             <div v-if="details.time" class="doc-detail-row">
               <span class="doc-detail-label">{{ getTimeLabel() }}</span>
               <span class="doc-detail-value">{{ details.time }}</span>
             </div>
             <div v-if="details.type" class="doc-detail-row">
-              <span class="doc-detail-label">{{ $t('knowledgeBase.infoCard.type') }}</span>
+              <span class="doc-detail-label">{{
+                $t("knowledgeBase.infoCard.type")
+              }}</span>
               <span class="doc-detail-value">
-                <t-tag size="small" :theme="getTypeTheme()" variant="light">{{ getTypeLabel() }}</t-tag>
+                <t-tag size="small" :theme="getTypeTheme()" variant="light">{{
+                  getTypeLabel()
+                }}</t-tag>
               </span>
             </div>
-            <div v-if="details.channel && details.channel !== 'web'" class="doc-detail-row">
-              <span class="doc-detail-label">{{ $t('knowledgeBase.infoCard.source') }}</span>
+            <div
+              v-if="details.channel && details.channel !== 'web'"
+              class="doc-detail-row"
+            >
+              <span class="doc-detail-label">{{
+                $t("knowledgeBase.infoCard.source")
+              }}</span>
               <span class="doc-detail-value">
-                <t-tag size="small" variant="light" theme="warning">{{ getChannelLabel(details.channel) }}</t-tag>
+                <t-tag size="small" variant="light" theme="warning">{{
+                  getChannelLabel(details.channel)
+                }}</t-tag>
               </span>
             </div>
             <div v-if="detailTags.length > 0" class="doc-detail-row">
-              <span class="doc-detail-label">{{ $t('knowledgeBase.tagLabel') }}</span>
+              <span class="doc-detail-label">{{
+                $t("knowledgeBase.tagLabel")
+              }}</span>
               <span class="doc-detail-value doc-tag-chips">
                 <t-tag
                   v-for="tag in detailTags"
@@ -1178,10 +1532,19 @@ const handleDetailsScroll = () => {
         </section>
 
         <section v-if="details.type === 'url'" class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.urlSource') }}</h4>
+          <h4 class="setting-drawer__section-title">
+            {{ $t("knowledgeBase.urlSource") }}
+          </h4>
           <div class="url_link_box">
-            <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'"
-              :target="isValidURL(details.source) ? '_blank' : undefined" class="url_link">
+            <a
+              :href="
+                isValidURL(details.source)
+                  ? details.source
+                  : 'javascript:void(0)'
+              "
+              :target="isValidURL(details.source) ? '_blank' : undefined"
+              class="url_link"
+            >
               <t-icon name="link" size="14px" />
               <span class="url_text">{{ details.source }}</span>
               <t-icon name="jump" size="14px" class="jump-icon" />
@@ -1190,82 +1553,197 @@ const handleDetailsScroll = () => {
         </section>
 
         <section v-if="showSummarySection" class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.documentSummary') }}</h4>
-          <div v-if="details.description" class="summary_wrapper"
-            :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }"
-            @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
-            <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{
-              details.description
-            }}</div>
-            <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade"
-              :class="{ 'summary_fade_expanded': summaryExpanded }">
-              <t-icon :name="summaryExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="summary_fade_icon" />
+          <h4 class="setting-drawer__section-title">
+            {{ $t("knowledgeBase.documentSummary") }}
+          </h4>
+          <div
+            v-if="details.description"
+            class="summary_wrapper"
+            :class="{ summary_clickable: summaryOverflow || summaryExpanded }"
+            @click="
+              (summaryOverflow || summaryExpanded) &&
+              (summaryExpanded = !summaryExpanded)
+            "
+          >
+            <div
+              ref="summaryRef"
+              :class="[
+                'summary_content',
+                { summary_collapsed: !summaryExpanded },
+              ]"
+            >
+              {{ details.description }}
+            </div>
+            <div
+              v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded"
+              class="summary_fade"
+              :class="{ summary_fade_expanded: summaryExpanded }"
+            >
+              <t-icon
+                :name="summaryExpanded ? 'chevron-up' : 'chevron-down'"
+                size="14px"
+                class="summary_fade_icon"
+              />
             </div>
           </div>
           <div v-else class="summary_loading">
             <t-loading size="small" />
-            <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
+            <span>{{ $t("knowledgeBase.generatingSummary") }}</span>
           </div>
         </section>
 
         <section class="setting-drawer__section doc-content-section">
           <div class="doc-content-section-head">
             <div class="doc-content-section-head-left">
-              <h4 class="setting-drawer__section-title">{{ getContentLabel() }}</h4>
+              <h4 class="setting-drawer__section-title">
+                {{ getContentLabel() }}
+              </h4>
               <span v-if="details.total > 0" class="chunk-count">
-                {{ $t('knowledgeBase.chunkCount', { count: details.total }) }}
+                {{ $t("knowledgeBase.chunkCount", { count: details.total }) }}
               </span>
             </div>
-            <div class="view-mode-buttons">
-              <t-button v-if="canPreview()" size="small" :variant="viewMode === 'preview' ? 'base' : 'outline'"
-                :theme="viewMode === 'preview' ? 'primary' : 'default'" @click="viewMode = 'preview'"
-                class="view-mode-btn">
-                {{ $t('preview.tab') }}
-              </t-button>
-              <t-button v-if="!canPreview()" size="small" :variant="viewMode === 'merged' ? 'base' : 'outline'"
-                :theme="viewMode === 'merged' ? 'primary' : 'default'" @click="viewMode = 'merged'"
-                class="view-mode-btn">
-                {{ $t('knowledgeBase.viewMerged') }}
-              </t-button>
-              <t-button size="small" :variant="viewMode === 'chunks' ? 'base' : 'outline'"
-                :theme="viewMode === 'chunks' ? 'primary' : 'default'" @click="viewMode = 'chunks'"
-                class="view-mode-btn">
-                {{ $t('knowledgeBase.viewChunks') }}
-              </t-button>
+            <div class="view-mode-actions">
+              <div class="view-mode-buttons">
+                <t-button
+                  v-if="canPreview()"
+                  size="small"
+                  :variant="viewMode === 'preview' ? 'base' : 'outline'"
+                  :theme="viewMode === 'preview' ? 'primary' : 'default'"
+                  @click="viewMode = 'preview'"
+                  class="view-mode-btn"
+                >
+                  {{ $t("preview.tab") }}
+                </t-button>
+                <t-button
+                  v-if="!canPreview()"
+                  size="small"
+                  :variant="viewMode === 'merged' ? 'base' : 'outline'"
+                  :theme="viewMode === 'merged' ? 'primary' : 'default'"
+                  @click="viewMode = 'merged'"
+                  class="view-mode-btn"
+                >
+                  {{ $t("knowledgeBase.viewMerged") }}
+                </t-button>
+                <t-button
+                  size="small"
+                  :variant="viewMode === 'chunks' ? 'base' : 'outline'"
+                  :theme="viewMode === 'chunks' ? 'primary' : 'default'"
+                  @click="viewMode = 'chunks'"
+                  class="view-mode-btn"
+                >
+                  {{ $t("knowledgeBase.viewChunks") }}
+                </t-button>
+              </div>
+              <div v-if="viewMode === 'chunks'" class="chunk-quality-filter">
+                <t-checkbox
+                  v-model="lowQualityOnly"
+                  size="small"
+                  @change="reloadChunksWithFeedbackFilter"
+                >
+                  好评率
+                </t-checkbox>
+                <t-select
+                  v-model="lowQualityRate"
+                  size="small"
+                  class="quality-rate-select"
+                  :disabled="!lowQualityOnly"
+                  @change="reloadChunksWithFeedbackFilter"
+                >
+                  <t-option :value="0.5" label="50%" />
+                  <t-option :value="0.6" label="60%" />
+                  <t-option :value="0.7" label="70%" />
+                  <t-option :value="0.8" label="80%" />
+                </t-select>
+              </div>
             </div>
           </div>
 
           <!-- 音频播放器（音频文件时固定显示在内容区顶部） -->
-          <div v-if="isAudioFile(details.file_type)" class="audio-player-section">
+          <div
+            v-if="isAudioFile(details.file_type)"
+            class="audio-player-section"
+          >
             <div v-if="audioLoading" class="audio-loading">
               <t-loading size="small" />
-              <span>{{ $t('preview.audioLoading') }}</span>
+              <span>{{ $t("preview.audioLoading") }}</span>
             </div>
-            <audio v-else-if="audioBlobUrl" controls class="audio-player" :src="audioBlobUrl">
-              {{ $t('preview.audioNotSupported') }}
+            <audio
+              v-else-if="audioBlobUrl"
+              controls
+              class="audio-player"
+              :src="audioBlobUrl"
+            >
+              {{ $t("preview.audioNotSupported") }}
             </audio>
           </div>
 
           <!-- 合并视图 -->
           <div v-if="viewMode === 'merged'">
-            <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
-            <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
+            <div v-if="!mergedContent" class="no_content">
+              {{ $t("common.noData") }}
+            </div>
+            <div
+              v-else
+              class="md-content"
+              v-html="processMarkdown(mergedContent)"
+            ></div>
           </div>
 
           <!-- 分块视图 -->
           <div v-else-if="viewMode === 'chunks'">
-            <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
+            <div v-if="!processedChunks.length" class="no_content">
+              {{ $t("common.noData") }}
+            </div>
             <div v-else class="chunk-list">
-              <div class="chunk-item" v-for="(chunk, index) in processedChunks" :key="index">
+              <div
+                class="chunk-item"
+                v-for="(chunk, index) in processedChunks"
+                :key="index"
+              >
                 <div class="chunk-header">
-                  <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
+                  <span class="chunk-index"
+                    >{{ $t("knowledgeBase.segment") }} {{ index + 1 }}</span
+                  >
                   <div class="chunk-header-right">
-                    <t-tag v-if="chunk.hasParent" size="small" theme="primary" variant="light">
-                      {{ $t('knowledgeBase.childChunk') }}
+                    <t-tag
+                      v-if="chunk.hasParent"
+                      size="small"
+                      theme="primary"
+                      variant="light"
+                    >
+                      {{ $t("knowledgeBase.childChunk") }}
                     </t-tag>
-                    <t-tag v-if="chunk.questions.length > 0" size="small" theme="success" variant="light">
-                      {{ $t('knowledgeBase.questions') }} {{ chunk.questions.length }}
+                    <t-tag size="small" variant="light" theme="success">
+                      赞 {{ getFeedbackStats(chunk.original).like_count || 0 }}
                     </t-tag>
+                    <t-tag size="small" variant="light" theme="danger">
+                      踩
+                      {{ getFeedbackStats(chunk.original).dislike_count || 0 }}
+                    </t-tag>
+                    <t-tag
+                      size="small"
+                      variant="light"
+                      :theme="getPositiveRateTheme(chunk.original)"
+                    >
+                      好评率 {{ formatPositiveRate(chunk.original) }}
+                    </t-tag>
+                    <t-tag size="small" variant="light" theme="default">
+                      关联问答会话数
+                      {{ getFeedbackStats(chunk.original).session_count || 0 }}
+                    </t-tag>
+                    <t-tooltip
+                      :content="getFeedbackReasonSummary(chunk.original)"
+                      placement="top"
+                    >
+                      <t-tag
+                        size="small"
+                        variant="light"
+                        theme="warning"
+                        class="reason-stat-tag"
+                      >
+                        点踩原因
+                      </t-tag>
+                    </t-tooltip>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
                   </div>
                 </div>
@@ -1273,30 +1751,78 @@ const handleDetailsScroll = () => {
 
                 <!-- 父 Chunk 上下文展开 -->
                 <div v-if="chunk.hasParent" class="parent-context-section">
-                  <div class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
-                    <t-icon v-if="!parentContextLoading.has(index)"
-                      :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                    <t-loading v-else size="small" style="width: 14px; height: 14px;" />
-                    <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
+                  <div
+                    class="parent-context-toggle"
+                    @click="toggleParentContext(chunk.original, index)"
+                  >
+                    <t-icon
+                      v-if="!parentContextLoading.has(index)"
+                      :name="
+                        isParentExpanded(index)
+                          ? 'chevron-down'
+                          : 'chevron-right'
+                      "
+                      size="14px"
+                    />
+                    <t-loading
+                      v-else
+                      size="small"
+                      style="width: 14px; height: 14px"
+                    />
+                    <span>{{ $t("knowledgeBase.viewParentContext") }}</span>
                   </div>
-                  <div v-show="isParentExpanded(index)" class="parent-context-content">
-                    <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
+                  <div
+                    v-show="isParentExpanded(index)"
+                    class="parent-context-content"
+                  >
+                    <div
+                      class="md-content"
+                      v-html="processMarkdown(getParentContent(chunk.original))"
+                    ></div>
                   </div>
                 </div>
 
                 <!-- 生成的问题展示 -->
-                <div v-if="chunk.questions.length > 0" class="questions-section">
+                <div
+                  v-if="chunk.questions.length > 0"
+                  class="questions-section"
+                >
                   <div class="questions-toggle" @click="toggleQuestions(index)">
-                    <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                    <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ chunk.questions.length }})</span>
+                    <t-icon
+                      :name="
+                        isExpanded(index) ? 'chevron-down' : 'chevron-right'
+                      "
+                      size="14px"
+                    />
+                    <span
+                      >{{ $t("knowledgeBase.generatedQuestions") }} ({{
+                        chunk.questions.length
+                      }})</span
+                    >
                   </div>
                   <div v-show="isExpanded(index)" class="questions-list">
-                    <div v-for="question in chunk.questions" :key="question.id" class="question-item">
-                      <t-icon name="help-circle" size="14px" class="question-icon" />
+                    <div
+                      v-for="question in chunk.questions"
+                      :key="question.id"
+                      class="question-item"
+                    >
+                      <t-icon
+                        name="help-circle"
+                        size="14px"
+                        class="question-icon"
+                      />
                       <span class="question-text">{{ question.question }}</span>
-                      <t-button v-if="canDeleteGeneratedQuestion" theme="default" variant="text" size="small"
-                        class="delete-question-btn" :loading="isDeleting(index, question.id)"
-                        @click.stop="handleDeleteQuestion(chunk.original, index, question)">
+                      <t-button
+                        v-if="canDeleteGeneratedQuestion"
+                        theme="default"
+                        variant="text"
+                        size="small"
+                        class="delete-question-btn"
+                        :loading="isDeleting(index, question.id)"
+                        @click.stop="
+                          handleDeleteQuestion(chunk.original, index, question)
+                        "
+                      >
                         <template #icon>
                           <t-icon name="delete" size="14px" />
                         </template>
@@ -1310,12 +1836,15 @@ const handleDetailsScroll = () => {
 
           <!-- 文档预览视图 -->
           <div v-else-if="viewMode === 'preview'">
-            <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
-              :active="viewMode === 'preview'" />
+            <DocumentPreview
+              :knowledgeId="details.id"
+              :fileType="details.file_type"
+              :fileName="details.title"
+              :active="viewMode === 'preview'"
+            />
           </div>
         </section>
       </div>
-
     </t-drawer>
   </div>
 </template>
@@ -1443,7 +1972,7 @@ const handleDetailsScroll = () => {
   gap: 8px;
 
   &::before {
-    content: '';
+    content: "";
     width: 3px;
     height: 14px;
     background: var(--td-brand-color);
@@ -1523,7 +2052,9 @@ const handleDetailsScroll = () => {
   flex-shrink: 0;
   color: var(--td-text-color-secondary);
   border-radius: 4px;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -1554,7 +2085,7 @@ const handleDetailsScroll = () => {
   min-width: 0;
 }
 
-.kp-drawer-shell> :deep(.kp-timeline) {
+.kp-drawer-shell > :deep(.kp-timeline) {
   width: 100%;
   height: 100%;
 }
@@ -1604,7 +2135,10 @@ const handleDetailsScroll = () => {
     left: 0;
     right: 0;
     height: 28px;
-    background: linear-gradient(transparent, var(--td-bg-color-container-hover) 80%);
+    background: linear-gradient(
+      transparent,
+      var(--td-bg-color-container-hover) 80%
+    );
     border-radius: 0 0 4px 4px;
     align-items: flex-end;
   }
@@ -1688,6 +2222,14 @@ const handleDetailsScroll = () => {
   flex-shrink: 0;
 }
 
+.view-mode-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .view-mode-buttons {
   display: flex;
   gap: 4px;
@@ -1697,6 +2239,17 @@ const handleDetailsScroll = () => {
     height: 28px;
     min-width: 60px;
   }
+}
+
+.chunk-quality-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.quality-rate-select {
+  width: 82px;
 }
 
 .no_content {
@@ -1739,7 +2292,14 @@ const handleDetailsScroll = () => {
   .chunk-header-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .reason-stat-tag {
+    cursor: help;
   }
 
   .chunk-meta {
@@ -1920,7 +2480,9 @@ const handleDetailsScroll = () => {
   border-radius: 1px;
   background: var(--td-component-border);
   opacity: 0.55;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
 }
 
 .doc-drawer-resize-handle:hover .doc-drawer-resize-line {
@@ -1954,7 +2516,9 @@ const handleDetailsScroll = () => {
   border-radius: 1px;
   background: var(--td-component-border);
   opacity: 0.55;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease;
 }
 
 .trace-drawer-resize-handle:hover .trace-drawer-resize-line {

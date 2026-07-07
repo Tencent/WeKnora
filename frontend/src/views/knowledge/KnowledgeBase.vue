@@ -1889,8 +1889,11 @@ const handleScroll = () => {
     }
   }
 };
-const getDoc = (page: number) => {
-  getfDetails(details.id, page)
+const getDoc = (
+  page: number,
+  options?: { feedback_stats?: boolean; max_positive_rate?: number; min_feedback_count?: number },
+) => {
+  getfDetails(details.id, page, options)
 };
 
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {

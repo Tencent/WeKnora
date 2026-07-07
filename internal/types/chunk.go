@@ -173,6 +173,34 @@ type Chunk struct {
 	ContextHeader string `json:"-" gorm:"-"`
 }
 
+// ChunkFeedbackReasonStat represents an aggregated dislike reason for a chunk.
+type ChunkFeedbackReasonStat struct {
+	Reason string `json:"reason" gorm:"column:reason"`
+	Count  int64  `json:"count" gorm:"column:count"`
+}
+
+// ChunkFeedbackStats contains answer-feedback attribution metrics for a chunk.
+type ChunkFeedbackStats struct {
+	LikeCount      int64                     `json:"like_count"`
+	DislikeCount   int64                     `json:"dislike_count"`
+	PositiveRate   *float64                  `json:"positive_rate"`
+	SessionCount   int64                     `json:"session_count"`
+	DislikeReasons []ChunkFeedbackReasonStat `json:"dislike_reasons"`
+}
+
+// ChunkWithFeedbackStats wraps a chunk with optional answer-feedback stats.
+type ChunkWithFeedbackStats struct {
+	*Chunk
+	FeedbackStats ChunkFeedbackStats `json:"feedback_stats"`
+}
+
+// ChunkFeedbackStatsFilter controls chunk feedback-stat listing and filtering.
+type ChunkFeedbackStatsFilter struct {
+	Enable           bool
+	MaxPositiveRate  *float64
+	MinFeedbackCount int64
+}
+
 // EmbeddingContent returns the chunk content with ContextHeader prepended
 // when set. Use this where the embedding model needs section context that
 // isn't part of the literal Content. Surrounding whitespace on Content is

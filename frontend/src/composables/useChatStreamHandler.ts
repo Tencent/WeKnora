@@ -27,6 +27,7 @@ export interface UseChatStreamHandlerOptions {
   onMessageCreated?: (message: ChatMessage) => void
   onMessageUpdated?: (message: ChatMessage, payload?: ChatMessage) => void
   onAgentAnswerDone?: (message: ChatMessage) => void
+  onKnowledgeReferencesReady?: (message: ChatMessage) => void
   onAgentChunkBound?: (message: ChatMessage, created: boolean) => void
   debug?: boolean
 }
@@ -51,6 +52,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     onMessageCreated,
     onMessageUpdated,
     onAgentAnswerDone,
+    onKnowledgeReferencesReady,
     onAgentChunkBound,
     debug = false,
   } = options
@@ -122,6 +124,13 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       dataPayload?.knowledge_references ||
       []
     return Array.isArray(refs) ? refs : []
+  }
+
+  const notifyKnowledgeReferencesReady = (message: ChatMessage | undefined) => {
+    if (!message?.is_completed || !message.id) return
+    const refs = message.knowledge_references
+    if (!Array.isArray(refs) || refs.length === 0) return
+    onKnowledgeReferencesReady?.(message)
   }
 
   /** Match the in-flight assistant row by request id or assistant message id. */
@@ -452,12 +461,14 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       if (payload.is_fallback) message.is_fallback = true
       if (payload.is_completed) message.is_completed = true
       onMessageUpdated?.(message, payload)
+      notifyKnowledgeReferencesReady(message)
     } else {
       const entry = { ...payload }
       if (entry.id && !entry.request_id) entry.request_id = entry.id
       messagesList.push(entry)
       onMessageCreated?.(entry)
       onMessageUpdated?.(entry, payload)
+      notifyKnowledgeReferencesReady(entry)
     }
     scrollToBottom()
   }
@@ -795,6 +806,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         if (data.done && !answerEvent.done) {
           answerEvent.done = true
           onAgentAnswerDone?.(message)
+          notifyKnowledgeReferencesReady(message)
           loading.value = false
           isReplying.value = false
           fullContent.value = ''
@@ -808,6 +820,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         isReplying.value = false
         message.is_completed = true
         onReplyComplete?.(String(message.content || ''))
+        notifyKnowledgeReferencesReady(message)
         fullContent.value = ''
         currentAssistantMessageId.value = ''
         if (message.agentEventStream) {

@@ -253,6 +253,122 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	return chunks, total, nil
 }
 
+// ListPagedChunksWithFeedbackStatsByKnowledgeID lists chunks with answer-feedback
+// attribution stats. It keeps the legacy chunk listing untouched for existing tools.
+func (r *chunkRepository) ListPagedChunksWithFeedbackStatsByKnowledgeID(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	page *types.Pagination,
+	chunkType []types.ChunkType,
+	filter types.ChunkFeedbackStatsFilter,
+) ([]*types.ChunkWithFeedbackStats, int64, error) {
+	baseFilter := func(db *gorm.DB) *gorm.DB {
+		db = db.Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?)",
+			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
+		if filter.MinFeedbackCount > 0 {
+			db = db.Where("COALESCE(feedback_like_count, 0) + COALESCE(feedback_dislike_count, 0) >= ?", filter.MinFeedbackCount)
+		}
+		if filter.MaxPositiveRate != nil {
+			db = db.Where("COALESCE(feedback_like_count, 0) + COALESCE(feedback_dislike_count, 0) > 0")
+			db = db.Where(
+				"CAST(COALESCE(feedback_like_count, 0) AS DOUBLE PRECISION) / (COALESCE(feedback_like_count, 0) + COALESCE(feedback_dislike_count, 0)) <= ?",
+				*filter.MaxPositiveRate,
+			)
+		}
+		return db
+	}
+
+	var total int64
+	if err := baseFilter(r.db.WithContext(ctx).Model(&types.Chunk{})).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var chunks []*types.Chunk
+	if err := baseFilter(r.db.WithContext(ctx)).
+		Order("chunk_index ASC").
+		Offset(page.Offset()).
+		Limit(page.Limit()).
+		Find(&chunks).Error; err != nil {
+		return nil, 0, err
+	}
+
+	results := make([]*types.ChunkWithFeedbackStats, 0, len(chunks))
+	if len(chunks) == 0 {
+		return results, total, nil
+	}
+
+	chunkIDs := make([]string, 0, len(chunks))
+	byID := make(map[string]*types.ChunkWithFeedbackStats, len(chunks))
+	for _, chunk := range chunks {
+		likeCount := chunk.FeedbackLikeCount
+		dislikeCount := chunk.FeedbackDislikeCount
+		var rate *float64
+		if totalFeedback := likeCount + dislikeCount; totalFeedback > 0 {
+			value := float64(likeCount) / float64(totalFeedback)
+			rate = &value
+		}
+		item := &types.ChunkWithFeedbackStats{
+			Chunk: chunk,
+			FeedbackStats: types.ChunkFeedbackStats{
+				LikeCount:    likeCount,
+				DislikeCount: dislikeCount,
+				PositiveRate: rate,
+			},
+		}
+		results = append(results, item)
+		chunkIDs = append(chunkIDs, chunk.ID)
+		byID[chunk.ID] = item
+	}
+
+	type sessionRow struct {
+		ChunkID string `gorm:"column:chunk_id"`
+		Count   int64  `gorm:"column:count"`
+	}
+	var sessionRows []sessionRow
+	if err := r.db.WithContext(ctx).
+		Table("message_knowledge_chunks").
+		Select("chunk_id, COUNT(DISTINCT session_id) AS count").
+		Where("tenant_id = ? AND chunk_id IN ?", tenantID, chunkIDs).
+		Group("chunk_id").
+		Scan(&sessionRows).Error; err != nil {
+		return nil, 0, err
+	}
+	for _, row := range sessionRows {
+		if item := byID[row.ChunkID]; item != nil {
+			item.FeedbackStats.SessionCount = row.Count
+		}
+	}
+
+	type reasonRow struct {
+		ChunkID string `gorm:"column:chunk_id"`
+		Reason  string `gorm:"column:reason"`
+		Count   int64  `gorm:"column:count"`
+	}
+	var reasonRows []reasonRow
+	reasonExpr := "COALESCE(NULLIF(TRIM(mf.reason), ''), '未填写原因')"
+	if err := r.db.WithContext(ctx).
+		Table("message_knowledge_chunks AS mkc").
+		Select("mkc.chunk_id, "+reasonExpr+" AS reason, COUNT(*) AS count").
+		Joins("INNER JOIN message_feedbacks AS mf ON mf.message_id = mkc.message_id AND mf.session_id = mkc.session_id").
+		Where("mkc.tenant_id = ? AND mkc.chunk_id IN ? AND mf.feedback_type = ?", tenantID, chunkIDs, "dislike").
+		Group("mkc.chunk_id, " + reasonExpr).
+		Order("count DESC").
+		Scan(&reasonRows).Error; err != nil {
+		return nil, 0, err
+	}
+	for _, row := range reasonRows {
+		if item := byID[row.ChunkID]; item != nil {
+			item.FeedbackStats.DislikeReasons = append(item.FeedbackStats.DislikeReasons, types.ChunkFeedbackReasonStat{
+				Reason: row.Reason,
+				Count:  row.Count,
+			})
+		}
+	}
+
+	return results, total, nil
+}
+
 func (r *chunkRepository) ListChunkByParentID(
 	ctx context.Context,
 	tenantID uint64,

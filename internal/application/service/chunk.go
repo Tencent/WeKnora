@@ -183,6 +183,35 @@ func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 	return types.NewPageResult(total, page, chunks), nil
 }
 
+// ListPagedChunksWithFeedbackStatsByKnowledgeID lists chunks with answer-feedback stats.
+func (s *chunkService) ListPagedChunksWithFeedbackStatsByKnowledgeID(
+	ctx context.Context,
+	knowledgeID string,
+	page *types.Pagination,
+	chunkType []types.ChunkType,
+	filter types.ChunkFeedbackStatsFilter,
+) (*types.PageResult, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	chunks, total, err := s.chunkRepository.ListPagedChunksWithFeedbackStatsByKnowledgeID(
+		ctx,
+		tenantID,
+		knowledgeID,
+		page,
+		chunkType,
+		filter,
+	)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": knowledgeID,
+			"tenant_id":    tenantID,
+		})
+		return nil, err
+	}
+
+	logger.Infof(ctx, "Retrieved %d chunks with feedback stats out of %d total chunks", len(chunks), total)
+	return types.NewPageResult(total, page, chunks), nil
+}
+
 // updateChunk updates a chunk
 // This method updates an existing chunk in the repository
 // Parameters:

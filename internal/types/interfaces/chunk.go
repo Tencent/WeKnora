@@ -49,6 +49,15 @@ type ChunkRepository interface {
 		sortOrder string,
 		knowledgeType string,
 	) ([]*types.Chunk, int64, error)
+	// ListPagedChunksWithFeedbackStatsByKnowledgeID lists paged chunks with answer-feedback stats.
+	ListPagedChunksWithFeedbackStatsByKnowledgeID(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		page *types.Pagination,
+		chunkType []types.ChunkType,
+		filter types.ChunkFeedbackStatsFilter,
+	) ([]*types.ChunkWithFeedbackStats, int64, error)
 	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
 	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list
 	ListChunksByParentIDs(ctx context.Context, tenantID uint64, parentIDs []string) ([]*types.Chunk, error)
@@ -125,6 +134,14 @@ type ChunkService interface {
 		knowledgeID string,
 		page *types.Pagination,
 		chunkType []types.ChunkType,
+	) (*types.PageResult, error)
+	// ListPagedChunksWithFeedbackStatsByKnowledgeID lists paged chunks with answer-feedback stats.
+	ListPagedChunksWithFeedbackStatsByKnowledgeID(
+		ctx context.Context,
+		knowledgeID string,
+		page *types.Pagination,
+		chunkType []types.ChunkType,
+		filter types.ChunkFeedbackStatsFilter,
 	) (*types.PageResult, error)
 	// UpdateChunk updates a chunk
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error

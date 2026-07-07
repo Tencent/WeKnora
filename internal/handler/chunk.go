@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -137,21 +138,27 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		}
 	}
 
+	feedbackFilter, err := parseChunkFeedbackStatsFilter(c)
+	if err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
 	// The route-level guard has rewritten the request's tenant context
 	// to the effective tenant for shared KBs.
-	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
+	var result *types.PageResult
+	if feedbackFilter.Enable {
+		result, err = h.service.ListPagedChunksWithFeedbackStatsByKnowledgeID(ctx, knowledgeID, &pagination, chunkType, feedbackFilter)
+	} else {
+		result, err = h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
-	// 对 chunk 内容进行安全清理
-	for _, chunk := range result.Data.([]*types.Chunk) {
-		if chunk.Content != "" {
-			chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
-		}
-	}
+	sanitizeChunkList(result.Data)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
@@ -160,6 +167,59 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		"page":      result.Page,
 		"page_size": result.PageSize,
 	})
+}
+
+func parseChunkFeedbackStatsFilter(c *gin.Context) (types.ChunkFeedbackStatsFilter, error) {
+	filter := types.ChunkFeedbackStatsFilter{}
+	if value := c.Query("feedback_stats"); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return filter, err
+		}
+		filter.Enable = enabled
+	}
+	if value := c.Query("max_positive_rate"); value != "" {
+		rate, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return filter, err
+		}
+		if rate < 0 || rate > 1 {
+			return filter, errors.NewBadRequestError("max_positive_rate must be between 0 and 1")
+		}
+		filter.Enable = true
+		filter.MaxPositiveRate = &rate
+	}
+	if value := c.Query("max_positive_rate"); value != "" {
+		count, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return filter, err
+		}
+		if count < 0 {
+			return filter, errors.NewBadRequestError("min_feedback_count must be greater than or equal to 0")
+		}
+		filter.Enable = true
+		filter.MinFeedbackCount = count
+	}
+	return filter, nil
+}
+
+func sanitizeChunkList(data interface{}) {
+	switch chunks := data.(type) {
+	case []*types.Chunk:
+		for _, chunk := range chunks {
+			sanitizeChunkContent(chunk)
+		}
+	case []*types.ChunkWithFeedbackStats:
+		for _, item := range chunks {
+			sanitizeChunkContent(item.Chunk)
+		}
+	}
+}
+
+func sanitizeChunkContent(chunk *types.Chunk) {
+	if chunk != nil && chunk.Content != "" {
+		chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
+	}
 }
 
 // UpdateChunkRequest defines the request structure for updating a chunk

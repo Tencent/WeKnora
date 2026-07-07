@@ -291,8 +291,16 @@ export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agent
   return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
-export function getKnowledgeDetailsCon(id: string, page: number) {
-  return get(`/api/v1/chunks/${id}?page=${page}&page_size=25`);
+export function getKnowledgeDetailsCon(id: string, page: number, options?: {
+  feedback_stats?: boolean;
+  max_positive_rate?: number;
+  min_feedback_count?: number;
+}) {
+  const query = new URLSearchParams({ page: String(page), page_size: '25' });
+  if (options?.feedback_stats) query.set('feedback_stats', 'true');
+  if (options?.max_positive_rate !== undefined) query.set('max_positive_rate', String(options.max_positive_rate));
+  if (options?.min_feedback_count !== undefined) query.set('min_feedback_count', String(options.min_feedback_count));
+  return get(`/api/v1/chunks/${id}?${query.toString()}`);
 }
 
 // Get chunk by chunk_id only (new endpoint - to be added to backend)

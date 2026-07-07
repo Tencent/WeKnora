@@ -213,13 +213,13 @@ export default function (knowledgeBaseId?: string) {
         }
       })
       .catch(() => {});
-    getfDetails(item.id, 1);
+    getfDetails(item.id, 1, { feedback_stats: true });
   };
   
-  const getfDetails = (id: string, page: number) => {
+  const getfDetails = (id: string, page: number, options?: { feedback_stats?: boolean; max_positive_rate?: number; min_feedback_count?: number }) => {
     details.chunkLoading = true;
     details.chunkLoadError = "";
-    getKnowledgeDetailsCon(id, page)
+    getKnowledgeDetailsCon(id, page, options)
       .then((result: any) => {
         if (result.success && result.data) {
           const { data, total: totalResult } = result;
