@@ -859,7 +859,7 @@ func checkSufficientSummaryContent(ctx context.Context, knowledgeID, content str
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
-) (string, error) {
+) (summaryText string, err error) {
 	// Get knowledge info from the first chunk
 	if len(chunks) == 0 {
 		return "", fmt.Errorf("no chunks provided for summary generation")
@@ -947,8 +947,50 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryPrompt := types.RenderPromptPlaceholders(s.config.Conversation.GenerateSummaryPrompt, types.PlaceholderValues{
 		"language": types.LanguageNameFromContext(ctx),
 	})
+
+	// Content-addressed summary cache lookup.
+	if s.summaryCache != nil {
+		configBytes, err := json.Marshal(map[string]interface{}{
+			"model_name":      summaryModel.GetModelName(),
+			"max_input_chars": maxInputChars,
+			"max_tokens":      maxTokens,
+			"temperature":     0.3,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal summary cache config: %w", err)
+		}
+		docContentHash := types.StableContentHash(contentWithMetadata)
+		modelID := summaryModel.GetModelID()
+		promptVersion := types.SHAChecksum(summaryPrompt)
+		configHash := types.SHAChecksum(string(configBytes))
+
+		cached, ok, err := s.summaryCache.Get(ctx, docContentHash, modelID, promptVersion, configHash)
+		if err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Warnf("summary cache lookup failed for knowledge %s", knowledge.ID)
+		} else if ok {
+			logger.GetLogger(ctx).Infof("getSummary: cache hit for knowledge %s", knowledge.ID)
+			return cached, nil
+		}
+
+		// Cache the result after a successful LLM call.
+		defer func() {
+			if err == nil && summaryText != "" {
+				if putErr := s.summaryCache.Put(ctx, &types.SummaryCache{
+					DocContentHash: docContentHash,
+					ModelID:        modelID,
+					PromptVersion:  promptVersion,
+					ConfigHash:     configHash,
+					Summary:        summaryText,
+				}); putErr != nil {
+					logger.GetLogger(ctx).WithField("error", putErr).Warnf("failed to put summary cache for knowledge %s", knowledge.ID)
+				}
+			}
+		}()
+	}
+
 	thinking := false
-	summary, err := summaryModel.Chat(ctx, []chat.Message{
+	var summary *types.ChatResponse
+	summary, err = summaryModel.Chat(ctx, []chat.Message{
 		{
 			Role:    "system",
 			Content: summaryPrompt,
@@ -2035,6 +2077,36 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		"language":       langName,
 	})
 
+	// Content-addressed question cache lookup.
+	chunkContentHash := types.StableContentHash(content)
+	modelID := chatModel.GetModelID()
+	promptVersion := types.SHAChecksum(prompt)
+	var configHash string
+	if s.questionCache != nil {
+		configBytes, err := json.Marshal(map[string]interface{}{
+			"model_name":     chatModel.GetModelName(),
+			"temperature":    0.7,
+			"max_tokens":     512,
+			"question_count": questionCount,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal question cache config: %w", err)
+		}
+		configHash = types.SHAChecksum(string(configBytes))
+
+		cached, ok, err := s.questionCache.Get(ctx, chunkContentHash, modelID, promptVersion, configHash)
+		if err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Warnf("question cache lookup failed")
+		} else if ok {
+			var questions []string
+			if jsonErr := json.Unmarshal([]byte(cached), &questions); jsonErr == nil {
+				logger.GetLogger(ctx).Infof("generateQuestionsWithContext: cache hit")
+				return questions, nil
+			}
+			// Corrupt payload: fall through to LLM and overwrite.
+		}
+	}
+
 	thinking := false
 	response, err := chatModel.Chat(ctx, []chat.Message{
 		{
@@ -2064,6 +2136,22 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 			questions = append(questions, line)
 			if len(questions) >= questionCount {
 				break
+			}
+		}
+	}
+
+	// Cache the parsed questions on a successful miss.
+	if s.questionCache != nil && configHash != "" {
+		payloadBytes, err := json.Marshal(questions)
+		if err == nil {
+			if putErr := s.questionCache.Put(ctx, &types.QuestionCache{
+				ChunkContentHash: chunkContentHash,
+				ModelID:          modelID,
+				PromptVersion:    promptVersion,
+				ConfigHash:       configHash,
+				Payload:          string(payloadBytes),
+			}); putErr != nil {
+				logger.GetLogger(ctx).WithField("error", putErr).Warnf("failed to put question cache")
 			}
 		}
 	}
@@ -3331,7 +3419,11 @@ func (s *knowledgeService) convert(
 	}
 
 	var fileHash string
-	if !isURL {
+	// Load local bytes when available. File imports always have a local path;
+	// URL imports may carry a downloaded copy prepared by ProcessDocument upstream.
+	// Caching keys on the bytes we actually hand to DocReader, so pure URL imports
+	// without a local copy still fall through to the live reader.
+	if payload.FilePath != "" {
 		fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
 		if err != nil {
 			s.failStage(ctx, knowledge.ID, types.StageDocReader,
@@ -3351,10 +3443,10 @@ func (s *knowledgeService) convert(
 		fileHash = types.SHAChecksum(string(contentBytes))
 	}
 
-	// Try to serve the parse product from cache for file imports. URLs are
-	// fetched by DocReader itself, so we have no local bytes to hash and
-	// fall through to the live reader.
-	if !isURL && s.parseCache != nil {
+	// Try to serve the parse product from cache whenever we have local bytes
+	// to hash. Pure URL imports without a downloaded local copy are fetched by
+	// DocReader itself and fall through to the live reader.
+	if s.parseCache != nil && len(req.FileContent) > 0 {
 		pCfgHash := parserConfigHash(mergedOverrides)
 		if cached, ok, err := s.parseCache.Get(ctx, fileHash, parserEngine, pCfgHash, parseRenderConfigHash); err == nil && ok {
 			var result types.ReadResult
@@ -3404,10 +3496,10 @@ func (s *knowledgeService) convert(
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
 	}
-	// Persist the parse product best-effort. Strip raw image bytes from the
-	// payload — the cache stores references only; VLM cache governs OCR/Caption
-	// by image bytes independently.
-	if !isURL && s.parseCache != nil {
+	// Persist the parse product best-effort when we have local bytes to key on.
+	// Strip raw image bytes from the payload — the cache stores references only;
+	// VLM cache governs OCR/Caption by image bytes independently.
+	if s.parseCache != nil && len(req.FileContent) > 0 {
 		pCfgHash := parserConfigHash(mergedOverrides)
 		payload, merr := json.Marshal(cacheableReadResult(result))
 		if merr == nil {

@@ -83,6 +83,16 @@ type knowledgeService struct {
 	// scanned documents. nil-safe: lite/test paths fall through to the
 	// docreader directly.
 	parseCache apprepo.ParseProductCacheRepo
+
+	// summaryCache content-addresses the LLM-generated document summary
+	// by (doc_content_hash, model_id, prompt_version, config_hash).
+	// nil-safe: a nil repo falls through to the LLM.
+	summaryCache apprepo.SummaryCacheRepo
+
+	// questionCache content-addresses the LLM-generated chunk questions
+	// by (chunk_content_hash, model_id, prompt_version, config_hash).
+	// nil-safe: a nil repo falls through to the LLM.
+	questionCache apprepo.QuestionCacheRepo
 }
 
 const (
@@ -118,6 +128,8 @@ func NewKnowledgeService(
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
 	parseCache apprepo.ParseProductCacheRepo,
+	summaryCache apprepo.SummaryCacheRepo,
+	questionCache apprepo.QuestionCacheRepo,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -141,10 +153,12 @@ func NewKnowledgeService(
 		kbShareService:  kbShareService,
 		imageResolver:   imageResolver,
 		wikiRepo:        wikiRepo,
-		wikiService:        wikiService,
-		taskPendingRepo:    taskPendingRepo,
-		spanTracker:        spanTracker,
-		parseCache:         parseCache,
+		wikiService:     wikiService,
+		taskPendingRepo: taskPendingRepo,
+		spanTracker:     spanTracker,
+		parseCache:      parseCache,
+		summaryCache:    summaryCache,
+		questionCache:   questionCache,
 	}, nil
 }
 

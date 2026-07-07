@@ -199,6 +199,12 @@ must(container.Provide(repository.NewGraphChunkCacheRepo))
 // knowledgeService (NewKnowledgeService now asks for an
 // apprepo.ParseProductCacheRepo).
 must(container.Provide(repository.NewParseProductCacheRepo))
+// Summary generation cache repo. Resolved by dig into knowledgeService
+// (NewKnowledgeService now asks for an apprepo.SummaryCacheRepo).
+must(container.Provide(repository.NewSummaryCacheRepo))
+// Question generation cache repo. Resolved by dig into knowledgeService
+// (NewKnowledgeService now asks for an apprepo.QuestionCacheRepo).
+must(container.Provide(repository.NewQuestionCacheRepo))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
