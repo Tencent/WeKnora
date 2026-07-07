@@ -965,6 +965,12 @@ func (s *Service) startChannelInternal(channel *IMChannel, factory AdapterFactor
 	}
 
 	s.mu.Lock()
+	// Idempotency: another goroutine may have started this channel while
+	// factory was running above (factory is called unlocked). Stop the old
+	// state before overwriting so its adapter / long connection doesn't leak.
+	if existing, ok := s.channels[channel.ID]; ok {
+		s.stopChannelLocked(channel.ID, existing)
+	}
 	s.channels[channel.ID] = &channelState{
 		Channel:      channel,
 		Adapter:      adapter,
@@ -1068,6 +1074,31 @@ func (s *Service) wsLeaderRenewLoop(ctx context.Context, channelID string) {
 				s.StopChannel(channelID)
 				return
 			}
+			// Still the leader — verify the channel is still active. A
+			// delete/disable is served by whichever instance got the HTTP
+			// request; without this check the leader would keep the long
+			// connection open until process restart. The renew interval
+			// bounds the worst-case lag.
+			ch, err := s.GetChannelByID(channelID)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				logger.Infof(context.Background(),
+					"[IM] Channel %s deleted; leader stepping down", channelID)
+				s.StopChannel(channelID)
+				return
+			}
+			if err != nil {
+				// Transient DB error — don't stop a possibly-healthy channel
+				// on a DB hiccup. Skip this round; the next renewal re-checks.
+				logger.Warnf(context.Background(),
+					"[IM] DB check failed for channel %s during leader renewal: %v (skipping this round)", channelID, err)
+				continue
+			}
+			if !ch.Enabled {
+				logger.Infof(context.Background(),
+					"[IM] Channel %s disabled; leader stepping down", channelID)
+				s.StopChannel(channelID)
+				return
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -1088,6 +1119,34 @@ func (s *Service) wsLeaderRetryLoop(channel *IMChannel) {
 				return
 			}
 			if s.tryAcquireWSLeader(channel.ID) {
+				// Re-check the DB before starting: the channel may have been
+				// deleted or disabled on another instance while we waited for
+				// leadership. The in-memory `channel` is a startup snapshot and
+				// won't reflect that, so without this guard we'd resurrect a
+				// stopped channel (and reopen its long connection).
+				fresh, err := s.GetChannelByID(channel.ID)
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					// Channel was actually deleted — give up for good.
+					s.releaseWSLeader(channel.ID)
+					logger.Infof(context.Background(),
+						"[IM] Channel %s deleted while waiting for leadership; aborting leader takeover", channel.ID)
+					return
+				}
+				if err != nil {
+					// Transient DB error — don't make a destructive decision.
+					// Release the lock for this round and retry on the next tick.
+					s.releaseWSLeader(channel.ID)
+					logger.Warnf(context.Background(),
+						"[IM] DB check failed for channel %s during leader takeover: %v (will retry)", channel.ID, err)
+					continue
+				}
+				if !fresh.Enabled {
+					s.releaseWSLeader(channel.ID)
+					logger.Infof(context.Background(),
+						"[IM] Channel %s disabled while waiting for leadership; aborting leader takeover", channel.ID)
+					return
+				}
+				channel = fresh // use latest config (credentials/mode may have changed)
 				logger.Infof(context.Background(),
 					"[IM] Acquired leadership for channel %s, starting adapter", channel.ID)
 				s.mu.RLock()

@@ -174,6 +174,13 @@ func TestBuildClient_NoCurrentProfile(t *testing.T) {
 	var typed *Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, CodeAuthUnauthenticated, typed.Code)
+	// Zero-state retry_argv must NOT be the generic `auth login` (which itself
+	// fails with no profile → an agent execing retry_argv would loop); it must
+	// point at profile creation instead.
+	detail := ErrorToDetail(err)
+	assert.NotEqual(t, []string{"weknora", "auth", "login"}, detail.RetryArgv,
+		"zero-state retry_argv must not loop back to auth login")
+	assert.Contains(t, detail.RetryArgv, "profile", "zero-state retry_argv should point at profile setup")
 }
 
 func TestBuildClient_UnknownContext(t *testing.T) {
@@ -413,5 +420,58 @@ func TestResolveKB_Chain(t *testing.T) {
 		var typed *Error
 		require.ErrorAs(t, err, &typed)
 		assert.Equal(t, CodeKBIDRequired, typed.Code)
+	})
+}
+
+// TestBuildClientFromEnv covers the stateless env-credential path: WEKNORA_TOKEN
+// / WEKNORA_API_KEY build an ephemeral client with no config/keyring access.
+func TestBuildClientFromEnv(t *testing.T) {
+	emptyCfg := &Factory{Config: func() (*config.Config, error) { return &config.Config{}, nil }}
+
+	t.Run("no env vars falls through to profile path", func(t *testing.T) {
+		t.Setenv("WEKNORA_TOKEN", "")
+		t.Setenv("WEKNORA_API_KEY", "")
+		c, handled, err := buildClientFromEnv(emptyCfg)
+		assert.False(t, handled, "no env creds must fall through")
+		assert.Nil(t, c)
+		assert.NoError(t, err)
+	})
+
+	t.Run("api key + WEKNORA_HOST builds a client", func(t *testing.T) {
+		t.Setenv("WEKNORA_TOKEN", "")
+		t.Setenv("WEKNORA_API_KEY", "sk-test")
+		t.Setenv("WEKNORA_HOST", "https://kb.example.com")
+		c, handled, err := buildClientFromEnv(emptyCfg)
+		assert.True(t, handled)
+		require.NoError(t, err)
+		assert.NotNil(t, c)
+	})
+
+	t.Run("token set but no host is a typed input error", func(t *testing.T) {
+		t.Setenv("WEKNORA_API_KEY", "")
+		t.Setenv("WEKNORA_TOKEN", "jwt-token")
+		t.Setenv("WEKNORA_HOST", "")
+		c, handled, err := buildClientFromEnv(emptyCfg)
+		assert.True(t, handled, "env creds set → handled even on host error")
+		assert.Nil(t, c)
+		var ce *Error
+		require.ErrorAs(t, err, &ce)
+		assert.Equal(t, CodeInputInvalidArgument, ce.Code)
+	})
+
+	t.Run("host falls back to the active profile when WEKNORA_HOST unset", func(t *testing.T) {
+		t.Setenv("WEKNORA_API_KEY", "")
+		t.Setenv("WEKNORA_TOKEN", "jwt-token")
+		t.Setenv("WEKNORA_HOST", "")
+		f := &Factory{Config: func() (*config.Config, error) {
+			return &config.Config{
+				CurrentProfile: "p",
+				Profiles:       map[string]config.Profile{"p": {Host: "https://prof.example.com"}},
+			}, nil
+		}}
+		c, handled, err := buildClientFromEnv(f)
+		assert.True(t, handled)
+		require.NoError(t, err, "should use the active profile's host")
+		assert.NotNil(t, c)
 	})
 }

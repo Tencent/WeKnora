@@ -34,8 +34,8 @@ func toolErrorResult(err error) *mcpsdk.CallToolResult {
 	if detail.Hint != "" {
 		textLine += "\nhint: " + detail.Hint
 	}
-	if detail.RetryCommand != "" {
-		textLine += "\nretry: " + detail.RetryCommand
+	if len(detail.RetryArgv) != 0 {
+		textLine += "\nretry: " + strings.Join(detail.RetryArgv, " ")
 	}
 	// StructuredContent accepts any; pass *ErrDetail directly (no round-trip).
 	return &mcpsdk.CallToolResult{
@@ -43,6 +43,18 @@ func toolErrorResult(err error) *mcpsdk.CallToolResult {
 		Content:           []mcpsdk.Content{&mcpsdk.TextContent{Text: textLine}},
 		StructuredContent: detail,
 	}
+}
+
+func streamErrorDetail(sessionID, assistantMessageID string) map[string]any {
+	detail := map[string]any{"session_id": sessionID}
+	if assistantMessageID != "" {
+		detail["assistant_message_id"] = assistantMessageID
+	}
+	return detail
+}
+
+func toolStreamError(err *cmdutil.Error, sessionID, assistantMessageID string) *mcpsdk.CallToolResult {
+	return toolErrorResult(err.WithDetail(streamErrorDetail(sessionID, assistantMessageID)))
 }
 
 // successResult builds a CallToolResult with StructuredContent = payload.
@@ -431,22 +443,22 @@ type chatInput struct {
 	KBID      string `json:"kb_id" jsonschema:"knowledge base ID to chat against"`
 	Query     string `json:"query" jsonschema:"user query"`
 	SessionID string `json:"session_id,omitempty" jsonschema:"existing session to continue; auto-created when empty"`
+	Reference bool   `json:"reference,omitempty" jsonschema:"include indexed references"`
+	Verbose   bool   `json:"verbose,omitempty" jsonschema:"include reasoning, tools, and lifecycle events"`
 }
 
 type chatOutput struct {
-	Answer             string              `json:"answer"`
-	References         []*sdk.SearchResult `json:"references"`
-	Thinking           string              `json:"thinking,omitempty"` // reasoning text from response_type=thinking; empty for non-reasoning models
-	SessionID          string              `json:"session_id"`
-	AssistantMessageID string              `json:"assistant_message_id,omitempty"`
-	KBID               string              `json:"kb_id"`
-	Query              string              `json:"query"`
+	Events             []sse.ProjectedEvent `json:"events"`
+	SessionID          string               `json:"session_id"`
+	AssistantMessageID string               `json:"assistant_message_id,omitempty"`
+	KBID               string               `json:"kb_id"`
+	Query              string               `json:"query"`
 }
 
 func addChat(server *mcpsdk.Server, svc chatService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "chat",
-		Description: "Stream a RAG answer from the LLM, grounded in the given knowledge base. The SSE stream is accumulated server-side (MCP tools/call has no standard partial-response, so this is NOT streaming); the tool returns the full accumulated response once the stream completes. Pass session_id to continue a multi-turn conversation; otherwise a fresh session is auto-created.",
+		Description: "Run a RAG answer against a knowledge base. Returns a bounded answer-event projection by default; reference=true adds indexed citations and verbose=true adds reasoning, tool, and lifecycle events. MCP tools/call is buffered rather than streaming. Pass session_id to continue a conversation.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "Chat with KB (Streaming RAG)",
 			DestructiveHint: bptr(false),
@@ -475,27 +487,28 @@ func addChat(server *mcpsdk.Server, svc chatService) {
 			AgentEnabled:     false,
 			Channel:          "api",
 		}
-		acc := &sse.Accumulator{}
+		projector := sse.NewProjector(in.Verbose, in.Reference, in.KBID)
+		events := make([]sse.ProjectedEvent, 0)
 		streamErr := svc.KnowledgeQAStream(ctx, sessionID, req, func(r *sdk.StreamResponse) error {
-			acc.Append(r)
+			if event, include := projector.Chat(r); include {
+				events = append(events, event)
+			}
 			return nil
 		})
 		if streamErr != nil {
-			return toolErrorResult(cmdutil.WrapHTTP(streamErr, "knowledge qa stream")), nil, nil
+			return toolStreamError(cmdutil.WrapStream(streamErr, "knowledge qa stream"), sessionID, projector.AssistantMessageID()), nil, nil
 		}
-		if !acc.Done() {
-			return toolErrorResult(cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")), nil, nil
+		if !projector.Done() {
+			return toolStreamError(cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event"), sessionID, projector.AssistantMessageID()), nil, nil
 		}
-		sid := acc.SessionID
+		sid := projector.SessionID()
 		if sid == "" {
 			sid = sessionID
 		}
 		return successResult(chatOutput{
-			Answer:             acc.Result(),
-			References:         acc.References,
-			Thinking:           acc.Thinking(),
+			Events:             events,
 			SessionID:          sid,
-			AssistantMessageID: acc.AssistantMessageID,
+			AssistantMessageID: projector.AssistantMessageID(),
 			KBID:               in.KBID,
 			Query:              in.Query,
 		}), nil, nil
@@ -539,22 +552,21 @@ type sessionAskInput struct {
 	AgentID   string `json:"agent_id" jsonschema:"custom agent ID"`
 	Query     string `json:"query" jsonschema:"user query"`
 	SessionID string `json:"session_id,omitempty" jsonschema:"existing session to continue; auto-created when empty"`
+	Reference bool   `json:"reference,omitempty" jsonschema:"include indexed references"`
+	Verbose   bool   `json:"verbose,omitempty" jsonschema:"include reasoning, tools, and lifecycle events"`
 }
 
 type sessionAskOutput struct {
-	Answer     string               `json:"answer"`
-	References []*sdk.SearchResult  `json:"references"`
-	ToolEvents []sse.AgentToolEvent `json:"tool_events,omitempty"`
-	Thinking   string               `json:"thinking,omitempty"`
-	SessionID  string               `json:"session_id"`
-	AgentID    string               `json:"agent_id"`
-	Query      string               `json:"query"`
+	Events    []sse.ProjectedEvent `json:"events"`
+	SessionID string               `json:"session_id"`
+	AgentID   string               `json:"agent_id"`
+	Query     string               `json:"query"`
 }
 
 func addSessionAsk(server *mcpsdk.Server, svc sessionAskService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "session_ask",
-		Description: "Run a query through a custom agent via `session ask --agent` (system prompt + tool allow-list + KB scope). The agent's SSE stream is accumulated server-side (MCP tools/call has no standard partial-response, so this is NOT streaming); the tool returns the final accumulated response once the stream completes.",
+		Description: "Run a query through a custom agent. Returns a bounded answer-event projection by default; reference=true adds indexed citations and verbose=true adds reasoning, tool, and lifecycle events. MCP tools/call is buffered rather than streaming.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "Ask a Custom Agent (session ask --agent)",
 			DestructiveHint: bptr(false),
@@ -569,7 +581,8 @@ func addSessionAsk(server *mcpsdk.Server, svc sessionAskService) {
 		if strings.TrimSpace(in.Query) == "" {
 			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "query cannot be empty")), nil, nil
 		}
-		acc := &sse.AgentAccumulator{}
+		projector := sse.NewProjector(in.Verbose, in.Reference, "")
+		events := make([]sse.ProjectedEvent, 0)
 		req := &sdk.AgentQARequest{
 			Query:        in.Query,
 			AgentEnabled: true,
@@ -587,23 +600,22 @@ func addSessionAsk(server *mcpsdk.Server, svc sessionAskService) {
 			sessionID = sess.ID
 		}
 		streamErr := svc.AgentQAStreamWithRequest(ctx, sessionID, req, func(r *sdk.AgentStreamResponse) error {
-			acc.Append(r)
+			if event, include := projector.Agent(r); include {
+				events = append(events, event)
+			}
 			return nil
 		})
 		if streamErr != nil {
-			return toolErrorResult(cmdutil.WrapHTTP(streamErr, "agent-chat stream")), nil, nil
+			return toolStreamError(cmdutil.WrapStream(streamErr, "agent-chat stream"), sessionID, ""), nil, nil
 		}
-		if !acc.Done() {
-			return toolErrorResult(cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")), nil, nil
+		if !projector.Done() {
+			return toolStreamError(cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event"), sessionID, ""), nil, nil
 		}
 		return successResult(sessionAskOutput{
-			Answer:     acc.Answer(),
-			References: acc.References,
-			ToolEvents: acc.ToolEvents,
-			Thinking:   acc.Thinking(),
-			SessionID:  sessionID,
-			AgentID:    in.AgentID,
-			Query:      in.Query,
+			Events:    events,
+			SessionID: sessionID,
+			AgentID:   in.AgentID,
+			Query:     in.Query,
 		}), nil, nil
 	})
 }
@@ -647,14 +659,15 @@ func addChunkList(server *mcpsdk.Server, svc chunkListService) {
 		}
 		// `limit` is typed as int by chunkListInput, so the SDK rejects
 		// non-numeric values at schema validation (e.g. "limit":"50")
-		// before this handler runs. Here we only default+clamp the
-		// already-decoded value.
+		// before this handler runs. Default when unset; reject over-max
+		// (rather than silently clamping) so the agent's request is never
+		// quietly changed — matching search_chunks in this same file.
 		limit := in.Limit
 		if limit < 1 {
 			limit = chunkListDefaultLimit
 		}
 		if limit > chunkListMaxLimit {
-			limit = chunkListMaxLimit
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("limit must be in 1..%d", chunkListMaxLimit))), nil, nil
 		}
 		chunks, total, err := svc.ListKnowledgeChunks(ctx, in.DocID, 1, limit)
 		if err != nil {

@@ -206,7 +206,7 @@
 
         <!-- Section 2 — 连接配置（base url / api key / engine id），仅当任意字段需要时渲染 -->
         <section
-          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url"
+          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url"
           class="setting-drawer__section"
         >
           <h4 class="setting-drawer__section-title">{{ t('webSearchSettings.credentialsSection', '连接配置') }}</h4>
@@ -224,8 +224,12 @@
             子资源调用），不与本表单 submit 耦合；Create 模式下用 plain
             password input + lock prefix-icon，与 ModelEditorDialog 一致。
           -->
-          <div v-if="selectedProviderType?.requires_api_key" class="form-item">
-            <label class="form-label required">{{ t('webSearchSettings.apiKeyLabel') }}</label>
+          <div v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key" class="form-item">
+            <label class="form-label" :class="{ required: selectedProviderType?.requires_api_key }">
+              {{ selectedProviderType?.supports_optional_api_key && !selectedProviderType?.requires_api_key
+                ? t('webSearchSettings.apiKeyOptionalLabel', 'API Key（可选）')
+                : t('webSearchSettings.apiKeyLabel') }}
+            </label>
             <CredentialResource
               v-if="editingProvider?.id"
               :api="credentialApi"
@@ -847,6 +851,10 @@ onMounted(async () => {
   background: rgba(70, 70, 70, 0.12);
   color: #464646;
 }
+.provider-card--keenable .provider-card__badge {
+  background: rgba(20, 158, 130, 0.12);
+  color: #149E82;
+}
 
 .provider-card__body {
   flex: 1;
@@ -1120,5 +1128,9 @@ onMounted(async () => {
 .websearch-drawer--ollama .setting-drawer__header-icon {
   background: rgba(70, 70, 70, 0.12);
   color: #464646;
+}
+.websearch-drawer--keenable .setting-drawer__header-icon {
+  background: rgba(20, 158, 130, 0.12);
+  color: #149E82;
 }
 </style>

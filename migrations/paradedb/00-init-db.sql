@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS tenants (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    api_key VARCHAR(256) NOT NULL,
     retriever_engines JSONB NOT NULL DEFAULT '[]',
     status VARCHAR(50) DEFAULT 'active',
     business VARCHAR(255) NOT NULL,
@@ -28,7 +27,6 @@ COMMENT ON COLUMN tenants.agent_config IS 'Tenant-level agent configuration in J
 ALTER SEQUENCE tenants_id_seq RESTART WITH 10000;
 
 -- Add indexes
-CREATE INDEX IF NOT EXISTS idx_tenants_api_key ON tenants(api_key);
 CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
 
 -- Create model table

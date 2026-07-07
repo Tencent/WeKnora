@@ -27,11 +27,6 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-type oidcAuthorizationState struct {
-	Nonce       string `json:"nonce"`
-	RedirectURI string `json:"redirect_uri,omitempty"`
-}
-
 var (
 	jwtSecretOnce sync.Once
 	jwtSecret     string
@@ -367,7 +362,7 @@ func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI s
 		return nil, fmt.Errorf("failed to generate state: %w", err)
 	}
 
-	state, err := encodeOIDCAuthorizationState(&oidcAuthorizationState{
+	state, err := secutils.SignOIDCState(&secutils.OIDCStatePayload{
 		Nonce:       nonce,
 		RedirectURI: strings.TrimSpace(redirectURI),
 	})
@@ -394,6 +389,7 @@ func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI s
 		ProviderDisplayName: cfg.ProviderDisplayName,
 		AuthorizationURL:    authURL,
 		State:               state,
+		Nonce:               nonce,
 	}, nil
 }
 
@@ -592,7 +588,13 @@ func (s *userService) ChangePassword(ctx context.Context, userID string, oldPass
 	user.PasswordHash = string(hashedPassword)
 	user.UpdatedAt = time.Now()
 
-	return s.userRepo.UpdateUser(ctx, user)
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return err
+	}
+
+	// Invalidate every outstanding session so a stolen token cannot
+	// survive a password rotation.
+	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
 }
 
 // ValidatePassword validates user password
@@ -856,10 +858,17 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 		return nil, 0, errors.New("invalid user ID in token")
 	}
 
+	if isRefreshTokenClaims(claims) {
+		return nil, 0, errors.New("refresh token cannot be used as access token")
+	}
+
 	// Check if token is revoked
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
 	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
 		return nil, 0, errors.New("token is revoked")
+	}
+	if tokenRecord.TokenType == "refresh_token" {
+		return nil, 0, errors.New("refresh token cannot be used as access token")
 	}
 
 	user, err := s.userRepo.GetUserByID(ctx, userID)
@@ -873,6 +882,34 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	activeTenantID := tenantIDFromClaims(claims, user.TenantID)
 
 	return user, activeTenantID, nil
+}
+
+func isRefreshTokenClaims(claims jwt.MapClaims) bool {
+	tokenType, ok := claims["type"].(string)
+	return ok && tokenType == "refresh"
+}
+
+func userIDFromSignedToken(tokenString string) (string, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(getJwtSecret()), nil
+	}, jwt.WithoutClaimsValidation())
+	if err != nil || token == nil || !token.Valid {
+		return "", errors.New("invalid token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", errors.New("invalid token claims")
+	}
+
+	userID, ok := claims["user_id"].(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		return "", errors.New("invalid user ID in token")
+	}
+	return userID, nil
 }
 
 // tenantIDFromClaims pulls the active tenant ID out of a parsed JWT
@@ -941,6 +978,9 @@ func (s *userService) RefreshToken(
 	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
 		return "", "", errors.New("refresh token is revoked")
 	}
+	if tokenRecord.TokenType != "refresh_token" {
+		return "", "", errors.New("not a refresh token")
+	}
 
 	// Get user
 	user, err := s.userRepo.GetUserByID(ctx, userID)
@@ -954,6 +994,18 @@ func (s *userService) RefreshToken(
 
 	// Generate new tokens
 	return s.GenerateTokens(ctx, user)
+}
+
+// Logout invalidates every outstanding session for the user identified by
+// the presented JWT. Access and refresh tokens are both accepted so clients
+// can end the session without refreshing first; expired tokens are allowed
+// so logout still works after the access token TTL.
+func (s *userService) Logout(ctx context.Context, tokenString string) error {
+	userID, err := userIDFromSignedToken(tokenString)
+	if err != nil {
+		return err
+	}
+	return s.tokenRepo.RevokeTokensByUserID(ctx, userID)
 }
 
 // RevokeToken revokes a token
@@ -999,6 +1051,39 @@ type oidcTokenResponse struct {
 	TokenType   string `json:"token_type"`
 }
 
+func newOIDCHTTPClient() *http.Client {
+	cfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	cfg.Timeout = 30 * time.Second
+	return secutils.NewSSRFSafeHTTPClient(cfg)
+}
+
+func validateOIDCEndpoint(label, endpoint string, required bool) error {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		if required {
+			return fmt.Errorf("OIDC %s endpoint is required", label)
+		}
+		return nil
+	}
+	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+		return fmt.Errorf("OIDC %s endpoint failed SSRF validation: %w", label, err)
+	}
+	return nil
+}
+
+func validateOIDCEndpoints(cfg *config.OIDCAuthConfig) error {
+	if err := validateOIDCEndpoint("authorization", cfg.AuthorizationEndpoint, true); err != nil {
+		return err
+	}
+	if err := validateOIDCEndpoint("token", cfg.TokenEndpoint, true); err != nil {
+		return err
+	}
+	if err := validateOIDCEndpoint("userinfo", cfg.UserInfoEndpoint, false); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *userService) getOIDCConfig(ctx context.Context) (*config.OIDCAuthConfig, error) {
 	if s.config == nil || s.config.OIDCAuth == nil || !s.config.OIDCAuth.Enable {
 		return nil, errors.New("OIDC login is disabled")
@@ -1015,10 +1100,13 @@ func (s *userService) getOIDCConfig(ctx context.Context) (*config.OIDCAuthConfig
 
 func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OIDCAuthConfig) error {
 	if strings.TrimSpace(cfg.AuthorizationEndpoint) != "" && strings.TrimSpace(cfg.TokenEndpoint) != "" {
-		return nil
+		return validateOIDCEndpoints(cfg)
 	}
 	if strings.TrimSpace(cfg.DiscoveryURL) == "" {
 		return errors.New("OIDC discovery_url or explicit endpoints are required")
+	}
+	if err := validateOIDCEndpoint("discovery", cfg.DiscoveryURL, true); err != nil {
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.DiscoveryURL, nil)
@@ -1026,7 +1114,7 @@ func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OID
 		return fmt.Errorf("failed to create OIDC discovery request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newOIDCHTTPClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to load OIDC discovery document: %w", err)
 	}
@@ -1052,10 +1140,14 @@ func (s *userService) populateOIDCEndpoints(ctx context.Context, cfg *config.OID
 	if cfg.AuthorizationEndpoint == "" || cfg.TokenEndpoint == "" {
 		return errors.New("OIDC discovery document missing required endpoints")
 	}
-	return nil
+	return validateOIDCEndpoints(cfg)
 }
 
 func (s *userService) exchangeOIDCCode(ctx context.Context, cfg *config.OIDCAuthConfig, code, redirectURI string) (*oidcTokenResponse, error) {
+	if err := validateOIDCEndpoint("token", cfg.TokenEndpoint, true); err != nil {
+		return nil, err
+	}
+
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
@@ -1070,14 +1162,14 @@ func (s *userService) exchangeOIDCCode(ctx context.Context, cfg *config.OIDCAuth
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newOIDCHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange OIDC code: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("OIDC token exchange failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("OIDC token exchange failed: status=%d", resp.StatusCode)
 	}
 
 	var tokenResp oidcTokenResponse
@@ -1134,6 +1226,10 @@ func (s *userService) resolveOIDCUserInfo(ctx context.Context, cfg *config.OIDCA
 }
 
 func (s *userService) fetchOIDCUserInfo(ctx context.Context, endpoint, accessToken string) (map[string]interface{}, error) {
+	if err := validateOIDCEndpoint("userinfo", endpoint, true); err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -1141,14 +1237,14 @@ func (s *userService) fetchOIDCUserInfo(ctx context.Context, endpoint, accessTok
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newOIDCHTTPClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("userinfo request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("userinfo request failed: status=%d", resp.StatusCode)
 	}
 
 	var claims map[string]interface{}
@@ -1205,14 +1301,6 @@ func generateRandomString(length int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buffer), nil
-}
-
-func encodeOIDCAuthorizationState(state *oidcAuthorizationState) (string, error) {
-	payload, err := json.Marshal(state)
-	if err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
 func decodeJWTClaims(token string) (map[string]interface{}, error) {

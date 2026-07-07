@@ -43,18 +43,6 @@ func (s *IOStreams) IsStdoutTTY() bool { return s.stdoutTTY }
 // IsStderrTTY reports whether stderr is a terminal.
 func (s *IOStreams) IsStderrTTY() bool { return s.stderrTTY }
 
-// ColorEnabled honors NO_COLOR (https://no-color.org) and TERM=dumb.
-// Computed on demand so env changes after init are picked up by callers.
-func (s *IOStreams) ColorEnabled() bool {
-	if !s.stdoutTTY {
-		return false
-	}
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
-	return os.Getenv("TERM") != "dumb"
-}
-
 // SetForTest replaces the package singleton with in-memory buffers for the
 // duration of t. Call it once per test. Not safe under t.Parallel().
 func SetForTest(t *testing.T) (out, errBuf *bytes.Buffer) {

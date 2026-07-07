@@ -53,6 +53,17 @@ func TestSessionOwnerIDFromContextFallsBackToUserID(t *testing.T) {
 	}
 }
 
+func TestSessionOwnerIDFromContextIsolatesTenantAPIKeys(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), Principal{Type: PrincipalAPITenant, ID: "7"})
+	ctx = context.WithValue(ctx, TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, UserIDContextKey, "system-7")
+	ctx = WithTenantAPIKeyScope(ctx, TenantAPIKeyScope{KeyID: 99})
+
+	if got := SessionOwnerIDFromContext(ctx); got != "api_tenant_key:7:99" {
+		t.Fatalf("SessionOwnerIDFromContext() = %q, want per-key isolation", got)
+	}
+}
+
 func TestSessionOwnerIDFromContextUsesEmbedSessionPrincipal(t *testing.T) {
 	ctx := WithPrincipal(context.Background(), EmbedSessionPrincipal(10000, "ch1", "sess1"))
 	ctx = context.WithValue(ctx, UserIDContextKey, "embed-ch1")

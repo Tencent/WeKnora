@@ -128,9 +128,35 @@ func TestList_AllPages_LimitTruncatesAccumulated(t *testing.T) {
 	assert.Equal(t, []string{"c1", "c2", "c3"}, []string{got[0].ID, got[1].ID, got[2].ID})
 }
 
+// TestList_JSON_EmitsTotalCount pins that chunk list surfaces the document's
+// full chunk count as meta.total_count (like doc/session/kb/model list), not
+// just the returned count — an agent must be able to tell truncation from
+// completeness.
+func TestList_JSON_EmitsTotalCount(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListSvc{
+		pages:  [][]sdk.Chunk{{{ID: "c1"}, {ID: "c2"}}},
+		totals: []int64{7},
+		errs:   []error{nil},
+	}
+	opts := &ListOptions{DocID: "d1", Limit: 50, PageSize: 50}
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	var env struct {
+		Meta struct {
+			Count      *int `json:"count"`
+			TotalCount *int `json:"total_count"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	require.NotNil(t, env.Meta.TotalCount, "chunk list must emit meta.total_count")
+	assert.Equal(t, 7, *env.Meta.TotalCount)
+	require.NotNil(t, env.Meta.Count)
+	assert.Equal(t, 2, *env.Meta.Count)
+}
+
 func TestList_LimitInvalid(t *testing.T) {
 	svc := &fakeListSvc{}
-	for _, lim := range []int{0, -1, 1001} {
+	for _, lim := range []int{0, -1, 10001} {
 		err := runList(context.Background(), &ListOptions{DocID: "d", Limit: lim, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
 		require.Error(t, err, "expect error for --limit %d", lim)
 		assert.Contains(t, err.Error(), "input.invalid_argument")

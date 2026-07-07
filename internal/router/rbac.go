@@ -1,6 +1,10 @@
 package router
 
 import (
+	"net/http"
+	"path"
+	"strings"
+
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/middleware"
@@ -122,10 +126,10 @@ type rbacGuards struct {
 	// Contributor who owns the KB can edit/delete its sub-resources
 	// (documents, chunks, wiki pages); a Contributor who merely belongs
 	// to the tenant gets 403 unless they're also Admin+.
-	knowledgeKBCreator    middleware.CreatorLookup
-	chunkKBCreator        middleware.CreatorLookup
-	chunkKBCreatorFromID  middleware.CreatorLookup // chunk routes that address chunks by :id (no knowledge id in URL)
-	wikiKBCreator         middleware.CreatorLookup
+	knowledgeKBCreator   middleware.CreatorLookup
+	chunkKBCreator       middleware.CreatorLookup
+	chunkKBCreatorFromID middleware.CreatorLookup // chunk routes that address chunks by :id (no knowledge id in URL)
+	wikiKBCreator        middleware.CreatorLookup
 
 	// Services for the KB-access guard (own / org-shared / via shared
 	// agent). Captured here so route lines can reference g.KBAccess()
@@ -136,6 +140,12 @@ type rbacGuards struct {
 	chunkService      middleware.ChunkLookup
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
+
+	// apiKeyAuthorizer is the single source of truth for which routes an
+	// X-API-Key principal may call. Routes opt in via the apiKeyGroup
+	// helpers below; anything not declared is denied by the gate. See
+	// middleware.APIKeyRouteAuthorizer.
+	apiKeyAuthorizer *middleware.APIKeyRouteAuthorizer
 }
 
 // newRBACGuards wires the guards from the live configuration and the
@@ -153,7 +163,7 @@ func newRBACGuards(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 ) *rbacGuards {
-	g := &rbacGuards{cfg: cfg}
+	g := &rbacGuards{cfg: cfg, apiKeyAuthorizer: middleware.NewAPIKeyRouteAuthorizer()}
 	if kbHandler != nil {
 		g.kbCreator = kbHandler.KBCreatorLookup
 		g.kbCreatorFromKbIDParam = kbHandler.KBCreatorLookupFromKbIDParam
@@ -196,6 +206,208 @@ func (g *rbacGuards) Admin() gin.HandlerFunc {
 
 func (g *rbacGuards) Owner() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleOwner, g.cfg)
+}
+
+// API-key authorization — a SEPARATE authority from the JWT role/ownership
+// guards above. Instead of stacking a per-route guard that also had to know
+// the caller's ownership, every API-key-accessible route declares one
+// APIKeyRoutePolicy via the apiKeyGroup helpers; the gate on /api/v1 enforces
+// it and denies any undeclared route by default. JWT sessions ignore all of
+// this (they short-circuit the gate).
+//
+// Policy constructors. API keys do not reuse tenant-member roles: a key is
+// either full-access, or it carries explicit capabilities. KB allow-lists are
+// pure data filters applied downstream by KBAccess guards and handlers.
+
+func apiKeyAny() middleware.APIKeyRoutePolicy {
+	return middleware.APIKeyRoutePolicy{}
+}
+
+func apiKeyFullAccess() middleware.APIKeyRoutePolicy {
+	return middleware.APIKeyRoutePolicy{RequireFullAccess: true}
+}
+
+// apiKeyRetrieve grants read/search access to knowledge-base data.
+func apiKeyRetrieve(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityRetrieve)
+}
+
+// apiKeyChat layers the "chat" capability on top of a base policy: keys that
+// carry the chat capability can use the conversation flow (sessions, agent
+// listing) without full tenant access.
+func apiKeyChat(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityChat)
+}
+
+// apiKeyReadAgents layers the "read_agents" capability on top of a base
+// policy so scoped integrations can inspect available agents without chat or
+// authoring permissions.
+func apiKeyReadAgents(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityReadAgents)
+}
+
+// apiKeyIngest layers the "ingest" capability on top of a base policy so a
+// scoped key can write content into its allowed knowledge bases (documents,
+// chunks, FAQ, tags, wiki).
+func apiKeyIngest(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityIngest)
+}
+
+// apiKeyManageKnowledgeBases layers the "manage_kbs" capability on top of a
+// base policy so a scoped key can manage existing KB metadata/config within
+// its KB allow-list.
+func apiKeyManageKnowledgeBases(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageKnowledgeBases)
+}
+
+// apiKeyManageAgents layers the "manage_agents" capability on top of a base policy.
+func apiKeyManageAgents(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageAgents)
+}
+
+// apiKeyMessageHistory layers the "message_history" capability on top of a
+// base policy so an explicitly granted key can search or inspect tenant chat
+// history without being promoted to full Owner.
+func apiKeyMessageHistory(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityMessageHistory)
+}
+
+func apiKeyManageModels(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageModels)
+}
+
+func apiKeyManageMCPServices(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageMCPServices)
+}
+
+func apiKeyManageDataSources(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageDataSources)
+}
+
+func apiKeyManageChannels(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageChannels)
+}
+
+func apiKeyManageVectorStores(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageVectorStores)
+}
+
+func apiKeyManageWebSearch(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageWebSearch)
+}
+
+func apiKeyRunEvaluations(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityRunEvaluations)
+}
+
+func apiKeyManageMembers(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageMembers)
+}
+
+func apiKeyManageSpaces(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageSpaces)
+}
+
+func apiKeyManageTenantSettings(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageTenantSettings)
+}
+
+// apiKeyRouteGroup wraps a *gin.RouterGroup so route registration also records
+// the route's API-key policy into the authorizer. Use g.apiKeyGroup(grp,
+// policy) then register the API-key-accessible routes through it; register
+// API-key-denied routes on the raw *gin.RouterGroup so they stay undeclared
+// (default-deny). Per-route overrides use With().
+type apiKeyRouteGroup struct {
+	g      *rbacGuards
+	grp    *gin.RouterGroup
+	policy middleware.APIKeyRoutePolicy
+}
+
+// ensureAPIKeyAuthorizer lazily allocates the authorizer so route
+// registration is safe even when rbacGuards is built directly in tests
+// (bypassing newRBACGuards). In production it is always pre-allocated.
+func (g *rbacGuards) ensureAPIKeyAuthorizer() *middleware.APIKeyRouteAuthorizer {
+	if g.apiKeyAuthorizer == nil {
+		g.apiKeyAuthorizer = middleware.NewAPIKeyRouteAuthorizer()
+	}
+	return g.apiKeyAuthorizer
+}
+
+// apiKeyGroup returns a wrapper that declares `policy` for every route
+// registered through it (unless overridden via With).
+func (g *rbacGuards) apiKeyGroup(grp *gin.RouterGroup, policy middleware.APIKeyRoutePolicy) *apiKeyRouteGroup {
+	g.ensureAPIKeyAuthorizer()
+	return &apiKeyRouteGroup{g: g, grp: grp, policy: policy}
+}
+
+// With returns a sibling wrapper on the same gin group but with a different
+// policy, for the odd route that differs from its group default (e.g. a read
+// search inside an otherwise contributor-gated group).
+func (a *apiKeyRouteGroup) With(policy middleware.APIKeyRoutePolicy) *apiKeyRouteGroup {
+	return &apiKeyRouteGroup{g: a.g, grp: a.grp, policy: policy}
+}
+
+func (a *apiKeyRouteGroup) handle(method, rel string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	full := path.Join(a.grp.BasePath(), rel)
+	a.g.ensureAPIKeyAuthorizer().Register(method, full, a.policy)
+	return a.grp.Handle(method, rel, handlers...)
+}
+
+func (a *apiKeyRouteGroup) GET(rel string, h ...gin.HandlerFunc) gin.IRoutes {
+	return a.handle(http.MethodGet, rel, h...)
+}
+
+func (a *apiKeyRouteGroup) POST(rel string, h ...gin.HandlerFunc) gin.IRoutes {
+	return a.handle(http.MethodPost, rel, h...)
+}
+
+func (a *apiKeyRouteGroup) PUT(rel string, h ...gin.HandlerFunc) gin.IRoutes {
+	return a.handle(http.MethodPut, rel, h...)
+}
+
+func (a *apiKeyRouteGroup) DELETE(rel string, h ...gin.HandlerFunc) gin.IRoutes {
+	return a.handle(http.MethodDelete, rel, h...)
+}
+
+// apiKeyRoute declares a single API-key-accessible route directly on a gin
+// group (for routes registered outside an apiKeyGroup, e.g. top-level r.POST).
+func (g *rbacGuards) apiKeyRoute(
+	grp *gin.RouterGroup, method, rel string, policy middleware.APIKeyRoutePolicy, handlers ...gin.HandlerFunc,
+) gin.IRoutes {
+	full := path.Join(grp.BasePath(), rel)
+	g.ensureAPIKeyAuthorizer().Register(method, full, policy)
+	return grp.Handle(method, rel, handlers...)
+}
+
+// assertAPIKeyPoliciesMatchRoutes verifies every declared API-key policy
+// resolves to a real registered route. gin's c.FullPath() must match the
+// authorizer key verbatim or the gate silently 403s the route for API keys;
+// panicking here turns that latent misconfiguration into a startup failure.
+func (g *rbacGuards) assertAPIKeyPoliciesMatchRoutes(engine *gin.Engine) {
+	registered := map[string]struct{}{}
+	for _, ri := range engine.Routes() {
+		// Authorizer keys are stored normalized (trailing slash trimmed), so
+		// normalize gin's reported path the same way. Otherwise a route
+		// registered with a "/" rel (gin path ".../evaluation/") would look
+		// missing against the normalized key (".../evaluation") even though
+		// the gate — which also normalizes c.FullPath() — matches it fine.
+		p := ri.Path
+		if len(p) > 1 {
+			p = strings.TrimRight(p, "/")
+		}
+		registered[ri.Method+" "+p] = struct{}{}
+	}
+	var missing []string
+	for method, paths := range g.apiKeyAuthorizer.RegisteredRoutes() {
+		for _, p := range paths {
+			if _, ok := registered[method+" "+p]; !ok {
+				missing = append(missing, method+" "+p)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		panic("api-key policy declared for non-existent route(s): " + strings.Join(missing, ", "))
+	}
 }
 
 func (g *rbacGuards) SystemAdmin() gin.HandlerFunc {
@@ -283,7 +495,7 @@ func (g *rbacGuards) CrossTenant() gin.HandlerFunc {
 // PathTenantMatch enforces that the URL :id matches the caller's
 // active tenant context (cross-tenant superusers bypass). Routes apply
 // it at the /tenants/:id group level so every per-tenant endpoint —
-// GetTenant / UpdateTenant / DeleteTenant / ResetAPIKey / member
+// GetTenant / UpdateTenant / DeleteTenant / member
 // management / leave — shares the same check. Replaces the
 // authorizeTenantAccess helper that used to live inside the tenant
 // handler.

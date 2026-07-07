@@ -14,6 +14,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrChunkNotFound is returned when a chunk lookup finds no row. A typed
+// sentinel (matching the ErrXNotFound convention used by the other repos)
+// so callers can errors.Is it safely through wrapping — replacing the
+// previous bare errors.New("chunk not found") that forced fragile
+// string-equality matching in the service layer.
+var ErrChunkNotFound = errors.New("chunk not found")
+
 // chunkRepository implements the ChunkRepository interface
 type chunkRepository struct {
 	db *gorm.DB
@@ -58,7 +65,7 @@ func (r *chunkRepository) GetChunkByID(ctx context.Context, tenantID uint64, id 
 	var chunk types.Chunk
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&chunk).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("chunk not found")
+			return nil, ErrChunkNotFound
 		}
 		return nil, err
 	}
@@ -70,7 +77,7 @@ func (r *chunkRepository) GetChunkByIDOnly(ctx context.Context, id string) (*typ
 	var chunk types.Chunk
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&chunk).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("chunk not found")
+			return nil, ErrChunkNotFound
 		}
 		return nil, err
 	}
@@ -82,7 +89,7 @@ func (r *chunkRepository) GetChunkBySeqID(ctx context.Context, tenantID uint64, 
 	var chunk types.Chunk
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND seq_id = ?", tenantID, seqID).First(&chunk).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("chunk not found")
+			return nil, ErrChunkNotFound
 		}
 		return nil, err
 	}

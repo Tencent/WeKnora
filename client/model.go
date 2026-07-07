@@ -21,6 +21,15 @@ const (
 	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
 )
 
+// AllModelTypes returns every model type the server recognises, in a stable
+// order. Callers (CLI flag validation, docs) should use this instead of
+// re-typing the string set, so they can't drift from the SDK.
+func AllModelTypes() []ModelType {
+	return []ModelType{
+		ModelTypeEmbedding, ModelTypeRerank, ModelTypeKnowledgeQA, ModelTypeVLLM, ModelTypeASR,
+	}
+}
+
 // ModelSource represents the source of the model
 type ModelSource string
 
@@ -43,6 +52,21 @@ const (
 	ModelSourceNovita      ModelSource = "novita"       // Novita AI model
 	ModelSourceAzureOpenAI ModelSource = "azure_openai" // Azure OpenAI model
 )
+
+// AllModelSources returns every model source the server recognises, in a stable
+// order. This is the broad set used for FILTERING existing records (model
+// list --source); creating a model only supports local/remote (the provider
+// identity goes in ModelParameters.provider). Use this instead of re-typing
+// the set so callers can't drift from the SDK.
+func AllModelSources() []ModelSource {
+	return []ModelSource{
+		ModelSourceLocal, ModelSourceRemote, ModelSourceAliyun, ModelSourceZhipu,
+		ModelSourceVolcengine, ModelSourceDeepseek, ModelSourceHunyuan, ModelSourceMinimax,
+		ModelSourceOpenAI, ModelSourceGemini, ModelSourceMimo, ModelSourceSiliconFlow,
+		ModelSourceJina, ModelSourceOpenRouter, ModelSourceNvidia, ModelSourceNovita,
+		ModelSourceAzureOpenAI,
+	}
+}
 
 // ModelParameters model parameters
 type ModelParameters map[string]interface{}

@@ -2183,7 +2183,7 @@ function gotoIntegrations(tab: 'im' | 'embed') {
   const agentId = editorAgent.value?.id;
   if (!agentId) return;
   handleClose();
-  router.push({ path: '/platform/integrations', query: { agentId, tab } });
+  router.push({ path: '/platform/settings', query: { section: 'integrations', agentId, tab } });
 }
 
 const filteredIntentPlaceholders = computed(() => {

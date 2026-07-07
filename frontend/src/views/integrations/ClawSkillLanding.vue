@@ -141,8 +141,8 @@ const openClawHub = () => {
 }
 
 const openApiSettings = () => {
-  router.push('/platform/knowledge-bases')
-  uiStore.openSettings('api')
+  router.push({ path: '/platform/settings', query: { section: 'integrations', tab: 'api' } })
+  uiStore.openSettings('integration-api')
 }
 
 const copyText = async (text: string, successKey: string) => {

@@ -93,6 +93,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete a custom agent",
 		RequiredFlags: []string{"<agent-id> (positional)"},
+		Output:        "envelope.data is {id, deleted:true}",
 		Examples: []string{
 			"weknora agent delete ag_abc -y",
 			"weknora agent delete ag_abc -y --format json",
@@ -106,7 +107,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "agent", opts.AgentID, "agent.delete", "weknora agent delete "+opts.AgentID+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "agent", opts.AgentID, "agent.delete", []string{"weknora", "agent", "delete", opts.AgentID, "-y"}); err != nil {
 		return err
 	}
 	if err := svc.DeleteAgent(ctx, opts.AgentID); err != nil {

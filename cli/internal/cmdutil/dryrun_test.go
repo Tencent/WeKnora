@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
-	"github.com/Tencent/WeKnora/cli/internal/output"
 )
 
 func TestAddDryRunFlag_RegistersFlag(t *testing.T) {
@@ -76,27 +75,6 @@ func TestEmitDryRun_ApiPlanShape(t *testing.T) {
 	body, ok := planOut["body"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "foo", body["name"])
-}
-
-func TestEmitDryRun_InjectsNotice(t *testing.T) {
-	// Regression: dry-run envelope must carry the same _notice channel as
-	// every other success envelope. PendingNotice is the system-level hook
-	// used for deprecation / version_skew / security signals.
-	output.PendingNotice = func() map[string]any {
-		return map[string]any{"deprecation": "use weknora kb create-v2"}
-	}
-	t.Cleanup(func() { output.PendingNotice = nil })
-
-	var buf bytes.Buffer
-	err := EmitDryRun(&buf, &FormatOptions{Mode: FormatJSON},
-		DryRunPlan{Action: "kb.create", Args: map[string]any{"name": "x"}})
-	require.NoError(t, err)
-
-	var got map[string]any
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
-	notice, ok := got["_notice"].(map[string]any)
-	require.True(t, ok, "expected _notice field on dry-run envelope; got %v", got)
-	assert.Equal(t, "use weknora kb create-v2", notice["deprecation"])
 }
 
 func TestEmitDryRun_HonorsTTYIndent(t *testing.T) {

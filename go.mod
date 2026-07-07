@@ -31,7 +31,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1
 	github.com/ks3sdklib/aws-sdk-go v1.11.0
-	github.com/larksuite/oapi-sdk-go/v3 v3.6.1
+	github.com/larksuite/oapi-sdk-go/v3 v3.9.7
 	github.com/longbridgeapp/opencc v0.3.13
 	github.com/mark3labs/mcp-go v0.52.0
 	github.com/milvus-io/milvus/client/v2 v2.6.4

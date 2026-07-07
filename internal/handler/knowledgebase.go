@@ -395,7 +395,8 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base
+// validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base.
+// Enforces per-API-key KB scope before tenant/share/agent resolution.
 // Returns the knowledge base, knowledge base ID, effective tenant ID for embedding, permission level, and any errors encountered
 // For owned KBs, effectiveTenantID is the caller's tenant ID
 // For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
@@ -418,6 +419,9 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, "", 0, "", apperrors.NewBadRequestError("Knowledge base ID cannot be empty")
+	}
+	if err := requireTenantAPIKeyKnowledgeBase(ctx, id); err != nil {
+		return nil, id, 0, "", err
 	}
 
 	// Verify tenant has permission to access this knowledge base
@@ -602,6 +606,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 			}
 			kbs = filtered
 		}
+		kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
 
 		// `all` mode: authoritative server-side capability filter so a client
 		// that bypassed the frontend (old tab, curl, rogue plugin) can't @ a
@@ -669,6 +674,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		}
 		kbs = filtered
 	}
+	kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
 
 	// Get share counts for all knowledge bases
 	if len(kbs) > 0 && h.kbShareService != nil {
@@ -699,6 +705,20 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		"success": true,
 		"data":    h.buildKBListResponse(ctx, kbs, callerTenantID),
 	})
+}
+
+func filterKnowledgeBasesForAPIKeyScope(ctx context.Context, kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || len(scope.KnowledgeBaseIDs) == 0 {
+		return kbs
+	}
+	filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil && scope.AllowsKnowledgeBase(kb.ID) {
+			filtered = append(filtered, kb)
+		}
+	}
+	return filtered
 }
 
 // enrichKBCreatorNames 把 KB 列表里的 CreatorID 批量解析成展示名（username
@@ -944,6 +964,14 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
+	kbIDs := []string{req.SourceID}
+	if req.TargetID != "" {
+		kbIDs = append(kbIDs, req.TargetID)
+	}
+	if err := requireTenantAPIKeyKnowledgeBases(ctx, kbIDs...); err != nil {
+		c.Error(err)
+		return
+	}
 
 	// Validate source knowledge base exists and belongs to caller's tenant (prevent cross-tenant clone)
 	sourceKB, err := h.service.GetKnowledgeBaseByID(ctx, req.SourceID)
@@ -1105,6 +1133,10 @@ func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 	if taskID == "" {
 		logger.Error(ctx, "Task ID is empty")
 		c.Error(apperrors.NewBadRequestError("Task ID cannot be empty"))
+		return
+	}
+	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		c.Error(err)
 		return
 	}
 

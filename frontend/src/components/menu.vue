@@ -85,7 +85,7 @@
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'integration' ? integrationIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
@@ -94,15 +94,6 @@
                                     class="menu-pending-badge"
                                     :title="t('organization.settings.pendingJoinRequestsBadge')">{{
                                         orgStore.totalPendingJoinRequestCount }}</span>
-                                <span v-if="item.path === 'integrations'" class="integration-preview"
-                                    aria-hidden="true">
-                                    <span v-for="(preview, idx) in integrationPreviewItems" :key="preview.key"
-                                        class="integration-preview__item" :style="{ zIndex: idx + 1 }">
-                                        <t-icon v-if="preview.icon.type === 'icon'" :name="preview.icon.name"
-                                            size="13px" />
-                                        <span v-else class="integration-preview__emoji">{{ preview.icon.value }}</span>
-                                    </span>
-                                </span>
                             </template>
                         </div>
                     </div>
@@ -257,17 +248,8 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
-import { INTEGRATION_PREVIEW_ITEMS, INTEGRATION_TAB_MIN_ROLE } from '@/config/integrations';
 
 const chatResources = useChatResourcesStore();
-const integrationPreviewItems = computed(() =>
-    INTEGRATION_PREVIEW_ITEMS.filter((item) => {
-        const min = INTEGRATION_TAB_MIN_ROLE[item.key];
-        if (!min) return true;
-        if (authStore.canAccessAllTenants) return true;
-        return authStore.hasRole(min);
-    }),
-);
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
 // visually consistent with the channels admin view.
 import wecomLogo from '@/assets/img/im/wecom.svg';
@@ -412,8 +394,6 @@ const isMenuItemActive = (itemPath: string): boolean => {
                 currentRoute === 'knowledgeBaseSettings';
         case 'agents':
             return currentRoute === 'agentList';
-        case 'integrations':
-            return currentRoute === 'integrations';
         case 'organizations':
             return currentRoute === 'organizationList';
         case 'creatChat':
@@ -444,13 +424,13 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) =>
-        item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'integrations' || item.path === 'organizations' || item.path === 'creatChat'
+        item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
     );
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'integrations' || item.path === 'organizations' || item.path === 'creatChat') {
+        if (item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
             return false;
         }
         return true;
@@ -1032,7 +1012,6 @@ let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
-let integrationIcon = ref('integration.svg');
 let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
 const getIcon = (path: string) => {
@@ -1041,7 +1020,6 @@ const getIcon = (path: string) => {
     const creatChatActiveState = getIconActiveState('creatChat');
     const settingsActiveState = getIconActiveState('settings');
     const agentsActiveState = route.name === 'agentList';
-    const integrationsActiveState = route.name === 'integrations';
     const organizationsActiveState = route.name === 'organizationList';
 
     // 知识库图标：只在知识库页面显示绿色
@@ -1049,8 +1027,6 @@ const getIcon = (path: string) => {
 
     // 智能体图标：只在智能体页面显示绿色
     agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
-
-    integrationIcon.value = integrationsActiveState ? 'integration-green.svg' : 'integration.svg';
 
     // 组织图标：只在组织页面显示绿色
     organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
@@ -1076,8 +1052,6 @@ const handleMenuClick = async (path: string) => {
         }
     } else if (path === 'agents') {
         router.push('/platform/agents')
-    } else if (path === 'integrations') {
-        router.push('/platform/integrations')
     } else if (path === 'organizations') {
         // 组织菜单项：跳转到组织列表
         router.push('/platform/organizations')
@@ -1904,48 +1878,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     line-height: 18px;
     text-align: center;
     flex-shrink: 0;
-}
-
-.integration-preview {
-    display: inline-flex;
-    align-items: center;
-    margin-left: auto;
-    flex-shrink: 0;
-    width: 0;
-    overflow: hidden;
-    pointer-events: none;
-
-    .menu_item:hover & {
-        width: auto;
-    }
-
-    &__item {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        flex-shrink: 0;
-        border-radius: 50%;
-        background: var(--td-bg-color-container);
-        border: 2px solid var(--td-bg-color-sidebar);
-        box-sizing: border-box;
-        color: var(--td-text-color-primary);
-
-        &:not(:first-child) {
-            margin-left: -5px;
-        }
-
-        :deep(.t-icon) {
-            display: block;
-        }
-    }
-
-    &__emoji {
-        font-size: 12px;
-        line-height: 1;
-    }
 }
 
 .menu_box {

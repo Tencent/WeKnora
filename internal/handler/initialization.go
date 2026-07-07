@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/assets"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -1377,18 +1378,17 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	config := map[string]interface{}{
 		"hasFiles": hasFiles,
 	}
+	includeIntegrationDetail := dto.CanViewIntegrationSecrets(ctx)
 
 	// 按类型分组模型
 	for _, model := range models {
 		if model == nil {
 			continue
 		}
-		// Hide sensitive information for builtin models
+		// Hide sensitive information for builtin models and viewers.
 		baseURL := model.Parameters.BaseURL
-		apiKey := model.Parameters.APIKey
-		if model.IsBuiltin {
+		if model.IsBuiltin || !includeIntegrationDetail {
 			baseURL = ""
-			apiKey = ""
 		}
 
 		switch model.Type {
@@ -1397,22 +1397,28 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 				"source":    string(model.Source),
 				"modelName": model.Name,
 				"baseUrl":   baseURL,
-				"apiKey":    apiKey,
+				"credentials": map[string]bool{
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
+				},
 			}
 		case types.ModelTypeEmbedding:
 			config["embedding"] = map[string]interface{}{
 				"source":    string(model.Source),
 				"modelName": model.Name,
 				"baseUrl":   baseURL,
-				"apiKey":    apiKey,
 				"dimension": model.Parameters.EmbeddingParameters.Dimension,
+				"credentials": map[string]bool{
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
+				},
 			}
 		case types.ModelTypeRerank:
 			config["rerank"] = map[string]interface{}{
 				"enabled":   true,
 				"modelName": model.Name,
 				"baseUrl":   baseURL,
-				"apiKey":    apiKey,
+				"credentials": map[string]bool{
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
+				},
 			}
 		case types.ModelTypeVLLM:
 			if config["multimodal"] == nil {
@@ -1424,9 +1430,11 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			multimodal["vlm"] = map[string]interface{}{
 				"modelName":     model.Name,
 				"baseUrl":       baseURL,
-				"apiKey":        apiKey,
 				"interfaceType": model.Parameters.InterfaceType,
 				"modelId":       model.ID,
+				"credentials": map[string]bool{
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
+				},
 			}
 		}
 	}
@@ -1450,7 +1458,9 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			"enabled":   false,
 			"modelName": "",
 			"baseUrl":   "",
-			"apiKey":    "",
+			"credentials": map[string]bool{
+				"apiKey": false,
+			},
 		}
 	}
 
@@ -1485,12 +1495,14 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			switch effectiveProvider {
 			case "cos":
 				multimodal["cos"] = map[string]interface{}{
-					"secretId":   kb.StorageConfig.SecretID,
-					"secretKey":  kb.StorageConfig.SecretKey,
 					"region":     kb.StorageConfig.Region,
 					"bucketName": kb.StorageConfig.BucketName,
 					"appId":      kb.StorageConfig.AppID,
 					"pathPrefix": kb.StorageConfig.PathPrefix,
+					"credentials": map[string]bool{
+						"secretId":  kb.StorageConfig.SecretID != "",
+						"secretKey": kb.StorageConfig.SecretKey != "",
+					},
 				}
 			case "minio":
 				multimodal["minio"] = map[string]interface{}{

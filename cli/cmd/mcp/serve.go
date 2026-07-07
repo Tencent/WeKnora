@@ -49,6 +49,9 @@ Consult your MCP client's documentation for the exact config-file location.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor: "run weknora as a long-lived MCP (Model Context Protocol) server over stdio for an IDE/host agent",
 		Output:  "no stdout payload (JSON-RPC 2.0 protocol traffic); logs go to stderr",
+		Examples: []string{
+			"weknora mcp serve",
+		},
 		Warnings: []string{
 			"this is a long-running stdio server, not a one-shot command — register it in your MCP client (command: weknora, args: [mcp, serve])",
 			"exits with auth.unauthenticated at startup if no profile is configured",

@@ -185,8 +185,6 @@ func identToErrorCode(name string) (cmdutil.ErrorCode, bool) {
 		return cmdutil.CodeLocalKeychainDenied, true
 	case "CodeLocalFileIO":
 		return cmdutil.CodeLocalFileIO, true
-	case "CodeLocalUnimplemented":
-		return cmdutil.CodeLocalUnimplemented, true
 	case "CodeLocalProfileNotFound":
 		return cmdutil.CodeLocalProfileNotFound, true
 	case "CodeKBIDRequired":
@@ -209,6 +207,8 @@ func identToErrorCode(name string) (cmdutil.ErrorCode, bool) {
 		return cmdutil.CodeOperationFailed, true
 	case "CodeOperationCancelled":
 		return cmdutil.CodeOperationCancelled, true
+	case "CodeInternalError":
+		return cmdutil.CodeInternalError, true
 	}
 	return "", false
 }
