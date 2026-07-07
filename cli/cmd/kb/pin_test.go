@@ -36,6 +36,10 @@ func (f *fakePinSvc) ListKnowledgeBases(_ context.Context) ([]sdk.KnowledgeBase,
 	return []sdk.KnowledgeBase{c}, nil
 }
 
+func (f *fakePinSvc) ListSharedKnowledgeBases(_ context.Context) ([]sdk.SharedKnowledgeBaseInfo, error) {
+	return nil, nil
+}
+
 func (f *fakePinSvc) TogglePinKnowledgeBase(_ context.Context, id string) (*sdk.KnowledgeBase, error) {
 	f.toggleCalled = true
 	if f.toggleErr != nil {

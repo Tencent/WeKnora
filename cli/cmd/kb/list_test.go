@@ -9,18 +9,31 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
 type fakeListSvc struct {
-	items []sdk.KnowledgeBase
-	err   error
+	items       []sdk.KnowledgeBase
+	shared      []sdk.SharedKnowledgeBaseInfo
+	err         error
+	sharedErr   error
+	ownedCalls  int
+	sharedCalls int
 }
 
 func (f *fakeListSvc) ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error) {
+	f.ownedCalls++
 	return f.items, f.err
+}
+
+func (f *fakeListSvc) ListSharedKnowledgeBases(ctx context.Context) ([]sdk.SharedKnowledgeBaseInfo, error) {
+	f.sharedCalls++
+	return f.shared, f.sharedErr
 }
 
 func TestList_Empty_Text(t *testing.T) {
@@ -65,11 +78,60 @@ func TestList_NonEmpty_Text_RenderColumns(t *testing.T) {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"ID", "NAME", "DOCS", "UPDATED", "kb1", "Marketing", "5 docs", "kb2", "Engineering", "1 doc"} {
+	for _, want := range []string{"ID", "NAME", "SOURCE", "ACCESS", "DOCS", "UPDATED", "kb1", "Marketing", "owned", "5 docs", "kb2", "Engineering", "1 doc"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q in:\n%s", want, got)
 		}
 	}
+}
+
+func TestList_DefaultMergesOwnedAndShared(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	now := time.Now()
+	sharedKB := sdk.KnowledgeBase{ID: "kb-shared", Name: "Partner Docs", KnowledgeCount: 2, UpdatedAt: now}
+	svc := &fakeListSvc{
+		items: []sdk.KnowledgeBase{{ID: "kb-owned", Name: "Team Docs", UpdatedAt: now.Add(-time.Hour)}},
+		shared: []sdk.SharedKnowledgeBaseInfo{{
+			KnowledgeBase: &sharedKB, OrganizationID: "org-1", OrgName: "Partners",
+			Permission: "viewer", SourceTenantID: 42, SharedAt: now.Add(-24 * time.Hour),
+		}},
+	}
+	require.NoError(t, runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	var env struct {
+		Data []cmdutil.VisibleKnowledgeBase `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	require.Len(t, env.Data, 2)
+	assert.Equal(t, "kb-shared", env.Data[0].ID)
+	assert.True(t, env.Data[0].IsShared)
+	assert.Equal(t, "Partners", env.Data[0].OrgName)
+	assert.Equal(t, "viewer", env.Data[0].Permission)
+	assert.Equal(t, "kb-owned", env.Data[1].ID)
+	assert.False(t, env.Data[1].IsShared)
+}
+
+func TestList_SourceFiltersOnlyCallSelectedEndpoint(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	sharedKB := sdk.KnowledgeBase{ID: "kb-shared", Name: "Shared"}
+
+	ownedSvc := &fakeListSvc{items: []sdk.KnowledgeBase{{ID: "kb-owned"}}}
+	require.NoError(t, runList(context.Background(), &ListOptions{Owned: true, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, ownedSvc))
+	assert.Equal(t, 1, ownedSvc.ownedCalls)
+	assert.Zero(t, ownedSvc.sharedCalls)
+
+	sharedSvc := &fakeListSvc{shared: []sdk.SharedKnowledgeBaseInfo{{KnowledgeBase: &sharedKB}}}
+	require.NoError(t, runList(context.Background(), &ListOptions{Shared: true, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, sharedSvc))
+	assert.Zero(t, sharedSvc.ownedCalls)
+	assert.Equal(t, 1, sharedSvc.sharedCalls)
+}
+
+func TestList_OwnedAndSharedRejected(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	err := runList(context.Background(), &ListOptions{Owned: true, Shared: true, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, &fakeListSvc{})
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
 }
 
 func TestList_JSON_JQProjection(t *testing.T) {

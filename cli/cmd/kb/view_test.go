@@ -31,6 +31,10 @@ func (f *fakeGetSvc) ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBas
 	return []sdk.KnowledgeBase{*f.kb}, nil
 }
 
+func (f *fakeGetSvc) ListSharedKnowledgeBases(ctx context.Context) ([]sdk.SharedKnowledgeBaseInfo, error) {
+	return nil, nil
+}
+
 func TestGet_OK_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{

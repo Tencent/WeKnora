@@ -13,7 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/text"
-	sdk "github.com/Tencent/WeKnora/client"
 )
 
 // kbSearchFields enumerates the fields surfaced for `--format json` discovery on
@@ -21,6 +20,7 @@ import (
 var kbSearchFields = []string{
 	"id", "name", "type", "description",
 	"is_temporary", "is_pinned",
+	"is_shared", "organization_id", "org_name", "permission", "source_tenant_id", "shared_at",
 	"embedding_model_id", "summary_model_id",
 	"knowledge_count", "chunk_count",
 	"is_processing", "processing_count",
@@ -36,7 +36,7 @@ type KBSearchOptions struct {
 // Server has no fuzzy-KB-name endpoint; the CLI filters ListKnowledgeBases
 // client-side. Acceptable because tenants typically have ≪ 1000 KBs.
 type KBSearchService interface {
-	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
+	cmdutil.VisibleKBLister
 }
 
 // NewCmdKB builds `weknora search kb "<query>"` - substring + case-insensitive
@@ -83,13 +83,13 @@ content, use ` + "`weknora search chunks`" + `.`,
 		UsedFor:       "Find knowledge bases by name or description (client-side case-insensitive substring match). Results come with meta.count; use --limit to cap. For searching content inside a KB, use 'search chunks' instead.",
 		RequiredFlags: []string{"<query> (positional)"},
 		Examples:      []string{`weknora search kb "engineering" --format json`},
-		Output:   "envelope.data is an array of KnowledgeBase objects with id, name, knowledge_count; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+		Output:        "envelope.data is an array of KnowledgeBase objects with id, name, knowledge_count; meta.count is the returned count; meta.has_more=true if more matched than --limit",
 	})
 	return cmd
 }
 
 func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.FormatOptions, svc KBSearchService) error {
-	items, err := svc.ListKnowledgeBases(ctx)
+	items, err := cmdutil.ListVisibleKnowledgeBases(ctx, svc, true, true)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
@@ -101,7 +101,7 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.Form
 
 	if fopts.WantsJSON() {
 		if matches == nil {
-			matches = []sdk.KnowledgeBase{}
+			matches = []cmdutil.VisibleKnowledgeBase{}
 		}
 		meta := &output.Meta{Count: output.IntPtr(len(matches)), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, matches, meta)
@@ -111,10 +111,17 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.Form
 		return nil
 	}
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tDOCS")
+	fmt.Fprintln(tw, "ID\tNAME\tSOURCE\tDOCS")
 	for _, kb := range matches {
 		name := text.Truncate(50, kb.Name)
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", kb.ID, name, text.Pluralize(int(kb.KnowledgeCount), "doc"))
+		source := "owned"
+		if kb.IsShared {
+			source = "shared"
+			if kb.OrgName != "" {
+				source = "shared:" + text.Truncate(24, kb.OrgName)
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", kb.ID, name, source, text.Pluralize(int(kb.KnowledgeCount), "doc"))
 	}
 	return tw.Flush()
 }
@@ -122,9 +129,9 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.Form
 // filterKBs returns the KBs whose name or description contains q (case-
 // insensitive), sorted by name length so the most-likely match shows
 // first. Ties broken alphabetically for determinism.
-func filterKBs(items []sdk.KnowledgeBase, q string) []sdk.KnowledgeBase {
+func filterKBs(items []cmdutil.VisibleKnowledgeBase, q string) []cmdutil.VisibleKnowledgeBase {
 	needle := strings.ToLower(q)
-	out := make([]sdk.KnowledgeBase, 0, len(items))
+	out := make([]cmdutil.VisibleKnowledgeBase, 0, len(items))
 	for _, kb := range items {
 		if text.ContainsFold(needle, kb.Name, kb.Description) {
 			out = append(out, kb)

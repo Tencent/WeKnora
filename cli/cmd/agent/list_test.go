@@ -15,12 +15,18 @@ import (
 )
 
 type fakeListSvc struct {
-	items []sdk.Agent
-	err   error
+	items     []sdk.Agent
+	shared    []sdk.SharedAgentInfo
+	err       error
+	sharedErr error
 }
 
 func (f *fakeListSvc) ListAgents(_ context.Context) ([]sdk.Agent, error) {
 	return f.items, f.err
+}
+
+func (f *fakeListSvc) ListSharedAgents(_ context.Context) ([]sdk.SharedAgentInfo, error) {
+	return f.shared, f.sharedErr
 }
 
 func TestList_Empty_Text(t *testing.T) {
@@ -64,10 +70,46 @@ func TestList_NonEmpty_Text_RendersColumns(t *testing.T) {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
-	for _, w := range []string{"ID", "NAME", "BUILTIN", "ag_a", "Research", "yes", "ag_b", "Triage"} {
+	for _, w := range []string{"ID", "NAME", "SOURCE", "ACCESS", "BUILTIN", "ag_a", "Research", "owned", "yes", "ag_b", "Triage"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("output missing %q in:\n%s", w, got)
 		}
+	}
+}
+
+func TestList_DefaultIncludesSharedAgents(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	now := time.Now()
+	sharedAgent := sdk.Agent{ID: "ag_shared", Name: "Partner Agent", UpdatedAt: now}
+	svc := &fakeListSvc{
+		items: []sdk.Agent{{ID: "ag_owned", Name: "Own Agent", UpdatedAt: now.Add(-time.Hour)}},
+		shared: []sdk.SharedAgentInfo{{
+			Agent: &sharedAgent, OrgName: "Partners", Permission: "viewer", SourceTenantID: 42,
+		}},
+	}
+	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	var env struct {
+		Data []cmdutil.VisibleAgent `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(env.Data) != 2 || !env.Data[0].IsShared || env.Data[0].OrgName != "Partners" {
+		t.Fatalf("unexpected merged agents: %+v", env.Data)
+	}
+}
+
+func TestList_OwnedAndSharedRejected(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	err := runList(context.Background(), &ListOptions{Owned: true, Shared: true, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, &fakeListSvc{})
+	if err == nil {
+		t.Fatal("expected mutually-exclusive flag error")
+	}
+	var typed *cmdutil.Error
+	if !errors.As(err, &typed) || typed.Code != cmdutil.CodeInputInvalidArgument {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
