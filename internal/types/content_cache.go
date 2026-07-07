@@ -45,12 +45,12 @@ func (EmbeddingCache) TableName() string { return "embedding_cache" }
 // Payload is an opaque JSON blob; the schema of that blob is owned by the
 // wiki ingest service, not by the cache table.
 type WikiMapCache struct {
-	DocContentHash  string    `gorm:"column:doc_content_hash;type:varchar(128);primaryKey"`
-	Granularity     string    `gorm:"column:granularity;type:varchar(32);primaryKey"`
-	SynthesisModel  string    `gorm:"column:synthesis_model_id;type:varchar(64);primaryKey"`
-	PromptVersion   string    `gorm:"column:prompt_version;type:varchar(64);primaryKey"`
-	Payload         string    `gorm:"column:payload;type:text"`
-	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"`
+	DocContentHash string    `gorm:"column:doc_content_hash;type:varchar(128);primaryKey"`
+	Granularity    string    `gorm:"column:granularity;type:varchar(32);primaryKey"`
+	SynthesisModel string    `gorm:"column:synthesis_model_id;type:varchar(64);primaryKey"`
+	PromptVersion  string    `gorm:"column:prompt_version;type:varchar(64);primaryKey"`
+	Payload        string    `gorm:"column:payload;type:text"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (WikiMapCache) TableName() string { return "wiki_map_cache" }
@@ -59,12 +59,12 @@ func (WikiMapCache) TableName() string { return "wiki_map_cache" }
 // relationships for that chunk) keyed by frozen chunk content hash +
 // extract config hash + chat model + prompt version.
 type GraphChunkCache struct {
-	ChunkContentHash string    `gorm:"column:chunk_content_hash;type:varchar(128);primaryKey"`
-	ExtractConfigHash string   `gorm:"column:extract_config_hash;type:varchar(128);primaryKey"`
-	ChatModelID      string    `gorm:"column:chat_model_id;type:varchar(64);primaryKey"`
-	PromptVersion    string    `gorm:"column:prompt_version;type:varchar(64);primaryKey"`
-	Payload          string    `gorm:"column:payload;type:text"`
-	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime"`
+	ChunkContentHash  string    `gorm:"column:chunk_content_hash;type:varchar(128);primaryKey"`
+	ExtractConfigHash string    `gorm:"column:extract_config_hash;type:varchar(128);primaryKey"`
+	ChatModelID       string    `gorm:"column:chat_model_id;type:varchar(64);primaryKey"`
+	PromptVersion     string    `gorm:"column:prompt_version;type:varchar(64);primaryKey"`
+	Payload           string    `gorm:"column:payload;type:text"`
+	CreatedAt         time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (GraphChunkCache) TableName() string { return "graph_chunk_cache" }
@@ -86,3 +86,31 @@ type ParseProductCache struct {
 }
 
 func (ParseProductCache) TableName() string { return "parse_product_cache" }
+
+// SummaryCache stores the LLM-generated document summary keyed by the
+// frozen document content hash + model + prompt version + config hash.
+// A hit skips the summary LLM call.
+type SummaryCache struct {
+	DocContentHash string    `gorm:"column:doc_content_hash;type:varchar(128);primaryKey"`
+	ModelID        string    `gorm:"column:model_id;type:varchar(64);primaryKey"`
+	PromptVersion  string    `gorm:"column:prompt_version;type:varchar(64);primaryKey"`
+	ConfigHash     string    `gorm:"column:config_hash;type:varchar(64);primaryKey"`
+	Summary        string    `gorm:"column:summary;type:text"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (SummaryCache) TableName() string { return "summary_cache" }
+
+// QuestionCache stores the LLM-generated chunk questions keyed by the
+// frozen chunk content hash + model + prompt version + config hash.
+// A hit skips the question-generation LLM call.
+type QuestionCache struct {
+	ChunkContentHash string    `gorm:"column:chunk_content_hash;type:varchar(128);primaryKey"`
+	ModelID          string    `gorm:"column:model_id;type:varchar(64);primaryKey"`
+	PromptVersion    string    `gorm:"column:prompt_version;type:varchar(64);primaryKey"`
+	ConfigHash       string    `gorm:"column:config_hash;type:varchar(64);primaryKey"`
+	Payload          string    `gorm:"column:payload;type:text"`
+	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (QuestionCache) TableName() string { return "question_cache" }

@@ -51,4 +51,24 @@ CREATE TABLE IF NOT EXISTS parse_product_cache (
     PRIMARY KEY (file_hash, parser_engine, parser_config_hash, render_config_hash)
 );
 
+CREATE TABLE IF NOT EXISTS summary_cache (
+    doc_content_hash VARCHAR(128) NOT NULL,
+    model_id VARCHAR(64) NOT NULL,
+    prompt_version VARCHAR(64) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    summary TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (doc_content_hash, model_id, prompt_version, config_hash)
+);
+
+CREATE TABLE IF NOT EXISTS question_cache (
+    chunk_content_hash VARCHAR(128) NOT NULL,
+    model_id VARCHAR(64) NOT NULL,
+    prompt_version VARCHAR(64) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    payload TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chunk_content_hash, model_id, prompt_version, config_hash)
+);
+
 DO $$ BEGIN RAISE NOTICE '[Migration 000065] content-addressed reparse cache tables ready'; END $$;

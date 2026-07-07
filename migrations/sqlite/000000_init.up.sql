@@ -820,3 +820,23 @@ CREATE TABLE IF NOT EXISTS parse_product_cache (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (file_hash, parser_engine, parser_config_hash, render_config_hash)
 );
+
+CREATE TABLE IF NOT EXISTS summary_cache (
+    doc_content_hash TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
+    summary TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (doc_content_hash, model_id, prompt_version, config_hash)
+);
+
+CREATE TABLE IF NOT EXISTS question_cache (
+    chunk_content_hash TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
+    payload TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chunk_content_hash, model_id, prompt_version, config_hash)
+);

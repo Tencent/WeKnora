@@ -226,3 +226,71 @@ func (r *parseProductCacheRepo) Put(ctx context.Context, row *types.ParseProduct
 		DoNothing: true,
 	}).Create(row).Error
 }
+
+// ---- SummaryCacheRepo ----
+
+// SummaryCacheRepo persists LLM-generated document summaries keyed by
+// (doc_content_hash, model_id, prompt_version, config_hash).
+type SummaryCacheRepo interface {
+	Get(ctx context.Context, docContentHash, modelID, promptVersion, configHash string) (string, bool, error)
+	Put(ctx context.Context, row *types.SummaryCache) error
+}
+
+type summaryCacheRepo struct{ db *gorm.DB }
+
+func NewSummaryCacheRepo(db *gorm.DB) SummaryCacheRepo { return &summaryCacheRepo{db: db} }
+
+func (r *summaryCacheRepo) Get(ctx context.Context, docContentHash, modelID, promptVersion, configHash string) (string, bool, error) {
+	var row types.SummaryCache
+	err := r.db.WithContext(ctx).Where(
+		"doc_content_hash = ? AND model_id = ? AND prompt_version = ? AND config_hash = ?",
+		docContentHash, modelID, promptVersion, configHash,
+	).First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return row.Summary, true, nil
+}
+
+func (r *summaryCacheRepo) Put(ctx context.Context, row *types.SummaryCache) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		DoNothing: true,
+	}).Create(row).Error
+}
+
+// ---- QuestionCacheRepo ----
+
+// QuestionCacheRepo persists LLM-generated chunk questions keyed by
+// (chunk_content_hash, model_id, prompt_version, config_hash).
+type QuestionCacheRepo interface {
+	Get(ctx context.Context, chunkContentHash, modelID, promptVersion, configHash string) (string, bool, error)
+	Put(ctx context.Context, row *types.QuestionCache) error
+}
+
+type questionCacheRepo struct{ db *gorm.DB }
+
+func NewQuestionCacheRepo(db *gorm.DB) QuestionCacheRepo { return &questionCacheRepo{db: db} }
+
+func (r *questionCacheRepo) Get(ctx context.Context, chunkContentHash, modelID, promptVersion, configHash string) (string, bool, error) {
+	var row types.QuestionCache
+	err := r.db.WithContext(ctx).Where(
+		"chunk_content_hash = ? AND model_id = ? AND prompt_version = ? AND config_hash = ?",
+		chunkContentHash, modelID, promptVersion, configHash,
+	).First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return row.Payload, true, nil
+}
+
+func (r *questionCacheRepo) Put(ctx context.Context, row *types.QuestionCache) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		DoNothing: true,
+	}).Create(row).Error
+}
