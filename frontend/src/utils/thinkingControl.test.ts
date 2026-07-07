@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { defaultThinkingControl } from './thinkingControl.ts'
+import zhCN from '../i18n/locales/zh-CN.ts'
+import { defaultThinkingControl, resolveThinkingControl } from './thinkingControl.ts'
 
 // Cases mirror internal/models/chat/provider_test.go TestResolveProvider thinking defaults.
 test('defaultThinkingControl matches backend provider adapters', () => {
@@ -33,4 +34,21 @@ test('defaultThinkingControl matches backend provider adapters', () => {
       `${provider}/${model}`,
     )
   }
+})
+
+test('resolveThinkingControl accepts extended wire formats', () => {
+  const values = [
+    'chat_template_kwargs_thinking',
+    'reasoning_effort',
+    'openrouter_reasoning',
+  ] as const
+  for (const value of values) {
+    assert.equal(resolveThinkingControl(value, 'openai', 'gpt-5'), value)
+  }
+})
+
+test('zh-CN labels distinguish chat_template_kwargs variants', () => {
+  const thinkingControl = zhCN.model.editor.thinkingControl
+  assert.equal(thinkingControl.chatTemplateKwargs.label, 'chat_template_kwargs.enable_thinking')
+  assert.equal(thinkingControl.chatTemplateKwargsThinking.label, 'chat_template_kwargs.thinking')
 })

@@ -17,14 +17,20 @@ export function isLkeapDeepSeekR1Model(modelName: string): boolean {
 export type ThinkingControlValue =
   | 'none'
   | 'chat_template_kwargs'
+  | 'chat_template_kwargs_thinking'
   | 'enable_thinking'
   | 'thinking_type'
+  | 'reasoning_effort'
+  | 'openrouter_reasoning'
 
 const THINKING_CONTROL_VALUES: ThinkingControlValue[] = [
   'none',
   'chat_template_kwargs',
+  'chat_template_kwargs_thinking',
   'enable_thinking',
   'thinking_type',
+  'reasoning_effort',
+  'openrouter_reasoning',
 ]
 
 /**
