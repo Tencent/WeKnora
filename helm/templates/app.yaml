@@ -53,11 +53,11 @@ spec:
               value: {{ .Values.app.env.TZ | quote }}
             # Database configuration
             - name: DB_DRIVER
-              value: "postgres"
+              value: {{ .Values.app.database.driver | quote }}
             - name: DB_HOST
-              value: "postgres"
+              value: {{ .Values.app.database.host | quote }}
             - name: DB_PORT
-              value: "5432"
+              value: {{ .Values.app.database.port | quote }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:

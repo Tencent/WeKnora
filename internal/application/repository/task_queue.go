@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // taskPendingOpsRepository implements interfaces.TaskPendingOpsRepository.
@@ -91,6 +92,30 @@ func (r *taskPendingOpsRepository) DeleteByIDs(ctx context.Context, ids []int64)
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
 	var newCount int
+	if r.db.Dialector.Name() != "postgres" {
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			q := tx
+			if tx.Dialector.Name() == "mysql" {
+				q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			var op types.TaskPendingOp
+			if err := q.Where("id = ?", id).First(&op).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+			newCount = op.FailCount + 1
+			return tx.Model(&types.TaskPendingOp{}).
+				Where("id = ?", id).
+				UpdateColumn("fail_count", newCount).Error
+		})
+		if err != nil {
+			return 0, err
+		}
+		return newCount, nil
+	}
+
 	err := r.db.WithContext(ctx).Raw(
 		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
 		id,

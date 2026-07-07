@@ -88,7 +88,8 @@ app:
   # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
   env:
     GIN_MODE: release
-    # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
+    # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant.
+    # When database.driver is mysql, use an external vector store instead of postgres.
     RETRIEVE_DRIVER: postgres
     # -- Storage type: local, minio, cos, tos, s3
     STORAGE_TYPE: local
@@ -98,6 +99,15 @@ app:
     CONCURRENCY_POOL_SIZE: "5"
     ENABLE_GRAPH_RAG: "false"
     TZ: UTC
+
+  # -- Primary SQL database connection.
+  # Supported drivers: postgres, mysql. The built-in PostgreSQL chart uses
+  # driver=postgres, host=postgres, port=5432. For MySQL, disable postgresql
+  # and point host/port at an external MySQL 8.x instance.
+  database:
+    driver: postgres
+    host: postgres
+    port: "5432"
 
   # -- Additional environment variables
   extraEnv: []

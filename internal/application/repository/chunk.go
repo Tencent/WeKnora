@@ -335,6 +335,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 	var flagsArgs []interface{}
 	var statusArgs []interface{}
 
+	dialect := r.db.Dialector.Name()
 	for _, chunk := range chunks {
 		ids = append(ids, chunk.ID)
 		content := common.CleanInvalidUTF8(chunk.Content)
@@ -342,13 +343,16 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		contentCases = append(contentCases, "WHEN id = ? THEN ?")
 		contentArgs = append(contentArgs, chunk.ID, content)
 
-		// Convert bool to string for PostgreSQL compatibility
-		isEnabledStr := "false"
-		if chunk.IsEnabled {
-			isEnabledStr = "true"
-		}
 		isEnabledCases = append(isEnabledCases, "WHEN id = ? THEN ?")
-		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		if dialect == "postgres" {
+			isEnabledStr := "false"
+			if chunk.IsEnabled {
+				isEnabledStr = "true"
+			}
+			isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		} else {
+			isEnabledArgs = append(isEnabledArgs, chunk.ID, chunk.IsEnabled)
+		}
 
 		tagIDCases = append(tagIDCases, "WHEN id = ? THEN ?")
 		tagIDArgs = append(tagIDArgs, chunk.ID, chunk.TagID)
@@ -377,10 +381,9 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
-
 	var sql string
-	if isPostgres {
+	switch dialect {
+	case "postgres":
 		sql = fmt.Sprintf(`
 			UPDATE chunks SET
 				content = CASE %s END,
@@ -398,7 +401,25 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(statusCases, " "),
 			strings.Join(inPlaceholders, ","),
 		)
-	} else {
+	case "mysql":
+		sql = fmt.Sprintf(`
+			UPDATE chunks SET
+				content = CASE %s END,
+				is_enabled = CASE %s END,
+				tag_id = CASE %s END,
+				flags = CASE %s END,
+				status = CASE %s END,
+				updated_at = NOW()
+			WHERE id IN (%s)
+		`,
+			strings.Join(contentCases, " "),
+			strings.Join(isEnabledCases, " "),
+			strings.Join(tagIDCases, " "),
+			strings.Join(flagsCases, " "),
+			strings.Join(statusCases, " "),
+			strings.Join(inPlaceholders, ","),
+		)
+	default:
 		sql = fmt.Sprintf(`
 			UPDATE chunks SET
 				content = CASE %s END,
@@ -663,7 +684,7 @@ func (r *chunkRepository) FindFAQChunkWithDuplicateQuestion(
 		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status = ? AND id != ?",
 			tenantID, kbID, types.ChunkTypeFAQ, types.ChunkStatusIndexed, excludeChunkID)
 
-	switch r.db.Name() {
+	switch r.db.Dialector.Name() {
 	case "mysql":
 		// MySQL 5.7+: JSON_EXTRACT for standard_question, JSON_CONTAINS for similar_questions
 		parts := []string{
@@ -1036,7 +1057,7 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	}
 
 	// Query chunks that have non-empty generated_questions in metadata
-	switch r.db.Name() {
+	switch r.db.Dialector.Name() {
 	case "postgres":
 		if err := baseQuery.
 			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").

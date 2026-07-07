@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -103,10 +106,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
-		migrationsPath = "file://migrations/sqlite"
-	}
+	migrationsPath := migrationSourceForDSN(dsn)
 
 	var m *migrate.Migrate
 	if opts.SQLiteDBPath != "" {
@@ -300,17 +300,12 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
-	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-	)
+	dbURL, err := migrationDSNFromEnv()
+	if err != nil {
+		return 0, false, err
+	}
 
-	migrationsPath := "file://migrations/versioned"
-
+	migrationsPath := migrationSourceForDSN(dbURL)
 	m, err := migrate.New(migrationsPath, dbURL)
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to create migrate instance: %w", err)
@@ -323,4 +318,50 @@ func GetMigrationVersion() (uint, bool, error) {
 	}
 
 	return version, dirty, nil
+}
+
+func migrationSourceForDSN(dsn string) string {
+	switch {
+	case strings.HasPrefix(dsn, "sqlite3://"):
+		return "file://migrations/sqlite"
+	case strings.HasPrefix(dsn, "mysql://"):
+		return "file://migrations/mysql"
+	default:
+		return "file://migrations/versioned"
+	}
+}
+
+func migrationDSNFromEnv() (string, error) {
+	switch os.Getenv("DB_DRIVER") {
+	case "mysql":
+		query := url.Values{}
+		query.Set("charset", "utf8mb4")
+		query.Set("loc", "UTC")
+		query.Set("multiStatements", "true")
+		query.Set("parseTime", "true")
+		return fmt.Sprintf(
+			"mysql://%s@tcp(%s)/%s?%s",
+			url.UserPassword(os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD")).String(),
+			net.JoinHostPort(os.Getenv("DB_HOST"), os.Getenv("DB_PORT")),
+			url.PathEscape(os.Getenv("DB_NAME")),
+			query.Encode(),
+		), nil
+	case "sqlite":
+		dbPath := os.Getenv("DB_PATH")
+		if dbPath == "" {
+			dbPath = "./data/weknora.db"
+		}
+		return "sqlite3://" + dbPath, nil
+	case "", "postgres":
+		return fmt.Sprintf(
+			"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			os.Getenv("DB_USER"),
+			url.QueryEscape(os.Getenv("DB_PASSWORD")),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		), nil
+	default:
+		return "", fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
+	}
 }

@@ -110,6 +110,10 @@ global:
 
 app:
   replicaCount: 3
+  database:
+    driver: postgres
+    host: postgres
+    port: "5432"
   resources:
     requests:
       cpu: 500m
@@ -179,6 +183,18 @@ helm install weknora ./helm \
 | `frontend.replicaCount` | Number of replicas | `1` |
 | `frontend.image.repository` | Image repository | `wechatopenai/weknora-ui` |
 | `frontend.image.tag` | Image tag | `latest` |
+
+### Primary Database
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `app.database.driver` | Primary SQL database driver (`postgres` or `mysql`) | `postgres` |
+| `app.database.host` | Primary SQL database host | `postgres` |
+| `app.database.port` | Primary SQL database port | `5432` |
+
+For MySQL deployments, set `app.database.driver=mysql`, point `app.database.host` and
+`app.database.port` to an external MySQL 8.x instance, set `postgresql.enabled=false`,
+and configure `app.env.RETRIEVE_DRIVER` to an external vector store.
 
 ### PostgreSQL (ParadeDB)
 

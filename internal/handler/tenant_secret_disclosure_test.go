@@ -44,7 +44,7 @@ func (s *stubTenantService) SearchTenants(context.Context, string, uint64, int, 
 	return nil, 0, nil
 }
 func (s *stubTenantService) UpdateAPIKey(context.Context, uint64) (string, error) { return "", nil }
-func (s *stubTenantService) ExtractTenantIDFromAPIKey(string) (uint64, error)      { return 0, nil }
+func (s *stubTenantService) ExtractTenantIDFromAPIKey(string) (uint64, error)     { return 0, nil }
 func (s *stubTenantService) BulkSetStorageQuota(context.Context, int64) (int64, error) {
 	return 0, nil
 }
@@ -127,8 +127,8 @@ func TestGetTenantKVAdminReturnsRedactedSecrets(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var payload struct {
-		Success bool                           `json:"success"`
-		Data    types.ParserEngineConfig       `json:"data"`
+		Success bool                     `json:"success"`
+		Data    types.ParserEngineConfig `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
 	assert.Equal(t, types.RedactedSecretPlaceholder, payload.Data.MinerUAPIKey)
@@ -169,7 +169,7 @@ func TestPutTenantParserConfigAdminPreservesRedactedSecrets(t *testing.T) {
 	tenant := secretTenantFixture()
 	engine := newTenantHandlerTestEngine(t, types.TenantRoleAdmin, tenant)
 
-	body := `{"mineru_api_key":"***","mineru_endpoint":"http://new-endpoint"}`
+	body := `{"mineru_api_key":"***","mineru_endpoint":"https://example.com/mineru"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/tenants/kv/parser-engine-config", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -177,5 +177,5 @@ func TestPutTenantParserConfigAdminPreservesRedactedSecrets(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, tenant.ParserEngineConfig)
 	assert.Equal(t, "parser-secret-123", tenant.ParserEngineConfig.MinerUAPIKey)
-	assert.Equal(t, "http://new-endpoint", tenant.ParserEngineConfig.MinerUEndpoint)
+	assert.Equal(t, "https://example.com/mineru", tenant.ParserEngineConfig.MinerUEndpoint)
 }

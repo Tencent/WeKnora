@@ -27,6 +27,21 @@ The cached error message you see in the UI is the same one logged at startup
 under `Database migration failed: ...`. Recent container logs are the
 authoritative source — copy them before doing anything destructive.
 
+## Supported database drivers
+
+WeKnora selects the migration directory from `DB_DRIVER`:
+
+| `DB_DRIVER` | Migration directory | Notes |
+|-------------|---------------------|-------|
+| `postgres` | `migrations/versioned` | Default path for PostgreSQL / ParadeDB. PostgreSQL extensions may be required. |
+| `mysql` | `migrations/mysql` | MySQL 8.x path. New MySQL installs start from baseline version `64`. |
+| `sqlite` | `migrations/sqlite` | Lite / embedded path. |
+
+When `DB_DRIVER=mysql`, do not use `RETRIEVE_DRIVER=postgres`; the PostgreSQL
+retriever depends on PostgreSQL / ParadeDB vector features. Use an external
+vector store such as Qdrant, Milvus, Weaviate, Doris, Tencent VectorDB,
+Elasticsearch, or OpenSearch.
+
 ---
 
 ## Common causes
@@ -71,7 +86,40 @@ PostgreSQL server — install the corresponding OS package (e.g.
 `postgresql-contrib` for `pg_trgm`) or switch to an image that ships it
 preinstalled, then retry.
 
-### 2. Dirty migration state
+### 2. MySQL baseline did not apply
+
+MySQL deployments use a baseline schema migration instead of replaying every
+PostgreSQL-specific historical migration. On a new MySQL database, the expected
+schema migration version is `64`.
+
+**Symptoms in the error**:
+
+```
+Error 1064 (42000): You have an error in your SQL syntax
+Unknown database 'WeKnora'
+Access denied for user ...
+```
+
+**Fix**:
+
+1. Confirm the database exists and the configured role can create tables.
+2. Confirm the application is using the MySQL driver:
+
+   ```bash
+   DB_DRIVER=mysql ./scripts/migrate.sh version
+   ```
+
+3. Check the recorded migration state:
+
+   ```sql
+   SELECT version, dirty FROM schema_migrations;
+   ```
+
+4. If the database is empty and no user data has been written yet, recreate it
+   and run the MySQL migration path again. If it contains user data, do not
+   drop tables; collect the migration error and open an issue.
+
+### 3. Dirty migration state
 
 If a migration crashed partway through (OOM, container kill, network blip)
 `golang-migrate` marks the schema as "dirty" at the failing version. By
@@ -100,7 +148,7 @@ After that, restart WeKnora.
 Or set `AUTO_RECOVER_DIRTY=true` (the default in recent versions) and just
 restart — startup will perform the same `force` + retry automatically.
 
-### 3. Insufficient privileges on the database role
+### 4. Insufficient privileges on the database role
 
 Some migrations create extensions or alter shared catalogs, which require
 either superuser or `CREATEROLE` / `CREATEDB`. Errors look like:
@@ -114,7 +162,10 @@ ERROR: must be owner of database ...
 pre-create the extensions / objects as a superuser ahead of time, then
 restart. The migration's `CREATE EXTENSION IF NOT EXISTS` will then no-op.
 
-### 4. Out-of-disk during `CREATE INDEX`
+For MySQL, the configured role must be able to create, alter, index, and drop
+tables in the selected `DB_NAME`.
+
+### 5. Out-of-disk during `CREATE INDEX`
 
 GIN / pgvector indexes can require significant temporary space. Errors:
 
@@ -126,7 +177,10 @@ ERROR: cannot create temporary tables in transaction
 **Fix**: free disk on the volume backing `PGDATA`, then restart. The
 migration will retry the index build.
 
-### 5. Schema drift from manual edits
+For MySQL, free disk on the volume backing the MySQL data directory, then
+restart and retry the migration.
+
+### 6. Schema drift from manual edits
 
 If you previously edited tables / columns by hand and a later migration
 expects the original shape, it will fail with mismatched-type errors. The
@@ -141,11 +195,14 @@ migration's `*.up.sql` and then re-run pending migrations.
    your browser scroll — it is the complete `golang-migrate` error. The
    container log shows the same content with stack context.
 2. **Identify the failing migration**: the version number in the error (or
-   `make migrate-version`) points to a file under `migrations/versioned/`.
-   Open `migrations/versioned/<version>_*.up.sql` and look for the statement
-   matching the error type (extension, index, function, foreign key, …).
-3. **Run the failing statement manually** against the DB using `psql`. The
-   error will be far more specific than the migration wrapper's.
+   `make migrate-version`) points to a file under the directory selected by
+   `DB_DRIVER`: `migrations/versioned/` for PostgreSQL, `migrations/mysql/`
+   for MySQL, or `migrations/sqlite/` for SQLite. Open the matching
+   `<version>_*.up.sql` file and look for the statement matching the error
+   type (extension, index, function, foreign key, …).
+3. **Run the failing statement manually** against the DB using `psql` for
+   PostgreSQL or `mysql` for MySQL. The error will be far more specific than
+   the migration wrapper's.
 4. **Fix the underlying cause** (install extension, fix privileges, free
    disk, …), then either:
    - Restart WeKnora and let auto-recovery retry; **or**
@@ -168,11 +225,17 @@ Include:
 
 - WeKnora version + commit ID (from the system info page).
 - The full error from the system info page (or container logs).
-- PostgreSQL version (`SELECT version();`) and how it was deployed (vanilla,
-  ParadeDB, Aurora, Aliyun RDS, …).
-- The output of:
+- `DB_DRIVER` and the database version (`SELECT version();` for PostgreSQL,
+  `SELECT VERSION();` for MySQL), including how it was deployed (vanilla,
+  ParadeDB, RDS, self-managed Docker, …).
+- For PostgreSQL, the output of:
   ```sql
   SELECT extname, extversion FROM pg_extension;
+  ```
+- For MySQL, the output of:
+  ```sql
+  SELECT version, dirty FROM schema_migrations;
+  SHOW TABLES;
   ```
 - Any non-default values of `RETRIEVE_DRIVER`, `AUTO_MIGRATE`, and
   `AUTO_RECOVER_DIRTY`.

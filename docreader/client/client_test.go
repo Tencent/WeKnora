@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"log"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -16,8 +17,22 @@ func init() {
 	log.Println("INFO: Initializing DocReader client tests")
 }
 
+func requireDocReaderService(t *testing.T) string {
+	t.Helper()
+	addr := os.Getenv("DOCREADER_TEST_ADDR")
+	if addr == "" {
+		addr = "localhost:50051"
+	}
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err != nil {
+		t.Skipf("DocReader service is not available at %s: %v", addr, err)
+	}
+	_ = conn.Close()
+	return addr
+}
+
 func TestReadURL(t *testing.T) {
-	client, err := NewClient("localhost:50051")
+	client, err := NewClient(requireDocReaderService(t))
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -47,7 +62,7 @@ func TestReadURL(t *testing.T) {
 }
 
 func TestReadFile(t *testing.T) {
-	client, err := NewClient("localhost:50051")
+	client, err := NewClient(requireDocReaderService(t))
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
