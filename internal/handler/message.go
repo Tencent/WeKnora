@@ -327,15 +327,15 @@ func (h *MessageHandler) DeleteMessageFeedback(c *gin.Context) {
 }
 
 // SaveMessageKnowledgeChunks godoc
-// @Summary      Save answer knowledge chunk relations
-// @Description  Persist the normalized relation between an assistant answer and referenced knowledge chunks.
+// @Summary      Save answer knowledge chunks
+// @Description  Persist the normalized mapping between an assistant answer and referenced knowledge chunks.
 // @Tags         messages
 // @Accept       json
 // @Produce      json
 // @Param        session_id  path      string  true  "Session ID"
 // @Param        id          path      string  true  "Assistant message ID"
 // @Param        request     body      SaveMessageKnowledgeChunksRequest  true  "Referenced chunks"
-// @Success      200         {object}  map[string]interface{}  "Saved relations"
+// @Success      200         {object}  map[string]interface{}  "Saved chunks"
 // @Failure      400         {object}  errors.AppError         "Invalid request"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -368,7 +368,7 @@ func (h *MessageHandler) SaveMessageKnowledgeChunks(c *gin.Context) {
 		}
 	}
 
-	relations, err := h.MessageService.SaveMessageKnowledgeChunkRelations(ctx, sessionID, messageID, refs)
+	chunks, err := h.MessageService.SaveMessageKnowledgeChunks(ctx, sessionID, messageID, refs)
 	if err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
@@ -385,7 +385,7 @@ func (h *MessageHandler) SaveMessageKnowledgeChunks(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    relations,
+		"data":    chunks,
 	})
 }
 
@@ -395,7 +395,7 @@ type SaveMessageFeedbackRequest struct {
 	Reason       string `json:"reason"`
 }
 
-// SaveMessageKnowledgeChunksRequest defines the request body for answer-to-chunk relation persistence.
+// SaveMessageKnowledgeChunksRequest defines the request body for answer-to-chunk persistence.
 type SaveMessageKnowledgeChunksRequest struct {
 	References []types.MessageKnowledgeChunkReference `json:"references"`
 	ChunkIDs   []string                               `json:"chunk_ids"`

@@ -115,7 +115,7 @@ import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
-import { getMessageList, getSession } from "@/api/chat/index";
+import { getMessageList, getSession, saveMessageKnowledgeChunks } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { useStream } from '../../api/chat/streame'
 import { useMenuStore } from '@/stores/menu';
@@ -205,7 +205,8 @@ const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
 const isReplying = ref(false);
-const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant message ID
+const currentAssistantMessageId = ref('');
+const persistedKnowledgeRelationKeys = new Set(); // 当前正在生成的 assistant message ID
 // True only while attaching to an in-flight *IM-originated* reply via continue-stream.
 // Such replies are generated on the IM side and never stream through this server, so
 // continue-stream always fails even though the answer is coming — recover by polling
@@ -434,6 +435,33 @@ const handleScroll = () => {
 
 const fetchMessageList = (data) => getMessageList(data);
 
+const persistAnswerKnowledgeRelations = async (message) => {
+    const messageId = message?.id;
+    const refs = Array.isArray(message?.knowledge_references) ? message.knowledge_references : [];
+    if (!session_id.value || !messageId || refs.length === 0) return;
+
+    const references = refs
+        .map((ref) => ({
+            chunk_id: ref?.id || ref?.chunk_id || '',
+            knowledge_id: ref?.knowledge_id || '',
+            knowledge_base_id: ref?.knowledge_base_id || '',
+            chunk_index: Number.isFinite(Number(ref?.chunk_index)) ? Number(ref.chunk_index) : 0,
+        }))
+        .filter((ref) => ref.chunk_id);
+    if (references.length === 0) return;
+
+    const relationKey = `${session_id.value}:${messageId}:${references.map((ref) => ref.chunk_id).sort().join(',')}`;
+    if (persistedKnowledgeRelationKeys.has(relationKey)) return;
+    persistedKnowledgeRelationKeys.add(relationKey);
+
+    try {
+        await saveMessageKnowledgeChunks(session_id.value, messageId, references);
+    } catch (err) {
+        persistedKnowledgeRelationKeys.delete(relationKey);
+        console.warn('[Answer Knowledge Relations] Failed to persist referenced chunks:', err);
+    }
+};
+
 const {
     findLastMessage,
     shouldRenderAssistantMessage,
@@ -497,7 +525,11 @@ const {
         attachStreamDebugToMessage(message);
         pendingStreamDebug.value = null;
     },
+    onKnowledgeReferencesReady: (message) => {
+        persistAnswerKnowledgeRelations(message);
+    },
 });
+
 
 const showGlobalTypingIndicator = computed(() =>
     shouldShowGlobalTypingIndicator(messagesList, loading.value, isImRecovering.value),

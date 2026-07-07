@@ -1,16 +1,30 @@
 <template>
-  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-embedded': embeddedMode, 'is-rag-mode': ragMode }">
-
+  <div
+    ref="rootElement"
+    class="agent-stream-display"
+    :class="{ 'is-embedded': embeddedMode, 'is-rag-mode': ragMode }"
+  >
     <!-- Collapsed intermediate steps (tree root) -->
     <div v-if="shouldShowCollapsedSteps" class="tree-container">
       <div class="tool-event">
         <div class="action-card tree-root" @click="toggleIntermediateSteps">
           <div class="action-header">
             <div class="action-title">
-              <span class="action-title-icon icon-mask" :style="maskIconStyle(agentIcon)" aria-hidden="true" />
-              <span class="action-name tree-root-summary" v-html="intermediateStepsSummaryHtml"></span>
+              <span
+                class="action-title-icon icon-mask"
+                :style="maskIconStyle(agentIcon)"
+                aria-hidden="true"
+              />
+              <span
+                class="action-name tree-root-summary"
+                v-html="intermediateStepsSummaryHtml"
+              ></span>
               <div class="action-show-icon">
-                <t-icon :name="showIntermediateSteps ? 'chevron-down' : 'chevron-right'" />
+                <t-icon
+                  :name="
+                    showIntermediateSteps ? 'chevron-down' : 'chevron-right'
+                  "
+                />
               </div>
             </div>
           </div>
@@ -18,16 +32,30 @@
       </div>
       <!-- Tree children (intermediate steps) -->
       <div v-if="showIntermediateSteps" class="tree-children">
-        <template v-for="(event, index) in visibleIntermediateEvents" :key="getEventKey(event, index)">
-          <div v-if="event && event.type" class="tree-child"
-            :class="{ 'tree-child-last': !isConversationDone && index === visibleIntermediateEvents.length - 1 }">
+        <template
+          v-for="(event, index) in visibleIntermediateEvents"
+          :key="getEventKey(event, index)"
+        >
+          <div
+            v-if="event && event.type"
+            class="tree-child"
+            :class="{
+              'tree-child-last':
+                !isConversationDone &&
+                index === visibleIntermediateEvents.length - 1,
+            }"
+          >
             <div class="tree-branch"></div>
             <div class="tree-child-content">
               <!-- Plan Task Change Event -->
-              <div v-if="event.type === 'plan_task_change'" class="plan-task-change-event">
+              <div
+                v-if="event.type === 'plan_task_change'"
+                class="plan-task-change-event"
+              >
                 <div class="plan-task-change-card">
                   <div class="plan-task-change-content">
-                    <strong>{{ $t('agent.taskLabel') }}</strong> {{ event.task }}
+                    <strong>{{ $t("agent.taskLabel") }}</strong>
+                    {{ event.task }}
                   </div>
                 </div>
               </div>
@@ -36,19 +64,43 @@
                    preamble was folded in, it becomes the card title and the
                    reasoning is the expandable body. -->
               <div v-if="event.type === 'thinking'" class="tool-event">
-                <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
-                  <div class="action-header" @click="toggleEvent(event.event_id)">
+                <div
+                  class="action-card"
+                  :class="{
+                    'action-pending': isThinkingActive(event.event_id),
+                  }"
+                >
+                  <div
+                    class="action-header"
+                    @click="toggleEvent(event.event_id)"
+                  >
                     <div class="action-title">
-                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
-                        aria-hidden="true" />
-                      <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                      <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think')
-                      }}</span>
-                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
-                        }}</span>
+                      <span
+                        class="action-title-icon icon-mask"
+                        :style="maskIconStyle(thinkingIcon)"
+                        aria-hidden="true"
+                      />
+                      <span
+                        v-if="event.title"
+                        class="action-name action-preamble-title"
+                        >{{ event.title }}</span
+                      >
+                      <span
+                        v-else-if="isEventExpanded(event.event_id)"
+                        class="action-name"
+                        >{{ $t("agent.think") }}</span
+                      >
+                      <span
+                        v-else-if="getThinkingSummary(event)"
+                        class="action-summary"
+                        >{{ getThinkingSummary(event) }}</span
+                      >
                     </div>
                   </div>
-                  <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                  <div
+                    v-if="event.content && isEventExpanded(event.event_id)"
+                    class="action-details"
+                  >
                     <div class="thinking-detail-content markdown-content">
                       <div v-html="renderMarkdownContent(event.content)"></div>
                     </div>
@@ -57,111 +109,262 @@
               </div>
 
               <!-- Thinking Tool Call -->
-              <div v-else-if="event.type === 'tool_call' && event.tool_name === 'thinking'" class="tool-event">
-                <div class="action-card"
-                  :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
-                  <div class="action-header" @click="toggleEvent(event.tool_call_id)">
+              <div
+                v-else-if="
+                  event.type === 'tool_call' && event.tool_name === 'thinking'
+                "
+                class="tool-event"
+              >
+                <div
+                  class="action-card"
+                  :class="{
+                    'action-pending':
+                      event.pending || isThinkingActive(event.tool_call_id),
+                  }"
+                >
+                  <div
+                    class="action-header"
+                    @click="toggleEvent(event.tool_call_id)"
+                  >
                     <div class="action-title">
-                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
-                        aria-hidden="true" />
-                      <span class="action-name">{{ $t('agent.think') }}</span>
-                      <span v-if="event.tool_data?.thought_number" class="action-badge">{{
-                        event.tool_data.thought_number }}/{{ event.tool_data.total_thoughts }}</span>
-                      <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
-                        class="action-summary">{{ getThinkingSummary(event) }}</span>
+                      <span
+                        class="action-title-icon icon-mask"
+                        :style="maskIconStyle(thinkingIcon)"
+                        aria-hidden="true"
+                      />
+                      <span class="action-name">{{ $t("agent.think") }}</span>
+                      <span
+                        v-if="event.tool_data?.thought_number"
+                        class="action-badge"
+                        >{{ event.tool_data.thought_number }}/{{
+                          event.tool_data.total_thoughts
+                        }}</span
+                      >
+                      <span
+                        v-if="
+                          getThinkingSummary(event) &&
+                          !isEventExpanded(event.tool_call_id)
+                        "
+                        class="action-summary"
+                        >{{ getThinkingSummary(event) }}</span
+                      >
                     </div>
                   </div>
-                  <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
+                  <div
+                    v-if="
+                      event.tool_data?.thought &&
+                      isEventExpanded(event.tool_call_id)
+                    "
+                    class="action-details"
+                  >
                     <div class="thinking-detail-content markdown-content">
-                      <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
+                      <div
+                        v-html="renderMarkdownContent(event.tool_data.thought)"
+                      ></div>
                     </div>
                   </div>
                 </div>
               </div>
 
               <!-- MCP tool human approval (issue #1173) -->
-              <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
-                <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
-                  :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
-                  :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
-                  :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
-                  :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
+              <div
+                v-else-if="event.type === 'tool_approval_required'"
+                class="tool-event"
+              >
+                <ToolApprovalCard
+                  :pending-id="event.pending_id"
+                  :service-name="event.service_name || ''"
+                  :mcp-tool-name="event.mcp_tool_name || ''"
+                  :description="event.description"
+                  :args-json="event.args_json"
+                  :timeout-seconds="event.timeout_seconds"
+                  :requested-at="event.requested_at"
+                  :resolved="event.resolved"
+                  :approved="event.approved"
+                  :resolve-reason="event.resolve_reason"
+                  v-bind="embedAuthProps"
+                />
               </div>
 
               <!-- MCP OAuth in-conversation authorization prompt -->
-              <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
-                <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
-                  :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
-                  :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
-                  :resolved="event.resolved" :authorized="event.authorized"
-                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out" :canceled="event.canceled"
-                  v-bind="embedAuthProps" />
+              <div
+                v-else-if="event.type === 'mcp_oauth_required'"
+                class="tool-event"
+              >
+                <McpOAuthCard
+                  :pending-id="event.pending_id"
+                  :service-id="event.service_id || ''"
+                  :service-name="event.service_name || ''"
+                  :mcp-tool-name="event.mcp_tool_name || ''"
+                  :timeout-seconds="event.timeout_seconds"
+                  :requested-at="event.requested_at"
+                  :resolved="event.resolved"
+                  :authorized="event.authorized"
+                  :resolve-reason="event.resolve_reason"
+                  :timed-out="event.timed_out"
+                  :canceled="event.canceled"
+                  v-bind="embedAuthProps"
+                />
               </div>
 
               <!-- Tool Call Event (non-thinking) -->
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
-                <div class="action-card" :class="{
-                  'action-pending': event.pending,
-                  'action-error': event.success === false
-                }">
-                  <div class="action-header" @click="handleActionHeaderClick(event)"
-                    :class="{ 'no-results': !hasResults(event) }">
+                <div
+                  class="action-card"
+                  :class="{
+                    'action-pending': event.pending,
+                    'action-error': event.success === false,
+                  }"
+                >
+                  <div
+                    class="action-header"
+                    @click="handleActionHeaderClick(event)"
+                    :class="{ 'no-results': !hasResults(event) }"
+                  >
                     <div class="action-title">
-                      <t-icon v-if="event.tool_name" class="action-title-icon"
-                        :name="getToolIconName(event.tool_name)" />
-                      <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
-                        :content="t('agent.updatePlan')" placement="top">
-                        <span class="action-name">{{ $t('agent.updatePlan') }}</span>
+                      <t-icon
+                        v-if="event.tool_name"
+                        class="action-title-icon"
+                        :name="getToolIconName(event.tool_name)"
+                      />
+                      <t-tooltip
+                        v-if="
+                          event.tool_name === 'todo_write' &&
+                          event.tool_data?.steps
+                        "
+                        :content="t('agent.updatePlan')"
+                        placement="top"
+                      >
+                        <span class="action-name">{{
+                          $t("agent.updatePlan")
+                        }}</span>
                       </t-tooltip>
-                      <t-tooltip v-else :content="getToolTitle(event)" placement="top">
-                        <span class="action-name">{{ getToolTitle(event) }}</span>
+                      <t-tooltip
+                        v-else
+                        :content="getToolTitle(event)"
+                        placement="top"
+                      >
+                        <span class="action-name">{{
+                          getToolTitle(event)
+                        }}</span>
                       </t-tooltip>
                     </div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'todo_write' && event.tool_data?.steps"
-                    class="plan-status-summary-fixed">
+                  <div
+                    v-if="
+                      !event.pending &&
+                      event.tool_name === 'todo_write' &&
+                      event.tool_data?.steps
+                    "
+                    class="plan-status-summary-fixed"
+                  >
                     <div class="plan-status-text">
-                      <template v-for="(part, partIndex) in getPlanStatusItems(event)" :key="partIndex">
-                        <t-icon :name="part.icon" :class="['status-icon', part.class]" />
+                      <template
+                        v-for="(part, partIndex) in getPlanStatusItems(event)"
+                        :key="partIndex"
+                      >
+                        <t-icon
+                          :name="part.icon"
+                          :class="['status-icon', part.class]"
+                        />
                         <span>{{ part.label }} {{ part.count }}</span>
-                        <span v-if="partIndex < getPlanStatusItems(event).length - 1" class="separator">·</span>
+                        <span
+                          v-if="
+                            partIndex < getPlanStatusItems(event).length - 1
+                          "
+                          class="separator"
+                          >·</span
+                        >
                       </template>
                     </div>
                   </div>
 
                   <div
-                    v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data"
-                    class="search-results-summary-fixed">
-                    <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
+                    v-if="
+                      !event.pending &&
+                      (event.tool_name === 'search_knowledge' ||
+                        event.tool_name === 'knowledge_search') &&
+                      event.tool_data
+                    "
+                    class="search-results-summary-fixed"
+                  >
+                    <div
+                      class="results-summary-text"
+                      v-html="getSearchResultsSummary(event)"
+                    ></div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'web_search' && event.tool_data"
-                    class="search-results-summary-fixed">
-                    <div class="results-summary-text"
-                      v-html="t('agent.webSearchFound', { count: getResultsCount(event.tool_data) })">
-                    </div>
+                  <div
+                    v-if="
+                      !event.pending &&
+                      event.tool_name === 'web_search' &&
+                      event.tool_data
+                    "
+                    class="search-results-summary-fixed"
+                  >
+                    <div
+                      class="results-summary-text"
+                      v-html="
+                        t('agent.webSearchFound', {
+                          count: getResultsCount(event.tool_data),
+                        })
+                      "
+                    ></div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data"
-                    class="search-results-summary-fixed grep-summary">
-                    <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
+                  <div
+                    v-if="
+                      !event.pending &&
+                      event.tool_name === 'grep_chunks' &&
+                      event.tool_data
+                    "
+                    class="search-results-summary-fixed grep-summary"
+                  >
+                    <div
+                      class="results-summary-text"
+                      v-html="getGrepResultsSummary(event.tool_data)"
+                    ></div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'list_knowledge_chunks' && event.tool_data"
-                    class="search-results-summary-fixed knowledge-chunks-summary">
-                    <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
+                  <div
+                    v-if="
+                      !event.pending &&
+                      event.tool_name === 'list_knowledge_chunks' &&
+                      event.tool_data
+                    "
+                    class="search-results-summary-fixed knowledge-chunks-summary"
+                  >
+                    <div
+                      class="results-summary-text"
+                      v-html="getKnowledgeChunksSummary(event.tool_data)"
+                    ></div>
                   </div>
 
-                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)"
-                    class="action-details">
-                    <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
-                      <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
-                        :output="event.output" :arguments="event.arguments" />
+                  <div
+                    v-if="
+                      isEventExpanded(event.tool_call_id) &&
+                      !event.pending &&
+                      hasResults(event)
+                    "
+                    class="action-details"
+                  >
+                    <div
+                      v-if="event.display_type && event.tool_data"
+                      class="tool-result-wrapper"
+                    >
+                      <ToolResultRenderer
+                        :display-type="event.display_type"
+                        :tool-data="event.tool_data"
+                        :output="event.output"
+                        :arguments="event.arguments"
+                      />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
-                        <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
+                        <span class="fallback-label">{{
+                          $t("chat.rawOutputLabel")
+                        }}</span>
                       </div>
                       <div class="detail-output-wrapper">
                         <div class="detail-output">{{ event.output }}</div>
@@ -174,14 +377,17 @@
             </div>
           </div>
         </template>
-        <div v-if="isConversationDone" class="tree-child tree-child-last agent-step-done">
+        <div
+          v-if="isConversationDone"
+          class="tree-child tree-child-last agent-step-done"
+        >
           <div class="tree-branch"></div>
           <div class="tree-child-content">
             <div class="action-card">
               <div class="action-header no-results">
                 <div class="action-title">
                   <t-icon class="action-title-icon" name="check-circle" />
-                  <span class="action-name">{{ t('common.finish') }}</span>
+                  <span class="action-name">{{ t("common.finish") }}</span>
                 </div>
               </div>
             </div>
@@ -191,25 +397,44 @@
     </div>
 
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
-    <div v-if="!ragMode || displayEvents.length > 0 || showAgentActivityIndicator" ref="streamingStepsContainer"
-      class="streaming-steps-container" :class="{
-        'streaming-steps-constrained': !answerEverStarted && !isConversationDone,
-        'is-streaming-timeline': showStreamingTimeline
-      }">
-      <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
-        <div v-if="event && event.type" class="event-item" :class="{
-          'event-answer': event.type === 'answer',
-          'tree-child': isStreamingTimelineEvent(event),
-          'tree-child-last': isStreamingTimelineEvent(event) && !showAgentActivityIndicator && index === lastStreamingTimelineEventIndex
-        }">
+    <div
+      v-if="!ragMode || displayEvents.length > 0 || showAgentActivityIndicator"
+      ref="streamingStepsContainer"
+      class="streaming-steps-container"
+      :class="{
+        'streaming-steps-constrained':
+          !answerEverStarted && !isConversationDone,
+        'is-streaming-timeline': showStreamingTimeline,
+      }"
+    >
+      <template
+        v-for="(event, index) in displayEvents"
+        :key="getEventKey(event, index)"
+      >
+        <div
+          v-if="event && event.type"
+          class="event-item"
+          :class="{
+            'event-answer': event.type === 'answer',
+            'tree-child': isStreamingTimelineEvent(event),
+            'tree-child-last':
+              isStreamingTimelineEvent(event) &&
+              !showAgentActivityIndicator &&
+              index === lastStreamingTimelineEventIndex,
+          }"
+        >
           <div v-if="isStreamingTimelineEvent(event)" class="tree-branch"></div>
-          <div :class="{ 'tree-child-content': isStreamingTimelineEvent(event) }">
-
+          <div
+            :class="{ 'tree-child-content': isStreamingTimelineEvent(event) }"
+          >
             <!-- Plan Task Change Event -->
-            <div v-if="event.type === 'plan_task_change'" class="plan-task-change-event">
+            <div
+              v-if="event.type === 'plan_task_change'"
+              class="plan-task-change-event"
+            >
               <div class="plan-task-change-card">
                 <div class="plan-task-change-content">
-                  <strong>{{ $t('agent.taskLabel') }}</strong> {{ event.task }}
+                  <strong>{{ $t("agent.taskLabel") }}</strong> {{ event.task }}
                 </div>
               </div>
             </div>
@@ -218,17 +443,40 @@
              from the answer area) is shown as the card title; the reasoning is
              the expandable body. -->
             <div v-if="event.type === 'thinking'" class="tool-event">
-              <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
+              <div
+                class="action-card"
+                :class="{ 'action-pending': isThinkingActive(event.event_id) }"
+              >
                 <div class="action-header" @click="toggleEvent(event.event_id)">
                   <div class="action-title">
-                    <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
-                    <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                    <span v-else class="action-name">{{ $t('agent.think') }}</span>
-                    <span v-if="!event.title && getThinkingSummary(event) && !isEventExpanded(event.event_id)"
-                      class="action-summary">{{ getThinkingSummary(event) }}</span>
+                    <span
+                      class="action-title-icon icon-mask"
+                      :style="maskIconStyle(thinkingIcon)"
+                      aria-hidden="true"
+                    />
+                    <span
+                      v-if="event.title"
+                      class="action-name action-preamble-title"
+                      >{{ event.title }}</span
+                    >
+                    <span v-else class="action-name">{{
+                      $t("agent.think")
+                    }}</span>
+                    <span
+                      v-if="
+                        !event.title &&
+                        getThinkingSummary(event) &&
+                        !isEventExpanded(event.event_id)
+                      "
+                      class="action-summary"
+                      >{{ getThinkingSummary(event) }}</span
+                    >
                   </div>
                 </div>
-                <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                <div
+                  v-if="event.content && isEventExpanded(event.event_id)"
+                  class="action-details"
+                >
                   <div class="thinking-detail-content markdown-content">
                     <div v-html="renderMarkdownContent(event.content)"></div>
                   </div>
@@ -237,146 +485,357 @@
             </div>
 
             <!-- MCP tool human approval -->
-            <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
-              <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
-                :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
-                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
-                :approved="event.approved" :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
+            <div
+              v-else-if="event.type === 'tool_approval_required'"
+              class="tool-event"
+            >
+              <ToolApprovalCard
+                :pending-id="event.pending_id"
+                :service-name="event.service_name || ''"
+                :mcp-tool-name="event.mcp_tool_name || ''"
+                :description="event.description"
+                :args-json="event.args_json"
+                :timeout-seconds="event.timeout_seconds"
+                :requested-at="event.requested_at"
+                :resolved="event.resolved"
+                :approved="event.approved"
+                :resolve-reason="event.resolve_reason"
+                v-bind="embedAuthProps"
+              />
             </div>
 
             <!-- MCP OAuth in-conversation authorization prompt -->
-            <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
-              <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
-                :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
-                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
-                :authorized="event.authorized" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
-                :canceled="event.canceled" v-bind="embedAuthProps" />
+            <div
+              v-else-if="event.type === 'mcp_oauth_required'"
+              class="tool-event"
+            >
+              <McpOAuthCard
+                :pending-id="event.pending_id"
+                :service-id="event.service_id || ''"
+                :service-name="event.service_name || ''"
+                :mcp-tool-name="event.mcp_tool_name || ''"
+                :timeout-seconds="event.timeout_seconds"
+                :requested-at="event.requested_at"
+                :resolved="event.resolved"
+                :authorized="event.authorized"
+                :resolve-reason="event.resolve_reason"
+                :timed-out="event.timed_out"
+                :canceled="event.canceled"
+                v-bind="embedAuthProps"
+              />
             </div>
 
             <!-- Thinking Tool Call -->
-            <div v-else-if="event.type === 'tool_call' && event.tool_name === 'thinking'" class="tool-event">
-              <div class="action-card"
-                :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
-                <div class="action-header" @click="toggleEvent(event.tool_call_id)">
+            <div
+              v-else-if="
+                event.type === 'tool_call' && event.tool_name === 'thinking'
+              "
+              class="tool-event"
+            >
+              <div
+                class="action-card"
+                :class="{
+                  'action-pending':
+                    event.pending || isThinkingActive(event.tool_call_id),
+                }"
+              >
+                <div
+                  class="action-header"
+                  @click="toggleEvent(event.tool_call_id)"
+                >
                   <div class="action-title">
-                    <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
-                    <span class="action-name">{{ $t('agent.think') }}</span>
-                    <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number
-                    }}/{{ event.tool_data.total_thoughts }}</span>
-                    <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
-                      class="action-summary">{{ getThinkingSummary(event) }}</span>
+                    <span
+                      class="action-title-icon icon-mask"
+                      :style="maskIconStyle(thinkingIcon)"
+                      aria-hidden="true"
+                    />
+                    <span class="action-name">{{ $t("agent.think") }}</span>
+                    <span
+                      v-if="event.tool_data?.thought_number"
+                      class="action-badge"
+                      >{{ event.tool_data.thought_number }}/{{
+                        event.tool_data.total_thoughts
+                      }}</span
+                    >
+                    <span
+                      v-if="
+                        getThinkingSummary(event) &&
+                        !isEventExpanded(event.tool_call_id)
+                      "
+                      class="action-summary"
+                      >{{ getThinkingSummary(event) }}</span
+                    >
                   </div>
                 </div>
-                <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
+                <div
+                  v-if="
+                    event.tool_data?.thought &&
+                    isEventExpanded(event.tool_call_id)
+                  "
+                  class="action-details"
+                >
                   <div class="thinking-detail-content markdown-content">
-                    <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
+                    <div
+                      v-html="renderMarkdownContent(event.tool_data.thought)"
+                    ></div>
                   </div>
                 </div>
               </div>
             </div>
 
             <!-- Answer Event -->
-            <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))"
-              class="answer-event">
-              <div v-if="event.content && event.content.trim()" class="answer-content markdown-content">
-                <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
-                </div>
+            <div
+              v-else-if="
+                event.type === 'answer' &&
+                (event.done || (event.content && event.content.trim()))
+              "
+              class="answer-event"
+            >
+              <div
+                v-if="event.content && event.content.trim()"
+                class="answer-content markdown-content"
+              >
+                <div
+                  v-stable-html="
+                    renderAnswerContent(
+                      event === activeAnswerEventRef
+                        ? typedAnswer
+                        : event.content,
+                    )
+                  "
+                ></div>
               </div>
-              <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
-                <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
-                  :title="$t('agent.copy')">
+              <div
+                v-if="
+                  event.done &&
+                  event.content &&
+                  event.content.trim() &&
+                  !embeddedMode
+                "
+                class="answer-toolbar"
+              >
+                <t-button
+                  size="small"
+                  variant="outline"
+                  shape="round"
+                  @click.stop="handleCopyAnswer(event)"
+                  :title="$t('agent.copy')"
+                >
                   <t-icon name="copy" />
                 </t-button>
-                <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
-                  :title="$t('agent.addToKnowledgeBase')">
+                <t-button
+                  size="small"
+                  variant="outline"
+                  shape="round"
+                  @click.stop="handleAddToKnowledge(event)"
+                  :title="$t('agent.addToKnowledgeBase')"
+                >
                   <t-icon name="bookmark-add" />
                 </t-button>
-                <t-button size="small" variant="outline" shape="round"
-                  :class="['answer-feedback-btn', { 'is-active': getAnswerFeedbackType(event) === 'like' }]"
-                  title="点赞" @click.stop="handleLikeAnswer(event)">
+                <t-button
+                  size="small"
+                  variant="outline"
+                  shape="round"
+                  :class="[
+                    'answer-feedback-btn',
+                    { 'is-active': getAnswerFeedbackType(event) === 'like' },
+                  ]"
+                  title="点赞"
+                  @click.stop="handleLikeAnswer(event)"
+                >
                   <t-icon name="thumb-up" />
                 </t-button>
-                <t-button size="small" variant="outline" shape="round"
-                  :class="['answer-feedback-btn', 'is-negative', { 'is-active': getAnswerFeedbackType(event) === 'dislike' }]"
-                  title="点踩" @click.stop="handleDislikeAnswer(event)">
+                <t-button
+                  size="small"
+                  variant="outline"
+                  shape="round"
+                  :class="[
+                    'answer-feedback-btn',
+                    'is-negative',
+                    { 'is-active': getAnswerFeedbackType(event) === 'dislike' },
+                  ]"
+                  title="点踩"
+                  @click.stop="handleDislikeAnswer(event)"
+                >
                   <t-icon name="thumb-down" />
                 </t-button>
-                <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
-                  <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                <t-tooltip
+                  v-if="event.is_fallback"
+                  :content="$t('chat.fallbackHint')"
+                  placement="top"
+                >
+                  <t-button
+                    size="small"
+                    variant="outline"
+                    shape="round"
+                    class="fallback-icon-btn"
+                  >
                     <t-icon name="info-circle" />
                   </t-button>
                 </t-tooltip>
-                <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
-                  :session-id="sessionId" />
+                <ChatRequestInfoButton
+                  v-if="showRequestInfo && isConversationDone"
+                  :session="session"
+                  :session-id="sessionId"
+                />
               </div>
             </div>
 
             <!-- Tool Call Event (non-thinking) -->
             <div v-else-if="event.type === 'tool_call'" class="tool-event">
-              <div class="action-card" :class="{
-                'action-pending': event.pending,
-                'action-error': event.success === false
-              }">
-                <div class="action-header" @click="handleActionHeaderClick(event)"
-                  :class="{ 'no-results': !hasResults(event) }">
+              <div
+                class="action-card"
+                :class="{
+                  'action-pending': event.pending,
+                  'action-error': event.success === false,
+                }"
+              >
+                <div
+                  class="action-header"
+                  @click="handleActionHeaderClick(event)"
+                  :class="{ 'no-results': !hasResults(event) }"
+                >
                   <div class="action-title">
-                    <t-icon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
-                    <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
-                      :content="t('agent.updatePlan')" placement="top">
+                    <t-icon
+                      v-if="event.tool_name"
+                      class="action-title-icon"
+                      :name="getToolIconName(event.tool_name)"
+                    />
+                    <t-tooltip
+                      v-if="
+                        event.tool_name === 'todo_write' &&
+                        event.tool_data?.steps
+                      "
+                      :content="t('agent.updatePlan')"
+                      placement="top"
+                    >
                       <span class="action-name">
-                        {{ $t('agent.updatePlan') }}
+                        {{ $t("agent.updatePlan") }}
                       </span>
                     </t-tooltip>
-                    <t-tooltip v-else :content="getToolTitle(event)" placement="top">
+                    <t-tooltip
+                      v-else
+                      :content="getToolTitle(event)"
+                      placement="top"
+                    >
                       <span class="action-name">{{ getToolTitle(event) }}</span>
                     </t-tooltip>
                   </div>
                 </div>
 
-                <div v-if="!event.pending && event.tool_name === 'todo_write' && event.tool_data?.steps"
-                  class="plan-status-summary-fixed">
+                <div
+                  v-if="
+                    !event.pending &&
+                    event.tool_name === 'todo_write' &&
+                    event.tool_data?.steps
+                  "
+                  class="plan-status-summary-fixed"
+                >
                   <div class="plan-status-text">
-                    <template v-for="(part, partIndex) in getPlanStatusItems(event)" :key="partIndex">
-                      <t-icon :name="part.icon" :class="['status-icon', part.class]" />
+                    <template
+                      v-for="(part, partIndex) in getPlanStatusItems(event)"
+                      :key="partIndex"
+                    >
+                      <t-icon
+                        :name="part.icon"
+                        :class="['status-icon', part.class]"
+                      />
                       <span>{{ part.label }} {{ part.count }}</span>
-                      <span v-if="partIndex < getPlanStatusItems(event).length - 1" class="separator">·</span>
+                      <span
+                        v-if="partIndex < getPlanStatusItems(event).length - 1"
+                        class="separator"
+                        >·</span
+                      >
                     </template>
                   </div>
                 </div>
 
                 <div
-                  v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data"
-                  class="search-results-summary-fixed">
-                  <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
+                  v-if="
+                    !event.pending &&
+                    (event.tool_name === 'search_knowledge' ||
+                      event.tool_name === 'knowledge_search') &&
+                    event.tool_data
+                  "
+                  class="search-results-summary-fixed"
+                >
+                  <div
+                    class="results-summary-text"
+                    v-html="getSearchResultsSummary(event)"
+                  ></div>
                 </div>
 
-                <div v-if="!event.pending && event.tool_name === 'web_search' && event.tool_data"
-                  class="search-results-summary-fixed">
-                  <div class="results-summary-text"
-                    v-html="t('agent.webSearchFound', { count: getResultsCount(event.tool_data) })">
-                  </div>
+                <div
+                  v-if="
+                    !event.pending &&
+                    event.tool_name === 'web_search' &&
+                    event.tool_data
+                  "
+                  class="search-results-summary-fixed"
+                >
+                  <div
+                    class="results-summary-text"
+                    v-html="
+                      t('agent.webSearchFound', {
+                        count: getResultsCount(event.tool_data),
+                      })
+                    "
+                  ></div>
                 </div>
 
-                <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data"
-                  class="search-results-summary-fixed grep-summary">
-                  <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
+                <div
+                  v-if="
+                    !event.pending &&
+                    event.tool_name === 'grep_chunks' &&
+                    event.tool_data
+                  "
+                  class="search-results-summary-fixed grep-summary"
+                >
+                  <div
+                    class="results-summary-text"
+                    v-html="getGrepResultsSummary(event.tool_data)"
+                  ></div>
                 </div>
 
-                <div v-if="!event.pending && event.tool_name === 'list_knowledge_chunks' && event.tool_data"
-                  class="search-results-summary-fixed knowledge-chunks-summary">
-                  <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
+                <div
+                  v-if="
+                    !event.pending &&
+                    event.tool_name === 'list_knowledge_chunks' &&
+                    event.tool_data
+                  "
+                  class="search-results-summary-fixed knowledge-chunks-summary"
+                >
+                  <div
+                    class="results-summary-text"
+                    v-html="getKnowledgeChunksSummary(event.tool_data)"
+                  ></div>
                 </div>
 
-                <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)"
-                  class="action-details">
-                  <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
-                    <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
-                      :output="event.output" :arguments="event.arguments" />
+                <div
+                  v-if="
+                    isEventExpanded(event.tool_call_id) &&
+                    !event.pending &&
+                    hasResults(event)
+                  "
+                  class="action-details"
+                >
+                  <div
+                    v-if="event.display_type && event.tool_data"
+                    class="tool-result-wrapper"
+                  >
+                    <ToolResultRenderer
+                      :display-type="event.display_type"
+                      :tool-data="event.tool_data"
+                      :output="event.output"
+                      :arguments="event.arguments"
+                    />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
                     <div class="fallback-header">
-                      <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
+                      <span class="fallback-label">{{
+                        $t("chat.rawOutputLabel")
+                      }}</span>
                     </div>
                     <div class="detail-output-wrapper">
                       <div class="detail-output">{{ event.output }}</div>
@@ -390,11 +849,17 @@
           </div>
         </div>
       </template>
-      <div v-if="showRequestInfo && isConversationDone && !hasDoneAnswerContent" class="answer-toolbar">
+      <div
+        v-if="showRequestInfo && isConversationDone && !hasDoneAnswerContent"
+        class="answer-toolbar"
+      >
         <ChatRequestInfoButton :session="session" :session-id="sessionId" />
       </div>
       <!-- Loading Indicator (inside container so it scrolls into view) -->
-      <div v-if="showAgentActivityIndicator" class="tree-child tree-child-last streaming-loading-node">
+      <div
+        v-if="showAgentActivityIndicator"
+        class="tree-child tree-child-last streaming-loading-node"
+      >
         <div class="tree-branch"></div>
         <div class="tree-child-content">
           <div class="loading-indicator">
@@ -409,75 +874,139 @@
     </div>
   </div>
   <!-- 引用 hover 浮层（与历史消息共用同一组件） -->
-  <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose" :on-leave="scheduleCitationClose" />
+  <ChatCitationFloat
+    :float="citationFloat"
+    :on-enter="cancelCitationClose"
+    :on-leave="scheduleCitationClose"
+  />
 
   <!-- Image Preview -->
-  <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
+  <picturePreview
+    :reviewImg="imagePreviewVisible"
+    :reviewUrl="imagePreviewUrl"
+    @closePreImg="closeImagePreview"
+  />
 
-  <t-dialog v-model:visible="dislikeDialogVisible" header="反馈原因" width="420px" :confirm-btn="'提交'"
-    :cancel-btn="'取消'" @confirm="submitDislikeFeedback">
+  <t-dialog
+    v-model:visible="dislikeDialogVisible"
+    header="反馈原因"
+    width="420px"
+    :confirm-btn="'提交'"
+    :cancel-btn="'取消'"
+    @confirm="submitDislikeFeedback"
+  >
     <div class="answer-feedback-dialog">
       <t-radio-group v-model="dislikeReason">
-        <t-radio v-for="reason in feedbackReasonOptions" :key="reason" :value="reason">
+        <t-radio
+          v-for="reason in feedbackReasonOptions"
+          :key="reason"
+          :value="reason"
+        >
           {{ reason }}
         </t-radio>
       </t-radio-group>
-      <t-textarea v-model="dislikeReason" placeholder="也可以补充具体原因" :autosize="{ minRows: 3, maxRows: 5 }" />
+      <t-textarea
+        v-model="dislikeReason"
+        placeholder="也可以补充具体原因"
+        :autosize="{ minRows: 3, maxRows: 5 }"
+      />
     </div>
   </t-dialog>
 
   <!-- Wiki Page Detail Drawer -->
-  <t-drawer v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
-    placement="right" attach="body" :show-overlay="true" :close-btn="true" :close-on-overlay-click="true"
-    class="wiki-graph-drawer">
+  <t-drawer
+    v-model:visible="wikiDrawerVisible"
+    :header="wikiDrawerPage?.title || ''"
+    size="480px"
+    :footer="false"
+    placement="right"
+    attach="body"
+    :show-overlay="true"
+    :close-btn="true"
+    :close-on-overlay-click="true"
+    class="wiki-graph-drawer"
+  >
     <template v-if="wikiDrawerPage">
-      <div class="wiki-reader-meta"
-        style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <t-tag size="small" :theme="getTypeTheme(wikiDrawerPage.page_type)" variant="light-outline">
+      <div
+        class="wiki-reader-meta"
+        style="
+          margin-bottom: 16px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        "
+      >
+        <div style="display: flex; align-items: center; gap: 12px">
+          <t-tag
+            size="small"
+            :theme="getTypeTheme(wikiDrawerPage.page_type)"
+            variant="light-outline"
+          >
             {{ getTypeLabel(wikiDrawerPage.page_type) }}
           </t-tag>
-          <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', {
-            ver: wikiDrawerPage.version
-              || 1
-          }) }}</span>
+          <span class="wiki-reader-meta-text">{{
+            $t("knowledgeEditor.wikiBrowser.version", {
+              ver: wikiDrawerPage.version || 1,
+            })
+          }}</span>
         </div>
         <t-link theme="primary" hover="color" @click="navigateToWikiGraph">
           <template #prefixIcon><t-icon name="chart-bubble" /></template>
-          {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
+          {{ $t("knowledgeEditor.wikiBrowser.viewInGraph") }}
         </t-link>
       </div>
-      <div ref="wikiDrawerBodyRef" class="wiki-reader-body" v-html="wikiDrawerContent" @click="handleWikiDrawerClick">
-      </div>
+      <div
+        ref="wikiDrawerBodyRef"
+        class="wiki-reader-body"
+        v-html="wikiDrawerContent"
+        @click="handleWikiDrawerClick"
+      ></div>
     </template>
   </t-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
-import { marked } from 'marked';
-import 'katex/dist/katex.min.css';
-import ToolResultRenderer from './ToolResultRenderer.vue';
-import ToolApprovalCard from './ToolApprovalCard.vue';
-import McpOAuthCard from './McpOAuthCard.vue';
-import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
-import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
-import picturePreview from '@/components/picture-preview.vue';
-import { countGrepDocuments } from '@/utils/grepResultsGroup';
-import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
-import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
-import { getWikiPage, type WikiPage } from '@/api/wiki';
-import { MessagePlugin } from 'tdesign-vue-next';
-import { useUIStore } from '@/stores/ui';
-import { useSettingsStore } from '@/stores/settings';
-import { useAuthStore } from '@/stores/auth';
-import { useI18n } from 'vue-i18n';
-import i18n from '@/i18n';
-import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
-import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
-import { getAgentToolIconName } from '@/utils/agent-tool-icons';
-import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import {
+  ref,
+  reactive,
+  computed,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+  onUpdated,
+  nextTick,
+} from "vue";
+import { useRouter, useRoute } from "vue-router";
+import { marked } from "marked";
+import "katex/dist/katex.min.css";
+import ToolResultRenderer from "./ToolResultRenderer.vue";
+import ToolApprovalCard from "./ToolApprovalCard.vue";
+import McpOAuthCard from "./McpOAuthCard.vue";
+import ChatRequestInfoButton from "@/components/ChatRequestInfoButton.vue";
+import ChatCitationFloat from "@/components/ChatCitationFloat.vue";
+import picturePreview from "@/components/picture-preview.vue";
+import { countGrepDocuments } from "@/utils/grepResultsGroup";
+import { getKnowledgeChunksSummaryHtml } from "@/utils/knowledgeChunksDisplay";
+import { useChatCitationPopover } from "@/composables/useChatCitationPopover";
+import { getWikiPage, type WikiPage } from "@/api/wiki";
+import { deleteMessageFeedback, saveMessageFeedback } from "@/api/chat";
+import { MessagePlugin } from "tdesign-vue-next";
+import { useUIStore } from "@/stores/ui";
+import { useSettingsStore } from "@/stores/settings";
+import { useAuthStore } from "@/stores/auth";
+import { useI18n } from "vue-i18n";
+import i18n from "@/i18n";
+import {
+  hydrateProtectedFileImages,
+  clearProtectedFileFailureCache,
+  sanitizeMarkdownHTML,
+} from "@/utils/security";
+import {
+  unwrapFinalAnswerWrappers,
+  thinkingEqualsAnswer,
+} from "@/utils/finalAnswer";
+import { getAgentToolIconName } from "@/utils/agent-tool-icons";
+import { getQueryText, getWikiPageText } from "@/utils/agent-tool-display";
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -486,21 +1015,24 @@ import {
   prepareStreamingMermaidMarkdown,
   extractFirstMermaidCode,
   injectCachedMermaidSvg,
-} from '@/utils/chatMessageShared';
+} from "@/utils/chatMessageShared";
 import {
   configureMarkedForChatMarkdown,
   renderChatMarkdown,
   wrapChatMarkdownTables,
-} from '@/utils/chatMarkdownRenderer';
+} from "@/utils/chatMarkdownRenderer";
 import {
   createMermaidCodeRenderer,
   ensureMermaidInitialized,
   enhanceMarkdownContainer,
   renderMermaidToSvg,
-} from '@/utils/mermaidShared';
-import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
-import { useTypewriter } from '@/composables/useTypewriter';
-import { vStableHtml } from '@/directives/stableHtml';
+} from "@/utils/mermaidShared";
+import {
+  attachMarkdownEnhancementListeners,
+  refreshMarkdownEnhancements,
+} from "@/utils/markdownEnhancements";
+import { useTypewriter } from "@/composables/useTypewriter";
+import { vStableHtml } from "@/directives/stableHtml";
 
 const getToolIconName = getAgentToolIconName;
 
@@ -514,38 +1046,38 @@ const { t } = useI18n();
 ensureMermaidInitialized();
 
 const TOOL_NAME_KEYS: Record<string, string> = {
-  search_knowledge: 'agentStream.tools.searchKnowledge',
-  knowledge_search: 'agentStream.tools.searchKnowledge',
-  grep_chunks: 'agentStream.tools.grepChunks',
-  web_search: 'agentStream.tools.webSearch',
-  web_fetch: 'agentStream.tools.webFetch',
-  get_document_info: 'agentStream.tools.getDocumentInfo',
-  list_knowledge_chunks: 'agentStream.tools.listKnowledgeChunks',
-  get_related_documents: 'agentStream.tools.getRelatedDocuments',
-  get_document_content: 'agentStream.tools.getDocumentContent',
-  wiki_search: 'agentEditor.tools.wikiSearch',
-  wiki_read_page: 'agentEditor.tools.wikiReadPage',
-  wiki_read_source_doc: 'agentStream.tools.wikiReadSourceDoc',
-  todo_write: 'agentStream.tools.todoWrite',
-  knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
-  thinking: 'agentStream.tools.thinking',
-  image_analysis: 'agentStream.tools.imageAnalysis',
-  query_understand: 'agentStream.tools.queryUnderstand',
-  query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
-  read_skill: 'agentStream.tools.readSkill',
-  execute_skill_script: 'agentStream.tools.executeSkillScript',
-  data_analysis: 'agentStream.tools.dataAnalysis',
-  data_schema: 'agentStream.tools.dataSchema',
-  database_query: 'agentStream.tools.databaseQuery',
+  search_knowledge: "agentStream.tools.searchKnowledge",
+  knowledge_search: "agentStream.tools.searchKnowledge",
+  grep_chunks: "agentStream.tools.grepChunks",
+  web_search: "agentStream.tools.webSearch",
+  web_fetch: "agentStream.tools.webFetch",
+  get_document_info: "agentStream.tools.getDocumentInfo",
+  list_knowledge_chunks: "agentStream.tools.listKnowledgeChunks",
+  get_related_documents: "agentStream.tools.getRelatedDocuments",
+  get_document_content: "agentStream.tools.getDocumentContent",
+  wiki_search: "agentEditor.tools.wikiSearch",
+  wiki_read_page: "agentEditor.tools.wikiReadPage",
+  wiki_read_source_doc: "agentStream.tools.wikiReadSourceDoc",
+  todo_write: "agentStream.tools.todoWrite",
+  knowledge_graph_extract: "agentStream.tools.knowledgeGraphExtract",
+  thinking: "agentStream.tools.thinking",
+  image_analysis: "agentStream.tools.imageAnalysis",
+  query_understand: "agentStream.tools.queryUnderstand",
+  query_knowledge_graph: "agentStream.tools.queryKnowledgeGraph",
+  read_skill: "agentStream.tools.readSkill",
+  execute_skill_script: "agentStream.tools.executeSkillScript",
+  data_analysis: "agentStream.tools.dataAnalysis",
+  data_schema: "agentStream.tools.dataSchema",
+  database_query: "agentStream.tools.databaseQuery",
 };
 
 const getLocalizedToolName = (toolName?: string | null): string => {
-  if (!toolName) return t('agent.toolFallback');
+  if (!toolName) return t("agent.toolFallback");
   const key = TOOL_NAME_KEYS[toolName];
   if (key) return t(key);
 
   // Format MCP tool names: "mcp_my_server_search_docs" → "My Server: search docs"
-  if (toolName.startsWith('mcp_')) {
+  if (toolName.startsWith("mcp_")) {
     return formatMCPToolName(toolName);
   }
 
@@ -565,18 +1097,22 @@ const formatMCPToolName = (rawName: string): string => {
   // Since we only have the sanitized composite name, split heuristically:
   // The service name comes first, tool name second, separated by "_".
   // We look for common MCP tool name patterns at the end.
-  const parts = rest.split('_');
+  const parts = rest.split("_");
   if (parts.length <= 1) return rest;
 
   // Heuristic: tool names from MCP servers are typically 1-3 words like
   // "search", "get_weather", "list_bugs". We try to find a reasonable split.
   // For now, treat everything as a readable phrase.
-  const humanized = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+  const humanized = parts
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(" ");
   return humanized;
 };
 
-const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-const ID_LABEL_RE = /\b(knowledge_base_id|knowledge_id|chunk_id|knowledge_base_ids)\s*[:=]\s*/gi;
+const UUID_RE =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+const ID_LABEL_RE =
+  /\b(knowledge_base_id|knowledge_id|chunk_id|knowledge_base_ids)\s*[:=]\s*/gi;
 
 const sanitizeForDisplay = (text: string): string => {
   if (!text) return text;
@@ -586,16 +1122,18 @@ const sanitizeForDisplay = (text: string): string => {
   }
   // Format any remaining mcp_ tool names inline
   result = result.replace(/\bmcp_([a-z0-9_]+)/g, (_match, rest) => {
-    const parts = rest.split('_');
-    return parts.map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+    const parts = rest.split("_");
+    return parts
+      .map((p: string) => p.charAt(0).toUpperCase() + p.slice(1))
+      .join(" ");
   });
-  result = result.replace(ID_LABEL_RE, '');
-  result = result.replace(UUID_RE, '');
+  result = result.replace(ID_LABEL_RE, "");
+  result = result.replace(UUID_RE, "");
   // Remove empty inline code like `` or ` ` while preserving triple-backtick
   // fenced code blocks (```). Without the lookaround the greedy pair match
   // would eat two of the three fence backticks and break code block rendering.
-  result = result.replace(/(?<!`)`[ \t]*`(?!`)/g, '');
-  result = result.replace(/\(\s*\)/g, '');
+  result = result.replace(/(?<!`)`[ \t]*`(?!`)/g, "");
+  result = result.replace(/\(\s*\)/g, "");
   return result;
 };
 
@@ -604,18 +1142,18 @@ const rootElement = ref<HTMLElement | null>(null);
 
 function escapeHtml(value: string): string {
   return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 const streamingStepsContainer = ref<HTMLElement | null>(null);
 
 // 图片预览状态
 const imagePreviewVisible = ref(false);
-const imagePreviewUrl = ref('');
+const imagePreviewUrl = ref("");
 
 const openImagePreview = (url: string) => {
   imagePreviewUrl.value = url;
@@ -630,48 +1168,60 @@ const closeImagePreview = () => {
 const wikiDrawerVisible = ref(false);
 const wikiDrawerPage = ref<WikiPage | null>(null);
 const wikiDrawerBodyRef = ref<HTMLElement | null>(null);
-const currentWikiKbId = ref<string>('');
+const currentWikiKbId = ref<string>("");
 
 function getTypeTheme(type: string): string {
   const map: Record<string, string> = {
-    summary: 'primary', entity: 'success', concept: 'warning',
-    synthesis: 'primary', comparison: 'danger', index: 'default', log: 'default',
+    summary: "primary",
+    entity: "success",
+    concept: "warning",
+    synthesis: "primary",
+    comparison: "danger",
+    index: "default",
+    log: "default",
   };
-  return map[type] || 'default';
+  return map[type] || "default";
 }
 
 function getTypeLabel(type: string): string {
   const map: Record<string, string> = {
-    summary: t('knowledgeEditor.wikiBrowser.filterSummary'),
-    entity: t('knowledgeEditor.wikiBrowser.filterEntity'),
-    concept: t('knowledgeEditor.wikiBrowser.filterConcept'),
-    synthesis: t('knowledgeEditor.wikiBrowser.filterSynthesis'),
-    comparison: t('knowledgeEditor.wikiBrowser.filterComparison'),
-    index: 'Index',
-    log: 'Log',
+    summary: t("knowledgeEditor.wikiBrowser.filterSummary"),
+    entity: t("knowledgeEditor.wikiBrowser.filterEntity"),
+    concept: t("knowledgeEditor.wikiBrowser.filterConcept"),
+    synthesis: t("knowledgeEditor.wikiBrowser.filterSynthesis"),
+    comparison: t("knowledgeEditor.wikiBrowser.filterComparison"),
+    index: "Index",
+    log: "Log",
   };
   return map[type] || type;
 }
 
 const wikiDrawerContent = computed(() => {
-  if (!wikiDrawerPage.value) return '';
-  const content = wikiDrawerPage.value.content || '';
+  if (!wikiDrawerPage.value) return "";
+  const content = wikiDrawerPage.value.content || "";
 
   // Pre-process wiki links [[slug|name]] to custom HTML tags for the drawer
-  let preprocessed = content.replace(/\[\[([^\]]+)\]\]/g, (_, inner: string) => {
-    const pipeIdx = inner.indexOf('|');
-    const slug = pipeIdx > 0 ? inner.substring(0, pipeIdx).trim() : inner.trim();
-    let display = slug;
-    if (pipeIdx > 0) {
-      display = inner.substring(pipeIdx + 1).trim();
-    } else {
-      const parts = slug.split('/');
-      display = parts.length > 1 ? parts.slice(1).join('/') : slug;
-    }
-    return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
-  });
+  let preprocessed = content.replace(
+    /\[\[([^\]]+)\]\]/g,
+    (_, inner: string) => {
+      const pipeIdx = inner.indexOf("|");
+      const slug =
+        pipeIdx > 0 ? inner.substring(0, pipeIdx).trim() : inner.trim();
+      let display = slug;
+      if (pipeIdx > 0) {
+        display = inner.substring(pipeIdx + 1).trim();
+      } else {
+        const parts = slug.split("/");
+        display = parts.length > 1 ? parts.slice(1).join("/") : slug;
+      }
+      return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
+    },
+  );
 
-  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string;
+  const html = marked.parse(preprocessed, {
+    breaks: true,
+    async: false,
+  }) as string;
   return sanitizeMarkdownHTML(wrapChatMarkdownTables(html));
 });
 
@@ -687,11 +1237,11 @@ const openWikiDrawer = async (kbId: string, slug: string) => {
   try {
     currentWikiKbId.value = kbId;
     const res = await getWikiPage(kbId, slug);
-    wikiDrawerPage.value = (res as any).data || res as any;
+    wikiDrawerPage.value = (res as any).data || (res as any);
     wikiDrawerVisible.value = true;
   } catch (e) {
     console.error(`Failed to load page ${slug}:`, e);
-    MessagePlugin.warning(t('agentStream.citation.loadFailed'));
+    MessagePlugin.warning(t("agentStream.citation.loadFailed"));
   }
 };
 
@@ -699,30 +1249,32 @@ const navigateToWikiGraph = () => {
   if (currentWikiKbId.value && wikiDrawerPage.value?.slug) {
     wikiDrawerVisible.value = false;
     try {
-      router.push(`/platform/knowledge-bases/${currentWikiKbId.value}?tab=graph&slug=${encodeURIComponent(wikiDrawerPage.value.slug)}`);
+      router.push(
+        `/platform/knowledge-bases/${currentWikiKbId.value}?tab=graph&slug=${encodeURIComponent(wikiDrawerPage.value.slug)}`,
+      );
     } catch (error) {
-      console.error('Failed to navigate to wiki graph:', error);
+      console.error("Failed to navigate to wiki graph:", error);
     }
   }
 };
 
 const handleWikiDrawerClick = (e: MouseEvent) => {
   const target = e.target as HTMLElement;
-  if (target.closest('.citation-wiki')) {
+  if (target.closest(".citation-wiki")) {
     e.preventDefault();
     e.stopPropagation();
-    const slug = target.closest('.citation-wiki')?.getAttribute('data-slug');
+    const slug = target.closest(".citation-wiki")?.getAttribute("data-slug");
     if (slug) openWikiDrawer(currentWikiKbId.value, slug);
-  } else if (target.tagName.toLowerCase() === 'img') {
+  } else if (target.tagName.toLowerCase() === "img") {
     e.preventDefault();
-    const src = target.getAttribute('src');
+    const src = target.getAttribute("src");
     if (src) openImagePreview(src);
   } else {
     // allow link navigation inside drawer
-    const aEl = target.closest?.('a') as HTMLAnchorElement | null;
+    const aEl = target.closest?.("a") as HTMLAnchorElement | null;
     // @ts-ignore
     if (aEl && aEl.href && window.runtime && window.runtime.BrowserOpenURL) {
-      if (aEl.href.startsWith('http://') || aEl.href.startsWith('https://')) {
+      if (aEl.href.startsWith("http://") || aEl.href.startsWith("https://")) {
         e.preventDefault();
         // @ts-ignore
         window.runtime.BrowserOpenURL(aEl.href);
@@ -732,8 +1284,8 @@ const handleWikiDrawerClick = (e: MouseEvent) => {
 };
 
 // Import icons
-import agentIcon from '@/assets/img/agent.svg';
-import thinkingIcon from '@/assets/img/Frame3718.svg';
+import agentIcon from "@/assets/img/agent.svg";
+import thinkingIcon from "@/assets/img/Frame3718.svg";
 
 interface SessionData {
   id?: string;
@@ -767,7 +1319,8 @@ const embedAuthProps = computed(() => ({
 }));
 
 const showRequestInfo = computed(
-  () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
+  () =>
+    !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
 );
 
 const {
@@ -801,65 +1354,73 @@ const isThinkingActive = (eventId: string): boolean => {
 };
 
 // Watch event stream to auto-expand thinking events and auto-collapse when non-thinking follows
-watch(eventStream, (stream) => {
-  if (!stream || !Array.isArray(stream)) return;
+watch(
+  eventStream,
+  (stream) => {
+    if (!stream || !Array.isArray(stream)) return;
 
-  // Scan stream to find thinking events to expand and collapse
-  const newActiveIds = new Set<string>();
+    // Scan stream to find thinking events to expand and collapse
+    const newActiveIds = new Set<string>();
 
-  // Walk backwards to find the trailing thinking block
-  let inTrailingThinking = true;
-  for (let i = stream.length - 1; i >= 0; i--) {
-    const event = stream[i];
-    if (!event) continue;
+    // Walk backwards to find the trailing thinking block
+    let inTrailingThinking = true;
+    for (let i = stream.length - 1; i >= 0; i--) {
+      const event = stream[i];
+      if (!event) continue;
 
-    const isThinking = event.type === 'thinking' ||
-      (event.type === 'tool_call' && event.tool_name === 'thinking');
-    const id = event.type === 'thinking' ? event.event_id : event.tool_call_id;
+      const isThinking =
+        event.type === "thinking" ||
+        (event.type === "tool_call" && event.tool_name === "thinking");
+      const id =
+        event.type === "thinking" ? event.event_id : event.tool_call_id;
 
-    if (inTrailingThinking && isThinking && id) {
-      newActiveIds.add(id);
-      // Auto-expand if not yet known
-      expandedEvents.value.add(id);
-    } else if (!isThinking) {
-      inTrailingThinking = false;
-    }
-  }
-
-  // Collapse thinking events that were active before but are no longer trailing
-  for (const oldId of activeThinkingIds.value) {
-    if (!newActiveIds.has(oldId)) {
-      expandedEvents.value.delete(oldId);
-    }
-  }
-
-  activeThinkingIds.value = newActiveIds;
-  activeThinkingVersion.value++;
-
-  nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value);
-    await enhanceMarkdownContainer(rootElement.value);
-    // Auto-scroll thinking detail content to bottom during streaming
-    if (newActiveIds.size > 0 && rootElement.value) {
-      const els = rootElement.value.querySelectorAll('.thinking-detail-content');
-      els.forEach((el: Element) => {
-        const htmlEl = el as HTMLElement;
-        if (htmlEl.scrollHeight > htmlEl.clientHeight) {
-          htmlEl.scrollTop = htmlEl.scrollHeight;
-        }
-      });
-    }
-    // Auto-scroll the steps container to the bottom while it is still height-
-    // capped (steps-only phase). Once answer text appears the cap is released
-    // and the container grows with the page, so internal scrolling is moot.
-    if (!answerEverStarted.value && streamingStepsContainer.value) {
-      const el = streamingStepsContainer.value;
-      if (el.scrollHeight > el.clientHeight) {
-        el.scrollTop = el.scrollHeight;
+      if (inTrailingThinking && isThinking && id) {
+        newActiveIds.add(id);
+        // Auto-expand if not yet known
+        expandedEvents.value.add(id);
+      } else if (!isThinking) {
+        inTrailingThinking = false;
       }
     }
-  });
-}, { immediate: true, deep: true });
+
+    // Collapse thinking events that were active before but are no longer trailing
+    for (const oldId of activeThinkingIds.value) {
+      if (!newActiveIds.has(oldId)) {
+        expandedEvents.value.delete(oldId);
+      }
+    }
+
+    activeThinkingIds.value = newActiveIds;
+    activeThinkingVersion.value++;
+
+    nextTick(async () => {
+      await hydrateProtectedFileImages(rootElement.value);
+      await enhanceMarkdownContainer(rootElement.value);
+      // Auto-scroll thinking detail content to bottom during streaming
+      if (newActiveIds.size > 0 && rootElement.value) {
+        const els = rootElement.value.querySelectorAll(
+          ".thinking-detail-content",
+        );
+        els.forEach((el: Element) => {
+          const htmlEl = el as HTMLElement;
+          if (htmlEl.scrollHeight > htmlEl.clientHeight) {
+            htmlEl.scrollTop = htmlEl.scrollHeight;
+          }
+        });
+      }
+      // Auto-scroll the steps container to the bottom while it is still height-
+      // capped (steps-only phase). Once answer text appears the cap is released
+      // and the container grows with the page, so internal scrolling is moot.
+      if (!answerEverStarted.value && streamingStepsContainer.value) {
+        const el = streamingStepsContainer.value;
+        if (el.scrollHeight > el.clientHeight) {
+          el.scrollTop = el.scrollHeight;
+        }
+      }
+    });
+  },
+  { immediate: true, deep: true },
+);
 
 // State for intermediate steps collapse
 const showIntermediateSteps = ref(false);
@@ -873,7 +1434,10 @@ const showIntermediateSteps = ref(false);
 const hasAnswerStarted = computed(() => {
   const stream = eventStream.value;
   if (!stream || !Array.isArray(stream)) return false;
-  return stream.some((e: any) => e.type === 'answer' && !e.superseded && e.content && e.content.trim());
+  return stream.some(
+    (e: any) =>
+      e.type === "answer" && !e.superseded && e.content && e.content.trim(),
+  );
 });
 
 // Whether ANY answer text has ever appeared this turn — including a preamble
@@ -885,48 +1449,57 @@ const hasAnswerStarted = computed(() => {
 const answerEverStarted = computed(() => {
   const stream = eventStream.value;
   if (!stream || !Array.isArray(stream)) return false;
-  return stream.some((e: any) => e.type === 'answer' && e.content && e.content.trim());
+  return stream.some(
+    (e: any) => e.type === "answer" && e.content && e.content.trim(),
+  );
 });
 
 const agentDurationMs = ref<number>(0);
-watch(eventStream, (stream) => {
-  if (!stream || !Array.isArray(stream)) return;
+watch(
+  eventStream,
+  (stream) => {
+    if (!stream || !Array.isArray(stream)) return;
 
-  // Check for agent_complete event with authoritative duration from backend
-  if (agentDurationMs.value === 0) {
-    const completeEvent = stream.find((e: any) => e.type === 'agent_complete' && e.total_duration_ms);
-    if (completeEvent) {
-      agentDurationMs.value = completeEvent.total_duration_ms;
+    // Check for agent_complete event with authoritative duration from backend
+    if (agentDurationMs.value === 0) {
+      const completeEvent = stream.find(
+        (e: any) => e.type === "agent_complete" && e.total_duration_ms,
+      );
+      if (completeEvent) {
+        agentDurationMs.value = completeEvent.total_duration_ms;
+      }
     }
-  }
-}, { deep: true, immediate: true });
-
+  },
+  { deep: true, immediate: true },
+);
 
 // Check if conversation is done (based on answer event with done=true or stop event)
 const isConversationDone = computed(() => {
   const stream = eventStream.value;
   if (!stream || stream.length === 0) {
-    console.log('[Collapse] No stream or empty stream');
+    console.log("[Collapse] No stream or empty stream");
     return false;
   }
 
   // Check for stop event (user cancelled)
-  const stopEvent = stream.find((e: any) => e.type === 'stop');
+  const stopEvent = stream.find((e: any) => e.type === "stop");
   if (stopEvent) {
-    console.log('[Collapse] Found stop event, conversation done');
+    console.log("[Collapse] Found stop event, conversation done");
     return true;
   }
 
-  const completeEvent = stream.find((e: any) => e.type === 'agent_complete');
+  const completeEvent = stream.find((e: any) => e.type === "agent_complete");
   if (completeEvent) {
-    console.log('[Collapse] Found complete event, conversation done');
+    console.log("[Collapse] Found complete event, conversation done");
     return true;
   }
 
   // Check for answer event with done=true. Exclude superseded preambles: a
   // retracted tool-round preamble is also closed with done=true, but the agent
   // keeps running, so it must not mark the whole conversation as finished.
-  const answerEvents = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
+  const answerEvents = stream.filter(
+    (e: any) => e.type === "answer" && !e.superseded,
+  );
   const doneAnswer = answerEvents.find((e: any) => e.done === true);
 
   return !!doneAnswer;
@@ -938,10 +1511,13 @@ let streamingMermaidRenderId = 0;
 
 const activeAnswerMarkdown = computed(() => {
   const stream = eventStream.value;
-  if (!stream?.length) return '';
-  const answers = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
-  const active = answers.find((e: any) => !e.done) ?? answers[answers.length - 1];
-  return typeof active?.content === 'string' ? active.content : '';
+  if (!stream?.length) return "";
+  const answers = stream.filter(
+    (e: any) => e.type === "answer" && !e.superseded,
+  );
+  const active =
+    answers.find((e: any) => !e.done) ?? answers[answers.length - 1];
+  return typeof active?.content === "string" ? active.content : "";
 });
 
 // The answer event whose text is currently streaming. The template renders the
@@ -949,8 +1525,12 @@ const activeAnswerMarkdown = computed(() => {
 const activeAnswerEventRef = computed(() => {
   const stream = eventStream.value;
   if (!stream?.length) return null;
-  const answers = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
-  return answers.find((e: any) => !e.done) ?? answers[answers.length - 1] ?? null;
+  const answers = stream.filter(
+    (e: any) => e.type === "answer" && !e.superseded,
+  );
+  return (
+    answers.find((e: any) => !e.done) ?? answers[answers.length - 1] ?? null
+  );
 });
 
 // Smooth the streamed answer into a steady typewriter cadence (shared with the
@@ -968,7 +1548,10 @@ const cacheStreamingMermaidSvg = async () => {
 
   if (!streamingMermaidRenderTask) {
     streamingMermaidRenderTask = (async () => {
-      const svg = await renderMermaidToSvg(code, `mermaid-agent-stream-${++streamingMermaidRenderId}`);
+      const svg = await renderMermaidToSvg(
+        code,
+        `mermaid-agent-stream-${++streamingMermaidRenderId}`,
+      );
       if (svg) streamingMermaidSvgCache.value = svg;
     })().finally(() => {
       streamingMermaidRenderTask = null;
@@ -1004,7 +1587,9 @@ watch(activeAnswerMarkdown, () => {
 // yet. Hydrating too early would find nothing and leave a permanent placeholder
 // (until a manual reload). Waiting for full reveal guarantees the image exists.
 const answerFullyRendered = computed(
-  () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
+  () =>
+    isConversationDone.value &&
+    typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
   if (!ready) return;
@@ -1025,11 +1610,14 @@ const showAgentActivityIndicator = computed(() => {
 });
 
 const isStreamingTimelineEvent = (event: any): boolean => {
-  return !isConversationDone.value && event?.type && event.type !== 'answer';
+  return !isConversationDone.value && event?.type && event.type !== "answer";
 };
 
 const showStreamingTimeline = computed(() => {
-  return displayEvents.value.some((event: any) => isStreamingTimelineEvent(event)) || showAgentActivityIndicator.value;
+  return (
+    displayEvents.value.some((event: any) => isStreamingTimelineEvent(event)) ||
+    showAgentActivityIndicator.value
+  );
 });
 
 const lastStreamingTimelineEventIndex = computed(() => {
@@ -1046,7 +1634,7 @@ const hasDoneAnswerContent = computed(() => {
   const stream = eventStream.value;
   if (!stream || stream.length === 0) return false;
   return stream.some(
-    (e: any) => e.type === 'answer' && e.done && e.content && e.content.trim()
+    (e: any) => e.type === "answer" && e.done && e.content && e.content.trim(),
   );
 });
 
@@ -1064,11 +1652,15 @@ const finalContent = computed(() => {
   // Check if there's a (non-superseded) answer event with content. Superseded
   // preambles carry content too, but they were retracted into the steps and are
   // not the final answer, so they must not count here.
-  const answerEvents = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
-  const hasAnswerContent = answerEvents.some((e: any) => e.content && e.content.trim());
+  const answerEvents = stream.filter(
+    (e: any) => e.type === "answer" && !e.superseded,
+  );
+  const hasAnswerContent = answerEvents.some(
+    (e: any) => e.content && e.content.trim(),
+  );
 
   if (hasAnswerContent) {
-    return { type: 'answer' };
+    return { type: "answer" };
   }
 
   // Do NOT fall back to re-rendering the last thinking event when the
@@ -1079,21 +1671,23 @@ const finalContent = computed(() => {
   if (shouldShowCollapsedSteps.value) {
     return null;
   }
-  const wasStopped = stream.some((e: any) => e.type === 'stop');
+  const wasStopped = stream.some((e: any) => e.type === "stop");
   if (wasStopped) {
     return null;
   }
 
   // Fallback: if no answer content (e.g. the model ended with only reasoning),
   // use last thinking as final content
-  const thinkingEvents = stream.filter((e: any) => e.type === 'thinking' && e.content && e.content.trim());
+  const thinkingEvents = stream.filter(
+    (e: any) => e.type === "thinking" && e.content && e.content.trim(),
+  );
   if (thinkingEvents.length > 0) {
     const lastThinking = thinkingEvents[thinkingEvents.length - 1];
     const doneAnswer = answerEvents.find((e: any) => e.done === true);
     return {
-      type: 'thinking',
+      type: "thinking",
       event_id: lastThinking.event_id,
-      showAnswerToolbar: !!doneAnswer
+      showAnswerToolbar: !!doneAnswer,
     };
   }
 
@@ -1105,7 +1699,7 @@ const intermediateStepsCount = computed(() => {
   if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
   // Count only thinking and tool_call events (exclude plan_task_change, etc.)
   return intermediateEvents.value.filter(
-    (e: any) => e.type === 'thinking' || e.type === 'tool_call'
+    (e: any) => e.type === "thinking" || e.type === "tool_call",
   ).length;
 });
 
@@ -1115,17 +1709,19 @@ const intermediateStepsCount = computed(() => {
 // thinking card plus its tool calls).
 const reasoningRoundsCount = computed(() => {
   if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
-  return intermediateEvents.value.filter((e: any) => e.type === 'thinking').length;
+  return intermediateEvents.value.filter((e: any) => e.type === "thinking")
+    .length;
 });
 
 const toolCallsCount = computed(() => {
   if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
-  return intermediateEvents.value.filter((e: any) => e.type === 'tool_call').length;
+  return intermediateEvents.value.filter((e: any) => e.type === "tool_call")
+    .length;
 });
 
 const intermediateStepsSummary = computed(() => {
   if (!eventStream.value) {
-    return '';
+    return "";
   }
 
   const rounds = reasoningRoundsCount.value;
@@ -1134,22 +1730,26 @@ const intermediateStepsSummary = computed(() => {
 
   const parts: string[] = [];
   if (rounds > 0) {
-    parts.push(t('agent.reasoningRounds', { rounds }));
+    parts.push(t("agent.reasoningRounds", { rounds }));
   }
   if (tools > 0) {
-    parts.push(t('agent.toolCalls', { tools }));
+    parts.push(t("agent.toolCalls", { tools }));
   }
   // Fallback to a generic step count if neither bucket has anything (shouldn't
   // normally happen once the tree is shown).
   if (parts.length === 0) {
-    parts.push(t('agent.stepsCompleted', { steps: intermediateStepsCount.value }));
+    parts.push(
+      t("agent.stepsCompleted", { steps: intermediateStepsCount.value }),
+    );
   }
 
   if (elapsed > 0) {
-    parts.push(t('agent.durationSuffix', { duration: formatDuration(elapsed) }));
+    parts.push(
+      t("agent.durationSuffix", { duration: formatDuration(elapsed) }),
+    );
   }
 
-  return parts.join(t('agent.stepSummarySeparator'));
+  return parts.join(t("agent.stepSummarySeparator"));
 });
 
 // HTML version of intermediate steps summary with colored numbers
@@ -1162,58 +1762,64 @@ const intermediateStepsSummaryHtml = computed(() => {
 // intermediate progress is handled by RagPipelineProgress and disappears once
 // references or the answer arrive.
 const shouldShowCollapsedSteps = computed(() => {
-  if (props.ragMode) return false
+  if (props.ragMode) return false;
   const hasSteps = intermediateStepsCount.value > 0;
   return hasSteps && isConversationDone.value;
 });
 
 // Check if event is a "deep thinking" type (either streaming thinking or thinking tool call)
 const isThinkingLikeEvent = (event: any): boolean => {
-  if (event.type === 'thinking') return true;
-  if (event.type === 'tool_call' && event.tool_name === 'thinking') return true;
+  if (event.type === "thinking") return true;
+  if (event.type === "tool_call" && event.tool_name === "thinking") return true;
   return false;
 };
 
 // Extract thinking content from an event
 const getThinkingContent = (event: any): string => {
-  if (event.type === 'thinking') return event.content || '';
-  if (event.type === 'tool_call' && event.tool_name === 'thinking') {
-    return event.tool_data?.thought || event.output || '';
+  if (event.type === "thinking") return event.content || "";
+  if (event.type === "tool_call" && event.tool_name === "thinking") {
+    return event.tool_data?.thought || event.output || "";
   }
-  return '';
+  return "";
 };
 
 // Get a short summary snippet from thinking content for display in the header
 const getThinkingSummary = (event: any): string => {
   const content = getThinkingContent(event);
-  if (!content) return '';
+  if (!content) return "";
   const cleaned = sanitizeForDisplay(content)
-    .replace(/^#+\s+/gm, '')
-    .replace(/\*\*/g, '')
-    .replace(/\*/g, '')
-    .replace(/`/g, '')
-    .replace(/\n+/g, ' ')
+    .replace(/^#+\s+/gm, "")
+    .replace(/\*\*/g, "")
+    .replace(/\*/g, "")
+    .replace(/`/g, "")
+    .replace(/\n+/g, " ")
     .trim();
   if (cleaned.length <= 50) return cleaned;
-  return cleaned.slice(0, 50) + '...';
+  return cleaned.slice(0, 50) + "...";
 };
 
 // Helper: build the full result list with plan_task_change injections and thinking merging
 const buildFullEventList = (stream: any[]) => {
-  const validStream = stream.filter((e: any) => e && typeof e === 'object' && e.type);
+  const validStream = stream.filter(
+    (e: any) => e && typeof e === "object" && e.type,
+  );
   let lastTask: string | null = null;
   const result: any[] = [];
 
   for (let i = 0; i < validStream.length; i++) {
     const event = validStream[i];
-    if (event.type === 'tool_call' && event.tool_name === 'todo_write' && event.tool_data?.task) {
+    if (
+      event.type === "tool_call" &&
+      event.tool_name === "todo_write" &&
+      event.tool_data?.task
+    ) {
       const currentTask = event.tool_data.task;
       if (lastTask === null || currentTask !== lastTask) {
         result.push({
-          type: 'plan_task_change',
+          type: "plan_task_change",
           task: currentTask,
           event_id: `plan-task-change-${event.tool_call_id || i}`,
-          timestamp: event.timestamp || Date.now()
+          timestamp: event.timestamp || Date.now(),
         });
       }
       lastTask = currentTask;
@@ -1234,7 +1840,7 @@ const buildFullEventList = (stream: any[]) => {
         if (curContent && prevContent && curContent.includes(prevContent)) {
           // Current fully contains previous — replace instead of appending
           result[result.length - 1] = {
-            type: 'thinking',
+            type: "thinking",
             event_id: prev.event_id,
             content: curContent,
             thinking: prev.thinking || event.thinking,
@@ -1245,9 +1851,9 @@ const buildFullEventList = (stream: any[]) => {
         }
 
         // Normal merge: combine non-overlapping content
-        const merged = [prevContent, curContent].filter(Boolean).join('\n\n');
+        const merged = [prevContent, curContent].filter(Boolean).join("\n\n");
         result[result.length - 1] = {
-          type: 'thinking',
+          type: "thinking",
           event_id: prev.event_id,
           content: merged,
           thinking: prev.thinking || event.thinking,
@@ -1269,20 +1875,20 @@ const buildFullEventList = (stream: any[]) => {
   // rendered in the answer area, never here.
   const folded: any[] = [];
   for (const e of result) {
-    if (e.type === 'answer' && e.superseded) {
-      const preambleText = typeof e.content === 'string' ? e.content : '';
+    if (e.type === "answer" && e.superseded) {
+      const preambleText = typeof e.content === "string" ? e.content : "";
       const prev = folded[folded.length - 1];
-      if (prev && prev.type === 'thinking' && !prev.title) {
+      if (prev && prev.type === "thinking" && !prev.title) {
         folded[folded.length - 1] = { ...prev, title: preambleText };
         continue;
       }
       // No reasoning channel: title-only thinking card (same chrome as merged
       // rounds). Rounds with reasoning_content merge preamble into prev.title.
       folded.push({
-        type: 'thinking',
+        type: "thinking",
         event_id: e.event_id,
         title: preambleText,
-        content: '',
+        content: "",
         thinking: false,
         timestamp: e.timestamp,
       });
@@ -1297,9 +1903,9 @@ const buildFullEventList = (stream: any[]) => {
   // card. Keep cards that carry a title (a relocated preamble) even with no
   // reasoning body.
   return folded.filter((e: any) => {
-    if (e.type !== 'thinking') return true;
-    const content = typeof e.content === 'string' ? e.content : '';
-    const title = typeof e.title === 'string' ? e.title : '';
+    if (e.type !== "thinking") return true;
+    const content = typeof e.content === "string" ? e.content : "";
+    const title = typeof e.title === "string" ? e.title : "";
     return content.trim().length > 0 || title.trim().length > 0;
   });
 };
@@ -1322,9 +1928,10 @@ const hiddenThinkingEventIds = computed<Set<string>>(() => {
 
   // Case 1: trailing thinking promoted to answer (no answer events present).
   const final = finalContent.value;
-  if (final && final.type === 'thinking') {
+  if (final && final.type === "thinking") {
     const hasRealAnswer = stream.some(
-      (e: any) => e.type === 'answer' && !e.superseded && e.content && e.content.trim()
+      (e: any) =>
+        e.type === "answer" && !e.superseded && e.content && e.content.trim(),
     );
     if (!hasRealAnswer && final.event_id) {
       hidden.add(final.event_id);
@@ -1337,20 +1944,23 @@ const hiddenThinkingEventIds = computed<Set<string>>(() => {
   // preambles are excluded: they are the retracted tool-round narration, not
   // the final answer, and are intentionally shown in the steps as titles.
   const answerContent = stream
-    .filter((e: any) => e.type === 'answer' && !e.superseded && e.content)
+    .filter((e: any) => e.type === "answer" && !e.superseded && e.content)
     .map((e: any) => e.content)
-    .join('');
+    .join("");
   if (answerContent.trim()) {
     const merged = buildFullEventList(stream);
     for (const e of merged) {
-      if (e.type !== 'thinking' || !e.event_id) continue;
+      if (e.type !== "thinking" || !e.event_id) continue;
       if (hidden.has(e.event_id)) continue;
       // Hide a step card that duplicates the final answer. Match the body, or a
       // title-only card (a relocated preamble) whose title equals the answer —
       // but keep cards that still carry a distinct reasoning body so the
       // reasoning stays visible.
-      const bodyMatches = e.content && thinkingEqualsAnswer(e.content, answerContent);
-      const titleOnlyMatches = e.title && !(e.content && e.content.trim()) &&
+      const bodyMatches =
+        e.content && thinkingEqualsAnswer(e.content, answerContent);
+      const titleOnlyMatches =
+        e.title &&
+        !(e.content && e.content.trim()) &&
         thinkingEqualsAnswer(e.title, answerContent);
       if (bodyMatches || titleOnlyMatches) {
         hidden.add(e.event_id);
@@ -1368,8 +1978,9 @@ const intermediateEvents = computed(() => {
   const result = buildFullEventList(stream);
   const hidden = hiddenThinkingEventIds.value;
   return result.filter((e: any) => {
-    if (e.type === 'answer' || e.type === 'agent_complete') return false;
-    if (e.type === 'thinking' && e.event_id && hidden.has(e.event_id)) return false;
+    if (e.type === "answer" || e.type === "agent_complete") return false;
+    if (e.type === "thinking" && e.event_id && hidden.has(e.event_id))
+      return false;
     return true;
   });
 });
@@ -1377,8 +1988,8 @@ const intermediateEvents = computed(() => {
 const visibleIntermediateEvents = computed(() => {
   return intermediateEvents.value.filter((e: any) => {
     if (!e) return false;
-    if (e.type === 'thinking') return false;
-    if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
+    if (e.type === "thinking") return false;
+    if (e.type === "tool_call" && e.tool_name === "thinking") return false;
     return true;
   });
 });
@@ -1395,7 +2006,7 @@ const displayEvents = computed(() => {
   // Quick-answer RAG: pipeline steps and model thinking live in RagPipelineProgress;
   // here we only render the final answer stream.
   if (props.ragMode) {
-    return result.filter((e: any) => e.type === 'answer');
+    return result.filter((e: any) => e.type === "answer");
   }
 
   // While the conversation is still running, keep the same lightweight tool-log
@@ -1403,14 +2014,14 @@ const displayEvents = computed(() => {
   // streaming; the active state is represented by the compact activity dots.
   if (!isConversationDone.value) {
     return result.filter((e: any) => {
-      if (e.type === 'thinking') return false;
-      if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
+      if (e.type === "thinking") return false;
+      if (e.type === "tool_call" && e.tool_name === "thinking") return false;
       return true;
     });
   }
 
   // Done: the steps live in the collapsed tree; show only the answer here.
-  const answerEvents = result.filter((e: any) => e.type === 'answer');
+  const answerEvents = result.filter((e: any) => e.type === "answer");
   if (answerEvents.length > 0) {
     return answerEvents;
   }
@@ -1429,24 +2040,26 @@ const displayEvents = computed(() => {
     return result;
   }
 
-  if (final.type === 'thinking') {
+  if (final.type === "thinking") {
     // The agent loop ended via natural-stop (the model wrote its answer as
     // free text). Synthesize a virtual
     // `answer` event from the trailing thinking content so it renders with
     // the answer card UI (expanded markdown + copy/add toolbar) rather than
     // the collapsed "思考" card. The original thinking event is still in
     // the intermediate-steps tree when applicable.
-    const thinking = result.find((e: any) =>
-      e.type === 'thinking' && e.event_id === final.event_id
+    const thinking = result.find(
+      (e: any) => e.type === "thinking" && e.event_id === final.event_id,
     );
     if (!thinking || !thinking.content) return result;
-    return [{
-      type: 'answer',
-      event_id: thinking.event_id,
-      content: thinking.content,
-      done: true,
-      _promoted_from_thinking: true,
-    }];
+    return [
+      {
+        type: "answer",
+        event_id: thinking.event_id,
+        content: thinking.content,
+        done: true,
+        _promoted_from_thinking: true,
+      },
+    ];
   }
 
   return result;
@@ -1457,13 +2070,13 @@ const getEventKey = (event: any, index: number): string => {
   if (!event) return `event-${index}`;
   if (event.event_id) return `event-${event.event_id}`;
   if (event.tool_call_id) return `tool-${event.tool_call_id}`;
-  if (event.type === 'tool_approval_required' && event.pending_id) {
+  if (event.type === "tool_approval_required" && event.pending_id) {
     return `approval-${event.pending_id}`;
   }
-  if (event.type === 'mcp_oauth_required' && event.pending_id) {
+  if (event.type === "mcp_oauth_required" && event.pending_id) {
     return `mcp-oauth-${event.pending_id}`;
   }
-  return `event-${index}-${event.type || 'unknown'}`;
+  return `event-${index}-${event.type || "unknown"}`;
 };
 
 const toggleIntermediateSteps = () => {
@@ -1500,26 +2113,26 @@ const hasResults = (event: any): boolean => {
   const toolName = event.tool_name;
 
   // For knowledge search tools
-  if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
+  if (toolName === "search_knowledge" || toolName === "knowledge_search") {
     const count = event.tool_data.results?.length || event.tool_data.count || 0;
     return count > 0;
   }
 
   // For web search tools
-  if (toolName === 'web_search') {
+  if (toolName === "web_search") {
     const count = event.tool_data.results?.length || event.tool_data.count || 0;
     return count > 0;
   }
 
   // For grep tools
-  if (toolName === 'grep_chunks') {
+  if (toolName === "grep_chunks") {
     const totalMatches = event.tool_data.total_matches || 0;
     const resultCount = event.tool_data.result_count || 0;
     return totalMatches > 0 || resultCount > 0;
   }
 
   // list_knowledge_chunks: summary is inline below the header (no expandable body)
-  if (toolName === 'list_knowledge_chunks') {
+  if (toolName === "list_knowledge_chunks") {
     return false;
   }
 
@@ -1529,7 +2142,7 @@ const hasResults = (event: any): boolean => {
 
 // Delegated handlers for span-based citation clicks/keyboard
 const handleCitationActivate = (el: HTMLElement) => {
-  const url = el.getAttribute('data-url');
+  const url = el.getAttribute("data-url");
   if (!url) return;
   try {
     // @ts-ignore: Wails runtime check
@@ -1537,7 +2150,7 @@ const handleCitationActivate = (el: HTMLElement) => {
       // @ts-ignore
       window.runtime.BrowserOpenURL(url);
     } else {
-      const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
+      const newWindow = window.open(url, "_blank", "noopener,noreferrer");
       if (!newWindow) {
         window.location.assign(url);
       }
@@ -1556,14 +2169,14 @@ const getKbIdForWiki = (slug: string): string => {
   // (if ever needed) can layer on top. We also defensively handle the legacy
   // string shape in case older tool outputs are still cached in a session.
   const pickKbId = (v: unknown): string => {
-    if (!v) return '';
-    if (typeof v === 'string') return v;
+    if (!v) return "";
+    if (typeof v === "string") return v;
     if (Array.isArray(v)) {
       for (const item of v) {
-        if (typeof item === 'string' && item) return item;
+        if (typeof item === "string" && item) return item;
       }
     }
-    return '';
+    return "";
   };
 
   // Try to extract from agent event stream (retrieval pipeline). Walk
@@ -1572,7 +2185,7 @@ const getKbIdForWiki = (slug: string): string => {
     for (let i = props.session.agentEventStream.length - 1; i >= 0; i--) {
       const event = props.session.agentEventStream[i];
       const foundKbs = event?.tool_data?.found_kbs;
-      if (event.type === 'tool_call' && foundKbs) {
+      if (event.type === "tool_call" && foundKbs) {
         const hit = pickKbId(foundKbs[slug]);
         if (hit) return hit;
       }
@@ -1587,7 +2200,7 @@ const getKbIdForWiki = (slug: string): string => {
     return authStore.knowledgeBases[0].id;
   }
 
-  return '';
+  return "";
 };
 
 const onRootClick = (e: Event) => {
@@ -1595,10 +2208,13 @@ const onRootClick = (e: Event) => {
   if (!target) return;
 
   // Handle image clicks -> open preview (only for images inside markdown/answer content, not icons)
-  if (target.tagName === 'IMG') {
+  if (target.tagName === "IMG") {
     const imgEl = target as HTMLImageElement;
-    if (imgEl.closest('.markdown-content') || imgEl.closest('.answer-content')) {
-      const src = imgEl.getAttribute('src');
+    if (
+      imgEl.closest(".markdown-content") ||
+      imgEl.closest(".answer-content")
+    ) {
+      const src = imgEl.getAttribute("src");
       if (src) {
         e.preventDefault();
         e.stopPropagation();
@@ -1609,53 +2225,53 @@ const onRootClick = (e: Event) => {
   }
 
   // Handle web citation clicks
-  const webEl = target.closest?.('.citation-web') as HTMLElement | null;
-  if (webEl && webEl.getAttribute('data-url')) {
+  const webEl = target.closest?.(".citation-web") as HTMLElement | null;
+  if (webEl && webEl.getAttribute("data-url")) {
     e.preventDefault();
     handleCitationActivate(webEl);
     return;
   }
 
   // Handle KB citation clicks -> navigate to KB detail page
-  const kbEl = target.closest?.('.citation-kb') as HTMLElement | null;
-  if (kbEl && kbEl.getAttribute('data-kb-id')) {
+  const kbEl = target.closest?.(".citation-kb") as HTMLElement | null;
+  if (kbEl && kbEl.getAttribute("data-kb-id")) {
     e.preventDefault();
     e.stopPropagation();
-    const kbId = kbEl.getAttribute('data-kb-id');
+    const kbId = kbEl.getAttribute("data-kb-id");
     if (kbId) {
       try {
         // Navigate to knowledge base detail page
         router.push(`/platform/knowledge-bases/${kbId}`);
       } catch (error) {
-        console.error('Failed to navigate to knowledge base:', error);
+        console.error("Failed to navigate to knowledge base:", error);
       }
     }
     return;
   }
 
   // Handle wiki link clicks -> navigate to KB wiki browser page
-  const wikiEl = target.closest?.('.citation-wiki') as HTMLElement | null;
-  if (wikiEl && wikiEl.getAttribute('data-slug')) {
+  const wikiEl = target.closest?.(".citation-wiki") as HTMLElement | null;
+  if (wikiEl && wikiEl.getAttribute("data-slug")) {
     e.preventDefault();
     e.stopPropagation();
-    const slug = wikiEl.getAttribute('data-slug');
+    const slug = wikiEl.getAttribute("data-slug");
 
     // Determine the relevant KB ID
-    const kbId = getKbIdForWiki(slug || '');
+    const kbId = getKbIdForWiki(slug || "");
 
     if (kbId && slug) {
       openWikiDrawer(kbId, slug);
     } else {
-      MessagePlugin.warning(t('agentStream.citation.noKbForWiki'));
+      MessagePlugin.warning(t("agentStream.citation.noKbForWiki"));
     }
     return;
   }
 
   // Handle generic a clicks (especially in Wails desktop)
-  const aEl = target.closest?.('a') as HTMLAnchorElement | null;
+  const aEl = target.closest?.("a") as HTMLAnchorElement | null;
   // @ts-ignore
   if (aEl && aEl.href && window.runtime && window.runtime.BrowserOpenURL) {
-    if (aEl.href.startsWith('http://') || aEl.href.startsWith('https://')) {
+    if (aEl.href.startsWith("http://") || aEl.href.startsWith("https://")) {
       e.preventDefault();
       // @ts-ignore
       window.runtime.BrowserOpenURL(aEl.href);
@@ -1669,9 +2285,9 @@ const onRootKeydown = (e: KeyboardEvent) => {
   if (!target) return;
 
   // Handle web citation keyboard
-  const webEl = target.closest?.('.citation-web') as HTMLElement | null;
+  const webEl = target.closest?.(".citation-web") as HTMLElement | null;
   if (webEl) {
-    if (e.key === 'Enter' || e.key === ' ') {
+    if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       handleCitationActivate(webEl);
     }
@@ -1679,16 +2295,16 @@ const onRootKeydown = (e: KeyboardEvent) => {
   }
 
   // Handle KB citation keyboard -> navigate to KB detail
-  const kbEl = target.closest?.('.citation-kb') as HTMLElement | null;
+  const kbEl = target.closest?.(".citation-kb") as HTMLElement | null;
   if (kbEl) {
-    if (e.key === 'Enter' || e.key === ' ') {
+    if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      const kbId = kbEl.getAttribute('data-kb-id');
+      const kbId = kbEl.getAttribute("data-kb-id");
       if (kbId) {
         try {
           router.push(`/platform/knowledge-bases/${kbId}`);
         } catch (error) {
-          console.error('Failed to navigate to knowledge base:', error);
+          console.error("Failed to navigate to knowledge base:", error);
         }
       }
     }
@@ -1696,18 +2312,18 @@ const onRootKeydown = (e: KeyboardEvent) => {
   }
 
   // Handle wiki citation keyboard -> navigate to KB wiki browser
-  const wikiEl = target.closest?.('.citation-wiki') as HTMLElement | null;
+  const wikiEl = target.closest?.(".citation-wiki") as HTMLElement | null;
   if (wikiEl) {
-    if (e.key === 'Enter' || e.key === ' ') {
+    if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      const slug = wikiEl.getAttribute('data-slug');
+      const slug = wikiEl.getAttribute("data-slug");
 
-      const kbId = getKbIdForWiki(slug || '');
+      const kbId = getKbIdForWiki(slug || "");
 
       if (kbId && slug) {
         openWikiDrawer(kbId, slug);
       } else {
-        MessagePlugin.warning(t('agentStream.citation.noKbForWiki'));
+        MessagePlugin.warning(t("agentStream.citation.noKbForWiki"));
       }
     }
     return;
@@ -1718,10 +2334,11 @@ onMounted(() => {
   nextTick(async () => {
     const root = rootElement.value;
     if (!root) return;
-    root.addEventListener('click', onRootClick, true);
-    const keydownListener: EventListener = (evt: Event) => onRootKeydown(evt as KeyboardEvent);
+    root.addEventListener("click", onRootClick, true);
+    const keydownListener: EventListener = (evt: Event) =>
+      onRootKeydown(evt as KeyboardEvent);
     (root as any).__citationKeydown__ = keydownListener;
-    root.addEventListener('keydown', keydownListener, true);
+    root.addEventListener("keydown", keydownListener, true);
     rebindCitations();
     await hydrateProtectedFileImages(rootElement.value);
   });
@@ -1730,10 +2347,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   const root = rootElement.value;
   if (!root) return;
-  root.removeEventListener('click', onRootClick, true);
-  const keydownListener: EventListener | undefined = (root as any).__citationKeydown__;
+  root.removeEventListener("click", onRootClick, true);
+  const keydownListener: EventListener | undefined = (root as any)
+    .__citationKeydown__;
   if (keydownListener) {
-    root.removeEventListener('keydown', keydownListener, true);
+    root.removeEventListener("keydown", keydownListener, true);
     delete (root as any).__citationKeydown__;
   }
 });
@@ -1753,21 +2371,28 @@ onUpdated(() => {
 
 // 自定义渲染器 - 支持 Mermaid
 const agentRenderer = new marked.Renderer();
-agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
+agentRenderer.code = createMermaidCodeRenderer("mermaid-agent");
 
-const prepareAgentMarkdown = (markdown: string, cachedSvgHtml?: string | null): string => {
+const prepareAgentMarkdown = (
+  markdown: string,
+  cachedSvgHtml?: string | null,
+): string => {
   const mermaidSafe = !isConversationDone.value
-    ? prepareStreamingMermaidMarkdown(markdown, cachedSvgHtml ?? streamingMermaidSvgCache.value)
+    ? prepareStreamingMermaidMarkdown(
+        markdown,
+        cachedSvgHtml ?? streamingMermaidSvgCache.value,
+      )
     : replaceIncompleteMermaidWithPlaceholder(markdown);
-  return mermaidSafe.replace(/<(?:kb|web)\b[^>]*$/i, '');
+  return mermaidSafe.replace(/<(?:kb|web)\b[^>]*$/i, "");
 };
 
 const renderAgentMarkdown = (
   content: unknown,
   escapeMarkdown: (markdown: string) => string,
 ): string => {
-  const contentStr = typeof content === 'string' ? content : String(content || '');
-  if (!contentStr.trim()) return '';
+  const contentStr =
+    typeof content === "string" ? content : String(content || "");
+  if (!contentStr.trim()) return "";
 
   return renderChatMarkdown(contentStr, {
     renderer: agentRenderer,
@@ -1790,20 +2415,27 @@ const renderMarkdownContent = (content: unknown): string => {
 // (e.g. <answer>…</answer>, "Final Answer:") that some models wrap their
 // plain-text answer in, then delegates to the standard markdown renderer.
 const renderAnswerContent = (content: unknown): string => {
-  const contentStr = typeof content === 'string' ? content : String(content || '');
+  const contentStr =
+    typeof content === "string" ? content : String(content || "");
   return renderMarkdownContent(unwrapFinalAnswerWrappers(contentStr));
 };
 
 // Legacy Markdown rendering function (kept for summaries)
 const renderMarkdown = (content: unknown): string => {
-  const contentStr = typeof content === 'string' ? content : String(content || '');
-  if (!contentStr.trim()) return '';
+  const contentStr =
+    typeof content === "string" ? content : String(content || "");
+  if (!contentStr.trim()) return "";
 
   try {
     return renderAgentMarkdown(content, (text) => text);
   } catch (e) {
-    console.error('Markdown rendering error:', e, 'Content:', contentStr.substring(0, 100));
-    return contentStr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    console.error(
+      "Markdown rendering error:",
+      e,
+      "Content:",
+      contentStr.substring(0, 100),
+    );
+    return contentStr.replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 };
 
@@ -1814,47 +2446,65 @@ const renderMermaidDiagrams = async () => {
 
 // Tool summary - extract key info to display externally
 const getToolSummary = (event: any): string => {
-  if (!event || event.pending || !event.success) return '';
+  if (!event || event.pending || !event.success) return "";
 
   const toolName = event.tool_name;
   const toolData = event.tool_data;
 
   // For search tools, don't return summary here - it will be displayed in SearchResults component
-  if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
-    return '';
-  } else if (toolName === 'get_document_info') {
+  if (toolName === "search_knowledge" || toolName === "knowledge_search") {
+    return "";
+  } else if (toolName === "get_document_info") {
     if (toolData?.title) {
-      return t('agentStream.toolSummary.getDocument', { title: toolData.title });
+      return t("agentStream.toolSummary.getDocument", {
+        title: toolData.title,
+      });
     }
-  } else if (toolName === 'list_knowledge_chunks') {
+  } else if (toolName === "list_knowledge_chunks") {
     if (toolData?.faq_question) {
-      return t('agentStream.toolSummary.listFaqEntry', { question: toolData.faq_question });
+      return t("agentStream.toolSummary.listFaqEntry", {
+        question: toolData.faq_question,
+      });
     }
     if (toolData?.fetched_chunks !== undefined) {
-      const title = toolData?.knowledge_title || toolData?.knowledge_id || t('agentStream.toolSummary.document');
-      return t('agentStream.toolSummary.listChunks', { title, fetched: toolData.fetched_chunks, total: toolData.total_chunks ?? '?' });
+      const title =
+        toolData?.knowledge_title ||
+        toolData?.knowledge_id ||
+        t("agentStream.toolSummary.document");
+      return t("agentStream.toolSummary.listChunks", {
+        title,
+        fetched: toolData.fetched_chunks,
+        total: toolData.total_chunks ?? "?",
+      });
     }
-  } else if (toolName === 'todo_write') {
+  } else if (toolName === "todo_write") {
     // Extract steps from tool data
     const steps = toolData?.steps;
     if (Array.isArray(steps)) {
-      const inProgress = steps.filter((s: any) => s.status === 'in_progress').length;
-      const pending = steps.filter((s: any) => s.status === 'pending').length;
-      const completed = steps.filter((s: any) => s.status === 'completed').length;
+      const inProgress = steps.filter(
+        (s: any) => s.status === "in_progress",
+      ).length;
+      const pending = steps.filter((s: any) => s.status === "pending").length;
+      const completed = steps.filter(
+        (s: any) => s.status === "completed",
+      ).length;
 
       const parts = [];
-      if (inProgress > 0) parts.push(`🚀 ${t('agentStream.plan.inProgress')} ${inProgress}`);
-      if (pending > 0) parts.push(`📋 ${t('agentStream.plan.pending')} ${pending}`);
-      if (completed > 0) parts.push(`✅ ${t('agentStream.plan.completed')} ${completed}`);
+      if (inProgress > 0)
+        parts.push(`🚀 ${t("agentStream.plan.inProgress")} ${inProgress}`);
+      if (pending > 0)
+        parts.push(`📋 ${t("agentStream.plan.pending")} ${pending}`);
+      if (completed > 0)
+        parts.push(`✅ ${t("agentStream.plan.completed")} ${completed}`);
 
-      return parts.join(' · ');
+      return parts.join(" · ");
     }
-  } else if (toolName === 'thinking') {
+  } else if (toolName === "thinking") {
     // Return truthy value to trigger rendering, actual content rendered in template
-    return toolData?.thought ? t('agentStream.toolSummary.deepThinking') : '';
+    return toolData?.thought ? t("agentStream.toolSummary.deepThinking") : "";
   }
 
-  return '';
+  return "";
 };
 
 // Get plan status parts for todo_write tool header
@@ -1869,41 +2519,46 @@ const getPlanStatusParts = (event: any) => {
   }
 
   return {
-    inProgress: steps.filter((s: any) => s.status === 'in_progress').length,
-    pending: steps.filter((s: any) => s.status === 'pending').length,
-    completed: steps.filter((s: any) => s.status === 'completed').length
+    inProgress: steps.filter((s: any) => s.status === "in_progress").length,
+    pending: steps.filter((s: any) => s.status === "pending").length,
+    completed: steps.filter((s: any) => s.status === "completed").length,
   };
 };
 
 // Get plan status items for display with icons
 const getPlanStatusItems = (event: any) => {
   const parts = getPlanStatusParts(event);
-  const items: Array<{ icon: string; class: string; label: string; count: number }> = [];
+  const items: Array<{
+    icon: string;
+    class: string;
+    label: string;
+    count: number;
+  }> = [];
 
   if (parts.inProgress > 0) {
     items.push({
-      icon: 'play-circle-filled',
-      class: 'in-progress',
-      label: t('agentStream.plan.inProgress'),
-      count: parts.inProgress
+      icon: "play-circle-filled",
+      class: "in-progress",
+      label: t("agentStream.plan.inProgress"),
+      count: parts.inProgress,
     });
   }
 
   if (parts.pending > 0) {
     items.push({
-      icon: 'time',
-      class: 'pending',
-      label: t('agentStream.plan.pending'),
-      count: parts.pending
+      icon: "time",
+      class: "pending",
+      label: t("agentStream.plan.pending"),
+      count: parts.pending,
     });
   }
 
   if (parts.completed > 0) {
     items.push({
-      icon: 'check-circle-filled',
-      class: 'completed',
-      label: t('agentStream.plan.completed'),
-      count: parts.completed
+      icon: "check-circle-filled",
+      class: "completed",
+      label: t("agentStream.plan.completed"),
+      count: parts.completed,
     });
   }
 
@@ -1914,51 +2569,63 @@ const getPlanStatusItems = (event: any) => {
 const getPlanStatusSummary = (event: any): string => {
   const parts = getPlanStatusParts(event);
   const textParts = [];
-  if (parts.inProgress > 0) textParts.push(`🚀 ${t('agentStream.plan.inProgress')} ${parts.inProgress}`);
-  if (parts.pending > 0) textParts.push(`📋 ${t('agentStream.plan.pending')} ${parts.pending}`);
-  if (parts.completed > 0) textParts.push(`✅ ${t('agentStream.plan.completed')} ${parts.completed}`);
-  return textParts.length > 0 ? textParts.join(' · ') : '';
+  if (parts.inProgress > 0)
+    textParts.push(
+      `🚀 ${t("agentStream.plan.inProgress")} ${parts.inProgress}`,
+    );
+  if (parts.pending > 0)
+    textParts.push(`📋 ${t("agentStream.plan.pending")} ${parts.pending}`);
+  if (parts.completed > 0)
+    textParts.push(`✅ ${t("agentStream.plan.completed")} ${parts.completed}`);
+  return textParts.length > 0 ? textParts.join(" · ") : "";
 };
 
 /** Render SVG assets in the channel / brand color via CSS mask. */
 function maskIconStyle(src: string, size = 18): Record<string, string> {
-  if (!src) return {}
-  const url = `url("${src}")`
+  if (!src) return {};
+  const url = `url("${src}")`;
   return {
     width: `${size}px`,
     height: `${size}px`,
     WebkitMaskImage: url,
     maskImage: url,
-  }
+  };
 }
 
 // Get search results summary text (returns HTML with colored numbers)
 const getSearchResultsSummary = (event: any): string => {
-  if (!event || !event.tool_data) return '';
+  if (!event || !event.tool_data) return "";
 
   const toolData = event.tool_data;
   const count = Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
-  if (count === 0) return t('agentStream.search.noResults');
+  if (count === 0) return t("agentStream.search.noResults");
 
   // Build summary text
-  let summary = '';
-  const kbCount = toolData.kb_counts ? Object.keys(toolData.kb_counts).length : 0;
+  let summary = "";
+  const kbCount = toolData.kb_counts
+    ? Object.keys(toolData.kb_counts).length
+    : 0;
   if (kbCount > 0) {
-    summary = t('agentStream.search.foundResultsFromFiles', { count: `<strong>${count}</strong>`, files: `<strong>${kbCount}</strong>` });
+    summary = t("agentStream.search.foundResultsFromFiles", {
+      count: `<strong>${count}</strong>`,
+      files: `<strong>${kbCount}</strong>`,
+    });
   } else {
-    summary = t('agentStream.search.foundResults', { count: `<strong>${count}</strong>` });
+    summary = t("agentStream.search.foundResults", {
+      count: `<strong>${count}</strong>`,
+    });
   }
   return summary;
 };
 
 // Get web search results summary text
 const getWebSearchResultsSummary = (toolData: any): string => {
-  if (!toolData) return '';
+  if (!toolData) return "";
 
   const count = Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
-  if (count === 0) return '';
+  if (count === 0) return "";
 
-  return t('agentStream.search.webResults', { count });
+  return t("agentStream.search.webResults", { count });
 };
 
 // Get results count (number only) for web search summary
@@ -1969,16 +2636,16 @@ const getResultsCount = (toolData: any): number => {
 
 // Get grep results summary text (returns HTML with colored numbers)
 const getGrepResultsSummary = (toolData: any): string => {
-  if (!toolData) return '';
+  if (!toolData) return "";
 
   const totalChunks = Number(toolData.total_matches ?? 0) || 0;
   const docCount = countGrepDocuments(toolData);
 
   if (totalChunks === 0) {
-    return t('agentStream.search.noResults');
+    return t("agentStream.search.noResults");
   }
 
-  return t('agentStream.search.grepSummary', {
+  return t("agentStream.search.grepSummary", {
     chunks: `<strong>${totalChunks}</strong>`,
     docs: `<strong>${docCount}</strong>`,
   });
@@ -1991,27 +2658,32 @@ const getKnowledgeChunksSummary = (toolData: any): string => {
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
   if (event.pending) {
-    if (event.tool_name === 'image_analysis') {
-      return t('agentStream.toolStatus.imageAnalyzing');
+    if (event.tool_name === "image_analysis") {
+      return t("agentStream.toolStatus.imageAnalyzing");
     }
-    if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
+    if (
+      event.tool_name === "wiki_search" ||
+      event.tool_name === "wiki_read_page"
+    ) {
       return `${getLocalizedToolName(event.tool_name)}...`;
     }
     const localizedName = getLocalizedToolName(event.tool_name);
-    return t('agentStream.toolStatus.calling', { name: localizedName });
+    return t("agentStream.toolStatus.calling", { name: localizedName });
   }
 
   const toolName = event.tool_name;
-  const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search' || toolName === 'wiki_search';
-  const isWebSearchTool = toolName === 'web_search';
-  const isGrepTool = toolName === 'grep_chunks';
+  const isSearchTool =
+    toolName === "search_knowledge" ||
+    toolName === "knowledge_search" ||
+    toolName === "wiki_search";
+  const isWebSearchTool = toolName === "web_search";
+  const isGrepTool = toolName === "grep_chunks";
 
   // For search tools, use description with query text
   if (isSearchTool) {
     const baseTitle = getToolDescription(event);
     const queryText =
-      getQueryText(event.arguments) ||
-      getQueryText(event.tool_data);
+      getQueryText(event.arguments) || getQueryText(event.tool_data);
     if (queryText) {
       return `${baseTitle}：「${queryText}」`;
     }
@@ -2022,21 +2694,29 @@ const getToolTitle = (event: any): string => {
   if (isWebSearchTool) {
     const baseTitle = getToolDescription(event);
     // Try to get query from arguments or tool_data
-    let queryText = '';
-    if (event.arguments && typeof event.arguments === 'object' && event.arguments.query) {
+    let queryText = "";
+    if (
+      event.arguments &&
+      typeof event.arguments === "object" &&
+      event.arguments.query
+    ) {
       const query = event.arguments.query;
       // Handle both string and array formats
       if (Array.isArray(query)) {
-        queryText = query.filter((q: any) => q && typeof q === 'string').join('，');
-      } else if (typeof query === 'string') {
+        queryText = query
+          .filter((q: any) => q && typeof q === "string")
+          .join("，");
+      } else if (typeof query === "string") {
         queryText = query;
       }
     } else if (event.tool_data && event.tool_data.query) {
       const query = event.tool_data.query;
       // Handle both string and array formats
       if (Array.isArray(query)) {
-        queryText = query.filter((q: any) => q && typeof q === 'string').join('，');
-      } else if (typeof query === 'string') {
+        queryText = query
+          .filter((q: any) => q && typeof q === "string")
+          .join("，");
+      } else if (typeof query === "string") {
         queryText = query;
       }
     }
@@ -2051,7 +2731,7 @@ const getToolTitle = (event: any): string => {
     const baseTitle = getToolDescription(event);
     // Try to get patterns from arguments or tool_data
     let patterns: string[] = [];
-    if (event.arguments && typeof event.arguments === 'object') {
+    if (event.arguments && typeof event.arguments === "object") {
       if (Array.isArray(event.arguments.queries)) {
         patterns = event.arguments.queries;
       } else if (Array.isArray(event.arguments.patterns)) {
@@ -2075,21 +2755,23 @@ const getToolTitle = (event: any): string => {
     if (patterns.length > 0) {
       // Show up to 2 patterns in title
       const displayPatterns = patterns.slice(0, 2);
-      const patternText = displayPatterns.join('、');
-      const moreText = patterns.length > 2 ? ` +${patterns.length - 2}` : '';
+      const patternText = displayPatterns.join("、");
+      const moreText = patterns.length > 2 ? ` +${patterns.length - 2}` : "";
       return `${baseTitle}：「${patternText}${moreText}」`;
     }
     return baseTitle;
   }
 
-  if (toolName === 'wiki_read_page') {
+  if (toolName === "wiki_read_page") {
     const pageLabel = String(
       event.tool_data?.title ||
-      getWikiPageText(event.arguments) ||
-      getWikiPageText(event.tool_data)
+        getWikiPageText(event.arguments) ||
+        getWikiPageText(event.tool_data),
     ).trim();
     const baseTitle = getToolDescription(event);
-    return pageLabel ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」` : baseTitle;
+    return pageLabel
+      ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」`
+      : baseTitle;
   }
 
   // Use tool summary if available
@@ -2100,49 +2782,78 @@ const getToolTitle = (event: any): string => {
 // Tool description
 const getToolDescription = (event: any): string => {
   if (event.pending) {
-    if (event.tool_name === 'image_analysis') {
-      return t('agentStream.toolStatus.imageAnalyzing');
+    if (event.tool_name === "image_analysis") {
+      return t("agentStream.toolStatus.imageAnalyzing");
     }
-    if (event.tool_name === 'query_understand') {
-      return t('agentStream.toolStatus.queryUnderstanding');
+    if (event.tool_name === "query_understand") {
+      return t("agentStream.toolStatus.queryUnderstanding");
     }
     const localizedName = getLocalizedToolName(event.tool_name);
-    return t('agentStream.toolStatus.calling', { name: localizedName });
+    return t("agentStream.toolStatus.calling", { name: localizedName });
   }
 
   const success = event.success === true;
   const toolName = event.tool_name;
 
-  if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
-    return success ? t('agentStream.toolStatus.searchKb') : t('agentStream.toolStatus.searchKbFailed');
-  } else if (toolName === 'wiki_search' || toolName === 'wiki_read_page') {
+  if (toolName === "search_knowledge" || toolName === "knowledge_search") {
+    return success
+      ? t("agentStream.toolStatus.searchKb")
+      : t("agentStream.toolStatus.searchKbFailed");
+  } else if (toolName === "wiki_search" || toolName === "wiki_read_page") {
     const localizedName = getLocalizedToolName(toolName);
-    return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
-  } else if (toolName === 'web_search') {
-    return success ? t('agentStream.toolStatus.webSearch') : t('agentStream.toolStatus.webSearchFailed');
-  } else if (toolName === 'grep_chunks') {
-    return success ? t('agentStream.toolStatus.grepSearch') : t('agentStream.toolStatus.grepSearchFailed');
-  } else if (toolName === 'get_document_info') {
-    return success ? t('agentStream.toolStatus.getDocInfo') : t('agentStream.toolStatus.getDocInfoFailed');
-  } else if (toolName === 'get_document_content' || toolName === 'wiki_read_source_doc') {
-    return success ? t('agentStream.toolStatus.viewDocument') : t('agentStream.toolStatus.calledFailed', { name: t('agentStream.toolStatus.viewDocument') });
-  } else if (toolName === 'thinking') {
-    return success ? t('agentStream.toolStatus.thinkingDone') : t('agentStream.toolStatus.thinkingFailed');
-  } else if (toolName === 'todo_write') {
-    return success ? t('agentStream.toolStatus.updateTodos') : t('agentStream.toolStatus.updateTodosFailed');
-  } else if (toolName === 'image_analysis') {
-    return success ? t('agentStream.toolStatus.imageAnalysisDone') : t('agentStream.toolStatus.imageAnalysisFailed');
-  } else if (toolName === 'query_understand') {
-    return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
+    return success
+      ? localizedName
+      : t("agentStream.toolStatus.calledFailed", { name: localizedName });
+  } else if (toolName === "web_search") {
+    return success
+      ? t("agentStream.toolStatus.webSearch")
+      : t("agentStream.toolStatus.webSearchFailed");
+  } else if (toolName === "grep_chunks") {
+    return success
+      ? t("agentStream.toolStatus.grepSearch")
+      : t("agentStream.toolStatus.grepSearchFailed");
+  } else if (toolName === "get_document_info") {
+    return success
+      ? t("agentStream.toolStatus.getDocInfo")
+      : t("agentStream.toolStatus.getDocInfoFailed");
+  } else if (
+    toolName === "get_document_content" ||
+    toolName === "wiki_read_source_doc"
+  ) {
+    return success
+      ? t("agentStream.toolStatus.viewDocument")
+      : t("agentStream.toolStatus.calledFailed", {
+          name: t("agentStream.toolStatus.viewDocument"),
+        });
+  } else if (toolName === "thinking") {
+    return success
+      ? t("agentStream.toolStatus.thinkingDone")
+      : t("agentStream.toolStatus.thinkingFailed");
+  } else if (toolName === "todo_write") {
+    return success
+      ? t("agentStream.toolStatus.updateTodos")
+      : t("agentStream.toolStatus.updateTodosFailed");
+  } else if (toolName === "image_analysis") {
+    return success
+      ? t("agentStream.toolStatus.imageAnalysisDone")
+      : t("agentStream.toolStatus.imageAnalysisFailed");
+  } else if (toolName === "query_understand") {
+    return success
+      ? t("agentStream.toolStatus.queryUnderstandDone")
+      : t("agentStream.toolStatus.calledFailed", {
+          name: getLocalizedToolName(toolName),
+        });
   } else {
     const localizedName = getLocalizedToolName(toolName);
-    return success ? t('agentStream.toolStatus.called', { name: localizedName }) : t('agentStream.toolStatus.calledFailed', { name: localizedName });
+    return success
+      ? t("agentStream.toolStatus.called", { name: localizedName })
+      : t("agentStream.toolStatus.calledFailed", { name: localizedName });
   }
 };
 
 // Helper functions
 const formatDuration = (ms?: number): string => {
-  if (!ms) return '0s';
+  if (!ms) return "0s";
   if (ms < 1000) return `${ms}ms`;
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -2153,7 +2864,7 @@ const formatDuration = (ms?: number): string => {
 
 const formatJSON = (obj: any): string => {
   try {
-    if (typeof obj === 'string') {
+    if (typeof obj === "string") {
       // Try to parse if it's a JSON string
       try {
         const parsed = JSON.parse(obj);
@@ -2173,7 +2884,7 @@ const formatJSON = (obj: any): string => {
 // so callers like copy and add-to-knowledge get clean text.
 const getActualContent = (answerEvent: any): string => {
   // First try to get content from answer event
-  const answerContent = (answerEvent?.content || '').trim();
+  const answerContent = (answerEvent?.content || "").trim();
   if (answerContent) {
     return unwrapFinalAnswerWrappers(answerContent).trim();
   }
@@ -2181,72 +2892,78 @@ const getActualContent = (answerEvent: any): string => {
   // If answer is empty, try to get from last thinking
   const stream = eventStream.value;
   if (stream && Array.isArray(stream)) {
-    const thinkingEvents = stream.filter((e: any) => e.type === 'thinking' && e.content && e.content.trim());
+    const thinkingEvents = stream.filter(
+      (e: any) => e.type === "thinking" && e.content && e.content.trim(),
+    );
     if (thinkingEvents.length > 0) {
       const lastThinking = thinkingEvents[thinkingEvents.length - 1];
-      return unwrapFinalAnswerWrappers((lastThinking.content || '').trim()).trim();
+      return unwrapFinalAnswerWrappers(
+        (lastThinking.content || "").trim(),
+      ).trim();
     }
   }
 
-  return '';
+  return "";
 };
 
 const handleCopyAnswer = async (answerEvent: any) => {
   const content = getActualContent(answerEvent);
   if (!content) {
-    MessagePlugin.warning(t('agentStream.copy.emptyContent'));
+    MessagePlugin.warning(t("agentStream.copy.emptyContent"));
     return;
   }
 
   try {
     await copyTextToClipboard(content);
-    MessagePlugin.success(t('agentStream.copy.success'));
+    MessagePlugin.success(t("agentStream.copy.success"));
   } catch (err) {
-    console.error('Copy failed:', err);
-    MessagePlugin.error(t('agentStream.copy.failed'));
+    console.error("Copy failed:", err);
+    MessagePlugin.error(t("agentStream.copy.failed"));
   }
 };
 
 const handleAddToKnowledge = (answerEvent: any) => {
   const content = getActualContent(answerEvent);
   if (!content) {
-    MessagePlugin.warning(t('agentStream.saveToKb.emptyContent'));
+    MessagePlugin.warning(t("agentStream.saveToKb.emptyContent"));
     return;
   }
 
-  const question = (props.userQuery || '').trim();
+  const question = (props.userQuery || "").trim();
   const manualContent = buildManualMarkdown(question, content);
   const manualTitle = formatManualTitle(question);
 
   uiStore.openManualEditor({
-    mode: 'create',
+    mode: "create",
     title: manualTitle,
     content: manualContent,
-    status: 'draft',
+    status: "draft",
   });
 
-  MessagePlugin.info(t('agentStream.saveToKb.editorOpened'));
+  MessagePlugin.info(t("agentStream.saveToKb.editorOpened"));
 };
 
-type AnswerFeedbackType = 'like' | 'dislike';
+type AnswerFeedbackType = "like" | "dislike";
 
-const answerFeedbackState = reactive<Record<string, { type: AnswerFeedbackType; reason?: string }>>({});
+const answerFeedbackState = reactive<
+  Record<string, { type: AnswerFeedbackType; reason?: string }>
+>({});
 const dislikeDialogVisible = ref(false);
-const dislikeReason = ref('');
-const pendingDislikeKey = ref('');
+const dislikeReason = ref("");
+const pendingDislikeKey = ref("");
 
 const feedbackReasonOptions = [
-  '回答不准确',
-  '没有解决问题',
-  '引用内容不相关',
-  '表达不清晰',
+  "回答不准确",
+  "没有解决问题",
+  "引用内容不相关",
+  "表达不清晰",
 ];
 
 const getAnswerFeedbackKey = (answerEvent: any) => {
   if (answerEvent?.event_id) return `event:${answerEvent.event_id}`;
   if (answerEvent?.id) return `event:${answerEvent.id}`;
 
-  const sessionKey = props.session?.id || props.sessionId || 'current';
+  const sessionKey = props.session?.id || props.sessionId || "current";
   const content = getActualContent(answerEvent);
   return `${sessionKey}:${content.slice(0, 80)}`;
 };
@@ -2255,36 +2972,100 @@ const getAnswerFeedbackType = (answerEvent: any) => {
   return answerFeedbackState[getAnswerFeedbackKey(answerEvent)]?.type;
 };
 
-const handleLikeAnswer = (answerEvent: any) => {
-  const key = getAnswerFeedbackKey(answerEvent);
-  answerFeedbackState[key] = { type: 'like' };
-  MessagePlugin.success('感谢反馈');
+const getFeedbackMessageID = () => props.session?.id || "";
+
+const persistFeedback = async (
+  feedbackType: AnswerFeedbackType,
+  reason = "",
+) => {
+  const messageID = getFeedbackMessageID();
+  if (!props.sessionId || !messageID) {
+    MessagePlugin.warning("当前回复尚未生成完成，暂时无法提交反馈");
+    return false;
+  }
+
+  try {
+    await saveMessageFeedback(props.sessionId, messageID, feedbackType, reason);
+    return true;
+  } catch (err) {
+    console.error("Save answer feedback failed:", err);
+    MessagePlugin.error("反馈提交失败");
+    return false;
+  }
 };
 
-const handleDislikeAnswer = (answerEvent: any) => {
+const clearFeedback = async () => {
+  const messageID = getFeedbackMessageID();
+  if (!props.sessionId || !messageID) {
+    MessagePlugin.warning("当前回复尚未生成完成，暂时无法提交反馈");
+    return false;
+  }
+
+  try {
+    await deleteMessageFeedback(props.sessionId, messageID);
+    return true;
+  } catch (err) {
+    console.error("Delete answer feedback failed:", err);
+    MessagePlugin.error("反馈提交失败");
+    return false;
+  }
+};
+
+const handleLikeAnswer = async (answerEvent: any) => {
   const key = getAnswerFeedbackKey(answerEvent);
+  if (answerFeedbackState[key]?.type === "like") {
+    const ok = await clearFeedback();
+    if (ok) {
+      delete answerFeedbackState[key];
+      MessagePlugin.success("已取消反馈");
+    }
+    return;
+  }
+
+  const ok = await persistFeedback("like");
+  if (ok) {
+    answerFeedbackState[key] = { type: "like" };
+    MessagePlugin.success("感谢反馈");
+  }
+};
+
+const handleDislikeAnswer = async (answerEvent: any) => {
+  const key = getAnswerFeedbackKey(answerEvent);
+  if (answerFeedbackState[key]?.type === "dislike") {
+    const ok = await clearFeedback();
+    if (ok) {
+      delete answerFeedbackState[key];
+      MessagePlugin.success("已取消反馈");
+    }
+    return;
+  }
+
   pendingDislikeKey.value = key;
-  dislikeReason.value = answerFeedbackState[key]?.reason || '';
+  dislikeReason.value = answerFeedbackState[key]?.reason || "";
   dislikeDialogVisible.value = true;
 };
 
-const submitDislikeFeedback = () => {
+const submitDislikeFeedback = async () => {
   if (!pendingDislikeKey.value) return;
 
-  answerFeedbackState[pendingDislikeKey.value] = {
-    type: 'dislike',
-    reason: dislikeReason.value.trim(),
-  };
-  dislikeDialogVisible.value = false;
-  MessagePlugin.success('感谢反馈，我们会继续改进');
+  const reason = dislikeReason.value.trim();
+  const ok = await persistFeedback("dislike", reason);
+  if (ok) {
+    answerFeedbackState[pendingDislikeKey.value] = {
+      type: "dislike",
+      reason,
+    };
+    dislikeDialogVisible.value = false;
+    MessagePlugin.success("感谢反馈，我们会继续改进");
+  }
 };
 </script>
 
 <style lang="less" scoped>
-@import '../../../components/css/chat-markdown.less';
-@import '../../../components/css/chat-message-shared.less';
-@import '../../../components/css/chat-citations.less';
-@import '../../../components/css/chat-timeline-loading.less';
+@import "../../../components/css/chat-markdown.less";
+@import "../../../components/css/chat-message-shared.less";
+@import "../../../components/css/chat-citations.less";
+@import "../../../components/css/chat-timeline-loading.less";
 
 .agent-stream-display {
   display: flex;
@@ -2294,7 +3075,11 @@ const submitDislikeFeedback = () => {
   position: relative;
   --agent-step-text-size: 14px;
   --agent-step-summary-size: 13px;
-  --agent-step-line-color: color-mix(in srgb, var(--td-text-color-primary) 16%, transparent);
+  --agent-step-line-color: color-mix(
+    in srgb,
+    var(--td-text-color-primary) 16%,
+    transparent
+  );
   --agent-step-icon-color: var(--td-text-color-placeholder);
   --stream-brand-2: color-mix(in srgb, var(--td-brand-color) 2%, transparent);
   --stream-brand-3: color-mix(in srgb, var(--td-brand-color) 3%, transparent);
@@ -2414,7 +3199,7 @@ const submitDislikeFeedback = () => {
   // vertical trunk line (continues for non-last children)
   // bottom: -6px extends the line through the margin-bottom gap between siblings
   &::before {
-    content: '';
+    content: "";
     position: absolute;
     left: 9px;
     top: 22px;
@@ -2506,7 +3291,7 @@ const submitDislikeFeedback = () => {
     transition: border-color 0.2s ease;
     box-shadow: none;
 
-    >* {
+    > * {
       position: relative;
       z-index: 1;
     }
@@ -2649,7 +3434,11 @@ const submitDislikeFeedback = () => {
     height: 18px;
     border-radius: 9px;
     background: var(--stream-brand-10);
-    color: color-mix(in srgb, var(--td-brand-color) 80%, var(--td-text-color-secondary));
+    color: color-mix(
+      in srgb,
+      var(--td-brand-color) 80%,
+      var(--td-text-color-secondary)
+    );
     font-size: 11px;
     font-weight: 500;
     white-space: nowrap;
@@ -2665,7 +3454,6 @@ const submitDislikeFeedback = () => {
     flex-shrink: 1;
   }
 }
-
 
 @keyframes fadeInUp {
   from {
@@ -2705,7 +3493,6 @@ const submitDislikeFeedback = () => {
 
 // Loading 动画关键帧
 @keyframes dotBounce {
-
   0%,
   80%,
   100% {
@@ -2730,7 +3517,6 @@ const submitDislikeFeedback = () => {
 }
 
 @keyframes pulse {
-
   0%,
   100% {
     transform: scale(1);
@@ -2744,7 +3530,6 @@ const submitDislikeFeedback = () => {
 }
 
 @keyframes typingBounce {
-
   0%,
   60%,
   100% {
@@ -2757,7 +3542,6 @@ const submitDislikeFeedback = () => {
 }
 
 @keyframes wave {
-
   0%,
   40%,
   100% {
@@ -2770,7 +3554,6 @@ const submitDislikeFeedback = () => {
 }
 
 @keyframes pulseBorder {
-
   0%,
   100% {
     border-left-color: var(--td-brand-color);
@@ -2784,7 +3567,6 @@ const submitDislikeFeedback = () => {
 }
 
 @keyframes shakeError {
-
   0%,
   100% {
     transform: translateX(0);
@@ -3354,7 +4136,7 @@ const submitDislikeFeedback = () => {
       line-height: 1.6;
     }
 
-    li>p {
+    li > p {
       margin-bottom: 6px;
     }
 

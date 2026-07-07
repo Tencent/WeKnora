@@ -269,43 +269,130 @@ func (r *messageRepository) UpdateMessageKnowledgeID(
 		Update("knowledge_id", knowledgeID).Error
 }
 
-// ReplaceMessageKnowledgeChunkRelations atomically replaces all chunk relations
-// for one assistant message. Passing an empty relation slice clears old rows.
-func (r *messageRepository) ReplaceMessageKnowledgeChunkRelations(
+// ReplaceMessageKnowledgeChunks atomically replaces all referenced chunks
+// for one assistant message. Passing an empty chunk slice clears old rows.
+func (r *messageRepository) ReplaceMessageKnowledgeChunks(
 	ctx context.Context,
 	sessionID, messageID string,
-	relations []*types.MessageKnowledgeChunkRelation,
+	chunks []*types.MessageKnowledgeChunk,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where(
 			"session_id = ? AND message_id = ?", sessionID, messageID,
-		).Delete(&types.MessageKnowledgeChunkRelation{}).Error; err != nil {
+		).Delete(&types.MessageKnowledgeChunk{}).Error; err != nil {
 			return err
 		}
-		if len(relations) == 0 {
+		if len(chunks) == 0 {
 			return nil
 		}
-		return tx.Create(&relations).Error
+		return tx.Create(&chunks).Error
 	})
 }
 
-// UpsertMessageFeedback creates or updates feedback for one assistant message.
-func (r *messageRepository) UpsertMessageFeedback(ctx context.Context, feedback *types.MessageFeedback) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "message_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"tenant_id",
-			"session_id",
-			"feedback_type",
-			"reason",
-			"updated_at",
-		}),
-	}).Create(feedback).Error
+// UpsertMessageFeedbackWithChunkStats creates or updates feedback and applies
+// the corresponding delta to all chunks referenced by the answer.
+func (r *messageRepository) UpsertMessageFeedbackWithChunkStats(ctx context.Context, feedback *types.MessageFeedback) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		previousType, err := getExistingMessageFeedbackType(tx, feedback.SessionID, feedback.MessageID)
+		if err != nil {
+			return err
+		}
+
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "message_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"tenant_id",
+				"session_id",
+				"feedback_type",
+				"reason",
+				"updated_at",
+			}),
+		}).Create(feedback).Error; err != nil {
+			return err
+		}
+
+		return updateAttributedChunkFeedbackCounts(tx, feedback.SessionID, feedback.MessageID, previousType, feedback.FeedbackType)
+	})
 }
 
-// DeleteMessageFeedback deletes feedback for one assistant message.
-func (r *messageRepository) DeleteMessageFeedback(ctx context.Context, sessionID, messageID string) error {
-	return r.db.WithContext(ctx).
+// DeleteMessageFeedbackWithChunkStats deletes feedback and applies the inverse
+// delta to all chunks referenced by the answer.
+func (r *messageRepository) DeleteMessageFeedbackWithChunkStats(ctx context.Context, sessionID, messageID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		previousType, err := getExistingMessageFeedbackType(tx, sessionID, messageID)
+		if err != nil {
+			return err
+		}
+
+		if err := tx.Where("session_id = ? AND message_id = ?", sessionID, messageID).
+			Delete(&types.MessageFeedback{}).Error; err != nil {
+			return err
+		}
+
+		return updateAttributedChunkFeedbackCounts(tx, sessionID, messageID, previousType, "")
+	})
+}
+
+func getExistingMessageFeedbackType(tx *gorm.DB, sessionID, messageID string) (string, error) {
+	var existing types.MessageFeedback
+	if err := tx.Where("session_id = ? AND message_id = ?", sessionID, messageID).First(&existing).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", nil
+		}
+		return "", err
+	}
+	return existing.FeedbackType, nil
+}
+
+func updateAttributedChunkFeedbackCounts(tx *gorm.DB, sessionID, messageID, oldType, newType string) error {
+	likeDelta, dislikeDelta := feedbackCounterDelta(oldType, newType)
+	if likeDelta == 0 && dislikeDelta == 0 {
+		return nil
+	}
+
+	var chunkIDs []string
+	if err := tx.Model(&types.MessageKnowledgeChunk{}).
 		Where("session_id = ? AND message_id = ?", sessionID, messageID).
-		Delete(&types.MessageFeedback{}).Error
+		Distinct().
+		Pluck("chunk_id", &chunkIDs).Error; err != nil {
+		return err
+	}
+	if len(chunkIDs) == 0 {
+		return nil
+	}
+
+	updates := map[string]interface{}{}
+	if likeDelta != 0 {
+		updates["feedback_like_count"] = nonNegativeCounterExpr(tx, "feedback_like_count", likeDelta)
+	}
+	if dislikeDelta != 0 {
+		updates["feedback_dislike_count"] = nonNegativeCounterExpr(tx, "feedback_dislike_count", dislikeDelta)
+	}
+
+	return tx.Model(&types.Chunk{}).
+		Where("id IN ?", chunkIDs).
+		Updates(updates).Error
+}
+
+func feedbackCounterDelta(oldType, newType string) (likeDelta, dislikeDelta int) {
+	switch oldType {
+	case "like":
+		likeDelta--
+	case "dislike":
+		dislikeDelta--
+	}
+	switch newType {
+	case "like":
+		likeDelta++
+	case "dislike":
+		dislikeDelta++
+	}
+	return likeDelta, dislikeDelta
+}
+
+func nonNegativeCounterExpr(tx *gorm.DB, column string, delta int) clause.Expr {
+	if tx.Dialector != nil && tx.Dialector.Name() == "sqlite" {
+		return gorm.Expr("MAX(COALESCE("+column+", 0) + ?, 0)", delta)
+	}
+	return gorm.Expr("GREATEST(COALESCE("+column+", 0) + ?, 0)", delta)
 }

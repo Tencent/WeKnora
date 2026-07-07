@@ -146,7 +146,7 @@ CREATE TABLE message_feedbacks (
     KEY idx_message_feedbacks_type (feedback_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE message_knowledge_chunk_relations (
+CREATE TABLE message_knowledge_chunks (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id BIGINT NOT NULL,
     session_id VARCHAR(36) NOT NULL,
@@ -158,12 +158,12 @@ CREATE TABLE message_knowledge_chunk_relations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
-    UNIQUE KEY idx_message_chunk_relation (message_id, chunk_id),
-    KEY idx_msg_chunk_rel_tenant (tenant_id),
-    KEY idx_msg_chunk_rel_session (session_id),
-    KEY idx_msg_chunk_rel_chunk (chunk_id),
-    KEY idx_msg_chunk_rel_knowledge (knowledge_id),
-    KEY idx_msg_chunk_rel_kb (knowledge_base_id)
+    UNIQUE KEY idx_message_knowledge_chunk (message_id, chunk_id),
+    KEY idx_msg_knowledge_chunk_tenant (tenant_id),
+    KEY idx_msg_knowledge_chunk_session (session_id),
+    KEY idx_msg_knowledge_chunk_chunk (chunk_id),
+    KEY idx_msg_knowledge_chunk_knowledge (knowledge_id),
+    KEY idx_msg_knowledge_chunk_kb (knowledge_base_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE chunks (
@@ -183,6 +183,8 @@ CREATE TABLE chunks (
     image_info TEXT,
     relation_chunks JSON,
     indirect_relation_chunks JSON,
+    feedback_like_count BIGINT NOT NULL DEFAULT 0,
+    feedback_dislike_count BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL

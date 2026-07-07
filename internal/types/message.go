@@ -313,13 +313,13 @@ type MessageKnowledgeChunkReference struct {
 	ChunkIndex      int    `json:"chunk_index,omitempty"`
 }
 
-// MessageKnowledgeChunkRelation stores the normalized answer-to-chunk relation.
-type MessageKnowledgeChunkRelation struct {
+// MessageKnowledgeChunk stores the normalized answer-to-chunk mapping.
+type MessageKnowledgeChunk struct {
 	ID              string    `json:"id" gorm:"type:varchar(36);primaryKey"`
 	TenantID        uint64    `json:"tenant_id" gorm:"index;not null"`
 	SessionID       string    `json:"session_id" gorm:"type:varchar(36);index;not null"`
-	MessageID       string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_message_chunk_relation;index;not null"`
-	ChunkID         string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_message_chunk_relation;index;not null"`
+	MessageID       string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_message_knowledge_chunk;index;not null"`
+	ChunkID         string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_message_knowledge_chunk;index;not null"`
 	KnowledgeID     string    `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`
 	KnowledgeBaseID string    `json:"knowledge_base_id,omitempty" gorm:"type:varchar(36);index"`
 	ChunkIndex      int       `json:"chunk_index,omitempty" gorm:"default:0"`
@@ -327,7 +327,12 @@ type MessageKnowledgeChunkRelation struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
-func (r *MessageKnowledgeChunkRelation) BeforeCreate(tx *gorm.DB) (err error) {
+// TableName uses the existing answer-to-chunk association table.
+func (r MessageKnowledgeChunk) TableName() string {
+	return "message_knowledge_chunks"
+}
+
+func (r *MessageKnowledgeChunk) BeforeCreate(tx *gorm.DB) (err error) {
 	if r.ID == "" {
 		r.ID = uuid.New().String()
 	}

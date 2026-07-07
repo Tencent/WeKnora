@@ -289,7 +289,7 @@ func (s *messageService) SaveMessageFeedback(
 		FeedbackType: feedbackType,
 		Reason:       strings.TrimSpace(reason),
 	}
-	if err := s.messageRepo.UpsertMessageFeedback(ctx, feedback); err != nil {
+	if err := s.messageRepo.UpsertMessageFeedbackWithChunkStats(ctx, feedback); err != nil {
 		return nil, err
 	}
 	return feedback, nil
@@ -310,14 +310,14 @@ func (s *messageService) DeleteMessageFeedback(ctx context.Context, sessionID, m
 		return fmt.Errorf("message %s is not an assistant answer", messageID)
 	}
 
-	return s.messageRepo.DeleteMessageFeedback(ctx, sessionID, messageID)
+	return s.messageRepo.DeleteMessageFeedbackWithChunkStats(ctx, sessionID, messageID)
 }
 
-func (s *messageService) SaveMessageKnowledgeChunkRelations(
+func (s *messageService) SaveMessageKnowledgeChunks(
 	ctx context.Context,
 	sessionID, messageID string,
 	refs []types.MessageKnowledgeChunkReference,
-) ([]*types.MessageKnowledgeChunkRelation, error) {
+) ([]*types.MessageKnowledgeChunk, error) {
 	tenantID := types.MustTenantIDFromContext(ctx)
 	if _, err := s.sessionRepo.Get(ctx, tenantID, sessionUserIDForLookup(ctx), sessionID); err != nil {
 		return nil, err
@@ -332,14 +332,14 @@ func (s *messageService) SaveMessageKnowledgeChunkRelations(
 	}
 
 	seen := make(map[string]bool, len(refs))
-	relations := make([]*types.MessageKnowledgeChunkRelation, 0, len(refs))
+	chunks := make([]*types.MessageKnowledgeChunk, 0, len(refs))
 	for _, ref := range refs {
 		chunkID := strings.TrimSpace(ref.ChunkID)
 		if chunkID == "" || seen[chunkID] {
 			continue
 		}
 		seen[chunkID] = true
-		relations = append(relations, &types.MessageKnowledgeChunkRelation{
+		chunks = append(chunks, &types.MessageKnowledgeChunk{
 			TenantID:        tenantID,
 			SessionID:       sessionID,
 			MessageID:       messageID,
@@ -350,10 +350,10 @@ func (s *messageService) SaveMessageKnowledgeChunkRelations(
 		})
 	}
 
-	if err := s.messageRepo.ReplaceMessageKnowledgeChunkRelations(ctx, sessionID, messageID, relations); err != nil {
+	if err := s.messageRepo.ReplaceMessageKnowledgeChunks(ctx, sessionID, messageID, chunks); err != nil {
 		return nil, err
 	}
-	return relations, nil
+	return chunks, nil
 }
 
 // DeleteMessage removes a message from a session, also cleaning up its Knowledge entry in the chat history KB.

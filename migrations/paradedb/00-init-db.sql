@@ -176,7 +176,7 @@ CREATE INDEX IF NOT EXISTS idx_message_feedbacks_tenant ON message_feedbacks(ten
 CREATE INDEX IF NOT EXISTS idx_message_feedbacks_session ON message_feedbacks(session_id);
 CREATE INDEX IF NOT EXISTS idx_message_feedbacks_type ON message_feedbacks(feedback_type);
 
-CREATE TABLE IF NOT EXISTS message_knowledge_chunk_relations (
+CREATE TABLE IF NOT EXISTS message_knowledge_chunks (
     id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id BIGINT NOT NULL,
     session_id VARCHAR(36) NOT NULL,
@@ -190,12 +190,12 @@ CREATE TABLE IF NOT EXISTS message_knowledge_chunk_relations (
     deleted_at TIMESTAMP WITH TIME ZONE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_message_chunk_relation ON message_knowledge_chunk_relations(message_id, chunk_id);
-CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_tenant ON message_knowledge_chunk_relations(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_session ON message_knowledge_chunk_relations(session_id);
-CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_chunk ON message_knowledge_chunk_relations(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_knowledge ON message_knowledge_chunk_relations(knowledge_id);
-CREATE INDEX IF NOT EXISTS idx_msg_chunk_rel_kb ON message_knowledge_chunk_relations(knowledge_base_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_knowledge_chunk ON message_knowledge_chunks(message_id, chunk_id);
+CREATE INDEX IF NOT EXISTS idx_msg_knowledge_chunk_tenant ON message_knowledge_chunks(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_msg_knowledge_chunk_session ON message_knowledge_chunks(session_id);
+CREATE INDEX IF NOT EXISTS idx_msg_knowledge_chunk_chunk ON message_knowledge_chunks(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_msg_knowledge_chunk_knowledge ON message_knowledge_chunks(knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_msg_knowledge_chunk_kb ON message_knowledge_chunks(knowledge_base_id);
 
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -215,6 +215,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     image_info TEXT,
     relation_chunks JSONB,
     indirect_relation_chunks JSONB,
+    feedback_like_count BIGINT NOT NULL DEFAULT 0,
+    feedback_dislike_count BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE

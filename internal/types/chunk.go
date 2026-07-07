@@ -154,6 +154,10 @@ type Chunk struct {
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
 	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
+	// FeedbackLikeCount records cumulative likes attributed from assistant answer feedback.
+	FeedbackLikeCount int64 `json:"feedback_like_count"      gorm:"default:0"`
+	// FeedbackDislikeCount records cumulative dislikes attributed from assistant answer feedback.
+	FeedbackDislikeCount int64 `json:"feedback_dislike_count"   gorm:"default:0"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
 	// Chunk creation time

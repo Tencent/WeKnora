@@ -415,7 +415,7 @@ const feedbackReasonOptions = [
 const persistFeedback = async (feedbackType, reason = "") => {
   const messageID = props.session?.id;
   if (!props.sessionId || !messageID) {
-    MessagePlugin.warning("\u5f53\u524d\u56de\u590d\u5c1a\u672a\u751f\u6210\u5b8c\u6210\uff0c\u6682\u65f6\u65e0\u6cd5\u63d0\u4ea4\u53cd\u9988");
+    MessagePlugin.warning("当前回复尚未生成完成，暂时无法提交反馈");
     return false;
   }
 
@@ -424,7 +424,7 @@ const persistFeedback = async (feedbackType, reason = "") => {
     return true;
   } catch (err) {
     console.error("Save answer feedback failed:", err);
-    MessagePlugin.error("\u53cd\u9988\u63d0\u4ea4\u5931\u8d25");
+    MessagePlugin.error("反馈提交失败");
     return false;
   }
 };
@@ -432,7 +432,7 @@ const persistFeedback = async (feedbackType, reason = "") => {
 const clearFeedback = async () => {
   const messageID = props.session?.id;
   if (!props.sessionId || !messageID) {
-    MessagePlugin.warning("\u5f53\u524d\u56de\u590d\u5c1a\u672a\u751f\u6210\u5b8c\u6210\uff0c\u6682\u65f6\u65e0\u6cd5\u63d0\u4ea4\u53cd\u9988");
+    MessagePlugin.warning("当前回复尚未生成完成，暂时无法提交反馈");
     return false;
   }
 
@@ -441,7 +441,7 @@ const clearFeedback = async () => {
     return true;
   } catch (err) {
     console.error("Delete answer feedback failed:", err);
-    MessagePlugin.error("\u53cd\u9988\u63d0\u4ea4\u5931\u8d25");
+    MessagePlugin.error("反馈提交失败");
     return false;
   }
 };
@@ -452,7 +452,7 @@ const handleLikeAnswer = async () => {
     if (ok) {
       answerFeedback.type = "";
       answerFeedback.reason = "";
-      MessagePlugin.success("\u5df2\u53d6\u6d88\u53cd\u9988");
+      MessagePlugin.success("已取消反馈");
     }
     return;
   }
@@ -461,7 +461,7 @@ const handleLikeAnswer = async () => {
   if (ok) {
     answerFeedback.type = "like";
     answerFeedback.reason = "";
-    MessagePlugin.success("\u611f\u8c22\u53cd\u9988");
+    MessagePlugin.success("感谢反馈");
   }
 };
 
@@ -471,7 +471,7 @@ const handleDislikeAnswer = async () => {
     if (ok) {
       answerFeedback.type = "";
       answerFeedback.reason = "";
-      MessagePlugin.success("\u5df2\u53d6\u6d88\u53cd\u9988");
+      MessagePlugin.success("已取消反馈");
     }
     return;
   }
@@ -487,11 +487,10 @@ const submitDislikeFeedback = async () => {
     answerFeedback.type = "dislike";
     answerFeedback.reason = reason;
     dislikeDialogVisible.value = false;
-    MessagePlugin.success("\u611f\u8c22\u53cd\u9988\uff0c\u6211\u4eec\u4f1a\u7ee7\u7eed\u6539\u8fdb");
+    MessagePlugin.success("感谢反馈，我们会继续改进");
   }
 };
 
-// ?? markdown-content ???????? ????????
 const handleMarkdownImageClick = (e) => {
   const target = e.target;
   if (target && target.tagName === "IMG") {
