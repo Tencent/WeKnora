@@ -172,6 +172,33 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewWikiLogEntryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+// Content-addressed VLM (OCR/Caption) cache repo. Resolved by dig into
+// ImageMultimodalService (NewImageMultimodalService now asks for an
+// apprepo.VLMCacheRepo). nil-safe at the service: lite/test paths that
+// build the service without this provider will hit the no-cache fallback
+// in cachedPredict, but in the production container this provider makes
+// dig resolve the new constructor param automatically — no Name binding
+// is needed because the param is an interface with a single provider.
+must(container.Provide(repository.NewVLMCacheRepo))
+// Embedding cache + dig.As binding to the embedding-layer VectorCacheStore
+// interface. NewEmbeddingCacheRepo returns an EmbeddingCacheRepo (repo
+// layer); dig.As re-exposes that same value as embedding.VectorCacheStore
+// (the interface NewModelService asks for), so the model service resolves the
+// cache without the model package importing the repository package.
+must(container.Provide(repository.NewEmbeddingCacheRepo, dig.As(new(embedding.VectorCacheStore))))
+// Wiki per-document map cache repo. Resolved by dig into
+// wikiIngestService (NewWikiIngestService now asks for an
+// apprepo.WikiMapCacheRepo). Same single-provider pattern as VLM.
+must(container.Provide(repository.NewWikiMapCacheRepo))
+// GraphRAG per-chunk extraction cache repo. Resolved by dig into
+// ChunkExtractService (NewChunkExtractService now asks for an
+// apprepo.GraphChunkCacheRepo).
+must(container.Provide(repository.NewGraphChunkCacheRepo))
+// Parse product cache repo (markdown + image refs + metadata keyed by
+// file bytes + parser engine + parser config). Resolved by dig into
+// knowledgeService (NewKnowledgeService now asks for an
+// apprepo.ParseProductCacheRepo).
+must(container.Provide(repository.NewParseProductCacheRepo))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
