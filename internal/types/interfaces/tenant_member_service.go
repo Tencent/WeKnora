@@ -51,4 +51,9 @@ type TenantMemberService interface {
 	// RemoveMember soft-deletes the membership while enforcing the
 	// "cannot remove the last active Owner" invariant.
 	RemoveMember(ctx context.Context, userID string, tenantID uint64) error
+
+	// UpdateMemberStorageQuota sets the personal storage quota for a user
+	// in the tenant. Only Admin/Owner should call this.
+	// Validates: quotaBytes >= 0, quotaBytes >= member.StorageUsed (if > 0).
+	UpdateMemberStorageQuota(ctx context.Context, userID string, tenantID uint64, quotaBytes int64) error
 }

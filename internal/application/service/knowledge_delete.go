@@ -197,6 +197,13 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -knowledge.StorageSize); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
 	}
+	// update user's storage usage (charge KB owner when available)
+	chargeUserID := resolveChargeUserID(ctx, kb)
+	if chargeUserID != "" {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, chargeUserID, tenantInfo.ID, -knowledge.StorageSize); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update user storage used failed")
+		}
+	}
 	recordKBActivity(ctx, s.audit, tenantID, knowledge.KnowledgeBaseID, types.AuditActionKnowledgeDeleted,
 		"knowledge", knowledge.ID, types.AuditOutcomeSuccess,
 		map[string]any{"title": knowledge.Title, "type": knowledge.Type})
@@ -668,6 +675,32 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
 	}
+	// update per-user storage usage (charge KB owner when available).
+	// kbCreatorCache avoids re-querying each KB once per knowledge row in the batch.
+	kbCreatorCache := make(map[string]string) // kbID → CreatorID
+	userDeltas := make(map[string]int64)      // userID → total delta
+	for _, knowledge := range knowledgeList {
+		chargeUID, cached := kbCreatorCache[knowledge.KnowledgeBaseID]
+		if !cached {
+			if kbObj, err := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); err == nil && kbObj != nil {
+				chargeUID = kbObj.CreatorID
+			}
+			kbCreatorCache[knowledge.KnowledgeBaseID] = chargeUID
+		}
+		if chargeUID == "" {
+			if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
+				chargeUID = uid
+			}
+		}
+		if chargeUID != "" {
+			userDeltas[chargeUID] -= knowledge.StorageSize
+		}
+	}
+	for uid, delta := range userDeltas {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, uid, tenantInfo.ID, delta); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledgeList update user storage used failed for user %s", uid)
+		}
+	}
 	byKB := make(map[string][]*types.Knowledge)
 	for i := range knowledgeList {
 		knowledge := knowledgeList[i]
@@ -756,6 +789,13 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 
 	// Delete extracted images after chunks are deleted
 	deleteExtractedImages(ctx, fileSvc, imageURLs)
+	// update user's storage usage (charge KB owner when available)
+	chargeUserID := resolveChargeUserID(ctx, kb)
+	if chargeUserID != "" {
+		if err := s.tenantMemberRepo.AdjustUserStorageUsed(ctx, chargeUserID, tenantInfo.ID, -knowledge.StorageSize); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("cleanupKnowledgeResources update user storage used failed")
+		}
+	}
 
 	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
 	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {

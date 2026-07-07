@@ -23,6 +23,66 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+// resolveChargeUserID determines which user should be charged for storage quota.
+// Priority: KB CreatorID (so async workers enforce the right limit) > context UserID.
+// Returns empty string if no chargeable user is found (e.g., synthetic system user).
+func resolveChargeUserID(ctx context.Context, kb *types.KnowledgeBase) string {
+	chargeUserID := ""
+	if kb != nil {
+		chargeUserID = kb.CreatorID
+	}
+	if chargeUserID == "" {
+		if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
+			chargeUserID = uid
+		}
+	}
+	return chargeUserID
+}
+
+// shouldEnforceUserQuota checks whether user-level storage quota should be enforced
+// for the current request. Returns false for Owner/Admin roles (they need to manage
+// tenant resources without personal quota limits), true for Contributors/Viewers.
+func shouldEnforceUserQuota(ctx context.Context) bool {
+	role := types.TenantRoleFromContext(ctx)
+	// Owner and Admin are exempt from personal storage quotas
+	return role != types.TenantRoleOwner && role != types.TenantRoleAdmin
+}
+
+// checkUserStorageQuota enforces user-level storage quota with admin exemption.
+// knownSize is the incoming data size in bytes; pass 0 if unknown (soft check only).
+func (s *knowledgeService) checkUserStorageQuota(
+	ctx context.Context, kb *types.KnowledgeBase, tenantID uint64, knownSize int64,
+) error {
+	// Exempt Owner and Admin roles from user quota checks
+	if !shouldEnforceUserQuota(ctx) {
+		return nil
+	}
+
+	chargeUserID := resolveChargeUserID(ctx, kb)
+	if chargeUserID == "" {
+		return nil // No chargeable user (e.g., synthetic system user)
+	}
+
+	member, err := s.tenantMemberRepo.Get(ctx, chargeUserID, tenantID)
+	if err != nil || member == nil || member.StorageQuota == 0 {
+		return nil // No quota configured or member not found
+	}
+
+	// If we have known incoming size, check if adding it would exceed quota
+	if knownSize > 0 {
+		if member.StorageUsed+knownSize > member.StorageQuota {
+			return types.NewUserStorageQuotaExceededError()
+		}
+	} else {
+		// Soft check: reject if already at/over quota
+		if member.StorageUsed >= member.StorageQuota {
+			return types.NewUserStorageQuotaExceededError()
+		}
+	}
+
+	return nil
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
@@ -101,9 +161,14 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	// Check storage quota
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed >= tenantInfo.StorageQuota {
+	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed+file.Size > tenantInfo.StorageQuota {
 		logger.Error(ctx, "Storage quota exceeded")
 		return nil, types.NewStorageQuotaExceededError()
+	}
+
+	// Check user storage quota (charge KB owner, exempt Owner/Admin roles)
+	if err := s.checkUserStorageQuota(ctx, kb, tenantID, file.Size); err != nil {
+		return nil, err
 	}
 
 	// Convert metadata to JSON format if provided
@@ -403,6 +468,12 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, types.NewStorageQuotaExceededError()
 	}
 
+	// Check user storage quota (charge KB owner, exempt Owner/Admin roles).
+	// No size estimate available for URL fetch, so enforce soft "already over" gate.
+	if err := s.checkUserStorageQuota(ctx, kb, tenantID, 0); err != nil {
+		return nil, err
+	}
+
 	// Create knowledge record
 	logger.Info(ctx, "Creating knowledge record")
 	knowledge := &types.Knowledge{
@@ -646,6 +717,11 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, types.NewStorageQuotaExceededError()
 	}
 
+	// Check user storage quota (charge KB owner, exempt Owner/Admin roles)
+	if err := s.checkUserStorageQuota(ctx, kb, tenantID, 0); err != nil {
+		return nil, err
+	}
+
 	// Create knowledge record
 	knowledge := &types.Knowledge{
 		ID:               uuid.New().String(),
@@ -811,6 +887,14 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	}
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+	// Check user storage quota (charge KB owner, exempt Owner/Admin roles).
+	// Actual storage size is unknown until chunking+embedding in async worker,
+	// so enforce soft "already over" gate before persisting the row.
+	if err := s.checkUserStorageQuota(ctx, kb, tenantID, 0); err != nil {
+		return nil, err
+	}
+
 	now := time.Now()
 	title := safeTitle
 	if title == "" {
@@ -921,6 +1005,14 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
+		return nil, err
+	}
+
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+	// Check user storage quota (charge KB owner, exempt Owner/Admin roles).
+	// Passage path has no known incoming size, so enforce soft "already over" gate.
+	if err := s.checkUserStorageQuota(ctx, kb, tenantID, 0); err != nil {
 		return nil, err
 	}
 

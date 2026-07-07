@@ -44,3 +44,26 @@ func NewDuplicateURLError(knowledge *Knowledge) *DuplicateKnowledgeError {
 		Knowledge: knowledge,
 	}
 }
+
+// UserStorageQuotaExceededError represents a per-user storage quota
+// exceeded error. It is intentionally a DISTINCT type from the
+// tenant-level StorageQuotaExceededError so handlers can map them to
+// different business codes and the frontend can show targeted
+// messaging ("contact admin to raise your personal quota" vs "tenant
+// storage is full").
+type UserStorageQuotaExceededError struct {
+	Message string
+}
+
+func (e *UserStorageQuotaExceededError) Error() string {
+	return e.Message
+}
+
+// NewUserStorageQuotaExceededError creates a user storage quota exceeded
+// error. Returns the new dedicated type so callers can errors.As it
+// apart from the tenant-level quota error.
+func NewUserStorageQuotaExceededError() *UserStorageQuotaExceededError {
+	return &UserStorageQuotaExceededError{
+		Message: "User storage quota exceeded, please contact your tenant admin to increase the storage quota",
+	}
+}

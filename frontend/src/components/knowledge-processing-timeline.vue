@@ -442,6 +442,19 @@ function localizedErrorSuggestion(code?: string): string {
   return fallback === 'knowledgeStages.errorCode.UNKNOWN_SUGGESTION' ? '' : fallback
 }
 
+// localizeQuotaError swaps a raw backend storage-quota message for a
+// localized, actionable hint. The user-level quota message is checked
+// first (it is a superset substring of the tenant message) so a
+// per-user limit shows "contact admin to raise your quota" while a
+// tenant-wide exhaustion shows the distinct tenant message.
+function localizeQuotaError(msg?: string): string {
+  if (!msg) return msg ?? ''
+  const lower = msg.toLowerCase()
+  if (lower.includes('user storage quota exceeded')) return t('knowledgeBase.quotaExceeded')
+  if (lower.includes('storage quota exceeded')) return t('knowledgeBase.tenantQuotaExceeded')
+  return msg
+}
+
 async function copyValue(value: any) {
   try {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -1496,7 +1509,7 @@ const processConfigLines = computed<string[]>(() => {
               </div>
               <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
               <div v-if="data.last_error.error_message" class="kp-last-error-raw kp-mono">{{
-                data.last_error.error_message }}
+                localizeQuotaError(data.last_error.error_message) }}
               </div>
             </div>
           </div>
@@ -1747,7 +1760,7 @@ const processConfigLines = computed<string[]>(() => {
                       selectedRow.node.error_code }}</span>
                   </div>
                   <pre v-if="selectedRow.node.error_message"
-                    class="kp-error-msg kp-mono">{{ selectedRow.node.error_message }}</pre>
+                    class="kp-error-msg kp-mono">{{ localizeQuotaError(selectedRow.node.error_message) }}</pre>
                 </div>
 
                 <div v-if="!selectedRow.node.span_id && !selectedRow.node.started_at" class="kp-detail-hint">

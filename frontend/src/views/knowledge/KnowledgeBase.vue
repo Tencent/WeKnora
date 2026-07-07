@@ -1453,6 +1453,10 @@ const executeUploadBatch = async (
           }
           if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
             errorMessage = t('knowledgeBase.fileExists');
+          } else if (errorMessage?.toLowerCase().includes('user storage quota exceeded')) {
+            errorMessage = t('knowledgeBase.quotaExceeded');
+          } else if (errorMessage?.toLowerCase().includes('storage quota exceeded')) {
+            errorMessage = t('knowledgeBase.tenantQuotaExceeded');
           }
           MessagePlugin.error(errorMessage);
         }
@@ -1463,6 +1467,10 @@ const executeUploadBatch = async (
         let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
         if (error?.code === 'duplicate_file') {
           errorMessage = t('knowledgeBase.fileExists');
+        } else if (errorMessage?.toLowerCase().includes('user storage quota exceeded')) {
+          errorMessage = t('knowledgeBase.quotaExceeded');
+        } else if (errorMessage?.toLowerCase().includes('storage quota exceeded')) {
+          errorMessage = t('knowledgeBase.tenantQuotaExceeded');
         }
         MessagePlugin.error(errorMessage);
       }
