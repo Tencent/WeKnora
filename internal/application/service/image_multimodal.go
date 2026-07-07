@@ -11,6 +11,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -18,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -74,6 +74,13 @@ type ImageMultimodalService struct {
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
 	spanTracker SpanTracker
+
+	// vlmCache content-addresses VLM (OCR/Caption) results by
+	// (image-hash, model, prompt-version, prompt-kind). A hit freezes the
+	// canonical OCR/caption text and skips the expensive VLM Predict call
+	// — the single most expensive per-call step in the pipeline. nil-safe
+	// (lite/test paths skip caching and just call the VLM directly).
+	vlmCache apprepo.VLMCacheRepo
 }
 
 func NewImageMultimodalService(
@@ -89,6 +96,7 @@ func NewImageMultimodalService(
 	redisClient *redis.Client,
 	fileSvc interfaces.FileService,
 	spanTracker SpanTracker,
+	vlmCache apprepo.VLMCacheRepo,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:   chunkService,
@@ -101,8 +109,8 @@ func NewImageMultimodalService(
 		ollamaService:  ollamaService,
 		taskEnqueuer:   taskEnqueuer,
 		redisClient:    redisClient,
-		fileSvc:        fileSvc,
 		spanTracker:    spanTracker,
+		vlmCache:       vlmCache,
 	}
 }
 
@@ -210,10 +218,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// legacy inline-config path) so the trace shows WHICH model handled
 	// this image. Without this, debugging "VLM is slow" requires a
 	// separate hop to the KB config.
-	if id := strings.TrimSpace(vlmCfg.ModelID); id != "" {
-		imgOut["vlm_model_id"] = id
+	vlmModelID := strings.TrimSpace(vlmCfg.ModelID)
+	if vlmModelID != "" {
+		imgOut["vlm_model_id"] = vlmModelID
 	} else {
-		imgOut["vlm_model_id"] = "legacy_inline"
+		vlmModelID = "legacy_inline"
+		imgOut["vlm_model_id"] = vlmModelID
 	}
 
 	// Read image bytes. A provider:// URL must be resolved via FileService —
@@ -236,15 +246,17 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if payload.EnableOCR {
 		prompt := vlmOCRPrompt
+		promptKind := "ocr"
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
+			promptKind = "ocr_scanned_pdf"
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 			imgOut["ocr_prompt"] = "scanned_pdf"
 		} else {
 			imgOut["ocr_prompt"] = "default"
 		}
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, ocrErr := s.cachedPredict(ctx, vlmModel, vlmModelID, imgBytes, prompt, promptKind)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
@@ -262,7 +274,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+	caption, capErr := s.cachedPredict(ctx, vlmModel, vlmModelID, imgBytes, vlmCaptionPrompt, "caption")
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
@@ -278,7 +290,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableChunkID(payload.KnowledgeID, imageInfo.OCRText, 0),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -295,7 +307,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              types.StableChunkID(payload.KnowledgeID, imageInfo.Caption, 0),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -315,6 +327,46 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		// Deferred finalize will count this image on success.
 		imgOut["skipped"] = "no_extracted_content"
 		return nil
+	}
+
+	// Non-destructive reparse safeguard: image OCR/caption chunks use
+	// StableChunkID, so old records from a previous parse may still exist.
+	// Remove any stale records before CreateChunks to avoid PK conflicts.
+	existingChunkIDs := make([]string, 0, len(newChunks))
+	for _, c := range newChunks {
+		if _, err := s.chunkService.GetChunkByIDOnly(ctx, c.ID); err == nil {
+			existingChunkIDs = append(existingChunkIDs, c.ID)
+		}
+	}
+	if len(existingChunkIDs) > 0 {
+		logger.Infof(ctx, "[ImageMultimodal] Removing %d existing OCR/caption chunks before recreate for image %s",
+			len(existingChunkIDs), payload.ImageURL)
+
+		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+		if kbErr == nil && kb != nil && kb.NeedsEmbeddingModel() {
+			embeddingModel, modelErr := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+			if modelErr == nil {
+				tenantInfo, tenantErr := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+				if tenantErr == nil {
+					ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
+					engine, engineErr := retriever.CreateRetrieveEngineForKB(
+						ctx, s.retrieveEngine, s.ownership, payload.TenantID, kb.VectorStoreID)
+					if engineErr == nil {
+						if err := engine.DeleteByChunkIDList(ctx, existingChunkIDs, embeddingModel.GetDimensions(), kb.Type); err != nil {
+							logger.Warnf(ctx, "[ImageMultimodal] Failed to delete existing chunk vectors: %v", err)
+						}
+					} else {
+						logger.Warnf(ctx, "[ImageMultimodal] Failed to init retrieve engine for existing chunk cleanup: %v", engineErr)
+					}
+				}
+			} else {
+				logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for existing chunk cleanup: %v", modelErr)
+			}
+		}
+
+		if err := s.chunkService.DeleteChunks(ctx, existingChunkIDs); err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Failed to delete existing chunks before recreate: %v", err)
+		}
 	}
 
 	// Persist chunks
@@ -558,6 +610,54 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 	}
 	logger.Infof(ctx, "[ImageMultimodal] Image downloaded from URL, len=%d", len(data))
 	return data, nil
+}
+
+// cachedPredict wraps a VLM Predict call with a content-addressed OCR/Caption
+// cache. The cache key is (image-bytes-hash, model_id, prompt-version-hash,
+// prompt_kind) — no tenant_id, no knowledge_id — so the same image under the
+// same model+prompt yields the same canonical text regardless of who owns it.
+// A hit returns the frozen canonical text WITHOUT calling the VLM (the single
+// most expensive step in the pipeline), isolating VLM non-determinism at the
+// source. A miss calls the VLM, persists the result (best-effort; ON CONFLICT
+// DO NOTHING at the repo level bounds the cross-process cold-cache race), and
+// returns it. When vlmCache is nil (lite/test paths without a DB-backed repo),
+// the call falls through to the VLM directly with no caching.
+func (s *ImageMultimodalService) cachedPredict(
+	ctx context.Context, model vlm.VLM, modelID string, imgBytes []byte,
+	prompt, promptKind string,
+) (string, error) {
+	if s.vlmCache == nil {
+		return model.Predict(ctx, [][]byte{imgBytes}, prompt)
+	}
+	imageHash := types.SHAChecksum(string(imgBytes))
+	promptVersion := types.SHAChecksum(prompt)
+	if cached, ok, err := s.vlmCache.Get(ctx, imageHash, modelID, promptVersion, promptKind); err == nil && ok {
+		logger.Infof(ctx, "[ImageMultimodal] VLM cache hit for %s/%s (model=%s)", promptKind, imageHash[:12], modelID)
+		return cached, nil
+	} else if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] VLM cache Get failed (%s/%s): %v — falling back to VLM", promptKind, imageHash[:12], err)
+	}
+
+	out, perr := model.Predict(ctx, [][]byte{imgBytes}, prompt)
+	if perr != nil {
+		return out, perr
+	}
+
+	// Persist the canonical result. Best-effort — a Put failure (DB down,
+	// constraint, etc.) MUST NOT fail the image; the next rebuild will simply
+	// miss and recompute. The ON CONFLICT DO NOTHING at the repo level means
+	// a concurrent cold-cache writer that already persisted the same key wins
+	// and this Put is a harmless no-op.
+	if perr := s.vlmCache.Put(ctx, &types.VLMCache{
+		ImageHash:     imageHash,
+		ModelID:       modelID,
+		PromptVersion: promptVersion,
+		PromptKind:    promptKind,
+		OutputText:    out,
+	}); perr != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] VLM cache Put failed (%s/%s): %v", promptKind, imageHash[:12], perr)
+	}
+	return out, nil
 }
 
 // downloadImageFromURL downloads image bytes from an HTTP(S) URL.
