@@ -212,6 +212,7 @@ import { getAgentToolIconName } from '@/utils/agent-tool-icons'
 import {
   getKnowledgeSearchSummaryHtml,
   getRagPipelineStepTitle,
+  getRetrievalSearchSource,
 } from '@/utils/agent-tool-display'
 import { RAG_PIPELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
 
@@ -286,6 +287,9 @@ const steps = computed(() => {
           : null
 
       const isSearchTool = toolName === 'knowledge_search' || toolName === 'search_knowledge'
+      const searchSource = isSearchTool
+        ? getRetrievalSearchSource(event.arguments, toolData)
+        : undefined
       const summaryHtml =
         !pending && isSearchTool && toolData
           ? getKnowledgeSearchSummaryHtml(t, toolData)
@@ -294,7 +298,7 @@ const steps = computed(() => {
       return {
         id: String(event.tool_call_id || `${toolName}-${event.timestamp || 0}`),
         pending,
-        iconName: getAgentToolIconName(toolName),
+        iconName: getAgentToolIconName(toolName, searchSource),
         title: getRagPipelineStepTitle(t, {
           tool_name: toolName,
           pending,
@@ -385,6 +389,9 @@ const referencesHeaderText = computed(() => {
   }
   if (docCount > 0) {
     return t('chat.referencesDocCount', { count: docCount })
+  }
+  if (webCount > 0) {
+    return t('chat.referencesWebCount', { count: webCount })
   }
   return t('chat.referencesTitle', { count: total })
 })
