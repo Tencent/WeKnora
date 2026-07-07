@@ -403,6 +403,18 @@ const answerFeedback = reactive({
   type: "",
   reason: "",
 });
+
+const syncAnswerFeedback = () => {
+  answerFeedback.type = props.session?.feedback_type || "";
+  answerFeedback.reason = props.session?.feedback_reason || "";
+};
+
+watch(
+  () => [props.session?.id, props.session?.feedback_type, props.session?.feedback_reason],
+  syncAnswerFeedback,
+  { immediate: true },
+);
+
 const dislikeDialogVisible = ref(false);
 const dislikeReason = ref("");
 const feedbackReasonOptions = [

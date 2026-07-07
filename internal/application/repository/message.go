@@ -82,6 +82,9 @@ func (r *messageRepository) GetRecentMessagesBySession(
 		}
 		return cmp
 	})
+	if err := r.hydrateMessageFeedbacks(ctx, messages); err != nil {
+		return nil, err
+	}
 	return messages, nil
 }
 
@@ -105,7 +108,44 @@ func (r *messageRepository) GetMessagesBySessionBeforeTime(
 		}
 		return cmp
 	})
+	if err := r.hydrateMessageFeedbacks(ctx, messages); err != nil {
+		return nil, err
+	}
 	return messages, nil
+}
+
+func (r *messageRepository) hydrateMessageFeedbacks(ctx context.Context, messages []*types.Message) error {
+	messageIDs := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if message != nil && message.Role == "assistant" {
+			messageIDs = append(messageIDs, message.ID)
+		}
+	}
+	if len(messageIDs) == 0 {
+		return nil
+	}
+
+	var feedbacks []types.MessageFeedback
+	if err := r.db.WithContext(ctx).
+		Where("message_id IN ?", messageIDs).
+		Find(&feedbacks).Error; err != nil {
+		return err
+	}
+
+	feedbackByMessageID := make(map[string]types.MessageFeedback, len(feedbacks))
+	for _, feedback := range feedbacks {
+		feedbackByMessageID[feedback.MessageID] = feedback
+	}
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		if feedback, ok := feedbackByMessageID[message.ID]; ok {
+			message.FeedbackType = feedback.FeedbackType
+			message.FeedbackReason = feedback.Reason
+		}
+	}
+	return nil
 }
 
 // UpdateMessage updates an existing message

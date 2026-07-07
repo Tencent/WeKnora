@@ -1292,6 +1292,8 @@ interface SessionData {
   request_id?: string;
   debugRequest?: Record<string, unknown>;
   isAgentMode?: boolean;
+  feedback_type?: string;
+  feedback_reason?: string;
   agentEventStream?: any[];
   knowledge_references?: any[];
   [key: string]: unknown;
@@ -2948,6 +2950,27 @@ type AnswerFeedbackType = "like" | "dislike";
 const answerFeedbackState = reactive<
   Record<string, { type: AnswerFeedbackType; reason?: string }>
 >({});
+
+const syncSessionFeedbackState = () => {
+  const answerEvents = Array.isArray(eventStream.value)
+    ? eventStream.value.filter((event: any) => event?.type === "answer")
+    : [];
+  if (answerEvents.length === 0) return;
+
+  const latestAnswer = answerEvents[answerEvents.length - 1];
+  const key = getAnswerFeedbackKey(latestAnswer);
+  const feedbackType = props.session?.feedback_type as AnswerFeedbackType | undefined;
+  if (feedbackType !== "like" && feedbackType !== "dislike") {
+    delete answerFeedbackState[key];
+    return;
+  }
+
+  answerFeedbackState[key] = {
+    type: feedbackType,
+    reason: props.session?.feedback_reason || "",
+  };
+};
+
 const dislikeDialogVisible = ref(false);
 const dislikeReason = ref("");
 const pendingDislikeKey = ref("");
@@ -2971,6 +2994,12 @@ const getAnswerFeedbackKey = (answerEvent: any) => {
 const getAnswerFeedbackType = (answerEvent: any) => {
   return answerFeedbackState[getAnswerFeedbackKey(answerEvent)]?.type;
 };
+
+watch(
+  () => [props.session?.id, props.session?.feedback_type, props.session?.feedback_reason, eventStream.value],
+  syncSessionFeedbackState,
+  { immediate: true },
+);
 
 const getFeedbackMessageID = () => props.session?.id || "";
 
