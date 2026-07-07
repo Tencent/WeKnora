@@ -249,36 +249,46 @@
                 <label>{{ $t('integrations.api.hmacSecret') }}</label>
                 <p>{{ $t('integrations.api.hmacSecretDesc') }}</p>
               </div>
-              <div class="secret-control">
-                <t-input
-                  v-model="secretInput"
-                  :type="showHMACSecret ? 'text' : 'password'"
-                  class="mono-input"
-                  :placeholder="config?.has_hmac_secret ? $t('integrations.api.secretConfigured') : ''"
-                  @blur="triggerAutoSave"
-                />
-                <t-button size="small" variant="text" @click="showHMACSecret = !showHMACSecret">
-                  <t-icon :name="showHMACSecret ? 'browse-off' : 'browse'" />
-                </t-button>
-                <t-button
-                  size="small"
-                  variant="text"
-                  :title="$t('integrations.api.copy')"
-                  :disabled="!secretInput.trim()"
-                  @click="copy(secretInput)"
-                >
-                  <t-icon name="file-copy" />
-                </t-button>
-                <t-button
-                  size="small"
-                  variant="text"
-                  theme="danger"
-                  :title="$t('integrations.api.generateSecret')"
-                  :loading="saving"
-                  @click="confirmGenerateSecret"
-                >
-                  <t-icon name="refresh" />
-                </t-button>
+              <div class="secret-field">
+                <div class="secret-control">
+                  <t-input
+                    v-model="secretInput"
+                    :type="secretInputType"
+                    class="mono-input secret-mono-input"
+                    :placeholder="config?.has_hmac_secret && !secretInput.trim() ? $t('integrations.api.secretConfigured') : ''"
+                    @blur="triggerAutoSave"
+                  />
+                  <t-button
+                    v-if="secretInput.trim()"
+                    size="small"
+                    variant="text"
+                    @click="showHMACSecret = !showHMACSecret"
+                  >
+                    <t-icon :name="showHMACSecret ? 'browse-off' : 'browse'" />
+                  </t-button>
+                  <t-button
+                    v-if="secretInput.trim()"
+                    size="small"
+                    variant="text"
+                    :title="$t('integrations.api.copy')"
+                    @click="copy(secretInput)"
+                  >
+                    <t-icon name="file-copy" />
+                  </t-button>
+                  <t-button
+                    size="small"
+                    variant="text"
+                    theme="danger"
+                    :title="$t('integrations.api.generateSecret')"
+                    :loading="saving"
+                    @click="confirmGenerateSecret"
+                  >
+                    <t-icon name="refresh" />
+                  </t-button>
+                </div>
+                <p v-if="showSecretSavedHint" class="secret-saved-hint">
+                  {{ $t('integrations.api.secretSavedCopyHint') }}
+                </p>
               </div>
             </div>
           </div>
@@ -588,6 +598,8 @@ const apiKeyCreating = ref(false)
 const knowledgeBasesLoading = ref(false)
 const knowledgeBases = ref<Array<{ id: string; name: string }>>([])
 const secretInput = ref('')
+/** Plaintext of the last secret successfully saved in this page session. */
+const lastSavedSecretInput = ref('')
 const exampleTab = ref<'jwt' | 'curl'>('curl')
 const agents = ref<CustomAgent[]>([])
 const agentsLoading = ref(false)
@@ -862,6 +874,11 @@ const tokenHeaderName = computed(() => DEFAULT_TOKEN_HEADER_NAME)
 
 const directHeaderName = computed(() => DEFAULT_DIRECT_HEADER_NAME)
 
+const secretInputType = computed(() => {
+  if (!secretInput.value.trim()) return 'text'
+  return showHMACSecret.value ? 'text' : 'password'
+})
+
 const canAutoSave = computed(() => {
   if (!tenantId.value) return false
   if (form.mode === 'signed_token') {
@@ -883,15 +900,24 @@ const knowledgeBaseOptions = computed(() => knowledgeBases.value.map((kb) => ({
   value: kb.id,
 })))
 
+const hasUnsavedSecretChange = computed(() => {
+  const trimmed = secretInput.value.trim()
+  if (!trimmed) return false
+  return trimmed !== lastSavedSecretInput.value
+})
+
+const showSecretSavedHint = computed(() => {
+  const trimmed = secretInput.value.trim()
+  return trimmed !== '' && trimmed === lastSavedSecretInput.value
+})
+
 const hasUnsavedPrincipalChanges = computed(() => {
   const cfg = config.value
   if (!cfg) return false
   return (
     form.mode !== cfg.mode
     || form.require_direct_header !== cfg.require_direct_header
-    // A non-empty input always means the user intends to set a new secret;
-    // the existing secret is never echoed back so any typed value is a change.
-    || secretInput.value.trim() !== ''
+    || hasUnsavedSecretChange.value
   )
 })
 
@@ -1039,6 +1065,7 @@ async function load() {
     // The plaintext secret is never returned; start with an empty input and
     // rely on config.has_hmac_secret to reflect whether one is configured.
     secretInput.value = ''
+    lastSavedSecretInput.value = ''
     ensurePlaygroundAgent()
   } catch (err: any) {
     error.value = err?.message || t('integrations.api.loadFailed')
@@ -1162,19 +1189,25 @@ async function saveIfNeeded(options: { showSuccess?: boolean } = {}) {
       signed_token_header_name: DEFAULT_TOKEN_HEADER_NAME,
       require_direct_header: form.require_direct_header,
     }
-    // Only send the secret when the user typed a new one; otherwise the
+    // Only send the secret when the user entered a new value; otherwise the
     // backend keeps the stored value untouched.
-    if (secretInput.value.trim() !== '') {
-      payload.hmac_secret = secretInput.value.trim()
+    const secretBeingSaved = hasUnsavedSecretChange.value ? secretInput.value.trim() : ''
+    if (secretBeingSaved) {
+      payload.hmac_secret = secretBeingSaved
     }
     const resp = await updateAPIPrincipalConfig(tenantId.value, payload)
     if (!resp.success || !resp.data) {
       throw new Error(resp.message || t('integrations.api.saveFailed'))
     }
     config.value = resp.data
-    secretInput.value = ''
+    if (secretBeingSaved) {
+      lastSavedSecretInput.value = secretBeingSaved
+      showHMACSecret.value = true
+    }
     if (options.showSuccess) {
-      MessagePlugin.success(t('integrations.api.saveSuccess'))
+      MessagePlugin.success(
+        secretBeingSaved ? t('integrations.api.secretSavedCopyHint') : t('integrations.api.saveSuccess'),
+      )
     }
     return true
   } catch (err: any) {
@@ -2157,6 +2190,13 @@ onBeforeUnmount(stopPlayground)
   }
 }
 
+.secret-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
 .secret-control {
   display: flex;
   align-items: center;
@@ -2168,9 +2208,22 @@ onBeforeUnmount(stopPlayground)
     min-width: 0;
   }
 
+  .secret-mono-input {
+    :deep(.t-input__suffix) {
+      display: none;
+    }
+  }
+
   :deep(.t-button) {
     flex: 0 0 auto;
   }
+}
+
+.secret-saved-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-warning-color);
 }
 
 @media (max-width: 640px) {
