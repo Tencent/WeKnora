@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -75,6 +75,14 @@ type knowledgeService struct {
 	// handled because the public surface is the SpanTracker interface,
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
+
+	// parseCache content-addresses the full ReadResult produced by the
+	// docreader step (markdown + image references + metadata) by
+	// (file-bytes-hash, parser-engine, parser-config-hash,
+	// render-config-hash). A hit skips the CPU-hour-scale re-render of
+	// scanned documents. nil-safe: lite/test paths fall through to the
+	// docreader directly.
+	parseCache apprepo.ParseProductCacheRepo
 }
 
 const (
@@ -109,6 +117,7 @@ func NewKnowledgeService(
 	wikiService interfaces.WikiPageService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
+	parseCache apprepo.ParseProductCacheRepo,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -132,9 +141,10 @@ func NewKnowledgeService(
 		kbShareService:  kbShareService,
 		imageResolver:   imageResolver,
 		wikiRepo:        wikiRepo,
-		wikiService:     wikiService,
-		taskPendingRepo: taskPendingRepo,
-		spanTracker:     spanTracker,
+		wikiService:        wikiService,
+		taskPendingRepo:    taskPendingRepo,
+		spanTracker:        spanTracker,
+		parseCache:         parseCache,
 	}, nil
 }
 
@@ -509,7 +519,7 @@ func (s *knowledgeService) GetOwningKBCreatorID(ctx context.Context, knowledgeID
 		return "", err
 	}
 	if kb == nil {
-		return "", repository.ErrKnowledgeBaseNotFound
+		return "", apprepo.ErrKnowledgeBaseNotFound
 	}
 	return kb.CreatorID, nil
 }

@@ -102,12 +102,7 @@ func TestDeleteModel_RejectsWhenReferenced(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	modelID := "model-in-use"
 
-	svc := NewModelService(
-		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
-		&stubKBRepoForModelDelete{count: 1},
-		&stubAgentRepoForModelDelete{count: 0},
-		nil, nil, nil,
-	)
+	svc := NewModelService(&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}}, &stubKBRepoForModelDelete{count: 1}, &stubAgentRepoForModelDelete{count: 0}, nil, nil, nil, nil)
 
 	err := svc.DeleteModel(ctx, modelID)
 	require.Error(t, err)
@@ -121,12 +116,7 @@ func TestDeleteModel_RejectsWhenUsedByAgent(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	modelID := "agent-model"
 
-	svc := NewModelService(
-		&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}},
-		&stubKBRepoForModelDelete{count: 0},
-		&stubAgentRepoForModelDelete{count: 2},
-		nil, nil, nil,
-	)
+	svc := NewModelService(&stubModelRepoForDelete{model: &types.Model{ID: modelID, TenantID: 1}}, &stubKBRepoForModelDelete{count: 0}, &stubAgentRepoForModelDelete{count: 2}, nil, nil, nil, nil)
 
 	err := svc.DeleteModel(ctx, modelID)
 	require.Error(t, err)
@@ -140,19 +130,14 @@ func TestDeleteModel_SucceedsWhenUnreferenced(t *testing.T) {
 	modelID := "free-model"
 	deleted := false
 
-	svc := NewModelService(
-		&stubModelRepoForDelete{
+	svc := NewModelService(&stubModelRepoForDelete{
 			model: &types.Model{ID: modelID, TenantID: 1},
 			delete: func(id string) error {
 				assert.Equal(t, modelID, id)
 				deleted = true
 				return nil
 			},
-		},
-		&stubKBRepoForModelDelete{},
-		&stubAgentRepoForModelDelete{},
-		nil, nil, nil,
-	)
+		}, &stubKBRepoForModelDelete{}, &stubAgentRepoForModelDelete{}, nil, nil, nil, nil)
 
 	require.NoError(t, svc.DeleteModel(ctx, modelID))
 	assert.True(t, deleted)

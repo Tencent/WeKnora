@@ -13,7 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 )
 
 // ListFAQEntries lists FAQ entries under a FAQ knowledge base.
@@ -185,7 +184,7 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 	}
 
 	chunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              types.StableChunkID(faqKnowledge.ID, buildFAQChunkContent(meta, indexMode), 0),
 		TenantID:        tenantID,
 		KnowledgeID:     faqKnowledge.ID,
 		KnowledgeBaseID: kb.ID,
