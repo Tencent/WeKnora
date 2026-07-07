@@ -758,6 +758,7 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
     api_key TEXT NOT NULL DEFAULT '',
     full_access BOOLEAN NOT NULL DEFAULT 0,
     knowledge_base_ids TEXT NOT NULL DEFAULT '[]',
+    capabilities TEXT NOT NULL DEFAULT '[]',
     last_used_at DATETIME,
     expires_at DATETIME,
     revoked_at DATETIME,

@@ -258,7 +258,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 // has not yet expired are kept out by the role check, matching the
 // rest of the RBAC matrix in this file.
 func RegisterChunkerDebugRoutes(r *gin.RouterGroup, g *rbacGuards) {
-	g.apiKeyRoute(r, http.MethodPost, "/chunker/preview", apiKeyAny(), g.Viewer(), handler.PreviewChunking)
+	g.apiKeyRoute(r, http.MethodPost, "/chunker/preview", apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.PreviewChunking)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由

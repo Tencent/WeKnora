@@ -154,12 +154,19 @@ func MCPOAuthPrincipalFromContext(ctx context.Context) Principal {
 
 // SessionOwnerIDFromContext returns the sessions.user_id scope for the current
 // caller. API external users and embed chat sessions use principal-derived IDs;
-// MCP OAuth token storage uses MCPOAuthPrincipalFromContext (visitor-level for embed).
+// tenant API keys are isolated per key id; MCP OAuth token storage uses
+// MCPOAuthPrincipalFromContext (visitor-level for embed).
 func SessionOwnerIDFromContext(ctx context.Context) string {
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Type {
 		case PrincipalAPIExternalUser, PrincipalEmbedSession:
 			return p.StorageID()
+		case PrincipalAPITenant:
+			if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && scope.KeyID > 0 {
+				if tenantID, ok := TenantIDFromContext(ctx); ok && tenantID > 0 {
+					return fmt.Sprintf("api_tenant_key:%d:%d", tenantID, scope.KeyID)
+				}
+			}
 		}
 	}
 	userID, _ := UserIDFromContext(ctx)

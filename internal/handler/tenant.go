@@ -656,6 +656,10 @@ func validateTenantAPIKeyRequest(
 	if req.FullAccess {
 		return nil
 	}
+	caps := types.NormalizeAPIKeyCapabilities(types.StringArray(req.Capabilities))
+	if len(caps) == 0 {
+		return errors.NewValidationError("capabilities are required for scoped API keys")
+	}
 	for _, cap := range req.Capabilities {
 		if strings.TrimSpace(cap) == "" {
 			continue
@@ -1169,6 +1173,14 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	ctx := c.Request.Context()
 	key := secutils.SanitizeForLog(c.Param("key"))
+
+	switch key {
+	case "web-search-config", "parser-engine-config", "storage-engine-config":
+		if !dto.CanViewIntegrationSecrets(ctx) {
+			c.Error(errors.NewForbiddenError("integration configuration requires admin access"))
+			return
+		}
+	}
 
 	switch key {
 	case "web-search-config":

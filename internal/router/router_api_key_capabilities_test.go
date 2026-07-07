@@ -293,6 +293,25 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	}
 }
 
+func TestChunkerPreviewRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterChunkerDebugRoutes(v1, g)
+
+	policy := mustLookupAPIKeyPolicy(t, g, http.MethodPost, "/api/v1/chunker/preview")
+	if !policy.RequireFullAccess {
+		t.Fatal("policy should require full access without a matching capability")
+	}
+	if !policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+		t.Fatalf("policy capabilities = %#v, want retrieve", policy.Capabilities)
+	}
+	if !policyHasCapability(policy, types.APIKeyCapabilityIngest) {
+		t.Fatalf("policy capabilities = %#v, want ingest", policy.Capabilities)
+	}
+}
+
 func mustLookupAPIKeyPolicy(
 	t *testing.T,
 	g *rbacGuards,

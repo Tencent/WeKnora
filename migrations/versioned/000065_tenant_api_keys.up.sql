@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
     api_key TEXT NOT NULL DEFAULT '',
     full_access BOOLEAN NOT NULL DEFAULT FALSE,
     knowledge_base_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- Bounded per-key grants for non-full-access keys. KB allow-list still
+    -- constrains which knowledge bases a scoped key may touch.
+    capabilities JSONB NOT NULL DEFAULT '[]'::jsonb,
     last_used_at TIMESTAMP,
     expires_at TIMESTAMP,
     revoked_at TIMESTAMP,
