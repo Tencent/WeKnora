@@ -27,7 +27,7 @@ var (
 // in this org, with what role" rather than "is this user". The 3-D cap
 // inside CheckTenantKBPermission encodes:
 //
-//   effective = min(share.Permission, tenant_org_role, tenant_role_cap)
+//	effective = min(share.Permission, tenant_org_role, tenant_role_cap)
 //
 // where tenant_role_cap pins tenant Viewers to OrgRoleViewer regardless
 // of what the org-level grant said. That keeps the tenant RBAC promise
@@ -313,6 +313,29 @@ func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, tenantID 
 	result := make([]*types.SharedKnowledgeBaseInfo, 0, len(kbInfoMap))
 	for _, info := range kbInfoMap {
 		result = append(result, info)
+	}
+
+	// Pins belong to the caller's active tenant, even when the KB itself is
+	// owned by another tenant. Stamp the same per-user state returned by the
+	// ordinary KB list so merged clients can apply --pinned and make pin/unpin
+	// idempotent for shared KBs as well.
+	if userID, ok := types.UserIDFromContext(ctx); ok && userID != "" && len(result) > 0 {
+		pins, err := s.kbRepo.ListUserKBPinIDs(ctx, tenantID, userID)
+		if err != nil {
+			logger.Warnf(ctx, "ListSharedKnowledgeBases: failed to load pins for tenant=%d user=%s: %v",
+				tenantID, userID, err)
+		} else {
+			for _, info := range result {
+				if info == nil || info.KnowledgeBase == nil {
+					continue
+				}
+				if ts, pinned := pins[info.KnowledgeBase.ID]; pinned {
+					info.KnowledgeBase.IsPinned = true
+					t := ts
+					info.KnowledgeBase.PinnedAt = &t
+				}
+			}
+		}
 	}
 
 	return result, nil
