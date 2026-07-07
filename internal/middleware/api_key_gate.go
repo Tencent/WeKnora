@@ -21,20 +21,32 @@ var errTenantAPIKeyScopeForbidden = stderrors.New("tenant api key scope forbidde
 // default (fail-closed), which removes the old "remember to add APIKeyDeny"
 // footgun.
 type APIKeyRoutePolicy struct {
-	// MinRole is the minimum tenant role an API key needs for this route.
-	//
-	// Data-plane routes (knowledge bases and their content) use Viewer /
-	// Contributor / Admin; for those, safe reads (GET/HEAD/OPTIONS) only
-	// require Viewer while writes require the declared role. Tenant-level
-	// infrastructure routes (models, vector stores, MCP, data sources,
-	// channels, tenant KV, ...) use Owner, which is required for EVERY
-	// method — reading tenant configuration is itself a privileged action.
-	//
-	// KB scoping is NOT enforced here: a key's knowledge_base_ids allow-list
-	// is a pure data filter applied by the KBAccess guards and the handler
-	// scope checks on data-plane routes. Tenant-level routes are simply
-	// gated behind the Owner role instead of being reachable by a narrow key.
-	MinRole types.TenantRole
+	// RequireFullAccess admits only full-access tenant API keys unless one of
+	// the listed capabilities also matches. Routes with neither full-access
+	// requirement nor capabilities are open to any valid API key.
+	RequireFullAccess bool
+
+	// Capabilities is an any-of allow-list for scoped API keys. A capability
+	// never widens which knowledge bases a key may touch; KB scoping is
+	// enforced downstream by KBAccess guards and handler scope checks.
+	Capabilities []types.APIKeyCapability
+}
+
+// WithCapability returns a copy of the policy that additionally admits keys
+// carrying capability c. Multiple calls accumulate (any-of semantics);
+// duplicates are ignored.
+func (p APIKeyRoutePolicy) WithCapability(c types.APIKeyCapability) APIKeyRoutePolicy {
+	for _, existing := range p.Capabilities {
+		if existing == c {
+			return p
+		}
+	}
+	// Copy the slice so mutating the returned policy never aliases the
+	// receiver's backing array.
+	next := make([]types.APIKeyCapability, len(p.Capabilities), len(p.Capabilities)+1)
+	copy(next, p.Capabilities)
+	p.Capabilities = append(next, c)
+	return p
 }
 
 // APIKeyRouteAuthorizer is the registry of per-route API-key policies. It is
@@ -116,23 +128,18 @@ func (a *APIKeyRouteAuthorizer) authorize(scope types.TenantAPIKeyScope, method,
 	if !ok {
 		return errTenantAPIKeyScopeForbidden
 	}
-	role := scope.Role
-	if role == "" {
-		role = types.TenantRoleViewer
+	if scope.FullAccess {
+		return nil
 	}
-	required := policy.MinRole
-	if required == "" {
-		required = types.TenantRoleViewer
+	for _, cap := range policy.Capabilities {
+		if cap != "" && scope.HasCapability(cap) {
+			return nil
+		}
 	}
-	// Data-plane safe reads only need a Viewer floor. Tenant-level (Owner)
-	// routes require the full role even for reads, so they are never lowered.
-	if isSafeHTTPMethod(method) && required != types.TenantRoleOwner {
-		required = types.TenantRoleViewer
+	if !policy.RequireFullAccess && len(policy.Capabilities) == 0 {
+		return nil
 	}
-	if !role.HasPermission(required) {
-		return errTenantAPIKeyScopeForbidden
-	}
-	return nil
+	return errTenantAPIKeyScopeForbidden
 }
 
 // DenyAPIKeyPrincipal returns a middleware that rejects any X-API-Key
@@ -151,15 +158,6 @@ func DenyAPIKeyPrincipal() gin.HandlerFunc {
 			return
 		}
 		c.Next()
-	}
-}
-
-func isSafeHTTPMethod(method string) bool {
-	switch method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return true
-	default:
-		return false
 	}
 }
 

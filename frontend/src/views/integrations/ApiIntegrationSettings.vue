@@ -114,7 +114,7 @@
                     <tr>
                       <th>{{ $t('integrations.api.apiKeyName') }}</th>
                       <th>{{ $t('integrations.api.apiKeyValue') }}</th>
-                      <th>{{ $t('integrations.api.apiKeyAccessRole') }}</th>
+                      <th>{{ $t('integrations.api.apiKeyAccessMode') }}</th>
                       <th>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</th>
                       <th>{{ $t('integrations.api.createdAt') }}</th>
                       <th class="api-key-table__actions-heading">{{ $t('integrations.api.actions') }}</th>
@@ -129,9 +129,23 @@
                         <code class="api-key-fingerprint">{{ formatKeyMaskedValue(key) }}</code>
                       </td>
                       <td>
-                        <t-tag size="small" variant="light">
-                          {{ formatApiKeyAccessRoleLabel(key.role) }}
-                        </t-tag>
+                        <div class="api-key-access-cell" :title="formatApiKeyCapabilitiesTitle(key)">
+                          <span
+                            v-if="key.full_access"
+                            class="api-key-access-mode api-key-access-mode--full"
+                          >
+                            {{ formatApiKeyAccessModeLabel(key) }}
+                          </span>
+                          <div v-if="!key.full_access" class="api-key-capability-chips">
+                            <span
+                              v-for="label in keyCapabilityLabels(key)"
+                              :key="label"
+                              class="api-key-capability-chip"
+                            >
+                              {{ label }}
+                            </span>
+                          </div>
+                        </div>
                       </td>
                       <td>
                         <span class="api-key-knowledge-scope">
@@ -427,26 +441,22 @@
       </section>
     </SettingDrawer>
 
-    <t-dialog
-      v-model:visible="apiKeyDialogVisible"
-      :footer="false"
-      width="450px"
-      dialog-class-name="api-key-create-dialog"
+    <SettingDrawer
+      :visible="apiKeyDialogVisible"
+      class="api-key-create-drawer"
+      :title="$t('integrations.api.createApiKey')"
+      :description="$t('integrations.api.createApiKeyDialogDesc')"
+      icon="lock-on"
+      width="560px"
+      :min-width="480"
+      :max-width="920"
+      storage-key="setting-drawer:width:api-key-create"
       :close-on-overlay-click="false"
-      destroy-on-close
+      :confirm-text="$t('integrations.api.createApiKey')"
+      :confirm-loading="apiKeyCreating"
+      @update:visible="(v: boolean) => apiKeyDialogVisible = v"
+      @confirm="createScopedAPIKey"
     >
-      <template #header>
-        <div class="api-key-create-heading">
-          <div class="api-key-create-heading-row">
-            <span class="api-key-create-heading-mark">
-              <t-icon name="lock-on" size="16px" aria-hidden="true" />
-            </span>
-            <span class="api-key-create-title">{{ $t('integrations.api.createApiKey') }}</span>
-          </div>
-          <p class="api-key-create-desc">{{ $t('integrations.api.createApiKeyDialogDesc') }}</p>
-        </div>
-      </template>
-
       <div class="api-key-dialog">
         <div class="api-key-dialog-row">
           <div class="api-key-dialog-row__label">
@@ -462,32 +472,63 @@
           <div class="api-key-dialog-row__label">
             <label>{{ $t('integrations.api.apiKeyAccessType') }}</label>
           </div>
-          <t-radio-group v-model="apiKeyAccessType" class="mode-radio api-key-role-radio">
-            <t-radio-button value="kb">{{ $t('integrations.api.accessTypeKnowledgeBase') }}</t-radio-button>
-            <t-radio-button value="tenant">{{ $t('integrations.api.accessTypeTenantFull') }}</t-radio-button>
+          <t-radio-group v-model="apiKeyAccessMode" class="mode-radio api-key-access-type-radio">
+            <t-radio-button value="scoped">{{ $t('integrations.api.apiKeyScopedAccess') }}</t-radio-button>
+            <t-radio-button value="full">{{ $t('integrations.api.capabilityTenantFull') }}</t-radio-button>
           </t-radio-group>
-          <p class="scope-role-hint">{{ $t('integrations.api.apiKeyAccessTypeHint') }}</p>
+          <p class="scope-hint">
+            {{
+              apiKeyFullAccessEnabled
+                ? $t('integrations.api.capabilityTenantFullHint')
+                : $t('integrations.api.apiKeyAccessTypeHint')
+            }}
+          </p>
         </div>
 
-        <div v-if="!apiKeyRoleIsOwner" class="api-key-dialog-row">
+        <div v-if="!apiKeyFullAccessEnabled" class="api-key-dialog-row">
           <div class="api-key-dialog-row__label">
-            <label>{{ $t('integrations.api.apiKeyPermissionLevel') }}</label>
+            <label>{{ $t('integrations.api.apiKeyCapabilities') }}</label>
           </div>
-          <t-radio-group v-model="apiKeyForm.role" class="mode-radio api-key-role-radio">
-            <t-radio-button value="viewer">{{ $t('integrations.api.accessRoleViewer') }}</t-radio-button>
-            <t-radio-button value="contributor">{{ $t('integrations.api.accessRoleContributor') }}</t-radio-button>
-            <t-radio-button value="admin">{{ $t('integrations.api.accessRoleAdmin') }}</t-radio-button>
-          </t-radio-group>
+          <div v-if="!apiKeyFullAccessEnabled" class="api-key-capability-list">
+            <div
+              v-for="group in apiKeyCapabilityGroups"
+              :key="group.key"
+              class="api-key-capability-group"
+            >
+              <div class="api-key-capability-group__header">
+                <span>{{ $t(group.labelKey) }}</span>
+                <t-button
+                  size="small"
+                  variant="text"
+                  @click="toggleCapabilityGroup(group, !capabilityGroupAllSelected(group))"
+                >
+                  {{
+                    capabilityGroupAllSelected(group)
+                      ? $t('integrations.api.apiKeyCapabilityClearGroup')
+                      : $t('integrations.api.apiKeyCapabilitySelectGroup')
+                  }}
+                </t-button>
+              </div>
+              <div class="api-key-capability-group__items">
+                <div
+                  v-for="capability in group.capabilities"
+                  :key="capability.value"
+                  class="api-key-capability-item"
+                >
+                  <t-checkbox
+                    :model-value="capabilitySelections[capability.value]"
+                    @change="handleCapabilityChange(capability.value, $event)"
+                  >
+                    {{ $t(capability.labelKey) }}
+                  </t-checkbox>
+                  <p class="scope-hint">{{ $t(capability.hintKey) }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="api-key-dialog-row api-key-dialog-row--help">
-          <div class="scope-help scope-help--role">
-            <p class="scope-help__role">{{ formatApiKeyAccessRoleLabel(apiKeyForm.role) }}</p>
-            <p class="scope-help__desc">{{ apiKeyFormRoleDesc }}</p>
-          </div>
-        </div>
-
-        <div v-if="!apiKeyRoleIsOwner" class="api-key-dialog-row">
+        <div v-if="apiKeyKnowledgeScopeApplies" class="api-key-dialog-row">
           <div class="api-key-dialog-row__label">
             <label>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</label>
           </div>
@@ -502,18 +543,7 @@
           />
         </div>
       </div>
-
-      <div class="api-key-create-footer">
-        <div class="api-key-create-footer__actions">
-          <t-button variant="outline" size="small" @click="apiKeyDialogVisible = false">
-            {{ $t('common.cancel') }}
-          </t-button>
-          <t-button theme="primary" size="small" :loading="apiKeyCreating" @click="createScopedAPIKey">
-            {{ $t('integrations.api.createApiKey') }}
-          </t-button>
-        </div>
-      </div>
-    </t-dialog>
+    </SettingDrawer>
 
   </div>
 </template>
@@ -535,7 +565,7 @@ import {
   type APIPrincipalConfig,
   type APIPrincipalMode,
   type TenantAPIKey,
-  type TenantAPIKeyRole,
+  type TenantAPIKeyCapability,
 } from '@/api/tenant'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { getApiBaseUrl } from '@/utils/api-base'
@@ -580,66 +610,180 @@ const form = reactive({
   require_direct_header: false,
 })
 
-type ApiKeyAccessRole = 'viewer' | 'contributor' | 'admin' | 'owner'
+type ApiKeyCapabilityOption = {
+  value: TenantAPIKeyCapability
+  labelKey: string
+  hintKey: string
+}
+type ApiKeyCapabilityGroup = {
+  key: string
+  labelKey: string
+  capabilities: ApiKeyCapabilityOption[]
+}
+
+const API_KEY_CAPABILITIES: TenantAPIKeyCapability[] = [
+  'retrieve',
+  'chat',
+  'read_agents',
+  'ingest',
+  'manage_kbs',
+  'message_history',
+  'manage_agents',
+  'manage_mcp_services',
+  'manage_datasources',
+  'manage_models',
+  'manage_vector_stores',
+  'manage_web_search',
+  'manage_channels',
+  'run_evaluations',
+  'manage_tenant_settings',
+]
+
+const DEFAULT_API_KEY_CAPABILITIES = new Set<TenantAPIKeyCapability>(['retrieve', 'chat', 'read_agents'])
+const KB_SCOPED_CAPABILITIES = new Set<TenantAPIKeyCapability>([
+  'retrieve',
+  'chat',
+  'ingest',
+  'manage_kbs',
+  'manage_agents',
+  'manage_datasources',
+])
+
+const apiKeyCapabilityGroups: ApiKeyCapabilityGroup[] = [
+  {
+    key: 'knowledge',
+    labelKey: 'integrations.api.apiKeyCapabilityGroupKnowledge',
+    capabilities: [
+      { value: 'retrieve', labelKey: 'integrations.api.capabilityRetrieve', hintKey: 'integrations.api.capabilityRetrieveHint' },
+      { value: 'chat', labelKey: 'integrations.api.capabilityChat', hintKey: 'integrations.api.capabilityChatHint' },
+      { value: 'ingest', labelKey: 'integrations.api.capabilityIngest', hintKey: 'integrations.api.capabilityIngestHint' },
+      { value: 'manage_kbs', labelKey: 'integrations.api.capabilityManageKbs', hintKey: 'integrations.api.capabilityManageKbsHint' },
+      { value: 'message_history', labelKey: 'integrations.api.capabilityMessageHistory', hintKey: 'integrations.api.capabilityMessageHistoryHint' },
+    ],
+  },
+  {
+    key: 'automation',
+    labelKey: 'integrations.api.apiKeyCapabilityGroupAutomation',
+    capabilities: [
+      { value: 'read_agents', labelKey: 'integrations.api.capabilityReadAgents', hintKey: 'integrations.api.capabilityReadAgentsHint' },
+      { value: 'manage_agents', labelKey: 'integrations.api.capabilityManageAgents', hintKey: 'integrations.api.capabilityManageAgentsHint' },
+      { value: 'manage_mcp_services', labelKey: 'integrations.api.capabilityManageMcpServices', hintKey: 'integrations.api.capabilityManageMcpServicesHint' },
+      { value: 'manage_datasources', labelKey: 'integrations.api.capabilityManageDatasources', hintKey: 'integrations.api.capabilityManageDatasourcesHint' },
+    ],
+  },
+  {
+    key: 'tenant',
+    labelKey: 'integrations.api.apiKeyCapabilityGroupTenant',
+    capabilities: [
+      { value: 'manage_models', labelKey: 'integrations.api.capabilityManageModels', hintKey: 'integrations.api.capabilityManageModelsHint' },
+      { value: 'manage_vector_stores', labelKey: 'integrations.api.capabilityManageVectorStores', hintKey: 'integrations.api.capabilityManageVectorStoresHint' },
+      { value: 'manage_web_search', labelKey: 'integrations.api.capabilityManageWebSearch', hintKey: 'integrations.api.capabilityManageWebSearchHint' },
+      { value: 'manage_channels', labelKey: 'integrations.api.capabilityManageChannels', hintKey: 'integrations.api.capabilityManageChannelsHint' },
+      { value: 'run_evaluations', labelKey: 'integrations.api.capabilityRunEvaluations', hintKey: 'integrations.api.capabilityRunEvaluationsHint' },
+      { value: 'manage_tenant_settings', labelKey: 'integrations.api.capabilityManageTenantSettings', hintKey: 'integrations.api.capabilityManageTenantSettingsHint' },
+    ],
+  },
+]
+
+const capabilitySelections = reactive<Record<TenantAPIKeyCapability, boolean>>(
+  API_KEY_CAPABILITIES.reduce((acc, capability) => {
+    acc[capability] = DEFAULT_API_KEY_CAPABILITIES.has(capability)
+    return acc
+  }, {} as Record<TenantAPIKeyCapability, boolean>),
+)
 
 const apiKeyForm = reactive({
   name: '',
-  role: 'viewer' as ApiKeyAccessRole,
   knowledge_base_ids: [] as string[],
+  // Tenant-full keys already cover every capability. Scoped keys default to
+  // retrieval + chat + agent reads so a fresh integration can ask questions
+  // and present an agent picker immediately.
+  tenant_full_enabled: false,
 })
 
-// The role picker is presented as two levels: a top-level access type
-// (knowledge-base vs. full tenant) and, for knowledge-base keys, a permission
-// level (viewer/contributor/admin). Owner is a full-access key, for which the
-// KB scope is meaningless and hidden.
-const apiKeyRoleIsOwner = computed(() => apiKeyForm.role === 'owner')
-type ApiKeyAccessType = 'kb' | 'tenant'
-const apiKeyAccessType = ref<ApiKeyAccessType>('kb')
-// Remember the last knowledge-base permission level so toggling back from
-// "tenant full" restores the user's previous choice instead of resetting.
-let lastKbRole: ApiKeyAccessRole = 'viewer'
-
-watch(apiKeyAccessType, (type) => {
-  if (type === 'tenant') {
-    apiKeyForm.role = 'owner'
-    apiKeyForm.knowledge_base_ids = []
-  } else if (apiKeyForm.role === 'owner') {
-    apiKeyForm.role = lastKbRole === 'owner' ? 'viewer' : lastKbRole
-  }
-})
-
-watch(
-  () => apiKeyForm.role,
-  (role) => {
-    if (role !== 'owner') {
-      lastKbRole = role
-    }
+const apiKeyFullAccessEnabled = computed(() => apiKeyForm.tenant_full_enabled)
+const apiKeyAccessMode = computed<'scoped' | 'full'>({
+  get: () => (apiKeyForm.tenant_full_enabled ? 'full' : 'scoped'),
+  set: (value) => {
+    apiKeyForm.tenant_full_enabled = value === 'full'
   },
-)
+})
+const selectedCapabilityValues = computed(() => API_KEY_CAPABILITIES.filter((capability) => capabilitySelections[capability]))
+const apiKeyKnowledgeScopeApplies = computed(() => (
+  !apiKeyFullAccessEnabled.value
+  && selectedCapabilityValues.value.some((capability) => KB_SCOPED_CAPABILITIES.has(capability))
+))
 
-function formatApiKeyAccessRoleLabel(role: ApiKeyAccessRole | TenantAPIKeyRole | undefined): string {
-  const normalized = (role ?? 'viewer') as ApiKeyAccessRole
-  const labels: Record<ApiKeyAccessRole, string> = {
-    viewer: t('integrations.api.accessRoleViewer'),
-    contributor: t('integrations.api.accessRoleContributor'),
-    admin: t('integrations.api.accessRoleAdmin'),
-    owner: t('integrations.api.accessRoleOwner'),
+watch(() => apiKeyForm.tenant_full_enabled, (enabled) => {
+  if (enabled) {
+    apiKeyForm.knowledge_base_ids = []
   }
-  return labels[normalized] ?? labels.viewer
+})
+
+watch(apiKeyKnowledgeScopeApplies, (applies) => {
+  if (!applies) {
+    apiKeyForm.knowledge_base_ids = []
+  }
+})
+
+function selectedCapabilities(): TenantAPIKeyCapability[] {
+  return selectedCapabilityValues.value
 }
 
-const apiKeyFormRoleDesc = computed(() => {
-  switch (apiKeyForm.role) {
-    case 'owner':
-      return t('integrations.api.accessRoleOwnerDesc')
-    case 'admin':
-      return t('integrations.api.accessRoleAdminDesc')
-    case 'contributor':
-      return t('integrations.api.accessRoleContributorDesc')
-    default:
-      return t('integrations.api.accessRoleViewerDesc')
+function setCapabilitySelected(capability: TenantAPIKeyCapability, selected: boolean) {
+  capabilitySelections[capability] = selected
+}
+
+function handleCapabilityChange(capability: TenantAPIKeyCapability, checked: unknown) {
+  setCapabilitySelected(capability, Boolean(checked))
+}
+
+function capabilityGroupAllSelected(group: ApiKeyCapabilityGroup): boolean {
+  return group.capabilities.every((capability) => capabilitySelections[capability.value])
+}
+
+function toggleCapabilityGroup(group: ApiKeyCapabilityGroup, selected: boolean) {
+  group.capabilities.forEach((capability) => {
+    capabilitySelections[capability.value] = selected
+  })
+}
+
+// Full-access keys already cover every capability, so no capability badges for them.
+function keyCapabilityLabels(key: TenantAPIKey): string[] {
+  if (key.full_access) return []
+  const labels: Record<TenantAPIKeyCapability, string> = {
+    retrieve: t('integrations.api.capabilityRetrieve'),
+    chat: t('integrations.api.capabilityChat'),
+    read_agents: t('integrations.api.capabilityReadAgents'),
+    ingest: t('integrations.api.capabilityIngest'),
+    manage_kbs: t('integrations.api.capabilityManageKbs'),
+    manage_agents: t('integrations.api.capabilityManageAgents'),
+    message_history: t('integrations.api.capabilityMessageHistory'),
+    manage_models: t('integrations.api.capabilityManageModels'),
+    manage_mcp_services: t('integrations.api.capabilityManageMcpServices'),
+    manage_datasources: t('integrations.api.capabilityManageDatasources'),
+    manage_channels: t('integrations.api.capabilityManageChannels'),
+    manage_vector_stores: t('integrations.api.capabilityManageVectorStores'),
+    manage_web_search: t('integrations.api.capabilityManageWebSearch'),
+    run_evaluations: t('integrations.api.capabilityRunEvaluations'),
+    manage_tenant_settings: t('integrations.api.capabilityManageTenantSettings'),
   }
-})
+  return (key.capabilities ?? [])
+    .map((c) => labels[c])
+    .filter((label): label is string => Boolean(label))
+}
+
+function formatApiKeyCapabilitiesTitle(key: TenantAPIKey): string {
+  if (key.full_access) return t('integrations.api.capabilityTenantFull')
+  const labels = keyCapabilityLabels(key)
+  return labels.length > 0 ? labels.join(' / ') : t('integrations.api.apiKeyScopedAccess')
+}
+
+function formatApiKeyAccessModeLabel(key: TenantAPIKey): string {
+  return key.full_access
+    ? t('integrations.api.capabilityTenantFull')
+    : t('integrations.api.apiKeyScopedAccess')
+}
 
 type PlaygroundStatus = '' | 'running' | 'success' | 'failed' | 'stopped'
 
@@ -1170,10 +1314,11 @@ function openApiDoc() {
 
 function openCreateAPIKeyDialog() {
   apiKeyForm.name = ''
-  apiKeyForm.role = 'viewer'
   apiKeyForm.knowledge_base_ids = []
-  apiKeyAccessType.value = 'kb'
-  lastKbRole = 'viewer'
+  apiKeyForm.tenant_full_enabled = false
+  API_KEY_CAPABILITIES.forEach((capability) => {
+    capabilitySelections[capability] = DEFAULT_API_KEY_CAPABILITIES.has(capability)
+  })
   apiKeyDialogVisible.value = true
   void loadKnowledgeBaseOptions()
 }
@@ -1187,9 +1332,11 @@ async function createScopedAPIKey() {
   try {
     const resp = await createTenantAPIKey(tenantId.value, {
       name: apiKeyForm.name.trim(),
-      role: apiKeyForm.role,
-      // Owner keys are full-access; KB scoping does not apply to them.
-      knowledge_base_ids: apiKeyRoleIsOwner.value ? [] : apiKeyForm.knowledge_base_ids,
+      full_access: apiKeyFullAccessEnabled.value,
+      // KB scoping only applies to capabilities that touch knowledge bases.
+      knowledge_base_ids: apiKeyKnowledgeScopeApplies.value ? apiKeyForm.knowledge_base_ids : [],
+      // Capabilities only matter below full access; full access already covers them all.
+      capabilities: apiKeyFullAccessEnabled.value ? [] : selectedCapabilities(),
     })
     if (!resp.success || !resp.data?.api_key) {
       throw new Error(resp.message || t('integrations.api.createApiKeyFailed'))
@@ -1438,44 +1585,6 @@ onMounted(async () => {
 onBeforeUnmount(stopPlayground)
 </script>
 
-<style lang="less">
-.api-key-create-dialog {
-  overflow: hidden;
-  padding: 0;
-  border-radius: 4px;
-}
-
-.api-key-create-dialog .t-dialog__header {
-  min-height: auto;
-  padding: 20px 20px 0;
-}
-
-.api-key-create-dialog .t-dialog__body {
-  padding: 0 20px 20px;
-}
-
-.api-key-create-dialog .t-dialog__close {
-  top: 16px;
-  right: 16px;
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  color: var(--td-text-color-secondary);
-  transition: background 0.18s ease;
-}
-
-.api-key-create-dialog .t-dialog__close:hover {
-  color: var(--td-text-color-primary);
-  background: var(--td-bg-color-container-hover);
-}
-
-@media (max-width: 480px) {
-  .api-key-create-dialog {
-    width: calc(100vw - 24px) !important;
-  }
-}
-</style>
-
 <style scoped lang="less">
 .api-integration {
   width: 100%;
@@ -1657,22 +1766,22 @@ onBeforeUnmount(stopPlayground)
 
   th:nth-child(2),
   td:nth-child(2) {
-    width: 26%;
+    width: 22%;
   }
 
   th:nth-child(3),
   td:nth-child(3) {
-    width: 15%;
+    width: 24%;
   }
 
   th:nth-child(4),
   td:nth-child(4) {
-    width: 18%;
+    width: 16%;
   }
 
   th:nth-child(5),
   td:nth-child(5) {
-    width: 15%;
+    width: 12%;
   }
 
   th:nth-child(6),
@@ -1720,6 +1829,100 @@ onBeforeUnmount(stopPlayground)
   white-space: nowrap;
 }
 
+.api-key-access-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.api-key-access-mode {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-key-access-mode--full {
+  border-color: color-mix(in srgb, var(--td-brand-color) 28%, transparent);
+  background: color-mix(in srgb, var(--td-brand-color) 10%, var(--td-bg-color-container));
+  color: var(--td-brand-color);
+}
+
+.api-key-capability-chips {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.api-key-capability-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--td-success-color) 10%, var(--td-bg-color-container));
+  color: var(--td-success-color);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.api-key-capability-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.api-key-capability-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+
+.api-key-capability-group + .api-key-capability-group {
+  border-top: 1px solid var(--td-component-stroke);
+}
+
+.api-key-capability-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.api-key-capability-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.api-key-capability-item .scope-hint {
+  margin-top: 2px;
+}
+
 .api-key-knowledge-scope,
 .api-key-created-at {
   display: block;
@@ -1734,53 +1937,8 @@ onBeforeUnmount(stopPlayground)
   display: flex;
   flex-direction: column;
   gap: 0;
-  margin-top: 16px;
   padding: 0;
   border-bottom: 1px solid var(--td-component-stroke);
-}
-
-.api-key-create-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  padding-right: 28px;
-}
-
-.api-key-create-heading-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.api-key-create-heading-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--td-brand-color);
-  line-height: 0;
-
-  :deep(.t-icon) {
-    display: inline-flex;
-  }
-}
-
-.api-key-create-title {
-  color: var(--td-text-color-primary);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 22px;
-  letter-spacing: 0.2px;
-}
-
-.api-key-create-desc {
-  margin: 0;
-  color: var(--td-text-color-placeholder);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 20px;
 }
 
 .api-key-dialog-row {
@@ -1846,88 +2004,11 @@ onBeforeUnmount(stopPlayground)
   }
 }
 
-.api-key-role-radio {
-  display: flex;
-  width: 100%;
-  max-width: 100%;
-
-  :deep(.t-radio-group) {
-    display: flex;
-    width: 100%;
-  }
-
-  :deep(.t-radio-button) {
-    flex: 1 1 0;
-    min-width: 0;
-    justify-content: center;
-  }
-
-  :deep(.t-radio-button__former) {
-    position: absolute;
-    width: 0;
-    height: 0;
-    margin: 0;
-    padding: 0;
-  }
-
-  :deep(.t-radio-button__input) {
-    display: none;
-  }
-
-  :deep(.t-radio-button__label) {
-    flex: 0 1 auto;
-    margin-left: 0;
-    text-align: center;
-  }
-}
-
-.scope-role-hint {
+.scope-hint {
   margin: 8px 0 0;
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   line-height: 18px;
-}
-
-.scope-help {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 4px;
-  background: var(--td-bg-color-secondarycontainer);
-
-  &--role {
-    margin-top: 8px;
-  }
-
-  &__role {
-    margin: 0;
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 20px;
-  }
-
-  &__desc {
-    margin: 0;
-    color: var(--td-text-color-placeholder);
-    font-size: 12px;
-    line-height: 18px;
-  }
-}
-
-.api-key-create-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding-top: 14px;
-}
-
-.api-key-create-footer__actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
 }
 
 .principal-section {

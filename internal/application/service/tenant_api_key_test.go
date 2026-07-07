@@ -26,7 +26,6 @@ func TestTenantAPIKeyServiceCreateAPIKeyUsesSKPrefix(t *testing.T) {
 	result, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: 42,
 		Name:     "integration",
-		Role:     types.TenantRoleViewer,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey returned error: %v", err)
@@ -135,11 +134,11 @@ func TestTenantAPIKeyServiceBackfillMissingKeyHashes(t *testing.T) {
 
 	token := "sk-legacy-token-value"
 	legacy := &types.TenantAPIKey{
-		TenantID: 7,
-		Name:     "legacy",
-		KeyHash:  "migrated-tenant-7",
-		APIKey:   token,
-		Role:     types.TenantRoleOwner,
+		TenantID:   7,
+		Name:       "legacy",
+		KeyHash:    "migrated-tenant-7",
+		APIKey:     token,
+		FullAccess: true,
 	}
 	if err := repo.CreateAPIKey(ctx, legacy); err != nil {
 		t.Fatalf("CreateAPIKey returned error: %v", err)
@@ -168,7 +167,6 @@ func TestTenantAPIKeyServiceRevokeAPIKey(t *testing.T) {
 	created, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: 42,
 		Name:     "integration",
-		Role:     types.TenantRoleViewer,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey returned error: %v", err)
@@ -189,7 +187,6 @@ func TestTenantAPIKeyServiceAuthenticateThrottlesLastUsedUpdates(t *testing.T) {
 	created, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID: 42,
 		Name:     "integration",
-		Role:     types.TenantRoleViewer,
 	})
 	if err != nil {
 		t.Fatalf("CreateAPIKey returned error: %v", err)

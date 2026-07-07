@@ -215,32 +215,93 @@ func (g *rbacGuards) Owner() gin.HandlerFunc {
 // it and denies any undeclared route by default. JWT sessions ignore all of
 // this (they short-circuit the gate).
 //
-// Policy constructors. A single dimension — the minimum role — decides
-// access; the key's knowledge_base_ids allow-list is a pure data filter
-// applied downstream (KBAccess guards + handler scope checks), never here.
-//
-//   - apiKeyViewer      : data-plane reads/searches (Viewer floor).
-//   - apiKeyContributor : data-plane content writes (Contributor+).
-//   - apiKeyAdmin       : destructive data-plane ops, e.g. clearing a KB (Admin+).
-//   - apiKeyOwner       : tenant-level infrastructure (models, vector stores,
-//     MCP, data sources, channels, tenant KV, ...). Requires the Owner role
-//     for EVERY method, mirroring the original full-access tenant key. A key
-//     below Owner can only ever touch knowledge-base data.
+// Policy constructors. API keys do not reuse tenant-member roles: a key is
+// either full-access, or it carries explicit capabilities. KB allow-lists are
+// pure data filters applied downstream by KBAccess guards and handlers.
 
-func apiKeyViewer() middleware.APIKeyRoutePolicy {
-	return middleware.APIKeyRoutePolicy{MinRole: types.TenantRoleViewer}
+func apiKeyAny() middleware.APIKeyRoutePolicy {
+	return middleware.APIKeyRoutePolicy{}
 }
 
-func apiKeyContributor() middleware.APIKeyRoutePolicy {
-	return middleware.APIKeyRoutePolicy{MinRole: types.TenantRoleContributor}
+func apiKeyFullAccess() middleware.APIKeyRoutePolicy {
+	return middleware.APIKeyRoutePolicy{RequireFullAccess: true}
 }
 
-func apiKeyAdmin() middleware.APIKeyRoutePolicy {
-	return middleware.APIKeyRoutePolicy{MinRole: types.TenantRoleAdmin}
+// apiKeyRetrieve grants read/search access to knowledge-base data.
+func apiKeyRetrieve(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityRetrieve)
 }
 
-func apiKeyOwner() middleware.APIKeyRoutePolicy {
-	return middleware.APIKeyRoutePolicy{MinRole: types.TenantRoleOwner}
+// apiKeyChat layers the "chat" capability on top of a base policy: keys that
+// carry the chat capability can use the conversation flow (sessions, agent
+// listing) without full tenant access.
+func apiKeyChat(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityChat)
+}
+
+// apiKeyReadAgents layers the "read_agents" capability on top of a base
+// policy so scoped integrations can inspect available agents without chat or
+// authoring permissions.
+func apiKeyReadAgents(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityReadAgents)
+}
+
+// apiKeyIngest layers the "ingest" capability on top of a base policy so a
+// scoped key can write content into its allowed knowledge bases (documents,
+// chunks, FAQ, tags, wiki).
+func apiKeyIngest(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityIngest)
+}
+
+// apiKeyManageKnowledgeBases layers the "manage_kbs" capability on top of a
+// base policy so a scoped key can manage existing KB metadata/config within
+// its KB allow-list.
+func apiKeyManageKnowledgeBases(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageKnowledgeBases)
+}
+
+// apiKeyManageAgents layers the "manage_agents" capability on top of a base policy.
+func apiKeyManageAgents(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageAgents)
+}
+
+// apiKeyMessageHistory layers the "message_history" capability on top of a
+// base policy so an explicitly granted key can search or inspect tenant chat
+// history without being promoted to full Owner.
+func apiKeyMessageHistory(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityMessageHistory)
+}
+
+func apiKeyManageModels(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageModels)
+}
+
+func apiKeyManageMCPServices(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageMCPServices)
+}
+
+func apiKeyManageDataSources(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageDataSources)
+}
+
+func apiKeyManageChannels(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageChannels)
+}
+
+func apiKeyManageVectorStores(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageVectorStores)
+}
+
+func apiKeyManageWebSearch(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageWebSearch)
+}
+
+func apiKeyRunEvaluations(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityRunEvaluations)
+}
+
+func apiKeyManageTenantSettings(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageTenantSettings)
 }
 
 // apiKeyRouteGroup wraps a *gin.RouterGroup so route registration also records

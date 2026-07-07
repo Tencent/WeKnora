@@ -45,7 +45,10 @@ func (s *sessionService) KnowledgeQA(
 	ctx = setupCtx
 
 	// Resolve knowledge bases using shared helper
-	knowledgeBaseIDs, knowledgeIDs := s.resolveKnowledgeBases(ctx, req)
+	knowledgeBaseIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	if err != nil {
+		return err
+	}
 
 	// Resolve chat model ID using shared helper
 	chatModelID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)

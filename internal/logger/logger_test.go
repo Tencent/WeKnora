@@ -183,7 +183,6 @@ func TestCloneContextPreservesTenantAPIKeyScope(t *testing.T) {
 
 	want := types.TenantAPIKeyScope{
 		KeyID:            7,
-		Role:             types.TenantRoleViewer,
 		KnowledgeBaseIDs: types.StringArray{"kb-1"},
 	}
 	ctx := types.WithTenantAPIKeyScope(context.Background(), want)

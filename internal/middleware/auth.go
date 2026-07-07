@@ -250,8 +250,8 @@ func authenticateAPIKeyRequest(
 	if c.IsAborted() {
 		return false
 	}
-	// Per-route API-key authorization (role + KB scope + default-deny) is
-	// enforced by middleware.APIKeyRouteAuthorizer on the /api/v1 group.
+	// Per-route API-key authorization (full access + capabilities + KB scope)
+	// is enforced by middleware.APIKeyRouteAuthorizer on the /api/v1 group.
 	// Key-management and any other undeclared route is denied there.
 	return true
 }
@@ -299,25 +299,26 @@ func attachAPIKeyAuthContext(
 		return
 	}
 	c.Set(types.PrincipalContextKey.String(), principal)
-	apiKeyRole := types.TenantRoleViewer
-	if key != nil {
-		apiKeyRole = types.NormalizeTenantAPIKeyRole(key.Role)
-		if apiKeyRole == "" {
-			apiKeyRole = types.TenantRoleViewer
-		}
+	// This role context exists only for legacy guard compatibility after
+	// RequireRole short-circuits API-key principals. The API key's real
+	// authority is FullAccess + Capabilities + KnowledgeBaseIDs.
+	apiKeyTenantRoleContext := types.TenantRoleViewer
+	if key != nil && key.FullAccess {
+		apiKeyTenantRoleContext = types.TenantRoleOwner
 	}
-	c.Set(types.TenantRoleContextKey.String(), apiKeyRole)
+	c.Set(types.TenantRoleContextKey.String(), apiKeyTenantRoleContext)
 	c.Set(types.SystemAdminContextKey.String(), false)
 	ctx = context.WithValue(ctx, types.UserContextKey, user)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
 	ctx = types.WithPrincipal(ctx, principal)
-	ctx = context.WithValue(ctx, types.TenantRoleContextKey, apiKeyRole)
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, apiKeyTenantRoleContext)
 	ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
 	if key != nil {
 		ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{
 			KeyID:            key.ID,
-			Role:             apiKeyRole,
+			FullAccess:       key.FullAccess,
 			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
+			Capabilities:     key.Capabilities,
 		})
 	}
 	c.Request = c.Request.WithContext(ctx)

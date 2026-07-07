@@ -65,8 +65,9 @@ type TenantRepository interface {
 type TenantAPIKeyCreateRequest struct {
 	TenantID         uint64
 	Name             string
-	Role             types.TenantRole
+	FullAccess       bool
 	KnowledgeBaseIDs []string
+	Capabilities     []string
 	ExpiresAt        *time.Time
 }
 

@@ -12,9 +12,9 @@ import (
 )
 
 // apiKeyRBACHarness seeds an API-key scope (as attachAPIKeyAuthContext would)
-// plus a deliberately-insufficient TenantRole, then runs the guard. It
-// asserts the JWT guard short-circuits for API-key principals so that
-// per-route API-key authorization is left entirely to the APIKeyGate.
+// plus a deliberately-insufficient TenantRole, then runs the guard. It asserts
+// the JWT guard short-circuits for API-key principals so that per-route
+// API-key authorization is left entirely to the APIKeyGate.
 func apiKeyRBACHarness(scope types.TenantAPIKeyScope, role types.TenantRole, mw gin.HandlerFunc) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -32,10 +32,10 @@ func apiKeyRBACHarness(scope types.TenantAPIKeyScope, role types.TenantRole, mw 
 }
 
 func TestRequireRole_ShortCircuitsAPIKey(t *testing.T) {
-	// Viewer-role API key against an Admin gate would 403 under the JWT
+	// Scoped API key against an Admin gate would 403 under the JWT
 	// ladder; the short-circuit lets it through (the gate handles it).
 	w := apiKeyRBACHarness(
-		types.TenantAPIKeyScope{Role: types.TenantRoleViewer},
+		types.TenantAPIKeyScope{},
 		types.TenantRoleViewer,
 		RequireRole(types.TenantRoleAdmin, cfgRBAC(true)),
 	)
@@ -46,7 +46,7 @@ func TestRequireRole_ShortCircuitsAPIKey(t *testing.T) {
 
 func TestRequireSystemAdmin_RejectsAPIKey(t *testing.T) {
 	w := apiKeyRBACHarness(
-		types.TenantAPIKeyScope{Role: types.TenantRoleOwner},
+		types.TenantAPIKeyScope{FullAccess: true},
 		types.TenantRoleOwner,
 		RequireSystemAdmin(cfgRBAC(true)),
 	)
@@ -55,24 +55,27 @@ func TestRequireSystemAdmin_RejectsAPIKey(t *testing.T) {
 	}
 }
 
-// TestRequireOwnershipOrRole_ShortCircuitsAPIKeyContributor is the core
-// regression for review #1: a Contributor API key writing to a KB it does not
+// TestRequireOwnershipOrRole_ShortCircuitsAPIKey is the core regression for
+// review #1: an API key writing to a KB it does not
 // "own" (synthetic system user never matches creator_id) must not be 403'd by
 // the OwnedKBOrAdmin guard when EnableRBAC=true. The lookup deliberately
 // returns a foreign creator to prove the guard never runs it.
-func TestRequireOwnershipOrRole_ShortCircuitsAPIKeyContributor(t *testing.T) {
+func TestRequireOwnershipOrRole_ShortCircuitsAPIKey(t *testing.T) {
 	lookupCalled := false
 	lookup := func(_ *gin.Context) (string, error) {
 		lookupCalled = true
 		return "some-other-human-user", nil
 	}
 	w := apiKeyRBACHarness(
-		types.TenantAPIKeyScope{Role: types.TenantRoleContributor, KnowledgeBaseIDs: types.StringArray{"kb-1"}},
+		types.TenantAPIKeyScope{
+			KnowledgeBaseIDs: types.StringArray{"kb-1"},
+			Capabilities:     types.StringArray{string(types.APIKeyCapabilityIngest)},
+		},
 		types.TenantRoleContributor,
 		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(true)),
 	)
 	if w.Code != http.StatusOK {
-		t.Fatalf("Contributor API-key write should short-circuit OwnedKBOrAdmin, got %d", w.Code)
+		t.Fatalf("API-key write should short-circuit OwnedKBOrAdmin, got %d", w.Code)
 	}
 	if lookupCalled {
 		t.Fatal("ownership lookup must not run for API-key principals")

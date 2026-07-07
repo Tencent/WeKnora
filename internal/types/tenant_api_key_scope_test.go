@@ -15,6 +15,16 @@ func TestAuthorizeTenantAPIKeyKnowledgeTargetsRejectsKnowledgeIDs(t *testing.T) 
 	}
 }
 
+func TestAuthorizeTenantAPIKeyKnowledgeTargetsAllowsUnspecifiedTargets(t *testing.T) {
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-1"},
+	})
+	err := AuthorizeTenantAPIKeyKnowledgeTargets(ctx, nil, nil)
+	if err != nil {
+		t.Fatalf("expected unspecified targets to be allowed, got %v", err)
+	}
+}
+
 func TestAuthorizeTenantAPIKeyOptionalTagIDsRejectsTags(t *testing.T) {
 	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
 		KnowledgeBaseIDs: StringArray{"kb-1"},
@@ -45,5 +55,41 @@ func TestFilterKnowledgeBasesForTenantAPIKeyScopeRejectsExplicitOutOfScope(t *te
 	_, err := FilterKnowledgeBasesForTenantAPIKeyScope(ctx, []string{"kb-1", "kb-2"}, []string{"kb-1", "kb-2"})
 	if err == nil {
 		t.Fatal("expected forbidden for explicit out-of-scope kb_ids")
+	}
+}
+
+func TestScopeHasCapability(t *testing.T) {
+	s := TenantAPIKeyScope{Capabilities: StringArray{"chat"}}
+	if !s.HasCapability(APIKeyCapabilityChat) {
+		t.Fatal("expected chat capability to be present")
+	}
+	if (TenantAPIKeyScope{}).HasCapability(APIKeyCapabilityChat) {
+		t.Fatal("empty scope must not report chat capability")
+	}
+	// Unknown capability is never satisfied.
+	if s.HasCapability(APIKeyCapability("bogus")) {
+		t.Fatal("unknown capability must not be satisfied")
+	}
+}
+
+func TestNormalizeAPIKeyCapabilities(t *testing.T) {
+	got := NormalizeAPIKeyCapabilities(StringArray{
+		" Retrieve ",
+		"chat",
+		"read_agents",
+		"manage_kbs",
+		"message_history",
+		"manage_mcp_services",
+		"bogus",
+		"",
+	})
+	want := []string{"retrieve", "chat", "read_agents", "manage_kbs", "message_history", "manage_mcp_services"}
+	if len(got) != len(want) {
+		t.Fatalf("normalized = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("normalized = %#v, want %#v", got, want)
+		}
 	}
 }

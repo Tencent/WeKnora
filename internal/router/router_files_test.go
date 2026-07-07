@@ -168,7 +168,7 @@ func TestServeFilesRejectsAPIKeyPrincipal(t *testing.T) {
 	filePath := "local://42/docs/example.txt"
 	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(filePath), nil)
 	ctx := context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
-	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{Role: types.TenantRoleOwner})
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{FullAccess: true})
 	req = req.WithContext(ctx)
 
 	recorder := httptest.NewRecorder()

@@ -12,7 +12,7 @@ import (
 
 // TestAPIKeyGateDeniesTenantKeyManagementPaths guards the default-deny
 // contract: tenant lifecycle, key management and API-principal config routes
-// are registered without apiKeyRoute/apiKeyGroup, so even an Owner-role API
+// are registered without apiKeyRoute/apiKeyGroup, so even a full-access API
 // key must receive 403 from the gate before JWT-only handlers run.
 func TestAPIKeyGateDeniesTenantKeyManagementPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -20,7 +20,7 @@ func TestAPIKeyGateDeniesTenantKeyManagementPaths(t *testing.T) {
 	gate := middleware.NewAPIKeyRouteAuthorizer()
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
-		scope := types.TenantAPIKeyScope{Role: types.TenantRoleOwner}
+		scope := types.TenantAPIKeyScope{FullAccess: true}
 		c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(c.Request.Context(), scope))
 		c.Next()
 	})
@@ -66,17 +66,17 @@ func TestAPIKeyGateDeniesTenantKeyManagementPaths(t *testing.T) {
 }
 
 // TestAPIKeyGateAllowsDeclaredTenantKVRead confirms the gate still permits
-// routes that are explicitly declared for Owner API keys (sanity check).
+// routes that are explicitly declared for full-access API keys (sanity check).
 func TestAPIKeyGateAllowsDeclaredTenantKVRead(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
-	g.apiKeyRoute(v1.Group("/tenants"), http.MethodGet, "/kv/:key", apiKeyOwner(), reachedOK)
+	g.apiKeyRoute(v1.Group("/tenants"), http.MethodGet, "/kv/:key", apiKeyFullAccess(), reachedOK)
 
 	engine := gin.New()
 	engine.Use(func(c *gin.Context) {
-		scope := types.TenantAPIKeyScope{Role: types.TenantRoleOwner}
+		scope := types.TenantAPIKeyScope{FullAccess: true}
 		c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(c.Request.Context(), scope))
 		c.Next()
 	})

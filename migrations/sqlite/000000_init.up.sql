@@ -756,7 +756,7 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
     name TEXT NOT NULL,
     key_hash TEXT NOT NULL UNIQUE,
     api_key TEXT NOT NULL DEFAULT '',
-    role TEXT NOT NULL DEFAULT 'viewer',
+    full_access BOOLEAN NOT NULL DEFAULT 0,
     knowledge_base_ids TEXT NOT NULL DEFAULT '[]',
     last_used_at DATETIME,
     expires_at DATETIME,

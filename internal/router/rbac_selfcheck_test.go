@@ -20,14 +20,14 @@ func TestAssertAPIKeyPoliciesMatchRoutes_TrailingSlash(t *testing.T) {
 
 	// Register through the apiKey helpers using both "" and "/" rel plus a
 	// nested path, mirroring real route declarations.
-	empty := g.apiKeyGroup(v1.Group("/knowledge-bases"), apiKeyViewer())
+	empty := g.apiKeyGroup(v1.Group("/knowledge-bases"), apiKeyAny())
 	empty.GET("", noop)
 
-	slash := g.apiKeyGroup(v1.Group("/evaluation"), apiKeyOwner())
+	slash := g.apiKeyGroup(v1.Group("/evaluation"), apiKeyFullAccess())
 	slash.POST("/", noop)
 	slash.GET("/", noop)
 
-	g.apiKeyRoute(v1, http.MethodGet, "/tenants", apiKeyOwner(), noop)
+	g.apiKeyRoute(v1, http.MethodGet, "/tenants", apiKeyFullAccess(), noop)
 
 	// Must not panic: every declared policy resolves to a real route despite
 	// the trailing-slash difference on /evaluation.
@@ -42,7 +42,7 @@ func TestAssertAPIKeyPoliciesMatchRoutes_Missing(t *testing.T) {
 
 	g := &rbacGuards{}
 	// Declare a policy for a path that is never registered on the engine.
-	g.ensureAPIKeyAuthorizer().Register(http.MethodPost, "/api/v1/does-not-exist", apiKeyOwner())
+	g.ensureAPIKeyAuthorizer().Register(http.MethodPost, "/api/v1/does-not-exist", apiKeyFullAccess())
 
 	defer func() {
 		if recover() == nil {

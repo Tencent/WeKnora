@@ -48,14 +48,46 @@ export interface APIPrincipalTestToken {
   external_user_id: string
 }
 
-export type TenantAPIKeyRole = 'viewer' | 'contributor' | 'admin' | 'owner'
+// Bounded per-key grants for non-full-access API keys.
+//  - 'retrieve': read/search knowledge-base data within scope
+//  - 'chat': run the conversation flow (sessions + agent listing + self identity)
+//  - 'read_agents': list/read agents without chat or authoring
+//  - 'ingest': write content into allowed knowledge bases (docs/chunks/FAQ/tags/wiki)
+//  - 'manage_kbs': manage existing knowledge-base metadata/configuration
+//  - 'manage_agents': create/update/delete/copy agents
+//  - 'message_history': search/read tenant chat-history metadata
+//  - 'manage_models': manage tenant model definitions, checks, and credentials
+//  - 'manage_mcp_services': manage MCP services, credentials, tool policies, and OAuth state
+//  - 'manage_datasources': manage data-source connectors and sync jobs
+//  - 'manage_channels': manage embed and IM channels
+//  - 'manage_vector_stores': manage vector stores and parser/storage checks
+//  - 'manage_web_search': manage web-search providers
+//  - 'run_evaluations': run/read evaluation jobs
+//  - 'manage_tenant_settings': read/update tenant integration settings (API principal mode, headers, tenant KV)
+export type TenantAPIKeyCapability =
+  | 'retrieve'
+  | 'chat'
+  | 'read_agents'
+  | 'ingest'
+  | 'manage_kbs'
+  | 'manage_agents'
+  | 'message_history'
+  | 'manage_models'
+  | 'manage_mcp_services'
+  | 'manage_datasources'
+  | 'manage_channels'
+  | 'manage_vector_stores'
+  | 'manage_web_search'
+  | 'run_evaluations'
+  | 'manage_tenant_settings'
 
 export interface TenantAPIKey {
   id: number
   name: string
   api_key: string
-  role: TenantAPIKeyRole
+  full_access: boolean
   knowledge_base_ids: string[]
+  capabilities?: TenantAPIKeyCapability[]
   last_used_at?: string
   expires_at?: string
   created_at: string
@@ -67,8 +99,9 @@ export interface CreatedTenantAPIKey extends TenantAPIKey {
 
 export interface CreateTenantAPIKeyPayload {
   name: string
-  role: TenantAPIKeyRole
+  full_access?: boolean
   knowledge_base_ids?: string[]
+  capabilities?: TenantAPIKeyCapability[]
   expires_at_unix?: number
 }
 

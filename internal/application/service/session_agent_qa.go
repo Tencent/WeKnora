@@ -243,7 +243,12 @@ func (s *sessionService) buildAgentConfig(
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
 
 	// Resolve knowledge bases using shared helper
-	agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs = s.resolveKnowledgeBases(ctx, req)
+	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	agentConfig.KnowledgeBases = kbIDs
+	agentConfig.KnowledgeIDs = knowledgeIDs
 
 	// Use custom agent's allowed tools if specified, otherwise use defaults
 	if len(customAgent.Config.AllowedTools) > 0 {

@@ -136,8 +136,9 @@ type apiPrincipalTestTokenResponse struct {
 
 type tenantAPIKeyCreateRequest struct {
 	Name             string   `json:"name"`
-	Role             string   `json:"role"`
+	FullAccess       bool     `json:"full_access"`
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	Capabilities     []string `json:"capabilities"`
 	ExpiresAt        *int64   `json:"expires_at_unix"`
 }
 
@@ -145,8 +146,9 @@ type tenantAPIKeyResponse struct {
 	ID               uint64            `json:"id"`
 	Name             string            `json:"name"`
 	APIKey           string            `json:"api_key"`
-	Role             types.TenantRole  `json:"role"`
+	FullAccess       bool              `json:"full_access"`
 	KnowledgeBaseIDs types.StringArray `json:"knowledge_base_ids"`
+	Capabilities     types.StringArray `json:"capabilities"`
 	LastUsedAt       *time.Time        `json:"last_used_at,omitempty"`
 	ExpiresAt        *time.Time        `json:"expires_at,omitempty"`
 	CreatedAt        time.Time         `json:"created_at"`
@@ -576,10 +578,6 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 		c.Error(err)
 		return
 	}
-	role := types.NormalizeTenantAPIKeyRole(types.TenantRole(strings.TrimSpace(req.Role)))
-	if role == "" {
-		role = types.TenantRoleViewer
-	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
 		t := time.Unix(*req.ExpiresAt, 0)
@@ -592,8 +590,9 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 	result, err := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
 		TenantID:         id,
 		Name:             req.Name,
-		Role:             role,
+		FullAccess:       req.FullAccess,
 		KnowledgeBaseIDs: req.KnowledgeBaseIDs,
+		Capabilities:     req.Capabilities,
 		ExpiresAt:        expiresAt,
 	})
 	if err != nil {
@@ -636,8 +635,9 @@ func tenantAPIKeyForResponse(key *types.TenantAPIKey) tenantAPIKeyResponse {
 		ID:               key.ID,
 		Name:             key.Name,
 		APIKey:           key.APIKey,
-		Role:             types.NormalizeTenantAPIKeyRole(key.Role),
+		FullAccess:       key.FullAccess,
 		KnowledgeBaseIDs: key.KnowledgeBaseIDs,
+		Capabilities:     types.NormalizeAPIKeyCapabilities(key.Capabilities),
 		LastUsedAt:       key.LastUsedAt,
 		ExpiresAt:        key.ExpiresAt,
 		CreatedAt:        key.CreatedAt,
@@ -653,8 +653,16 @@ func validateTenantAPIKeyRequest(
 	if strings.TrimSpace(req.Name) == "" {
 		return errors.NewValidationError("name is required")
 	}
-	if role := types.NormalizeTenantAPIKeyRole(types.TenantRole(strings.TrimSpace(req.Role))); req.Role != "" && role == "" {
-		return errors.NewValidationError("role must be one of viewer, contributor, admin, or owner")
+	if req.FullAccess {
+		return nil
+	}
+	for _, cap := range req.Capabilities {
+		if strings.TrimSpace(cap) == "" {
+			continue
+		}
+		if types.NormalizeAPIKeyCapability(types.APIKeyCapability(cap)) == "" {
+			return errors.NewValidationError("capabilities contains an unknown capability")
+		}
 	}
 	for _, kbID := range req.KnowledgeBaseIDs {
 		kbID = strings.TrimSpace(kbID)

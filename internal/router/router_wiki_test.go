@@ -66,9 +66,8 @@ func newKBRouteTestEngine(
 		role := types.TenantRoleViewer
 		if apiKeyScope != nil {
 			ctx = types.WithTenantAPIKeyScope(ctx, *apiKeyScope)
-			role = apiKeyScope.Role
-			if role == "" {
-				role = types.TenantRoleViewer
+			if apiKeyScope.FullAccess {
+				role = types.TenantRoleOwner
 			}
 		}
 		ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
@@ -142,8 +141,8 @@ func TestWikiReadRoutesDenyCrossTenantKB(t *testing.T) {
 func TestInitializationWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 	kbLookup := tenantKBLookupFixture()
 	scope := &types.TenantAPIKeyScope{
-		Role:             types.TenantRoleContributor,
 		KnowledgeBaseIDs: types.StringArray{"kb-allowed"},
+		Capabilities:     types.StringArray{string(types.APIKeyCapabilityManageKnowledgeBases)},
 	}
 	engine := newKBRouteTestEngine(t, 1, kbLookup, scope, func(r *gin.RouterGroup, guards *rbacGuards) {
 		RegisterInitializationRoutes(r, &handler.InitializationHandler{}, guards)
@@ -172,8 +171,8 @@ func TestInitializationWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 func TestWikiWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 	kbLookup := tenantKBLookupFixture()
 	scope := &types.TenantAPIKeyScope{
-		Role:             types.TenantRoleContributor,
 		KnowledgeBaseIDs: types.StringArray{"kb-allowed"},
+		Capabilities:     types.StringArray{string(types.APIKeyCapabilityIngest)},
 	}
 	engine := newKBRouteTestEngine(t, 1, kbLookup, scope, func(r *gin.RouterGroup, guards *rbacGuards) {
 		RegisterWikiPageRoutes(r, &handler.WikiPageHandler{}, guards)

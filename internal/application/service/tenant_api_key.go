@@ -50,12 +50,14 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 		Name:             name,
 		KeyHash:          hashTenantAPIKey(token),
 		APIKey:           token,
-		Role:             types.NormalizeTenantAPIKeyRole(req.Role),
+		FullAccess:       req.FullAccess,
 		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
+		Capabilities:     types.NormalizeAPIKeyCapabilities(types.StringArray(req.Capabilities)),
 		ExpiresAt:        req.ExpiresAt,
 	}
-	if key.Role == "" {
-		key.Role = types.TenantRoleViewer
+	if key.FullAccess {
+		key.KnowledgeBaseIDs = nil
+		key.Capabilities = nil
 	}
 	if err := s.repo.CreateAPIKey(ctx, key); err != nil {
 		return nil, err
