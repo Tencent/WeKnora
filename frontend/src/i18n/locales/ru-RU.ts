@@ -968,6 +968,9 @@ export default {
       rerankSpecified: 'ReRank model specified',
       webSearchOn: 'Web search enabled',
       webSearchOff: 'Web search disabled',
+      webSearchUnconfigured: 'Поисковая система не настроена',
+      imageUploadOn: 'Загрузка изображений поддерживается',
+      imageUploadOff: 'Загрузка изображений не поддерживается',
       hasPrompt: 'Custom prompt',
       default: 'Default configuration',
       mcpEnabled: 'MCP services enabled',
@@ -1065,6 +1068,7 @@ export default {
       notReadyMissing: 'Missing: {items}',
       configureAction: 'Configure',
       sharedNotReadyContact: 'Ask the sharing organization admin to finish setup',
+      capabilitiesSection: 'Возможности',
     },
     builtinInfo: {
       quickAnswer: {

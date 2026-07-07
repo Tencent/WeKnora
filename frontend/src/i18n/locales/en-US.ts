@@ -924,6 +924,9 @@ export default {
       rerankSpecified: 'ReRank model specified',
       webSearchOn: 'Web search enabled',
       webSearchOff: 'Web search disabled',
+      webSearchUnconfigured: 'Search engine not configured',
+      imageUploadOn: 'Image upload supported',
+      imageUploadOff: 'Image upload not supported',
       hasPrompt: 'Custom prompt',
       default: 'Default configuration',
       mcpEnabled: 'MCP services enabled',
@@ -1151,6 +1154,7 @@ export default {
       notReadyMissing: 'Missing: {items}',
       configureAction: 'Configure',
       sharedNotReadyContact: 'Ask the sharing organization admin to finish setup',
+      capabilitiesSection: 'Capabilities',
     },
     // Built-in agent information
     builtinInfo: {

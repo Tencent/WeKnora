@@ -1935,6 +1935,9 @@ export default {
       rerankSpecified: "指定 ReRank 模型",
       webSearchOn: "启用网络搜索",
       webSearchOff: "禁用网络搜索",
+      webSearchUnconfigured: "未配置搜索引擎",
+      imageUploadOn: "支持图片上传",
+      imageUploadOff: "不支持图片上传",
       hasPrompt: "自定义提示词",
       default: "默认配置",
       mcpEnabled: "启用 MCP 服务",
@@ -2162,6 +2165,7 @@ export default {
       notReadyMissing: "缺少 {items}",
       configureAction: "去配置",
       sharedNotReadyContact: "请联系分享方管理员完成配置",
+      capabilitiesSection: "能力",
     },
     // 内置智能体信息
     builtinInfo: {

@@ -1929,6 +1929,9 @@ export default {
       rerankSpecified: "ReRank 모델 지정",
       webSearchOn: "웹 검색 활성화",
       webSearchOff: "웹 검색 비활성화",
+      webSearchUnconfigured: "검색 엔진 미구성",
+      imageUploadOn: "이미지 업로드 지원",
+      imageUploadOff: "이미지 업로드 미지원",
       hasPrompt: "맞춤 프롬프트",
       default: "기본 구성",
       mcpEnabled: "MCP 서비스 활성화",
@@ -2166,6 +2169,7 @@ export default {
       notReadyMissing: "누락: {items}",
       configureAction: "구성",
       sharedNotReadyContact: "공유한 조직 관리자에게 구성을 요청하세요",
+      capabilitiesSection: "능력",
     },
     // 내장 에이전트 정보
     builtinInfo: {
