@@ -22,6 +22,7 @@ const (
 	WebSearchProviderTypeOllama     WebSearchProviderType = "ollama"
 	WebSearchProviderTypeBaidu      WebSearchProviderType = "baidu"
 	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
+	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a tenant.
@@ -197,6 +198,14 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			RequiresAPIKey: true,
 			Description:    "Baidu AI Search (requires API key from Baidu Cloud)",
 			DocsURL:        "https://cloud.baidu.com/doc/AppBuilder/s/qlvEcai0p",
+		},
+		{
+			ID:             "keenable",
+			Name:           "Keenable",
+			RequiresAPIKey: false,
+			SupportsProxy:  true,
+			Description:    "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
+			DocsURL:        "https://keenable.ai/",
 		},
 	}
 }
