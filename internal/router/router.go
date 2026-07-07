@@ -610,9 +610,10 @@ func RegisterTenantRoutes(
 		g.apiKeyRoute(tenantRoutes, http.MethodPut, "/kv/:key", apiKeyManageTenantSettings(apiKeyFullAccess()), g.Admin(), handler.UpdateTenantKV)
 
 		// Per-tenant endpoints share PathTenantMatch at the group level.
-		// None of the /tenants/:id/* endpoints are declared for API keys,
-		// so scoped keys are denied by default — tenant lifecycle, member
-		// management and key/principal management are JWT-only.
+		// Most /tenants/:id/* endpoints stay undeclared for API keys by
+		// default — tenant lifecycle and key/principal management require
+		// full tenant access or JWT ownership. Member/invitation management
+		// opts in below through the manage_members capability.
 		tenantByID := tenantRoutes.Group("/:id", g.PathTenantMatch())
 		{
 			tenantByID.GET("", g.Viewer(), handler.GetTenant)
@@ -632,10 +633,10 @@ func RegisterTenantRoutes(
 			// their own; the service still rejects when it would leave
 			// the tenant without an Owner.
 			if memberHandler != nil {
-				tenantByID.GET("/members", g.Viewer(), memberHandler.ListMembers)
-				tenantByID.POST("/members", g.Owner(), memberHandler.AddMember)
-				tenantByID.PUT("/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
-				tenantByID.DELETE("/members/:user_id", g.Owner(), memberHandler.RemoveMember)
+				g.apiKeyRoute(tenantByID, http.MethodGet, "/members", apiKeyManageMembers(apiKeyFullAccess()), g.Viewer(), memberHandler.ListMembers)
+				g.apiKeyRoute(tenantByID, http.MethodPost, "/members", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.AddMember)
+				g.apiKeyRoute(tenantByID, http.MethodPut, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.UpdateMemberRole)
+				g.apiKeyRoute(tenantByID, http.MethodDelete, "/members/:user_id", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), memberHandler.RemoveMember)
 				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)
 			}
 
@@ -649,14 +650,14 @@ func RegisterTenantRoutes(
 			// mirrors memberHandler above for environments built
 			// without the invitation dependency wired.
 			if invitationHandler != nil {
-				tenantByID.GET("/invitations", g.Viewer(), invitationHandler.ListTenantInvitations)
-				tenantByID.POST("/invitations", g.Owner(), invitationHandler.CreateInvitation)
-				tenantByID.DELETE("/invitations/:inv_id", g.Owner(), invitationHandler.RevokeInvitation)
+				g.apiKeyRoute(tenantByID, http.MethodGet, "/invitations", apiKeyManageMembers(apiKeyFullAccess()), g.Viewer(), invitationHandler.ListTenantInvitations)
+				g.apiKeyRoute(tenantByID, http.MethodPost, "/invitations", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), invitationHandler.CreateInvitation)
+				g.apiKeyRoute(tenantByID, http.MethodDelete, "/invitations/:inv_id", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), invitationHandler.RevokeInvitation)
 				// Share-link create lives under /invite-links so the URL
 				// reads as "create a link" rather than another flavour
 				// of /invitations; the underlying row still lives in the
 				// tenant_invitations table and shows up in the GET above.
-				tenantByID.POST("/invite-links", g.Owner(), invitationHandler.CreateInviteLink)
+				g.apiKeyRoute(tenantByID, http.MethodPost, "/invite-links", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), invitationHandler.CreateInviteLink)
 			}
 
 			// Audit log feed (PR 6 of #1303). Admin+ so denied-action
@@ -1092,7 +1093,7 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler,
 // RegisterOrganizationRoutes registers organization and sharing routes
 func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.OrganizationHandler, g *rbacGuards) {
 	// Organization routes
-	orgs := g.apiKeyGroup(r.Group("/organizations"), apiKeyFullAccess())
+	orgs := g.apiKeyGroup(r.Group("/organizations"), apiKeyManageSpaces(apiKeyFullAccess()))
 	{
 		// Create organization (Admin+ in caller's tenant only)
 		orgs.POST("", g.Admin(), orgHandler.CreateOrganization)
@@ -1202,13 +1203,13 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	}
 
 	// Shared knowledge bases route — Viewer+
-	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyFullAccess(), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
+	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
 	// Shared agents route — Viewer+
-	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyFullAccess(), g.Viewer(), orgHandler.ListSharedAgents)
+	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedAgents)
 	// "Disable by me" 是租户级偏好（写到 tenant_disabled_shared_agents），
 	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
 	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
-	g.apiKeyRoute(r, http.MethodPost, "/shared-agents/disabled", apiKeyFullAccess(), g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
+	g.apiKeyRoute(r, http.MethodPost, "/shared-agents/disabled", apiKeyManageSpaces(apiKeyFullAccess()), g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
 // RegisterEmbedPublicRoutes registers anonymous embed endpoints secured by publish tokens.

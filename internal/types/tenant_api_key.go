@@ -97,6 +97,15 @@ const (
 	// APIKeyCapabilityRunEvaluations lets a key run and inspect evaluation
 	// jobs without full tenant ownership.
 	APIKeyCapabilityRunEvaluations APIKeyCapability = "run_evaluations"
+	// APIKeyCapabilityManageMembers lets a key list and manage tenant
+	// members and invitations. It does not include API key management,
+	// tenant deletion, or ownership transfer.
+	APIKeyCapabilityManageMembers APIKeyCapability = "manage_members"
+	// APIKeyCapabilityManageSpaces lets a key manage organization/space
+	// collaboration surfaces such as space membership and join flows. It does
+	// not grant KB/agent share management, which still depends on resource
+	// ownership and remains JWT-only/default-deny for API keys.
+	APIKeyCapabilityManageSpaces APIKeyCapability = "manage_spaces"
 	// APIKeyCapabilityManageTenantSettings lets a key read and update
 	// tenant-scoped integration settings exposed under /tenants, such as API
 	// principal mode, request headers, and tenant KV. It does not include API
@@ -136,6 +145,10 @@ func NormalizeAPIKeyCapability(c APIKeyCapability) APIKeyCapability {
 		return APIKeyCapabilityManageWebSearch
 	case APIKeyCapabilityRunEvaluations:
 		return APIKeyCapabilityRunEvaluations
+	case APIKeyCapabilityManageMembers:
+		return APIKeyCapabilityManageMembers
+	case APIKeyCapabilityManageSpaces:
+		return APIKeyCapabilityManageSpaces
 	case APIKeyCapabilityManageTenantSettings:
 		return APIKeyCapabilityManageTenantSettings
 	default:

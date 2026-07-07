@@ -293,6 +293,94 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	}
 }
 
+func TestTenantMemberRoutesDeclareManageMembersCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterTenantRoutes(v1, &handler.TenantHandler{}, &handler.TenantMemberHandler{}, &handler.TenantInvitationHandler{}, nil, g)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/tenants/:id/members"},
+		{http.MethodPost, "/api/v1/tenants/:id/members"},
+		{http.MethodPut, "/api/v1/tenants/:id/members/:user_id"},
+		{http.MethodDelete, "/api/v1/tenants/:id/members/:user_id"},
+		{http.MethodGet, "/api/v1/tenants/:id/invitations"},
+		{http.MethodPost, "/api/v1/tenants/:id/invitations"},
+		{http.MethodDelete, "/api/v1/tenants/:id/invitations/:inv_id"},
+		{http.MethodPost, "/api/v1/tenants/:id/invite-links"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityManageMembers) {
+				t.Fatalf("policy capabilities = %#v, want manage_members", policy.Capabilities)
+			}
+		})
+	}
+
+	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodPost, "/api/v1/tenants/:id/leave"); ok {
+		t.Fatal("tenant leave route should remain default-deny for API keys")
+	}
+}
+
+func TestOrganizationRoutesDeclareManageSpacesCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterOrganizationRoutes(v1, &handler.OrganizationHandler{}, g)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/organizations"},
+		{http.MethodGet, "/api/v1/organizations"},
+		{http.MethodPost, "/api/v1/organizations/join"},
+		{http.MethodGet, "/api/v1/organizations/search"},
+		{http.MethodPut, "/api/v1/organizations/:id"},
+		{http.MethodPost, "/api/v1/organizations/:id/invite-code"},
+		{http.MethodGet, "/api/v1/organizations/:id/members"},
+		{http.MethodPut, "/api/v1/organizations/:id/members/:tenant_id"},
+		{http.MethodGet, "/api/v1/shared-knowledge-bases"},
+		{http.MethodGet, "/api/v1/shared-agents"},
+		{http.MethodPost, "/api/v1/shared-agents/disabled"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityManageSpaces) {
+				t.Fatalf("policy capabilities = %#v, want manage_spaces", policy.Capabilities)
+			}
+		})
+	}
+
+	defaultDeny := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/knowledge-bases/:id/shares"},
+		{http.MethodPost, "/api/v1/agents/:id/shares"},
+	}
+	for _, tc := range defaultDeny {
+		if _, ok := g.apiKeyAuthorizer.Lookup(tc.method, tc.path); ok {
+			t.Fatalf("resource share route should remain default-deny for API keys: %s %s", tc.method, tc.path)
+		}
+	}
+}
+
 func TestChunkerPreviewRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}

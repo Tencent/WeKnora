@@ -300,6 +300,14 @@ func apiKeyRunEvaluations(base middleware.APIKeyRoutePolicy) middleware.APIKeyRo
 	return base.WithCapability(types.APIKeyCapabilityRunEvaluations)
 }
 
+func apiKeyManageMembers(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageMembers)
+}
+
+func apiKeyManageSpaces(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageSpaces)
+}
+
 func apiKeyManageTenantSettings(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityManageTenantSettings)
 }

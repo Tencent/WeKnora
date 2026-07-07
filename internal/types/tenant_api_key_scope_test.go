@@ -80,10 +80,12 @@ func TestNormalizeAPIKeyCapabilities(t *testing.T) {
 		"manage_kbs",
 		"message_history",
 		"manage_mcp_services",
+		"manage_members",
+		"manage_spaces",
 		"bogus",
 		"",
 	})
-	want := []string{"retrieve", "chat", "read_agents", "manage_kbs", "message_history", "manage_mcp_services"}
+	want := []string{"retrieve", "chat", "read_agents", "manage_kbs", "message_history", "manage_mcp_services", "manage_members", "manage_spaces"}
 	if len(got) != len(want) {
 		t.Fatalf("normalized = %#v, want %#v", got, want)
 	}

@@ -636,6 +636,8 @@ const API_KEY_CAPABILITIES: TenantAPIKeyCapability[] = [
   'manage_web_search',
   'manage_channels',
   'run_evaluations',
+  'manage_members',
+  'manage_spaces',
   'manage_tenant_settings',
 ]
 
@@ -669,6 +671,14 @@ const apiKeyCapabilityGroups: ApiKeyCapabilityGroup[] = [
       { value: 'manage_agents', labelKey: 'integrations.api.capabilityManageAgents', hintKey: 'integrations.api.capabilityManageAgentsHint' },
       { value: 'manage_mcp_services', labelKey: 'integrations.api.capabilityManageMcpServices', hintKey: 'integrations.api.capabilityManageMcpServicesHint' },
       { value: 'manage_datasources', labelKey: 'integrations.api.capabilityManageDatasources', hintKey: 'integrations.api.capabilityManageDatasourcesHint' },
+    ],
+  },
+  {
+    key: 'collaboration',
+    labelKey: 'integrations.api.apiKeyCapabilityGroupCollaboration',
+    capabilities: [
+      { value: 'manage_members', labelKey: 'integrations.api.capabilityManageMembers', hintKey: 'integrations.api.capabilityManageMembersHint' },
+      { value: 'manage_spaces', labelKey: 'integrations.api.capabilityManageSpaces', hintKey: 'integrations.api.capabilityManageSpacesHint' },
     ],
   },
   {
@@ -766,6 +776,8 @@ function keyCapabilityLabels(key: TenantAPIKey): string[] {
     manage_vector_stores: t('integrations.api.capabilityManageVectorStores'),
     manage_web_search: t('integrations.api.capabilityManageWebSearch'),
     run_evaluations: t('integrations.api.capabilityRunEvaluations'),
+    manage_members: t('integrations.api.capabilityManageMembers'),
+    manage_spaces: t('integrations.api.capabilityManageSpaces'),
     manage_tenant_settings: t('integrations.api.capabilityManageTenantSettings'),
   }
   return (key.capabilities ?? [])

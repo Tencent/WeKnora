@@ -63,6 +63,8 @@ export interface APIPrincipalTestToken {
 //  - 'manage_vector_stores': manage vector stores and parser/storage checks
 //  - 'manage_web_search': manage web-search providers
 //  - 'run_evaluations': run/read evaluation jobs
+//  - 'manage_members': manage tenant members and invitations
+//  - 'manage_spaces': manage organization/space collaboration
 //  - 'manage_tenant_settings': read/update tenant integration settings (API principal mode, headers, tenant KV)
 export type TenantAPIKeyCapability =
   | 'retrieve'
@@ -79,6 +81,8 @@ export type TenantAPIKeyCapability =
   | 'manage_vector_stores'
   | 'manage_web_search'
   | 'run_evaluations'
+  | 'manage_members'
+  | 'manage_spaces'
   | 'manage_tenant_settings'
 
 export interface TenantAPIKey {
