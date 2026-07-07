@@ -2170,6 +2170,13 @@ export default {
       configureAction: "구성",
       sharedNotReadyContact: "공유한 조직 관리자에게 구성을 요청하세요",
       capabilitiesSection: "능력",
+      webSearchCapability: "웹 검색",
+      imageUploadCapability: "이미지 업로드",
+      capabilityEnabled: "켜짐",
+      capabilityDisabled: "꺼짐",
+      capabilitySupported: "지원",
+      capabilityUnsupported: "미지원",
+      capabilityUnconfigured: "미구성",
     },
     // 내장 에이전트 정보
     builtinInfo: {

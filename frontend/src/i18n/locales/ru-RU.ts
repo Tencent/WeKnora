@@ -1069,6 +1069,13 @@ export default {
       configureAction: 'Configure',
       sharedNotReadyContact: 'Ask the sharing organization admin to finish setup',
       capabilitiesSection: 'Возможности',
+      webSearchCapability: 'Web search',
+      imageUploadCapability: 'Image upload',
+      capabilityEnabled: 'On',
+      capabilityDisabled: 'Off',
+      capabilitySupported: 'Supported',
+      capabilityUnsupported: 'Unsupported',
+      capabilityUnconfigured: 'Not set',
     },
     builtinInfo: {
       quickAnswer: {

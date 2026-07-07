@@ -142,16 +142,22 @@
             <div class="detail-tag-group-title">{{ $t('agent.selector.capabilitiesSection') }}</div>
             <div class="detail-tags detail-tags--capabilities">
               <span class="detail-tag detail-capability-tag"
-                :class="isWebSearchReadyForAgent(activeDetail.agent) ? 'detail-tag--on' : 'detail-tag--off'">
-                <TIcon :name="isWebSearchReadyForAgent(activeDetail.agent) ? 'check' : 'close'" size="12px"
-                  class="detail-capability-icon" />
-                <span>{{ getWebSearchCapability(activeDetail.agent) }}</span>
+                :class="getWebSearchCapabilityClass(activeDetail.agent)">
+                <span class="detail-capability-icon-wrap">
+                  <TIcon :name="getWebSearchCapabilityIcon(activeDetail.agent)" size="10px"
+                    class="detail-capability-icon" />
+                </span>
+                <span class="detail-capability-name">{{ $t('agent.selector.webSearchCapability') }}</span>
+                <span class="detail-capability-state">{{ getWebSearchCapabilityState(activeDetail.agent) }}</span>
               </span>
               <span class="detail-tag detail-capability-tag"
-                :class="isImageUploadEnabledForAgent(activeDetail.agent) ? 'detail-tag--on' : 'detail-tag--off'">
-                <TIcon :name="isImageUploadEnabledForAgent(activeDetail.agent) ? 'check' : 'close'" size="12px"
-                  class="detail-capability-icon" />
-                <span>{{ getImageUploadCapability(activeDetail.agent) }}</span>
+                :class="isImageUploadEnabledForAgent(activeDetail.agent) ? 'detail-capability-tag--on' : 'detail-capability-tag--off'">
+                <span class="detail-capability-icon-wrap">
+                  <TIcon :name="isImageUploadEnabledForAgent(activeDetail.agent) ? 'check' : 'close'" size="10px"
+                    class="detail-capability-icon" />
+                </span>
+                <span class="detail-capability-name">{{ $t('agent.selector.imageUploadCapability') }}</span>
+                <span class="detail-capability-state">{{ getImageUploadCapabilityState(activeDetail.agent) }}</span>
               </span>
             </div>
           </div>
@@ -324,20 +330,28 @@ const isImageUploadEnabledForAgent = (agent: CustomAgent): boolean => {
   return config.image_upload_enabled === true;
 };
 
-const getWebSearchCapability = (agent: CustomAgent): string => {
-  if (!isWebSearchEnabledForAgent(agent)) {
-    return t('agent.capabilities.webSearchOff');
-  }
-  if (!isWebSearchReadyForAgent(agent)) {
-    return t('agent.capabilities.webSearchUnconfigured');
-  }
-  return t('agent.capabilities.webSearchOn');
+const getWebSearchCapabilityClass = (agent: CustomAgent): string => {
+  if (isWebSearchReadyForAgent(agent)) return 'detail-capability-tag--on';
+  if (isWebSearchEnabledForAgent(agent)) return 'detail-capability-tag--warning';
+  return 'detail-capability-tag--off';
 };
 
-const getImageUploadCapability = (agent: CustomAgent): string => {
+const getWebSearchCapabilityIcon = (agent: CustomAgent): string => {
+  if (isWebSearchReadyForAgent(agent)) return 'check';
+  if (isWebSearchEnabledForAgent(agent)) return 'error-circle';
+  return 'close';
+};
+
+const getWebSearchCapabilityState = (agent: CustomAgent): string => {
+  if (isWebSearchReadyForAgent(agent)) return t('agent.selector.capabilityEnabled');
+  if (isWebSearchEnabledForAgent(agent)) return t('agent.selector.capabilityUnconfigured');
+  return t('agent.selector.capabilityDisabled');
+};
+
+const getImageUploadCapabilityState = (agent: CustomAgent): string => {
   return isImageUploadEnabledForAgent(agent)
-    ? t('agent.capabilities.imageUploadOn')
-    : t('agent.capabilities.imageUploadOff');
+    ? t('agent.selector.capabilitySupported')
+    : t('agent.selector.capabilityUnsupported');
 };
 
 const getMcpCapability = (agent: CustomAgent): string => {
@@ -1002,32 +1016,86 @@ watch(activeDetail, (detail) => {
 }
 
 .detail-capability-tag {
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px 3px 5px;
 
-  &--on {
+  .detail-capability-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--td-text-color-secondary);
-    border-color: var(--td-component-border);
-    background: var(--td-bg-color-secondarycontainer);
-
-    .detail-capability-icon {
-      color: var(--td-text-color-primary);
-    }
+    font-weight: 500;
   }
 
-  &--off {
+  .detail-capability-state {
+    flex-shrink: 0;
+    font-size: 10px;
+    line-height: 14px;
     color: var(--td-text-color-placeholder);
-    border-style: dashed;
-    border-color: var(--td-component-stroke);
-    background: transparent;
-
-    .detail-capability-icon {
-      color: var(--td-text-color-placeholder);
-    }
   }
 }
 
+.detail-capability-tag--on {
+  border-color: rgba(0, 168, 112, 0.2);
+  background: rgba(0, 168, 112, 0.06);
+
+  .detail-capability-icon-wrap {
+    color: var(--td-success-color, #00a870);
+    background: rgba(0, 168, 112, 0.12);
+  }
+
+  .detail-capability-icon {
+    color: var(--td-success-color, #00a870);
+  }
+
+  .detail-capability-state {
+    color: var(--td-success-color, #00a870);
+  }
+}
+
+.detail-capability-tag--warning {
+  border-color: rgba(237, 123, 47, 0.22);
+  background: rgba(237, 123, 47, 0.06);
+
+  .detail-capability-icon-wrap {
+    color: var(--td-warning-color, #ed7b2f);
+    background: rgba(237, 123, 47, 0.12);
+  }
+
+  .detail-capability-icon,
+  .detail-capability-state {
+    color: var(--td-warning-color, #ed7b2f);
+  }
+}
+
+.detail-capability-tag--off {
+  border-color: var(--td-component-stroke);
+  background: var(--td-bg-color-secondarycontainer);
+
+  .detail-capability-icon-wrap {
+    color: var(--td-text-color-placeholder);
+    background: var(--td-bg-color-component, rgba(0, 0, 0, 0.04));
+  }
+
+  .detail-capability-icon {
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.detail-capability-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .detail-capability-icon {
+  display: inline-flex;
   flex-shrink: 0;
   line-height: 1;
 }

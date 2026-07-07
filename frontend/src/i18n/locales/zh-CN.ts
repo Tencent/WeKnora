@@ -2166,6 +2166,13 @@ export default {
       configureAction: "去配置",
       sharedNotReadyContact: "请联系分享方管理员完成配置",
       capabilitiesSection: "能力",
+      webSearchCapability: "网络搜索",
+      imageUploadCapability: "图片上传",
+      capabilityEnabled: "开启",
+      capabilityDisabled: "关闭",
+      capabilitySupported: "支持",
+      capabilityUnsupported: "不支持",
+      capabilityUnconfigured: "未配置",
     },
     // 内置智能体信息
     builtinInfo: {
