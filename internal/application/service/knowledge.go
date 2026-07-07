@@ -30,7 +30,7 @@ var (
 	// Aliases the repository sentinel so a chunk-not-found from the repo
 	// errors.Is-matches at the service and middleware layers (a single
 	// identity instead of two string-equal-but-distinct errors).
-	ErrChunkNotFound = repository.ErrChunkNotFound
+	ErrChunkNotFound = apprepo.ErrChunkNotFound
 	// ErrDuplicateFile is returned when trying to add a file that already exists
 	ErrDuplicateFile = errors.New("file already exists")
 	// ErrDuplicateURL is returned when trying to add a URL that already exists
