@@ -1476,6 +1476,7 @@ export default {
     proxyUrlPlaceholder: 'e.g. http://proxy.example.com:3128 (optional; http/https only)',
     proxyUrlHelp: 'Use when outbound access to the search API requires a proxy; leave empty to rely on HTTP_PROXY/HTTPS_PROXY environment variables.',
     apiKeyLabel: 'API Key',
+    apiKeyOptionalLabel: 'API Key (optional)',
     baseUrlLabel: 'Instance URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyDescription: 'Enter the API key for the selected search provider',

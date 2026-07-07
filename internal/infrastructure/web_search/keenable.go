@@ -20,6 +20,9 @@ const (
 	defaultKeenableBaseURL = "https://api.keenable.ai"
 	// keenableTitle is the attribution tag Keenable segments integration traffic by.
 	keenableTitle = "WeKnora"
+	// defaultKeenableResults matches the fallback other providers use when the
+	// caller does not specify a positive maxResults.
+	defaultKeenableResults = 5
 )
 
 var (
@@ -63,6 +66,9 @@ func (p *KeenableProvider) Search(
 ) ([]*types.WebSearchResult, error) {
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
+	}
+	if maxResults <= 0 {
+		maxResults = defaultKeenableResults
 	}
 
 	// Keyless by default; a configured key switches to the authenticated path.
@@ -116,10 +122,19 @@ func (p *KeenableProvider) Search(
 		if maxResults > 0 && len(results) >= maxResults {
 			break
 		}
+		// Keenable returns both a short "description" and a longer "snippet"
+		// excerpt. Prefer the short description as the summary snippet and keep
+		// the longer excerpt as Content (used by RAG compression). Fall back to
+		// whichever is present so we never drop the only available text.
+		snippet := item.Description
+		if snippet == "" {
+			snippet = item.Snippet
+		}
 		result := &types.WebSearchResult{
 			Title:   item.Title,
 			URL:     item.URL,
-			Snippet: item.Description,
+			Snippet: snippet,
+			Content: item.Snippet,
 			Source:  "keenable",
 		}
 		if includeDate && item.PublishedAt != "" {
@@ -146,6 +161,7 @@ type keenableSearchResponse struct {
 		Title       string `json:"title"`
 		URL         string `json:"url"`
 		Description string `json:"description"`
+		Snippet     string `json:"snippet,omitempty"`
 		PublishedAt string `json:"published_at,omitempty"`
 		AcquiredAt  string `json:"acquired_at,omitempty"`
 	} `json:"results"`

@@ -62,6 +62,38 @@ func TestKeenableProvider_Search_Keyless(t *testing.T) {
 	}
 }
 
+func TestKeenableProvider_Search_SnippetMapping(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				// Has both: description is the short summary, snippet the longer excerpt.
+				{"title": "T1", "url": "https://e/1", "description": "short", "snippet": "long excerpt"},
+				// Only snippet present: it must fall back into Snippet so we don't drop text.
+				{"title": "T2", "url": "https://e/2", "snippet": "only long"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := &KeenableProvider{client: srv.Client(), baseURL: srv.URL}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results, err := p.Search(ctx, "q", 5, false)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Snippet != "short" || results[0].Content != "long excerpt" {
+		t.Errorf("result[0] snippet/content mapping wrong: %+v", results[0])
+	}
+	if results[1].Snippet != "only long" {
+		t.Errorf("result[1] should fall back to snippet when description is empty: %+v", results[1])
+	}
+}
+
 func TestKeenableProvider_Search_Keyed(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A configured key => authenticated endpoint + X-API-Key.

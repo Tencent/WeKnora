@@ -128,6 +128,9 @@ type WebSearchProviderTypeInfo struct {
 	Name string `json:"name"`
 	// Whether the provider requires an API key
 	RequiresAPIKey bool `json:"requires_api_key"`
+	// Whether the provider accepts an optional API key (keyless by default, but a
+	// key unlocks higher limits — e.g. Keenable). Mutually exclusive with RequiresAPIKey.
+	SupportsOptionalAPIKey bool `json:"supports_optional_api_key,omitempty"`
 	// Whether the provider requires an engine ID (e.g., Google CSE)
 	RequiresEngineID bool `json:"requires_engine_id"`
 	// Whether the provider requires a user-supplied base URL (e.g., self-hosted SearXNG instance)
@@ -200,12 +203,13 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			DocsURL:        "https://cloud.baidu.com/doc/AppBuilder/s/qlvEcai0p",
 		},
 		{
-			ID:             "keenable",
-			Name:           "Keenable",
-			RequiresAPIKey: false,
-			SupportsProxy:  true,
-			Description:    "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
-			DocsURL:        "https://keenable.ai/",
+			ID:                     "keenable",
+			Name:                   "Keenable",
+			RequiresAPIKey:         false,
+			SupportsOptionalAPIKey: true,
+			SupportsProxy:          true,
+			Description:            "Keenable web search built for AI agents (keyless by default; an optional API key lifts the rate limit)",
+			DocsURL:                "https://keenable.ai/",
 		},
 	}
 }

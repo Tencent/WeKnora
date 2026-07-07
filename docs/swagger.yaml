@@ -3459,6 +3459,7 @@ definitions:
     - ollama
     - baidu
     - searxng
+    - keenable
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBing
@@ -3468,6 +3469,7 @@ definitions:
     - WebSearchProviderTypeOllama
     - WebSearchProviderTypeBaidu
     - WebSearchProviderTypeSearxng
+    - WebSearchProviderTypeKeenable
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       extraction_granularity:

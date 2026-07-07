@@ -1324,6 +1324,7 @@ export default {
     proxyUrlPlaceholder: "예: http://127.0.0.1:7890 (선택 사항)",
     proxyUrlHelp: "검색 API 접근에 프록시가 필요한 경우 입력합니다. 비우면 HTTP_PROXY/HTTPS_PROXY를 사용합니다.",
     apiKeyLabel: "API 키",
+    apiKeyOptionalLabel: "API 키 (선택 사항)",
     baseUrlLabel: "인스턴스 URL",
     baseUrlPlaceholder: "https://searxng.example.com",
     apiKeyDescription: "선택한 검색 엔진의 API 키 입력",
