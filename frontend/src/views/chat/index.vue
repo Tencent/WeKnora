@@ -136,7 +136,8 @@ import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 
-const { visible: referencesDrawerVisible } = provideChatReferencesDrawer();
+const referencesDrawer = provideChatReferencesDrawer();
+const { visible: referencesDrawerVisible } = referencesDrawer;
 
 const props = defineProps({
     session_id: { type: String, default: '' },
@@ -835,6 +836,7 @@ onMounted(async () => {
 })
 const clearData = () => {
     stopStream();
+    referencesDrawer.close();
     isReplying.value = false;
     fullContent.value = '';
     // Stop any IM-reply recovery poll for the session we're leaving/switching.
