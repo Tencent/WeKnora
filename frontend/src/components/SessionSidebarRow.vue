@@ -17,7 +17,22 @@
       @click.stop
       @change="emit('toggle-select')"
     />
-    <span class="submenu_title" :class="batchMode ? 'submenu_title--batch' : ''" :title="item.title">
+    <form
+      v-if="titleEditing"
+      class="session-title-edit"
+      @submit.prevent="submitTitleEdit"
+      @click.stop
+    >
+      <input
+        ref="titleInputRef"
+        v-model="titleDraft"
+        class="session-title-edit__input"
+        :maxlength="SESSION_TITLE_MAX_LENGTH"
+        @keydown.esc.prevent="cancelTitleEdit"
+        @blur="submitTitleEdit"
+      />
+    </form>
+    <span v-else class="submenu_title" :class="batchMode ? 'submenu_title--batch' : ''" :title="item.title">
       <t-icon v-if="item.is_pinned" name="pin" class="submenu_pin_icon" />
       <span class="submenu_title-text">{{ item.title }}</span>
     </span>
@@ -64,6 +79,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, nextTick, ref } from 'vue'
+import { normalizeSessionTitleDraft, SESSION_TITLE_MAX_LENGTH } from './sessionTitleEdit'
 
 interface SessionMenuOption {
   content: string
@@ -72,7 +88,7 @@ interface SessionMenuOption {
   prefixIcon?: any
 }
 
-defineProps<{
+const props = defineProps<{
   item: { id: string; path: string; title: string; is_pinned?: boolean }
   batchMode: boolean
   activePath: string
@@ -86,6 +102,7 @@ const emit = defineEmits<{
   (e: 'navigate'): void
   (e: 'toggle-select'): void
   (e: 'menu-click', data: { value: string }): void
+  (e: 'rename-submit', data: { title: string }): void
   (e: 'hover-in'): void
   (e: 'hover-out'): void
 }>()
@@ -95,7 +112,10 @@ const MENU_GAP = 4
 const VIEWPORT_MARGIN = 8
 
 const menuOpen = ref(false)
+const titleEditing = ref(false)
+const titleDraft = ref('')
 const triggerRef = ref<HTMLButtonElement | null>(null)
+const titleInputRef = ref<HTMLInputElement | null>(null)
 const menuStyle = ref<Record<string, string>>({})
 
 const updateMenuPosition = (): void => {
@@ -138,7 +158,36 @@ const toggleMenu = (): void => {
   })
 }
 
+const startTitleEdit = (): void => {
+  closeMenu()
+  titleDraft.value = props.item.title || ''
+  titleEditing.value = true
+  nextTick(() => {
+    titleInputRef.value?.focus()
+    titleInputRef.value?.select()
+  })
+}
+
+const cancelTitleEdit = (): void => {
+  titleEditing.value = false
+  titleDraft.value = ''
+}
+
+const submitTitleEdit = (): void => {
+  if (!titleEditing.value) return
+  const nextTitle = normalizeSessionTitleDraft(titleDraft.value)
+  const currentTitle = normalizeSessionTitleDraft(props.item.title || '')
+  titleEditing.value = false
+  titleDraft.value = ''
+  if (!nextTitle || nextTitle === currentTitle) return
+  emit('rename-submit', { title: nextTitle })
+}
+
 const handleMenuClick = (option: SessionMenuOption): void => {
+  if (option.value === 'rename') {
+    startTitleEdit()
+    return
+  }
   closeMenu()
   emit('menu-click', { value: option.value })
 }
@@ -156,6 +205,25 @@ onBeforeUnmount(() => {
 .session-row-menu-wrap {
   position: relative;
   flex: 0 0 auto;
+}
+
+.session-title-edit {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.session-title-edit__input {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--td-brand-color);
+  border-radius: 5px;
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+  font-size: 14px;
+  line-height: 24px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--td-brand-color-light);
 }
 
 .menu-more-wrap {
