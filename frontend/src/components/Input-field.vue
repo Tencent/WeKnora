@@ -29,6 +29,11 @@ import {
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
 import {
+  isAgentWebSearchEnabled,
+  isAgentWebSearchReady,
+  isTenantWebSearchReady,
+} from '@/utils/agentWebSearch';
+import {
   getAgentNotReadyReasonKeys,
   resolveAgentNotReadySection,
   resolveAgentNotReadyHighlight,
@@ -258,20 +263,15 @@ watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId], async 
   }
 }, { immediate: true });
 
-// 智能体是否启用了网络搜索
-const agentWebSearchEnabled = computed(() => {
-  if (!hasAgentConfig.value) return null; // null 表示不受智能体控制
-  return currentAgentConfig.value?.web_search_enabled ?? true;
+// 智能体是否启用了网络搜索（仅显式开启才算支持）
+const isWebSearchEnabledByAgent = computed(() => {
+  if (!hasAgentConfig.value) return null;
+  return isAgentWebSearchEnabled(currentAgentConfig.value);
 });
 
-const agentWebSearchProviderId = computed(() => {
-  if (!hasAgentConfig.value) return '';
-  return currentAgentConfig.value?.web_search_provider_id || '';
-});
-
-// 网络搜索是否被智能体禁用（只读状态）- 只有明确设置为 false 时才禁用
+// 网络搜索是否被智能体禁用
 const isWebSearchDisabledByAgent = computed(() => {
-  return hasAgentConfig.value && agentWebSearchEnabled.value === false;
+  return hasAgentConfig.value && isWebSearchEnabledByAgent.value !== true;
 });
 
 // 知识库选择是否被智能体锁定
@@ -432,6 +432,15 @@ const isImageUploadEnabledByAgent = computed(() => {
   if (!hasAgentConfig.value) return false;
   return currentAgentConfig.value?.image_upload_enabled === true;
 });
+
+// Input 工具栏：仅当智能体已启用且搜索引擎可用时才显示
+const showWebSearchButton = computed(() => {
+  if (!hasAgentConfig.value) {
+    return isTenantWebSearchReady(webSearchProviders.value);
+  }
+  return isAgentWebSearchReady(currentAgentConfig.value, webSearchProviders.value);
+});
+const showImageUploadButton = computed(() => isImageUploadEnabledByAgent.value);
 
 // 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
 const isModelLockedByAgent = computed(() => {
@@ -791,12 +800,10 @@ watch(selectedFileIds, () => {
 }, { immediate: true });
 
 const isWebSearchConfigured = computed(() => {
-  const agentProviderId = agentWebSearchProviderId.value;
-  if (agentProviderId) {
-    return webSearchProviders.value.some(p => p.id === agentProviderId);
+  if (hasAgentConfig.value) {
+    return isAgentWebSearchReady(currentAgentConfig.value, webSearchProviders.value);
   }
-
-  return webSearchProviders.value.some(p => p.is_default);
+  return isTenantWebSearchReady(webSearchProviders.value);
 });
 
 const loadWebSearchConfig = async (force = false) => {
@@ -2215,6 +2222,14 @@ const handleGoToWebSearchSettings = () => {
   }
 };
 
+const handleGoToWebSearchConfig = () => {
+  if (hasAgentConfig.value && selectedAgent.value) {
+    handleGoToAgentSettings('websearch');
+    return;
+  }
+  handleGoToWebSearchSettings();
+};
+
 const handleGoToAgentSettings = (section?: string) => {
   const agent = selectedAgent.value;
   if (!agent) {
@@ -2343,7 +2358,7 @@ const toggleWebSearch = () => {
         href: '#',
         onClick: (e: Event) => {
           e.preventDefault();
-          handleGoToWebSearchSettings();
+          handleGoToWebSearchConfig();
         },
         style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
         onMouseenter: (e: Event) => {
@@ -2352,7 +2367,7 @@ const toggleWebSearch = () => {
         onMouseleave: (e: Event) => {
           (e.target as HTMLElement).style.textDecoration = 'none';
         }
-      }, t('input.goToSettings'))
+      }, t('input.goToAgentSettings'))
     ]);
     MessagePlugin.warning({
       content: () => messageContent,
@@ -2485,24 +2500,20 @@ defineExpose({
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
 
-          <!-- WebSearch 开关按钮 -->
-          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+          <!-- WebSearch 开关按钮（智能体未启用时不显示） -->
+          <t-tooltip v-if="showWebSearchButton" placement="top" theme="light"
+            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
-              <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
-                <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
-                <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings')
-                }}</a>
-              </div>
-              <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
+              <span v-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
                 $t('input.webSearch.toggleOn') }}</span>
               <div v-else class="tooltip-with-link">
                 <span>{{ $t('input.webSearch.notConfigured') }}</span>
-                <a href="#" @click.prevent="handleGoToWebSearchSettings">{{ $t('input.goToSettings') }}</a>
+                <a href="#" @click.prevent="handleGoToWebSearchConfig">{{ $t('input.goToAgentSettings') }}</a>
               </div>
             </template>
             <div class="control-btn websearch-btn" :class="{
               'active': isWebSearchEnabled && isWebSearchConfigured,
-              'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
+              'disabled': !isWebSearchConfigured
             }" @click.stop="toggleWebSearch">
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
                 class="control-icon websearch-icon" :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }">
@@ -2517,19 +2528,15 @@ defineExpose({
             </div>
           </t-tooltip>
 
-          <!-- 图片上传按钮 -->
-          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+          <!-- 图片上传按钮（智能体未启用时不显示） -->
+          <t-tooltip v-if="showImageUploadButton" placement="top" theme="light"
+            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
-              <div v-if="!isImageUploadEnabledByAgent" class="tooltip-with-link">
-                <span>{{ $t('input.imageUploadDisabledByAgent') }}</span>
-                <a href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
-              </div>
-              <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
+              <span>{{ $t('chat.imageUploadTooltip') }}</span>
             </template>
             <div class="control-btn image-upload-btn" :class="{
-              'active': uploadedImages.length > 0,
-              'disabled': !isImageUploadEnabledByAgent
-            }" @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()">
+              'active': uploadedImages.length > 0
+            }" @click.stop="triggerImageUpload()">
               <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor" class="control-icon">
                 <path
                   d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z" />

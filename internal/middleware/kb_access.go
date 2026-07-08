@@ -241,6 +241,11 @@ func RequireKBAccess(
 		}
 
 		ctx := c.Request.Context()
+		if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+			_ = c.Error(err)
+			c.Abort()
+			return
+		}
 
 		// Rollout window: enforcement off -> log the would-be check and
 		// pass through. We still resolve the KB (best-effort) so the

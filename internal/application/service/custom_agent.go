@@ -462,6 +462,13 @@ func (s *customAgentService) GetSuggestedQuestions(
 		limit = 6
 	}
 
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+		return nil, err
+	}
+	if err := types.AuthorizeTenantAPIKeyOptionalTagIDs(ctx, tagIDs); err != nil {
+		return nil, err
+	}
+
 	// Get tenant ID from context
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
@@ -540,6 +547,12 @@ func (s *customAgentService) GetSuggestedQuestions(
 			effectiveKBIDs = agent.Config.KnowledgeBases
 		}
 	}
+
+	filteredKBIDs, err := types.FilterKnowledgeBasesForTenantAPIKeyScope(ctx, kbIDs, effectiveKBIDs)
+	if err != nil {
+		return nil, err
+	}
+	effectiveKBIDs = filteredKBIDs
 
 	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 {
 		return s.truncateQuestions(result, limit), nil

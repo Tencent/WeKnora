@@ -153,6 +153,32 @@ func TestServeFilesRejectsPathWithoutTenantSegment(t *testing.T) {
 	}
 }
 
+func TestServeFilesRejectsAPIKeyPrincipal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_TYPE", "local")
+
+	engine := gin.New()
+	serveFiles(engine, &stubFileService{
+		getFile: func(ctx context.Context, filePath string) (io.ReadCloser, error) {
+			t.Fatalf("GetFile should not be called for API-key principal, got %q", filePath)
+			return nil, nil
+		},
+	})
+
+	filePath := "local://42/docs/example.txt"
+	req := httptest.NewRequest(http.MethodGet, "/files?file_path="+url.QueryEscape(filePath), nil)
+	ctx := context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 42})
+	ctx = types.WithTenantAPIKeyScope(ctx, types.TenantAPIKeyScope{FullAccess: true})
+	req = req.WithContext(ctx)
+
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if got, want := recorder.Code, http.StatusForbidden; got != want {
+		t.Fatalf("status = %d, want %d body=%s", got, want, recorder.Body.String())
+	}
+}
+
 func TestServeFilesForcesActiveContentDownload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("STORAGE_TYPE", "local")

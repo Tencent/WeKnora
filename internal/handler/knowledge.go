@@ -95,6 +95,7 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.K
 }
 
 // validateKnowledgeBaseAccessWithKBID validates access to the given knowledge base ID (e.g. from query or body).
+// Enforces per-API-key KB scope before tenant/share/agent resolution.
 // Returns the knowledge base, kbID, effective tenant ID, permission, and error.
 func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, kbID string) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
 	ctx := c.Request.Context()
@@ -108,6 +109,9 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, k
 	kbID = secutils.SanitizeForLog(kbID)
 	if kbID == "" {
 		return nil, "", 0, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
+	}
+	if err := requireTenantAPIKeyKnowledgeBase(ctx, kbID); err != nil {
+		return nil, kbID, 0, "", err
 	}
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -162,6 +166,9 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 	knowledge, err := h.kgService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil {
 		return nil, ctx, errors.NewNotFoundError("Knowledge not found")
+	}
+	if err := requireTenantAPIKeyKnowledgeBase(ctx, knowledge.KnowledgeBaseID); err != nil {
+		return nil, ctx, err
 	}
 
 	// Owner: knowledge belongs to caller's tenant
@@ -1433,9 +1440,8 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		knowledges, err = h.kgService.GetKnowledgeBatchWithSharedAccess(ctx, effectiveTenantID, req.IDs)
 	}
 
-	// Build the effective allowed-KB set from both scopeKBID and agentAllowedKBIDs.
-	// scopeKBID (from explicit kb_id) restricts to a single KB;
-	// agentAllowedKBIDs (from shared agent) restricts to the agent's configured KBs.
+	// Build the effective allowed-KB set from explicit kb_id, shared agent
+	// scope, and per-API-key KB restrictions.
 	var allowedKBSet map[string]bool
 	if scopeKBID != "" {
 		allowedKBSet = map[string]bool{scopeKBID: true}
@@ -1445,14 +1451,11 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 			allowedKBSet[id] = true
 		}
 	}
-	if allowedKBSet != nil && len(knowledges) > 0 {
-		filtered := make([]*types.Knowledge, 0, len(knowledges))
-		for _, k := range knowledges {
-			if allowedKBSet[k.KnowledgeBaseID] {
-				filtered = append(filtered, k)
-			}
-		}
-		knowledges = filtered
+	if apiKeySet := tenantAPIKeyAllowedKBSet(ctx); apiKeySet != nil {
+		allowedKBSet = intersectKBAllowSet(allowedKBSet, apiKeySet)
+	}
+	if allowedKBSet != nil {
+		knowledges = filterKnowledgesByKBAllowSet(knowledges, allowedKBSet)
 	}
 
 	if err != nil {
@@ -1958,6 +1961,41 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 					agentID, removed)
 			}
 		}
+		scopes = filterKnowledgeSearchScopesForAPIKey(ctx, scopes)
+		if len(scopes) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success":  true,
+				"data":     []interface{}{},
+				"has_more": false,
+				"total":    0,
+			})
+			return
+		}
+		knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success":  true,
+			"data":     knowledges,
+			"has_more": hasMore,
+			"total":    total,
+		})
+		return
+	}
+
+	if scopes, restricted := tenantAPIKeySearchScopes(ctx); restricted {
+		if len(scopes) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success":  true,
+				"data":     []interface{}{},
+				"has_more": false,
+				"total":    0,
+			})
+			return
+		}
 		knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
@@ -2039,6 +2077,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	if err := requireTenantAPIKeyKnowledgeBases(ctx, req.SourceKBID, req.TargetKBID); err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -2390,4 +2432,83 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 			"reparse_count": len(ids),
 		},
 	})
+}
+
+func requireTenantAPIKeyKnowledgeBase(ctx context.Context, kbID string) error {
+	return requireTenantAPIKeyKnowledgeBases(ctx, kbID)
+}
+
+func requireTenantAPIKeyKnowledgeBases(ctx context.Context, kbIDs ...string) error {
+	return types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbIDs...)
+}
+
+func tenantAPIKeyAllowedKBSet(ctx context.Context) map[string]bool {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
+		return nil
+	}
+	allowed := make(map[string]bool, len(scope.KnowledgeBaseIDs))
+	for _, id := range scope.KnowledgeBaseIDs {
+		allowed[id] = true
+	}
+	return allowed
+}
+
+func intersectKBAllowSet(base, restrict map[string]bool) map[string]bool {
+	if restrict == nil {
+		return base
+	}
+	if base == nil {
+		return restrict
+	}
+	out := make(map[string]bool)
+	for id := range base {
+		if restrict[id] {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func filterKnowledgesByKBAllowSet(knowledges []*types.Knowledge, allowed map[string]bool) []*types.Knowledge {
+	if allowed == nil {
+		return knowledges
+	}
+	filtered := make([]*types.Knowledge, 0, len(knowledges))
+	for _, k := range knowledges {
+		if k != nil && allowed[k.KnowledgeBaseID] {
+			filtered = append(filtered, k)
+		}
+	}
+	return filtered
+}
+
+func filterKnowledgeSearchScopesForAPIKey(ctx context.Context, scopes []types.KnowledgeSearchScope) []types.KnowledgeSearchScope {
+	allowed := tenantAPIKeyAllowedKBSet(ctx)
+	if allowed == nil {
+		return scopes
+	}
+	filtered := make([]types.KnowledgeSearchScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if allowed[scope.KBID] {
+			filtered = append(filtered, scope)
+		}
+	}
+	return filtered
+}
+
+func tenantAPIKeySearchScopes(ctx context.Context) ([]types.KnowledgeSearchScope, bool) {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
+		return nil, false
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return nil, true
+	}
+	scopes := make([]types.KnowledgeSearchScope, 0, len(scope.KnowledgeBaseIDs))
+	for _, kbID := range scope.KnowledgeBaseIDs {
+		scopes = append(scopes, types.KnowledgeSearchScope{TenantID: tenantID, KBID: kbID})
+	}
+	return scopes, true
 }

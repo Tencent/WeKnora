@@ -3,7 +3,7 @@
 [返回目录](./README.md)
 
 包含两组接口：
-- 租户 CRUD（`/tenants`、`/tenants/:id`、`/tenants/:id/api-key`）：当前认证用户对自己所属租户进行管理；跨租户访问需要管理员权限。
+- 租户 CRUD（`/tenants`、`/tenants/:id`）：当前认证用户对自己所属租户进行管理；跨租户访问需要管理员权限。
 - 跨租户接口（`/tenants/all`、`/tenants/search`）：**需要服务端启用 `EnableCrossTenantAccess` 且当前用户具备 `CanAccessAllTenants` 权限**，否则返回 403。
 - 租户 KV 配置（`/tenants/kv/:key`）：当前租户级别的通用配置项，**`tenant_id` 从认证上下文中获取，不在 URL 中传入**。
 
@@ -15,7 +15,9 @@
 | GET    | `/tenants/:id`             | 获取指定租户信息                                  |
 | PUT    | `/tenants/:id`             | 更新租户信息                                      |
 | DELETE | `/tenants/:id`             | 删除租户                                          |
-| POST   | `/tenants/:id/api-key`     | 重置租户 API Key                                  |
+| GET    | `/tenants/:id/api-keys`    | 列出租户 API Key（Owner）                         |
+| POST   | `/tenants/:id/api-keys`    | 创建带角色的 API Key（Owner）                  |
+| DELETE | `/tenants/:id/api-keys/:key_id` | 吊销指定 API Key（Owner）                   |
 | GET    | `/tenants/:id/api-principal-config` | 获取 API Key 用户身份配置（Owner）          |
 | PUT    | `/tenants/:id/api-principal-config` | 更新 API Key 用户身份配置（Owner）          |
 | GET    | `/tenants`                 | 获取当前用户可见的租户列表                        |
@@ -108,7 +110,7 @@ curl --location 'http://localhost:8080/api/v1/tenants/search?keyword=weknora&pag
 
 ## POST `/tenants` - 创建新租户
 
-创建一个新的租户，服务端会自动生成租户 ID 与 API Key。
+创建一个新的租户。**不会**自动发放 API Key；请在创建后通过 `POST /tenants/:id/api-keys` 创建密钥。从旧版本升级时，原有 `tenants.api_key` 会迁移到 `tenant_api_keys` 表并继续可用，直至被吊销。
 
 **参数说明（请求体）**:
 
@@ -327,34 +329,16 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/tenants/10000' \
 }
 ```
 
-## POST `/tenants/:id/api-key` - 重置租户 API Key
+## 租户 API Key 管理（`tenant_api_keys`）
 
-为指定租户生成新的 API Key，旧 Key 立即失效。访问规则同 `GET /tenants/:id`。
+自 scoped API Key 改造后，密钥以独立记录存储，支持：
 
-**路径参数**:
+- **role**：`viewer`（只读 + 语义检索 POST）、`contributor`（知识库写入）、`admin`（租户级管理，不含 `/api-keys` 管理面）
+- **knowledge_base_ids**：可选，将 Key 限制在指定知识库
+- **吊销**：`DELETE /tenants/:id/api-keys/:key_id`
+- **过期**：创建时可选 `expires_at_unix`
 
-| 字段 | 类型 | 说明    |
-| ---- | ---- | ------- |
-| id   | int  | 租户 ID |
-
-**请求**:
-
-```curl
-curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-key' \
---header 'X-API-Key: sk-aaLRAgvCRJcmtiL2vLMeB1FB5UV0Q-qB7DlTE1pJ9KA93XZG' \
---header 'Content-Type: application/json'
-```
-
-**响应**:
-
-```json
-{
-    "data": {
-        "api_key": "sk-IKtd9JGV4-aPGQ6RiL8YJu9Vzb3-ae4lgFkjFJZmhvUn2mLu"
-    },
-    "success": true
-}
-```
+认证上下文中的租户角色与 Key 的 `role` 一致（`viewer` / `contributor` / `admin`）。路由级 API Key 鉴权与 KB 访问守卫在 `X-API-Key` 认证后强制执行。
 
 ## API Key Principal：隔离边界与安全说明
 
@@ -368,7 +352,7 @@ Principal **仅**用于按终端用户隔离以下能力：
 - **MCP OAuth** 访问令牌（同一租户下不同外部用户各自授权，token 互不共用）
 - 对话内 MCP OAuth 提示、MCP 工具审批等与终端用户绑定的流程
 
-Principal **不会**缩小 API Key 的 API 权限：`X-API-Key` 认证仍授予租户内 **Admin** 角色，知识库、Agent 配置等接口**不按**外部用户做 RBAC 隔离。
+Principal **不会**缩小 API Key 的 HTTP 路由权限：路由访问由 Key 的 `role` 控制；租户内 RBAC 角色与 `role` 一致。知识库、Agent 等资源的细粒度访问另受 KB 守卫约束。
 
 ### 模式与安全假设
 

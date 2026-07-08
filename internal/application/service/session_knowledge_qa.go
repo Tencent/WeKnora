@@ -45,7 +45,10 @@ func (s *sessionService) KnowledgeQA(
 	ctx = setupCtx
 
 	// Resolve knowledge bases using shared helper
-	knowledgeBaseIDs, knowledgeIDs := s.resolveKnowledgeBases(ctx, req)
+	knowledgeBaseIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	if err != nil {
+		return err
+	}
 
 	// Resolve chat model ID using shared helper
 	chatModelID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)
@@ -86,7 +89,7 @@ func (s *sessionService) KnowledgeQA(
 	// Build unified search targets (computed once, used throughout pipeline)
 	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to build search targets: %v", err)
+		return fmt.Errorf("build search targets: %w", err)
 	}
 
 	// Create chat management object with session settings
@@ -452,7 +455,10 @@ func (s *sessionService) buildSearchTargets(
 
 	kbByID := make(map[string]*types.KnowledgeBase)
 	if len(kbIDsToFetch) > 0 {
-		kbs, _ := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDsToFetch)
+		kbs, kbFetchErr := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDsToFetch)
+		if kbFetchErr != nil {
+			logger.Warnf(ctx, "Failed to fetch knowledge bases for search targets: %v", kbFetchErr)
+		}
 		for _, kb := range kbs {
 			if kb != nil {
 				kbByID[kb.ID] = kb
@@ -550,11 +556,14 @@ func (s *sessionService) buildSearchTargets(
 		kb := kbByID[kbID]
 		explicitKnowledgeIDs := uniqueNonEmptyStrings(kbToKnowledgeIDs[kbID])
 
-		if kb != nil && kb.Type != types.KnowledgeBaseTypeFAQ {
+		useDocumentTagResolution := kb == nil || kb.Type != types.KnowledgeBaseTypeFAQ
+		if kb == nil {
+			logger.Warnf(ctx, "Knowledge base metadata missing for tag scope, kb_id=%s, using document tag resolution", kbID)
+		}
+		if useDocumentTagResolution {
 			tagKnowledgeIDs, err := s.knowledgeService.ListKnowledgeIDsByTagIDs(ctx, kbTenant, kbID, tagIDs)
 			if err != nil {
-				logger.Warnf(ctx, "Failed to resolve knowledge IDs for tag scope, kb_id=%s: %v", kbID, err)
-				continue
+				return nil, fmt.Errorf("resolve knowledge IDs for tag scope kb_id=%s: %w", kbID, err)
 			}
 			if len(explicitKnowledgeIDs) > 0 {
 				tagKnowledgeIDs = intersectStrings(tagKnowledgeIDs, explicitKnowledgeIDs)
@@ -797,7 +806,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	// Build unified search targets (computed once, used throughout pipeline)
 	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to build search targets: %v", err)
+		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 
 	if len(searchTargets) == 0 {

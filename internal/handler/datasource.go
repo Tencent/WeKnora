@@ -54,6 +54,9 @@ func (h *DataSourceHandler) getOwnedKnowledgeBase(
 	if kb.TenantID != tenantID {
 		return nil, http.StatusForbidden, "access denied"
 	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+		return nil, http.StatusForbidden, err.Error()
+	}
 
 	return kb, http.StatusOK, ""
 }
@@ -170,7 +173,6 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 		c.JSON(status, gin.H{"error": msg})
 		return
 	}
-
 	dataSources, err := h.service.ListDataSources(ctx, kbID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list data sources"})

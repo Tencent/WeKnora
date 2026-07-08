@@ -99,9 +99,9 @@
           <t-icon name="tools" class="menu-icon" />
           <span>{{ $t('settings.mcpService') }}</span>
         </div>
-        <div v-if="canSeeQuickNav('api')" class="menu-item" @click="handleQuickNav('api')">
+        <div v-if="canSeeQuickNav('integration-api')" class="menu-item" @click="handleQuickNav('integration-api')">
           <t-icon name="secured" class="menu-icon" />
-          <span>{{ $t('settings.apiInfo') }}</span>
+          <span>{{ $t('integrations.tabs.api') }}</span>
         </div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="handleSettings">
@@ -257,7 +257,7 @@ const QUICKNAV_MIN_ROLE: Record<string, 'viewer' | 'contributor' | 'admin' | 'ow
   models: 'viewer',
   websearch: 'admin',
   mcp: 'admin',
-  api: 'owner',
+  'integration-api': 'owner',
 }
 const canSeeQuickNav = (key: string): boolean => {
   if (authStore.canAccessAllTenants) return true
@@ -296,7 +296,11 @@ const toggleMenu = () => {
 const handleQuickNav = (section: string) => {
   menuVisible.value = false
   uiStore.openSettings()
-  router.push('/platform/settings')
+  if (section === 'integration-api') {
+    router.push({ path: '/platform/settings', query: { section: 'integrations', tab: 'api' } })
+  } else {
+    router.push('/platform/settings')
+  }
 
   // 延迟一下，确保设置页面已经渲染
   setTimeout(() => {
@@ -556,7 +560,6 @@ const loadUserInfo = async () => {
         authStore.setTenant({
           id: String(response.data.tenant.id),
           name: response.data.tenant.name,
-          api_key: response.data.tenant.api_key || '',
           owner_id: user.id,
           created_at: response.data.tenant.created_at,
           updated_at: response.data.tenant.updated_at
