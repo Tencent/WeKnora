@@ -2051,6 +2051,7 @@ async function createNewSession(value: string): Promise<void> {
                     <t-icon name="search" size="16px" />
                   </template>
                 </t-input>
+                <div class="doc-filter-bar__filters">
                 <t-popup v-model:visible="tagFilterPanelVisible" trigger="click" placement="bottom-left"
                   overlay-class-name="tag-filter-popup" :overlay-inner-style="{ padding: 0 }">
                   <template #content>
@@ -2180,26 +2181,29 @@ async function createNewSession(value: string): Promise<void> {
                     </template>
                   </t-date-range-picker>
                 </div>
-                <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
-                  <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
-                    <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'grid' }"
-                      @click="viewMode = 'grid'" :aria-pressed="viewMode === 'grid'">
-                      <t-icon name="view-module" size="16px" />
-                    </button>
-                  </t-tooltip>
-                  <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
-                    <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'list' }"
-                      @click="viewMode = 'list'" :aria-pressed="viewMode === 'list'">
-                      <t-icon name="view-list" size="16px" />
-                    </button>
-                  </t-tooltip>
                 </div>
-                <div v-if="canEdit" class="doc-filter-actions">
-                  <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
-                    :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
-                    trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
-                    :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
-                    @url="handleUploadSourceUrl" @manual="handleManualCreate" />
+                <div class="doc-filter-bar__trailing">
+                  <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
+                    <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
+                      <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'grid' }"
+                        @click="viewMode = 'grid'" :aria-pressed="viewMode === 'grid'">
+                        <t-icon name="view-module" size="16px" />
+                      </button>
+                    </t-tooltip>
+                    <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
+                      <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'list' }"
+                        @click="viewMode = 'list'" :aria-pressed="viewMode === 'list'">
+                        <t-icon name="view-list" size="16px" />
+                      </button>
+                    </t-tooltip>
+                  </div>
+                  <div v-if="canEdit" class="doc-filter-actions">
+                    <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
+                      :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
+                      trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
+                      :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
+                      @url="handleUploadSourceUrl" @manual="handleManualCreate" />
+                  </div>
                 </div>
               </div>
               <div class="doc-scroll-container"
@@ -2667,10 +2671,61 @@ async function createNewSession(value: string): Promise<void> {
 .doc-filter-bar {
   padding: 0 0 12px 0;
   flex-shrink: 0;
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'search trailing'
+    'filters filters';
+  gap: 8px 12px;
   align-items: center;
-  flex-wrap: wrap;
+
+  .doc-search-input {
+    grid-area: search;
+    min-width: 0;
+    width: 100%;
+  }
+
+  &__filters {
+    grid-area: filters;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+
+    &::-webkit-scrollbar {
+      height: 4px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      background-color: rgba(0, 0, 0, 0.15);
+      border-radius: 2px;
+    }
+  }
+
+  &__trailing {
+    grid-area: trailing;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  @media (min-width: 1280px) {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 12px;
+
+    &__filters {
+      flex: 0 1 auto;
+      overflow-x: visible;
+    }
+  }
 
   .doc-filter-field {
     width: 140px;
@@ -2756,9 +2811,11 @@ async function createNewSession(value: string): Promise<void> {
     }
   }
 
-  .doc-search-input {
-    flex: 1 1 220px;
-    min-width: 220px;
+  @media (min-width: 1280px) {
+    .doc-search-input {
+      flex: 1 1 220px;
+      min-width: 220px;
+    }
   }
 
   .doc-type-select {
