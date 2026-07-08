@@ -428,6 +428,8 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.GET("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
 		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)
 		kbgrp.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
+		// 创建知识库副本 — Contributor+ 且对源 KB 有 read 权限；只创建新的 KB 设置记录，不复制内容/索引/分享。
+		kbgrp.POST("/:id/duplicate", g.Contributor(), g.KBAccessRead("id"), handler.DuplicateKnowledgeBase)
 		// 获取知识库复制进度 — Viewer+
 		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限

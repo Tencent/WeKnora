@@ -936,6 +936,17 @@ type CopyKnowledgeBaseResponse struct {
 	Message  string `json:"message"`
 }
 
+type DuplicateKnowledgeBaseRequest struct {
+	TargetID string `json:"target_id"`
+}
+
+type DuplicateKnowledgeBaseResponse struct {
+	SourceID      string      `json:"source_id"`
+	TargetID      string      `json:"target_id"`
+	Message       string      `json:"message"`
+	KnowledgeBase interface{} `json:"knowledge_base"`
+}
+
 // CopyKnowledgeBase godoc
 // @Summary      复制知识库
 // @Description  将一个知识库的内容复制到另一个知识库（异步任务）
@@ -1110,6 +1121,80 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 			SourceID: req.SourceID,
 			TargetID: req.TargetID,
 			Message:  "Knowledge base copy task started",
+		},
+	})
+}
+
+// DuplicateKnowledgeBase godoc
+// @Summary      创建知识库副本
+// @Description  创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                         true   "源知识库 ID"
+// @Param        request  body      DuplicateKnowledgeBaseRequest  false  "创建副本请求"
+// @Success      201      {object}  map[string]interface{}         "创建后的知识库副本"
+// @Failure      400      {object}  errors.AppError                 "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/duplicate [post]
+func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	sourceID := c.Param("id")
+	if sourceID == "" {
+		c.Error(apperrors.NewBadRequestError("Knowledge base ID cannot be empty"))
+		return
+	}
+	var req DuplicateKnowledgeBaseRequest
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+			return
+		}
+	}
+
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	sourceKB, err := h.service.GetKnowledgeBaseByID(ctx, sourceID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if sourceKB.TenantID != callerTenantID {
+		logger.Warnf(ctx,
+			"Knowledge base duplicate rejected: source belongs to another tenant, source_id: %s, caller_tenant: %d, kb_tenant: %d",
+			secutils.SanitizeForLog(sourceID), callerTenantID, sourceKB.TenantID)
+		c.Error(errors.NewForbiddenError("No permission to duplicate this knowledge base"))
+		return
+	}
+
+	targetKB, err := h.service.DuplicateKnowledgeBase(ctx, sourceID, req.TargetID)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge base duplicate created, source: %s, target: %s",
+		secutils.SanitizeForLog(sourceID), secutils.SanitizeForLog(targetKB.ID))
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data": DuplicateKnowledgeBaseResponse{
+			SourceID:      sourceID,
+			TargetID:      targetKB.ID,
+			Message:       "Knowledge base duplicate created",
+			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), nil),
 		},
 	})
 }

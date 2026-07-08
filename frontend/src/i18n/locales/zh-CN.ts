@@ -3184,6 +3184,7 @@ export default {
     },
     menu: {
       viewDetails: "查看详情",
+      duplicate: "创建副本",
     },
     pin: {
       pin: "置顶",
@@ -3234,6 +3235,8 @@ export default {
     messages: {
       deleted: "已删除",
       deleteFailed: "删除失败",
+      duplicateSuccess: "知识库副本已创建（不包含知识内容）",
+      duplicateFailed: "创建知识库副本失败",
       file: "文件",
       knowledgeBase: "知识库",
       noResult: "无结果",

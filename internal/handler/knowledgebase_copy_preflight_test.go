@@ -9,50 +9,32 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// handler.CopyKnowledgeBase pre-flight tests.
-//
-// The async clone worker (service.CopyKnowledgeBase) re-applies the same
-// embedding-model and store-binding defenses as defense in depth, but the
-// handler-level pre-flight is the one that surfaces 400 to the API caller
-// synchronously instead of inside Asynq progress polling. These tests pin
-// the synchronous behavior so a future refactor that drops the pre-flight
-// fails loudly here rather than silently degrading UX.
-
-// stubKBCopyService provides only the two methods the Copy handler reaches
-// for (GetKnowledgeBaseByID twice). Other interface methods stay nil so any
-// accidental new call panics rather than silently succeeding.
+// stubKBCopyService provides only the methods the duplicate handler reaches.
+// Other interface methods stay embedded so accidental new calls panic in tests.
 type stubKBCopyService struct {
 	interfaces.KnowledgeBaseService
-	byID func(ctx context.Context, id string) (*types.KnowledgeBase, error)
+	byID      func(ctx context.Context, id string) (*types.KnowledgeBase, error)
+	duplicate func(ctx context.Context, sourceID, targetID string) (*types.KnowledgeBase, error)
 }
 
 func (s *stubKBCopyService) GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error) {
 	return s.byID(ctx, id)
 }
 
-// stubEnqueuer records whether Enqueue was invoked. The whole point of the
-// pre-flight is to short-circuit *before* enqueue, so the test fails if
-// enqueue ran for a mismatched clone.
-type stubEnqueuer struct {
-	calls int
+func (s *stubKBCopyService) DuplicateKnowledgeBase(
+	ctx context.Context,
+	sourceID string,
+	targetID string,
+) (*types.KnowledgeBase, error) {
+	return s.duplicate(ctx, sourceID, targetID)
 }
 
-func (s *stubEnqueuer) Enqueue(_ interface{}, _ ...interface{}) (*stubEnqueueInfo, error) {
-	s.calls++
-	return &stubEnqueueInfo{ID: "x"}, nil
-}
-
-// stubEnqueueInfo is a stand-in for asynq.TaskInfo so the test does not need
-// to construct one.
-type stubEnqueueInfo struct{ ID string }
-
-func newCopyPreflightRouter(svc interfaces.KnowledgeBaseService) (*gin.Engine, *stubEnqueuer) {
+func newDuplicateRouter(svc interfaces.KnowledgeBaseService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(middleware.ErrorHandler())
@@ -61,120 +43,75 @@ func newCopyPreflightRouter(svc interfaces.KnowledgeBaseService) (*gin.Engine, *
 		c.Set(types.UserIDContextKey.String(), "u-test")
 		c.Next()
 	})
-	enq := &stubEnqueuer{}
-	// The real handler reaches into h.asynqClient.Enqueue with the asynq
-	// task type. We do not exercise the enqueue path in these tests — every
-	// case here either short-circuits at pre-flight or returns 4xx earlier.
-	// Leaving asynqClient nil would panic if enqueue ran, which is exactly
-	// the regression we want to catch.
 	h := &KnowledgeBaseHandler{service: svc}
-	r.POST("/knowledge-bases/copy", h.CopyKnowledgeBase)
-	return r, enq
+	r.POST("/knowledge-bases/:id/duplicate", h.DuplicateKnowledgeBase)
+	return r
 }
 
-func storeIDPtr(s string) *string { return &s }
-
-func TestCopyHandlerPreflight_DifferentEmbeddingModel(t *testing.T) {
+func TestDuplicateHandler_ReturnsCreatedKnowledgeBase(t *testing.T) {
+	var gotSourceID, gotTargetID string
 	svc := &stubKBCopyService{
 		byID: func(_ context.Context, id string) (*types.KnowledgeBase, error) {
-			switch id {
-			case "src":
-				return &types.KnowledgeBase{
-					ID: "src", TenantID: 1, EmbeddingModelID: "embed-A",
-				}, nil
-			case "dst":
-				return &types.KnowledgeBase{
-					ID: "dst", TenantID: 1, EmbeddingModelID: "embed-B",
-				}, nil
+			if id != "src" {
+				t.Fatalf("handler should only load the source KB, got id=%s", id)
 			}
-			return nil, nil
+			return &types.KnowledgeBase{ID: "src", TenantID: 1, Name: "Source"}, nil
+		},
+		duplicate: func(_ context.Context, sourceID, targetID string) (*types.KnowledgeBase, error) {
+			gotSourceID, gotTargetID = sourceID, targetID
+			return &types.KnowledgeBase{
+				ID:        "copy-id",
+				TenantID:  1,
+				Name:      "Source",
+				CreatorID: "u-test",
+			}, nil
 		},
 	}
-	r, _ := newCopyPreflightRouter(svc)
+	r := newDuplicateRouter(svc)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/copy",
-		strings.NewReader(`{"source_id":"src","target_id":"dst"}`))
+	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/src/duplicate",
+		strings.NewReader(`{"target_id":"copy-id"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for embedding-model mismatch, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for duplicate, got %d body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "different embedding models") {
-		t.Fatalf("expected embedding-model error message, got %s", w.Body.String())
+	if gotSourceID != "src" || gotTargetID != "copy-id" {
+		t.Fatalf("duplicate service called with source=%q target=%q", gotSourceID, gotTargetID)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`"source_id":"src"`, `"target_id":"copy-id"`, `"knowledge_base"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("response missing %s: %s", want, body)
+		}
 	}
 }
 
-func TestCopyHandlerPreflight_DifferentVectorStore(t *testing.T) {
+func TestDuplicateHandler_RejectsCrossTenantSource(t *testing.T) {
+	calledDuplicate := false
 	svc := &stubKBCopyService{
 		byID: func(_ context.Context, id string) (*types.KnowledgeBase, error) {
-			switch id {
-			case "src":
-				return &types.KnowledgeBase{
-					ID: "src", TenantID: 1, EmbeddingModelID: "embed-A",
-					VectorStoreID: storeIDPtr("store-A"),
-				}, nil
-			case "dst":
-				return &types.KnowledgeBase{
-					ID: "dst", TenantID: 1, EmbeddingModelID: "embed-A",
-					VectorStoreID: storeIDPtr("store-B"),
-				}, nil
-			}
+			return &types.KnowledgeBase{ID: id, TenantID: 2, Name: "Shared"}, nil
+		},
+		duplicate: func(_ context.Context, _, _ string) (*types.KnowledgeBase, error) {
+			calledDuplicate = true
 			return nil, nil
 		},
 	}
-	r, _ := newCopyPreflightRouter(svc)
+	r := newDuplicateRouter(svc)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/copy",
-		strings.NewReader(`{"source_id":"src","target_id":"dst"}`))
+	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/src/duplicate",
+		strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for store mismatch, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for cross-tenant source, got %d body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "different vector stores") {
-		t.Fatalf("expected store-mismatch error message, got %s", w.Body.String())
-	}
-	if strings.Contains(w.Body.String(), "Phase 4") {
-		t.Fatalf("error message must not leak internal roadmap labels: %s", w.Body.String())
+	if calledDuplicate {
+		t.Fatal("duplicate service must not be called when source KB is outside the caller tenant")
 	}
 }
-
-func TestCopyHandlerPreflight_OneSideNilStore(t *testing.T) {
-	svc := &stubKBCopyService{
-		byID: func(_ context.Context, id string) (*types.KnowledgeBase, error) {
-			switch id {
-			case "src":
-				return &types.KnowledgeBase{
-					ID: "src", TenantID: 1, EmbeddingModelID: "embed-A",
-					VectorStoreID: nil,
-				}, nil
-			case "dst":
-				return &types.KnowledgeBase{
-					ID: "dst", TenantID: 1, EmbeddingModelID: "embed-A",
-					VectorStoreID: storeIDPtr("store-A"),
-				}, nil
-			}
-			return nil, nil
-		},
-	}
-	r, _ := newCopyPreflightRouter(svc)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/copy",
-		strings.NewReader(`{"source_id":"src","target_id":"dst"}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 when one side is env-store and the other is DB-store, got %d body=%s",
-			w.Code, w.Body.String())
-	}
-}
-
-// compile-time guard against accidentally dropping the apperrors import
-// from the file — if the pre-flight refactor goes away, this fails too.
-var _ = apperrors.NewBadRequestError

@@ -83,6 +83,14 @@ func (s *stubKnowledgeBaseService) CopyKnowledgeBase(
 	return nil, nil, nil
 }
 
+func (s *stubKnowledgeBaseService) DuplicateKnowledgeBase(
+	context.Context,
+	string,
+	string,
+) (*types.KnowledgeBase, error) {
+	return nil, nil
+}
+
 func (s *stubKnowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepository {
 	return nil
 }

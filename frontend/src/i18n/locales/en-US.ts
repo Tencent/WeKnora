@@ -2262,6 +2262,7 @@ export default {
     },
     menu: {
       viewDetails: 'View Details',
+      duplicate: 'Duplicate',
     },
     pin: {
       pin: 'Pin to Top',
@@ -2282,6 +2283,8 @@ export default {
     messages: {
       deleted: 'Knowledge base deleted',
       deleteFailed: 'Failed to delete knowledge base',
+      duplicateSuccess: 'Knowledge base duplicate created (content not included)',
+      duplicateFailed: 'Failed to create knowledge base duplicate',
       file: 'File',
       knowledgeBase: 'Knowledge Base',
       noResult: 'No results',

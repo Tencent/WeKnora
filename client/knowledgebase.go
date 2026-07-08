@@ -241,6 +241,17 @@ type CopyKnowledgeBaseResponse struct {
 	Message  string `json:"message"`
 }
 
+type DuplicateKnowledgeBaseRequest struct {
+	TargetID string `json:"target_id,omitempty"`
+}
+
+type DuplicateKnowledgeBaseResponse struct {
+	SourceID      string        `json:"source_id"`
+	TargetID      string        `json:"target_id"`
+	Message       string        `json:"message"`
+	KnowledgeBase KnowledgeBase `json:"knowledge_base"`
+}
+
 // KBCloneProgress represents the progress of a knowledge base clone task
 type KBCloneProgress struct {
 	TaskID    string `json:"task_id"`
@@ -453,6 +464,31 @@ func (c *Client) CopyKnowledgeBase(ctx context.Context, request *CopyKnowledgeBa
 	var response struct {
 		Success bool                      `json:"success"`
 		Data    CopyKnowledgeBaseResponse `json:"data"`
+	}
+
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// DuplicateKnowledgeBase creates a settings-only duplicate and returns the new knowledge base info.
+func (c *Client) DuplicateKnowledgeBase(
+	ctx context.Context,
+	knowledgeBaseID string,
+	request *DuplicateKnowledgeBaseRequest,
+) (*DuplicateKnowledgeBaseResponse, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/duplicate", knowledgeBaseID)
+
+	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                           `json:"success"`
+		Data    DuplicateKnowledgeBaseResponse `json:"data"`
 	}
 
 	if err := parseResponse(resp, &response); err != nil {

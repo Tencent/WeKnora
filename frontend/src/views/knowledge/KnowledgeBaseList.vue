@@ -219,6 +219,11 @@
                         <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                         <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
                       </div>
+                      <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item"
+                        @click.stop="handleDuplicateById(kb.id)">
+                        <t-icon class="menu-icon" name="file-copy" />
+                        <span>{{ $t('knowledgeList.menu.duplicate') }}</span>
+                      </div>
                       <template v-if="canManageKBCard(kb)">
                         <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
                           <t-icon class="menu-icon" name="setting" />
@@ -447,6 +452,10 @@
                       <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
                         <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                         <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                      </div>
+                      <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item" @click.stop="handleDuplicate(kb)">
+                        <t-icon class="menu-icon" name="file-copy" />
+                        <span>{{ $t('knowledgeList.menu.duplicate') }}</span>
                       </div>
                       <template v-if="canManageKBCard(kb)">
                         <div class="popup-menu-item" @click.stop="handleSettings(kb)">
@@ -774,7 +783,7 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { deleteKnowledgeBase, duplicateKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
@@ -1348,6 +1357,10 @@ function canManageKBCard(kb: KB): boolean {
   return authStore.hasRole('admin')
 }
 
+function canDuplicateKBCard(kb: any): boolean {
+  return authStore.hasRole('contributor') && kb.isMine !== false
+}
+
 // isMyKb 仅用于卡片右下角徽章在「我创建」与「同租户其他成员创建」之间切换。
 // 与 canManageKBCard 不同：管理权限有 admin 兜底，徽章纯粹按创建者匹配。
 // creator_id 为空（PR 5 RBAC 迁移之前的老 KB）一律按 tenant 处理——避免把
@@ -1417,6 +1430,33 @@ const handleTogglePinById = async (id: string) => {
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
+  }
+}
+
+const handleDuplicate = async (kb: KB) => {
+  kb.showMore = false
+  await duplicateKB(kb.id)
+}
+
+const handleDuplicateById = async (id: string) => {
+  await duplicateKB(id)
+}
+
+const duplicateKB = async (id: string) => {
+  try {
+    const res: any = await duplicateKnowledgeBase(id)
+    if (res?.success) {
+      const newKbId = res.data?.target_id || res.data?.knowledge_base?.id
+      MessagePlugin.success(t('knowledgeList.messages.duplicateSuccess'))
+      await fetchList(true)
+      if (newKbId) {
+        triggerHighlightFlash(newKbId)
+      }
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeList.messages.duplicateFailed'))
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeList.messages.duplicateFailed'))
   }
 }
 

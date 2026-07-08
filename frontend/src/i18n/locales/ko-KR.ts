@@ -3165,6 +3165,7 @@ export default {
     },
     menu: {
       viewDetails: "세부 사항을 확인하세요",
+      duplicate: "복제",
     },
     pin: {
       pin: "상단 고정",
@@ -3215,6 +3216,8 @@ export default {
     messages: {
       deleted: "삭제됨",
       deleteFailed: "삭제 실패",
+      duplicateSuccess: "지식베이스 복제본이 생성되었습니다(콘텐츠 제외)",
+      duplicateFailed: "지식베이스 복제본 생성 실패",
       file: "파일",
       knowledgeBase: "지식베이스",
       noResult: "결과 없음",

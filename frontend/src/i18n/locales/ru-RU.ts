@@ -2652,6 +2652,8 @@ export default {
     messages: {
       deleted: 'База знаний удалена',
       deleteFailed: 'Не удалось удалить базу знаний',
+      duplicateSuccess: 'Дубликат базы знаний создан (без содержимого)',
+      duplicateFailed: 'Не удалось создать дубликат базы знаний',
       file: '文件',
       knowledgeBase: '知识库',
       noResult: '无结果'
@@ -2694,7 +2696,8 @@ export default {
     },
     emptyShared: 'No collaborative knowledge bases yet. Join a shared space to access knowledge bases from others.',
     menu: {
-      viewDetails: 'View Details'
+      viewDetails: 'View Details',
+      duplicate: 'Duplicate'
     },
     detail: {
       title: 'Shared Knowledge Base',

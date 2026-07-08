@@ -179,7 +179,7 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 	}
 }
 
-func TestKnowledgeBaseCreateAndCopyRemainDefaultDenyForAPIKeys(t *testing.T) {
+func TestKnowledgeBaseCreateAndCopyRoutesRemainDefaultDenyForAPIKeys(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
@@ -192,6 +192,7 @@ func TestKnowledgeBaseCreateAndCopyRemainDefaultDenyForAPIKeys(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/v1/knowledge-bases"},
 		{http.MethodPost, "/api/v1/knowledge-bases/copy"},
+		{http.MethodPost, "/api/v1/knowledge-bases/:id/duplicate"},
 	}
 
 	for _, tc := range cases {
