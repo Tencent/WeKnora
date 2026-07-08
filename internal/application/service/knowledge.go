@@ -918,8 +918,9 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 	}
 
 	if len(scopes) == 0 {
-		return nil, false, 0, nil
-	}
+
+	return nil, false, 0, nil
+}
 	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 }
 
@@ -930,3 +931,13 @@ func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes 
 	}
 	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 }
+
+// GetKnowledgeParseStats returns counts of knowledge entries grouped by parse_status for a knowledge base.
+func (s *knowledgeService) GetKnowledgeParseStats(ctx context.Context, kbID string) (map[string]int64, error) {
+	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		return nil, werrors.NewUnauthorizedError("Tenant ID not found in context")
+	}
+	return s.repo.GetKnowledgeParseStats(ctx, tenantID, kbID)
+}
+

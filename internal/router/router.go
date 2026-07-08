@@ -394,6 +394,8 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// removed accordingly. The route still requires KB read access
 		// so callers can't poke at KBs they can't see.
 		kb.PUT("/:id/pin", g.Viewer(), g.KBAccessRead("id"), handler.TogglePinKnowledgeBase)
+		// 解析状态统计 — Viewer+ 且对 KB 有 read 权限
+		kb.GET("/:id/parse-stats", g.Viewer(), g.KBAccessRead("id"), handler.GetKnowledgeParseStats)
 		// 混合搜索 — Viewer+ 且对 KB 有 read 权限 (read-only)
 		// POST is preferred; GET with JSON body is kept for backward compatibility (#1727).
 		kb.POST("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)

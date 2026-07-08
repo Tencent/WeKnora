@@ -33,6 +33,7 @@ import {
   cancelKnowledgeParse,
   batchDeleteKnowledge,
   batchReparseKnowledge,
+  getKnowledgeParseStats,
   getKnowledgeSpans,
   getKnowledgeDetails,
 } from "@/api/knowledge-base/index";
@@ -403,6 +404,73 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+// Parse status distribution stats
+const parseStats = ref<Record<string, number>>({});
+
+const parseStatsTotal = computed(() => {
+  return Object.values(parseStats.value).reduce((s, v) => s + v, 0);
+});
+
+const parseStatsCompletedPct = computed(() => {
+  if (parseStatsTotal.value === 0) return 0;
+  return Math.round(((parseStats.value.completed || 0) / parseStatsTotal.value) * 100);
+});
+
+const parseStatsSegments = computed(() => {
+  const segments = [
+    { key: 'completed', cls: 'completed' },
+    { key: 'processing', cls: 'processing' },
+    { key: 'finalizing', cls: 'finalizing' },
+    { key: 'pending', cls: 'pending' },
+    { key: 'failed', cls: 'failed' },
+    { key: 'cancelled', cls: 'cancelled' },
+  ];
+  const total = parseStatsTotal.value;
+  return segments
+    .filter((s) => (parseStats.value[s.key] || 0) > 0)
+    .map((s) => ({
+      ...s,
+      count: parseStats.value[s.key] || 0,
+      pct: total ? Math.round(((parseStats.value[s.key] || 0) / total) * 100) : 0,
+    }));
+});
+
+const fetchParseStats = async (kbIdValue: string) => {
+  if (!kbIdValue || isFAQ.value) return;
+  try {
+    const res: any = await getKnowledgeParseStats(kbIdValue);
+    if (res?.success && res.data) {
+      parseStats.value = res.data;
+    }
+  } catch { /* silent */ }
+};
+
+// 轮询：当还有未完成文档时，每 2s 刷新一次 parseStats
+let parseStatsTimer: ReturnType<typeof setTimeout> | null = null;
+let parseStatsPollCount = 0;
+const MAX_PARSE_STATS_POLLS = 30;
+
+const scheduleParseStatsPoll = () => {
+  if (parseStatsTimer !== null) {
+    clearTimeout(parseStatsTimer);
+    parseStatsTimer = null;
+  }
+  const inFlight =
+    (parseStats.value.pending || 0) +
+    (parseStats.value.processing || 0) +
+    (parseStats.value.finalizing || 0);
+  if (inFlight === 0 || parseStatsPollCount >= MAX_PARSE_STATS_POLLS) {
+    parseStatsPollCount = 0;
+    return;
+  }
+  parseStatsTimer = setTimeout(() => {
+    parseStatsPollCount++;
+    fetchParseStats(kbId.value).then(() => {
+      if (kbId.value) scheduleParseStatsPoll();
+    });
+  }, 2000);
+};
+
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -646,6 +714,7 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
   if (!isFAQ.value) {
     docListLoading.value = true;
   }
+  fetchParseStats(kbIdValue).then(() => scheduleParseStatsPoll());
   return getKnowled(
     {
       page: 1,
@@ -1034,6 +1103,10 @@ onUnmounted(() => {
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
+  }
+  if (parseStatsTimer !== null) {
+    clearTimeout(parseStatsTimer);
+    parseStatsTimer = null;
   }
 });
 watch(() => cardList.value, (newValue) => {
@@ -2202,6 +2275,26 @@ async function createNewSession(value: string): Promise<void> {
                     @url="handleUploadSourceUrl" @manual="handleManualCreate" />
                 </div>
               </div>
+              <!-- 解析状态统计条 -->
+              <div v-if="!isFAQ && !docListLoading && cardList.length > 0" class="parse-stats-bar">
+                <div class="parse-stats-summary">
+                  <span class="parse-stats-pct">{{ t('knowledgeBase.parseStatsCompleted') }} {{ parseStatsCompletedPct }}%</span>
+                  <span class="parse-stats-count">{{ parseStats.completed || 0 }}/{{ parseStatsTotal }}</span>
+                </div>
+                <div class="parse-stats-track">
+                  <span v-for="seg in parseStatsSegments" :key="seg.key"
+                    class="parse-stats-fill" :class="seg.cls"
+                    :style="{ width: seg.pct + '%' }"
+                    :title="t('knowledgeBase.parseStats' + seg.cls.charAt(0).toUpperCase() + seg.cls.slice(1)) + ': ' + seg.count">
+                  </span>
+                </div>
+                <div class="parse-stats-detail">
+                  <span v-for="seg in parseStatsSegments" :key="seg.key"
+                    class="parse-stats-chip" :class="seg.cls">
+                    {{ t('knowledgeBase.parseStats' + seg.cls.charAt(0).toUpperCase() + seg.cls.slice(1)) }} {{ seg.count }}
+                  </span>
+                </div>
+              </div>
               <div class="doc-scroll-container"
                 :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
@@ -2858,6 +2951,86 @@ async function createNewSession(value: string): Promise<void> {
     }
   }
 }
+
+.parse-stats-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  margin: 0 4px 6px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 6px;
+}
+
+.parse-stats-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.parse-stats-pct {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.parse-stats-count {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.parse-stats-track {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--td-bg-color-component);
+}
+
+.parse-stats-fill {
+  height: 100%;
+  min-width: 2px;
+  transition: width 0.3s ease;
+
+  &.completed  { background-color: var(--td-success-color, #2ba471); }
+  &.processing { background-color: var(--td-brand-color, #0052d9); }
+  &.finalizing { background-color: var(--td-warning-color, #e37318); }
+  &.pending    { background-color: var(--td-text-color-placeholder, #bbb); }
+  &.failed     { background-color: var(--td-error-color, #d54941); }
+  &.cancelled  { background-color: var(--td-text-color-disabled, #999); }
+}
+
+.parse-stats-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.parse-stats-chip {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+
+  &::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+
+  &.completed::before  { background-color: var(--td-success-color, #2ba471); }
+  &.processing::before { background-color: var(--td-brand-color, #0052d9); }
+  &.finalizing::before { background-color: var(--td-warning-color, #e37318); }
+  &.pending::before    { background-color: var(--td-text-color-placeholder, #bbb); }
+  &.failed::before     { background-color: var(--td-error-color, #d54941); }
+  &.cancelled::before  { background-color: var(--td-text-color-disabled, #999); }
+}
+
 
 .doc-scroll-container {
   position: relative;

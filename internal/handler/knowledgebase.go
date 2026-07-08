@@ -1266,3 +1266,38 @@ func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 		"data":    targets,
 	})
 }
+
+// GetKnowledgeParseStats godoc
+// @Summary      获取知识库解析状态统计
+// @Description  返回指定知识库下各 parse_status 的知识条目计数分布
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "统计结果"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      404  {object}  errors.AppError         "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/parse-stats [get]
+func (h *KnowledgeBaseHandler) GetKnowledgeParseStats(c *gin.Context) {
+	// Validate and get the knowledge base
+	kb, _, effectiveTenantID, _, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, effectiveTenantID)
+	stats, err := h.knowledgeService.GetKnowledgeParseStats(ctx, kb.ID)
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
+	})
+}

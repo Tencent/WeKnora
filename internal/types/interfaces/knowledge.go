@@ -114,8 +114,7 @@ type KnowledgeService interface {
 	// is already cancelled. Returns an error when the knowledge is in a
 	// terminal state (completed / failed) or being deleted.
 	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
-	// CloneKnowledgeBase clones knowledge to another knowledge base.
-	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
+	GetKnowledgeParseStats(ctx context.Context, kbID string) (map[string]int64, error)
 	// UpdateImageInfo updates image information for a knowledge chunk.
 	UpdateImageInfo(ctx context.Context, knowledgeID string, chunkID string, imageInfo string) error
 	// ListFAQEntries lists FAQ entries under a FAQ knowledge base.
@@ -257,6 +256,8 @@ type KnowledgeRepository interface {
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.
 	CountKnowledgeByStatus(ctx context.Context, tenantID uint64, kbID string, parseStatuses []string) (int64, error)
+	// GetKnowledgeParseStats returns counts of knowledge entries grouped by parse_status for a knowledge base.
+	GetKnowledgeParseStats(ctx context.Context, tenantID uint64, kbID string) (map[string]int64, error)
 	// SearchKnowledge searches knowledge items by keyword across the tenant.
 	// fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
 	SearchKnowledge(ctx context.Context, tenantID uint64, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error)

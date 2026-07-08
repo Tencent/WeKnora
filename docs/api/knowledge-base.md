@@ -18,6 +18,7 @@
 | PUT    | `/knowledge-bases/:id`                    | 更新知识库               |
 | DELETE | `/knowledge-bases/:id`                    | 删除知识库               |
 | PUT    | `/knowledge-bases/:id/pin`                | 置顶/取消置顶知识库      |
+| GET    | `/knowledge-bases/:id/parse-stats`        | 知识库解析状态分布统计   |
 | POST   | `/knowledge-bases/:id/hybrid-search`      | 混合搜索（向量+关键词，推荐）  |
 | GET    | `/knowledge-bases/:id/hybrid-search`      | 混合搜索（兼容旧客户端，需 JSON 请求体）  |
 | POST   | `/knowledge-bases/copy`                   | 拷贝知识库（异步任务）   |
@@ -358,6 +359,56 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-0
 ```
 
 **响应**: 字段结构同 `POST /knowledge-bases` 响应（包含 Phase 2 的 `vector_store_*` 元数据字段），本接口操作后 `is_pinned` 翻转、`pinned_at` 同步更新。
+
+## GET `/knowledge-bases/:id/parse-stats` - 知识库解析状态分布统计
+
+返回指定知识库下各 `parse_status` 的知识条目计数分布，用于在知识库详情页展示文档解析进度概览。
+
+**路径参数**:
+
+| 参数名 | 类型   | 必填 | 描述        |
+|--------|--------|------|-------------|
+| id     | string | 是   | 知识库 ID   |
+
+**请求示例**:
+
+```curl
+curl --location --request GET 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/parse-stats' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应字段**:
+
+| 字段名         | 类型                   | 描述                           |
+|----------------|------------------------|--------------------------------|
+| success        | bool                   | 请求是否成功                   |
+| data           | map[string]int64       | parse_status → count 的映射    |
+
+`data` 中可能出现的 key 及其含义：
+| key          | 含义                                           |
+|--------------|------------------------------------------------|
+| pending      | 等待开始解析                                   |
+| processing   | 正在解析（主流程：文件解析/分块/向量化）         |
+| finalizing   | 主流程已完成，正在执行摘要/问题生成等后处理任务   |
+| completed    | 解析成功完成                                   |
+| failed       | 解析失败                                       |
+| cancelled    | 用户主动取消                                   |
+
+**响应示例**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "completed": 120,
+        "processing": 3,
+        "finalizing": 2,
+        "pending": 1,
+        "failed": 5,
+        "cancelled": 0
+    }
+}
+```
 
 ## POST `/knowledge-bases/:id/hybrid-search` - 混合搜索
 

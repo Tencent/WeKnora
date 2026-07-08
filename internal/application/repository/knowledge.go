@@ -486,6 +486,30 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 	return count, nil
 }
 
+// GetKnowledgeParseStats returns counts of knowledge entries grouped by parse_status for a knowledge base.
+func (r *knowledgeRepository) GetKnowledgeParseStats(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) (map[string]int64, error) {
+	var results []struct {
+		ParseStatus string `gorm:"column:parse_status"`
+		Count       int64  `gorm:"column:count"`
+	}
+	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Select("parse_status, COUNT(*) as count").
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Group("parse_status").
+		Scan(&results).Error; err != nil {
+		return nil, err
+	}
+	stats := make(map[string]int64)
+	for _, r := range results {
+		stats[r.ParseStatus] = r.Count
+	}
+	return stats, nil
+}
+
 // SearchKnowledge searches knowledge items by keyword across the tenant
 // If keyword is empty, returns recent files
 // Only returns documents from document-type knowledge bases (excludes FAQ)

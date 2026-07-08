@@ -491,3 +491,7 @@ export function batchReparseKnowledge(kbId: string, ids: string[], processConfig
     process_config: processConfig,
   });
 }
+
+export function getKnowledgeParseStats(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/parse-stats`);
+}
