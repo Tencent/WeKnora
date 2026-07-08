@@ -1,0 +1,3 @@
+-- No-op: the previous materialized builtin quick-answer prompt cannot be
+-- reconstructed safely after the up migration aligns it with default_kb.
+-- Fresh installs still resolve builtin quick-answer through default_kb.

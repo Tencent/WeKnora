@@ -159,7 +159,7 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	customAgent.EnsureDefaults()
 
 	// Override summary config fields
-	if customAgent.Config.SystemPrompt != "" {
+	if shouldApplyCustomAgentSystemPrompt(customAgent) {
 		cm.SummaryConfig.Prompt = customAgent.Config.SystemPrompt
 		logger.Infof(ctx, "Using custom agent's system_prompt")
 	}
@@ -263,6 +263,13 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		cm.IntentPromptOverrides = customAgent.Config.IntentPrompts
 		logger.Infof(ctx, "Using custom agent's intent_prompts (%d overrides)", len(cm.IntentPromptOverrides))
 	}
+}
+
+func shouldApplyCustomAgentSystemPrompt(customAgent *types.CustomAgent) bool {
+	if customAgent == nil || strings.TrimSpace(customAgent.Config.SystemPrompt) == "" {
+		return false
+	}
+	return true
 }
 
 // restrictMentionsToAgentScope filters user-provided @mention targets (KB IDs

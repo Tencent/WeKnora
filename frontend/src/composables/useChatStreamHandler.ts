@@ -249,6 +249,48 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return out
   }
 
+  const appendAgentAnswerEvent = (
+    message: ChatMessage,
+    content: string,
+    options: { eventId?: string; isFallback?: boolean; isError?: boolean } = {},
+  ) => {
+    const text = String(content || '')
+    if (!text.trim()) return
+
+    if (!message.agentEventStream) message.agentEventStream = []
+    if (!message._eventMap) message._eventMap = new Map()
+    const stream = message.agentEventStream as ChatMessage[]
+    const eventMap = message._eventMap as Map<string, ChatMessage>
+    const eventId = options.eventId || `answer-${Date.now()}`
+
+    let answerEvent = eventMap.get(eventId)
+    if (!answerEvent) {
+      answerEvent = {
+        type: 'answer',
+        event_id: eventId,
+        content: '',
+        done: false,
+      }
+      if (options.isFallback) answerEvent.is_fallback = true
+      if (options.isError) answerEvent.is_error = true
+      stream.push(answerEvent)
+      eventMap.set(eventId, answerEvent)
+    }
+
+    const current = String(answerEvent.content || '')
+    if (!current.includes(text)) {
+      answerEvent.content = current + text
+    }
+    answerEvent.done = true
+    if (options.isFallback) {
+      answerEvent.is_fallback = true
+      message.is_fallback = true
+    }
+    if (options.isError) answerEvent.is_error = true
+    message.content = recomposeAgentAnswer(message) || text
+    fullContent.value = String(message.content || '')
+  }
+
   const reconstructEventStreamFromSteps = (
     agentSteps: unknown[],
     messageContent: string,
@@ -742,23 +784,33 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           }
           if (responseType === 'error' && !toolName) {
             const errorMsg = String(data.content || t('chat.processError'))
+            appendAgentAnswerEvent(message, errorMsg, {
+              eventId: `error-${String(data.id || Date.now())}`,
+              isError: true,
+            })
             message.content = errorMsg
             message.is_completed = true
             isReplying.value = false
             loading.value = false
             fullContent.value = ''
             currentAssistantMessageId.value = ''
+            onAgentAnswerDone?.(message)
             reportError(errorMsg)
             console.error('[Chat Error]', errorMsg)
           }
         } else if (responseType === 'error') {
           const errorMsg = String(data.content || t('chat.processError'))
+          appendAgentAnswerEvent(message, errorMsg, {
+            eventId: `error-${String(data.id || Date.now())}`,
+            isError: true,
+          })
           message.content = errorMsg
           message.is_completed = true
           isReplying.value = false
           loading.value = false
           fullContent.value = ''
           currentAssistantMessageId.value = ''
+          onAgentAnswerDone?.(message)
           reportError(errorMsg)
           console.error('[Chat Error]', errorMsg)
         }

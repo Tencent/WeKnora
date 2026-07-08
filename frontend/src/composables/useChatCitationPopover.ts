@@ -2,11 +2,21 @@ import { onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getChunkByIdOnly } from '@/api/knowledge-base'
 import { getEmbedChunkById } from '@/api/embed'
-import { resolveCitationChunkId, type CitationKnowledgeRef } from '@/utils/citationMarkdown'
+import {
+  resolveCitationChunkId,
+  resolveCitationReferenceContent,
+  type CitationKnowledgeRef,
+} from '@/utils/citationMarkdown'
 import {
   getCitationChunkCache,
   setCitationChunkCache,
 } from '@/utils/citationChunkCache'
+import {
+  computeCitationFloatPosition,
+  currentCitationViewport,
+  elementAnchorRect,
+  type CitationAnchorRect,
+} from '@/utils/citationFloatPosition'
 
 export { clearCitationChunkCache } from '@/utils/citationChunkCache'
 
@@ -20,6 +30,8 @@ type FloatState = {
   url: string
   loading: boolean
   error: string
+  anchor: CitationAnchorRect | null
+  offsetY: number
 }
 
 export type CitationFloatState = FloatState
@@ -54,15 +66,25 @@ export function useChatCitationPopover(
     url: '',
     loading: false,
     error: '',
+    anchor: null,
+    offsetY: 0,
   })
 
   let hoverTimer: number | null = null
   let closeTimer: number | null = null
 
   const positionFor = (el: HTMLElement, offsetY = 0) => {
-    const rect = el.getBoundingClientRect()
-    float.value.top = rect.bottom + window.scrollY + 6 + offsetY
-    float.value.left = Math.min(rect.left + window.scrollX, window.innerWidth - 320)
+    const anchor = elementAnchorRect(el)
+    const position = computeCitationFloatPosition({
+      anchor,
+      floatSize: { width: 320, height: 320 },
+      viewport: currentCitationViewport(),
+      offsetY,
+    })
+    float.value.anchor = anchor
+    float.value.offsetY = offsetY
+    float.value.top = position.top
+    float.value.left = position.left
   }
 
   const openWeb = (el: HTMLElement) => {
@@ -90,10 +112,11 @@ export function useChatCitationPopover(
     const rawChunkId = el.getAttribute('data-chunk-id') || ''
     const title = el.getAttribute('data-doc') || ''
     const kbId = el.getAttribute('data-kb-id') || ''
+    const refs = options?.getKnowledgeReferences?.()
     const chunkId = resolveCitationChunkId(
       rawChunkId,
       { doc: title, kbId },
-      options?.getKnowledgeReferences?.(),
+      refs,
     ) || rawChunkId
     if (!chunkId) return
     float.value.type = 'kb'
@@ -103,6 +126,15 @@ export function useChatCitationPopover(
     positionFor(el, 4)
 
     const scope = getCacheScope()
+    const referenceContent = resolveCitationReferenceContent(rawChunkId, { doc: title, kbId }, refs)
+    if (referenceContent) {
+      setCitationChunkCache(scope, chunkId, { content: referenceContent })
+      float.value.content = referenceContent
+      float.value.error = ''
+      float.value.loading = false
+      return
+    }
+
     const cached = getCitationChunkCache(scope, chunkId)
     if (cached) {
       float.value.content = cached.content

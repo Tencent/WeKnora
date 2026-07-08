@@ -26,8 +26,8 @@
       </div>
     </div>
     <Teleport to="body">
-      <div v-if="citationFloat.visible" class="embed-citation-float"
-        :style="{ top: `${citationFloat.top}px`, left: `${citationFloat.left}px` }" @mouseenter="cancelCitationClose"
+      <div v-if="citationFloat.visible" ref="citationFloatRef" class="embed-citation-float"
+        :style="citationFloatStyle" @mouseenter="cancelCitationClose"
         @mouseleave="scheduleCitationClose">
         <template v-if="citationFloat.type === 'web'">
           <div class="embed-citation-float__title">{{ citationFloat.title || citationFloat.url }}</div>
@@ -38,7 +38,12 @@
           <div class="embed-citation-float__title">{{ citationFloat.title }}</div>
           <div v-if="citationFloat.loading" class="embed-citation-float__muted">…</div>
           <div v-else-if="citationFloat.error" class="embed-citation-float__error">{{ citationFloat.error }}</div>
-          <div v-else class="embed-citation-float__body">{{ citationFloat.content }}</div>
+          <div
+            v-else
+            ref="citationFloatBody"
+            class="embed-citation-float__body markdown-content"
+            v-stable-html="citationPreviewHTML"
+          />
         </template>
       </div>
     </Teleport>
@@ -67,6 +72,11 @@ import {
 import { useEmbedCitationPopover } from '@/composables/useEmbedCitationPopover'
 import { useTypewriter } from '@/composables/useTypewriter'
 import { vStableHtml } from '@/directives/stableHtml'
+import { renderCitationPreviewContent } from '@/utils/citationPreview'
+import {
+  computeCitationFloatPosition,
+  currentCitationViewport,
+} from '@/utils/citationFloatPosition'
 
 const RagPipelineProgress = defineAsyncComponent(
   () => import('@/views/chat/components/RagPipelineProgress.vue'),
@@ -126,6 +136,8 @@ const props = withDefaults(
 )
 
 const parentMd = ref<HTMLElement | null>(null)
+const citationFloatRef = ref<HTMLElement | null>(null)
+const citationFloatBody = ref<HTMLElement | null>(null)
 
 const embedChannelIdRef = computed(() => props.embedChannelId)
 const embedTokenRef = computed(() => props.embedToken)
@@ -134,6 +146,9 @@ const { float: citationFloat, rebind: rebindCitations } = useEmbedCitationPopove
   parentMd,
   embedChannelIdRef,
   embedTokenRef,
+  {
+    getKnowledgeReferences: () => props.session?.knowledge_references,
+  },
 )
 
 let citationCloseTimer: number | null = null
@@ -173,6 +188,65 @@ const hasActualContent = computed(() => {
   const text = String(props.content || props.session?.content || '')
   return text.trim().length > 0
 })
+
+const citationPreviewHTML = computed(() => renderCitationPreviewContent(citationFloat.value.content))
+const citationFloatTop = ref(citationFloat.value.top)
+const citationFloatLeft = ref(citationFloat.value.left)
+const citationFloatStyle = computed(() => ({
+  top: `${citationFloatTop.value}px`,
+  left: `${citationFloatLeft.value}px`,
+}))
+
+const updateCitationFloatPosition = async () => {
+  if (!citationFloat.value.visible) return
+  await nextTick()
+  const el = citationFloatRef.value
+  const anchor = citationFloat.value.anchor
+  if (!el || !anchor) {
+    citationFloatTop.value = citationFloat.value.top
+    citationFloatLeft.value = citationFloat.value.left
+    return
+  }
+
+  const rect = el.getBoundingClientRect()
+  const position = computeCitationFloatPosition({
+    anchor,
+    floatSize: {
+      width: rect.width || 320,
+      height: rect.height || 80,
+    },
+    viewport: currentCitationViewport(),
+    offsetY: citationFloat.value.offsetY,
+  })
+  citationFloatTop.value = position.top
+  citationFloatLeft.value = position.left
+}
+
+watch(citationPreviewHTML, async () => {
+  await nextTick()
+  const embedCtx =
+    props.embedChannelId && props.embedToken
+      ? { channelId: props.embedChannelId, token: props.embedToken }
+      : undefined
+  await hydrateProtectedFileImages(citationFloatBody.value, embedCtx)
+  await updateCitationFloatPosition()
+}, { flush: 'post' })
+
+watch(() => [
+  citationFloat.value.visible,
+  citationFloat.value.top,
+  citationFloat.value.left,
+  citationFloat.value.anchor?.top,
+  citationFloat.value.anchor?.bottom,
+  citationFloat.value.anchor?.left,
+  citationFloat.value.offsetY,
+  citationFloat.value.loading,
+  citationFloat.value.error,
+  citationFloat.value.title,
+  citationPreviewHTML.value,
+], () => {
+  void updateCitationFloatPosition()
+}, { flush: 'post', immediate: true })
 
 const hydrateImages = async () => {
   const embedCtx =
@@ -297,7 +371,8 @@ onMounted(() => {
 .embed-citation-float {
   position: absolute;
   z-index: 10000;
-  max-width: 320px;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 32px));
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--td-bg-color-container);
@@ -318,9 +393,40 @@ onMounted(() => {
   }
 
   &__body {
-    max-height: 200px;
-    overflow-y: auto;
-    white-space: pre-wrap;
+    max-height: 280px;
+    overflow: auto;
+    white-space: normal;
+    overscroll-behavior: contain;
+  }
+
+  &__body p {
+    margin: 0 0 8px;
+  }
+
+  &__body p:last-child {
+    margin-bottom: 0;
+  }
+
+  &__body .chat-markdown-table {
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 4px 0;
+  }
+
+  &__body table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  &__body th,
+  &__body td {
+    padding: 4px 6px;
+    border: 1px solid var(--td-component-stroke);
+    vertical-align: top;
+    white-space: normal;
   }
 
   &__muted {

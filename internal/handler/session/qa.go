@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -738,6 +739,43 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			}
 			return nil
 		})
+
+		streamCtx.eventBus.On(event.EventError, func(ctx context.Context, evt event.Event) error {
+			data, ok := evt.Data.(event.ErrorData)
+			if !ok {
+				return nil
+			}
+			if completionHandled {
+				return nil
+			}
+			completionHandled = true
+
+			userMessage := strings.TrimSpace(data.Error)
+			if userMessage == "" {
+				userMessage = terminalQAErrorMessage(streamCtx.asyncCtx, streamCtx.assistantMessage.Content != "")
+			}
+			streamCtx.assistantMessage.Content = appendTerminalErrorMessage(
+				streamCtx.assistantMessage.Content,
+				userMessage,
+			)
+
+			logger.Infof(streamCtx.asyncCtx, "Knowledge QA service terminated with error for session: %s", sessionID)
+			updateCtx := context.WithValue(
+				context.WithoutCancel(streamCtx.asyncCtx),
+				types.TenantIDContextKey,
+				reqCtx.session.TenantID,
+			)
+			// Do not index failed/incomplete answers into chat-history KB.
+			h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, "")
+			streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
+				Type:      event.EventAgentComplete,
+				SessionID: sessionID,
+				Data: event.AgentCompleteData{
+					FinalAnswer: "",
+				},
+			})
+			return nil
+		})
 	}
 
 	// Execute QA asynchronously
@@ -795,15 +833,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				logger.Infof(streamCtx.asyncCtx, "QA cancelled by user stop for session: %s", sessionID)
 			} else {
 				logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
-				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
-					Type:      event.EventError,
-					SessionID: sessionID,
-					Data: event.ErrorData{
-						Error:     serviceErr.Error(),
-						Stage:     stageName,
-						SessionID: sessionID,
-					},
-				})
+				h.emitTerminalQAError(streamCtx, reqCtx, mode, stageName, serviceErr)
 			}
 		}
 	}()
@@ -946,4 +976,88 @@ func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
 	bgCtx := context.WithoutCancel(ctx)
 	go h.messageService.IndexMessageToKB(bgCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
+}
+
+func (h *Handler) emitTerminalQAError(
+	streamCtx *sseStreamContext,
+	reqCtx *qaRequestContext,
+	mode qaMode,
+	stageName string,
+	err error,
+) {
+	userMessage := terminalQAErrorMessage(streamCtx.asyncCtx, streamCtx.assistantMessage.Content != "")
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+	}
+
+	if emitErr := streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
+		Type:      event.EventError,
+		SessionID: reqCtx.sessionID,
+		Data: event.ErrorData{
+			Error:     userMessage,
+			ErrorCode: "qa_generation_failed",
+			Stage:     stageName,
+			SessionID: reqCtx.sessionID,
+			Query:     reqCtx.query,
+			Extra: map[string]interface{}{
+				"detail":   detail,
+				"terminal": true,
+			},
+		},
+	}); emitErr != nil {
+		logger.Errorf(streamCtx.asyncCtx, "Failed to emit terminal QA error event: %v", emitErr)
+	}
+
+	if mode != qaModeAgent || streamCtx.assistantMessage.IsCompleted {
+		return
+	}
+
+	streamCtx.assistantMessage.Content = appendTerminalErrorMessage(
+		streamCtx.assistantMessage.Content,
+		userMessage,
+	)
+	updateCtx := context.WithValue(
+		context.WithoutCancel(streamCtx.asyncCtx),
+		types.TenantIDContextKey,
+		reqCtx.session.TenantID,
+	)
+	h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, "")
+	streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
+		Type:      event.EventAgentComplete,
+		SessionID: reqCtx.sessionID,
+		Data: event.AgentCompleteData{
+			FinalAnswer: "",
+			MessageID:   streamCtx.assistantMessage.ID,
+		},
+	})
+}
+
+func terminalQAErrorMessage(ctx context.Context, hasPartialAnswer bool) string {
+	lang, _ := types.LanguageFromContext(ctx)
+	if lang == "" {
+		lang = types.DefaultLanguage()
+	}
+	if strings.HasPrefix(strings.ToLower(lang), "zh") {
+		if hasPartialAnswer {
+			return "回答生成中断：模型服务暂时不可用或连接中断，请稍后重试。"
+		}
+		return "回答生成失败：模型服务暂时不可用或连接中断，请稍后重试。"
+	}
+	if hasPartialAnswer {
+		return "Answer generation was interrupted because the model service was unavailable or the connection was closed. Please try again later."
+	}
+	return "Answer generation failed because the model service was unavailable or the connection was closed. Please try again later."
+}
+
+func appendTerminalErrorMessage(content, message string) string {
+	content = strings.TrimSpace(content)
+	message = strings.TrimSpace(message)
+	if content == "" {
+		return message
+	}
+	if message == "" || strings.Contains(content, message) {
+		return content
+	}
+	return content + "\n\n" + message
 }

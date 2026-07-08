@@ -540,17 +540,24 @@ func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) e
 		return nil
 	}
 
+	h.mu.Lock()
+	content := appendTerminalErrorMessage(h.finalAnswer, data.Error)
+	h.mu.Unlock()
+
 	// Build error metadata
 	metadata := map[string]interface{}{
 		"stage": data.Stage,
 		"error": data.Error,
+	}
+	for key, value := range data.Extra {
+		metadata[key] = value
 	}
 
 	// Append error event to stream
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeError,
-		Content:   data.Error,
+		Content:   content,
 		Done:      true,
 		Timestamp: time.Now(),
 		Data:      metadata,

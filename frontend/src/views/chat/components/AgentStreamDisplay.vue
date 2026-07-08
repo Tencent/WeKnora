@@ -3354,7 +3354,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     }
 
     .chat-markdown-table {
-      width: fit-content;
+      width: 100%;
       max-width: 100%;
       overflow-x: auto;
       margin: 0 0 16px;
@@ -3366,12 +3366,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
     table {
       display: table;
-      width: max-content;
-      min-width: 0;
+      width: 100%;
+      min-width: 100%;
       border-collapse: separate;
       border-spacing: 0;
       font-size: 13px;
       line-height: 1.55;
+      table-layout: fixed;
     }
 
     table thead {
@@ -3385,13 +3386,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
       border-right: 1px solid var(--td-component-stroke);
       text-align: left;
       vertical-align: top;
+      white-space: normal;
+      overflow-wrap: anywhere;
       word-break: break-word;
     }
 
     table th {
       font-weight: 600;
       color: var(--td-text-color-primary);
-      white-space: nowrap;
     }
 
     table th:last-child,

@@ -62,6 +62,25 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 	return chatModel, opt, nil
 }
 
+func answerContainsKBCitationTag(answer string) bool {
+	answer = strings.ToLower(answer)
+	return strings.Contains(answer, "<kb ") || strings.Contains(answer, "<kb/>") || strings.Contains(answer, "<kb>")
+}
+
+func warnIfAnswerMissingKBCitations(ctx context.Context, stage string, chatManage *types.ChatManage, answer string) {
+	if chatManage == nil || len(chatManage.MergeResult) == 0 || strings.TrimSpace(answer) == "" {
+		return
+	}
+	if answerContainsKBCitationTag(answer) {
+		return
+	}
+	pipelineWarn(ctx, stage, "missing_inline_citations", map[string]interface{}{
+		"session_id":       chatManage.SessionID,
+		"merge_result_cnt": len(chatManage.MergeResult),
+		"answer_len":       len(answer),
+	})
+}
+
 // prepareMessagesWithHistory prepare complete messages including history.
 // When SystemPromptOverride is set (e.g. by intent-specific prompt logic),
 // it takes precedence over the default SummaryConfig.Prompt.

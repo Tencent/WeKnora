@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -108,6 +109,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		thinkingID := fmt.Sprintf("%s-thinking", uuid.New().String()[:8])
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
+		var answerBuilder strings.Builder
+		answerDone := false
+		terminalErrorEmitted := false
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -122,6 +126,30 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				},
 			})
 			thinkingOpen = false
+		}
+
+		emitTerminalError := func(errorCode, detail string) {
+			if terminalErrorEmitted {
+				return
+			}
+			terminalErrorEmitted = true
+			closeThinking()
+			userMessage := streamErrorUserMessage(chatManage.Language, answerBuilder.Len() > 0)
+			eventBus.Emit(ctx, types.Event{
+				ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
+				Type:      types.EventType(event.EventError),
+				SessionID: chatManage.SessionID,
+				Data: event.ErrorData{
+					Error:     userMessage,
+					ErrorCode: errorCode,
+					Stage:     "chat_completion_stream",
+					SessionID: chatManage.SessionID,
+					Extra: map[string]interface{}{
+						"detail":   detail,
+						"terminal": true,
+					},
+				},
+			})
 		}
 
 		for {
@@ -139,6 +167,13 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
 						"session_id": chatManage.SessionID,
 					})
+					if !answerDone && !terminalErrorEmitted && ctx.Err() == nil {
+						pipelineWarn(ctx, "Stream", "channel_closed_without_done", map[string]interface{}{
+							"session_id": chatManage.SessionID,
+							"answer_len": answerBuilder.Len(),
+						})
+						emitTerminalError("chat_stream_closed", "model stream closed before sending a done event")
+					}
 					return
 				}
 
@@ -147,17 +182,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						"session_id": chatManage.SessionID,
 						"error":      response.Content,
 					})
-					eventBus.Emit(ctx, types.Event{
-						ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
-						Type:      types.EventType(event.EventError),
-						SessionID: chatManage.SessionID,
-						Data: event.ErrorData{
-							Error:     response.Content,
-							Stage:     "chat_completion_stream",
-							SessionID: chatManage.SessionID,
-						},
-					})
-					continue
+					emitTerminalError("chat_stream_error", response.Content)
+					return
 				}
 
 				if response.ResponseType == types.ResponseTypeThinking {
@@ -181,6 +207,21 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 				if response.ResponseType == types.ResponseTypeAnswer {
 					closeThinking()
+					if response.Content != "" {
+						answerBuilder.WriteString(response.Content)
+					}
+					if response.Done && strings.TrimSpace(answerBuilder.String()) == "" {
+						pipelineWarn(ctx, "Stream", "empty_answer_done", map[string]interface{}{
+							"session_id":    chatManage.SessionID,
+							"finish_reason": response.FinishReason,
+						})
+						emitTerminalError("chat_stream_empty_answer", "model stream finished without answer content")
+						return
+					}
+					if response.Done {
+						answerDone = true
+						warnIfAnswerMissingKBCitations(ctx, "Stream", chatManage, answerBuilder.String())
+					}
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
@@ -196,4 +237,17 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	}()
 
 	return next()
+}
+
+func streamErrorUserMessage(language string, hasPartialAnswer bool) string {
+	if strings.Contains(strings.ToLower(language), "chinese") || strings.HasPrefix(strings.ToLower(language), "zh") {
+		if hasPartialAnswer {
+			return "回答生成中断：模型服务暂时不可用或连接中断，请稍后重试。"
+		}
+		return "回答生成失败：模型服务暂时不可用或连接中断，请稍后重试。"
+	}
+	if hasPartialAnswer {
+		return "Answer generation was interrupted because the model service was unavailable or the connection was closed. Please try again later."
+	}
+	return "Answer generation failed because the model service was unavailable or the connection was closed. Please try again later."
 }

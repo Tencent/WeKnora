@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"fmt"
+	"html"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -136,9 +137,11 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		for i, result := range faqResults {
 			passage := getEnrichedPassageForChat(ctx, result)
 			if hasHighConfidenceFAQ && i == 0 {
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"FAQ-%d\" match=\"exact\">%s</context>\n", i+1, passage))
+				writeContextTag(&contextsBuilder, fmt.Sprintf("FAQ-%d", i+1), result, passage, contextAttr{name: "match", value: "exact"})
+				contextsBuilder.WriteString("\n")
 			} else {
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"FAQ-%d\">%s</context>\n", i+1, passage))
+				writeContextTag(&contextsBuilder, fmt.Sprintf("FAQ-%d", i+1), result, passage)
+				contextsBuilder.WriteString("\n")
 			}
 		}
 		contextsBuilder.WriteString("</source>\n")
@@ -147,7 +150,8 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 			contextsBuilder.WriteString("<source type=\"document\" priority=\"supplementary\">\n")
 			for i, result := range docResults {
 				passage := getEnrichedPassageForChat(ctx, result)
-				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"DOC-%d\">%s</context>\n", i+1, passage))
+				writeContextTag(&contextsBuilder, fmt.Sprintf("DOC-%d", i+1), result, passage)
+				contextsBuilder.WriteString("\n")
 			}
 			contextsBuilder.WriteString("</source>")
 		}
@@ -157,7 +161,7 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 			if i > 0 {
 				contextsBuilder.WriteString("\n")
 			}
-			contextsBuilder.WriteString(fmt.Sprintf("<context id=\"%d\">%s</context>", i+1, passage))
+			writeContextTag(&contextsBuilder, fmt.Sprintf("%d", i+1), result, passage)
 		}
 	}
 
@@ -196,6 +200,71 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 
 	p.persistRenderedContent(ctx, chatManage)
 	return next()
+}
+
+type contextAttr struct {
+	name  string
+	value string
+}
+
+func writeContextTag(builder *strings.Builder, id string, result *types.SearchResult, passage string, extraAttrs ...contextAttr) {
+	builder.WriteString("<context")
+	writeContextAttr(builder, "id", id)
+	writeContextAttr(builder, "chunk_id", citationChunkID(id, result))
+	writeContextAttr(builder, "kb_id", citationKBID(result))
+	writeContextAttr(builder, "doc", citationDocName(id, result))
+	for _, attr := range extraAttrs {
+		writeContextAttr(builder, attr.name, attr.value)
+	}
+	builder.WriteString(">")
+	builder.WriteString(passage)
+	builder.WriteString("</context>")
+}
+
+func writeContextAttr(builder *strings.Builder, name, value string) {
+	value = strings.TrimSpace(value)
+	if name == "" || value == "" {
+		return
+	}
+	builder.WriteString(" ")
+	builder.WriteString(name)
+	builder.WriteString("=\"")
+	builder.WriteString(html.EscapeString(value))
+	builder.WriteString("\"")
+}
+
+func citationChunkID(fallback string, result *types.SearchResult) string {
+	if result == nil {
+		return fallback
+	}
+	if id := strings.TrimSpace(result.ID); id != "" {
+		return id
+	}
+	return fallback
+}
+
+func citationKBID(result *types.SearchResult) string {
+	if result == nil {
+		return ""
+	}
+	return strings.TrimSpace(result.KnowledgeBaseID)
+}
+
+func citationDocName(fallback string, result *types.SearchResult) string {
+	if result == nil {
+		return fallback
+	}
+	for _, candidate := range []string{
+		result.KnowledgeTitle,
+		result.KnowledgeFilename,
+		result.KnowledgeID,
+		fallback,
+	} {
+		if value := strings.TrimSpace(candidate); value != "" {
+			return value
+		}
+	}
+	return fallback
 }
 
 // persistRenderedContent asynchronously writes the RAG-augmented UserContent back

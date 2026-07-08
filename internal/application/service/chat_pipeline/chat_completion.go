@@ -71,6 +71,7 @@ func (p *PluginChatCompletion) OnEvent(
 		"completion_tokens": chatResponse.Usage.CompletionTokens,
 		"prompt_tokens":     chatResponse.Usage.PromptTokens,
 	})
+	warnIfAnswerMissingKBCitations(ctx, "Completion", chatManage, chatResponse.Content)
 	chatManage.ChatResponse = chatResponse
 	return next()
 }

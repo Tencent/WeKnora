@@ -38,7 +38,7 @@ func (p *PluginMerge) ActivationEvents() []types.EventType {
 //  4. Resolve parent chunks (child → parent content)
 //  5. Group by knowledge source + chunk type, merge overlapping ranges
 //  6. Populate FAQ answers
-//  7. Expand short contexts with neighboring chunks
+//  7. Expand short contexts and dangling figure contexts with neighboring chunks
 //     7.5. Re-merge overlapping ranges introduced by expansion
 //  8. Final deduplication (ID + signature + partial content overlap)
 func (p *PluginMerge) OnEvent(ctx context.Context,
@@ -82,7 +82,7 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	// Step 6: Populate FAQ answers
 	mergedChunks = p.populateFAQAnswers(ctx, chatManage, mergedChunks)
 
-	// Step 7: Expand short contexts
+	// Step 7: Expand short contexts and dangling figure contexts
 	mergedChunks = p.expandShortContextWithNeighbors(ctx, chatManage, mergedChunks)
 
 	// Step 7.5: Re-merge overlapping ranges introduced by expansion

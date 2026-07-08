@@ -33,12 +33,15 @@ export function stripIncompleteCitationTag(content: string): string {
 
 export type CitationKnowledgeRef = {
   id?: string
+  content?: string
+  matched_content?: string
   knowledge_id?: string
   knowledge_title?: string
   knowledge_filename?: string
   chunk_index?: number
   chunk_type?: string
   knowledge_base_id?: string
+  sub_chunk_id?: string[] | string
 }
 
 function parseTagAttributes(attrString: string): Record<string, string> {
@@ -78,6 +81,64 @@ function docTitlesMatch(a: string, b: string): boolean {
   const na = normalizeDocTitle(a)
   const nb = normalizeDocTitle(b)
   return na === nb || na.includes(nb) || nb.includes(na)
+}
+
+function referenceSubChunkIDs(ref: CitationKnowledgeRef): string[] {
+  const value = ref.sub_chunk_id
+  if (Array.isArray(value)) return value.map((id) => String(id || '').trim()).filter(Boolean)
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return []
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) {
+        return parsed.map((id) => String(id || '').trim()).filter(Boolean)
+      }
+    } catch {
+      // keep raw string fallback below
+    }
+    return [trimmed]
+  }
+  return []
+}
+
+function referenceContent(ref: CitationKnowledgeRef | undefined): string {
+  if (!ref) return ''
+  return String(ref.content || ref.matched_content || '').trim()
+}
+
+function findCitationKnowledgeRef(
+  rawChunkId: string,
+  attrs: { doc?: string; kbId?: string },
+  refs?: CitationKnowledgeRef[] | null,
+): CitationKnowledgeRef | undefined {
+  const raw = String(rawChunkId || '').trim()
+  const list = (refs || []).filter((r) => r && r.chunk_type !== 'web_search')
+  if (!raw || !list.length) return undefined
+
+  const resolved = resolveCitationChunkId(raw, attrs, list)
+  const doc = (attrs.doc || '').trim()
+  const kbId = (attrs.kbId || '').trim()
+  const scoped = list.filter((r) => {
+    if (kbId && r.knowledge_base_id && r.knowledge_base_id !== kbId) return false
+    if (!doc) return true
+    return (
+      docTitlesMatch(doc, r.knowledge_title || '') ||
+      docTitlesMatch(doc, r.knowledge_filename || '')
+    )
+  })
+  const candidates = scoped.length ? scoped : list
+
+  return candidates.find((r) => r.id === resolved || r.id === raw)
+    || candidates.find((r) => referenceSubChunkIDs(r).includes(resolved) || referenceSubChunkIDs(r).includes(raw))
+}
+
+export function resolveCitationReferenceContent(
+  rawChunkId: string,
+  attrs: { doc?: string; kbId?: string },
+  refs?: CitationKnowledgeRef[] | null,
+): string {
+  return referenceContent(findCitationKnowledgeRef(rawChunkId, attrs, refs))
 }
 
 /** Map model context index (1, FAQ-1, DOC-2) to the real chunk UUID from retrieval results. */

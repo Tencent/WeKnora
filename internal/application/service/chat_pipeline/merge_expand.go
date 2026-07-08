@@ -2,19 +2,28 @@ package chatpipeline
 
 import (
 	"context"
+	"regexp"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// expandShortContextWithNeighbors expands the short context with neighbors
+var (
+	markdownImagePattern      = regexp.MustCompile(`!\[([^\]]*)\]\([^)]*\)`)
+	figureContextAfterImageRE = regexp.MustCompile(`图\s*[0-9]+[-－—][0-9]+(?:[-－—][0-9]+)?|图点评|患者|说明[:：]|名称[:：]|编号[:：]`)
+)
+
+// expandShortContextWithNeighbors expands short contexts and dangling empty-alt
+// figure contexts with neighboring chunks.
 func (p *PluginMerge) expandShortContextWithNeighbors(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	results []*types.SearchResult,
 ) []*types.SearchResult {
 	const (
-		minLen = 350
-		maxLen = 850
+		minLen                  = 350
+		maxLen                  = 850
+		danglingImageNextMaxLen = 1000
 	)
 
 	if len(results) == 0 || p.chunkRepo == nil {
@@ -33,7 +42,8 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 	}
 
 	type targetInfo struct {
-		result *types.SearchResult
+		result             *types.SearchResult
+		danglingEmptyImage bool
 	}
 
 	targets := make([]targetInfo, 0)
@@ -46,16 +56,21 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 		if r.ChunkType != string(types.ChunkTypeText) {
 			continue
 		}
-		if runeLen(r.Content) >= minLen {
+		danglingEmptyImage := hasDanglingEmptyAltImage(r.Content)
+		if runeLen(r.Content) >= minLen && !danglingEmptyImage {
 			continue
 		}
-		targets = append(targets, targetInfo{result: r})
+		targets = append(targets, targetInfo{
+			result:             r,
+			danglingEmptyImage: danglingEmptyImage,
+		})
 		baseIDsSet[r.ID] = struct{}{}
 		pipelineInfo(ctx, "Merge", "need_expand", map[string]interface{}{
-			"chunk_id":   r.ID,
-			"content":    r.Content,
-			"chunk_type": r.ChunkType,
-			"len":        runeLen(r.Content),
+			"chunk_id":             r.ID,
+			"content":              r.Content,
+			"chunk_type":           r.ChunkType,
+			"len":                  runeLen(r.Content),
+			"dangling_empty_image": danglingEmptyImage,
 		})
 	}
 
@@ -125,6 +140,18 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 		p.fetchChunksIfMissing(ctx, tenantID, chunkMap, res.ID)
 		baseChunk := chunkMap[res.ID]
 		if baseChunk == nil || baseChunk.Content == "" || baseChunk.ChunkType != types.ChunkTypeText {
+			continue
+		}
+
+		if target.danglingEmptyImage && runeLen(baseChunk.Content) >= minLen {
+			p.expandDanglingEmptyAltImageWithNext(
+				ctx,
+				tenantID,
+				res,
+				baseChunk,
+				chunkMap,
+				danglingImageNextMaxLen,
+			)
 			continue
 		}
 
@@ -249,6 +276,85 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 	}
 
 	return results
+}
+
+func (p *PluginMerge) expandDanglingEmptyAltImageWithNext(
+	ctx context.Context,
+	tenantID uint64,
+	res *types.SearchResult,
+	baseChunk *types.Chunk,
+	chunkMap map[string]*types.Chunk,
+	nextMaxLen int,
+) {
+	if res == nil || baseChunk == nil || baseChunk.NextChunkID == "" {
+		return
+	}
+
+	p.fetchChunksIfMissing(ctx, tenantID, chunkMap, baseChunk.NextChunkID)
+	nextChunk := chunkMap[baseChunk.NextChunkID]
+	if nextChunk == nil ||
+		nextChunk.KnowledgeID != baseChunk.KnowledgeID ||
+		nextChunk.Content == "" ||
+		nextChunk.ChunkType != types.ChunkTypeText {
+		return
+	}
+
+	nextContent := trimRunes(nextChunk.Content, nextMaxLen)
+	if nextContent == "" {
+		return
+	}
+
+	beforeLen := runeLen(res.Content)
+	res.Content = concatNoOverlap(baseChunk.Content, nextContent)
+	if !containsID(res.SubChunkID, nextChunk.ID) {
+		res.SubChunkID = append(res.SubChunkID, nextChunk.ID)
+	}
+	res.StartAt = baseChunk.StartAt
+	res.EndAt = res.StartAt + runeLen(res.Content)
+
+	pipelineInfo(ctx, "Merge", "expand_dangling_empty_alt_image", map[string]interface{}{
+		"chunk_id":      res.ID,
+		"next_id":       nextChunk.ID,
+		"before_len":    beforeLen,
+		"after_len":     runeLen(res.Content),
+		"next_len":      runeLen(nextContent),
+		"base_content":  baseChunk.Content,
+		"after_content": res.Content,
+		"chunk_type":    res.ChunkType,
+	})
+}
+
+func hasDanglingEmptyAltImage(content string) bool {
+	matches := markdownImagePattern.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return false
+	}
+
+	last := matches[len(matches)-1]
+	if len(last) < 4 || last[2] < 0 || last[3] < 0 {
+		return false
+	}
+	if strings.TrimSpace(content[last[2]:last[3]]) != "" {
+		return false
+	}
+
+	afterImage := strings.TrimSpace(content[last[1]:])
+	if afterImage != "" && figureContextAfterImageRE.MatchString(afterImage) {
+		return false
+	}
+
+	return runeLen(content[last[0]:]) <= 500
+}
+
+func trimRunes(content string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(content)
+	if len(runes) <= maxLen {
+		return content
+	}
+	return string(runes[:maxLen])
 }
 
 // runeLen returns the length of a string in runes

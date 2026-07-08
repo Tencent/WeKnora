@@ -115,7 +115,8 @@
 .chat-citation-float {
   position: absolute;
   z-index: 10000;
-  max-width: 320px;
+  width: max-content;
+  max-width: min(520px, calc(100vw - 32px));
   padding: 10px 12px;
   border-radius: 8px;
   background: var(--td-bg-color-container);
@@ -136,9 +137,58 @@
   }
 
   &__body {
-    max-height: 200px;
-    overflow-y: auto;
-    white-space: pre-wrap;
+    max-height: 280px;
+    overflow: auto;
+    white-space: normal;
+    overscroll-behavior: contain;
+  }
+
+  &__body p {
+    margin: 0 0 8px;
+  }
+
+  &__body p:last-child {
+    margin-bottom: 0;
+  }
+
+  &__body .chat-markdown-table {
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 4px 0;
+  }
+
+  &__body .citation-preview-figure {
+    margin: 0 0 8px;
+  }
+
+  &__body .citation-preview-figure .markdown-image {
+    display: block;
+    margin: 0 auto;
+  }
+
+  &__body .citation-preview-figure__caption {
+    margin-top: 6px;
+    color: var(--td-text-color-secondary);
+    font-size: 11px;
+    line-height: 1.45;
+    text-align: center;
+    word-break: break-word;
+  }
+
+  &__body table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  &__body th,
+  &__body td {
+    padding: 4px 6px;
+    border: 1px solid var(--td-component-stroke);
+    vertical-align: top;
+    white-space: normal;
   }
 
   &__muted,

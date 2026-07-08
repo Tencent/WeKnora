@@ -510,7 +510,7 @@
   }
 
   :deep(.chat-markdown-table) {
-    width: fit-content;
+    width: 100%;
     max-width: 100%;
     margin: 0.875em 0 1em;
     overflow-x: auto;
@@ -521,14 +521,15 @@
   }
 
   :deep(table) {
-    word-break: initial;
+    word-break: normal;
     border-collapse: separate;
     border-spacing: 0;
     display: table;
     font-size: 14px;
     line-height: 1.55;
-    width: max-content;
-    min-width: 0;
+    width: 100%;
+    min-width: 100%;
+    table-layout: fixed;
   }
 
   :deep(table thead) {
@@ -548,7 +549,9 @@
     text-align: left;
     margin: 0;
     padding: 8px 12px;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   :deep(table tr td) {
@@ -559,6 +562,9 @@
     margin: 0;
     padding: 8px 12px;
     vertical-align: top;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   :deep(table tr th:last-child),
