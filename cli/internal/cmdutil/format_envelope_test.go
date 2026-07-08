@@ -28,7 +28,7 @@ func TestEmit_WrapsInEnvelope(t *testing.T) {
 func TestEmit_WithMeta(t *testing.T) {
 	var buf bytes.Buffer
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
-	meta := &output.Meta{Count: 2, HasMore: true}
+	meta := &output.Meta{Count: output.IntPtr(2), HasMore: true}
 	if err := fopts.Emit(&buf, []string{"a", "b"}, meta); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

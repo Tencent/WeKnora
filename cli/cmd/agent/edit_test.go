@@ -28,6 +28,8 @@ type fakeEditSvc struct {
 	updateResp  *sdk.Agent
 	updateErr   error
 	updateCalls int
+	models      []sdk.Model
+	modelsErr   error
 }
 
 func (f *fakeEditSvc) GetAgent(_ context.Context, _ string) (*sdk.Agent, error) {
@@ -39,6 +41,40 @@ func (f *fakeEditSvc) UpdateAgent(_ context.Context, id string, req *sdk.UpdateA
 	f.updateID = id
 	f.updateCalls++
 	return f.updateResp, f.updateErr
+}
+
+func (f *fakeEditSvc) ListModels(_ context.Context) ([]sdk.Model, error) {
+	return f.models, f.modelsErr
+}
+
+func TestEdit_ModelName_ResolvedToID(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeEditSvc{
+		getResp:    &sdk.Agent{ID: "ag_abc", Name: "A", Config: &sdk.AgentConfig{ModelID: "old-id"}},
+		updateResp: &sdk.Agent{ID: "ag_abc"},
+		models:     []sdk.Model{{ID: "m-real", Name: "good-llm", Type: "KnowledgeQA"}},
+	}
+	opts := &EditOptions{AgentID: "ag_abc", Model: "good-llm", flags: editFlagSet{modelSet: true}}
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	require.NotNil(t, svc.updateReq)
+	require.NotNil(t, svc.updateReq.Config)
+	assert.Equal(t, "m-real", svc.updateReq.Config.ModelID, "--model name must resolve to the model id")
+}
+
+func TestEdit_BogusModelName_RejectedNoWrite(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeEditSvc{
+		getResp:    &sdk.Agent{ID: "ag_abc", Name: "A", Config: &sdk.AgentConfig{ModelID: "old-id"}},
+		updateResp: &sdk.Agent{ID: "ag_abc"},
+		models:     []sdk.Model{{ID: "m-real", Name: "good-llm", Type: "KnowledgeQA"}},
+	}
+	opts := &EditOptions{AgentID: "ag_abc", Model: "totally-bogus-model-xyz", flags: editFlagSet{modelSet: true}}
+	err := runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
+	require.Error(t, err, "a --model name matching no model must fail")
+	var e *cmdutil.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, cmdutil.CodeResourceNotFound, e.Code)
+	assert.Equal(t, 0, svc.updateCalls, "must not write an agent with an unresolvable model")
 }
 
 func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {
@@ -250,7 +286,7 @@ func TestEdit_SystemPromptFile(t *testing.T) {
 	assert.Equal(t, "new prompt", svc.updateReq.Config.SystemPrompt)
 }
 
-// withRootHarnessAgent wraps `weknora agent edit ...` under a synthetic root
+// withRootHarnessAgent wraps `weknora agent update ...` under a synthetic root
 // cmd that registers the global persistent flags (mirrors addGlobalFlags in
 // cmd/root.go).
 func withRootHarnessAgent(edit *cobra.Command, args ...string) *cobra.Command {
@@ -262,7 +298,7 @@ func withRootHarnessAgent(edit *cobra.Command, args ...string) *cobra.Command {
 	ag := &cobra.Command{Use: "agent"}
 	ag.AddCommand(edit)
 	root.AddCommand(ag)
-	root.SetArgs(append([]string{"agent", "edit"}, args...))
+	root.SetArgs(append([]string{"agent", "update"}, args...))
 	root.SetContext(context.Background())
 	root.SilenceErrors = true
 	root.SilenceUsage = true
@@ -270,7 +306,7 @@ func withRootHarnessAgent(edit *cobra.Command, args ...string) *cobra.Command {
 }
 
 // TestAgentEdit_RequiresConfirmation asserts that without -y (non-TTY / JSON
-// mode), agent edit returns input.confirmation_required (exit 10).
+// mode), agent update returns input.confirmation_required (exit 10).
 func TestAgentEdit_RequiresConfirmation(t *testing.T) {
 	iostreams.SetForTest(t) // non-TTY
 	f := &cmdutil.Factory{
@@ -284,7 +320,7 @@ func TestAgentEdit_RequiresConfirmation(t *testing.T) {
 	require.ErrorAs(t, err, &ce)
 	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, ce.Code)
 	assert.Equal(t, 10, cmdutil.ExitCode(err), "exit code 10 per destructive-write protocol")
-	// retry command must include -y and the agent id
-	assert.Contains(t, ce.RetryCommand, "-y")
-	assert.Contains(t, ce.RetryCommand, "ag_abc")
+	// retry argv must include -y and the agent id
+	assert.Contains(t, ce.RetryArgv, "-y")
+	assert.Contains(t, ce.RetryArgv, "ag_abc")
 }

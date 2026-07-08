@@ -1,12 +1,15 @@
 // Package api implements the `weknora api` raw HTTP passthrough command.
 //
 // Shape: one positional (path) + `-X/--method` flag, default GET (auto-
-// promoted to POST when a body is supplied via --input). Default raw
-// response body to stdout; --format json emits a {status, headers, body}
-// object. Reuses sdk.Client.Raw which already applies tenant + auth headers.
+// promoted to POST when a body is supplied via -d/--input). Text mode writes
+// the raw response body to stdout; --format json places the parsed server
+// response directly under envelope.data (no {status, headers, body} wrapper),
+// so `--jq '.data...'` projects at the server's own depth. Reuses
+// sdk.Client.Raw which already applies tenant + auth headers.
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,7 +34,9 @@ var apiFields = []string{"<response-shape-varies>"}
 
 type Options struct {
 	Method      string
-	Input       string // --input: file path, "-" for stdin
+	Input       string   // --input: file path, "-" for stdin
+	Data        string   // -d/--data: inline JSON body (mutually exclusive with --input)
+	Fields      []string // -F/--field: key=value pairs assembled into a JSON object body (mutually exclusive with -d/--input)
 	Yes         bool
 	DryRun      bool
 	StdinReader io.Reader // overridden by tests; defaults to iostreams.IO.In
@@ -51,19 +56,23 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "api <path>",
 		Short: "Make a raw API request to the WeKnora server",
-		Long: `Raw HTTP API access. Body via --input <file> or --input - (stdin).
+		Long: `Raw HTTP API access. JSON body via -d/--data (inline) or --input <file>/- (stdin).
 
-The default method is GET; passing --input auto-promotes it to POST. Use
--X/--method to override (any non-empty method is accepted: DELETE / PUT /
-PATCH / HEAD / OPTIONS / TRACE / custom).
+The default method is GET; supplying a body (-d or --input) auto-promotes it
+to POST. Use -X/--method to override (any non-empty method is accepted:
+DELETE / PUT / PATCH / HEAD / OPTIONS / TRACE / custom).
 
 Auth, tenant, and request-id headers are applied automatically from the
-active profile. The response body is written to stdout by default; use
---format json to emit a {status, headers, body} envelope.
+active profile. In text mode (default) the raw server response body is written
+to stdout. In --format json the parsed server response is placed directly
+under envelope.data — drill in with --jq '.data...' at the server's own depth
+(e.g. '.data.data[]' for a list endpoint). Only -X DELETE is confirmation-gated.
 
 Examples:
-  weknora api /api/v1/knowledge-bases                                # GET
-  echo '{"name":"foo"}' | weknora api /api/v1/knowledge-bases --input -  # POST (auto)
+  weknora api /api/v1/knowledge-bases                                  # GET
+  weknora api /api/v1/knowledge-bases -d '{"name":"foo"}'              # POST (auto)
+  weknora api /api/v1/knowledge-bases -F name=foo -F enabled=true      # POST, typed body
+  echo '{"name":"foo"}' | weknora api /api/v1/knowledge-bases --input -  # POST via stdin
   weknora api /api/v1/knowledge-bases/kb_xxx -X DELETE`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -86,14 +95,14 @@ Examples:
 						"--dry-run requires explicit -X POST/PUT/PATCH/DELETE; default GET is read-only with no side effect to preview"))
 				}
 				var body any
-				if opts.Input != "" {
-					contents, err := readInput(opts)
+				if hasBody(opts) {
+					contents, err := resolveBody(opts)
 					if err != nil {
 						return err
 					}
-					// Best-effort JSON decode so the plan body surfaces a
-					// structured object (agents grep meta.plan.body for shape);
-					// fall back to raw string when the payload isn't JSON.
+					// Surface the parsed body in the plan so agents can grep
+					// meta.plan.body for shape; resolveBody has already validated
+					// it as JSON.
 					var parsed any
 					if json.Unmarshal(contents, &parsed) == nil {
 						body = parsed
@@ -112,9 +121,19 @@ Examples:
 			}
 			method := resolveMethod(opts)
 			// Escape-hatch DELETE through `weknora api` is just as destructive
-			// as `weknora kb delete` - exit-10 protocol must apply (cli/README.md).
-			if method == http.MethodDelete {
-				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "endpoint", args[0], "api.delete", "weknora api -X DELETE "+args[0]+" -y"); err != nil {
+			// as `weknora kb delete` - exit-10 destructive protocol must apply
+			// (cli/README.md). PUT/PATCH mutate server state like a typed
+			// `kb/agent/doc update`, so they get the same exit-10 WRITE gate;
+			// without it the raw escape hatch bypassed the "an agent cannot
+			// silently mutate" guarantee. POST stays ungated to match typed
+			// `create` (also ungated). GET/HEAD are reads.
+			switch method {
+			case http.MethodDelete:
+				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "endpoint", args[0], "api.delete", []string{"weknora", "api", "-X", "DELETE", args[0], "-y"}); err != nil {
+					return err
+				}
+			case http.MethodPut, http.MethodPatch:
+				if err := cmdutil.ConfirmWrite(f.Prompter(), opts.Yes, fopts.WantsJSON(), "write", "endpoint", args[0], "api."+strings.ToLower(method), apiRetryArgv(opts, method, args[0])); err != nil {
 					return err
 				}
 			}
@@ -126,8 +145,10 @@ Examples:
 			return runAPI(c.Context(), opts, fopts, cli, method, args[0], paginate)
 		},
 	}
-	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when --input is supplied). Any non-empty method is accepted.")
-	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin)")
+	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when a body is supplied via -d/--input). Any non-empty method is accepted.")
+	cmd.Flags().StringVarP(&opts.Data, "data", "d", "", "Inline JSON request body (e.g. -d '{\"name\":\"x\"}'). Mutually exclusive with --input.")
+	cmd.Flags().StringVar(&opts.Input, "input", "", "Read JSON request body from file (use `-` for stdin). Mutually exclusive with -d/--data.")
+	cmd.Flags().StringArrayVarP(&opts.Fields, "field", "F", nil, "Add a key=value to a JSON object body (repeatable; e.g. -F name=foo -F enabled=true). true/false/null and numbers are typed; everything else is a string. Flat keys only. Mutually exclusive with -d/--input.")
 	cmd.Flags().Bool("paginate", false, "Follow offset-based pagination (?page=N&page_size=M), merging all pages into a single {data, total} JSON response.")
 	cmdutil.AddFormatFlag(cmd, apiFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
@@ -136,12 +157,15 @@ Examples:
 		RequiredFlags: []string{"path (positional)"},
 		Examples: []string{
 			"weknora api /api/v1/knowledge-bases",
+			"weknora api /api/v1/knowledge-bases -d '{\"name\":\"foo\"}'",
+			"weknora api -X POST /api/v1/knowledge-bases -F name=\"Eng Docs\" -F enabled=true",
 			"weknora api -X DELETE /api/v1/knowledge-bases/kb_x -y",
-			"echo '{\"name\":\"foo\"}' | weknora api -X POST /api/v1/knowledge-bases --input -",
+			"echo '{\"name\":\"foo\"}' | weknora api /api/v1/knowledge-bases --input -",
 		},
-		Output: "raw server response body or envelope on error",
+		Output: "text mode (default): the raw server response body on stdout. json mode: the parsed server response is placed directly under envelope.data — project with --jq '.data...' at the server's own depth (e.g. '.data.data[]' for a list endpoint, '.data.data.id' for a created object). With --paginate, envelope.data is the merged {data, total}.",
 		Warnings: []string{
-			"Only -X DELETE is confirmation-gated (exit 10 / input.confirmation_required unless -y); -X GET/POST/PUT/PATCH and other methods are unguarded — you own the safety of writes made through this escape hatch.",
+			"-X DELETE is destructive-gated and -X PUT/PATCH are write-gated (exit 10 / input.confirmation_required unless -y), matching typed delete/update. -X POST (create-shaped) and GET are unguarded — you own the safety of creates made through this escape hatch.",
+			"Raw passthrough: the typed error envelope does NOT fully apply. The server's own response goes under envelope.data at its native depth; a non-2xx HTTP status surfaces via the exit code, not a typed error.type/retry_argv. Do not rely on error.type/retryable for `api` the way you do for typed subcommands.",
 			"Raw HTTP passthrough; agents should prefer typed subcommands (kb/doc/session/...) when available.",
 		},
 	})
@@ -151,35 +175,151 @@ Examples:
 // readInput reads opts.Input and returns its contents. "-" reads from
 // opts.StdinReader (or iostreams.IO.In as the production default) for
 // piped JSON payloads.
+//
+// The body is sent as a JSON document (the SDK marshals it as json.RawMessage),
+// so a non-JSON / malformed payload is validated and rejected here as
+// input.invalid_argument (exit 5). Without this, the failure surfaced from the
+// SDK's marshal step as a confusing network.error (exit 7, "retryable") —
+// looping an agent on a body that can never be sent.
 func readInput(opts *Options) ([]byte, error) {
+	var b []byte
 	if opts.Input == "-" {
 		r := opts.StdinReader
 		if r == nil {
 			r = iostreams.IO.In
 		}
-		b, err := io.ReadAll(r)
+		var err error
+		b, err = io.ReadAll(r)
 		if err != nil {
 			return nil, cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read request body from stdin")
 		}
-		return b, nil
+	} else {
+		var err error
+		b, err = os.ReadFile(opts.Input)
+		if err != nil {
+			return nil, cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read input file %s", opts.Input)
+		}
 	}
-	b, err := os.ReadFile(opts.Input)
-	if err != nil {
-		return nil, cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read input file %s", opts.Input)
+	if len(bytes.TrimSpace(b)) > 0 && !json.Valid(b) {
+		return nil, cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+			"--input must be valid JSON (the request body is sent as a JSON document)")
 	}
 	return b, nil
 }
 
+// resolveBody returns the request body bytes from -d/--data (inline) or
+// --input (file/stdin), or nil when neither is set. Inline --data is
+// validated as JSON here; --input is validated inside readInput. The two
+// flags are mutually exclusive — checked here (rather than cobra's
+// MarkFlagsMutuallyExclusive, whose violation surfaces as an unclassified
+// internal.error / exit 1) so the conflict reports input.invalid_argument.
+func resolveBody(opts *Options) ([]byte, error) {
+	set := 0
+	if opts.Data != "" {
+		set++
+	}
+	if opts.Input != "" {
+		set++
+	}
+	if len(opts.Fields) > 0 {
+		set++
+	}
+	if set > 1 {
+		return nil, cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+			"-d/--data, --input, and -F/--field are mutually exclusive; supply the body one way")
+	}
+	if len(opts.Fields) > 0 {
+		return buildFieldBody(opts.Fields)
+	}
+	if opts.Data != "" {
+		if !json.Valid([]byte(opts.Data)) {
+			return nil, cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				"-d/--data must be valid JSON (the request body is sent as a JSON document)")
+		}
+		return []byte(opts.Data), nil
+	}
+	if opts.Input != "" {
+		return readInput(opts)
+	}
+	return nil, nil
+}
+
+// hasBody reports whether a request body was supplied via -d or --input.
+func hasBody(opts *Options) bool {
+	return opts.Data != "" || opts.Input != "" || len(opts.Fields) > 0
+}
+
+// inferFieldValue maps a -F value string to a typed JSON scalar: literal
+// true/false/null and integer/float literals become typed JSON; everything
+// else stays a string. A value that looks numeric but must stay a string
+// (e.g. a zero-padded id "007") can't be forced here — use -d/--data or
+// --input for full control.
+func inferFieldValue(v string) any {
+	switch v {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "null":
+		return nil
+	}
+	if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+		return i
+	}
+	if f, err := strconv.ParseFloat(v, 64); err == nil {
+		return f
+	}
+	return v
+}
+
+// buildFieldBody assembles -F/--field key=value pairs into a JSON object with
+// type inference. Flat keys only. Returns input.invalid_argument (exit 5) for
+// a malformed pair or an unsupported @file value.
+func buildFieldBody(fields []string) ([]byte, error) {
+	obj := make(map[string]any, len(fields))
+	for _, f := range fields {
+		k, v, ok := strings.Cut(f, "=")
+		if !ok || k == "" {
+			return nil, cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				fmt.Sprintf("-F/--field must be key=value, got %q", f))
+		}
+		if strings.HasPrefix(v, "@") {
+			return nil, cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				fmt.Sprintf("-F %q: @file values are not supported; read a file body with --input", f))
+		}
+		obj[k] = inferFieldValue(v)
+	}
+	return json.Marshal(obj)
+}
+
 // resolveMethod implements the auto-method behavior: explicit -X wins;
-// otherwise body presence promotes GET → POST.
+// otherwise body presence (-d/--data or --input) promotes GET → POST.
 func resolveMethod(opts *Options) string {
 	if opts.Method != "" {
 		return strings.ToUpper(opts.Method)
 	}
-	if opts.Input != "" {
+	if hasBody(opts) {
 		return "POST"
 	}
 	return "GET"
+}
+
+// apiRetryArgv reconstructs a directly-executable `weknora api` argv (with -y)
+// for the write-confirmation gate, preserving the method, path and body flags
+// the caller passed so an agent can re-run the exact mutation after approval.
+func apiRetryArgv(opts *Options, method, path string) []string {
+	argv := []string{"weknora", "api", "-X", method, path}
+	switch {
+	case opts.Data != "":
+		argv = append(argv, "-d", opts.Data)
+	case opts.Input != "":
+		argv = append(argv, "--input", opts.Input)
+	default:
+		for _, f := range opts.Fields {
+			argv = append(argv, "-F", f)
+		}
+	}
+	return append(argv, "-y")
 }
 
 // runAPI is the testable core: validate inputs, dispatch via Service.Raw,
@@ -207,13 +347,15 @@ func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptio
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("path must start with /: %s", path))
 	}
 
-	// Resolve request body from --input (file path or `-` for stdin).
+	// Resolve request body from -d/--data (inline) or --input (file / `-`).
+	// Empty input is treated as no body rather than an empty JSON document
+	// (which fails to marshal).
+	contents, err := resolveBody(opts)
+	if err != nil {
+		return err
+	}
 	var body any
-	if opts.Input != "" {
-		contents, err := readInput(opts)
-		if err != nil {
-			return err
-		}
+	if len(bytes.TrimSpace(contents)) > 0 {
 		body = json.RawMessage(contents)
 	}
 
@@ -241,38 +383,31 @@ func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptio
 		return ce
 	}
 
+	return emitRawBody(respBody, fopts)
+}
+
+// emitRawBody writes a server response body under the active format. JSON mode
+// places the parsed body directly under envelope.data — no {status, headers,
+// body} wrapper — so `--jq '.data...'` projects at the server's own shape
+// (e.g. `.data.data[]` for a list endpoint) rather than a triple-nested
+// `.data.body.data[]`; non-JSON decodes best-effort to a raw string. Text mode
+// writes the body verbatim with a trailing newline. Shared by the single and
+// paginated-fallback paths so both project identically.
+func emitRawBody(body []byte, fopts *cmdutil.FormatOptions) error {
 	out := iostreams.IO.Out
 	if fopts.WantsJSON() {
-		// Best-effort decode: if response body is valid JSON, surface the
-		// parsed structure under .body so JSON consumers can drill
-		// in; otherwise fall back to the raw string.
 		var bodyAny any
-		if len(respBody) > 0 {
-			if err := json.Unmarshal(respBody, &bodyAny); err != nil {
-				bodyAny = string(respBody)
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &bodyAny); err != nil {
+				bodyAny = string(body)
 			}
 		}
-		hdrs := make(map[string]string, len(resp.Header))
-		for k, v := range resp.Header {
-			if len(v) > 0 {
-				hdrs[k] = v[0]
-			}
-		}
-		// Route through fopts.Emit so the payload lives under .data in the
-		// success envelope. --jq applies to the full envelope, so users
-		// project with ".data.status", ".data.body", etc.
-		payload := map[string]any{
-			"status":  resp.StatusCode,
-			"headers": hdrs,
-			"body":    bodyAny,
-		}
-		return fopts.Emit(out, payload, nil)
+		return fopts.Emit(out, bodyAny, nil)
 	}
-
-	if _, err := out.Write(respBody); err != nil {
+	if _, err := out.Write(body); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "write response body")
 	}
-	if len(respBody) > 0 && respBody[len(respBody)-1] != '\n' {
+	if len(body) > 0 && body[len(body)-1] != '\n' {
 		_, _ = out.Write([]byte{'\n'})
 	}
 	return nil
@@ -320,7 +455,7 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 		if err := json.Unmarshal(body, &pageResp); err != nil {
 			// Non-JSON response on first page — fall back through the envelope.
 			if page == 1 {
-				return passThroughFallback(body, resp, fopts)
+				return emitRawBody(body, fopts)
 			}
 			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 				fmt.Sprintf("--paginate: page %d response not in expected shape: %v", page, err))
@@ -329,7 +464,7 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 		// Heuristic: if the first page lacks pagination metadata, treat the
 		// response as non-paginated and fall back through the envelope.
 		if page == 1 && pageResp.Total == 0 && pageResp.PageSize == 0 {
-			return passThroughFallback(body, resp, fopts)
+			return emitRawBody(body, fopts)
 		}
 
 		allData = append(allData, pageResp.Data...)
@@ -347,50 +482,6 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 		"total": lastTotal,
 	}
 	return fopts.Emit(iostreams.IO.Out, merged, nil)
-}
-
-// passThroughFallback handles the case where --paginate detects a
-// non-paginated first-page response. When JSON output is requested, it routes
-// the body through fopts.Emit in the same {status, headers, body} envelope
-// shape that runAPISingle produces — keeping the wire contract consistent
-// regardless of whether --paginate was passed. For human-readable mode it
-// writes the raw body verbatim (same as the original passThroughRaw behavior).
-func passThroughFallback(body []byte, resp *http.Response, fopts *cmdutil.FormatOptions) error {
-	out := iostreams.IO.Out
-	if fopts.WantsJSON() {
-		var bodyAny any
-		if len(body) > 0 {
-			if err := json.Unmarshal(body, &bodyAny); err != nil {
-				bodyAny = string(body) // best-effort string fallback
-			}
-		}
-		hdrs := collectHeaders(resp)
-		return fopts.Emit(out, map[string]any{
-			"status":  resp.StatusCode,
-			"headers": hdrs,
-			"body":    bodyAny,
-		}, nil)
-	}
-	// Human-readable: raw passthrough, same as before.
-	if _, err := out.Write(body); err != nil {
-		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "write response body")
-	}
-	if len(body) > 0 && body[len(body)-1] != '\n' {
-		_, _ = out.Write([]byte{'\n'})
-	}
-	return nil
-}
-
-// collectHeaders extracts the first value of each response header into a flat
-// map, matching the shape that runAPISingle emits in its JSON envelope.
-func collectHeaders(resp *http.Response) map[string]string {
-	hdrs := make(map[string]string, len(resp.Header))
-	for k, v := range resp.Header {
-		if len(v) > 0 {
-			hdrs[k] = v[0]
-		}
-	}
-	return hdrs
 }
 
 // extractPageSize parses the page_size query parameter from path, returning 0

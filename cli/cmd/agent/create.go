@@ -66,7 +66,8 @@ const agentCreateExample = `  weknora agent create "Support Bot" --model <model-
 
 const agentCreateLong = `Create a new custom agent.
 
---model is required (an agent without a model cannot invoke). The 7
+--model is required (an agent without a model cannot invoke); discover a
+valid model id with 'weknora model list'. The 7
 optional hot-path flags cover the most frequently set AgentConfig fields;
 for the remaining 27 use --config-file with a YAML or JSON document
 matching the AgentConfig schema (run --generate-skeleton to get a
@@ -122,6 +123,12 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 					fmt.Sprintf("--temperature must be in 0.0..2.0, got %g", opts.Temperature))
 			}
 
+			// Reject an unknown --agent-mode / --kb-selection-mode up front
+			// (typed exit 5) rather than letting the server fail the create.
+			if err := validateAgentModeFlags(&opts.AgentMode, &opts.KBSelectionMode); err != nil {
+				return err
+			}
+
 			if systemPromptFile != "" {
 				r, err := cmdutil.OpenInput(systemPromptFile)
 				if err != nil {
@@ -159,6 +166,31 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Resolve --model / --rerank-model (id or name) and validate they
+			// exist, matching the id-or-name policy of `kb config set`. A bogus name
+			// fails fast here instead of creating an agent whose model never
+			// resolves at run time.
+			if opts.Model, err = cmdutil.ResolveModelRef(cmd.Context(), cli, opts.Model, "KnowledgeQA"); err != nil {
+				return err
+			}
+			if opts.RerankModel, err = cmdutil.ResolveModelRef(cmd.Context(), cli, opts.RerankModel, "Rerank"); err != nil {
+				return err
+			}
+			// Resolve --attach-kb values (id or name) to canonical ids,
+			// matching the --kb flag's id-or-name policy. Without this a raw
+			// name is stored verbatim as a kb_id, silently creating an agent
+			// whose KB reference never resolves at run time.
+			if len(opts.KBs) > 0 {
+				resolved := make([]string, 0, len(opts.KBs))
+				for _, raw := range opts.KBs {
+					id, rerr := cmdutil.ResolveKBFlag(cmd.Context(), cli, raw)
+					if rerr != nil {
+						return rerr
+					}
+					resolved = append(resolved, id)
+				}
+				opts.KBs = resolved
+			}
 			return runCreate(cmd.Context(), opts, fopts, cli)
 		},
 	}
@@ -166,17 +198,17 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	// Required (enforced in PreRunE rather than cmd.MarkFlagRequired so
 	// --generate-skeleton can bypass it — cobra's MarkFlagRequired runs
 	// before PreRunE and would otherwise block the skeleton path).
-	cmd.Flags().StringVar(&opts.Model, "model", "", "LLM model id (required, except with --generate-skeleton)")
+	cmd.Flags().StringVar(&opts.Model, "model", "", "LLM model id or name (required, except with --generate-skeleton)")
 
 	// Hot-path (8 flag names, 7 distinct config fields)
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Agent description")
 	cmd.Flags().StringVar(&opts.SystemPrompt, "system-prompt", "", "System prompt text (mutex with --system-prompt-file)")
 	cmd.Flags().StringVar(&systemPromptFile, "system-prompt-file", "", "Read system prompt from FILE, or '-' for stdin")
 	cmd.MarkFlagsMutuallyExclusive("system-prompt", "system-prompt-file")
-	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: quick-answer | smart-reasoning")
-	cmd.Flags().StringSliceVar(&opts.KBs, "attach-kb", nil, "Attach a knowledge base id (repeatable); aligns with 'agent edit --add-kb'")
-	cmd.Flags().StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: all | selected | none")
-	cmd.Flags().StringVar(&opts.RerankModel, "rerank-model", "", "Rerank model id")
+	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: "+strings.Join(agentModeValues, " | "))
+	cmd.Flags().StringSliceVar(&opts.KBs, "attach-kb", nil, "Attach a knowledge base id (repeatable); aligns with 'agent update --add-kb'")
+	cmd.Flags().StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: "+strings.Join(kbSelectionModeValues, " | "))
+	cmd.Flags().StringVar(&opts.RerankModel, "rerank-model", "", "Rerank model id or name")
 	cmd.Flags().Float64Var(&opts.Temperature, "temperature", 0.0, "Generation temperature (0.0..2.0)")
 
 	// Power-user / utility
@@ -187,9 +219,14 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "Create a new custom agent. --model is required; --attach-kb takes KB ids (repeatable, not names). Emits the created Agent object.",
+		UsedFor:       "Create a new custom agent. --model is required and accepts a model id or name; --attach-kb (repeatable) accepts KB ids or names. Emits the created Agent object.",
 		RequiredFlags: []string{"<name> (positional)", "--model"},
-		Output:        "envelope.data is the created Agent object with id, name, config",
+		Examples: []string{
+			`weknora agent create "Support Bot" --model gpt-4o`,
+			`weknora agent create "Support Bot" --model gpt-4o --attach-kb kb_eng --system-prompt "You are a support assistant."`,
+			`weknora agent create --generate-skeleton   # print a blank config to fill in (no --model needed)`,
+		},
+		Output: "envelope.data is the created Agent object with id, name, config",
 	})
 	return cmd
 }
@@ -268,6 +305,33 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		return cmdutil.WrapHTTP(err, "create agent")
 	}
 	return emitAgent(fopts, created)
+}
+
+// agentModeValues / kbSelectionModeValues are the closed server enums for the
+// --agent-mode / --kb-selection-mode flags, sourced from the SDK enumerators so
+// the CLI can't drift from the server vocabulary.
+var (
+	agentModeValues       = cmdutil.EnumStrings(sdk.AllAgentModes())
+	kbSelectionModeValues = cmdutil.EnumStrings(sdk.AllKBSelectionModes())
+)
+
+// validateAgentModeFlags validates and canonicalises --agent-mode and
+// --kb-selection-mode in place against the SDK enums. An empty value passes
+// through (flag unset → no override). Rejecting a typo here gives a fast,
+// typed input.invalid_argument instead of a confusing server-side failure.
+// Shared by `agent create` and `agent update`.
+func validateAgentModeFlags(agentMode, kbSelectionMode *string) error {
+	v, err := cmdutil.ValidateEnum("agent-mode", *agentMode, agentModeValues)
+	if err != nil {
+		return err
+	}
+	*agentMode = v
+	v, err = cmdutil.ValidateEnum("kb-selection-mode", *kbSelectionMode, kbSelectionModeValues)
+	if err != nil {
+		return err
+	}
+	*kbSelectionMode = v
+	return nil
 }
 
 // applyCreateOverrides merges hot-path flag overrides into the base config,

@@ -28,7 +28,6 @@ export interface LoginResponse {
     id: number
     name: string
     description: string
-    api_key: string
     status: string
     business: string
     storage_quota: number
@@ -43,7 +42,6 @@ export interface LoginResponse {
     id: number
     name: string
     description?: string
-    api_key?: string
     status?: string
     business?: string
     storage_quota?: number
@@ -88,7 +86,6 @@ export interface RegisterResponse {
     tenant: {
       id: string
       name: string
-      api_key: string
     }
   }
 }
@@ -163,7 +160,6 @@ export interface TenantInfo {
   id: string
   name: string
   description?: string
-  api_key: string
   status?: string
   business?: string
   owner_id: string

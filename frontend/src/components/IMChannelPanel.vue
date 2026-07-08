@@ -33,7 +33,7 @@
             </div>
             <div v-if="authStore.hasRole('admin')" class="channel-card__actions" @click.stop>
               <t-dropdown trigger="click" placement="bottom-right" attach="body" :options="channelMenuOptions(channel)"
-                @click="(data) => handleChannelMenuClick(data, channel)">
+                @click="handleChannelMenuClick($event, channel)">
                 <t-button variant="text" shape="square" size="small" class="channel-card__action-btn channel-card__more"
                   @click.stop>
                   <template #icon><t-icon name="ellipsis" /></template>

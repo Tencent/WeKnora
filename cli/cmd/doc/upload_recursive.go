@@ -81,16 +81,11 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 	// uploaded captures per-path server results for successful uploads.
 	// Populated by the RunBatch closure; read by the resultFn below.
 	uploaded := make(map[string]uploadedFile, len(matches))
-	var firstFailCode cmdutil.ErrorCode
 	channel := cmp.Or(opts.Channel, uploadChannel)
 
 	outcomes, runErr := cmdutil.RunBatch(ctx, matches, func(ctx context.Context, p string) error {
 		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, meta, opts.EnableMultimodel, "", channel, nil)
 		if err != nil {
-			code := cmdutil.ClassifyHTTPError(err)
-			if firstFailCode == "" {
-				firstFailCode = code
-			}
 			// Per-file progress lines are human progress signal; suppress
 			// under --format json so they don't precede the JSON object on stdout.
 			if !fopts.WantsJSON() {
@@ -133,9 +128,15 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 		// carries per-file detail; without Silent the root error handler would
 		// print to stderr in addition. ExitCode still walks Code so the typed
 		// exit-code-by-class contract holds.
-		code := firstFailCode
-		if code == "" {
-			code = cmdutil.ClassifyContextErr(ctx.Err())
+		// Any per-file failure collapses to operation.failed (exit 1) — the
+		// per-file batch envelope carries each file's typed error, which is the
+		// authoritative signal (matches doc/session/chunk batch delete). A
+		// cancelled / timed-out batch keeps its context class (124 / 130) so a
+		// permanent partial failure (e.g. a duplicate) is never misreported as a
+		// retryable 5xx that an agent would loop on.
+		code := cmdutil.CodeOperationFailed
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			code = cmdutil.ClassifyContextErr(ctxErr)
 		}
 		return &cmdutil.Error{
 			Code:    code,

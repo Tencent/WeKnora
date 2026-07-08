@@ -1,5 +1,5 @@
 // Package agentcmd holds the `weknora agent` command tree:
-// list / view / create / edit / delete / status / check. The directory is
+// list / view / create / update / delete / status / check. The directory is
 // named `agent/` to match the cobra subcommand; the Go package is `agentcmd`
 // to avoid colliding with cobra's *cobra.Command identifier.
 //
@@ -22,7 +22,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 		Use:   "agent",
 		Short: "Manage custom agents (CRUD + status/check)",
 		Long: `Custom Agents bundle a system prompt, model, tool allow-list, and KB
-scope into an addressable resource. Create, edit, list, view, check,
+scope into an addressable resource. Create, update, list, view, check,
 or delete agents. To invoke an agent, use: weknora session ask --agent <id>`,
 	}
 	cmd.AddCommand(NewCmdList(f))

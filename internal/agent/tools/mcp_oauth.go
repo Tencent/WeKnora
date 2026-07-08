@@ -176,6 +176,16 @@ func waitForMCPOAuthAuthorization(
 		requestID, _ = types.RequestIDFromContext(ctx)
 	}
 
+	// Non-interactive channels (e.g. IM bots) have no live client that can click
+	// "Authorize" and call the resolve endpoint, so blocking on the OAuth wait
+	// would just hang the agent until it times out (once per unauthorized
+	// service). Instead, emit a one-shot notice the channel can surface to the
+	// user and continue without the tool. See types.WithMCPOAuthNonInteractive.
+	if types.IsMCPOAuthNonInteractive(ctx) || types.IsMCPOAuthNonInteractive(waitCtx) {
+		emitMCPOAuthRequiredNotice(waitCtx, sess, service, mcpToolName, toolCallID, tenantID, requestID)
+		return ctx, noop, false
+	}
+
 	decision, waitErr := ow.RequestOAuthAndWait(waitCtx, approval.OAuthPendingRequest{
 		TenantID:           tenantID,
 		UserID:             userID,
@@ -198,6 +208,47 @@ func waitForMCPOAuthAuthorization(
 		return freshCtx, cancel, true
 	}
 	return ctx, noop, true
+}
+
+// emitMCPOAuthRequiredNotice publishes a one-shot "MCP OAuth required" event
+// WITHOUT registering a pending waiter. It is used for non-interactive channels
+// that cannot complete an in-conversation authorization: subscribers (e.g. the
+// IM reply builder) surface the notice to the user, who then authorizes the
+// service from the web console out-of-band. TimeoutSeconds is 0 to distinguish
+// this notice from a resolvable prompt.
+func emitMCPOAuthRequiredNotice(
+	ctx context.Context,
+	sess *MCPOAuthSession,
+	service *types.MCPService,
+	mcpToolName, toolCallID string,
+	tenantID uint64,
+	requestID string,
+) {
+	if sess == nil || sess.EventBus == nil || service == nil {
+		return
+	}
+	_ = sess.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
+		ID:        "mcp-oauth-notice-" + service.ID,
+		Type:      event.EventMCPOAuthRequired,
+		SessionID: sess.SessionID,
+		Data: event.MCPOAuthRequiredData{
+			TenantID:           tenantID,
+			SessionID:          sess.SessionID,
+			AssistantMessageID: sess.AssistantMessageID,
+			ServiceID:          service.ID,
+			ServiceName:        service.Name,
+			MCPToolName:        mcpToolName,
+			TimeoutSeconds:     0, // 0 => notice only, not an in-conversation prompt
+			RequestedAtUnix:    time.Now().Unix(),
+			ToolCallID:         toolCallID,
+			RequestID:          requestID,
+		},
+		Metadata: map[string]interface{}{
+			"assistant_message_id": sess.AssistantMessageID,
+			"notice_only":          true,
+		},
+		RequestID: requestID,
+	})
 }
 
 // oauthAwareConnectError turns a low-level MCP connect/call error into a

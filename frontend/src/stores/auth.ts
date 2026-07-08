@@ -59,7 +59,7 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const hasValidTenant = computed(() => {
-    return !!tenant.value && !!tenant.value.api_key
+    return !!tenant.value && !!tenant.value.id
   })
 
   const currentTenantId = computed(() => {
@@ -342,7 +342,6 @@ export const useAuthStore = defineStore('auth', () => {
         setTenant({
           id: String(tenantSnapshot.id) || '',
           name: tenantSnapshot.name || '',
-          api_key: tenantSnapshot.api_key || '',
           owner_id: tenantSnapshot.owner_id || u.id || '',
           description: tenantSnapshot.description,
           status: tenantSnapshot.status,

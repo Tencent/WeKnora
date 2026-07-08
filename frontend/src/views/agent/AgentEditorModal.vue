@@ -2183,7 +2183,7 @@ function gotoIntegrations(tab: 'im' | 'embed') {
   const agentId = editorAgent.value?.id;
   if (!agentId) return;
   handleClose();
-  router.push({ path: '/platform/integrations', query: { agentId, tab } });
+  router.push({ path: '/platform/settings', query: { section: 'integrations', agentId, tab } });
 }
 
 const filteredIntentPlaceholders = computed(() => {
@@ -2994,7 +2994,9 @@ const loadDependencies = async () => {
 
     webSearchProviderList.value = chatResources.webSearchProviders as WebSearchProviderEntity[];
 
-    placeholderData.value = editorResources.placeholders as PlaceholderDefinition[];
+    if (editorResources.placeholders) {
+      placeholderData.value = editorResources.placeholders;
+    }
 
     const rc = editorResources.tenantRetrievalConfig as Record<string, number> | null;
     if (rc?.embedding_top_k) defaultEmbeddingTopK.value = rc.embedding_top_k;

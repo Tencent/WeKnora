@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 )
 
@@ -55,7 +56,7 @@ func NewClient(config *Config) *Client {
 		baseURL:    config.GetBaseURL(),
 		appID:      config.AppID,
 		appSecret:  config.AppSecret,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
 	}
 }
 

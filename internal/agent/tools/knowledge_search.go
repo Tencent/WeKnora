@@ -1271,6 +1271,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 			"result_index":        i + 1,
 			"content":             result.Content,
 			"knowledge_id":        result.KnowledgeID,
+			"knowledge_base_id":   result.KnowledgeBaseID,
 			"knowledge_title":     result.KnowledgeTitle,
 			"match_type":          result.MatchType,
 			"source_query":        result.SourceQuery,

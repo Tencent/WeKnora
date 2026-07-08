@@ -103,6 +103,9 @@ adds leave the current profile untouched unless --use is passed.`,
 		UsedFor:       "Register a new profile (connection target) with a name and host URL. Does not store credentials; make it active (--use, or `profile use <n>`) and run `auth login` afterwards to authenticate.",
 		RequiredFlags: []string{"<name> (positional)", "--host"},
 		Output:        "envelope.data has name, host, user, current",
+		Examples: []string{
+			"weknora profile add prod --host https://kb.example.com --use",
+		},
 	})
 	return cmd
 }

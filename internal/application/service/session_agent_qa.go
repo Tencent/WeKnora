@@ -243,7 +243,12 @@ func (s *sessionService) buildAgentConfig(
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
 
 	// Resolve knowledge bases using shared helper
-	agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs = s.resolveKnowledgeBases(ctx, req)
+	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	agentConfig.KnowledgeBases = kbIDs
+	agentConfig.KnowledgeIDs = knowledgeIDs
 
 	// Use custom agent's allowed tools if specified, otherwise use defaults
 	if len(customAgent.Config.AllowedTools) > 0 {
@@ -299,7 +304,7 @@ func (s *sessionService) buildAgentConfig(
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
 	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
 	if err != nil {
-		logger.Warnf(ctx, "Failed to build search targets for agent: %v", err)
+		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))

@@ -35,6 +35,7 @@ export interface SearchResultItem {
     score: number;
     relevance_level: RelevanceLevel;
     knowledge_id: string;
+    knowledge_base_id?: string;
     knowledge_title: string;
     match_type: string;
     knowledge_base_type?: string;
@@ -343,4 +344,3 @@ export interface ActionData {
     display_type?: DisplayType;
     tool_data?: Record<string, any>;
 }
-

@@ -42,7 +42,16 @@ func NewFactory() im.AdapterFactory {
 				}
 			}()
 
-			return adapter, wsCancel, nil
+			// stop tears down the connection for real. wsCancel alone is a
+			// no-op: the Feishu SDK's Start blocks on select{} and never
+			// observes ctx, so we must call Close() to actually close the
+			// socket and disable auto-reconnect. wsCancel is kept as a
+			// belt-and-braces fallback for the start goroutine.
+			stop := func() {
+				client.Close()
+				wsCancel()
+			}
+			return adapter, stop, nil
 
 		default:
 			return nil, nil, fmt.Errorf("unknown Feishu mode: %s", mode)

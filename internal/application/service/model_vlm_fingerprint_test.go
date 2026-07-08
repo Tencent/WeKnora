@@ -117,6 +117,8 @@ func (f *fakeTenantServiceForVLM) GetWeKnoraCloudCredentials(ctx context.Context
 }
 
 func TestGetVLMModelWithFingerprint_UsesWeKnoraCloudTenantCredentialFallback(t *testing.T) {
+	withSSRFWhitelist(t, "weknora.example.com")
+
 	model := &types.Model{
 		ID:       "vlm-1",
 		TenantID: 7,

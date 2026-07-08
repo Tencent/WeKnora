@@ -41,22 +41,36 @@ func TestAnalyzeResponse_ToolCall_DoesNotTerminate(t *testing.T) {
 		"non-terminal tool calls must keep the loop running")
 }
 
-// TestAnalyzeResponse_NaturalStop_Terminates guards the sole termination path:
-// finish_reason == "stop" with no tool calls ends the loop and surfaces the
-// plain content as the final answer.
+// TestAnalyzeResponse_NaturalStop_Terminates guards the termination path:
+// a natural finish reason with no tool calls ends the loop and surfaces the
+// plain content as the final answer. Different providers use different labels
+// for the same "assistant turn is done" state.
 func TestAnalyzeResponse_NaturalStop_Terminates(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{})
-	resp := &types.ChatResponse{
-		FinishReason: "stop",
-		Content:      "Here is the answer.",
+	tests := []struct {
+		name         string
+		finishReason string
+	}{
+		{name: "openai_stop", finishReason: "stop"},
+		{name: "anthropic_end_turn", finishReason: "end_turn"},
+		{name: "anthropic_stop_sequence", finishReason: "stop_sequence"},
 	}
 
-	verdict := engine.analyzeResponse(
-		context.Background(), resp, types.AgentStep{}, 0, "sess-1", time.Now(),
-	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := newTestEngine(t, &mockChat{})
+			resp := &types.ChatResponse{
+				FinishReason: tt.finishReason,
+				Content:      "Here is the answer.",
+			}
 
-	assert.True(t, verdict.isDone, "a natural stop with no tool calls must terminate the loop")
-	assert.Equal(t, "Here is the answer.", verdict.finalAnswer)
+			verdict := engine.analyzeResponse(
+				context.Background(), resp, types.AgentStep{}, 0, "sess-1", time.Now(),
+			)
+
+			assert.True(t, verdict.isDone, "a natural stop with no tool calls must terminate the loop")
+			assert.Equal(t, "Here is the answer.", verdict.finalAnswer)
+		})
+	}
 }
 
 // TestAppendToolResults_PreservesReasoningContent verifies that the assistant

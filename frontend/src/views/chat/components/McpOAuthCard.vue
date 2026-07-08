@@ -81,8 +81,8 @@ const { t } = useI18n()
 const authorizing = ref(false)
 const canceling = ref(false)
 const now = ref(Date.now())
-let clock: ReturnType<typeof setInterval> | null = null
-let poll: ReturnType<typeof setInterval> | null = null
+let clock: number | null = null
+let poll: number | null = null
 
 const deadline = computed(() => {
   const base = (props.requestedAt || 0) * 1000
@@ -138,7 +138,7 @@ function formatCountdown(s: number): string {
 
 function stopPoll() {
   if (poll) {
-    clearInterval(poll)
+    window.clearInterval(poll)
     poll = null
   }
 }
@@ -248,13 +248,13 @@ const authorize = async () => {
 }
 
 onMounted(() => {
-  clock = setInterval(() => {
+  clock = window.setInterval(() => {
     now.value = Date.now()
   }, 1000)
 })
 
 onBeforeUnmount(() => {
-  if (clock) clearInterval(clock)
+  if (clock) window.clearInterval(clock)
   stopPoll()
 })
 </script>

@@ -144,7 +144,7 @@ func RequireCrossTenantAccess(cfg *config.Config) gin.HandlerFunc {
 // auth middleware.
 //
 // The router places this on the /tenants/:id group so every per-tenant
-// endpoint (GetTenant / UpdateTenant / DeleteTenant / ResetAPIKey /
+// endpoint (GetTenant / UpdateTenant / DeleteTenant /
 // member management / leave) shares the same check, replacing what was
 // previously a copy-pasted block in each handler.
 //

@@ -2,8 +2,24 @@ package utils
 
 import "strings"
 
+// IsActiveBrowserContentExt reports whether a file extension can execute script
+// or otherwise participate as active same-origin browser content when served
+// inline. User-uploaded files with these extensions must be downloaded instead
+// of previewed inline.
+func IsActiveBrowserContentExt(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".svg", ".svgz", ".html", ".htm", ".xhtml", ".xml", ".js", ".mjs", ".css":
+		return true
+	default:
+		return false
+	}
+}
+
 // GetContentTypeByExt returns the content type based on file extension
 func GetContentTypeByExt(ext string) string {
+	if IsActiveBrowserContentExt(ext) {
+		return "application/octet-stream"
+	}
 	switch strings.ToLower(ext) {
 	case ".csv":
 		return "text/csv; charset=utf-8"
@@ -27,12 +43,8 @@ func GetContentTypeByExt(ext string) string {
 		return "image/gif"
 	case ".webp":
 		return "image/webp"
-	case ".svg":
-		return "image/svg+xml"
 	case ".txt":
 		return "text/plain; charset=utf-8"
-	case ".html", ".htm":
-		return "text/html; charset=utf-8"
 	case ".mp4":
 		return "video/mp4"
 	case ".mp3":
@@ -50,4 +62,19 @@ func GetContentTypeByExt(ext string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// SafeContentTypeByFilename returns a browser-safe content type for serving
+// user-controlled files and whether that file may be displayed inline.
+func SafeContentTypeByFilename(filename string) (string, bool) {
+	ext := filename
+	if idx := strings.LastIndex(ext, "."); idx >= 0 {
+		ext = ext[idx:]
+	} else {
+		ext = ""
+	}
+	if IsActiveBrowserContentExt(ext) {
+		return "application/octet-stream", false
+	}
+	return GetContentTypeByExt(ext), true
 }

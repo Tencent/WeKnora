@@ -90,6 +90,7 @@ in scripted / --format json invocations (exit code 10; see cli/README.md).`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "remove a named profile and its stored credentials",
 		RequiredFlags: []string{"<name> (positional)"},
+		Output:        "envelope.data is {name, removed:true, was_current}",
 		Examples: []string{
 			"weknora profile remove staging",
 			"weknora profile remove production -y",
@@ -117,7 +118,7 @@ func runRemove(opts *RemoveOptions, fopts *cmdutil.FormatOptions, name string, s
 	// Confirmation only fires for removing the current profile - non-current
 	// remove uses the same low-friction policy as `auth logout`.
 	if wasCurrent {
-		if err := cmdutil.ConfirmDestructive(p, opts.Yes, jsonOut, "remove", "current profile", name, "profile.remove", fmt.Sprintf("weknora profile remove %s -y", name)); err != nil {
+		if err := cmdutil.ConfirmDestructive(p, opts.Yes, jsonOut, "remove", "current profile", name, "profile.remove", []string{"weknora", "profile", "remove", name, "-y"}); err != nil {
 			return err
 		}
 	}

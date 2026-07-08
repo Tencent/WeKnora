@@ -47,6 +47,12 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
       - name: go vet
         run: go vet ./...
+      - name: Check skill wire vocabulary
+        if: runner.os == 'Linux'
+        run: scripts/check-skill-wire-vocab.sh
+      - name: Check for committed credentials in docs
+        if: runner.os == 'Linux'
+        run: scripts/check-secret-tokens.sh
       - name: coverage report
         if: matrix.os == 'ubuntu-latest'
         run: go tool cover -func=coverage.out

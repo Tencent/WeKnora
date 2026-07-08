@@ -47,7 +47,12 @@ func AddFormatFlag(cmd *cobra.Command, fieldHints ...string) {
 	if len(fieldHints) > 0 {
 		sorted := append([]string(nil), fieldHints...)
 		sort.Strings(sorted)
-		hdr := "\n\nJSON fields available (for --jq projection):\n  " +
+		// Fields live under .data in the {ok,data,meta} envelope, so --jq must
+		// be rooted there: `--jq '.data.<field>'` (object) or
+		// `--jq '.data[].<field>'` (list). A bare `--jq '.<field>'` matches the
+		// envelope top level and silently returns null — spell out the path so
+		// agents don't ship broken projections.
+		hdr := "\n\nJSON fields available under .data (project with --jq '.data.<field>', or '.data[].<field>' for lists):\n  " +
 			strings.Join(sorted, "\n  ")
 		if cmd.Long != "" {
 			cmd.Long += hdr
@@ -99,7 +104,7 @@ func (o *FormatOptions) WantsJSON() bool {
 // path) or as bare NDJSON lines (FormatNDJSON path). meta is optional
 // (pass nil for mutation commands without batch counts).
 //
-// FormatJSON path: envelope is {ok:true, data:..., meta?:..., _notice?:...}.
+// FormatJSON path: envelope is {ok:true, data:..., meta?:..., profile?:...}.
 // Indent is determined by o.TTY (populated by ResolveDefault).
 // When o.JQ is set, jq evaluates against the full envelope JSON, so users
 // project with ".data[]", ".meta.count", etc.
@@ -144,18 +149,33 @@ func mapJQError(err error) error {
 }
 
 // ResolveDefault fills in Mode when the caller has not explicitly set it:
-//   - Mode defaults to FormatJSON
+//   - Mode defaults to FormatJSON, regardless of TTY
 //   - TTY only affects the indent decision (auto-indent in TTY; compact in pipe)
 //   - For human-readable rendering, pass --format text explicitly
+//
+// JSON-always (not a TTY switch to text on a terminal) is deliberate: an
+// agent-first CLI values output predictability over terminal ergonomics, so
+// the default never depends on whether stdout is a TTY. Humans opt into
+// human-readable output with `--format text`.
 func (o *FormatOptions) ResolveDefault(tty bool) {
 	o.TTY = tty
+	// Apply WEKNORA_FORMAT before the hard default so the documented
+	// precedence holds: explicit --format (already set on o.Mode by
+	// CheckFormatFlag) > WEKNORA_FORMAT > DefaultFormatMode. FromEnv is a
+	// no-op when --format was passed. Folded in here because nearly every
+	// command calls ResolveDefault but only a couple called FromEnv, so the
+	// env var was silently ignored on success output across the CLI.
+	o.FromEnv()
 	if o.Mode == "" {
 		o.Mode = DefaultFormatMode
 	}
 }
 
 // FromEnv reads WEKNORA_FORMAT and applies it when Mode hasn't been set
-// by --format. Call between CheckFormatFlag and ResolveDefault.
+// by --format. ResolveDefault now calls this, so commands get the env var
+// applied automatically; explicit callers (e.g. the root PersistentPreRunE,
+// which resolves the error-envelope mode before any command RunE) remain
+// valid and idempotent.
 //
 // Invalid env values are silently ignored (the user's --format on a
 // later invocation will still take precedence).

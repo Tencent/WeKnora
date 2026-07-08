@@ -23,9 +23,8 @@ type Config struct {
 
 	// Defaults holds CLI-wide defaults; fields opt-in.
 	Defaults struct {
-		Format          string `yaml:"format,omitempty"`
-		NoVersionCheck  bool   `yaml:"no_version_check,omitempty"`
-		RequestIDPrefix string `yaml:"request_id_prefix,omitempty"`
+		Format         string `yaml:"format,omitempty"`
+		NoVersionCheck bool   `yaml:"no_version_check,omitempty"`
 	} `yaml:"defaults,omitempty"`
 }
 

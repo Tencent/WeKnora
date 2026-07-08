@@ -1,4 +1,4 @@
-DO $$ BEGIN RAISE NOTICE '[Migration 000065] Creating vlm_image_result_cache...'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000066] Creating vlm_image_result_cache...'; END $$;
 
 CREATE TABLE IF NOT EXISTS vlm_image_result_cache (
     id VARCHAR(36) PRIMARY KEY,
@@ -20,4 +20,4 @@ CREATE INDEX IF NOT EXISTS idx_vlm_image_result_cache_image_hash ON vlm_image_re
 CREATE INDEX IF NOT EXISTS idx_vlm_image_result_cache_model_fp ON vlm_image_result_cache(model_fingerprint);
 CREATE INDEX IF NOT EXISTS idx_vlm_image_result_cache_result_type ON vlm_image_result_cache(result_type);
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000065] vlm_image_result_cache ready'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000066] vlm_image_result_cache ready'; END $$;

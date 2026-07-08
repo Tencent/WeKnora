@@ -431,6 +431,45 @@ func TestList_EndTime_InvalidFormat_Rejected(t *testing.T) {
 	assert.Contains(t, typed.Message, "--end-time")
 }
 
+// TestList_JSON_TotalCount_SinglePage asserts that meta.total_count is populated
+// from the server total when doing a single-page fetch.
+func TestList_JSON_TotalCount_SinglePage(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListSvc{
+		items: []sdk.Knowledge{{ID: "doc1", FileName: "a.pdf"}},
+		total: 99,
+	}
+	opts := &ListOptions{PageSize: 20, Limit: 30}
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	body := out.String()
+	assert.Contains(t, body, `"total_count":99`, "single-page fetch must surface server total in meta.total_count")
+}
+
+// TestList_JSON_TotalCount_AllPages asserts meta.total_count is populated
+// from the server total when walking all pages.
+func TestList_JSON_TotalCount_AllPages(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &pagedDocSvc{all: makeDocs(45)}
+	opts := &ListOptions{PageSize: 20, Limit: 10000, AllPages: true}
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	body := out.String()
+	assert.Contains(t, body, `"total_count":45`, "--all-pages fetch must surface server total in meta.total_count")
+}
+
+// TestList_JSON_TotalCount_Zero_Present asserts that when server returns total=0
+// on an empty list, meta.total_count (and meta.count) still serialize as 0. The
+// *int + omitempty pattern omits only nil, so the agent contract stays stable:
+// an empty result reports 0, not a missing key.
+func TestList_JSON_TotalCount_Zero_Present(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListSvc{items: nil, total: 0}
+	opts := &ListOptions{PageSize: 20, Limit: 30}
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
+	body := out.String()
+	assert.Contains(t, body, `"total_count":0`, "zero server total must serialize as 0 on empty list")
+	assert.Contains(t, body, `"count":0`, "empty list must report count:0, not omit it")
+}
+
 // TestList_AllFiltersCombined drives every new filter flag at once to confirm
 // they all land on the same filter struct (AND combine on the server).
 func TestList_AllFiltersCombined(t *testing.T) {

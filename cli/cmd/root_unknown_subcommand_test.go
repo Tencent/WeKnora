@@ -48,7 +48,7 @@ func TestUnknownSubcommand_EmitsTypedEnvelope(t *testing.T) {
 	if !strings.Contains(got, `"available":[`) {
 		t.Errorf("expected detail.available[]; got %q", got)
 	}
-	if !strings.Contains(got, `"retry_command":"weknora --help"`) {
-		t.Errorf("expected retry_command; got %q", got)
+	if !strings.Contains(got, `"retry_argv":["weknora","--help"]`) {
+		t.Errorf("expected retry_argv; got %q", got)
 	}
 }

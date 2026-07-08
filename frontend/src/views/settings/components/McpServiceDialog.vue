@@ -76,7 +76,7 @@
           <t-textarea
             v-model="codeImportText"
             :autosize="{ minRows: 5, maxRows: 14 }"
-            :placeholder="t('mcpServiceDialog.codeImport.placeholder')"
+            :placeholder="codeImportPlaceholder"
             class="code-import__textarea"
           />
           <p v-if="codeImportError" class="code-import__error">{{ codeImportError }}</p>
@@ -408,6 +408,13 @@ const emit = defineEmits<Emits>()
 const formRef = ref<FormInstanceFunctions>()
 const submitting = ref(false)
 const { t } = useI18n()
+const codeImportPlaceholder = `{
+  "mcpServers": {
+    "my-server": {
+      "url": "https://example.com/sse"
+    }
+  }
+}`
 
 const formData = ref({
   name: '',

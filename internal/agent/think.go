@@ -437,9 +437,9 @@ func (e *AgentEngine) callLLMWithRetry(
 			round, response.FinishReason, len(response.Content))
 		// Early signal for natural-stop path: this round will be analyzed as a
 		// likely final answer (no tool call branch).
-		if response.FinishReason == "stop" {
-			logger.Infof(ctx, "[Agent][Round-%d] Natural-stop candidate detected (finish=stop, tool_calls=0, content=%d chars)",
-				round, len(response.Content))
+		if isNaturalStopFinishReason(response.FinishReason) {
+			logger.Infof(ctx, "[Agent][Round-%d] Natural-stop candidate detected (finish=%s, tool_calls=0, content=%d chars)",
+				round, response.FinishReason, len(response.Content))
 		}
 	}
 	if response.Content != "" {

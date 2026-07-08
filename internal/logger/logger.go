@@ -500,6 +500,7 @@ func CloneContext(ctx context.Context) context.Context {
 		types.UserIDContextKey,
 		types.UserContextKey,
 		types.PrincipalContextKey,
+		types.TenantAPIKeyScopeContextKey,
 		// TenantRoleContextKey: the caller's resolved role in the
 		// active tenant (PR 2 #1303). Must be propagated for the same
 		// reason as TenantIDContextKey — any handler that does
@@ -508,6 +509,7 @@ func CloneContext(ctx context.Context) context.Context {
 		// type-zero TenantRole and fall back
 		// to Viewer, blocking even Owners.
 		types.TenantRoleContextKey,
+		types.SystemAdminContextKey,
 		types.LanguageContextKey,
 		types.SessionTenantIDContextKey,
 		types.EmbedQueryContextKey,

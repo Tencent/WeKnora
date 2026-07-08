@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,7 +16,7 @@ import (
 // authStatusFields enumerates the fields surfaced for `--format json` discovery
 // on `auth status`. Single-resource shape: filter applies to data itself.
 var authStatusFields = []string{
-	"profile", "user_id", "username", "email", "is_active",
+	"profile", "host", "auth_source", "user_id", "username", "email", "is_active",
 	"can_access_all_tenants", "tenant_id", "tenant_name",
 }
 
@@ -29,6 +31,8 @@ type StatusService interface {
 // account) without a second round-trip.
 type statusResult struct {
 	Profile             string `json:"profile"`
+	Host                string `json:"host,omitempty"`
+	AuthSource          string `json:"auth_source,omitempty"`
 	UserID              string `json:"user_id,omitempty"`
 	Username            string `json:"username,omitempty"`
 	Email               string `json:"email,omitempty"`
@@ -68,7 +72,7 @@ usually only surfaces a hard auth failure.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:  "show the active profile, the authenticated principal, and token state",
 		Examples: []string{"weknora auth status", "weknora auth status --jq .data.tenant_id"},
-		Output:   "envelope.data is {profile, host, user, tenant, ...}; exit 3 if unauthenticated",
+		Output:   "envelope.data is {profile, host, auth_source, user_id, username, email, tenant_id, tenant_name, ...}; auth_source is 'profile + keyring' or a stateless env credential; exit 3 if unauthenticated",
 	})
 	return cmd
 }
@@ -89,8 +93,24 @@ func runStatus(ctx context.Context, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 		return err
 	}
 
+	// Effective host + auth source. Stateless env credentials
+	// (WEKNORA_TOKEN/WEKNORA_API_KEY) override the profile + keyring for the
+	// client, so report the host they authenticate against (WEKNORA_HOST) and
+	// that they are in effect — not the bypassed config profile's host.
+	host := ""
+	if c, ok := cfg.Profiles[cfg.CurrentProfile]; ok {
+		host = c.Host
+	}
+	authSource := "profile + keyring"
+	if active, kind := cmdutil.EnvCredential(); active {
+		authSource = kind + " env (stateless)"
+		if h := strings.TrimSpace(os.Getenv("WEKNORA_HOST")); h != "" {
+			host = h
+		}
+	}
+
 	if fopts.WantsJSON() {
-		result := statusResult{Profile: cfg.CurrentProfile}
+		result := statusResult{Profile: cfg.CurrentProfile, Host: host, AuthSource: authSource}
 		if user != nil {
 			result.UserID = user.ID
 			result.Username = user.Username
@@ -105,12 +125,9 @@ func runStatus(ctx context.Context, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 		return fopts.Emit(iostreams.IO.Out, result, nil)
 	}
 
-	host := ""
-	if c, ok := cfg.Profiles[cfg.CurrentProfile]; ok {
-		host = c.Host
-	}
-	fmt.Fprintf(iostreams.IO.Out, "profile: %s\n", cfg.CurrentProfile)
-	fmt.Fprintf(iostreams.IO.Out, "host:    %s\n", host)
+	fmt.Fprintf(iostreams.IO.Out, "profile:     %s\n", cfg.CurrentProfile)
+	fmt.Fprintf(iostreams.IO.Out, "auth_source: %s\n", authSource)
+	fmt.Fprintf(iostreams.IO.Out, "host:        %s\n", host)
 	if user != nil {
 		fmt.Fprintf(iostreams.IO.Out, "user:    %s (%s)\n", user.Email, user.ID)
 		fmt.Fprintf(iostreams.IO.Out, "tenant:  %d", user.TenantID)

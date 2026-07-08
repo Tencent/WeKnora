@@ -1,6 +1,6 @@
 // Package kb holds the `weknora kb` command tree: list / view / create /
-// edit / delete / pin / unpin. Verb set follows common CRUD vocabulary
-// (list/view/create/edit/delete) plus pin/unpin. Bulk content deletion
+// update / delete / pin / unpin. Verb set follows common CRUD vocabulary
+// (list/view/create/update/delete) plus pin/unpin. Bulk content deletion
 // is exposed via `weknora doc delete --all --kb=<id>`.
 package kb
 
@@ -25,5 +25,6 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(NewCmdUnpin(f))
 	cmd.AddCommand(NewCmdStatus(f))
 	cmd.AddCommand(NewCmdCheck(f))
+	cmd.AddCommand(NewCmdConfig(f)) // `config` also hosts the `config set` write subcommand
 	return cmd
 }
