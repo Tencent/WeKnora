@@ -1035,10 +1035,8 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 	ctx context.Context,
 	srcKB string,
-	targetID string,
 ) (*types.KnowledgeBase, error) {
 	srcKB = strings.TrimSpace(srcKB)
-	targetID = strings.TrimSpace(targetID)
 	if srcKB == "" {
 		return nil, apperrors.NewBadRequestError("source knowledge base ID cannot be empty")
 	}
@@ -1055,11 +1053,7 @@ func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 	if err != nil {
 		return nil, err
 	}
-	if targetID != "" {
-		targetKB.ID = targetID
-	} else {
-		targetKB.ID = uuid.New().String()
-	}
+	targetKB.ID = uuid.New().String()
 	targetKB.TenantID = tenantID
 	targetKB.Name = s.buildDuplicateKnowledgeBaseName(ctx, tenantID, sourceKB.Name)
 	targetKB.CreatorID = ""
@@ -1095,20 +1089,54 @@ func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 	return targetKB, nil
 }
 
+func duplicateKBCopySuffix(locale string) string {
+	locale = strings.ToLower(locale)
+	switch {
+	case strings.HasPrefix(locale, "zh"):
+		return " 副本"
+	case strings.HasPrefix(locale, "ko"):
+		return " 사본"
+	case strings.HasPrefix(locale, "ru"):
+		return " копия"
+	default:
+		return " Copy"
+	}
+}
+
+func duplicateKBDefaultName(locale string) string {
+	locale = strings.ToLower(locale)
+	switch {
+	case strings.HasPrefix(locale, "zh"):
+		return "知识库"
+	case strings.HasPrefix(locale, "ko"):
+		return "지식베이스"
+	case strings.HasPrefix(locale, "ru"):
+		return "База знаний"
+	default:
+		return "Knowledge Base"
+	}
+}
+
 func (s *knowledgeBaseService) buildDuplicateKnowledgeBaseName(
 	ctx context.Context,
 	tenantID uint64,
 	sourceName string,
 ) string {
+	locale, ok := types.LanguageFromContext(ctx)
+	if !ok {
+		locale = types.DefaultLanguage()
+	}
+	suffix := duplicateKBCopySuffix(locale)
+
 	baseName := strings.TrimSpace(sourceName)
 	if baseName == "" {
-		baseName = "知识库"
+		baseName = duplicateKBDefaultName(locale)
 	}
 
 	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
 	if err != nil {
 		logger.Warnf(ctx, "List tenant knowledge bases failed while building duplicate name: %v", err)
-		return baseName + " 副本"
+		return baseName + suffix
 	}
 
 	existing := make(map[string]struct{}, len(kbs))
@@ -1119,12 +1147,12 @@ func (s *knowledgeBaseService) buildDuplicateKnowledgeBaseName(
 		existing[kb.Name] = struct{}{}
 	}
 
-	candidate := baseName + " 副本"
+	candidate := baseName + suffix
 	if _, ok := existing[candidate]; !ok {
 		return candidate
 	}
 	for i := 2; ; i++ {
-		candidate = fmt.Sprintf("%s 副本 %d", baseName, i)
+		candidate = fmt.Sprintf("%s%s %d", baseName, suffix, i)
 		if _, ok := existing[candidate]; !ok {
 			return candidate
 		}

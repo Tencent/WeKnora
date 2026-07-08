@@ -241,10 +241,6 @@ type CopyKnowledgeBaseResponse struct {
 	Message  string `json:"message"`
 }
 
-type DuplicateKnowledgeBaseRequest struct {
-	TargetID string `json:"target_id,omitempty"`
-}
-
 type DuplicateKnowledgeBaseResponse struct {
 	SourceID      string        `json:"source_id"`
 	TargetID      string        `json:"target_id"`
@@ -477,11 +473,10 @@ func (c *Client) CopyKnowledgeBase(ctx context.Context, request *CopyKnowledgeBa
 func (c *Client) DuplicateKnowledgeBase(
 	ctx context.Context,
 	knowledgeBaseID string,
-	request *DuplicateKnowledgeBaseRequest,
 ) (*DuplicateKnowledgeBaseResponse, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/duplicate", knowledgeBaseID)
 
-	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
 	if err != nil {
 		return nil, err
 	}

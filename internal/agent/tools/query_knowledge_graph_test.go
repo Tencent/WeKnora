@@ -86,7 +86,6 @@ func (s *stubKnowledgeBaseService) CopyKnowledgeBase(
 func (s *stubKnowledgeBaseService) DuplicateKnowledgeBase(
 	context.Context,
 	string,
-	string,
 ) (*types.KnowledgeBase, error) {
 	return nil, nil
 }

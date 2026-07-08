@@ -936,10 +936,6 @@ type CopyKnowledgeBaseResponse struct {
 	Message  string `json:"message"`
 }
 
-type DuplicateKnowledgeBaseRequest struct {
-	TargetID string `json:"target_id"`
-}
-
 type DuplicateKnowledgeBaseResponse struct {
 	SourceID      string      `json:"source_id"`
 	TargetID      string      `json:"target_id"`
@@ -1131,9 +1127,8 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                         true   "源知识库 ID"
-// @Param        request  body      DuplicateKnowledgeBaseRequest  false  "创建副本请求"
-// @Success      201      {object}  map[string]interface{}         "创建后的知识库副本"
+// @Param        id       path      string                  true  "源知识库 ID"
+// @Success      201      {object}  map[string]interface{}  "创建后的知识库副本"
 // @Failure      400      {object}  errors.AppError                 "请求参数错误"
 // @Security     Bearer
 // @Router       /knowledge-bases/{id}/duplicate [post]
@@ -1143,13 +1138,6 @@ func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 	if sourceID == "" {
 		c.Error(apperrors.NewBadRequestError("Knowledge base ID cannot be empty"))
 		return
-	}
-	var req DuplicateKnowledgeBaseRequest
-	if c.Request.Body != nil && c.Request.ContentLength != 0 {
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
-			return
-		}
 	}
 
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -1171,7 +1159,7 @@ func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	targetKB, err := h.service.DuplicateKnowledgeBase(ctx, sourceID, req.TargetID)
+	targetKB, err := h.service.DuplicateKnowledgeBase(ctx, sourceID)
 	if err != nil {
 		if appErr, ok := apperrors.IsAppError(err); ok {
 			c.Error(appErr)

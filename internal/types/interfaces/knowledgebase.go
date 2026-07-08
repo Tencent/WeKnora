@@ -118,9 +118,8 @@ type KnowledgeBaseService interface {
 
 	// DuplicateKnowledgeBase creates a new settings-only knowledge base duplicate.
 	// It does not copy knowledge entries, chunks, FAQ rows, wiki pages, indexes,
-	// data sources, shares, pins, or task state. targetID is optional; when empty
-	// a new UUID is generated.
-	DuplicateKnowledgeBase(ctx context.Context, src string, targetID string) (*types.KnowledgeBase, error)
+	// data sources, shares, pins, or task state. A new UUID is always generated.
+	DuplicateKnowledgeBase(ctx context.Context, src string) (*types.KnowledgeBase, error)
 
 	// GetRepository gets the knowledge base repository
 	// Parameters:

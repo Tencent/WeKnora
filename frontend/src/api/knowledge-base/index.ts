@@ -135,8 +135,8 @@ export function copyKnowledgeBase(data: { source_id: string; target_id?: string 
   return post(`/api/v1/knowledge-bases/copy`, data);
 }
 
-export function duplicateKnowledgeBase(id: string, data: { target_id?: string } = {}) {
-  return post(`/api/v1/knowledge-bases/${id}/duplicate`, data);
+export function duplicateKnowledgeBase(id: string) {
+  return post(`/api/v1/knowledge-bases/${id}/duplicate`);
 }
 
 // 获取可移动目标知识库列表（同类型、同Embedding模型）

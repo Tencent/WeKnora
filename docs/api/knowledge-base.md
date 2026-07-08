@@ -22,6 +22,7 @@
 | GET    | `/knowledge-bases/:id/hybrid-search`      | 混合搜索（兼容旧客户端，需 JSON 请求体）  |
 | POST   | `/knowledge-bases/copy`                   | 拷贝知识库（异步任务）   |
 | GET    | `/knowledge-bases/copy/progress/:task_id` | 获取拷贝进度             |
+| POST   | `/knowledge-bases/:id/duplicate`          | 创建知识库副本（仅设置） |
 | GET    | `/knowledge-bases/:id/move-targets`       | 获取可迁移目标知识库列表 |
 
 ## POST `/knowledge-bases` - 创建知识库
@@ -528,6 +529,77 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/copy/progress/kb_c
     "success": true
 }
 ```
+
+## POST `/knowledge-bases/:id/duplicate` - 创建知识库副本
+
+同步创建一个**仅包含设置**的新知识库副本。会复制分块、模型、索引策略、Wiki/FAQ 配置等设置字段，但**不会**复制知识条目、分块内容、FAQ 条目、Wiki 页面、向量/关键词索引、数据源绑定、分享关系或置顶状态。
+
+与 `POST /knowledge-bases/copy` 的区别：
+
+| 能力 | `/duplicate` | `/copy` |
+| ---- | ------------ | ------- |
+| 执行方式 | 同步，立即返回新 KB | 异步任务，需轮询 progress |
+| 复制内容 | 仅设置 | 设置 + 全部知识内容 |
+| 新 KB ID | 服务端自动生成 UUID | 可指定已有目标库或新建 |
+
+**权限**：需要 `Contributor+`，且对源知识库至少有 `Viewer` 读权限（路由层 `KBAccessRead`）。源知识库必须属于调用者所在租户，否则返回 `403 Forbidden`。
+
+**命名规则**：新 KB 名称在源名称后追加本地化后缀（依据 `Accept-Language` 或 `WEKNORA_LANGUAGE`），例如中文 `原名 副本`、英文 `Original Name Copy`；若同名已存在则递增为 `原名 副本 2`、`Original Name Copy 2` 等。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明        |
+| ---- | ------ | ----------- |
+| id   | string | 源知识库 ID |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/duplicate' \
+--header 'Authorization: Bearer <token>' \
+--header 'Accept-Language: zh-CN' \
+--request POST
+```
+
+**响应**（HTTP 201）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "source_id": "kb-00000001",
+        "target_id": "kb-00000002",
+        "message": "Knowledge base duplicate created",
+        "knowledge_base": {
+            "id": "kb-00000002",
+            "name": "产品文档 副本",
+            "type": "document",
+            "description": "…",
+            "embedding_model_id": "embed-1",
+            "chunking_config": {},
+            "knowledge_count": 0,
+            "chunk_count": 0
+        }
+    }
+}
+```
+
+**响应字段（`data`）**:
+
+| 字段            | 类型   | 说明                         |
+| --------------- | ------ | ---------------------------- |
+| source_id       | string | 源知识库 ID                  |
+| target_id       | string | 新创建的知识库 ID            |
+| message         | string | 操作结果描述                 |
+| knowledge_base  | object | 新副本的完整知识库对象       |
+
+**常见错误**:
+
+| 场景                 | HTTP | 说明 |
+| -------------------- | ---- | ---- |
+| 源知识库不存在       | 404  | `Source knowledge base not found` |
+| 源库属于其他租户     | 403  | `No permission to duplicate this knowledge base` |
+| 向量存储绑定无效     | 400  | 源库绑定的 vector store 不可用 |
 
 ## GET `/knowledge-bases/:id/move-targets` - 获取可迁移目标知识库列表
 

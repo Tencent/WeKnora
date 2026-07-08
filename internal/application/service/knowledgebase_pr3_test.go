@@ -423,10 +423,10 @@ func TestDuplicateKnowledgeBase_CreatesSettingsOnlyDuplicate(t *testing.T) {
 	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 	ctx := context.WithValue(ctxWithTenant(1), types.UserIDContextKey, "copy-user")
 
-	target, err := svc.DuplicateKnowledgeBase(ctx, "src", "copy-id")
+	target, err := svc.DuplicateKnowledgeBase(ctx, "src")
 	require.NoError(t, err)
 
-	require.Equal(t, "copy-id", target.ID)
+	require.NotEmpty(t, target.ID)
 	assert.Equal(t, uint64(1), target.TenantID)
 	assert.Equal(t, "copy-user", target.CreatorID)
 	assert.Equal(t, "Source KB 副本", target.Name)
@@ -456,7 +456,7 @@ func TestDuplicateKnowledgeBase_CreatesSettingsOnlyDuplicate(t *testing.T) {
 	assert.Zero(t, target.ProcessingCount)
 	assert.Zero(t, target.ShareCount)
 	assert.Empty(t, target.CreatorName)
-	require.Same(t, target, repo.rows["copy-id"])
+	require.Same(t, target, repo.rows[target.ID])
 }
 
 func TestDuplicateKnowledgeBase_UsesDistinctNameWhenDuplicateExists(t *testing.T) {
@@ -475,8 +475,25 @@ func TestDuplicateKnowledgeBase_UsesDistinctNameWhenDuplicateExists(t *testing.T
 	}
 	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 
-	target, err := svc.DuplicateKnowledgeBase(ctxWithTenant(1), "src", "copy-id")
+	target, err := svc.DuplicateKnowledgeBase(ctxWithTenant(1), "src")
 	require.NoError(t, err)
 
 	assert.Equal(t, "Source KB 副本 2", target.Name)
+}
+
+func TestDuplicateKnowledgeBase_UsesLocalizedEnglishSuffix(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["src"] = &types.KnowledgeBase{
+		ID:       "src",
+		Name:     "Source KB",
+		Type:     types.KnowledgeBaseTypeDocument,
+		TenantID: 1,
+	}
+	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
+	ctx := context.WithValue(ctxWithTenant(1), types.LanguageContextKey, "en-US")
+
+	target, err := svc.DuplicateKnowledgeBase(ctx, "src")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Source KB Copy", target.Name)
 }
