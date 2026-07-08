@@ -11,6 +11,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/contentcache"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -18,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -48,7 +48,17 @@ const (
 		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
 		"</instructions>"
 	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image in Chinese"
+
+	vlmOCRPromptVersion           = "ocr-default-v1"
+	vlmOCRScannedPDFPromptVersion = "ocr-scanned-pdf-v1"
+	vlmCaptionPromptVersion       = "caption-v1"
+	vlmCacheTTL                   = 30 * 24 * time.Hour
 )
+
+type cachedVLMText struct {
+	Text     string `json:"text"`
+	CachedAt int64  `json:"cached_at"`
+}
 
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
@@ -113,6 +123,49 @@ func (s *ImageMultimodalService) tracker() SpanTracker {
 		return noopSpanTracker{}
 	}
 	return s.spanTracker
+}
+
+func (s *ImageMultimodalService) getCachedVLMText(ctx context.Context, key string) (string, bool) {
+	if s.redisClient == nil {
+		return "", false
+	}
+	data, err := s.redisClient.Get(ctx, key).Bytes()
+	if err == redis.Nil || err != nil {
+		return "", false
+	}
+	var cached cachedVLMText
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return "", false
+	}
+	return cached.Text, true
+}
+
+func (s *ImageMultimodalService) setCachedVLMText(ctx context.Context, key, text string) {
+	if s.redisClient == nil {
+		return
+	}
+	data, err := json.Marshal(cachedVLMText{
+		Text:     text,
+		CachedAt: time.Now().Unix(),
+	})
+	if err != nil {
+		return
+	}
+	if err := s.redisClient.Set(ctx, key, data, vlmCacheTTL).Err(); err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to write VLM cache %s: %v", key, err)
+	}
+}
+
+func vlmCacheModelKey(cfg types.VLMConfig) string {
+	if id := strings.TrimSpace(cfg.ModelID); id != "" {
+		return id
+	}
+	legacyKey := strings.Join([]string{
+		cfg.ModelName,
+		cfg.BaseURL,
+		cfg.InterfaceType,
+	}, "\x00")
+	return "legacy:" + contentcache.TextHash(legacyKey)
 }
 
 // Handle implements asynq handler for TypeImageMultimodal.
@@ -210,11 +263,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// legacy inline-config path) so the trace shows WHICH model handled
 	// this image. Without this, debugging "VLM is slow" requires a
 	// separate hop to the KB config.
-	if id := strings.TrimSpace(vlmCfg.ModelID); id != "" {
-		imgOut["vlm_model_id"] = id
-	} else {
-		imgOut["vlm_model_id"] = "legacy_inline"
-	}
+	vlmModelID := vlmCacheModelKey(vlmCfg)
+	imgOut["vlm_model_id"] = vlmModelID
 
 	// Read image bytes. A provider:// URL must be resolved via FileService —
 	// it must NEVER be handed to the HTTP downloader (which would fail with
@@ -228,6 +278,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 	imgOut["image_bytes"] = len(imgBytes)
+	imageContentHash := contentcache.ImageHash(imgBytes)
 
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
@@ -236,19 +287,33 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if payload.EnableOCR {
 		prompt := vlmOCRPrompt
+		promptVersion := vlmOCRPromptVersion
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
+			promptVersion = vlmOCRScannedPDFPromptVersion
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 			imgOut["ocr_prompt"] = "scanned_pdf"
 		} else {
 			imgOut["ocr_prompt"] = "default"
 		}
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-			imgOut["ocr_error"] = ocrErr.Error()
+		ocrCacheKey := contentcache.VLMKey(imageContentHash, vlmModelID, promptVersion)
+		ocrText, ocrHit := s.getCachedVLMText(ctx, ocrCacheKey)
+		if ocrHit {
+			imgOut["ocr_cache"] = "hit"
 		} else {
+			imgOut["ocr_cache"] = "miss"
+			var ocrErr error
+			ocrText, ocrErr = vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+			if ocrErr != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
+				imgOut["ocr_error"] = ocrErr.Error()
+			} else {
+				ocrText = sanitizeOCRText(ocrText)
+				s.setCachedVLMText(ctx, ocrCacheKey, ocrText)
+			}
+		}
+		if ocrHit || imgOut["ocr_error"] == nil {
 			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
@@ -262,11 +327,22 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
+	captionCacheKey := contentcache.VLMKey(imageContentHash, vlmModelID, vlmCaptionPromptVersion)
+	caption, captionHit := s.getCachedVLMText(ctx, captionCacheKey)
+	if captionHit {
+		imgOut["caption_cache"] = "hit"
+	} else {
+		imgOut["caption_cache"] = "miss"
+		var capErr error
+		caption, capErr = vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else {
+			s.setCachedVLMText(ctx, captionCacheKey, caption)
+		}
+	}
+	if (captionHit || imgOut["caption_error"] == nil) && caption != "" {
 		imageInfo.Caption = caption
 		imgOut["caption_chars"] = len([]rune(caption))
 		imgOut["caption_preview"] = previewText(caption, 200)
@@ -278,11 +354,19 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: contentcache.StableChunkID(contentcache.ChunkIDInput{
+				KnowledgeID: payload.KnowledgeID,
+				ChunkType:   types.ChunkTypeImageOCR,
+				Seq:         payload.ImageIndex,
+				Content:     imageInfo.OCRText,
+				ParentID:    payload.ChunkID,
+				ImageURL:    imageContentHash,
+			}),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
 			Content:         imageInfo.OCRText,
+			ContentHash:     contentcache.ChunkContentHash(imageInfo.OCRText, ""),
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   payload.ChunkID,
 			IsEnabled:       true,
@@ -295,11 +379,19 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: contentcache.StableChunkID(contentcache.ChunkIDInput{
+				KnowledgeID: payload.KnowledgeID,
+				ChunkType:   types.ChunkTypeImageCaption,
+				Seq:         payload.ImageIndex,
+				Content:     imageInfo.Caption,
+				ParentID:    payload.ChunkID,
+				ImageURL:    imageContentHash,
+			}),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
 			Content:         imageInfo.Caption,
+			ContentHash:     contentcache.ChunkContentHash(imageInfo.Caption, ""),
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   payload.ChunkID,
 			IsEnabled:       true,
@@ -399,6 +491,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: %v", err)
 		return
 	}
+	embeddingModel = cachedEmbeddingModel(s.redisClient, embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {

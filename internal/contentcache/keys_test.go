@@ -1,0 +1,116 @@
+package contentcache
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestStableChunkIDIsContentAddressedWithinKnowledge(t *testing.T) {
+	input := ChunkIDInput{
+		KnowledgeID:   "knowledge-1",
+		ChunkType:     "text",
+		Seq:           7,
+		Content:       "  hello\r\nworld  ",
+		ContextHeader: "# Intro",
+	}
+
+	got := StableChunkID(input)
+	again := StableChunkID(ChunkIDInput{
+		KnowledgeID:   "knowledge-1",
+		ChunkType:     "text",
+		Seq:           7,
+		Content:       "hello\nworld",
+		ContextHeader: "# Intro",
+	})
+
+	if got == "" {
+		t.Fatal("StableChunkID returned empty id")
+	}
+	if len(got) != 36 {
+		t.Fatalf("StableChunkID length = %d, want UUID length 36", len(got))
+	}
+	if got != again {
+		t.Fatalf("stable id changed for equivalent normalized content: %q != %q", got, again)
+	}
+}
+
+func TestStableChunkIDDifferentiatesContentTypeSequenceAndParent(t *testing.T) {
+	base := ChunkIDInput{
+		KnowledgeID: "knowledge-1",
+		ChunkType:   "text",
+		Seq:         1,
+		Content:     "same text",
+		ParentID:    "parent-a",
+	}
+	baseID := StableChunkID(base)
+
+	cases := map[string]ChunkIDInput{
+		"content": {
+			KnowledgeID: "knowledge-1",
+			ChunkType:   "text",
+			Seq:         1,
+			Content:     "different text",
+			ParentID:    "parent-a",
+		},
+		"type": {
+			KnowledgeID: "knowledge-1",
+			ChunkType:   "parent_text",
+			Seq:         1,
+			Content:     "same text",
+			ParentID:    "parent-a",
+		},
+		"sequence": {
+			KnowledgeID: "knowledge-1",
+			ChunkType:   "text",
+			Seq:         2,
+			Content:     "same text",
+			ParentID:    "parent-a",
+		},
+		"parent": {
+			KnowledgeID: "knowledge-1",
+			ChunkType:   "text",
+			Seq:         1,
+			Content:     "same text",
+			ParentID:    "parent-b",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := StableChunkID(tc); got == baseID {
+				t.Fatalf("StableChunkID did not change when %s changed", name)
+			}
+		})
+	}
+}
+
+func TestCacheKeysIncludeLayerInvalidationInputs(t *testing.T) {
+	textHash := TextHash("  alpha\r\nbeta ")
+	if textHash != TextHash("alpha\nbeta") {
+		t.Fatal("TextHash should use normalized text")
+	}
+
+	embeddingA := EmbeddingKey(textHash, "embedder-a", 1536)
+	embeddingB := EmbeddingKey(textHash, "embedder-a", 3072)
+	if embeddingA == embeddingB {
+		t.Fatal("EmbeddingKey must include embedding dimension")
+	}
+
+	vlmA := VLMKey(ImageHash([]byte("image bytes")), "vlm-a", "ocr-v1")
+	vlmB := VLMKey(ImageHash([]byte("image bytes")), "vlm-a", "ocr-v2")
+	if vlmA == vlmB {
+		t.Fatal("VLMKey must include prompt version")
+	}
+
+	wikiA := WikiMapKey(TextHash("document"), "standard", "chat-a", "wiki-v1")
+	wikiB := WikiMapKey(TextHash("document"), "focused", "chat-a", "wiki-v1")
+	if wikiA == wikiB {
+		t.Fatal("WikiMapKey must include extraction granularity")
+	}
+
+	for _, key := range []string{embeddingA, vlmA, wikiA} {
+		if strings.Contains(key, " ") {
+			t.Fatalf("cache key contains spaces: %q", key)
+		}
+	}
+}

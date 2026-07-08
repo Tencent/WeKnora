@@ -197,6 +197,82 @@ func TestCreateChunks_SQLite_SeqIDAfterSoftDelete(t *testing.T) {
 	assert.Equal(t, int64(5), saved[1].SeqID)
 }
 
+func TestHardDeleteChunksByKnowledgeID_AllowsStableIDReinsertAfterSoftDelete(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	chunk := makeChunk(kbID, knowledgeID, "text")
+	chunk.ID = "stable-chunk-id"
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+	require.NoError(t, repo.DeleteChunksByKnowledgeID(ctx, 1, knowledgeID))
+
+	recreated := makeChunk(kbID, knowledgeID, "text")
+	recreated.ID = "stable-chunk-id"
+	require.Error(t, repo.CreateChunks(ctx, []*types.Chunk{recreated}),
+		"soft-deleted stable IDs should still occupy the primary key")
+
+	require.NoError(t, repo.HardDeleteChunksByKnowledgeID(ctx, 1, knowledgeID))
+	recreated.SeqID = 0
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{recreated}))
+
+	got, err := repo.GetChunkByID(ctx, 1, "stable-chunk-id")
+	require.NoError(t, err)
+	assert.Equal(t, "test content", got.Content)
+}
+
+func TestListAllChunksByKnowledgeID_IncludesEveryChunkType(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	otherKnowledgeID := uuid.New().String()
+
+	textChunk := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	textChunk.ChunkIndex = 2
+	ocrChunk := makeChunk(kbID, knowledgeID, types.ChunkTypeImageOCR)
+	ocrChunk.ChunkIndex = 1
+	otherChunk := makeChunk(kbID, otherKnowledgeID, types.ChunkTypeText)
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{textChunk, ocrChunk, otherChunk}))
+
+	got, err := repo.ListAllChunksByKnowledgeID(ctx, 1, knowledgeID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, ocrChunk.ID, got[0].ID)
+	assert.Equal(t, textChunk.ID, got[1].ID)
+}
+
+func TestHardDeleteChunks_AllowsStableIDReinsertAfterSoftDelete(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	stableID := "stable-chunk-id"
+	chunk := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	chunk.ID = stableID
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+	require.NoError(t, repo.DeleteChunks(ctx, 1, []string{stableID}))
+
+	recreated := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	recreated.ID = stableID
+	require.Error(t, repo.CreateChunks(ctx, []*types.Chunk{recreated}),
+		"soft-deleted stable IDs should still occupy the primary key")
+
+	require.NoError(t, repo.HardDeleteChunks(ctx, 1, []string{stableID}))
+	recreated.SeqID = 0
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{recreated}))
+
+	got, err := repo.GetChunkByID(ctx, 1, stableID)
+	require.NoError(t, err)
+	assert.Equal(t, "test content", got.Content)
+}
+
 func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	db := setupChunkTestDB(t)
 	ctx := context.Background()

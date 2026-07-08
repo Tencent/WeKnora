@@ -144,6 +144,20 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
+// ListAllChunksByKnowledgeID lists every active chunk type for a knowledge ID.
+func (r *chunkRepository) ListAllChunksByKnowledgeID(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Order("chunk_index ASC, id ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	ctx context.Context,
@@ -438,9 +452,35 @@ func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids
 	return nil
 }
 
+// HardDeleteChunks permanently deletes chunks by IDs in batch.
+func (r *chunkRepository) HardDeleteChunks(ctx context.Context, tenantID uint64, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	const batchSize = 5000
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := r.db.WithContext(ctx).Unscoped().
+			Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).
+			Delete(&types.Chunk{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeleteChunksByKnowledgeID deletes all chunks for a knowledge ID
 func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error {
 	return r.db.WithContext(ctx).Where(
+		"tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID,
+	).Delete(&types.Chunk{}).Error
+}
+
+func (r *chunkRepository) HardDeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error {
+	return r.db.WithContext(ctx).Unscoped().Where(
 		"tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID,
 	).Delete(&types.Chunk{}).Error
 }
