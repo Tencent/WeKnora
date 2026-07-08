@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -70,6 +71,10 @@ type DataSourceService interface {
 
 	// ProcessSync handles the actual sync operation (called by asynq task)
 	ProcessSync(ctx context.Context, task *asynq.Task) error
+
+	// IngestFetchedItem writes an already-fetched async item into the target
+	// datasource's knowledge base.
+	IngestFetchedItem(ctx context.Context, dataSourceID string, item *types.FetchedItem) error
 }
 
 // DataSourceRepository defines database access patterns for data sources
@@ -125,4 +130,18 @@ type SyncLogRepository interface {
 
 	// CleanupOldLogs deletes sync logs older than the retention period
 	CleanupOldLogs(ctx context.Context, retentionDays int) error
+}
+
+// DingTalkExportTaskRepository stores official DingTalk Markdown export jobs
+// until the asynchronous dingdoc_export_finish callback arrives.
+type DingTalkExportTaskRepository interface {
+	UpsertPending(ctx context.Context, task *types.DingTalkExportTask) error
+	FindByTaskID(ctx context.Context, taskID string) (*types.DingTalkExportTask, error)
+	FindPendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]*types.DingTalkExportTask, error)
+	MarkSucceeded(ctx context.Context, taskID, eventID, exportURL string) error
+	MarkFailed(ctx context.Context, taskID, eventID, errorCode, errorMessage string) error
+}
+
+type DingTalkExportService interface {
+	HandleExportFinishEvent(ctx context.Context, payload []byte) error
 }

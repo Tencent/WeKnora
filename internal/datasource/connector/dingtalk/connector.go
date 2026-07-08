@@ -21,7 +21,7 @@ type Connector struct {
 }
 
 func NewConnector() *Connector {
-	return &Connector{contentFetchers: defaultDingTalkContentFetchers()}
+	return &Connector{}
 }
 
 func (c *Connector) Type() string { return types.ConnectorTypeDingTalk }
@@ -189,6 +189,7 @@ func (c *Connector) walk(
 		return nil, nil, err
 	}
 	cli := newClient(cfg)
+	fetchers := c.contentFetchersForConfig(config)
 
 	next := &dingtalkCursor{
 		LastSyncTime:      time.Now(),
@@ -224,7 +225,7 @@ func (c *Connector) walk(
 			}
 			seenDocs[docResourceID] = true
 
-			item, hash, err := c.fetchDingTalkItem(ctx, cli, doc, workspaceID, selectedResourceID)
+			item, hash, err := c.fetchDingTalkItem(ctx, cli, doc, workspaceID, selectedResourceID, fetchers)
 			if err != nil {
 				out = append(out, errorFetchedItem(doc, workspaceID, selectedResourceID, err))
 				continue

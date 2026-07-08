@@ -3,6 +3,7 @@ package dingtalk
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -11,17 +12,61 @@ type dingtalkContentFetcher interface {
 	Fetch(ctx context.Context, cli *client, doc wikiNode, workspaceID, selectedResourceID string) (*types.FetchedItem, string, bool, error)
 }
 
-func defaultDingTalkContentFetchers() []dingtalkContentFetcher {
+func (c *Connector) contentFetchersForConfig(config *types.DataSourceConfig) []dingtalkContentFetcher {
+	if len(c.contentFetchers) > 0 {
+		return c.contentFetchers
+	}
+	return defaultDingTalkContentFetchers(config)
+}
+
+func defaultDingTalkContentFetchers(config *types.DataSourceConfig) []dingtalkContentFetcher {
+	if dingTalkExportEnabled(config) {
+		return []dingtalkContentFetcher{
+			fileFetcher{},
+			exportFetcher{},
+			blockFetcher{},
+		}
+	}
 	return []dingtalkContentFetcher{
 		fileFetcher{},
 		blockFetcher{},
 	}
 }
 
-// exportFetcher is reserved for deployments that can handle DingTalk's export
-// completion event or an external exporter. It is not in the default fetcher
-// chain because the official Markdown export API returns results via event
-// push, while the datasource connector is a synchronous pull interface.
+func dingTalkExportEnabled(config *types.DataSourceConfig) bool {
+	if config == nil || config.Settings == nil {
+		return false
+	}
+	mode := configSettingString(config.Settings,
+		"online_doc_fetcher",
+		"online_document_fetcher",
+		"dingtalk_online_doc_fetcher",
+	)
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "export", "official_export", "markdown_export":
+		return true
+	default:
+		return false
+	}
+}
+
+func configSettingString(settings map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		raw, ok := settings[key]
+		if !ok || raw == nil {
+			continue
+		}
+		if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+		return strings.TrimSpace(fmt.Sprint(raw))
+	}
+	return ""
+}
+
+// exportFetcher starts DingTalk's official Markdown export task. The content
+// arrives later through a dingdoc_export_finish callback, so the returned item
+// is a pending marker for the application service to persist.
 type exportFetcher struct{}
 
 func (exportFetcher) Fetch(
@@ -31,7 +76,43 @@ func (exportFetcher) Fetch(
 	workspaceID string,
 	selectedResourceID string,
 ) (*types.FetchedItem, string, bool, error) {
-	return nil, "", false, nil
+	if !doc.isOnlineDocument() {
+		return nil, "", false, nil
+	}
+	dentryUUID := doc.downloadDentryUUID()
+	if strings.TrimSpace(dentryUUID) == "" {
+		return nil, "", true, fmt.Errorf("dingtalk online document %s has empty dentry uuid", doc.NodeID)
+	}
+	taskID, err := cli.SubmitMarkdownExport(ctx, dentryUUID)
+	if err != nil {
+		return nil, "", true, err
+	}
+	hash := contentHash([]byte("export:" + dentryUUID + ":" + doc.modifiedTime()))
+	item := &types.FetchedItem{
+		ExternalID:       makeResourceID(workspaceID, doc.NodeID),
+		Title:            doc.displayName(),
+		ContentType:      "text/markdown",
+		FileName:         markdownFileName(doc.displayName()),
+		URL:              doc.URL,
+		UpdatedAt:        parseDingTalkTime(doc.modifiedTime()),
+		SourceResourceID: selectedResourceID,
+		Metadata: map[string]string{
+			"channel":           types.ChannelDingtalk,
+			"workspace_id":      workspaceID,
+			"node_id":           doc.NodeID,
+			"doc_key":           doc.docKey(),
+			"dentry_uuid":       dentryUUID,
+			"category":          doc.Category,
+			"fetcher":           "export",
+			"fidelity":          "official_markdown_export",
+			"content_hash":      hash,
+			"export_status":     "pending",
+			"export_task_id":    taskID,
+			"target_format":     "markdown",
+			"supported_formats": "alidoc/asheet/pdf/docx/xlsx -> markdown export",
+		},
+	}
+	return item, hash, true, nil
 }
 
 type fileFetcher struct{}
@@ -143,19 +224,29 @@ func (c *Connector) fetchDingTalkItem(
 	doc wikiNode,
 	workspaceID string,
 	selectedResourceID string,
+	fetchers []dingtalkContentFetcher,
 ) (*types.FetchedItem, string, error) {
-	fetchers := c.contentFetchers
-	if len(fetchers) == 0 {
-		fetchers = defaultDingTalkContentFetchers()
-	}
 	for _, fetcher := range fetchers {
 		item, hash, handled, err := fetcher.Fetch(ctx, cli, doc, workspaceID, selectedResourceID)
 		if !handled {
 			continue
 		}
+		if shouldFallbackFromDingTalkFetcher(fetcher, err) {
+			continue
+		}
 		return item, hash, err
 	}
 	return nil, "", fmt.Errorf("unsupported dingtalk node category %q", doc.Category)
+}
+
+func shouldFallbackFromDingTalkFetcher(fetcher dingtalkContentFetcher, err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, ok := fetcher.(exportFetcher); !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "document.aiassistant.read")
 }
 
 func errorFetchedItem(doc wikiNode, workspaceID, selectedResourceID string, err error) types.FetchedItem {

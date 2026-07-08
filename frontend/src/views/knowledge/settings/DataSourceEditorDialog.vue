@@ -330,6 +330,27 @@ const schedulePresets = computed(() => [
   { label: t('datasource.schedule24h'), value: '0 0 2 * * *' },
 ])
 
+const dingtalkMarkdownExportGuideUrl = 'https://alidocs.dingtalk.com/i/p/Oe3RmQy6bQlPmaP6RBGvEVdkE4e3LmDA'
+
+type DingTalkOnlineDocFetcherMode = 'blocks' | 'export'
+
+function dingtalkOnlineDocFetcherMode(): DingTalkOnlineDocFetcherMode {
+  return String(form.value.config.settings.online_doc_fetcher || '').toLowerCase() === 'export'
+    ? 'export'
+    : 'blocks'
+}
+
+function setDingTalkOnlineDocFetcherMode(mode: DingTalkOnlineDocFetcherMode) {
+  const settings = form.value.config.settings
+  if (mode === 'export') {
+    settings.online_doc_fetcher = 'export'
+    return
+  }
+  delete settings.online_doc_fetcher
+  delete settings.online_document_fetcher
+  delete settings.dingtalk_online_doc_fetcher
+}
+
 // --- Connector definitions ---
 interface ConnectorDef {
   type: string
@@ -778,10 +799,11 @@ function prevStep() {
 // commitCredentialsIfNeeded). Sending an empty map keeps the backend
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
+  const settings = { ...form.value.config.settings }
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
-    settings: form.value.config.settings,
+    settings,
   }
 }
 
@@ -1114,6 +1136,16 @@ const drawerConfirmText = computed(() => {
             {{ t(`datasource.prereqOpenConsole_${form.type}`, t('datasource.prereqOpenConsole')) }}
             <t-icon name="link" class="link-icon" />
           </a>
+          <a
+            v-if="form.type === 'dingtalk'"
+            :href="dingtalkMarkdownExportGuideUrl"
+            target="_blank"
+            rel="noopener"
+            class="doc-link ds-setup-guide__link"
+          >
+            {{ t('datasource.prereqMarkdownExportGuide_dingtalk') }}
+            <t-icon name="link" class="link-icon" />
+          </a>
         </div>
       </div>
 
@@ -1428,6 +1460,38 @@ const drawerConfirmText = computed(() => {
         <t-select v-model="form.sync_schedule">
           <t-option v-for="p in schedulePresets" :key="p.value" :value="p.value" :label="p.label" />
         </t-select>
+      </section>
+
+      <section v-if="form.type === 'dingtalk'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.field.dingtalkOnlineDocFetcher') }}</h4>
+        <div class="form-item form-item--flat">
+          <div class="option-group" role="radiogroup" :aria-label="t('datasource.field.dingtalkOnlineDocFetcher')">
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': dingtalkOnlineDocFetcherMode() === 'blocks' }"
+              role="radio"
+              :aria-checked="dingtalkOnlineDocFetcherMode() === 'blocks'"
+              @click="setDingTalkOnlineDocFetcherMode('blocks')"
+            >
+              {{ t('datasource.field.dingtalkFetcherBlocks') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': dingtalkOnlineDocFetcherMode() === 'export' }"
+              role="radio"
+              :aria-checked="dingtalkOnlineDocFetcherMode() === 'export'"
+              @click="setDingTalkOnlineDocFetcherMode('export')"
+            >
+              {{ t('datasource.field.dingtalkFetcherExport') }}
+            </button>
+          </div>
+          <p class="form-desc">{{ t('datasource.field.dingtalkBlocksFetcherHint') }}</p>
+          <p class="form-desc">{{ t('datasource.field.dingtalkExportFetcherHint') }}</p>
+          <p class="form-desc">{{ t('datasource.field.dingtalkMarkdownExportHint') }}</p>
+          <p class="form-desc">{{ t('datasource.field.dingtalkOnlineDocFetcherHint') }}</p>
+        </div>
       </section>
 
       <section class="setting-drawer__section">

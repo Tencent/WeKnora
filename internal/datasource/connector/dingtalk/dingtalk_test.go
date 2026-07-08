@@ -221,6 +221,238 @@ func TestFetchAllCanUseConfiguredExporterBeforeOpenAPIFallback(t *testing.T) {
 	}
 }
 
+func TestParseExportFinishEventAcceptsHTTPAndStreamPayloads(t *testing.T) {
+	tests := map[string]struct {
+		payload    string
+		taskID     string
+		dentryUUID string
+	}{
+		"http": {
+			payload: `{
+			"EventType": "dingdoc_export_finish",
+			"EventTime": 1663143335567,
+			"eventId": "evt-http",
+			"biz_data": {
+				"eventId": "evt-http-inner",
+				"extension": "adoc",
+				"format": "markdown",
+				"url": "https://example.com/export/doc.md",
+				"success": true,
+				"dentryUuid": "doc-http",
+				"name": "HTTP 文档",
+				"taskId": "task-http"
+			}
+		}`,
+			taskID:     "task-http",
+			dentryUUID: "doc-http",
+		},
+		"http-string": {
+			payload: `{
+			"EventType": "dingdoc_export_finish",
+			"EventTime": 1663143335567,
+			"eventId": "evt-http-string",
+			"biz_data": "{\"extension\":\"adoc\",\"format\":\"markdown\",\"url\":\"https://example.com/export/string.md\",\"success\":true,\"dentryUuid\":\"doc-http-string\",\"name\":\"HTTP String 文档\",\"taskId\":\"task-http-string\"}"
+		}`,
+			taskID:     "task-http-string",
+			dentryUUID: "doc-http-string",
+		},
+		"stream": {
+			payload: `{
+			"eventType": "dingdoc_export_finish",
+			"eventId": "evt-stream",
+			"eventBornTime": 1683533823336,
+			"data": {
+				"bizData": {
+					"extension": "adoc",
+					"format": "markdown",
+					"url": "https://example.com/export/stream.md",
+					"success": true,
+					"dentryUuid": "doc-stream",
+					"name": "Stream 文档",
+					"taskId": "task-stream"
+				}
+			}
+		}`,
+			taskID:     "task-stream",
+			dentryUUID: "doc-stream",
+		},
+		"stream-data": {
+			payload: `{
+			"eventType": "doc_content_export_result",
+			"eventId": "evt-stream-data",
+			"eventBornTime": 1683533823336,
+			"data": {
+				"extension": "adoc",
+				"format": "markdown",
+				"url": "https://example.com/export/stream-data.md",
+				"success": true,
+				"dentryUuid": "doc-stream-data",
+				"name": "Stream Data 文档",
+				"taskId": "task-stream-data"
+			}
+		}`,
+			taskID:     "task-stream-data",
+			dentryUUID: "doc-stream-data",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			event, err := ParseExportFinishEvent([]byte(tt.payload))
+			if err != nil {
+				t.Fatalf("parse export finish event: %v", err)
+			}
+			if !isExportFinishEventType(event.EventType) {
+				t.Fatalf("unexpected event type: %#v", event)
+			}
+			if event.TaskID != tt.taskID || event.DentryUUID != tt.dentryUUID {
+				t.Fatalf("unexpected task identity: %#v", event)
+			}
+			if event.Format != "markdown" || event.Extension != "adoc" || !event.Success {
+				t.Fatalf("unexpected export result: %#v", event)
+			}
+			if event.URL == "" || event.Name == "" {
+				t.Fatalf("missing url or name: %#v", event)
+			}
+		})
+	}
+}
+
+func TestClientSubmitMarkdownExportStartsOfficialExportTask(t *testing.T) {
+	server := newFakeDingTalkServer(t)
+	defer server.Close()
+
+	cfg := &Config{
+		AppKey:          "ding-client",
+		AppSecret:       "ding-secret",
+		OperatorUnionID: "union-001",
+		BaseURL:         server.URL,
+	}
+	taskID, err := newClient(cfg).SubmitMarkdownExport(context.Background(), "doc1")
+	if err != nil {
+		t.Fatalf("submit markdown export: %v", err)
+	}
+	if taskID != "task-doc1" {
+		t.Fatalf("task id = %q, want task-doc1", taskID)
+	}
+	if got := atomic.LoadInt32(&server.exportCalls); got != 1 {
+		t.Fatalf("expected one export call, got %d", got)
+	}
+}
+
+func TestDingTalkStatusErrorSuggestsEnterpriseVerification(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusForbidden}
+	body := []byte(`{
+		"requestid": "019F4176-E640-7924-A7F6-52E3A0BFAAD8",
+		"code": "orgAuthLevelNotEnough",
+		"message": "auth level of org is not enough"
+	}`)
+
+	err := dingtalkStatusError(resp, body)
+	if err == nil {
+		t.Fatal("expected status error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "enterprise verification") ||
+		!strings.Contains(msg, "uploaded file download") {
+		t.Fatalf("missing enterprise verification suggestion: %s", msg)
+	}
+}
+
+func TestDingTalkStatusErrorSuggestsGrayScopeFallbackForAIAssistantScope(t *testing.T) {
+	resp := &http.Response{StatusCode: http.StatusForbidden}
+	body := []byte(`{
+		"requestid": "019F419C-8737-7A5D-B6B8-4DB544A5BC90",
+		"code": "Forbidden.AccessDenied.AccessTokenPermissionDenied",
+		"message": "应用尚未开通所需的权限：[Document.AIAssistant.Read]"
+	}`)
+
+	err := dingtalkStatusError(resp, body)
+	if err == nil {
+		t.Fatal("expected status error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Document.AIAssistant.Read") ||
+		!strings.Contains(msg, "gray/allowlisted") ||
+		!strings.Contains(msg, "uploaded file download") ||
+		!strings.Contains(msg, "block reading") {
+		t.Fatalf("missing gray scope fallback suggestion: %s", msg)
+	}
+}
+
+func TestFetchAllCanSubmitOfficialExportTasksWhenEnabled(t *testing.T) {
+	server := newFakeDingTalkServer(t)
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.Settings = map[string]interface{}{
+		"online_doc_fetcher": "export",
+	}
+
+	items, err := NewConnector().FetchAll(context.Background(), cfg, []string{"ws1:root"})
+	if err != nil {
+		t.Fatalf("fetch all: %v", err)
+	}
+
+	byID := map[string]types.FetchedItem{}
+	for _, item := range items {
+		byID[item.ExternalID] = item
+	}
+	for _, id := range []string{"ws1:doc1", "ws1:doc2"} {
+		item := byID[id]
+		if item.Metadata["fetcher"] != "export" ||
+			item.Metadata["export_status"] != "pending" ||
+			item.Metadata["export_task_id"] == "" ||
+			item.Metadata["dentry_uuid"] == "" {
+			t.Fatalf("expected pending export item for %s, got %#v", id, item)
+		}
+		if len(item.Content) != 0 || item.FileName == "" {
+			t.Fatalf("pending export item should carry filename but no content, got %#v", item)
+		}
+	}
+	if byID["ws1:file1"].Metadata["fetcher"] != "file" {
+		t.Fatalf("uploaded file should still use file fetcher, got %#v", byID["ws1:file1"])
+	}
+	if got := atomic.LoadInt32(&server.blockCalls); got != 0 {
+		t.Fatalf("export mode should not call block fallback, got %d block calls", got)
+	}
+	if got := atomic.LoadInt32(&server.exportCalls); got != 2 {
+		t.Fatalf("expected two export calls, got %d", got)
+	}
+}
+
+func TestFetchAllFallsBackToBlocksWhenOfficialExportScopeIsUnavailable(t *testing.T) {
+	server := newFakeDingTalkServer(t)
+	defer server.Close()
+	atomic.StoreInt32(&server.exportPermissionDenied, 1)
+
+	cfg := newTestConfig(server.URL)
+	cfg.Settings = map[string]interface{}{
+		"online_doc_fetcher": "export",
+	}
+
+	items, err := NewConnector().FetchAll(context.Background(), cfg, []string{"ws1:doc1"})
+	if err != nil {
+		t.Fatalf("fetch all: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one item, got %#v", items)
+	}
+	item := items[0]
+	if item.Metadata["fetcher"] != "block" {
+		t.Fatalf("expected block fallback, got %#v", item)
+	}
+	if !strings.Contains(string(item.Content), "docx:doc1:v1") {
+		t.Fatalf("expected block content after fallback, got %q", string(item.Content))
+	}
+	if got := atomic.LoadInt32(&server.exportCalls); got != 1 {
+		t.Fatalf("expected one export attempt, got %d", got)
+	}
+	if got := atomic.LoadInt32(&server.blockCalls); got != 1 {
+		t.Fatalf("expected one block fallback call, got %d", got)
+	}
+}
+
 func TestMarkdownFileNameNormalizesDocumentExtensions(t *testing.T) {
 	tests := map[string]string{
 		"WeKnora测试.adoc": "WeKnora测试.md",
@@ -599,12 +831,14 @@ func resourceIDs(resources []types.Resource) []string {
 
 type fakeDingTalkServer struct {
 	*httptest.Server
-	userDetailCalls   int32
-	blockCalls        int32
-	downloadInfoCalls int32
-	doc2Deleted       int32
-	doc1Revision      int32
-	doc1BlockFailed   int32
+	userDetailCalls        int32
+	blockCalls             int32
+	downloadInfoCalls      int32
+	exportCalls            int32
+	doc2Deleted            int32
+	doc1Revision           int32
+	doc1BlockFailed        int32
+	exportPermissionDenied int32
 }
 
 func newFakeDingTalkServer(t *testing.T) *fakeDingTalkServer {
@@ -618,6 +852,7 @@ func newFakeDingTalkServer(t *testing.T) *fakeDingTalkServer {
 	mux.HandleFunc("/v2.0/wiki/nodes", fake.handleNodes)
 	mux.HandleFunc("/v2.0/wiki/nodes/", fake.handleNodeDetail)
 	mux.HandleFunc("/v2.0/doc/dentries/", fake.handleQueryDentryID)
+	mux.HandleFunc("/v1.0/doc/", fake.handleDocExport)
 	mux.HandleFunc("/v1.0/doc/suites/documents/", fake.handleBlocks)
 	mux.HandleFunc("/v1.0/storage/spaces/", fake.handleStorageDownloadInfo)
 	mux.HandleFunc("/download/file1", fake.handleFileDownload)
@@ -808,6 +1043,40 @@ func (s *fakeDingTalkServer) handleQueryDentryID(w http.ResponseWriter, r *http.
 	writeJSON(w, map[string]interface{}{
 		"spaceId":  "854001",
 		"dentryId": "798001",
+	})
+}
+
+func (s *fakeDingTalkServer) handleDocExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if got := r.Header.Get("x-acs-dingtalk-access-token"); got != "tenant-token" {
+		http.Error(w, "missing access token", http.StatusUnauthorized)
+		return
+	}
+	if got := r.URL.Query().Get("targetFormat"); got != "markdown" {
+		http.Error(w, "unexpected targetFormat "+got, http.StatusBadRequest)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/v1.0/doc/")
+	dentryUUID := strings.TrimSuffix(path, "/export")
+	if dentryUUID == "" || strings.Contains(dentryUUID, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	atomic.AddInt32(&s.exportCalls, 1)
+	if atomic.LoadInt32(&s.exportPermissionDenied) == 1 {
+		w.WriteHeader(http.StatusForbidden)
+		writeJSON(w, map[string]interface{}{
+			"code":      "Forbidden.AccessDenied.AccessTokenPermissionDenied",
+			"requestid": "019F419C-8737-7A5D-B6B8-4DB544A5BC90",
+			"message":   "应用尚未开通所需的权限：[Document.AIAssistant.Read]",
+		})
+		return
+	}
+	writeJSON(w, map[string]interface{}{
+		"taskId": "task-" + dentryUUID,
 	})
 }
 

@@ -16,7 +16,7 @@ func setupDataSourceRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.DataSource{}, &types.SyncLog{}))
+	require.NoError(t, db.AutoMigrate(&types.DataSource{}, &types.SyncLog{}, &types.DingTalkExportTask{}))
 	return db
 }
 
@@ -84,4 +84,88 @@ func TestSyncLogRepositoryUpdateResultClearsErrorMessage(t *testing.T) {
 	assert.Zero(t, stored.ItemsFailed)
 	assert.Equal(t, result.ToString(), stored.Result.ToString())
 	require.NotNil(t, stored.FinishedAt)
+}
+
+func TestDingTalkExportTaskRepositoryUpsertsAndFindsPendingTask(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDingTalkExportTaskRepository(db)
+	ctx := context.Background()
+
+	task := &types.DingTalkExportTask{
+		TaskID:           "task-1",
+		DataSourceID:     "ds-1",
+		SyncLogID:        "log-1",
+		TenantID:         7,
+		ExternalID:       "ws1:doc1",
+		SourceResourceID: "ws1:root",
+		WorkspaceID:      "ws1",
+		NodeID:           "doc1",
+		DentryUUID:       "doc1",
+		Title:            "Architecture",
+		FileName:         "Architecture.md",
+		SourceURL:        "https://dingtalk.example/wiki/doc1",
+		Status:           types.DingTalkExportTaskStatusPending,
+	}
+	require.NoError(t, repo.UpsertPending(ctx, task))
+
+	stored, err := repo.FindByTaskID(ctx, "task-1")
+	require.NoError(t, err)
+	assert.Equal(t, types.DingTalkExportTaskStatusPending, stored.Status)
+	assert.Equal(t, "Architecture.md", stored.FileName)
+	assert.Equal(t, uint64(7), stored.TenantID)
+
+	task.Title = "Architecture v2"
+	task.FileName = "Architecture v2.md"
+	require.NoError(t, repo.UpsertPending(ctx, task))
+
+	stored, err = repo.FindByTaskID(ctx, "task-1")
+	require.NoError(t, err)
+	assert.Equal(t, "Architecture v2", stored.Title)
+	assert.Equal(t, "Architecture v2.md", stored.FileName)
+}
+
+func TestDingTalkExportTaskRepositoryMarksTerminalStates(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDingTalkExportTaskRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.UpsertPending(ctx, &types.DingTalkExportTask{
+		TaskID:       "task-ok",
+		DataSourceID: "ds-1",
+		TenantID:     7,
+		ExternalID:   "ws1:doc1",
+		DentryUUID:   "doc1",
+		Title:        "Architecture",
+		FileName:     "Architecture.md",
+		Status:       types.DingTalkExportTaskStatusPending,
+	}))
+
+	require.NoError(t, repo.MarkSucceeded(ctx, "task-ok", "evt-1", "https://example.com/export.md"))
+	require.NoError(t, repo.MarkSucceeded(ctx, "task-ok", "evt-1", "https://example.com/export.md"))
+
+	okTask, err := repo.FindByTaskID(ctx, "task-ok")
+	require.NoError(t, err)
+	assert.Equal(t, types.DingTalkExportTaskStatusSucceeded, okTask.Status)
+	assert.Equal(t, "evt-1", okTask.EventID)
+	assert.Equal(t, "https://example.com/export.md", okTask.ExportURL)
+	require.NotNil(t, okTask.FinishedAt)
+
+	require.NoError(t, repo.UpsertPending(ctx, &types.DingTalkExportTask{
+		TaskID:       "task-fail",
+		DataSourceID: "ds-1",
+		TenantID:     7,
+		ExternalID:   "ws1:doc2",
+		DentryUUID:   "doc2",
+		Title:        "Failure",
+		FileName:     "Failure.md",
+		Status:       types.DingTalkExportTaskStatusPending,
+	}))
+	require.NoError(t, repo.MarkFailed(ctx, "task-fail", "evt-2", "52622003", "task initial cp not found"))
+
+	failedTask, err := repo.FindByTaskID(ctx, "task-fail")
+	require.NoError(t, err)
+	assert.Equal(t, types.DingTalkExportTaskStatusFailed, failedTask.Status)
+	assert.Equal(t, "52622003", failedTask.ErrorCode)
+	assert.Equal(t, "task initial cp not found", failedTask.ErrorMessage)
+	require.NotNil(t, failedTask.FinishedAt)
 }

@@ -214,6 +214,25 @@ func (c *client) QueryDocBlocks(ctx context.Context, docKey string) ([]docBlock,
 	return resp.blocks(), nil
 }
 
+func (c *client) SubmitMarkdownExport(ctx context.Context, dentryUUID string) (string, error) {
+	if strings.TrimSpace(dentryUUID) == "" {
+		return "", fmt.Errorf("dingtalk export dentry uuid is empty")
+	}
+
+	query := url.Values{}
+	query.Set("targetFormat", "markdown")
+	var resp exportTaskResponse
+	path := "/v1.0/doc/" + url.PathEscape(dentryUUID) + "/export"
+	if err := c.postAPI(ctx, path, query, map[string]interface{}{}, &resp); err != nil {
+		return "", fmt.Errorf("submit dingtalk markdown export %s: %w", dentryUUID, err)
+	}
+	taskID := resp.taskID()
+	if taskID == "" {
+		return "", fmt.Errorf("submit dingtalk markdown export %s: empty task id", dentryUUID)
+	}
+	return taskID, nil
+}
+
 func (c *client) GetDentryIDByUUID(ctx context.Context, dentryUUID string) (dentryIdentity, error) {
 	operatorID, err := c.operatorUnionID(ctx)
 	if err != nil {
@@ -413,37 +432,31 @@ func isRetryableStatus(status int) bool {
 
 func dingtalkStatusError(resp *http.Response, body []byte) error {
 	requestID := requestIDFromResponse(resp, body)
-	if requestID != "" {
-		return fmt.Errorf("dingtalk api status=%d request_id=%s body=%s",
-			resp.StatusCode, requestID, truncate(string(body), 500))
+	code, message := dingtalkErrorDetailsFromBody(body)
+	suggestion := dingtalkErrorSuggestion(code, message)
+	suggestionPart := ""
+	if suggestion != "" {
+		suggestionPart = "; suggestion=" + suggestion
 	}
-	return fmt.Errorf("dingtalk api status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
+	if requestID != "" {
+		return fmt.Errorf("dingtalk api status=%d request_id=%s body=%s%s",
+			resp.StatusCode, requestID, truncate(string(body), 500), suggestionPart)
+	}
+	return fmt.Errorf("dingtalk api status=%d body=%s%s", resp.StatusCode, truncate(string(body), 500), suggestionPart)
 }
 
 func checkBusinessError(body []byte) error {
-	var envelope struct {
-		Success        *bool       `json:"success"`
-		Code           interface{} `json:"code"`
-		Message        string      `json:"message"`
-		Msg            string      `json:"msg"`
-		RequestID      string      `json:"request_id"`
-		RequestIDCamel string      `json:"requestId"`
-		RequestIDLower string      `json:"requestid"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
+	envelope, err := decodeDingTalkErrorEnvelope(body)
+	if err != nil {
 		return nil
 	}
 	if envelope.Success == nil || *envelope.Success {
 		return nil
 	}
-	message := strings.TrimSpace(envelope.Message)
-	if message == "" {
-		message = strings.TrimSpace(envelope.Msg)
-	}
+	code, message := dingtalkErrorDetails(envelope)
 	if message == "" {
 		message = "request failed"
 	}
-	code := businessCodeString(envelope.Code)
 	requestID := firstNonEmpty(envelope.RequestID, envelope.RequestIDCamel, envelope.RequestIDLower)
 	requestPart := ""
 	if requestID != "" {
@@ -454,6 +467,38 @@ func checkBusinessError(body []byte) error {
 			code, message, requestPart, suggestion)
 	}
 	return fmt.Errorf("dingtalk api error code=%s message=%s%s", code, message, requestPart)
+}
+
+type dingtalkErrorEnvelope struct {
+	Success        *bool       `json:"success"`
+	Code           interface{} `json:"code"`
+	Message        string      `json:"message"`
+	Msg            string      `json:"msg"`
+	RequestID      string      `json:"request_id"`
+	RequestIDCamel string      `json:"requestId"`
+	RequestIDLower string      `json:"requestid"`
+}
+
+func decodeDingTalkErrorEnvelope(body []byte) (dingtalkErrorEnvelope, error) {
+	var envelope dingtalkErrorEnvelope
+	err := json.Unmarshal(body, &envelope)
+	return envelope, err
+}
+
+func dingtalkErrorDetailsFromBody(body []byte) (string, string) {
+	envelope, err := decodeDingTalkErrorEnvelope(body)
+	if err != nil {
+		return "", ""
+	}
+	return dingtalkErrorDetails(envelope)
+}
+
+func dingtalkErrorDetails(envelope dingtalkErrorEnvelope) (string, string) {
+	message := strings.TrimSpace(envelope.Message)
+	if message == "" {
+		message = strings.TrimSpace(envelope.Msg)
+	}
+	return businessCodeString(envelope.Code), message
 }
 
 func businessCodeString(code interface{}) string {
@@ -473,6 +518,13 @@ func businessCodeString(code interface{}) string {
 
 func dingtalkErrorSuggestion(code, message string) string {
 	normalized := strings.ToLower(strings.TrimSpace(code + " " + message))
+	if strings.Contains(normalized, "orgauthlevelnotenough") ||
+		strings.Contains(normalized, "auth level of org is not enough") {
+		return "DingTalk organization enterprise verification level is not enough; complete or upgrade enterprise verification before using uploaded file download"
+	}
+	if strings.Contains(normalized, "document.aiassistant.read") {
+		return "DingTalk Markdown export requires the gray/allowlisted Document.AIAssistant.Read scope; ask DingTalk to enable it for the app, or use uploaded file download / block reading fallback"
+	}
 	if strings.Contains(normalized, "99991672") ||
 		strings.Contains(normalized, "access denied") ||
 		strings.Contains(normalized, "action_scope_required") ||

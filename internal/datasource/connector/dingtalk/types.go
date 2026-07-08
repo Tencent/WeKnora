@@ -9,6 +9,7 @@
 package dingtalk
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -318,6 +319,160 @@ func (r blockListResponse) blocks() []docBlock {
 		return r.Result.Blocks
 	}
 	return r.Data.Blocks
+}
+
+type exportTaskResponse struct {
+	TaskID interface{} `json:"taskId"`
+	Data   struct {
+		TaskID interface{} `json:"taskId"`
+	} `json:"data"`
+	Result struct {
+		TaskID interface{} `json:"taskId"`
+	} `json:"result"`
+}
+
+func (r exportTaskResponse) taskID() string {
+	for _, raw := range []interface{}{r.TaskID, r.Data.TaskID, r.Result.TaskID} {
+		if s := exportTaskIDString(raw); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func exportTaskIDString(raw interface{}) string {
+	switch v := raw.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	case json.Number:
+		return strings.TrimSpace(v.String())
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+}
+
+type ExportFinishEvent struct {
+	EventType    string
+	EventID      string
+	TaskID       string
+	DentryUUID   string
+	Name         string
+	URL          string
+	Format       string
+	Extension    string
+	Success      bool
+	ErrorCode    string
+	ErrorMessage string
+}
+
+type exportFinishEnvelope struct {
+	HTTPEventType   string          `json:"EventType"`
+	StreamEventType string          `json:"eventType"`
+	EventID         string          `json:"eventId"`
+	BizData         json.RawMessage `json:"biz_data"`
+	Data            json.RawMessage `json:"data"`
+}
+
+type exportFinishStreamData struct {
+	BizData json.RawMessage `json:"bizData"`
+}
+
+type exportFinishBizData struct {
+	EventID      string `json:"eventId"`
+	Extension    string `json:"extension"`
+	Format       string `json:"format"`
+	ErrorCode    string `json:"errorCode"`
+	URL          string `json:"url"`
+	ErrorMessage string `json:"errorMsg"`
+	Success      bool   `json:"success"`
+	DentryUUID   string `json:"dentryUuid"`
+	Name         string `json:"name"`
+	TaskID       string `json:"taskId"`
+}
+
+func ParseExportFinishEvent(payload []byte) (*ExportFinishEvent, error) {
+	var envelope exportFinishEnvelope
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return nil, fmt.Errorf("decode dingtalk export event: %w", err)
+	}
+
+	eventType := firstNonEmpty(envelope.HTTPEventType, envelope.StreamEventType)
+	if !isExportFinishEventType(eventType) {
+		return nil, fmt.Errorf("unsupported dingtalk event type %q", eventType)
+	}
+
+	rawBizData, err := exportFinishBizDataRaw(envelope)
+	if err != nil {
+		return nil, err
+	}
+	if len(rawBizData) == 0 {
+		return nil, fmt.Errorf("dingtalk export event missing biz data")
+	}
+
+	var biz exportFinishBizData
+	if err := json.Unmarshal(rawBizData, &biz); err != nil {
+		return nil, fmt.Errorf("decode dingtalk export biz data: %w", err)
+	}
+	event := &ExportFinishEvent{
+		EventType:    eventType,
+		EventID:      firstNonEmpty(biz.EventID, envelope.EventID),
+		TaskID:       strings.TrimSpace(biz.TaskID),
+		DentryUUID:   strings.TrimSpace(biz.DentryUUID),
+		Name:         strings.TrimSpace(biz.Name),
+		URL:          strings.TrimSpace(biz.URL),
+		Format:       strings.TrimSpace(biz.Format),
+		Extension:    strings.TrimSpace(biz.Extension),
+		Success:      biz.Success,
+		ErrorCode:    strings.TrimSpace(biz.ErrorCode),
+		ErrorMessage: strings.TrimSpace(biz.ErrorMessage),
+	}
+	if event.TaskID == "" {
+		return nil, fmt.Errorf("dingtalk export event missing task id")
+	}
+	if event.DentryUUID == "" {
+		return nil, fmt.Errorf("dingtalk export event missing dentry uuid")
+	}
+	return event, nil
+}
+
+func isExportFinishEventType(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "dingdoc_export_finish", "doc_content_export_result":
+		return true
+	default:
+		return false
+	}
+}
+
+func exportFinishBizDataRaw(envelope exportFinishEnvelope) (json.RawMessage, error) {
+	if len(envelope.BizData) > 0 {
+		return normalizeExportBizData(envelope.BizData)
+	}
+	if len(envelope.Data) == 0 {
+		return nil, nil
+	}
+
+	var streamData exportFinishStreamData
+	if err := json.Unmarshal(envelope.Data, &streamData); err == nil && len(streamData.BizData) > 0 {
+		return normalizeExportBizData(streamData.BizData)
+	}
+	return normalizeExportBizData(envelope.Data)
+}
+
+func normalizeExportBizData(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '"' {
+		return trimmed, nil
+	}
+	var encoded string
+	if err := json.Unmarshal(trimmed, &encoded); err != nil {
+		return nil, fmt.Errorf("decode dingtalk export biz data string: %w", err)
+	}
+	return bytes.TrimSpace([]byte(encoded)), nil
 }
 
 type downloadInfoResponse struct {
