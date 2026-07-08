@@ -173,12 +173,22 @@ func TestConnectorValidate_NilConfig(t *testing.T) {
 }
 
 func TestConnectorResolveResourceAncestors(t *testing.T) {
-	ancestors, err := NewConnector().ResolveResourceAncestors(context.Background(), nil, []string{"ws-1", "ws-2"})
+	f := newFakeDingTalk()
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "folder-1", Name: "Guides", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
+	}
+	f.nodesByParent["folder-1"] = []WikiNode{
+		{NodeID: "doc-1", Name: "Runbook", NodeType: "FILE", Category: "ALIDOC"},
+	}
+
+	ancestors, err := newTestConnector().ResolveResourceAncestors(context.Background(), f.config(nil), []string{"ws-1:doc-1:document"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(ancestors) != 0 {
-		t.Errorf("expected empty ancestors for flat workspace list, got %v", ancestors)
+	want := []string{"ws-1", "ws-1:folder-1:folder"}
+	if strings.Join(ancestors, ",") != strings.Join(want, ",") {
+		t.Errorf("ancestors = %v, want %v", ancestors, want)
 	}
 }
 
@@ -196,18 +206,54 @@ func TestConnectorListResources(t *testing.T) {
 	if resources[0].ExternalID != "ws-1" || resources[0].Name != "Engineering Wiki" {
 		t.Fatalf("unexpected resource: %+v", resources[0])
 	}
+	if resources[0].Type != dingtalkResourceSpace || !resources[0].HasChildren {
+		t.Fatalf("unexpected resource type/children: %+v", resources[0])
+	}
 	if resources[0].Metadata["root_node_id"] != "root-1" {
 		t.Fatalf("root_node_id metadata = %v, want root-1", resources[0].Metadata["root_node_id"])
 	}
 }
 
-func TestConnectorListResources_IgnoresParentID(t *testing.T) {
-	resources, err := NewConnector().ListResources(context.Background(), makeDingTalkConfig("id", "secret", "", nil), "some-parent-id")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestConnectorListResources_LoadsWorkspaceChildren(t *testing.T) {
+	f := newFakeDingTalk()
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "folder-1", Name: "Guides", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
+		{NodeID: "doc-1", Name: "Runbook", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-15T10:00:00+08:00"},
 	}
-	if len(resources) != 0 {
-		t.Errorf("expected empty resources when parentID is non-empty, got %d", len(resources))
+
+	resources, err := newTestConnector().ListResources(context.Background(), f.config(nil), "ws-1")
+	if err != nil {
+		t.Fatalf("ListResources() error = %v", err)
+	}
+	if len(resources) != 2 {
+		t.Fatalf("len(resources) = %d, want 2: %+v", len(resources), resources)
+	}
+	byID := map[string]types.Resource{}
+	for _, r := range resources {
+		byID[r.ExternalID] = r
+	}
+	if byID["ws-1:folder-1:folder"].Type != dingtalkResourceFolder || !byID["ws-1:folder-1:folder"].HasChildren {
+		t.Fatalf("unexpected folder resource: %+v", byID["ws-1:folder-1:folder"])
+	}
+	if byID["ws-1:doc-1:document"].Type != dingtalkResourceDocument || byID["ws-1:doc-1:document"].ParentID != "ws-1" {
+		t.Fatalf("unexpected document resource: %+v", byID["ws-1:doc-1:document"])
+	}
+}
+
+func TestConnectorListResources_LoadsFolderChildren(t *testing.T) {
+	f := newFakeDingTalk()
+	defer f.Close()
+	f.nodesByParent["folder-1"] = []WikiNode{
+		{NodeID: "doc-2", Name: "Nested", NodeType: "FILE", Category: "DOCUMENT"},
+	}
+
+	resources, err := newTestConnector().ListResources(context.Background(), f.config(nil), "ws-1:folder-1:folder")
+	if err != nil {
+		t.Fatalf("ListResources() error = %v", err)
+	}
+	if len(resources) != 1 || resources[0].ExternalID != "ws-1:doc-2:document" || resources[0].ParentID != "ws-1:folder-1:folder" {
+		t.Fatalf("unexpected resources: %+v", resources)
 	}
 }
 
@@ -265,6 +311,31 @@ func TestConnectorFetchAll_ContentFailureReturnsErrorItem(t *testing.T) {
 	}
 	if string(items[0].Content) != "" {
 		t.Fatalf("failure item should not include placeholder content, got %q", string(items[0].Content))
+	}
+}
+
+func TestConnectorFetchAll_SyncsSingleDocumentSelection(t *testing.T) {
+	f := newFakeDingTalk()
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "doc-1", DocKey: "doc-key-1", Name: "One Doc", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-15T10:00:00+08:00"},
+		{NodeID: "doc-2", Name: "Other Doc", NodeType: "FILE", Category: "ALIDOC"},
+	}
+	f.blocksByNode["doc-key-1"] = []docBlock{{Text: "Only selected content"}}
+	f.blocksByNode["doc-2"] = []docBlock{{Text: "Should not sync"}}
+
+	items, err := newTestConnector().FetchAll(context.Background(), f.config(nil), []string{"ws-1:doc-1:document"})
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1: %+v", len(items), items)
+	}
+	if items[0].ExternalID != "doc-1" || items[0].SourceResourceID != "ws-1:doc-1:document" {
+		t.Fatalf("unexpected item: %+v", items[0])
+	}
+	if got := string(items[0].Content); !strings.Contains(got, "Only selected content") || strings.Contains(got, "Should not sync") {
+		t.Fatalf("content = %q", got)
 	}
 }
 
