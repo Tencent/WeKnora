@@ -8,6 +8,7 @@ from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
 from docreader.parser.concurrency import parser_worker_limit
+from docreader.parser.excel_parser import structured_excel_tables_to_markdown
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.ppt_convert import normalize_ppt_bytes
 from docreader.parser.pptx_media import (
@@ -56,6 +57,14 @@ class StdMarkitdownParser(BaseParser):
                 result = self._convert_markitdown(content, ext, keep_data_uris=False)
 
         text = result.text_content
+        if self.enable_table_structure and ft in ("xlsx", "xls"):
+            try:
+                table_text = structured_excel_tables_to_markdown(content, file_type=ft)
+            except Exception:
+                logger.exception("Failed to extract structured Excel tables")
+                table_text = ""
+            if table_text:
+                text = table_text
         images: dict[str, str] = {}
         if pptx_bytes is not None and markdown_needs_pptx_media_attach(text):
             text, images = attach_pptx_media_to_markdown(text, pptx_bytes)

@@ -10,6 +10,8 @@ export interface ChunkingConfigOverride {
   chunk_overlap?: number
   separators?: string[]
   parser_engine_rules?: ParserEngineRule[]
+  enable_table_structure?: boolean
+  table_structure_file_types?: string[]
   enable_parent_child?: boolean
   parent_chunk_size?: number
   child_chunk_size?: number

@@ -171,6 +171,8 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if len(override.ParserEngineRules) > 0 {
 		result.ParserEngineRules = override.ParserEngineRules
 	}
+	result.EnableTableStructure = override.EnableTableStructure
+	result.TableStructureFileTypes = override.TableStructureFileTypes
 	// EnableParentChild is authoritative: callers send a full chunking snapshot,
 	// so an explicit false must be able to turn parent-child off (not just on).
 	result.EnableParentChild = override.EnableParentChild

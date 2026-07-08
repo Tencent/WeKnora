@@ -240,6 +240,8 @@ interface ChunkingConfig {
   chunkOverlap: number
   separators: string[]
   parserEngineRules?: ParserEngineRule[]
+  enableTableStructure?: boolean
+  tableStructureFileTypes?: string[]
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
@@ -380,6 +382,8 @@ const emitUpdate = () => {
     chunkOverlap: localChunkOverlap.value,
     separators: [...localSeparators.value],
     parserEngineRules: props.config.parserEngineRules,
+    enableTableStructure: props.config.enableTableStructure,
+    tableStructureFileTypes: props.config.tableStructureFileTypes,
     enableParentChild: localEnableParentChild.value,
     parentChunkSize: localParentChunkSize.value,
     childChunkSize: localChildChunkSize.value,

@@ -20,6 +20,7 @@ from docreader.parser.excel_convert import (
     engine_for_format,
     normalize_excel_bytes,
 )
+from docreader.parser.excel_structured import build_structured_excel_document
 from docreader.parser.xlsx_merge import fill_merged_cells_xlsx
 from docreader.parser.xlsx_repair import repair_xlsx_bytes
 
@@ -86,10 +87,22 @@ class ExcelParser(BaseParser):
         start, end = 0, 0
 
         excel_file = _open_excel_file(content, file_type=self.file_type)
+        if self.enable_table_structure:
+            structured_sheet_frames = [
+                (sheet_name, _read_sheet_dataframe_for_structured(excel_file, sheet_name))
+                for sheet_name in excel_file.sheet_names
+            ]
+            structured_doc = build_structured_excel_document(structured_sheet_frames)
+            if structured_doc is not None:
+                return structured_doc
+
+        sheet_frames = [
+            (sheet_name, _read_sheet_dataframe(excel_file, sheet_name))
+            for sheet_name in excel_file.sheet_names
+        ]
         
         # Process each sheet in the Excel file
-        for excel_sheet_name in excel_file.sheet_names:
-            df = _read_sheet_dataframe(excel_file, excel_sheet_name)
+        for excel_sheet_name, df in sheet_frames:
             # Remove rows where all values are NaN (completely empty rows)
             df.dropna(how="all", inplace=True)
 
@@ -120,6 +133,21 @@ class ExcelParser(BaseParser):
         return Document(content="".join(text), chunks=chunks)
 
 
+def structured_excel_tables_to_markdown(
+    content: bytes, file_type: str | None = None
+) -> str:
+    """Return structured Excel markdown when a workbook is table-like."""
+    excel_file = _open_excel_file(content, file_type=file_type)
+    structured_sheet_frames = [
+        (sheet_name, _read_sheet_dataframe_for_structured(excel_file, sheet_name))
+        for sheet_name in excel_file.sheet_names
+    ]
+    structured_doc = build_structured_excel_document(structured_sheet_frames)
+    if structured_doc is None:
+        return ""
+    return structured_doc.content
+
+
 def _read_sheet_dataframe(excel_file: pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
     """Read a worksheet into a DataFrame with stable column labels."""
     from openpyxl.utils import get_column_letter
@@ -137,6 +165,17 @@ def _read_sheet_dataframe(excel_file: pd.ExcelFile, sheet_name: str) -> pd.DataF
     elif any(str(col).startswith("Unnamed:") for col in df.columns):
         df = excel_file.parse(sheet_name=sheet_name, header=None)
         df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
+    return df
+
+
+def _read_sheet_dataframe_for_structured(
+    excel_file: pd.ExcelFile, sheet_name: str
+) -> pd.DataFrame:
+    """Read a worksheet without consuming a possible header row."""
+    from openpyxl.utils import get_column_letter
+
+    df = excel_file.parse(sheet_name=sheet_name, header=None)
+    df.columns = [get_column_letter(idx + 1) for idx in range(len(df.columns))]
     return df
 
 

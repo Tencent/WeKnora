@@ -3141,11 +3141,13 @@ func (s *knowledgeService) convert(
 	}
 
 	req := &types.ReadRequest{
-		URL:                   payload.URL,
-		Title:                 knowledge.Title,
-		ParserEngine:          parserEngine,
-		RequestID:             payload.RequestId,
-		ParserEngineOverrides: mergedOverrides,
+		URL:                     payload.URL,
+		Title:                   knowledge.Title,
+		ParserEngine:            parserEngine,
+		RequestID:               payload.RequestId,
+		ParserEngineOverrides:   mergedOverrides,
+		EnableTableStructure:    eff.ChunkingConfig.EnableTableStructure,
+		TableStructureFileTypes: eff.ChunkingConfig.TableStructureFileTypes,
 	}
 
 	if !isURL {

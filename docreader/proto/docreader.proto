@@ -19,6 +19,8 @@ service DocReader {
 message ReadConfig {
   string parser_engine = 1;
   map<string, string> parser_engine_overrides = 2;
+  bool enable_table_structure = 4;
+  repeated string table_structure_file_types = 5;
   // image_storage removed: image persistence is now handled entirely by the Go App.
   // Field number 3 is reserved for backward compatibility.
   reserved 3;

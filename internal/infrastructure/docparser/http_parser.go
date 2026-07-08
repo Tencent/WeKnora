@@ -24,8 +24,10 @@ const (
 // --- JSON DTOs ---
 
 type httpReadConfig struct {
-	ParserEngine          string            `json:"parser_engine,omitempty"`
-	ParserEngineOverrides map[string]string `json:"parser_engine_overrides,omitempty"`
+	ParserEngine            string            `json:"parser_engine,omitempty"`
+	ParserEngineOverrides   map[string]string `json:"parser_engine_overrides,omitempty"`
+	EnableTableStructure    bool              `json:"enable_table_structure,omitempty"`
+	TableStructureFileTypes []string          `json:"table_structure_file_types,omitempty"`
 }
 
 type httpReadRequest struct {
@@ -195,8 +197,10 @@ func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 		Title:     req.Title,
 		RequestID: req.RequestID,
 		Config: &httpReadConfig{
-			ParserEngine:          req.ParserEngine,
-			ParserEngineOverrides: req.ParserEngineOverrides,
+			ParserEngine:            req.ParserEngine,
+			ParserEngineOverrides:   req.ParserEngineOverrides,
+			EnableTableStructure:    req.EnableTableStructure,
+			TableStructureFileTypes: req.TableStructureFileTypes,
 		},
 	}
 	if len(req.FileContent) > 0 {

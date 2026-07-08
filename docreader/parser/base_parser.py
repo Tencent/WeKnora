@@ -22,15 +22,18 @@ class BaseParser(ABC):
         self,
         file_name: str = "",
         file_type: Optional[str] = None,
+        enable_table_structure: bool = False,
         **kwargs,
     ):
         self.file_name = file_name
         self.file_type = file_type or os.path.splitext(file_name)[1].lstrip(".")
+        self.enable_table_structure = enable_table_structure
 
         logger.info(
-            "Initializing parser for file=%s, type=%s",
+            "Initializing parser for file=%s, type=%s, table_structure=%s",
             file_name,
             self.file_type,
+            self.enable_table_structure,
         )
 
     @abstractmethod
