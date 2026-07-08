@@ -185,6 +185,9 @@ CREATE TABLE chunks (
     indirect_relation_chunks JSON,
     feedback_like_count BIGINT NOT NULL DEFAULT 0,
     feedback_dislike_count BIGINT NOT NULL DEFAULT 0,
+    feedback_positive_rate DOUBLE NOT NULL DEFAULT 0,
+    recall_weight DOUBLE NOT NULL DEFAULT 1,
+    quality_status VARCHAR(32) NOT NULL DEFAULT 'normal',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -193,3 +196,4 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+CREATE INDEX idx_chunks_quality_status ON chunks(quality_status);

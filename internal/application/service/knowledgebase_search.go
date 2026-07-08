@@ -247,6 +247,11 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
+	deduplicatedChunks, err = s.applyChunkRecallWeights(ctx, deduplicatedChunks)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(deduplicatedChunks) > params.MatchCount {
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}

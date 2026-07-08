@@ -3,12 +3,58 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func (s *knowledgeBaseService) applyChunkRecallWeights(ctx context.Context, results []*types.IndexWithScore) ([]*types.IndexWithScore, error) {
+	if len(results) == 0 {
+		return results, nil
+	}
+
+	chunkIDs := make([]string, 0, len(results))
+	seen := make(map[string]bool, len(results))
+	for _, result := range results {
+		if result == nil || result.ChunkID == "" || seen[result.ChunkID] {
+			continue
+		}
+		seen[result.ChunkID] = true
+		chunkIDs = append(chunkIDs, result.ChunkID)
+	}
+	if len(chunkIDs) == 0 {
+		return results, nil
+	}
+
+	chunks, err := s.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
+	if err != nil {
+		return nil, err
+	}
+	weights := make(map[string]float64, len(chunks))
+	for _, chunk := range chunks {
+		weight := chunk.RecallWeight
+		if weight <= 0 {
+			weight = 1
+		}
+		weights[chunk.ID] = weight
+	}
+
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		weight := weights[result.ChunkID]
+		if weight <= 0 {
+			weight = 1
+		}
+		result.Score *= weight
+	}
+	slices.SortFunc(results, sortByScoreDesc)
+	return results, nil
+}
 
 // processSearchResults handles the processing of search results, optimizing database queries.
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
@@ -306,6 +352,21 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	matchType types.MatchType,
 	matchedContent string,
 ) *types.SearchResult {
+	recallWeight := chunk.RecallWeight
+	if recallWeight <= 0 {
+		recallWeight = 1
+	}
+	metadata := knowledge.GetMetadata()
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	if recallWeight != 1 || chunk.FeedbackLikeCount > 0 || chunk.FeedbackDislikeCount > 0 {
+		metadata["weighted_retrieval_score"] = fmt.Sprintf("%.4f", score)
+		metadata["recall_weight"] = fmt.Sprintf("%.4f", recallWeight)
+		metadata["feedback_positive_rate"] = fmt.Sprintf("%.4f", chunk.FeedbackPositiveRate)
+		metadata["quality_status"] = chunk.QualityStatus
+	}
+
 	return &types.SearchResult{
 		ID:                chunk.ID,
 		Content:           chunk.Content,
@@ -317,7 +378,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		Seq:               chunk.ChunkIndex,
 		Score:             score,
 		MatchType:         matchType,
-		Metadata:          knowledge.GetMetadata(),
+		Metadata:          metadata,
 		ChunkType:         string(chunk.ChunkType),
 		ParentChunkID:     chunk.ParentChunkID,
 		ImageInfo:         chunk.ImageInfo,

@@ -409,9 +409,38 @@ func updateAttributedChunkFeedbackCounts(tx *gorm.DB, sessionID, messageID, oldT
 		updates["feedback_dislike_count"] = nonNegativeCounterExpr(tx, "feedback_dislike_count", dislikeDelta)
 	}
 
-	return tx.Model(&types.Chunk{}).
+	if err := tx.Model(&types.Chunk{}).
 		Where("id IN ?", chunkIDs).
-		Updates(updates).Error
+		Updates(updates).Error; err != nil {
+		return err
+	}
+
+	return refreshChunkFeedbackQuality(tx, chunkIDs)
+}
+
+func refreshChunkFeedbackQuality(tx *gorm.DB, chunkIDs []string) error {
+	var chunks []types.Chunk
+	if err := tx.Select("id", "feedback_like_count", "feedback_dislike_count").
+		Where("id IN ?", chunkIDs).
+		Find(&chunks).Error; err != nil {
+		return err
+	}
+	for _, chunk := range chunks {
+		positiveRate, recallWeight, qualityStatus := types.CalculateChunkFeedbackQuality(
+			chunk.FeedbackLikeCount,
+			chunk.FeedbackDislikeCount,
+		)
+		if err := tx.Model(&types.Chunk{}).
+			Where("id = ?", chunk.ID).
+			Updates(map[string]interface{}{
+				"feedback_positive_rate": positiveRate,
+				"recall_weight":           recallWeight,
+				"quality_status":          qualityStatus,
+			}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func feedbackCounterDelta(oldType, newType string) (likeDelta, dislikeDelta int) {

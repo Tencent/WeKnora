@@ -217,6 +217,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     indirect_relation_chunks JSONB,
     feedback_like_count BIGINT NOT NULL DEFAULT 0,
     feedback_dislike_count BIGINT NOT NULL DEFAULT 0,
+    feedback_positive_rate DOUBLE PRECISION NOT NULL DEFAULT 0,
+    recall_weight DOUBLE PRECISION NOT NULL DEFAULT 1,
+    quality_status VARCHAR(32) NOT NULL DEFAULT 'normal',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
@@ -225,6 +228,7 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_tenant_kg ON chunks(tenant_id, knowledge_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_chunk_type ON chunks(chunk_type);
+CREATE INDEX IF NOT EXISTS idx_chunks_quality_status ON chunks(quality_status);
 
 CREATE TABLE IF NOT EXISTS embeddings (
     id SERIAL PRIMARY KEY,

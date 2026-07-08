@@ -2,7 +2,7 @@ package chatpipeline
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -289,12 +289,22 @@ func logSearchScoreSample(ctx context.Context, action string, results []*types.S
 	limit := min(maxLogRows, len(results))
 	for i := 0; i < limit; i++ {
 		r := results[i]
-		pipelineInfo(ctx, "Search", action, map[string]interface{}{
-			"index":      i,
-			"chunk_id":   r.ID,
-			"score":      fmt.Sprintf("%.4f", r.Score),
-			"match_type": r.MatchType,
-		})
+		recallWeight := metadataFloat(r.Metadata, "recall_weight", 1)
+		weightedScore := metadataFloat(r.Metadata, "weighted_retrieval_score", r.Score)
+		originalScore := metadataFloat(r.Metadata, "retrieval_base_score", weightedScore)
+		positiveRate := metadataFloat(r.Metadata, "feedback_positive_rate", 0)
+		qualityStatus := ""
+		if r.Metadata != nil {
+			qualityStatus = r.Metadata["quality_status"]
+		}
+		if qualityStatus == "" {
+			qualityStatus = "normal"
+		}
+
+		logger.Infof(ctx,
+			"[PIPELINE] stage=Search action=%s rank=%d chunk_id=%s original_score=%.6f recall_weight=%.4f weighted_score=%.6f quality_status=%s feedback_positive_rate=%.4f match_type=%v",
+			action, i+1, r.ID, originalScore, recallWeight, weightedScore, qualityStatus, positiveRate, r.MatchType,
+		)
 	}
 	if len(results) > limit {
 		pipelineInfo(ctx, "Search", action+"_summary", map[string]interface{}{
@@ -303,6 +313,21 @@ func logSearchScoreSample(ctx context.Context, action string, results []*types.S
 			"truncated": len(results) - limit,
 		})
 	}
+}
+
+func metadataFloat(metadata map[string]string, key string, fallback float64) float64 {
+	if metadata == nil {
+		return fallback
+	}
+	value := strings.TrimSpace(metadata[key])
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 // searchByTargets performs KB searches using pre-computed SearchTargets.

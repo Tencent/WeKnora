@@ -158,6 +158,12 @@ type Chunk struct {
 	FeedbackLikeCount int64 `json:"feedback_like_count"      gorm:"default:0"`
 	// FeedbackDislikeCount records cumulative dislikes attributed from assistant answer feedback.
 	FeedbackDislikeCount int64 `json:"feedback_dislike_count"   gorm:"default:0"`
+	// FeedbackPositiveRate is likes / (likes + dislikes), used for quality-aware retrieval.
+	FeedbackPositiveRate float64 `json:"feedback_positive_rate"  gorm:"default:0"`
+	// RecallWeight adjusts retrieval ranking according to feedback quality.
+	RecallWeight float64 `json:"recall_weight"           gorm:"default:1"`
+	// QualityStatus marks chunks that need attention, e.g. needs_optimization.
+	QualityStatus string `json:"quality_status"          gorm:"type:varchar(32);default:'normal'"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
 	// Chunk creation time
@@ -171,6 +177,59 @@ type Chunk struct {
 	// when generating embeddings. NOT persisted — populated by the chunker
 	// during initial splitting and discarded after indexing.
 	ContextHeader string `json:"-" gorm:"-"`
+}
+
+const (
+	ChunkQualityStatusNormal            = "normal"
+	ChunkQualityStatusBoosted           = "boosted"
+	ChunkQualityStatusDeprioritized     = "deprioritized"
+	ChunkQualityStatusNeedsOptimization = "needs_optimization"
+)
+
+// ChunkFeedbackQualityConfig controls feedback-based retrieval weighting.
+type ChunkFeedbackQualityConfig struct {
+	BoostThreshold             float64
+	DemoteThreshold            float64
+	NeedsOptimizationThreshold float64
+	BoostWeight                float64
+	DemoteWeight               float64
+	DefaultWeight              float64
+	MinFeedbackCount           int64
+}
+
+func DefaultChunkFeedbackQualityConfig() ChunkFeedbackQualityConfig {
+	return ChunkFeedbackQualityConfig{
+		BoostThreshold:             0.8,
+		DemoteThreshold:            0.5,
+		NeedsOptimizationThreshold: 0.2,
+		BoostWeight:                1.2,
+		DemoteWeight:               0.7,
+		DefaultWeight:              1.0,
+		MinFeedbackCount:           1,
+	}
+}
+
+func CalculateChunkFeedbackQuality(likeCount, dislikeCount int64) (positiveRate float64, recallWeight float64, qualityStatus string) {
+	cfg := DefaultChunkFeedbackQualityConfig()
+	total := likeCount + dislikeCount
+	recallWeight = cfg.DefaultWeight
+	qualityStatus = ChunkQualityStatusNormal
+	if total > 0 {
+		positiveRate = float64(likeCount) / float64(total)
+	}
+	if total < cfg.MinFeedbackCount {
+		return positiveRate, recallWeight, qualityStatus
+	}
+	if positiveRate < cfg.NeedsOptimizationThreshold {
+		return positiveRate, cfg.DemoteWeight, ChunkQualityStatusNeedsOptimization
+	}
+	if positiveRate < cfg.DemoteThreshold {
+		return positiveRate, cfg.DemoteWeight, ChunkQualityStatusDeprioritized
+	}
+	if positiveRate >= cfg.BoostThreshold {
+		return positiveRate, cfg.BoostWeight, ChunkQualityStatusBoosted
+	}
+	return positiveRate, recallWeight, qualityStatus
 }
 
 // ChunkFeedbackReasonStat represents an aggregated dislike reason for a chunk.
