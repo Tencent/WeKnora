@@ -412,9 +412,9 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     permissionDocUrl: 'https://developers.dingtalk.com/document/app',
     permissionPageUrl: 'https://developers.dingtalk.com/app',
     requiredPermissions: [
-      'Wiki workspace read',
-      'Wiki node read',
-      'Document block read',
+      'Document.Workspace.Read',
+      'Wiki.Node.Read',
+      'Document.WorkspaceDocument.Read',
     ],
     fields: [
       { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: '', secret: true },

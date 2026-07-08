@@ -482,7 +482,7 @@ func TestClientDoRequest_ContextCanceled(t *testing.T) {
 
 // TestDingTalkAPIError_Error tests the error string format.
 func TestDingTalkAPIError_ErrorFromClientTest(t *testing.T) {
-	err := &dingtalkAPIError{Code: 123, Msg: "test message"}
+	err := &dingtalkAPIError{Code: "123", Msg: "test message"}
 	got := err.Error()
 	expected := "dingtalk api error: code=123 msg=test message"
 	if got != expected {

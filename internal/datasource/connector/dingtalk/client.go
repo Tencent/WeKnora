@@ -89,8 +89,8 @@ func (c *client) ensureAccessToken(ctx context.Context) error {
 	if resp.StatusCode != http.StatusOK {
 		var apiErr dingtalkErrorResponse
 		_ = json.Unmarshal(respBody, &apiErr)
-		if apiErr.ErrMsg != "" {
-			return fmt.Errorf("dingtalk token error: status=%d msg=%s", resp.StatusCode, apiErr.ErrMsg)
+		if msg := apiErr.errorMessage(); msg != "" {
+			return fmt.Errorf("dingtalk token error: status=%d code=%s msg=%s", resp.StatusCode, apiErr.errorCode(), msg)
 		}
 		return fmt.Errorf("dingtalk token error: status=%d body=%s", resp.StatusCode, truncate(string(respBody), 200))
 	}
@@ -223,8 +223,8 @@ func (c *client) doRequest(ctx context.Context, method, path string, queryParams
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			var apiErr dingtalkErrorResponse
 			_ = json.Unmarshal(bodyBytes, &apiErr)
-			if apiErr.ErrMsg != "" {
-				return &dingtalkAPIError{Code: apiErr.ErrCode, Msg: apiErr.ErrMsg}
+			if msg := apiErr.errorMessage(); msg != "" {
+				return &dingtalkAPIError{Code: apiErr.errorCode(), Msg: msg}
 			}
 			return fmt.Errorf("dingtalk api error: status=%d body=%s", resp.StatusCode, bodyPreview)
 		}

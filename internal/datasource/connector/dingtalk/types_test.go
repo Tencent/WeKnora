@@ -316,11 +316,31 @@ func TestWikiNode_JSON(t *testing.T) {
 }
 
 func TestDingTalkAPIError_Error(t *testing.T) {
-	err := &dingtalkAPIError{Code: 400, Msg: "invalid request"}
+	err := &dingtalkAPIError{Code: "400", Msg: "invalid request"}
 	got := err.Error()
 	want := "dingtalk api error: code=400 msg=invalid request"
 	if got != want {
 		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestDingTalkErrorResponse_UsesOpenAPIMessageShape(t *testing.T) {
+	resp := dingtalkErrorResponse{Code: "Forbidden.AccessDenied", Message: "permission denied"}
+	if got := resp.errorCode(); got != "Forbidden.AccessDenied" {
+		t.Errorf("errorCode() = %q", got)
+	}
+	if got := resp.errorMessage(); got != "permission denied" {
+		t.Errorf("errorMessage() = %q", got)
+	}
+}
+
+func TestDingTalkErrorResponse_UsesLegacyMessageShape(t *testing.T) {
+	resp := dingtalkErrorResponse{ErrCode: 400, ErrMsg: "bad request"}
+	if got := resp.errorCode(); got != "400" {
+		t.Errorf("errorCode() = %q", got)
+	}
+	if got := resp.errorMessage(); got != "bad request" {
+		t.Errorf("errorMessage() = %q", got)
 	}
 }
 
@@ -435,5 +455,28 @@ func TestDocBlocksResponse_ResultData(t *testing.T) {
 	}
 	if blocks[0].Text != "hello" {
 		t.Errorf("Text = %q, want hello", blocks[0].Text)
+	}
+}
+
+func TestDocBlocksResponse_ResultList(t *testing.T) {
+	body := `{
+		"result": {
+			"list": [
+				{"blockId": "block-1", "blockType": "paragraph", "text": "from list"}
+			]
+		}
+	}`
+
+	var resp docBlocksResponse
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	blocks := resp.allBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	if blocks[0].Text != "from list" {
+		t.Errorf("Text = %q, want from list", blocks[0].Text)
 	}
 }

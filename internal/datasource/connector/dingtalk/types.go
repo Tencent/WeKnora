@@ -130,7 +130,9 @@ type docBlocksResponse struct {
 		Blocks []docBlock `json:"blocks,omitempty"`
 	} `json:"data,omitempty"`
 	Result struct {
-		Data []docBlock `json:"data,omitempty"`
+		Blocks []docBlock `json:"blocks,omitempty"`
+		Data   []docBlock `json:"data,omitempty"`
+		List   []docBlock `json:"list,omitempty"`
 	} `json:"result,omitempty"`
 }
 
@@ -140,6 +142,12 @@ func (r docBlocksResponse) allBlocks() []docBlock {
 	}
 	if len(r.Data.Blocks) > 0 {
 		return r.Data.Blocks
+	}
+	if len(r.Result.Blocks) > 0 {
+		return r.Result.Blocks
+	}
+	if len(r.Result.List) > 0 {
+		return r.Result.List
 	}
 	return r.Result.Data
 }
@@ -191,16 +199,35 @@ type WikiNode struct {
 type dingtalkErrorResponse struct {
 	ErrCode int    `json:"errcode"`
 	ErrMsg  string `json:"errmsg"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func (r dingtalkErrorResponse) errorCode() string {
+	if r.Code != "" {
+		return r.Code
+	}
+	if r.ErrCode != 0 {
+		return fmt.Sprintf("%d", r.ErrCode)
+	}
+	return ""
+}
+
+func (r dingtalkErrorResponse) errorMessage() string {
+	if r.Message != "" {
+		return r.Message
+	}
+	return r.ErrMsg
 }
 
 // dingtalkAPIError represents a DingTalk API error.
 type dingtalkAPIError struct {
-	Code int
+	Code string
 	Msg  string
 }
 
 func (e *dingtalkAPIError) Error() string {
-	return fmt.Sprintf("dingtalk api error: code=%d msg=%s", e.Code, e.Msg)
+	return fmt.Sprintf("dingtalk api error: code=%s msg=%s", e.Code, e.Msg)
 }
 
 // dingtalkCursor stores incremental sync state.
