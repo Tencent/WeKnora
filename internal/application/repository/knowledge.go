@@ -137,6 +137,9 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	if filter.ParseStatus != "" {
 		query = query.Where("parse_status = ?", filter.ParseStatus)
 	}
+	if filter.FolderID != nil {
+		query = query.Where("folder_id = ?", *filter.FolderID)
+	}
 	if !filter.UpdatedFrom.IsZero() {
 		query = query.Where("updated_at >= ?", filter.UpdatedFrom)
 	}

@@ -100,6 +100,9 @@ type KnowledgeListFilter struct {
 	// The special values "manual" and "url" are routed to the `type` column to match
 	// FileType semantics, so callers can filter "manually created" / "URL imported" entries.
 	Source string
+	// FolderID filters by exact document folder placement. nil means no folder
+	// filter; pointer to "" means root-level documents.
+	FolderID *string
 	// UpdatedFrom, when non-zero, keeps rows with updated_at >= UpdatedFrom.
 	UpdatedFrom time.Time
 	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
@@ -116,6 +119,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// FolderID is the document-management folder containing this knowledge.
+	FolderID string `json:"folder_id" gorm:"type:varchar(36);index;default:''"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge

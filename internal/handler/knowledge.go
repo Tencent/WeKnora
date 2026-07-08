@@ -33,6 +33,7 @@ import (
 type KnowledgeHandler struct {
 	cfg               *config.Config
 	kgService         interfaces.KnowledgeService
+	folderService     interfaces.KnowledgeFolderService
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
@@ -44,6 +45,7 @@ type KnowledgeHandler struct {
 func NewKnowledgeHandler(
 	cfg *config.Config,
 	kgService interfaces.KnowledgeService,
+	folderService interfaces.KnowledgeFolderService,
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
@@ -53,6 +55,7 @@ func NewKnowledgeHandler(
 	return &KnowledgeHandler{
 		cfg:               cfg,
 		kgService:         kgService,
+		folderService:     folderService,
 		kbService:         kbService,
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
@@ -872,6 +875,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Param        file_type     query     string  false  "文件类型筛选"
 // @Param        parse_status  query     string  false  "解析状态筛选 (pending/processing/completed/failed)"
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
+// @Param        folder_id     query     string  false  "目录ID筛选，__root__ 表示根目录"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
@@ -908,6 +912,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+		FolderID:    normalizeKnowledgeFolderQuery(c.Query("folder_id")),
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
@@ -926,15 +931,20 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		filter.UpdatedTo = t
 	}
 
+	folderIDLog := ""
+	if filter.FolderID != nil {
+		folderIDLog = *filter.FolderID
+	}
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_ids=%s keyword=%s file_type=%s parse_status=%s source=%s folder_id=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(strings.Join(filter.TagIDs, ",")),
 		secutils.SanitizeForLog(filter.Keyword),
 		secutils.SanitizeForLog(filter.FileType),
 		secutils.SanitizeForLog(filter.ParseStatus),
 		secutils.SanitizeForLog(filter.Source),
+		secutils.SanitizeForLog(folderIDLog),
 		secutils.SanitizeForLog(c.Query("start_time")),
 		secutils.SanitizeForLog(c.Query("end_time")),
 		pagination.Page,

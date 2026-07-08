@@ -11,9 +11,14 @@
 | POST   | `/knowledge-bases/:id/knowledge/manual`    | 创建手工 Markdown 知识                     |
 | GET    | `/knowledge-bases/:id/knowledge`           | 列出知识库下的知识（支持分页/筛选）         |
 | DELETE | `/knowledge-bases/:id/knowledge`           | 清空知识库下的所有知识（异步任务）         |
+| GET    | `/knowledge-bases/:id/folders`             | 列出知识库目录                             |
+| POST   | `/knowledge-bases/:id/folders`             | 创建知识库目录                             |
+| PUT    | `/knowledge-bases/:id/folders/:folder_id`  | 重命名知识库目录                           |
+| DELETE | `/knowledge-bases/:id/folders/:folder_id`  | 删除空目录                                 |
 | GET    | `/knowledge/batch`                         | 按 ID 列表批量获取知识                     |
 | GET    | `/knowledge/:id`                           | 获取知识详情                               |
 | PUT    | `/knowledge/:id`                           | 更新知识（标题/描述/标签等）               |
+| PUT    | `/knowledge/:id/folder`                    | 移动单条知识到目录                         |
 | DELETE | `/knowledge/:id`                           | 删除单条知识                               |
 | PUT    | `/knowledge/manual/:id`                    | 更新手工 Markdown 知识                     |
 | POST   | `/knowledge/:id/reparse`                   | 重新解析知识（异步）                       |
@@ -30,6 +35,7 @@
 > **公共说明**：
 > - 路径中的 `:id`（知识库路径下）为**知识库 ID**，`/knowledge/:id` 中的 `:id` 为**知识 ID**。
 > - 所有写操作（创建、更新、删除、迁移、重新解析、取消解析）需要当前用户在知识库所属组织内具有 `editor` 或 `admin` 权限；清空知识库内容仅 KB **所有者**（admin 且租户匹配）可操作。
+> - 目录接口使用 `folder_id` 关联知识条目；空字符串或 `__root__` 表示根目录。目录删除仅支持空目录，不会递归删除子目录或知识。
 > - 关键状态字段：`parse_status` 取值 `pending` / `processing` / `finalizing` / `completed` / `failed` / `cancelled`；`enable_status` 取值 `enabled` / `disabled`。
 > - `processing` 指 DocReader / 分块 / 向量化阶段；`finalizing` 指主解析已完成、仍在执行摘要 / 问题生成 / 图谱抽取等索引优化任务；只有当全部子任务到达终态后才进入 `completed`。
 > - `cancelled` 表示解析被用户主动取消，可通过 `reparse` 重新触发。`pending` / `processing` / `finalizing` 这三种状态都可通过 `cancel-parse` 终止。
@@ -273,6 +279,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 | `file_type`    | string  | -    | 按单个文件扩展名过滤（如 `pdf`）；特殊值 `manual` / `url` 命中 `type` 列                              |
 | `parse_status` | string  | -    | 按解析状态过滤：`pending` / `processing` / `completed` / `failed`                                    |
 | `source`       | string  | -    | 按来源/渠道过滤：`web` / `api` / `browser_extension` / `feishu` / `notion` / `yuque` / `wechat` 等； 特殊值 `manual` / `url` 命中 `type` 列 |
+| `folder_id`    | string  | -    | 按目录过滤；传 `__root__` 查询根目录下知识，不传则不过滤目录                                         |
 | `start_time`   | string  | -    | 更新时间起点，接受 RFC3339 (`2024-05-01T00:00:00+08:00`) 或 `YYYY-MM-DD HH:MM:SS` / `YYYY-MM-DD`     |
 | `end_time`     | string  | -    | 更新时间终点，格式同 `start_time`                                                                   |
 
@@ -322,6 +329,138 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
     "success": true
 }
 ```
+
+## GET `/knowledge-bases/:id/folders` - 列出知识库目录
+
+列出指定父目录下的直接子目录，不递归展开。`parent_id` 为空或 `__root__` 时返回根目录。
+
+**查询参数**:
+
+| 字段        | 类型   | 默认       | 说明                    |
+| ----------- | ------ | ---------- | ----------------------- |
+| `parent_id` | string | `__root__` | 父目录 ID，根目录可传空 |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/folders?parent_id=__root__' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "folders": [
+            {
+                "id": "folder-00000001",
+                "tenant_id": 1,
+                "knowledge_base_id": "kb-00000001",
+                "parent_id": "",
+                "name": "产品文档",
+                "path": "产品文档",
+                "depth": 0,
+                "sort_order": 0,
+                "knowledge_count": 3,
+                "has_children": true,
+                "created_at": "2025-08-12T12:00:00+08:00",
+                "updated_at": "2025-08-12T12:00:00+08:00",
+                "deleted_at": null
+            }
+        ]
+    }
+}
+```
+
+## POST `/knowledge-bases/:id/folders` - 创建知识库目录
+
+在知识库内创建一个空目录。同一父目录下目录名不可重复，目录名不能包含 `/` 或 `\`。
+
+**请求体**:
+
+| 字段        | 类型   | 必填 | 说明                                  |
+| ----------- | ------ | ---- | ------------------------------------- |
+| `name`      | string | 是   | 目录名                                |
+| `parent_id` | string | 否   | 父目录 ID；空字符串或 `__root__` 为根 |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/folders' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "name": "产品文档",
+    "parent_id": "__root__"
+}'
+```
+
+**响应**（HTTP 201）: 返回创建后的目录对象，字段同列表接口中的单个 `folder`。
+
+## PUT `/knowledge-bases/:id/folders/:folder_id` - 重命名知识库目录
+
+当前版本仅支持重命名目录，不移动目录层级。
+
+**请求体**:
+
+| 字段   | 类型   | 必填 | 说明   |
+| ------ | ------ | ---- | ------ |
+| `name` | string | 是   | 新名称 |
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/folders/folder-00000001' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "name": "售前资料"
+}'
+```
+
+**响应**: 返回更新后的目录对象。
+
+## DELETE `/knowledge-bases/:id/folders/:folder_id` - 删除空目录
+
+仅当目录没有子目录、且没有直接关联知识时可以删除；非空目录会返回 409。
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/folders/folder-00000001' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**:
+
+```json
+{
+    "success": true
+}
+```
+
+## PUT `/knowledge/:id/folder` - 移动单条知识到目录
+
+移动单条知识到同一知识库下的指定目录。`folder_id` 为空字符串或 `__root__` 时移动到根目录。
+
+**请求体**:
+
+| 字段        | 类型   | 必填 | 说明         |
+| ----------- | ------ | ---- | ------------ |
+| `folder_id` | string | 否   | 目标目录 ID  |
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/folder' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "folder_id": "folder-00000001"
+}'
+```
+
+**响应**: 返回移动后的知识对象，包含最新 `folder_id`。
 
 ## DELETE `/knowledge-bases/:id/knowledge` - 清空知识库下的所有知识
 
