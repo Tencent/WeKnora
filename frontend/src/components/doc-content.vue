@@ -1635,13 +1635,12 @@ const handleDetailsScroll = () => {
                 </t-button>
               </div>
               <div v-if="viewMode === 'chunks'" class="chunk-quality-filter">
-                <t-checkbox
+                <t-switch
                   v-model="lowQualityOnly"
                   size="small"
                   @change="reloadChunksWithFeedbackFilter"
-                >
-                  好评率
-                </t-checkbox>
+                />
+                <span class="quality-filter-label">好评率≤</span>
                 <t-select
                   v-model="lowQualityRate"
                   size="small"
@@ -1658,7 +1657,6 @@ const handleDetailsScroll = () => {
             </div>
           </div>
 
-          <!-- 音频播放器（音频文件时固定显示在内容区顶部） -->
           <div
             v-if="isAudioFile(details.file_type)"
             class="audio-player-section"
@@ -1677,7 +1675,6 @@ const handleDetailsScroll = () => {
             </audio>
           </div>
 
-          <!-- 合并视图 -->
           <div v-if="viewMode === 'merged'">
             <div v-if="!mergedContent" class="no_content">
               {{ $t("common.noData") }}
@@ -1689,7 +1686,6 @@ const handleDetailsScroll = () => {
             ></div>
           </div>
 
-          <!-- 分块视图 -->
           <div v-else-if="viewMode === 'chunks'">
             <div v-if="!processedChunks.length" class="no_content">
               {{ $t("common.noData") }}

@@ -189,7 +189,7 @@ func parseChunkFeedbackStatsFilter(c *gin.Context) (types.ChunkFeedbackStatsFilt
 		filter.Enable = true
 		filter.MaxPositiveRate = &rate
 	}
-	if value := c.Query("max_positive_rate"); value != "" {
+	if value := c.Query("min_feedback_count"); value != "" {
 		count, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return filter, err
