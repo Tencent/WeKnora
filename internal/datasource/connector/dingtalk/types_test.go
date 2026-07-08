@@ -108,6 +108,17 @@ func TestConfig_GetBaseURL_ReturnsDefault(t *testing.T) {
 	}
 }
 
+func TestConfig_GetBaseURL_UsesExplicitBaseURL(t *testing.T) {
+	cfg := &Config{
+		ClientID:     "test",
+		ClientSecret: "test",
+		BaseURL:      "https://example.test/",
+	}
+	if got := cfg.GetBaseURL(); got != "https://example.test" {
+		t.Errorf("GetBaseURL() = %q, want %q", got, "https://example.test")
+	}
+}
+
 func TestParseTime_RFC3339(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -401,5 +412,28 @@ func TestWikiNodesResponse_JSON(t *testing.T) {
 	}
 	if resp.NextToken != "token-abc" {
 		t.Errorf("NextToken = %q, want %q", resp.NextToken, "token-abc")
+	}
+}
+
+func TestDocBlocksResponse_ResultData(t *testing.T) {
+	body := `{
+		"result": {
+			"data": [
+				{"blockId": "block-1", "blockType": "paragraph", "text": "hello"}
+			]
+		}
+	}`
+
+	var resp docBlocksResponse
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	blocks := resp.allBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
+	}
+	if blocks[0].Text != "hello" {
+		t.Errorf("Text = %q, want hello", blocks[0].Text)
 	}
 }

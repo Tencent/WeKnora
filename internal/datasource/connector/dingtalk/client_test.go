@@ -127,7 +127,7 @@ func (cts *clientTestServer) setupHandlers() {
 		if req.AppKey == "valid-key" && req.AppSecret == "valid-secret" {
 			json.NewEncoder(w).Encode(accessTokenResponse{
 				AccessToken: "test-access-token-123",
-				ExpireIn:   7200,
+				ExpireIn:    7200,
 			})
 		} else {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -153,7 +153,7 @@ func (cts *clientTestServer) setupHandlers() {
 		json.NewEncoder(w).Encode(wikiWorkspacesResponse{
 			Workspaces: []WikiWorkspace{
 				{
-					WorkspaceID:   "ws-test-123",
+					WorkspaceID:  "ws-test-123",
 					Name:         "测试知识库",
 					Type:         "TEAM",
 					RootNodeID:   "root-node-456",
@@ -211,7 +211,9 @@ func TestClientDoRequest_Unauthorized(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	err := c.doRequest(context.Background(), http.MethodGet, "/test", nil, nil, nil)
@@ -235,7 +237,9 @@ func TestClientDoRequest_Forbidden(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	err := c.doRequest(context.Background(), http.MethodGet, "/test", nil, nil, nil)
@@ -262,7 +266,9 @@ func TestClientDoRequest_TooManyRequests(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	err := c.doRequest(context.Background(), http.MethodGet, "/test", nil, nil, nil)
@@ -288,7 +294,9 @@ func TestClientDoRequest_ServerError(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	err := c.doRequest(context.Background(), http.MethodGet, "/test", nil, nil, nil)
@@ -314,7 +322,9 @@ func TestClientDoRequest_BadRequest(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	err := c.doRequest(context.Background(), http.MethodGet, "/test", nil, nil, nil)
@@ -338,7 +348,9 @@ func TestClientDoRequest_Success(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	var result map[string]string
@@ -365,7 +377,9 @@ func TestClientDoRequest_QueryParams(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	params := map[string]string{
@@ -395,7 +409,9 @@ func TestClientDoRequest_EmptyQueryValue(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	params := map[string]string{
@@ -425,7 +441,9 @@ func TestClientDoRequest_WithBody(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		accessToken:  "token",
+		tokenExpiry:  time.Now().Add(time.Hour),
+		httpClient:   &http.Client{},
 	}
 
 	body := map[string]string{"key": "value"}
@@ -450,7 +468,7 @@ func TestClientDoRequest_ContextCanceled(t *testing.T) {
 		baseURL:      srv.URL,
 		clientID:     "test",
 		clientSecret: "secret",
-		httpClient:  &http.Client{},
+		httpClient:   &http.Client{},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -463,7 +481,7 @@ func TestClientDoRequest_ContextCanceled(t *testing.T) {
 }
 
 // TestDingTalkAPIError_Error tests the error string format.
-func TestDingTalkAPIError_Error(t *testing.T) {
+func TestDingTalkAPIError_ErrorFromClientTest(t *testing.T) {
 	err := &dingtalkAPIError{Code: 123, Msg: "test message"}
 	got := err.Error()
 	expected := "dingtalk api error: code=123 msg=test message"

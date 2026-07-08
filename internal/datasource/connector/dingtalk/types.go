@@ -40,11 +40,19 @@ type Config struct {
 	// OperatorID is the unionId of the operator (used for API calls).
 	// This is optional and can be extracted from access_token response.
 	OperatorID string `json:"operator_id,omitempty"`
+
+	// BaseURL is only used by tests and private deployments. The frontend does
+	// not expose it, so production still uses DingTalk's public OpenAPI host.
+	BaseURL string `json:"base_url,omitempty"`
 }
 
-// GetBaseURL returns the normalized base URL (always uses default for DingTalk).
+// GetBaseURL returns the normalized base URL.
 func (c *Config) GetBaseURL() string {
-	return DefaultBaseURL
+	baseURL := strings.TrimSpace(c.BaseURL)
+	if baseURL == "" {
+		return DefaultBaseURL
+	}
+	return strings.TrimRight(baseURL, "/")
 }
 
 // parseDingTalkConfig extracts and validates DingTalk-specific configuration.
@@ -66,6 +74,10 @@ func parseDingTalkConfig(config *types.DataSourceConfig) (*Config, error) {
 	if strings.TrimSpace(cfg.ClientSecret) == "" {
 		return nil, fmt.Errorf("%w: client_secret is required", datasource.ErrInvalidCredentials)
 	}
+	cfg.ClientID = strings.TrimSpace(cfg.ClientID)
+	cfg.ClientSecret = strings.TrimSpace(cfg.ClientSecret)
+	cfg.OperatorID = strings.TrimSpace(cfg.OperatorID)
+	cfg.BaseURL = strings.TrimSpace(cfg.BaseURL)
 	return &cfg, nil
 }
 
@@ -80,7 +92,7 @@ type accessTokenRequest struct {
 // accessTokenResponse is the response from getting access token.
 type accessTokenResponse struct {
 	AccessToken string `json:"access_token"`
-	ExpireIn   int    `json:"expireIn"`
+	ExpireIn    int    `json:"expireIn"`
 }
 
 // wikiWorkspacesResponse wraps GET /v2.0/wiki/workspaces.
@@ -90,7 +102,7 @@ type wikiWorkspacesResponse struct {
 
 // WikiWorkspace represents a DingTalk knowledge base (workspace).
 type WikiWorkspace struct {
-	WorkspaceID   string `json:"workspaceId"`  // spaceUuid
+	WorkspaceID  string `json:"workspaceId"` // spaceUuid
 	CorpID       string `json:"corpId"`
 	TeamID       string `json:"teamId,omitempty"`
 	RootNodeID   string `json:"rootNodeId"` // dentryUuid of root node
@@ -109,13 +121,61 @@ type wikiNodesResponse struct {
 	NextToken string     `json:"nextToken,omitempty"`
 }
 
+// docBlocksResponse wraps GET /v1.0/doc/suites/documents/{docKey}/blocks.
+// DingTalk has returned both top-level and data-wrapped shapes across docs and
+// SDKs, so the client accepts both to keep the connector forward-compatible.
+type docBlocksResponse struct {
+	Blocks []docBlock `json:"blocks,omitempty"`
+	Data   struct {
+		Blocks []docBlock `json:"blocks,omitempty"`
+	} `json:"data,omitempty"`
+	Result struct {
+		Data []docBlock `json:"data,omitempty"`
+	} `json:"result,omitempty"`
+}
+
+func (r docBlocksResponse) allBlocks() []docBlock {
+	if len(r.Blocks) > 0 {
+		return r.Blocks
+	}
+	if len(r.Data.Blocks) > 0 {
+		return r.Data.Blocks
+	}
+	return r.Result.Data
+}
+
+// docBlock intentionally models only the portable text-bearing fields we need
+// for ingestion. Raw keeps the complete block so we can extract common text
+// keys without coupling the connector to every DingTalk block variant.
+type docBlock struct {
+	BlockID   string          `json:"blockId,omitempty"`
+	BlockType string          `json:"blockType,omitempty"`
+	Type      string          `json:"type,omitempty"`
+	Text      string          `json:"text,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	Children  []docBlock      `json:"children,omitempty"`
+	Raw       json.RawMessage `json:"-"`
+}
+
+func (b *docBlock) UnmarshalJSON(data []byte) error {
+	type alias docBlock
+	var a alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*b = docBlock(a)
+	b.Raw = append(b.Raw[:0], data...)
+	return nil
+}
+
 // WikiNode represents a node (file or folder) in DingTalk wiki.
 type WikiNode struct {
-	NodeID       string `json:"nodeId"`        // dentryUuid
-	WorkspaceID  string `json:"workspaceId"`   // spaceUuid
+	NodeID       string `json:"nodeId"` // dentryUuid
+	DocKey       string `json:"docKey,omitempty"`
+	WorkspaceID  string `json:"workspaceId"` // spaceUuid
 	Name         string `json:"name"`
 	Size         int64  `json:"size,omitempty"`
-	NodeType     string `json:"type"`   // "FILE" or "FOLDER"
+	NodeType     string `json:"type"`     // "FILE" or "FOLDER"
 	Category     string `json:"category"` // "ALIDOC", "DOCUMENT", "IMAGE", etc.
 	Extension    string `json:"extension,omitempty"`
 	URL          string `json:"url,omitempty"`
@@ -145,8 +205,8 @@ func (e *dingtalkAPIError) Error() string {
 
 // dingtalkCursor stores incremental sync state.
 type dingtalkCursor struct {
-	LastSyncTime    time.Time                               `json:"last_sync_time"`
-	WorkspaceTimes  map[string]map[string]time.Time        `json:"workspace_node_times,omitempty"` // workspaceId -> nodeId -> modifiedTime
+	LastSyncTime   time.Time                       `json:"last_sync_time"`
+	WorkspaceTimes map[string]map[string]time.Time `json:"workspace_node_times,omitempty"` // workspaceId -> nodeId -> modifiedTime
 }
 
 // parseTime parses DingTalk timestamp (returns zero time on parse failure).

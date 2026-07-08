@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -15,11 +16,28 @@ import (
 // Compile-time proof that *Connector satisfies the datasource.Connector interface.
 var _ datasource.Connector = (*Connector)(nil)
 
+type clientFactory func(*Config) *client
+
 // Connector implements datasource.Connector for DingTalk.
-type Connector struct{}
+type Connector struct {
+	newClient        clientFactory
+	perDocumentDelay time.Duration
+}
 
 // NewConnector creates a new DingTalk connector.
-func NewConnector() *Connector { return &Connector{} }
+func NewConnector() *Connector {
+	return &Connector{
+		newClient:        newClient,
+		perDocumentDelay: 300 * time.Millisecond,
+	}
+}
+
+func (c *Connector) clientFor(cfg *Config) *client {
+	if c != nil && c.newClient != nil {
+		return c.newClient(cfg)
+	}
+	return newClient(cfg)
+}
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string { return types.ConnectorTypeDingTalk }
@@ -30,7 +48,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	if err != nil {
 		return err
 	}
-	cli := newClient(cfg)
+	cli := c.clientFor(cfg)
 	if err := cli.Ping(ctx); err != nil {
 		return fmt.Errorf("dingtalk connection failed: %w", err)
 	}
@@ -59,7 +77,7 @@ func (c *Connector) ListResources(
 	if err != nil {
 		return nil, err
 	}
-	cli := newClient(cfg)
+	cli := c.clientFor(cfg)
 
 	// Get workspaces - use operatorID from config if provided
 	operatorID := cfg.OperatorID
@@ -80,7 +98,7 @@ func (c *Connector) ListResources(
 			Metadata: map[string]interface{}{
 				"workspace_type": w.Type,
 				"root_node_id":   w.RootNodeID,
-				"corp_id":       w.CorpID,
+				"corp_id":        w.CorpID,
 			},
 		})
 	}
@@ -108,7 +126,7 @@ func (c *Connector) walk(
 	if err != nil {
 		return nil, nil, err
 	}
-	cli := newClient(cfg)
+	cli := c.clientFor(cfg)
 	operatorID := cfg.OperatorID
 
 	newCursor := &dingtalkCursor{
@@ -179,32 +197,52 @@ func (c *Connector) walk(
 
 			kept++
 
-			// Rate limit protection
-			if err := sleepCtx(ctx, 300*time.Millisecond); err != nil {
-				return nil, nil, err
+			if c.perDocumentDelay > 0 {
+				if err := sleepCtx(ctx, c.perDocumentDelay); err != nil {
+					return nil, nil, err
+				}
 			}
 
-			// For now, we create a placeholder item since full content fetching
-			// requires additional API calls to get document blocks.
-			// The content will be represented as metadata since DingTalk's document
-			// content API requires specific permissions and additional calls.
+			blocks, err := cli.GetDocumentBlocks(ctx, node.contentKey(), operatorID)
+			if err != nil {
+				out = append(out, types.FetchedItem{
+					ExternalID:       node.NodeID,
+					Title:            node.Name,
+					SourceResourceID: workspaceID,
+					Metadata: map[string]string{
+						"error":         err.Error(),
+						"channel":       types.ChannelDingtalk,
+						"node_id":       node.NodeID,
+						"workspace_id":  workspaceID,
+						"node_type":     node.NodeType,
+						"category":      node.Category,
+						"failure_stage": "fetch_content",
+					},
+				})
+				continue
+			}
+
+			content := renderBlocksMarkdown(node.Name, blocks)
+			if strings.TrimSpace(content) == "" {
+				content = "# " + node.Name + "\n"
+			}
+
 			out = append(out, types.FetchedItem{
 				ExternalID:       node.NodeID,
 				Title:            node.Name,
-				Content:          []byte(fmt.Sprintf("# %s\n\n*Source: [DingTalk](%s)*\n\n---\n\n> This document was synced from DingTalk Wiki.\n> Node ID: `%s`\n> Category: %s\n> Modified: %s",
-					node.Name, node.URL, node.NodeID, node.Category, node.ModifiedTime)),
+				Content:          []byte(content),
 				ContentType:      "text/markdown",
 				FileName:         sanitizeFileName(node.Name) + ".md",
 				URL:              node.URL,
 				UpdatedAt:        parseTime(node.ModifiedTime),
 				SourceResourceID: workspaceID,
 				Metadata: map[string]string{
-					"node_id":     node.NodeID,
+					"node_id":      node.NodeID,
 					"workspace_id": workspaceID,
-					"node_type":   node.NodeType,
-					"category":    node.Category,
-					"word_count":  fmt.Sprintf("%d", node.WordCount),
-					"channel":     types.ChannelDingtalk,
+					"node_type":    node.NodeType,
+					"category":     node.Category,
+					"word_count":   fmt.Sprintf("%d", node.WordCount),
+					"channel":      types.ChannelDingtalk,
 				},
 			})
 		}
@@ -215,15 +253,12 @@ func (c *Connector) walk(
 		// Deletion detection (incremental only)
 		if incremental && prev != nil && prev.WorkspaceTimes != nil {
 			if prevTimes, ok := prev.WorkspaceTimes[workspaceID]; ok {
+				currentNodes := make(map[string]bool, len(allNodes))
+				for _, node := range allNodes {
+					currentNodes[node.NodeID] = true
+				}
 				for prevNodeID := range prevTimes {
-					found := false
-					for _, node := range allNodes {
-						if node.NodeID == prevNodeID {
-							found = true
-							break
-						}
-					}
-					if !found {
+					if !currentNodes[prevNodeID] {
 						out = append(out, types.FetchedItem{
 							ExternalID:       prevNodeID,
 							IsDeleted:        true,
@@ -239,6 +274,94 @@ func (c *Connector) walk(
 		return out, nil, nil
 	}
 	return out, newCursor, nil
+}
+
+func renderBlocksMarkdown(title string, blocks []docBlock) string {
+	var b strings.Builder
+	if strings.TrimSpace(title) != "" {
+		b.WriteString("# ")
+		b.WriteString(title)
+		b.WriteString("\n\n")
+	}
+	for _, block := range blocks {
+		writeBlockMarkdown(&b, block)
+	}
+	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func writeBlockMarkdown(b *strings.Builder, block docBlock) {
+	text := strings.TrimSpace(blockText(block))
+	if text != "" {
+		switch strings.ToLower(firstNonEmpty(block.BlockType, block.Type)) {
+		case "heading1", "h1", "title":
+			b.WriteString("# ")
+		case "heading2", "h2":
+			b.WriteString("## ")
+		case "heading3", "h3":
+			b.WriteString("### ")
+		case "bullet", "unordered_list", "list":
+			b.WriteString("- ")
+		case "ordered_list":
+			b.WriteString("1. ")
+		}
+		b.WriteString(text)
+		b.WriteString("\n\n")
+	}
+	for _, child := range block.Children {
+		writeBlockMarkdown(b, child)
+	}
+}
+
+func blockText(block docBlock) string {
+	if block.Text != "" {
+		return block.Text
+	}
+	if block.Content != "" {
+		return block.Content
+	}
+	if len(block.Raw) == 0 {
+		return ""
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(block.Raw, &raw); err != nil {
+		return ""
+	}
+	return strings.Join(extractTextFields(raw), " ")
+}
+
+func extractTextFields(value interface{}) []string {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		var out []string
+		for key, child := range v {
+			switch strings.ToLower(key) {
+			case "text", "content", "plaintext", "plain_text", "value":
+				if s, ok := child.(string); ok && strings.TrimSpace(s) != "" {
+					out = append(out, strings.TrimSpace(s))
+					continue
+				}
+			}
+			out = append(out, extractTextFields(child)...)
+		}
+		return out
+	case []interface{}:
+		var out []string
+		for _, child := range v {
+			out = append(out, extractTextFields(child)...)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // FetchIncremental returns items changed (or deleted) since the prior cursor.

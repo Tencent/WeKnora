@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,13 +24,13 @@ const (
 
 // client wraps the DingTalk Open API.
 type client struct {
-	baseURL     string
-	clientID    string
+	baseURL      string
+	clientID     string
 	clientSecret string
-	accessToken string
-	tokenExpiry time.Time
-	httpClient  *http.Client
-	mu          sync.Mutex
+	accessToken  string
+	tokenExpiry  time.Time
+	httpClient   *http.Client
+	mu           sync.Mutex
 
 	logTokenOnce sync.Once
 }
@@ -305,10 +306,17 @@ func (c *client) ListWorkspaces(ctx context.Context, operatorID string) ([]WikiW
 
 // ListNodes returns nodes (files and folders) in a workspace or folder.
 func (c *client) ListNodes(ctx context.Context, parentNodeID, operatorID string) ([]WikiNode, string, error) {
+	return c.listNodePage(ctx, parentNodeID, operatorID, "")
+}
+
+func (c *client) listNodePage(ctx context.Context, parentNodeID, operatorID, nextToken string) ([]WikiNode, string, error) {
 	query := map[string]string{
 		"parentNodeId": parentNodeID,
 		"operatorId":   operatorID,
 		"maxResults":   fmt.Sprintf("%d", defaultPageSize),
+	}
+	if nextToken != "" {
+		query["nextToken"] = nextToken
 	}
 
 	var resp wikiNodesResponse
@@ -320,36 +328,81 @@ func (c *client) ListNodes(ctx context.Context, parentNodeID, operatorID string)
 
 // ListAllNodes returns all nodes recursively (with pagination).
 func (c *client) ListAllNodes(ctx context.Context, parentNodeID, operatorID string) ([]WikiNode, error) {
+	visited := make(map[string]bool)
+	all, err := c.listAllNodesFrom(ctx, parentNodeID, operatorID, visited)
+	if err != nil {
+		return nil, err
+	}
+	return all, nil
+}
+
+func (c *client) listAllNodesFrom(
+	ctx context.Context,
+	parentNodeID, operatorID string,
+	visited map[string]bool,
+) ([]WikiNode, error) {
+	if parentNodeID == "" {
+		return nil, nil
+	}
+	if visited[parentNodeID] {
+		return nil, nil
+	}
+	visited[parentNodeID] = true
+
 	var all []WikiNode
 	nextToken := ""
-
 	for {
-		query := map[string]string{
-			"parentNodeId": parentNodeID,
-			"operatorId":   operatorID,
-			"maxResults":   fmt.Sprintf("%d", defaultPageSize),
-		}
-		if nextToken != "" {
-			query["nextToken"] = nextToken
-		}
-
-		var resp wikiNodesResponse
-		if err := c.doRequest(ctx, http.MethodGet, "/v2.0/wiki/nodes", query, nil, &resp); err != nil {
+		nodes, token, err := c.listNodePage(ctx, parentNodeID, operatorID, nextToken)
+		if err != nil {
 			return nil, err
 		}
+		all = append(all, nodes...)
 
-		all = append(all, resp.Nodes...)
+		for _, node := range nodes {
+			if !node.hasChildNodes() {
+				continue
+			}
+			children, err := c.listAllNodesFrom(ctx, node.NodeID, operatorID, visited)
+			if err != nil {
+				return nil, fmt.Errorf("list children of node %s: %w", node.NodeID, err)
+			}
+			all = append(all, children...)
+		}
 
-		if resp.NextToken == "" {
+		if token == "" {
 			break
 		}
-		nextToken = resp.NextToken
+		nextToken = token
 
-		// Rate limit protection
 		if err := sleepCtx(ctx, 200*time.Millisecond); err != nil {
 			return nil, err
 		}
 	}
-
 	return all, nil
+}
+
+func (n WikiNode) hasChildNodes() bool {
+	return n.HasChildren || strings.EqualFold(n.NodeType, "FOLDER")
+}
+
+func (n WikiNode) contentKey() string {
+	if strings.TrimSpace(n.DocKey) != "" {
+		return strings.TrimSpace(n.DocKey)
+	}
+	return n.NodeID
+}
+
+// GetDocumentBlocks retrieves a DingTalk document's block tree. The caller can
+// render the returned blocks to Markdown or surface a per-document failure.
+func (c *client) GetDocumentBlocks(ctx context.Context, nodeID, operatorID string) ([]docBlock, error) {
+	query := map[string]string{
+		"operatorId": operatorID,
+	}
+	path := fmt.Sprintf("/v1.0/doc/suites/documents/%s/blocks", url.PathEscape(nodeID))
+
+	var resp docBlocksResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, query, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.allBlocks(), nil
 }

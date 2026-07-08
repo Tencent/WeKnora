@@ -5,18 +5,27 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func makeDingTalkConfig(clientID, clientSecret, operatorID string, resourceIDs []string) *types.DataSourceConfig {
+	return makeDingTalkConfigWithBaseURL(clientID, clientSecret, operatorID, "", resourceIDs)
+}
+
+func makeDingTalkConfigWithBaseURL(clientID, clientSecret, operatorID, baseURL string, resourceIDs []string) *types.DataSourceConfig {
 	creds := map[string]interface{}{
 		"client_id":     clientID,
 		"client_secret": clientSecret,
 	}
 	if operatorID != "" {
 		creds["operator_id"] = operatorID
+	}
+	if baseURL != "" {
+		creds["base_url"] = baseURL
 	}
 	return &types.DataSourceConfig{
 		Type:        types.ConnectorTypeDingTalk,
@@ -25,17 +34,41 @@ func makeDingTalkConfig(clientID, clientSecret, operatorID string, resourceIDs [
 	}
 }
 
-// fakeDingTalk creates a test server that simulates DingTalk API.
+func newTestConnector() *Connector {
+	c := NewConnector()
+	c.perDocumentDelay = 0
+	return c
+}
+
 type fakeDingTalk struct {
-	server *httptest.Server
-	mux    *http.ServeMux
+	server        *httptest.Server
+	mux           *http.ServeMux
+	nodesByParent map[string][]WikiNode
+	blockStatus   map[string]int
+	blocksByNode  map[string][]docBlock
 }
 
 func newFakeDingTalk() *fakeDingTalk {
 	f := &fakeDingTalk{
-		mux: http.NewServeMux(),
+		mux:           http.NewServeMux(),
+		nodesByParent: make(map[string][]WikiNode),
+		blockStatus:   make(map[string]int),
+		blocksByNode:  make(map[string][]docBlock),
 	}
 	f.server = httptest.NewServer(f.mux)
+	f.handleToken()
+	f.handleWorkspaces([]WikiWorkspace{{
+		WorkspaceID:  "ws-1",
+		Name:         "Engineering Wiki",
+		Type:         "TEAM",
+		RootNodeID:   "root-1",
+		URL:          "https://wiki.dingtalk.com/ws/1",
+		ModifiedTime: "2026-01-15T10:00:00+08:00",
+		Description:  "Team docs",
+		CorpID:       "corp-1",
+	}})
+	f.handleNodes()
+	f.handleBlocks()
 	return f
 }
 
@@ -47,38 +80,56 @@ func (f *fakeDingTalk) URL() string {
 	return f.server.URL
 }
 
-// handleToken registers the OAuth token endpoint.
+func (f *fakeDingTalk) config(resourceIDs []string) *types.DataSourceConfig {
+	return makeDingTalkConfigWithBaseURL("valid-id", "valid-secret", "operator-1", f.URL(), resourceIDs)
+}
+
 func (f *fakeDingTalk) handleToken() {
 	f.mux.HandleFunc("/v1.0/oauth2/accessToken", func(w http.ResponseWriter, r *http.Request) {
+		var req accessTokenRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"access_token": "test-token-123",
-			"expireIn":     7200,
-		})
+		if req.AppKey != "valid-id" || req.AppSecret != "valid-secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(dingtalkErrorResponse{ErrCode: 401, ErrMsg: "invalid credentials"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(accessTokenResponse{AccessToken: "test-token", ExpireIn: 7200})
 	})
 }
 
-// handleWorkspaces registers the workspaces list endpoint.
 func (f *fakeDingTalk) handleWorkspaces(workspaces []WikiWorkspace) {
 	f.mux.HandleFunc("/v2.0/wiki/workspaces", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(wikiWorkspacesResponse{Workspaces: workspaces})
+		_ = json.NewEncoder(w).Encode(wikiWorkspacesResponse{Workspaces: workspaces})
 	})
 }
 
-// handleNodes registers the nodes list endpoint with optional pagination.
-func (f *fakeDingTalk) handleNodes(nodes []WikiNode, nextToken string) {
+func (f *fakeDingTalk) handleNodes() {
 	f.mux.HandleFunc("/v2.0/wiki/nodes", func(w http.ResponseWriter, r *http.Request) {
+		parentID := r.URL.Query().Get("parentNodeId")
 		w.Header().Set("Content-Type", "application/json")
-		resp := wikiNodesResponse{Nodes: nodes}
-		if nextToken != "" {
-			resp.NextToken = nextToken
-		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(wikiNodesResponse{Nodes: f.nodesByParent[parentID]})
 	})
 }
 
-// TestConnectorType verifies the connector type identifier.
+func (f *fakeDingTalk) handleBlocks() {
+	f.mux.HandleFunc("/v1.0/doc/suites/documents/", func(w http.ResponseWriter, r *http.Request) {
+		nodeID := strings.TrimPrefix(r.URL.Path, "/v1.0/doc/suites/documents/")
+		nodeID = strings.TrimSuffix(nodeID, "/blocks")
+		if status := f.blockStatus[nodeID]; status != 0 {
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(dingtalkErrorResponse{ErrCode: status, ErrMsg: "block failure"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(docBlocksResponse{Blocks: f.blocksByNode[nodeID]})
+	})
+}
+
 func TestConnectorType(t *testing.T) {
 	c := NewConnector()
 	if c.Type() != types.ConnectorTypeDingTalk {
@@ -86,29 +137,17 @@ func TestConnectorType(t *testing.T) {
 	}
 }
 
-// TestConnectorValidate_Success tests successful credential validation.
 func TestConnectorValidate_Success(t *testing.T) {
 	f := newFakeDingTalk()
 	defer f.Close()
-	f.handleToken()
-	f.handleWorkspaces(nil)
 
-	// Create a temporary config that points to our test server
-	// We need to inject the test URL, but Config.GetBaseURL returns a hardcoded value.
-	// For this test, we'll test validation logic without hitting the network.
-	c := NewConnector()
-	err := c.Validate(context.Background(), makeDingTalkConfig("valid-id", "valid-secret", "", nil))
-	// This will fail because we're hitting the real DingTalk API.
-	// We need a different approach for testing with fake server.
-	if err == nil {
-		t.Log("Validation succeeded (might be hitting real API)")
+	if err := newTestConnector().Validate(context.Background(), f.config(nil)); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }
 
-// TestConnectorValidate_MissingCredentials tests validation with missing credentials.
 func TestConnectorValidate_MissingClientID(t *testing.T) {
-	c := NewConnector()
-	err := c.Validate(context.Background(), &types.DataSourceConfig{
+	err := NewConnector().Validate(context.Background(), &types.DataSourceConfig{
 		Type:        types.ConnectorTypeDingTalk,
 		Credentials: map[string]interface{}{"client_secret": "secret"},
 	})
@@ -118,8 +157,7 @@ func TestConnectorValidate_MissingClientID(t *testing.T) {
 }
 
 func TestConnectorValidate_MissingClientSecret(t *testing.T) {
-	c := NewConnector()
-	err := c.Validate(context.Background(), &types.DataSourceConfig{
+	err := NewConnector().Validate(context.Background(), &types.DataSourceConfig{
 		Type:        types.ConnectorTypeDingTalk,
 		Credentials: map[string]interface{}{"client_id": "id"},
 	})
@@ -129,17 +167,13 @@ func TestConnectorValidate_MissingClientSecret(t *testing.T) {
 }
 
 func TestConnectorValidate_NilConfig(t *testing.T) {
-	c := NewConnector()
-	err := c.Validate(context.Background(), nil)
-	if err == nil {
+	if err := NewConnector().Validate(context.Background(), nil); err == nil {
 		t.Fatal("expected error for nil config")
 	}
 }
 
-// TestConnectorResolveResourceAncestors verifies that DingTalk workspaces are flat.
 func TestConnectorResolveResourceAncestors(t *testing.T) {
-	c := NewConnector()
-	ancestors, err := c.ResolveResourceAncestors(context.Background(), nil, []string{"ws-1", "ws-2"})
+	ancestors, err := NewConnector().ResolveResourceAncestors(context.Background(), nil, []string{"ws-1", "ws-2"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -148,95 +182,144 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 	}
 }
 
-// TestConnectorListResources_EmptyParent tests that parentID filtering works.
-func TestConnectorListResources_EmptyParent(t *testing.T) {
+func TestConnectorListResources(t *testing.T) {
 	f := newFakeDingTalk()
 	defer f.Close()
-	f.handleToken()
-	f.handleWorkspaces([]WikiWorkspace{
-		{WorkspaceID: "ws-1", Name: "知识库1", RootNodeID: "root-1", URL: "https://wiki.dingtalk.com/ws/1"},
-		{WorkspaceID: "ws-2", Name: "知识库2", RootNodeID: "root-2", URL: "https://wiki.dingtalk.com/ws/2"},
-	})
 
-	// This test would require modifying the Config to accept a custom base URL.
-	// For now, we test the logic that parentID != "" returns empty.
-	c := NewConnector()
-	resources, err := c.ListResources(context.Background(), makeDingTalkConfig("id", "secret", "", nil), "")
+	resources, err := newTestConnector().ListResources(context.Background(), f.config(nil), "")
 	if err != nil {
-		t.Logf("ListResources requires real API or injected URL: %v", err)
+		t.Fatalf("ListResources() error = %v", err)
 	}
-	_ = resources
-	_ = f
+	if len(resources) != 1 {
+		t.Fatalf("len(resources) = %d, want 1", len(resources))
+	}
+	if resources[0].ExternalID != "ws-1" || resources[0].Name != "Engineering Wiki" {
+		t.Fatalf("unexpected resource: %+v", resources[0])
+	}
+	if resources[0].Metadata["root_node_id"] != "root-1" {
+		t.Fatalf("root_node_id metadata = %v, want root-1", resources[0].Metadata["root_node_id"])
+	}
 }
 
-// TestConnectorListResources_IgnoresParentID tests that DingTalk ignores parentID (flat list).
 func TestConnectorListResources_IgnoresParentID(t *testing.T) {
-	f := newFakeDingTalk()
-	defer f.Close()
-	f.handleToken()
-	f.handleWorkspaces([]WikiWorkspace{
-		{WorkspaceID: "ws-1", Name: "知识库1", RootNodeID: "root-1", URL: "https://wiki.dingtalk.com/ws/1"},
-	})
-
-	// When parentID is non-empty, ListResources returns empty list.
-	// This is the expected behavior for DingTalk's flat workspace model.
-	c := NewConnector()
-	resources, err := c.ListResources(context.Background(), makeDingTalkConfig("id", "secret", "", nil), "some-parent-id")
+	resources, err := NewConnector().ListResources(context.Background(), makeDingTalkConfig("id", "secret", "", nil), "some-parent-id")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(resources) != 0 {
 		t.Errorf("expected empty resources when parentID is non-empty, got %d", len(resources))
 	}
-	_ = f
 }
 
-// TestConnectorFetchAll_RequiresResources tests that FetchAll requires resource IDs.
-func TestConnectorFetchAll_NoResourceIDs(t *testing.T) {
-	c := NewConnector()
-	_, err := c.FetchAll(context.Background(), makeDingTalkConfig("id", "secret", "", nil), nil)
-	// Without resource IDs pointing to existing workspaces, this should fail gracefully.
-	if err == nil {
-		t.Log("FetchAll succeeded without resource IDs (workspace lookup may have failed)")
+func TestConnectorFetchAll_RecursesAndFetchesDocumentBlocks(t *testing.T) {
+	f := newFakeDingTalk()
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "folder-1", Name: "Guides", NodeType: "FOLDER", Category: "FOLDER", HasChildren: true},
+		{NodeID: "doc-1", DocKey: "doc-key-1", Name: "Runbook", NodeType: "FILE", Category: "ALIDOC", URL: "https://wiki/doc-1", ModifiedTime: "2026-01-15T10:00:00+08:00", WordCount: 42},
+		{NodeID: "img-1", Name: "Logo", NodeType: "FILE", Category: "IMAGE"},
+	}
+	f.nodesByParent["folder-1"] = []WikiNode{
+		{NodeID: "doc-2", Name: "Nested Plan", NodeType: "FILE", Category: "DOCUMENT", URL: "https://wiki/doc-2", ModifiedTime: "2026-01-16T10:00:00+08:00"},
+	}
+	f.blocksByNode["doc-key-1"] = []docBlock{{BlockType: "heading2", Text: "Deploy"}, {Text: "Restart workers"}}
+	f.blocksByNode["doc-2"] = []docBlock{{Text: "Nested content"}}
+
+	items, err := newTestConnector().FetchAll(context.Background(), f.config(nil), []string{"ws-1"})
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2: %+v", len(items), items)
+	}
+
+	byID := map[string]types.FetchedItem{}
+	for _, item := range items {
+		byID[item.ExternalID] = item
+	}
+	if got := string(byID["doc-1"].Content); !strings.Contains(got, "## Deploy") || !strings.Contains(got, "Restart workers") {
+		t.Fatalf("doc-1 content = %q", got)
+	}
+	if got := string(byID["doc-2"].Content); !strings.Contains(got, "Nested content") {
+		t.Fatalf("doc-2 content = %q", got)
 	}
 }
 
-// TestConnectorFetchIncremental_NoResourceIDs tests that incremental sync validates resource IDs.
+func TestConnectorFetchAll_ContentFailureReturnsErrorItem(t *testing.T) {
+	f := newFakeDingTalk()
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "doc-1", Name: "Private Doc", NodeType: "FILE", Category: "ALIDOC"},
+	}
+	f.blockStatus["doc-1"] = http.StatusForbidden
+
+	items, err := newTestConnector().FetchAll(context.Background(), f.config(nil), []string{"ws-1"})
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].Metadata["failure_stage"] != "fetch_content" {
+		t.Fatalf("failure_stage = %q, want fetch_content", items[0].Metadata["failure_stage"])
+	}
+	if string(items[0].Content) != "" {
+		t.Fatalf("failure item should not include placeholder content, got %q", string(items[0].Content))
+	}
+}
+
+func TestConnectorFetchIncremental_SkipsUnchangedAndDetectsDeleted(t *testing.T) {
+	f := newFakeDingTalk()
+	defer f.Close()
+	f.nodesByParent["root-1"] = []WikiNode{
+		{NodeID: "same-doc", Name: "Same", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-15T10:00:00+08:00"},
+		{NodeID: "new-doc", Name: "New", NodeType: "FILE", Category: "ALIDOC", ModifiedTime: "2026-01-16T10:00:00+08:00"},
+	}
+	f.blocksByNode["new-doc"] = []docBlock{{Text: "New content"}}
+
+	prevSame := parseTime("2026-01-15T10:00:00+08:00")
+	prevDeleted := time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC)
+	cursor := &types.SyncCursor{
+		ConnectorCursor: map[string]interface{}{
+			"workspace_node_times": map[string]interface{}{
+				"ws-1": map[string]interface{}{
+					"same-doc":    prevSame,
+					"deleted-doc": prevDeleted,
+				},
+			},
+		},
+	}
+
+	items, _, err := newTestConnector().FetchIncremental(context.Background(), f.config([]string{"ws-1"}), cursor)
+	if err != nil {
+		t.Fatalf("FetchIncremental() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want changed + deleted: %+v", len(items), items)
+	}
+
+	seenChanged := false
+	seenDeleted := false
+	for _, item := range items {
+		if item.ExternalID == "new-doc" && strings.Contains(string(item.Content), "New content") {
+			seenChanged = true
+		}
+		if item.ExternalID == "deleted-doc" && item.IsDeleted {
+			seenDeleted = true
+		}
+	}
+	if !seenChanged || !seenDeleted {
+		t.Fatalf("seenChanged=%v seenDeleted=%v items=%+v", seenChanged, seenDeleted, items)
+	}
+}
+
 func TestConnectorFetchIncremental_NoResourceIDs(t *testing.T) {
-	c := NewConnector()
-	_, _, err := c.FetchIncremental(context.Background(), makeDingTalkConfig("id", "secret", "", nil), nil)
+	_, _, err := NewConnector().FetchIncremental(context.Background(), makeDingTalkConfig("id", "secret", "", nil), nil)
 	if err == nil {
 		t.Fatal("expected error when no resource IDs configured")
 	}
 }
 
-// TestConnectorFetchIncremental_ValidCursor tests that valid cursors are processed.
-func TestConnectorFetchIncremental_ValidCursor(t *testing.T) {
-	f := newFakeDingTalk()
-	defer f.Close()
-	f.handleToken()
-	f.handleWorkspaces([]WikiWorkspace{
-		{WorkspaceID: "ws-1", Name: "知识库1", RootNodeID: "root-1", URL: "https://wiki.dingtalk.com/ws/1"},
-	})
-
-	c := NewConnector()
-	cursor := &types.SyncCursor{
-		ConnectorCursor: map[string]interface{}{
-			"last_sync_time": "2026-01-15T10:00:00Z",
-			"workspace_node_times": map[string]interface{}{
-				"ws-1": map[string]interface{}{},
-			},
-		},
-	}
-
-	_, _, err := c.FetchIncremental(context.Background(), makeDingTalkConfig("id", "secret", "", []string{"ws-1"}), cursor)
-	if err == nil {
-		t.Log("Incremental sync processed valid cursor")
-	}
-	_ = f
-}
-
-// TestConnectorImplementsInterface verifies compile-time interface check.
 func TestConnectorImplementsInterface(t *testing.T) {
 	var _ interface {
 		Type() string
