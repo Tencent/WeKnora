@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // chunkRepository implements the ChunkRepository interface
@@ -50,7 +51,37 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
 	// explicitly inserted, bypassing GORM's default value behavior.
 	// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
-	return db.Select("*").CreateInBatches(chunks, 100).Error
+	updateColumns := clause.AssignmentColumns([]string{
+		"tenant_id",
+		"knowledge_id",
+		"knowledge_base_id",
+		"tag_id",
+		"content",
+		"chunk_index",
+		"is_enabled",
+		"flags",
+		"status",
+		"start_at",
+		"end_at",
+		"pre_chunk_id",
+		"next_chunk_id",
+		"chunk_type",
+		"parent_chunk_id",
+		"relation_chunks",
+		"indirect_relation_chunks",
+		"metadata",
+		"content_hash",
+		"image_info",
+		"updated_at",
+	})
+	updateColumns = append(updateColumns, clause.Assignment{
+		Column: clause.Column{Name: "deleted_at"},
+		Value:  nil,
+	})
+	return db.Select("*").Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoUpdates: updateColumns,
+	}).CreateInBatches(chunks, 100).Error
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID

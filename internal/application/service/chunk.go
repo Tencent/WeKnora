@@ -20,6 +20,7 @@ type chunkService struct {
 	chunkRepository interfaces.ChunkRepository // Repository for chunk data persistence
 	kbRepository    interfaces.KnowledgeBaseRepository
 	modelService    interfaces.ModelService
+	cacheRepo       interfaces.ProcessingCacheRepository
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
 }
@@ -35,6 +36,7 @@ func NewChunkService(
 	chunkRepository interfaces.ChunkRepository,
 	kbRepository interfaces.KnowledgeBaseRepository,
 	modelService interfaces.ModelService,
+	cacheRepo interfaces.ProcessingCacheRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
 ) interfaces.ChunkService {
@@ -42,6 +44,7 @@ func NewChunkService(
 		chunkRepository: chunkRepository,
 		kbRepository:    kbRepository,
 		modelService:    modelService,
+		cacheRepo:       cacheRepo,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
 	}
@@ -423,6 +426,7 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 		})
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = cacheEmbeddingModel(tenantID, s.cacheRepo, embeddingModel)
 
 	// Delete the vector index by source ID
 	if err := retrieveEngine.DeleteBySourceIDList(ctx, []string{sourceID}, embeddingModel.GetDimensions(), kb.Type); err != nil {

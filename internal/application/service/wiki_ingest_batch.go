@@ -438,7 +438,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			mapMu.Unlock()
 
 			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", op.DocTitle, op.KnowledgeID)
-			result, updates, err := s.mapOneDocument(mapCtx, chatModel, payload, op, batchCtx)
+			result, updates, err := s.mapOneDocument(mapCtx, chatModel, payload, op, batchCtx, synthesisModelID)
 			if err != nil {
 				mapMu.Lock()
 				ingestFailed++
@@ -775,6 +775,7 @@ func (s *wikiIngestService) mapOneDocument(
 	payload WikiIngestPayload,
 	op WikiPendingOp,
 	batchCtx *WikiBatchContext,
+	synthesisModelID string,
 ) (*docIngestResult, []SlugUpdate, error) {
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
@@ -853,6 +854,15 @@ func (s *wikiIngestService) mapOneDocument(
 	// surface during wiki page editing.
 	sourceRef := knowledgeID
 	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
+	chunkIDsForCache := make([]string, 0, len(chunks))
+	for _, ch := range chunks {
+		chunkIDsForCache = append(chunkIDsForCache, ch.ID)
+	}
+	mapCacheKey := wikiMapCacheKey(content, payload.KnowledgeBaseID, knowledgeID, lang, synthesisModelID, chunkIDsForCache)
+	if cachedResult, cachedUpdates, ok := s.getWikiMapCache(ctx, payload.TenantID, mapCacheKey, wikiSpan, oldPageSlugs, batchCtx, content, lang); ok {
+		logger.Infof(ctx, "wiki ingest: map cache hit for knowledge %s", knowledgeID)
+		return cachedResult, cachedUpdates, nil
+	}
 
 	// Pass 0: lightweight candidate slug extraction (skeleton only).
 	// On failure we fall back to the legacy single-shot extractor so the doc
@@ -1202,14 +1212,178 @@ func (s *wikiIngestService) mapOneDocument(
 		"summary_preview":  previewText(docSummaryLine, 160),
 	}
 
-	return &docIngestResult{
+	result := &docIngestResult{
 		KnowledgeID: knowledgeID,
 		DocTitle:    docTitle,
 		Summary:     docSummaryLine,
 		Pages:       extractedPages,
 		MapStats:    mapStats,
 		WikiSpan:    wikiSpan,
-	}, updates, nil
+	}
+	s.putWikiMapCache(ctx, payload.TenantID, mapCacheKey, result, updates, map[string]string{
+		"knowledge_base_id":  payload.KnowledgeBaseID,
+		"knowledge_id":       knowledgeID,
+		"language":           lang,
+		"synthesis_model_id": synthesisModelID,
+	})
+
+	return result, updates, nil
+}
+
+type wikiMapCachePayload struct {
+	Result  wikiMapCacheResult `json:"result"`
+	Updates []SlugUpdate       `json:"updates"`
+}
+
+type wikiMapCacheResult struct {
+	KnowledgeID string                 `json:"knowledge_id"`
+	DocTitle    string                 `json:"doc_title"`
+	Summary     string                 `json:"summary"`
+	Pages       []types.WikiLogPageRef `json:"pages"`
+	MapStats    types.JSONMap          `json:"map_stats"`
+}
+
+func (s *wikiIngestService) getWikiMapCache(
+	ctx context.Context,
+	tenantID uint64,
+	cacheKey string,
+	wikiSpan *Span,
+	oldPageSlugs map[string]bool,
+	batchCtx *WikiBatchContext,
+	content string,
+	lang string,
+) (*docIngestResult, []SlugUpdate, bool) {
+	if s.cacheRepo == nil {
+		return nil, nil, false
+	}
+	row, err := s.cacheRepo.Get(ctx, tenantID, types.ProcessingCacheStageWikiMap, cacheKey)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: map cache lookup failed: %v", err)
+		return nil, nil, false
+	}
+	if row == nil {
+		return nil, nil, false
+	}
+	var payload wikiMapCachePayload
+	if err := json.Unmarshal(row.Payload, &payload); err != nil {
+		logger.Warnf(ctx, "wiki ingest: map cache payload invalid: %v", err)
+		return nil, nil, false
+	}
+	result := &docIngestResult{
+		KnowledgeID: payload.Result.KnowledgeID,
+		DocTitle:    payload.Result.DocTitle,
+		Summary:     payload.Result.Summary,
+		Pages:       payload.Result.Pages,
+		MapStats:    payload.Result.MapStats,
+		WikiSpan:    wikiSpan,
+	}
+	if result.MapStats == nil {
+		result.MapStats = types.JSONMap{}
+	}
+	updates := rebuildWikiRetractsForCachedMap(ctx, result, payload.Updates, oldPageSlugs, batchCtx, content, lang)
+	result.MapStats["cache_hit"] = true
+	result.MapStats["cache_updates"] = len(payload.Updates)
+	result.MapStats["updates"] = len(updates)
+	return result, updates, true
+}
+
+func (s *wikiIngestService) putWikiMapCache(
+	ctx context.Context,
+	tenantID uint64,
+	cacheKey string,
+	result *docIngestResult,
+	updates []SlugUpdate,
+	metadata map[string]string,
+) {
+	if s.cacheRepo == nil || result == nil {
+		return
+	}
+	cacheUpdates := make([]SlugUpdate, 0, len(updates))
+	for _, u := range updates {
+		if u.Type == "retract" || u.Type == "retractStale" {
+			continue
+		}
+		cacheUpdates = append(cacheUpdates, u)
+	}
+	payloadBytes, err := json.Marshal(wikiMapCachePayload{
+		Result: wikiMapCacheResult{
+			KnowledgeID: result.KnowledgeID,
+			DocTitle:    result.DocTitle,
+			Summary:     result.Summary,
+			Pages:       result.Pages,
+			MapStats:    result.MapStats,
+		},
+		Updates: cacheUpdates,
+	})
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: map cache marshal failed: %v", err)
+		return
+	}
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["prompt_version"] = wikiMapPromptVersion
+	metaBytes, _ := json.Marshal(metadata)
+	if err := s.cacheRepo.Upsert(ctx, &types.ProcessingCache{
+		TenantID: tenantID,
+		Stage:    types.ProcessingCacheStageWikiMap,
+		CacheKey: cacheKey,
+		Payload:  types.JSON(payloadBytes),
+		Metadata: types.JSON(metaBytes),
+	}); err != nil {
+		logger.Warnf(ctx, "wiki ingest: map cache write failed: %v", err)
+	}
+}
+
+func rebuildWikiRetractsForCachedMap(
+	ctx context.Context,
+	result *docIngestResult,
+	updates []SlugUpdate,
+	oldPageSlugs map[string]bool,
+	batchCtx *WikiBatchContext,
+	content string,
+	lang string,
+) []SlugUpdate {
+	// The cached map only stores positive per-document contributions. Retracts
+	// depend on the current wiki page state, so rebuild them at read time.
+	if result == nil || len(oldPageSlugs) == 0 {
+		return updates
+	}
+	newSlugSet := make(map[string]bool, len(result.Pages))
+	for _, page := range result.Pages {
+		newSlugSet[page.Slug] = true
+	}
+	priorContribution := ""
+	if batchCtx != nil && batchCtx.SummaryContentByKnowledgeID != nil {
+		priorContribution = batchCtx.SummaryContentByKnowledgeID(ctx, result.KnowledgeID)
+	}
+	out := make([]SlugUpdate, 0, len(updates)+len(oldPageSlugs))
+	out = append(out, updates...)
+	for oldSlug := range oldPageSlugs {
+		if newSlugSet[oldSlug] {
+			if strings.HasPrefix(oldSlug, "summary/") {
+				continue
+			}
+			out = append(out, SlugUpdate{
+				Slug:              oldSlug,
+				Type:              "retract",
+				RetractDocContent: priorContribution,
+				DocTitle:          result.DocTitle,
+				KnowledgeID:       result.KnowledgeID,
+				Language:          lang,
+			})
+			continue
+		}
+		out = append(out, SlugUpdate{
+			Slug:              oldSlug,
+			Type:              "retractStale",
+			RetractDocContent: content,
+			DocTitle:          result.DocTitle,
+			KnowledgeID:       result.KnowledgeID,
+			Language:          lang,
+		})
+	}
+	return out
 }
 
 func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(

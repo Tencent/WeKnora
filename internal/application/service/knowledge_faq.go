@@ -13,7 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 )
 
 // ListFAQEntries lists FAQ entries under a FAQ knowledge base.
@@ -172,6 +171,7 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = cacheEmbeddingModel(kb.TenantID, s.cacheRepo, embeddingModel)
 
 	// 创建chunk
 	isEnabled := true
@@ -184,12 +184,13 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 		flags = 0
 	}
 
+	content := buildFAQChunkContent(meta, indexMode)
 	chunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              stableFAQChunkID(faqKnowledge.ID, meta, content),
 		TenantID:        tenantID,
 		KnowledgeID:     faqKnowledge.ID,
 		KnowledgeBaseID: kb.ID,
-		Content:         buildFAQChunkContent(meta, indexMode),
+		Content:         content,
 		IsEnabled:       isEnabled,
 		Flags:           flags,
 		ChunkType:       types.ChunkTypeFAQ,
@@ -408,6 +409,7 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	embeddingModel = cacheEmbeddingModel(kb.TenantID, s.cacheRepo, embeddingModel)
 
 	// 增量索引优化：只对变化的内容进行索引操作
 	if questionIndexMode == types.FAQQuestionIndexModeSeparate && len(oldSimilarQuestions) > 0 {
@@ -577,6 +579,7 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	embeddingModel = cacheEmbeddingModel(kb.TenantID, s.cacheRepo, embeddingModel)
 
 	questionIndexMode := types.FAQQuestionIndexModeCombined
 	if kb.FAQConfig != nil && kb.FAQConfig.QuestionIndexMode != "" {

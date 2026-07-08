@@ -197,6 +197,7 @@ type wikiIngestService struct {
 	knowledgeRepo  interfaces.KnowledgeRepository
 	chunkRepo      interfaces.ChunkRepository
 	modelService   interfaces.ModelService
+	cacheRepo      interfaces.ProcessingCacheRepository
 	task           interfaces.TaskEnqueuer
 	logEntrySvc    interfaces.WikiLogEntryService
 	pendingRepo    interfaces.TaskPendingOpsRepository
@@ -222,6 +223,7 @@ func NewWikiIngestService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	modelService interfaces.ModelService,
+	cacheRepo interfaces.ProcessingCacheRepository,
 	task interfaces.TaskEnqueuer,
 	logEntrySvc interfaces.WikiLogEntryService,
 	pendingRepo interfaces.TaskPendingOpsRepository,
@@ -236,6 +238,7 @@ func NewWikiIngestService(
 		knowledgeRepo:  knowledgeRepo,
 		chunkRepo:      chunkRepo,
 		modelService:   modelService,
+		cacheRepo:      cacheRepo,
 		task:           task,
 		logEntrySvc:    logEntrySvc,
 		pendingRepo:    pendingRepo,
@@ -1301,6 +1304,7 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 	}
 	return strings.TrimSpace(buf.String())
 }
+
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs

@@ -18,7 +18,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -58,6 +57,7 @@ type ImageMultimodalService struct {
 	modelService   interfaces.ModelService
 	kbService      interfaces.KnowledgeBaseService
 	knowledgeRepo  interfaces.KnowledgeRepository
+	cacheRepo      interfaces.ProcessingCacheRepository
 	tenantRepo     interfaces.TenantRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ownership      retriever.TenantStoreOwnership
@@ -81,6 +81,7 @@ func NewImageMultimodalService(
 	modelService interfaces.ModelService,
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	cacheRepo interfaces.ProcessingCacheRepository,
 	tenantRepo interfaces.TenantRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
@@ -95,6 +96,7 @@ func NewImageMultimodalService(
 		modelService:   modelService,
 		kbService:      kbService,
 		knowledgeRepo:  knowledgeRepo,
+		cacheRepo:      cacheRepo,
 		tenantRepo:     tenantRepo,
 		retrieveEngine: retrieveEngine,
 		ownership:      ownership,
@@ -228,6 +230,10 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 	imgOut["image_bytes"] = len(imgBytes)
+	vlmModelID := strings.TrimSpace(vlmCfg.ModelID)
+	if vlmModelID == "" {
+		vlmModelID = "legacy_inline:" + jsonStableHash(vlmCfg)
+	}
 
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
@@ -244,32 +250,104 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			imgOut["ocr_prompt"] = "default"
 		}
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-			imgOut["ocr_error"] = ocrErr.Error()
-		} else {
-			ocrText = sanitizeOCRText(ocrText)
-			if ocrText != "" {
-				imageInfo.OCRText = ocrText
-				imgOut["ocr_chars"] = len([]rune(ocrText))
-				imgOut["ocr_preview"] = previewText(ocrText, 200)
-			} else {
-				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
-				imgOut["ocr_chars"] = 0
-				imgOut["ocr_skipped"] = "empty_or_invalid"
+		ocrCacheKey := vlmOCRCacheKey(imgBytes, vlmModelID, payload.ImageSourceType, prompt)
+		var cached struct {
+			Text string `json:"text"`
+		}
+		ocrCacheHit := false
+		if s.cacheRepo != nil {
+			if row, err := s.cacheRepo.Get(ctx, payload.TenantID, types.ProcessingCacheStageVLMOCR, ocrCacheKey); err == nil && row != nil {
+				if json.Unmarshal(row.Payload, &cached) == nil {
+					imageInfo.OCRText = cached.Text
+					ocrCacheHit = true
+					imgOut["ocr_cache_hit"] = true
+				}
+			} else if err != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] OCR cache lookup failed for %s: %v", payload.ImageURL, err)
 			}
+		}
+		if !ocrCacheHit {
+			ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+			if ocrErr != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
+				imgOut["ocr_error"] = ocrErr.Error()
+			} else {
+				ocrText = sanitizeOCRText(ocrText)
+				imageInfo.OCRText = ocrText
+				if s.cacheRepo != nil {
+					payloadBytes, _ := json.Marshal(map[string]string{"text": ocrText})
+					metaBytes, _ := json.Marshal(map[string]string{
+						"model_id":       vlmModelID,
+						"prompt_version": vlmOCRPromptVersion,
+						"source_type":    payload.ImageSourceType,
+					})
+					if err := s.cacheRepo.Upsert(ctx, &types.ProcessingCache{
+						TenantID: payload.TenantID,
+						Stage:    types.ProcessingCacheStageVLMOCR,
+						CacheKey: ocrCacheKey,
+						Payload:  types.JSON(payloadBytes),
+						Metadata: types.JSON(metaBytes),
+					}); err != nil {
+						logger.Warnf(ctx, "[ImageMultimodal] OCR cache write failed for %s: %v", payload.ImageURL, err)
+					}
+				}
+				if ocrText == "" {
+					logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
+					imgOut["ocr_chars"] = 0
+					imgOut["ocr_skipped"] = "empty_or_invalid"
+				}
+			}
+		}
+		if imageInfo.OCRText != "" {
+			imgOut["ocr_chars"] = len([]rune(imageInfo.OCRText))
+			imgOut["ocr_preview"] = previewText(imageInfo.OCRText, 200)
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	captionCacheKey := vlmCaptionCacheKey(imgBytes, vlmModelID, vlmCaptionPrompt)
+	var cachedCaption struct {
+		Text string `json:"text"`
+	}
+	captionCacheHit := false
+	if s.cacheRepo != nil {
+		if row, err := s.cacheRepo.Get(ctx, payload.TenantID, types.ProcessingCacheStageVLMCaption, captionCacheKey); err == nil && row != nil {
+			if json.Unmarshal(row.Payload, &cachedCaption) == nil {
+				imageInfo.Caption = cachedCaption.Text
+				captionCacheHit = true
+				imgOut["caption_cache_hit"] = true
+			}
+		} else if err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption cache lookup failed for %s: %v", payload.ImageURL, err)
+		}
+	}
+	if !captionCacheHit {
+		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else {
+			imageInfo.Caption = caption
+			if s.cacheRepo != nil {
+				payloadBytes, _ := json.Marshal(map[string]string{"text": caption})
+				metaBytes, _ := json.Marshal(map[string]string{
+					"model_id":       vlmModelID,
+					"prompt_version": vlmCaptionVersion,
+				})
+				if err := s.cacheRepo.Upsert(ctx, &types.ProcessingCache{
+					TenantID: payload.TenantID,
+					Stage:    types.ProcessingCacheStageVLMCaption,
+					CacheKey: captionCacheKey,
+					Payload:  types.JSON(payloadBytes),
+					Metadata: types.JSON(metaBytes),
+				}); err != nil {
+					logger.Warnf(ctx, "[ImageMultimodal] Caption cache write failed for %s: %v", payload.ImageURL, err)
+				}
+			}
+		}
+	}
+	if imageInfo.Caption != "" {
+		imgOut["caption_chars"] = len([]rune(imageInfo.Caption))
+		imgOut["caption_preview"] = previewText(imageInfo.Caption, 200)
 	}
 
 	// Build child chunks for OCR and caption results
@@ -278,7 +356,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: stableChunkID(
+				payload.KnowledgeID,
+				types.ChunkTypeImageOCR,
+				payload.ImageIndex,
+				0,
+				0,
+				imageInfo.OCRText,
+				payload.ChunkID,
+				payload.ImageURL,
+			),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -295,7 +382,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: stableChunkID(
+				payload.KnowledgeID,
+				types.ChunkTypeImageCaption,
+				payload.ImageIndex,
+				0,
+				0,
+				imageInfo.Caption,
+				payload.ChunkID,
+				payload.ImageURL,
+			),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -399,6 +495,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: %v", err)
 		return
 	}
+	embeddingModel = cacheEmbeddingModel(payload.TenantID, s.cacheRepo, embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {

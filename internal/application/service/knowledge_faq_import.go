@@ -821,6 +821,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	if err != nil {
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = cacheEmbeddingModel(kb.TenantID, s.cacheRepo, embeddingModel)
 	faqKnowledge, err := s.ensureFAQKnowledge(ctx, tenantID, kb)
 	if err != nil {
 		return err
@@ -940,12 +941,13 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 				isEnabled = *entry.IsEnabled
 			}
 			// ChunkIndex计算：startChunkIndex + (i+idx) + initialProcessed
+			content := buildFAQChunkContent(meta, indexMode)
 			chunk := &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              stableFAQChunkID(faqKnowledge.ID, meta, content),
 				TenantID:        tenantID,
 				KnowledgeID:     faqKnowledge.ID,
 				KnowledgeBaseID: kb.ID,
-				Content:         buildFAQChunkContent(meta, indexMode),
+				Content:         content,
 				// ChunkIndex:      0,
 				IsEnabled: isEnabled,
 				ChunkType: types.ChunkTypeFAQ,
@@ -1467,6 +1469,7 @@ func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	embeddingModel = cacheEmbeddingModel(kb.TenantID, s.cacheRepo, embeddingModel)
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)

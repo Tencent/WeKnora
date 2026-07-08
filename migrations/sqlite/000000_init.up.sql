@@ -216,6 +216,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_seq_id ON chunks(seq_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb_tenant ON chunks(knowledge_base_id, tenant_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_knowledge_enabled ON chunks(knowledge_id, is_enabled, deleted_at);
 
+CREATE TABLE IF NOT EXISTS processing_caches (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    stage VARCHAR(64) NOT NULL,
+    cache_key VARCHAR(128) NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    last_hit_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_processing_cache_tenant_stage_key
+    ON processing_caches(tenant_id, stage, cache_key);
+CREATE INDEX IF NOT EXISTS idx_processing_cache_stage_updated
+    ON processing_caches(stage, updated_at);
+
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,
     username VARCHAR(100) NOT NULL UNIQUE,

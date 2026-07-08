@@ -63,6 +63,60 @@ func TestCreateChunks_SQLite_SeqIDAutoAssigned(t *testing.T) {
 	}
 }
 
+func TestCreateChunks_SQLite_RevivesSoftDeletedStableID(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	chunk := makeChunk(kbID, knowledgeID, "text")
+	chunk.ID = "stable-chunk-id"
+	chunk.Content = "old content"
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+	require.NoError(t, repo.DeleteChunksByKnowledgeID(ctx, 1, knowledgeID))
+
+	reparsed := makeChunk(kbID, knowledgeID, "text")
+	reparsed.ID = chunk.ID
+	reparsed.Content = "new content"
+	reparsed.ChunkIndex = 7
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{reparsed}))
+
+	var saved types.Chunk
+	require.NoError(t, db.Where("id = ?", chunk.ID).First(&saved).Error)
+	assert.Equal(t, "new content", saved.Content)
+	assert.Equal(t, 7, saved.ChunkIndex)
+	assert.False(t, saved.DeletedAt.Valid)
+}
+
+func TestCreateChunks_SQLite_UpsertsExistingStableID(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	chunk := makeChunk(kbID, knowledgeID, "text")
+	chunk.ID = "stable-active-chunk-id"
+	chunk.Content = "old content"
+	chunk.Status = int(types.ChunkStatusStored)
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+
+	updated := makeChunk(kbID, knowledgeID, "text")
+	updated.ID = chunk.ID
+	updated.Content = "new content"
+	updated.Status = int(types.ChunkStatusIndexed)
+	updated.IsEnabled = false
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{updated}))
+
+	var saved []types.Chunk
+	require.NoError(t, db.Where("id = ?", chunk.ID).Find(&saved).Error)
+	require.Len(t, saved, 1)
+	assert.Equal(t, "new content", saved[0].Content)
+	assert.Equal(t, int(types.ChunkStatusIndexed), saved[0].Status)
+	assert.False(t, saved[0].IsEnabled)
+}
+
 func TestCreateChunks_SQLite_SeqIDContinuesFromExisting(t *testing.T) {
 	db := setupChunkTestDB(t)
 	repo := NewChunkRepository(db)

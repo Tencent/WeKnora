@@ -128,7 +128,7 @@ type Chunk struct {
 	// Index position of the chunk in the original document
 	ChunkIndex int `json:"chunk_index"`
 	// Whether the chunk is enabled, can be used to temporarily disable certain chunks
-	IsEnabled bool `json:"is_enabled"               gorm:"default:true"`
+	IsEnabled bool `json:"is_enabled"`
 	// Flags 存储多个布尔状态的位标志（如推荐状态等）
 	// 默认值为 ChunkFlagRecommended (1)，表示默认可推荐
 	Flags ChunkFlags `json:"flags"                    gorm:"default:1"`

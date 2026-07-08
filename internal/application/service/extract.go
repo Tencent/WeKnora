@@ -161,6 +161,7 @@ type ChunkExtractService struct {
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
+	cacheRepo         interfaces.ProcessingCacheRepository
 	graphEngine       interfaces.RetrieveGraphRepository
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
@@ -175,6 +176,7 @@ func NewChunkExtractService(
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
+	cacheRepo interfaces.ProcessingCacheRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
@@ -184,6 +186,7 @@ func NewChunkExtractService(
 		knowledgeBaseRepo: knowledgeBaseRepo,
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
+		cacheRepo:         cacheRepo,
 		graphEngine:       graphEngine,
 		spanTracker:       spanTracker,
 	}
@@ -308,13 +311,6 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
-	if err != nil {
-		logger.Errorf(ctx, "failed to get chat model: %v", err)
-		handleErr = err
-		return err
-	}
-
 	template := &types.PromptTemplateStructured{
 		Description: s.template.Description,
 		Tags:        extractCfg.Tags,
@@ -326,11 +322,33 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+	graphCacheKey := processingCacheKey(
+		normalizedContentHash(chunk.Content),
+		p.ModelID,
+		graphChunkVersion,
+		jsonStableHash(template),
+	)
+	graph, cacheHit := s.getGraphChunkCache(ctx, p.TenantID, graphCacheKey)
+	if cacheHit {
+		graphOut["cache_hit"] = true
+	} else {
+		chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
+		if err != nil {
+			logger.Errorf(ctx, "failed to get chat model: %v", err)
+			handleErr = err
+			return err
+		}
+
+		extractor := chatpipeline.NewExtractor(chatModel, template)
+		graph, err = extractor.Extract(ctx, chunk.Content)
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		s.putGraphChunkCache(ctx, p.TenantID, graphCacheKey, graph, map[string]string{
+			"model_id":       p.ModelID,
+			"prompt_version": graphChunkVersion,
+		})
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -382,6 +400,59 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	return nil
 }
 
+type graphChunkCachePayload struct {
+	Graph *types.GraphData `json:"graph"`
+}
+
+func (s *ChunkExtractService) getGraphChunkCache(ctx context.Context, tenantID uint64, cacheKey string) (*types.GraphData, bool) {
+	if s.cacheRepo == nil {
+		return nil, false
+	}
+	row, err := s.cacheRepo.Get(ctx, tenantID, types.ProcessingCacheStageGraphChunk, cacheKey)
+	if err != nil {
+		logger.Warnf(ctx, "graph extract cache lookup failed: %v", err)
+		return nil, false
+	}
+	if row == nil {
+		return nil, false
+	}
+	var payload graphChunkCachePayload
+	if err := json.Unmarshal(row.Payload, &payload); err != nil || payload.Graph == nil {
+		if err != nil {
+			logger.Warnf(ctx, "graph extract cache payload invalid: %v", err)
+		}
+		return nil, false
+	}
+	return payload.Graph, true
+}
+
+func (s *ChunkExtractService) putGraphChunkCache(
+	ctx context.Context,
+	tenantID uint64,
+	cacheKey string,
+	graph *types.GraphData,
+	metadata map[string]string,
+) {
+	if s.cacheRepo == nil || graph == nil {
+		return
+	}
+	payloadBytes, err := json.Marshal(graphChunkCachePayload{Graph: graph})
+	if err != nil {
+		logger.Warnf(ctx, "graph extract cache marshal failed: %v", err)
+		return
+	}
+	metaBytes, _ := json.Marshal(metadata)
+	if err := s.cacheRepo.Upsert(ctx, &types.ProcessingCache{
+		TenantID: tenantID,
+		Stage:    types.ProcessingCacheStageGraphChunk,
+		CacheKey: cacheKey,
+		Payload:  types.JSON(payloadBytes),
+		Metadata: types.JSON(metaBytes),
+	}); err != nil {
+		logger.Warnf(ctx, "graph extract cache write failed: %v", err)
+	}
+}
+
 // DataTableExtractPayload represents the table extract task payload
 type DataTableSummaryPayload struct {
 	types.TracingContext
@@ -401,6 +472,7 @@ type DataTableSummaryService struct {
 	tenantService        interfaces.TenantService
 	retrieveEngine       interfaces.RetrieveEngineRegistry
 	ownership            retriever.TenantStoreOwnership
+	cacheRepo            interfaces.ProcessingCacheRepository
 	sqlDB                *sql.DB
 }
 
@@ -414,6 +486,7 @@ func NewDataTableSummaryService(
 	tenantService interfaces.TenantService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
+	cacheRepo interfaces.ProcessingCacheRepository,
 	sqlDB *sql.DB,
 ) interfaces.TaskHandler {
 	return &DataTableSummaryService{
@@ -425,6 +498,7 @@ func NewDataTableSummaryService(
 		tenantService:        tenantService,
 		retrieveEngine:       retrieveEngine,
 		ownership:            ownership,
+		cacheRepo:            cacheRepo,
 		sqlDB:                sqlDB,
 	}
 }
@@ -513,6 +587,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		logger.Errorf(ctx, "failed to get embedding model: %v", err)
 		return nil, err
 	}
+	embeddingModel = cacheEmbeddingModel(payload.TenantID, s.cacheRepo, embeddingModel)
 
 	// Load the KB to discover its VectorStoreID binding so the factory can
 	// route to the bound store (or fall back to tenant engines if unbound).
@@ -644,7 +719,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 表格摘要chunk
 	summaryChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              stableChunkID(resources.knowledge.ID, types.ChunkTypeTableSummary, 0, 0, 0, tableDescription),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
@@ -658,7 +733,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 列描述chunk（所有列的描述合并为一个chunk）
 	columnChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              stableChunkID(resources.knowledge.ID, types.ChunkTypeTableColumn, 1, 0, 0, columnDescription),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,

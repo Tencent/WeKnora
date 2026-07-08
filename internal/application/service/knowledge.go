@@ -45,6 +45,7 @@ type knowledgeService struct {
 	repo            interfaces.KnowledgeRepository
 	kbService       interfaces.KnowledgeBaseService
 	tenantRepo      interfaces.TenantRepository
+	cacheRepo       interfaces.ProcessingCacheRepository
 	tenantService   interfaces.TenantService
 	documentReader  interfaces.DocumentReader
 	chunkService    interfaces.ChunkService
@@ -87,6 +88,7 @@ func NewKnowledgeService(
 	documentReader interfaces.DocumentReader,
 	kbService interfaces.KnowledgeBaseService,
 	tenantRepo interfaces.TenantRepository,
+	cacheRepo interfaces.ProcessingCacheRepository,
 	tenantService interfaces.TenantService,
 	chunkService interfaces.ChunkService,
 	chunkRepo interfaces.ChunkRepository,
@@ -112,6 +114,7 @@ func NewKnowledgeService(
 		repo:            repo,
 		kbService:       kbService,
 		tenantRepo:      tenantRepo,
+		cacheRepo:       cacheRepo,
 		tenantService:   tenantService,
 		documentReader:  documentReader,
 		chunkService:    chunkService,
