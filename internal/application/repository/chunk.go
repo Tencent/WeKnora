@@ -1060,17 +1060,17 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 }
 
 // UpdateChunkFeedbackStats 更新片段的反馈统计
-func (r *chunkRepository) UpdateChunkFeedbackStats(ctx context.Context, chunkID string, likeCount, dislikeCount int, positiveRate float64, recallWeight float64, qualityStatus types.ChunkQualityStatus) error {
+func (r *chunkRepository) UpdateChunkFeedbackStats(ctx context.Context, tenantID uint64, chunkID string, likeCount, dislikeCount int, positiveRate float64, recallWeight float64, qualityStatus types.ChunkQualityStatus) error {
 	updates := map[string]interface{}{
 		"like_count":     likeCount,
-		"dislike_count": dislikeCount,
+		"dislike_count":  dislikeCount,
 		"positive_rate":  positiveRate,
-		"recall_weight": recallWeight,
+		"recall_weight":  recallWeight,
 		"quality_status": qualityStatus,
 	}
 	return r.db.WithContext(ctx).
 		Model(&types.Chunk{}).
-		Where("id = ?", chunkID).
+		Where("tenant_id = ? AND id = ?", tenantID, chunkID).
 		Updates(updates).Error
 }
 
@@ -1123,11 +1123,11 @@ func (r *chunkRepository) UpdateChunkQualityStatus(ctx context.Context, chunkID 
 }
 
 // UpdateChunkLastFeedbackAt 更新片段的最后反馈时间
-func (r *chunkRepository) UpdateChunkLastFeedbackAt(ctx context.Context, chunkID string) error {
+func (r *chunkRepository) UpdateChunkLastFeedbackAt(ctx context.Context, tenantID uint64, chunkID string) error {
 	now := time.Now()
 	return r.db.WithContext(ctx).
 		Model(&types.Chunk{}).
-		Where("id = ?", chunkID).
+		Where("tenant_id = ? AND id = ?", tenantID, chunkID).
 		Update("last_feedback_at", now).Error
 }
 
@@ -1159,20 +1159,39 @@ func (r *chunkRepository) CountLowQualityChunks(ctx context.Context, tenantID ui
 	return count, err
 }
 
+// GetChunkFeedbackOverview 获取租户下片段反馈聚合概览
+func (r *chunkRepository) GetChunkFeedbackOverview(ctx context.Context, tenantID uint64) (*types.ChunkFeedbackOverviewResponse, error) {
+	var overview types.ChunkFeedbackOverviewResponse
+	err := r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Select(`
+			COUNT(*) AS total_chunks,
+			COALESCE(SUM(CASE WHEN positive_rate >= ? THEN 1 ELSE 0 END), 0) AS high_quality_count,
+			COALESCE(SUM(CASE WHEN positive_rate <= ? THEN 1 ELSE 0 END), 0) AS low_quality_count,
+			COALESCE(SUM(like_count + dislike_count), 0) AS total_feedbacks
+		`, 0.8, 0.5).
+		Where("tenant_id = ? AND (like_count + dislike_count) > 0", tenantID).
+		Scan(&overview).Error
+	if err != nil {
+		return nil, err
+	}
+	return &overview, nil
+}
+
 // ResetChunkFeedback 重置片段的反馈数据
-func (r *chunkRepository) ResetChunkFeedback(ctx context.Context, chunkID string) error {
+func (r *chunkRepository) ResetChunkFeedback(ctx context.Context, tenantID uint64, chunkID string) error {
 	updates := map[string]interface{}{
-		"like_count":     0,
-		"dislike_count":  0,
-		"positive_rate":   0.0,
-		"recall_weight":   1.0,
-		"quality_status": types.ChunkQualityStatusNormal,
-		"dislike_reasons": "[]",
+		"like_count":       0,
+		"dislike_count":    0,
+		"positive_rate":    0.0,
+		"recall_weight":    1.0,
+		"quality_status":   types.ChunkQualityStatusNormal,
+		"dislike_reasons":  "[]",
 		"last_feedback_at": nil,
 	}
 	return r.db.WithContext(ctx).
 		Model(&types.Chunk{}).
-		Where("id = ?", chunkID).
+		Where("tenant_id = ? AND id = ?", tenantID, chunkID).
 		Updates(updates).Error
 }
 
@@ -1184,12 +1203,12 @@ func (r *chunkRepository) GetChunkStats(ctx context.Context, chunkID string) (*t
 	}
 
 	return &types.ChunkStatsResponse{
-		ChunkID:       chunk.ID,
-		LikeCount:     chunk.LikeCount,
-		DislikeCount:  chunk.DislikeCount,
-		PositiveRate:  chunk.PositiveRate,
-		RecallWeight:  chunk.RecallWeight,
-		QualityStatus: string(chunk.QualityStatus),
+		ChunkID:        chunk.ID,
+		LikeCount:      chunk.LikeCount,
+		DislikeCount:   chunk.DislikeCount,
+		PositiveRate:   chunk.PositiveRate,
+		RecallWeight:   chunk.RecallWeight,
+		QualityStatus:  string(chunk.QualityStatus),
 		LastFeedbackAt: chunk.LastFeedbackAt,
 	}, nil
 }

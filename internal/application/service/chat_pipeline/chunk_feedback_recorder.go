@@ -3,21 +3,21 @@ package chatpipeline
 import (
 	"context"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // ChunkFeedbackRecorder 片段反馈记录插件
 // 在 INTO_CHAT_MESSAGE 阶段记录问答回复与知识库片段的关联关系，以便后续用户反馈时能够追踪到片段
 type ChunkFeedbackRecorder struct {
-	qaRefRepo repository.QAReplyChunkRefRepository
+	qaRefRepo interfaces.QAReplyChunkRefRepository
 }
 
 // NewChunkFeedbackRecorder 创建片段反馈记录插件
 func NewChunkFeedbackRecorder(
 	eventManager *EventManager,
-	qaRefRepo repository.QAReplyChunkRefRepository,
+	qaRefRepo interfaces.QAReplyChunkRefRepository,
 ) *ChunkFeedbackRecorder {
 	recorder := &ChunkFeedbackRecorder{
 		qaRefRepo: qaRefRepo,
@@ -36,11 +36,11 @@ func (p *ChunkFeedbackRecorder) ActivationEvents() []types.EventType {
 func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
-	// 检查是否有搜索结果（知识库片段）
-	if len(chatManage.SearchResult) == 0 {
+	results, resultSet := feedbackReferenceResults(chatManage)
+	if len(results) == 0 {
 		pipelineInfo(ctx, "ChunkFeedbackRecorder", "skip", map[string]interface{}{
-			"session_id":   chatManage.SessionID,
-			"reason":       "no_search_results",
+			"session_id": chatManage.SessionID,
+			"reason":     "no_search_results",
 		})
 		return next()
 	}
@@ -49,15 +49,15 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 	if chatManage.AssistantMessageID == "" {
 		pipelineWarn(ctx, "ChunkFeedbackRecorder", "skip", map[string]interface{}{
 			"session_id": chatManage.SessionID,
-			"reason":      "no_assistant_message_id",
+			"reason":     "no_assistant_message_id",
 		})
 		return next()
 	}
 
 	// 提取片段 ID 列表
-	chunkIDs := make([]string, 0, len(chatManage.SearchResult))
+	chunkIDs := make([]string, 0, len(results))
 	seen := make(map[string]bool)
-	for _, result := range chatManage.SearchResult {
+	for _, result := range results {
 		if result.ID != "" && !seen[result.ID] {
 			chunkIDs = append(chunkIDs, result.ID)
 			seen[result.ID] = true
@@ -94,10 +94,21 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 	}()
 
 	pipelineInfo(ctx, "ChunkFeedbackRecorder", "recorded", map[string]interface{}{
-		"session_id":    chatManage.SessionID,
-		"message_id":    chatManage.AssistantMessageID,
-		"chunk_count":   len(chunkIDs),
+		"session_id":  chatManage.SessionID,
+		"message_id":  chatManage.AssistantMessageID,
+		"result_set":  resultSet,
+		"chunk_count": len(chunkIDs),
 	})
 
 	return next()
+}
+
+func feedbackReferenceResults(chatManage *types.ChatManage) ([]*types.SearchResult, string) {
+	if len(chatManage.MergeResult) > 0 {
+		return chatManage.MergeResult, "merge"
+	}
+	if len(chatManage.RerankResult) > 0 {
+		return chatManage.RerankResult, "rerank"
+	}
+	return chatManage.SearchResult, "search"
 }

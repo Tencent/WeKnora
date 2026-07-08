@@ -1,4 +1,4 @@
-import { get, post } from '@/utils/request'
+import { del, get, post } from '@/utils/request'
 
 // SubmitFeedbackRequest 提交反馈请求
 export interface SubmitFeedbackRequest {
@@ -34,6 +34,13 @@ export interface ChunkQualityStats {
   updated_at: string
 }
 
+export interface ChunkFeedbackOverview {
+  total_chunks: number
+  high_quality_count: number
+  low_quality_count: number
+  total_feedbacks: number
+}
+
 // WeightLogItem 权重变更日志项
 export interface WeightLogItem {
   id: string
@@ -65,6 +72,13 @@ export function submitFeedback(data: SubmitFeedbackRequest) {
   return post('/api/v1/feedback', data)
 }
 
+// 取消问答反馈
+export function cancelFeedback(messageId: string) {
+  return del<{ success: boolean; message: string }>(
+    `/api/v1/feedback?message_id=${encodeURIComponent(messageId)}`
+  )
+}
+
 // 获取点踩原因选项
 export function getDislikeReasons() {
   return get<string[]>('/api/v1/feedback/dislike-reasons')
@@ -77,7 +91,11 @@ export function getChunkStats(chunkId: string) {
 
 // 获取低质量片段列表
 export function listLowQualityChunks(params?: ListLowQualityChunksRequest) {
-  return get<{ success: boolean; data: ChunkQualityStats[] }>('/api/v1/chunks/low-quality', { params })
+  return get<{ success: boolean; data: ChunkQualityStats[]; total: number }>('/api/v1/chunks/low-quality', { params })
+}
+
+export function getFeedbackOverview() {
+  return get<{ success: boolean; data: ChunkFeedbackOverview }>('/api/v1/chunks/feedback-overview')
 }
 
 // 重置片段反馈（管理员）

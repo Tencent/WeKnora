@@ -311,8 +311,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	must(container.Invoke(chatpipeline.NewMemoryPlugin))
 	must(container.Invoke(chatpipeline.NewChunkFeedbackRecorder))
-	must(container.Invoke(chatpipeline.NewChunkWeightLoader))
 	must(container.Invoke(chatpipeline.NewRecallWeightApplier))
+	must(container.Invoke(chatpipeline.NewChunkWeightLoader))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// HTTP handlers layer

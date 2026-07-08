@@ -11,31 +11,31 @@ import (
 type ChunkQualityStatus string
 
 const (
-	ChunkQualityStatusNormal           ChunkQualityStatus = "normal"            // 正常
-	ChunkQualityStatusPendingOpt       ChunkQualityStatus = "pending_optimization" // 待优化
-	ChunkQualityStatusOptimizing       ChunkQualityStatus = "optimizing"        // 优化中
-	ChunkQualityStatusOptimized        ChunkQualityStatus = "optimized"         // 已优化
+	ChunkQualityStatusNormal     ChunkQualityStatus = "normal"               // 正常
+	ChunkQualityStatusPendingOpt ChunkQualityStatus = "pending_optimization" // 待优化
+	ChunkQualityStatusOptimizing ChunkQualityStatus = "optimizing"           // 优化中
+	ChunkQualityStatusOptimized  ChunkQualityStatus = "optimized"            // 已优化
 )
 
 // DislikeReasonType 点踩原因类型
 type DislikeReasonType string
 
 const (
-	DislikeReasonInaccurate  DislikeReasonType = "inaccurate"  // 答案不准确
-	DislikeReasonIncomplete  DislikeReasonType = "incomplete"  // 答案不完整
-	DislikeReasonUnclear     DislikeReasonType = "unclear"     // 表达不清楚
-	DislikeReasonIrrelevant  DislikeReasonType = "irrelevant"  // 与问题不相关
-	DislikeReasonOther       DislikeReasonType = "other"       // 其他
+	DislikeReasonInaccurate DislikeReasonType = "inaccurate" // 答案不准确
+	DislikeReasonIncomplete DislikeReasonType = "incomplete" // 答案不完整
+	DislikeReasonUnclear    DislikeReasonType = "unclear"    // 表达不清楚
+	DislikeReasonIrrelevant DislikeReasonType = "irrelevant" // 与问题不相关
+	DislikeReasonOther      DislikeReasonType = "other"      // 其他
 )
 
 // FeedbackTriggerType 反馈触发类型
 type FeedbackTriggerType string
 
 const (
-	FeedbackTriggerUserLike     FeedbackTriggerType = "user_like"     // 用户点赞
+	FeedbackTriggerUserLike    FeedbackTriggerType = "user_like"    // 用户点赞
 	FeedbackTriggerUserDislike FeedbackTriggerType = "user_dislike" // 用户点踩
-	FeedbackTriggerUserCancel   FeedbackTriggerType = "user_cancel"   // 用户取消评价
-	FeedbackTriggerAdminReset  FeedbackTriggerType = "admin_reset"   // 管理员重置
+	FeedbackTriggerUserCancel  FeedbackTriggerType = "user_cancel"  // 用户取消评价
+	FeedbackTriggerAdminReset  FeedbackTriggerType = "admin_reset"  // 管理员重置
 )
 
 // QAReplyChunkRef 问答回复与知识库片段关联关系
@@ -44,7 +44,7 @@ type QAReplyChunkRef struct {
 	ID        string    `json:"id" gorm:"type:varchar(36);primaryKey"`
 	MessageID string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_msg_chunk,priority:1"`
 	ChunkID   string    `json:"chunk_id" gorm:"type:varchar(36);uniqueIndex:idx_msg_chunk,priority:2;index"`
-	TenantID  uint64    `json:"tenant_id" gorm:"index"`
+	TenantID  uint64    `json:"tenant_id" gorm:"uniqueIndex:idx_msg_chunk,priority:3;index"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -58,18 +58,22 @@ func (r *QAReplyChunkRef) BeforeCreate(tx *gorm.DB) error {
 
 // ChunkFeedback 用户对问答回复的评价记录
 type ChunkFeedback struct {
-	ID            string             `json:"id" gorm:"type:varchar(36);primaryKey"`
-	MessageID     string             `json:"message_id" gorm:"type:varchar(36);index;not null"`
-	SessionID     string             `json:"session_id" gorm:"type:varchar(36);index;not null"`
-	TenantID      uint64             `json:"tenant_id" gorm:"index;not null"`
-	UserID        string             `json:"user_id" gorm:"type:varchar(36);index"`
-	IsPositive    bool               `json:"is_positive" gorm:"not null;default:true"` // true=点赞, false=点踩
-	DislikeReason string             `json:"dislike_reason,omitempty" gorm:"type:varchar(255)"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+	ID            string    `json:"id" gorm:"type:varchar(36);primaryKey"`
+	MessageID     string    `json:"message_id" gorm:"type:varchar(36);uniqueIndex:idx_tenant_message_user,priority:2;not null"`
+	SessionID     string    `json:"session_id" gorm:"type:varchar(36);index;not null"`
+	TenantID      uint64    `json:"tenant_id" gorm:"uniqueIndex:idx_tenant_message_user,priority:1;index;not null"`
+	UserID        string    `json:"user_id" gorm:"type:varchar(36);uniqueIndex:idx_tenant_message_user,priority:3;index"`
+	IsPositive    bool      `json:"is_positive" gorm:"not null;default:true"` // true=点赞, false=点踩
+	DislikeReason string    `json:"dislike_reason,omitempty" gorm:"type:varchar(255)"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 
-	// IsChanged 仅用于内部逻辑，表示评价是否发生了实质性变化
+	// IsChanged 仅用于内部逻辑，表示点赞/点踩方向是否发生了实质性变化。
 	IsChanged bool `json:"-" gorm:"-"`
+	// WasCreated 标记本次提交是否创建了新的评价记录。
+	WasCreated bool `json:"-" gorm:"-"`
+	// PreviousIsPositive 记录更新前的评价方向，仅在 WasCreated=false 时有效。
+	PreviousIsPositive bool `json:"-" gorm:"-"`
 }
 
 // BeforeCreate 创建前自动生成 UUID
@@ -82,16 +86,16 @@ func (f *ChunkFeedback) BeforeCreate(tx *gorm.DB) error {
 
 // ChunkWeightLog 片段权重变更日志
 type ChunkWeightLog struct {
-	ID            string             `json:"id" gorm:"type:varchar(36);primaryKey"`
-	ChunkID       string             `json:"chunk_id" gorm:"type:varchar(36);index;not null"`
-	TenantID      uint64             `json:"tenant_id" gorm:"index;not null"`
-	Action        string             `json:"action" gorm:"type:varchar(50);index;not null"` // adjust_weight, reset, manual_set
-	OldWeight     float64            `json:"old_weight" gorm:"type:float;not null"`
-	NewWeight     float64            `json:"new_weight" gorm:"type:float;not null"`
+	ID            string              `json:"id" gorm:"type:varchar(36);primaryKey"`
+	ChunkID       string              `json:"chunk_id" gorm:"type:varchar(36);index;not null"`
+	TenantID      uint64              `json:"tenant_id" gorm:"index;not null"`
+	Action        string              `json:"action" gorm:"type:varchar(50);index;not null"` // adjust_weight, reset, manual_set
+	OldWeight     float64             `json:"old_weight" gorm:"type:float;not null"`
+	NewWeight     float64             `json:"new_weight" gorm:"type:float;not null"`
 	TriggerType   FeedbackTriggerType `json:"trigger_type" gorm:"type:varchar(50);index;not null"`
-	TriggerDetail string             `json:"trigger_detail,omitempty" gorm:"type:varchar(500)"`
-	Operator      string             `json:"operator,omitempty" gorm:"type:varchar(36)"` // 管理员操作时记录操作人
-	CreatedAt     time.Time          `json:"created_at"`
+	TriggerDetail string              `json:"trigger_detail,omitempty" gorm:"type:varchar(500)"`
+	Operator      string              `json:"operator,omitempty" gorm:"type:varchar(36)"` // 管理员操作时记录操作人
+	CreatedAt     time.Time           `json:"created_at"`
 }
 
 // BeforeCreate 创建前自动生成 UUID
@@ -108,9 +112,9 @@ func (l *ChunkWeightLog) BeforeCreate(tx *gorm.DB) error {
 
 // SubmitFeedbackRequest 提交反馈请求
 type SubmitFeedbackRequest struct {
-	MessageID     string `json:"message_id" binding:"required"`      // 消息ID
-	IsPositive    bool   `json:"is_positive"`                       // 是否为点赞
-	DislikeReason string `json:"dislike_reason,omitempty"`          // 点踩原因
+	MessageID     string `json:"message_id" binding:"required"` // 消息ID
+	IsPositive    bool   `json:"is_positive"`                   // 是否为点赞
+	DislikeReason string `json:"dislike_reason,omitempty"`      // 点踩原因
 }
 
 // SubmitFeedbackResponse 提交反馈响应
@@ -121,14 +125,14 @@ type SubmitFeedbackResponse struct {
 
 // ChunkStatsResponse 片段统计响应
 type ChunkStatsResponse struct {
-	ChunkID             string    `json:"chunk_id"`              // 片段ID
-	LikeCount           int       `json:"like_count"`            // 点赞数
-	DislikeCount        int       `json:"dislike_count"`         // 点踩数
-	PositiveRate        float64   `json:"positive_rate"`         // 好评率
-	RecallWeight        float64   `json:"recall_weight"`         // 召回权重
-	QualityStatus       string    `json:"quality_status"`        // 质量状态
-	RelatedSessionCount int       `json:"related_session_count"` // 关联会话数
-	DislikeReasons      []string  `json:"dislike_reasons"`       // 点踩原因聚合
+	ChunkID             string     `json:"chunk_id"`              // 片段ID
+	LikeCount           int        `json:"like_count"`            // 点赞数
+	DislikeCount        int        `json:"dislike_count"`         // 点踩数
+	PositiveRate        float64    `json:"positive_rate"`         // 好评率
+	RecallWeight        float64    `json:"recall_weight"`         // 召回权重
+	QualityStatus       string     `json:"quality_status"`        // 质量状态
+	RelatedSessionCount int        `json:"related_session_count"` // 关联会话数
+	DislikeReasons      []string   `json:"dislike_reasons"`       // 点踩原因聚合
 	LastFeedbackAt      *time.Time `json:"last_feedback_at"`      // 最后反馈时间
 }
 
@@ -141,27 +145,35 @@ type ListLowQualityChunksRequest struct {
 
 // ChunkQualityStats 片段质量统计（用于列表展示）
 type ChunkQualityStats struct {
-	ChunkID       string  `json:"chunk_id"`
-	KnowledgeID   string  `json:"knowledge_id"`
-	KnowledgeName string  `json:"knowledge_name"`
-	Content       string  `json:"content"` // 片段内容摘要
-	LikeCount     int     `json:"like_count"`
-	DislikeCount  int     `json:"dislike_count"`
-	PositiveRate  float64 `json:"positive_rate"`
-	RecallWeight  float64 `json:"recall_weight"`
-	QualityStatus string  `json:"quality_status"`
+	ChunkID       string    `json:"chunk_id"`
+	KnowledgeID   string    `json:"knowledge_id"`
+	KnowledgeName string    `json:"knowledge_name"`
+	Content       string    `json:"content"` // 片段内容摘要
+	LikeCount     int       `json:"like_count"`
+	DislikeCount  int       `json:"dislike_count"`
+	PositiveRate  float64   `json:"positive_rate"`
+	RecallWeight  float64   `json:"recall_weight"`
+	QualityStatus string    `json:"quality_status"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// ChunkFeedbackOverviewResponse 知识片段反馈概览
+type ChunkFeedbackOverviewResponse struct {
+	TotalChunks      int64 `json:"total_chunks"`
+	HighQualityCount int64 `json:"high_quality_count"`
+	LowQualityCount  int64 `json:"low_quality_count"`
+	TotalFeedbacks   int64 `json:"total_feedbacks"`
 }
 
 // ChunkFeedbackConfig 反馈配置
 type ChunkFeedbackConfig struct {
 	// 好评率阈值配置
 	HighQualityThreshold float64 `json:"high_quality_threshold"` // >= 此值提升权重，默认 0.8
-	LowQualityThreshold float64 `json:"low_quality_threshold"`  // < 此值降低权重，默认 0.5
+	LowQualityThreshold  float64 `json:"low_quality_threshold"`  // < 此值降低权重，默认 0.5
 
 	// 权重调整参数
 	WeightBoostFactor   float64 `json:"weight_boost_factor"`   // 高质量权重提升倍数，默认 1.5
-	WeightPenaltyFactor float64 `json:"weight_penalty_factor"`  // 低质量权重降低倍数，默认 0.5
+	WeightPenaltyFactor float64 `json:"weight_penalty_factor"` // 低质量权重降低倍数，默认 0.5
 	MinWeight           float64 `json:"min_weight"`            // 最小权重，默认 0.1
 	MaxWeight           float64 `json:"max_weight"`            // 最大权重，默认 2.0
 
@@ -190,8 +202,8 @@ type ResetChunkFeedbackRequest struct {
 
 // WeightLogResponse 权重日志响应
 type WeightLogResponse struct {
-	Logs []ChunkWeightLog `json:"logs"`
-	Total int64           `json:"total"`
+	Logs  []*ChunkWeightLog `json:"logs"`
+	Total int64             `json:"total"`
 }
 
 // GetDislikeReasons 返回预定义的原因选项

@@ -61,7 +61,6 @@
                             <template #icon>
                                 <t-icon name="thumb-up" />
                             </template>
-                            <span v-if="feedbackStats.likeCount > 0">{{ feedbackStats.likeCount }}</span>
                         </t-button>
                     </t-tooltip>
                     <t-tooltip :content="$t('chunkFeedback.dislike')" placement="top">
@@ -71,7 +70,6 @@
                             <template #icon>
                                 <t-icon name="thumb-down" />
                             </template>
-                            <span v-if="feedbackStats.dislikeCount > 0">{{ feedbackStats.dislikeCount }}</span>
                         </t-button>
                     </t-tooltip>
                 </div>
@@ -112,7 +110,7 @@
     </div>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, nextTick, onUpdated } from 'vue';
+import { onMounted, onBeforeUnmount, watch, computed, ref, nextTick, onUpdated } from 'vue';
 import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
@@ -144,16 +142,12 @@ import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
-import { submitFeedback } from '@/api/feedback';
+import { cancelFeedback, getUserFeedback, submitFeedback } from '@/api/feedback';
 
 ensureMermaidInitialized();
 
 // 反馈相关状态
-const currentFeedback = ref<boolean | null>(null);
-const feedbackStats = reactive({
-    likeCount: 0,
-    dislikeCount: 0,
-});
+const currentFeedback = ref(null);
 const dislikeDialogVisible = ref(false);
 const selectedReason = ref('');
 const customReason = ref('');
@@ -311,12 +305,19 @@ const handleAddToKnowledge = () => {
 };
 
 // 反馈相关函数
-const handleFeedback = async (isPositive: boolean) => {
+const handleFeedback = async (isPositive) => {
     if (!props.session?.id) return;
 
     // 如果已经点了同样的按钮，取消反馈
     if (currentFeedback.value === isPositive) {
-        currentFeedback.value = null;
+        try {
+            await cancelFeedback(props.session.id);
+            currentFeedback.value = null;
+            MessagePlugin.success(t('chunkFeedback.feedbackCanceled'));
+        } catch (error) {
+            console.error('取消反馈失败:', error);
+            MessagePlugin.error(t('chunkFeedback.feedbackFailed'));
+        }
         return;
     }
 
@@ -326,13 +327,6 @@ const handleFeedback = async (isPositive: boolean) => {
             is_positive: isPositive,
         });
         currentFeedback.value = isPositive;
-        if (isPositive) {
-            feedbackStats.likeCount++;
-            if (feedbackStats.dislikeCount > 0) feedbackStats.dislikeCount--;
-        } else {
-            feedbackStats.dislikeCount++;
-            if (feedbackStats.likeCount > 0) feedbackStats.likeCount--;
-        }
         MessagePlugin.success(t('chunkFeedback.feedbackSubmitted'));
     } catch (error) {
         console.error('提交反馈失败:', error);
@@ -368,8 +362,6 @@ const submitDislike = async () => {
             dislike_reason: reason,
         });
         currentFeedback.value = false;
-        feedbackStats.dislikeCount++;
-        if (feedbackStats.likeCount > 0) feedbackStats.likeCount--;
         dislikeDialogVisible.value = false;
         MessagePlugin.success(t('chunkFeedback.feedbackSubmitted'));
     } catch (error) {
@@ -409,6 +401,14 @@ onUpdated(() => {
 });
 
 onMounted(async () => {
+    if (props.session?.id) {
+        try {
+            const res = await getUserFeedback(props.session.id);
+            currentFeedback.value = res?.data?.is_positive ?? null;
+        } catch (error) {
+            console.warn('获取反馈状态失败:', error);
+        }
+    }
     // 为 markdown-content 中的图片添加点击事件
     nextTick(async () => {
         if (parentMd.value) {

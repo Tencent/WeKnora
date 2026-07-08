@@ -3,21 +3,21 @@ package chatpipeline
 import (
 	"context"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // ChunkWeightLoader 片段权重加载插件
 // 在 CHUNK_RERANK 之后、INTO_CHAT_MESSAGE 之前加载片段的召回权重到搜索结果中
 type ChunkWeightLoader struct {
-	chunkRepo repository.ChunkRepository
+	chunkRepo interfaces.ChunkRepository
 }
 
 // NewChunkWeightLoader 创建片段权重加载插件
 func NewChunkWeightLoader(
 	eventManager *EventManager,
-	chunkRepo repository.ChunkRepository,
+	chunkRepo interfaces.ChunkRepository,
 ) *ChunkWeightLoader {
 	loader := &ChunkWeightLoader{
 		chunkRepo: chunkRepo,

@@ -1,30 +1,38 @@
 package handler
 
 import (
+	stdErrors "errors"
 	"net/http"
 	"strconv"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ChunkFeedbackHandler 片段反馈处理器
 type ChunkFeedbackHandler struct {
-	feedbackService *ChunkFeedbackService
-	messageRepo     MessageRepository
+	feedbackService *service.ChunkFeedbackService
 }
 
 // NewChunkFeedbackHandler 创建反馈处理器
 func NewChunkFeedbackHandler(
-	feedbackService *ChunkFeedbackService,
-	messageRepo MessageRepository,
+	feedbackService *service.ChunkFeedbackService,
 ) *ChunkFeedbackHandler {
 	return &ChunkFeedbackHandler{
 		feedbackService: feedbackService,
-		messageRepo:     messageRepo,
 	}
+}
+
+func handleFeedbackServiceError(c *gin.Context, err error) {
+	if stdErrors.Is(err, gorm.ErrRecordNotFound) {
+		c.Error(errors.NewNotFoundError("message not found"))
+		return
+	}
+	c.Error(errors.NewInternalServerError(err.Error()))
 }
 
 // SubmitFeedback godoc
@@ -57,16 +65,9 @@ func (h *ChunkFeedbackHandler) SubmitFeedback(c *gin.Context) {
 		userID = uid.(string)
 	}
 
-	// 获取 sessionID
-	session, err := h.messageRepo.GetMessageByID(c.Request.Context(), req.MessageID)
-	sessionID := ""
-	if err == nil && session != nil {
-		sessionID = session.SessionID
-	}
-
-	if err := h.feedbackService.SubmitFeedback(c.Request.Context(), tenantID, userID, sessionID, &req); err != nil {
+	if err := h.feedbackService.SubmitFeedback(c.Request.Context(), tenantID, userID, &req); err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to submit feedback: %v", err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		handleFeedbackServiceError(c, err)
 		return
 	}
 
@@ -97,7 +98,8 @@ func (h *ChunkFeedbackHandler) GetUserFeedback(c *gin.Context) {
 		userID = uid.(string)
 	}
 
-	feedback, err := h.feedbackService.GetUserFeedback(c.Request.Context(), messageID, userID)
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	feedback, err := h.feedbackService.GetUserFeedback(c.Request.Context(), tenantID, messageID, userID)
 	if err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to get user feedback: %v", err)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -107,6 +109,40 @@ func (h *ChunkFeedbackHandler) GetUserFeedback(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    feedback,
+	})
+}
+
+// CancelFeedback godoc
+// @Summary 取消用户反馈
+// @Description 取消当前用户对指定问答回复的点赞或点踩，并回退片段统计
+// @Tags 反馈
+// @Produce json
+// @Param message_id query string true "消息ID"
+// @Success 200 {object} map[string]interface{} "取消成功"
+// @Security Bearer
+// @Router /feedback [delete]
+func (h *ChunkFeedbackHandler) CancelFeedback(c *gin.Context) {
+	messageID := c.Query("message_id")
+	if messageID == "" {
+		c.Error(errors.NewBadRequestError("message_id is required"))
+		return
+	}
+
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	userID := ""
+	if uid, exists := c.Get(types.UserIDContextKey.String()); exists {
+		userID = uid.(string)
+	}
+
+	if err := h.feedbackService.CancelFeedback(c.Request.Context(), tenantID, userID, messageID); err != nil {
+		logger.Errorf(c.Request.Context(), "Failed to cancel feedback: %v", err)
+		handleFeedbackServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "反馈已取消",
 	})
 }
 
@@ -168,10 +204,41 @@ func (h *ChunkFeedbackHandler) ListLowQualityChunks(c *gin.Context) {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
+	total, err := h.feedbackService.CountLowQualityChunks(c.Request.Context(), tenantID, maxRate)
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "Failed to count low quality chunks: %v", err)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    chunks,
+		"total":   total,
+	})
+}
+
+// GetFeedbackOverview godoc
+// @Summary 获取片段反馈概览
+// @Description 获取当前租户下片段反馈聚合统计
+// @Tags 反馈
+// @Produce json
+// @Success 200 {object} map[string]interface{} "反馈概览"
+// @Failure 500 {object} errors.AppError "服务器错误"
+// @Security Bearer
+// @Router /chunks/feedback-overview [get]
+func (h *ChunkFeedbackHandler) GetFeedbackOverview(c *gin.Context) {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	overview, err := h.feedbackService.GetFeedbackOverview(c.Request.Context(), tenantID)
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "Failed to get feedback overview: %v", err)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    overview,
 	})
 }
 
@@ -233,7 +300,8 @@ func (h *ChunkFeedbackHandler) GetChunkWeightLogs(c *gin.Context) {
 
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
-	logs, err := h.feedbackService.GetWeightLogs(c.Request.Context(), chunkID, limit)
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	logs, err := h.feedbackService.GetWeightLogs(c.Request.Context(), tenantID, chunkID, limit)
 	if err != nil {
 		logger.Errorf(c.Request.Context(), "Failed to get weight logs: %v", err)
 		c.Error(errors.NewInternalServerError(err.Error()))

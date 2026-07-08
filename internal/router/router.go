@@ -86,7 +86,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
-	ChunkFeedbackHandler        *handler.ChunkFeedbackHandler
+	ChunkFeedbackHandler         *handler.ChunkFeedbackHandler
 }
 
 // NewRouter 创建新的路由
@@ -1821,11 +1821,13 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 func RegisterFeedbackRoutes(r *gin.RouterGroup, handler *handler.ChunkFeedbackHandler, g *rbacGuards) {
 	// 反馈提交 - 所有登录用户可用
 	r.POST("/feedback", g.Viewer(), handler.SubmitFeedback)
+	r.DELETE("/feedback", g.Viewer(), handler.CancelFeedback)
 	r.GET("/feedback/dislike-reasons", g.Viewer(), handler.GetDislikeReasons)
 	r.GET("/feedback/user-feedback", g.Viewer(), handler.GetUserFeedback)
 
 	// 片段统计 - 所有登录用户可用
 	r.GET("/chunks/low-quality", g.Viewer(), handler.ListLowQualityChunks)
+	r.GET("/chunks/feedback-overview", g.Viewer(), handler.GetFeedbackOverview)
 	r.GET("/chunks/:chunk_id/stats", g.Viewer(), handler.GetChunkStats)
 
 	// 管理员操作 - 需要管理员权限

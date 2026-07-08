@@ -151,28 +151,42 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { listLowQualityChunks, getChunkStats, resetChunkFeedback } from '@/api/feedback'
+import {
+  listLowQualityChunks,
+  getChunkStats,
+  getFeedbackOverview,
+  resetChunkFeedback,
+  type ChunkQualityStats,
+  type ChunkStatsResponse,
+} from '@/api/feedback'
 
 interface Props {
   embedded?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   embedded: false,
 })
+const { t } = useI18n()
 
 // 状态
 const showLowQualityDialog = ref(false)
 const showChunkDetailDialog = ref(false)
-const lowQualityChunks = ref<any[]>([])
-const chunkStats = ref<any>(null)
+const lowQualityChunks = ref<ChunkQualityStats[]>([])
+const chunkStats = ref<ChunkStatsResponse | null>(null)
 const currentPage = ref(1)
 const pageSize = ref(10)
 const totalCount = ref(0)
 const filterMaxRate = ref(0.5)
 
-const stats = ref<any>(null)
+const stats = ref<{
+  totalChunks: number
+  highQualityCount: number
+  lowQualityCount: number
+  totalFeedbacks: number
+} | null>(null)
 
 // 筛选选项
 const rateOptions = [
@@ -183,27 +197,25 @@ const rateOptions = [
 
 // 表格列
 const columns = [
-  { colKey: 'content', header: '内容', width: '30%' },
-  { colKey: 'like_count', header: '点赞', width: '10%' },
-  { colKey: 'dislike_count', header: '点踩', width: '10%' },
-  { colKey: 'positiveRate', header: '好评率', width: '15%' },
-  { colKey: 'recallWeight', header: '权重', width: '10%' },
-  { colKey: 'qualityStatus', header: '状态', width: '15%' },
-  { colKey: 'operations', header: '操作', width: '10%' },
+  { colKey: 'content', header: t('knowledgeEditor.feedback.columns.content'), width: '30%' },
+  { colKey: 'like_count', header: t('knowledgeEditor.feedback.columns.likeCount'), width: '10%' },
+  { colKey: 'dislike_count', header: t('knowledgeEditor.feedback.columns.dislikeCount'), width: '10%' },
+  { colKey: 'positiveRate', header: t('knowledgeEditor.feedback.columns.positiveRate'), width: '15%' },
+  { colKey: 'recallWeight', header: t('knowledgeEditor.feedback.columns.recallWeight'), width: '10%' },
+  { colKey: 'qualityStatus', header: t('knowledgeEditor.feedback.columns.qualityStatus'), width: '15%' },
+  { colKey: 'operations', header: t('knowledgeEditor.feedback.columns.operations'), width: '10%' },
 ]
 
 // 加载统计数据
 const loadStats = async () => {
-  // 简单统计：加载前100个低质量片段来汇总
   try {
-    const res = await listLowQualityChunks({ max_rate: 1.0, limit: 100 })
-    if (res.data?.data) {
-      const chunks = res.data.data
+    const res = await getFeedbackOverview()
+    if (res.data) {
       stats.value = {
-        totalChunks: chunks.length,
-        highQualityCount: chunks.filter(c => c.positive_rate >= 0.8).length,
-        lowQualityCount: chunks.filter(c => c.positive_rate <= 0.5).length,
-        totalFeedbacks: chunks.reduce((sum, c) => sum + c.like_count + c.dislike_count, 0),
+        totalChunks: res.data.total_chunks,
+        highQualityCount: res.data.high_quality_count,
+        lowQualityCount: res.data.low_quality_count,
+        totalFeedbacks: res.data.total_feedbacks,
       }
     }
   } catch (error) {
@@ -219,13 +231,13 @@ const loadLowQualityChunks = async () => {
       limit: pageSize.value,
       offset: (currentPage.value - 1) * pageSize.value,
     })
-    if (res.data?.data) {
-      lowQualityChunks.value = res.data.data
-      totalCount.value = res.data.data.length * 10 // 简化估算
+    if (res.data) {
+      lowQualityChunks.value = res.data
+      totalCount.value = res.total ?? res.data.length
     }
   } catch (error) {
     console.error('加载低质量片段失败:', error)
-    MessagePlugin.error('加载失败')
+    MessagePlugin.error(t('knowledgeEditor.feedback.messages.loadFailed'))
   }
 }
 
@@ -233,13 +245,13 @@ const loadLowQualityChunks = async () => {
 const viewChunkStats = async (chunkId: string) => {
   try {
     const res = await getChunkStats(chunkId)
-    if (res.data?.data) {
-      chunkStats.value = res.data.data
+    if (res.data) {
+      chunkStats.value = res.data
       showChunkDetailDialog.value = true
     }
   } catch (error) {
     console.error('加载片段详情失败:', error)
-    MessagePlugin.error('加载失败')
+    MessagePlugin.error(t('knowledgeEditor.feedback.messages.loadFailed'))
   }
 }
 
@@ -247,12 +259,12 @@ const viewChunkStats = async (chunkId: string) => {
 const resetChunkFeedbackHandler = async (chunkId: string) => {
   try {
     await resetChunkFeedback(chunkId)
-    MessagePlugin.success('重置成功')
+    MessagePlugin.success(t('knowledgeEditor.feedback.messages.resetSuccess'))
     loadLowQualityChunks()
     loadStats()
   } catch (error) {
     console.error('重置失败:', error)
-    MessagePlugin.error('重置失败')
+    MessagePlugin.error(t('knowledgeEditor.feedback.messages.resetFailed'))
   }
 }
 
@@ -278,13 +290,7 @@ const getStatusTheme = (status: string) => {
 }
 
 const getStatusLabel = (status: string) => {
-  const map: Record<string, string> = {
-    normal: '正常',
-    pending_optimization: '待优化',
-    optimizing: '优化中',
-    optimized: '已优化',
-  }
-  return map[status] || status
+  return t(`knowledgeEditor.feedback.status.${status}`)
 }
 
 onMounted(() => {
