@@ -3229,6 +3229,7 @@ export default {
       knowledgeGraph: "知识图谱",
       multimodal: "多模态",
       questionGeneration: "问题生成",
+      wiki: "Wiki",
     },
     messages: {
       deleted: "已删除",

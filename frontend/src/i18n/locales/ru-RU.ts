@@ -2659,7 +2659,8 @@ export default {
     features: {
       knowledgeGraph: 'Граф знаний включен',
       multimodal: 'Мультимодальность включена',
-      questionGeneration: 'Генерация вопросов включена'
+      questionGeneration: 'Генерация вопросов включена',
+      wiki: 'Wiki',
     },
     processing: 'Обработка задачи импорта',
     processingDocuments: 'Обработка {count} документов',

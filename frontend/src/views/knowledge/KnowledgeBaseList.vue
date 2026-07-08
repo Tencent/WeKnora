@@ -200,7 +200,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <!-- The card menu always exists when the card is visible: pin
                      is now per-user and available to anyone who can see the KB
                      (backend route only requires KB read access). Settings /
@@ -296,7 +299,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
                   <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetailFromAll(kb)"
                     :aria-label="$t('knowledgeList.menu.viewDetails')">
@@ -424,7 +430,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <!-- See the matching block in the "all" tab template for why
                      this is no longer gated by canManageKBCard. -->
                 <t-popup v-model="kb.showMore" overlayClassName="card-more-popup"
@@ -570,7 +579,10 @@
             }" @click="handleSharedKbClick(shared)">
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
+                <span class="card-title" :title="shared.knowledge_base.name">
+                  <KbWikiBadge v-if="isWikiKb(shared.knowledge_base)" />
+                  <span class="card-title-text">{{ shared.knowledge_base.name }}</span>
+                </span>
                 <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
                   <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
                     :aria-label="$t('knowledgeList.menu.viewDetails')">
@@ -771,6 +783,7 @@ import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
+import KbWikiBadge from './components/KbWikiBadge.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
@@ -1505,6 +1518,9 @@ const isInitialized = (kb: KB) => {
   if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
   return true
 }
+
+const isWikiKb = (kb: { indexing_strategy?: { wiki_enabled?: boolean } } | null | undefined) =>
+  !!kb?.indexing_strategy?.wiki_enabled
 
 // 计算是否有未初始化的知识库
 const hasUninitializedKbs = computed(() => {
@@ -2415,7 +2431,15 @@ const handleUploadFinishedEvent = (event: Event) => {
     text-overflow: ellipsis;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .card-title-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .card-more-btn {

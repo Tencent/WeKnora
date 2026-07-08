@@ -3210,6 +3210,7 @@ export default {
       knowledgeGraph: "지식 그래프 활성화됨",
       multimodal: "멀티모달 활성화됨",
       questionGeneration: "질문 생성 활성화됨",
+      wiki: "Wiki",
     },
     messages: {
       deleted: "삭제됨",

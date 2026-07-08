@@ -2314,6 +2314,7 @@ export default {
       knowledgeGraph: 'Knowledge Graph',
       multimodal: 'Multimodal',
       questionGeneration: 'Question Generation',
+      wiki: 'Wiki',
     },
     processing: 'Processing import task',
     processingDocuments: 'Processing {count} documents',
