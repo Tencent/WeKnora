@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -138,6 +139,66 @@ func TestResolveResourceAncestorsReturnsEmpty(t *testing.T) {
 	}
 	if len(ancestors) != 0 {
 		t.Fatalf("ancestors = %#v, want empty", ancestors)
+	}
+}
+
+func TestBucketItemRendersTextAndParticipantMetadata(t *testing.T) {
+	msgTime := time.Date(2026, 7, 7, 9, 1, 22, 0, time.FixedZone("CST", 8*3600))
+	b := newDayBucket(ArchiveMessageEnvelope{
+		Seq:              10,
+		MsgID:            "msg-1",
+		MsgType:          "text",
+		ConversationID:   "wr_xxx",
+		ConversationName: "客户项目群",
+		ConversationType: conversationTypeRoom,
+		RoomID:           "wr_xxx",
+		From:             Sender{UserID: "zhangsan", Name: "张三", Type: senderTypeInternal},
+		ToList:           []Sender{{UserID: "lisi", Name: "李四", Type: senderTypeInternal}},
+		MsgTime:          msgTime,
+	})
+	addToBucket(b, normalizedMessage{
+		Envelope: ArchiveMessageEnvelope{
+			Seq:              10,
+			MsgID:            "msg-1",
+			MsgType:          "text",
+			ConversationID:   "wr_xxx",
+			ConversationName: "客户项目群",
+			ConversationType: conversationTypeRoom,
+			RoomID:           "wr_xxx",
+			From:             Sender{UserID: "zhangsan", Name: "张三", Type: senderTypeInternal},
+			ToList:           []Sender{{UserID: "lisi", Name: "李四", Type: senderTypeInternal}},
+			MsgTime:          msgTime,
+		},
+		Body: "今天客户反馈了一个问题，需要确认日志。",
+	})
+
+	item := bucketItem(b)
+	if item.ExternalID != "wecom-chat:wr_xxx:2026-07-07" {
+		t.Fatalf("ExternalID = %q", item.ExternalID)
+	}
+	content := string(item.Content)
+	if !strings.Contains(content, "# 企业微信会话：客户项目群 / 2026-07-07") {
+		t.Fatalf("content missing title: %s", content)
+	}
+	if !strings.Contains(content, "[09:01:22] 张三（zhangsan）:") {
+		t.Fatalf("content missing sender: %s", content)
+	}
+	if item.Metadata["participant_userids"] != "lisi,zhangsan" {
+		t.Fatalf("participant_userids = %q", item.Metadata["participant_userids"])
+	}
+	if item.Metadata["sender_userids"] != "zhangsan" {
+		t.Fatalf("sender_userids = %q", item.Metadata["sender_userids"])
+	}
+}
+
+func TestNormalizeMessageRendersAttachmentsAndRevoke(t *testing.T) {
+	image := normalizeMessage(ArchiveMessageEnvelope{MsgID: "img-1", MsgType: "image"})
+	if image.Body != "[附件: image, msgid=img-1, 未解析]" {
+		t.Fatalf("image body = %q", image.Body)
+	}
+	revoke := normalizeMessage(ArchiveMessageEnvelope{MsgID: "msg-2", Action: "revoke", MsgType: "text"})
+	if revoke.Body != "[消息已撤回, msgid=msg-2]" {
+		t.Fatalf("revoke body = %q", revoke.Body)
 	}
 }
 
