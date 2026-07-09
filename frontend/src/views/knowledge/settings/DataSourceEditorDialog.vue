@@ -405,6 +405,24 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
+  {
+    type: 'wecom_chat_archive',
+    available: true,
+    docUrl: 'https://developer.work.weixin.qq.com/document/path/91360',
+    permissionDocUrl: 'https://developer.work.weixin.qq.com/document/path/91360',
+    permissionPageUrl: 'https://work.weixin.qq.com/wework_admin/frame#apps',
+    requiredPermissions: [
+      '会话内容存档授权范围',
+      '会话内容存档 Secret',
+      '会话内容存档私钥',
+    ],
+    fields: [
+      { key: 'corp_id', labelKey: 'datasource.field.corpId', placeholder: 'wwxxxx' },
+      { key: 'secret', labelKey: 'datasource.field.wecomSecret', placeholder: '', secret: true },
+      { key: 'private_key_version', labelKey: 'datasource.field.privateKeyVersion', placeholder: '1' },
+      { key: 'private_key', labelKey: 'datasource.field.privateKey', placeholder: '-----BEGIN PRIVATE KEY-----', secret: true, multiline: true, hintKey: 'datasource.field.privateKeyHint' },
+    ],
+  },
 ])
 
 
@@ -517,6 +535,28 @@ function selectType(def: ConnectorDef) {
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
   rssAuthHeaders.value = []
+  if (def.type === 'wecom_chat_archive') {
+    form.value.config.resource_ids = ['all']
+    selectedResourceIds.value = ['all']
+    form.value.config.settings = {
+      sync_scope: 'all_archived_conversations',
+      aggregation: 'conversation_day',
+      timezone: 'Asia/Shanghai',
+      full_sync_days: 90,
+      include_message_types: ['text', 'markdown', 'link', 'news', 'mixed'],
+      attachment_policy: 'metadata_only',
+      include_sender_name: true,
+      include_sender_id: true,
+      include_room_id: true,
+      include_external_user_id: true,
+      sync_revoke_as_delete: false,
+      record_participants_for_acl: true,
+    }
+    form.value.sync_schedule = '0 */30 * * * *'
+    form.value.sync_mode = 'incremental'
+    form.value.conflict_strategy = 'overwrite'
+    form.value.sync_deletions = false
+  }
   step.value = 1
 }
 
