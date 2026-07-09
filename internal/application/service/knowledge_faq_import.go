@@ -941,7 +941,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			}
 			// ChunkIndex计算：startChunkIndex + (i+idx) + initialProcessed
 			chunk := &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              types.StableChunkID(faqKnowledge.ID, buildFAQChunkContent(meta, indexMode), i+idx),
 				TenantID:        tenantID,
 				KnowledgeID:     faqKnowledge.ID,
 				KnowledgeBaseID: kb.ID,

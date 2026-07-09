@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -166,6 +167,11 @@ type ChunkExtractService struct {
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
 	spanTracker SpanTracker
+	// graphChunkCache content-addresses per-chunk GraphRAG extraction
+	// output by (chunk-content-hash, extract-config-hash, chat-model,
+	// prompt-version). A hit skips the LLM Extract call; a miss persists
+	// the result best-effort. nil-safe (lite/test paths fall through).
+	graphChunkCache apprepo.GraphChunkCacheRepo
 }
 
 // NewChunkExtractService creates a new chunk extract service
@@ -177,6 +183,7 @@ func NewChunkExtractService(
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	spanTracker SpanTracker,
+	graphChunkCache apprepo.GraphChunkCacheRepo,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
 		template:          config.ExtractManager.ExtractGraph,
@@ -186,6 +193,7 @@ func NewChunkExtractService(
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
 		spanTracker:       spanTracker,
+		graphChunkCache:   graphChunkCache,
 	}
 }
 
@@ -194,6 +202,84 @@ func (s *ChunkExtractService) tracker() SpanTracker {
 		return noopSpanTracker{}
 	}
 	return s.spanTracker
+}
+
+// cachedExtract returns the GraphData for a chunk, using the
+// graph_chunk_cache when available. A hit deserializes the cached JSON
+// payload and skips the LLM call entirely; a miss calls Extract and
+// persists the result best-effort (Put failures are logged, not fatal).
+// When graphChunkCache is nil the call falls through to the LLM directly.
+func (s *ChunkExtractService) cachedExtract(
+	ctx context.Context,
+	extractor chatpipeline.Extractor,
+	chunk *types.Chunk,
+	extractCfg *types.ExtractConfig,
+	chatModelID string,
+) (*types.GraphData, error) {
+	if s.graphChunkCache == nil {
+		return extractor.Extract(ctx, chunk.Content)
+	}
+
+	chunkContentHash := types.StableContentHash(chunk.Content)
+	extractConfigHash := s.extractConfigHash(extractCfg)
+	promptVersion := types.SHAChecksum(s.template.Description)
+
+	if cached, ok, err := s.graphChunkCache.Get(ctx, chunkContentHash, extractConfigHash, chatModelID, promptVersion); err == nil && ok {
+		var graph types.GraphData
+		var uerr error
+		if uerr = json.Unmarshal([]byte(cached), &graph); uerr == nil {
+			logger.Infof(ctx, "[ChunkExtract] graph chunk cache hit for chunk %s (model=%s)", chunk.ID, chatModelID)
+			return &graph, nil
+		}
+		logger.Warnf(ctx, "[ChunkExtract] graph chunk cache hit for chunk %s but unmarshal failed: %v — recomputing", chunk.ID, uerr)
+	} else if err != nil {
+		logger.Warnf(ctx, "[ChunkExtract] graph chunk cache Get failed for chunk %s: %v — falling back to LLM", chunk.ID, err)
+	}
+
+	graph, err := extractor.Extract(ctx, chunk.Content)
+	if err != nil {
+		return nil, err
+	}
+
+	payload, merr := json.Marshal(graph)
+	if merr != nil {
+		logger.Warnf(ctx, "[ChunkExtract] graph chunk cache payload marshal failed for chunk %s: %v", chunk.ID, merr)
+	} else {
+		if perr := s.graphChunkCache.Put(ctx, &types.GraphChunkCache{
+			ChunkContentHash:  chunkContentHash,
+			ExtractConfigHash: extractConfigHash,
+			ChatModelID:       chatModelID,
+			PromptVersion:     promptVersion,
+			Payload:           string(payload),
+		}); perr != nil {
+			logger.Warnf(ctx, "[ChunkExtract] graph chunk cache Put failed for chunk %s: %v", chunk.ID, perr)
+		}
+	}
+	return graph, nil
+}
+
+// extractConfigHash returns a stable SHA-256 hex for the parts of the
+// extract config that are injected into the extraction template.
+func (s *ChunkExtractService) extractConfigHash(cfg *types.ExtractConfig) string {
+	if cfg == nil {
+		return types.SHAChecksum("")
+	}
+	key := struct {
+		Text      string                `json:"text"`
+		Tags      []string              `json:"tags"`
+		Nodes     []*types.GraphNode    `json:"nodes"`
+		Relations []*types.GraphRelation `json:"relations"`
+	}{
+		Text:      cfg.Text,
+		Tags:      cfg.Tags,
+		Nodes:     cfg.Nodes,
+		Relations: cfg.Relations,
+	}
+	b, err := json.Marshal(key)
+	if err != nil {
+		return types.SHAChecksum("")
+	}
+	return types.SHAChecksum(string(b))
 }
 
 // Handle handles the chunk extraction task
@@ -327,7 +413,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		},
 	}
 	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
+	graph, err := s.cachedExtract(ctx, extractor, chunk, &extractCfg, p.ModelID)
 	if err != nil {
 		handleErr = err
 		return err
@@ -644,7 +730,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 表格摘要chunk
 	summaryChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              types.StableChunkID(resources.knowledge.ID, tableDescription, 0),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
@@ -658,7 +744,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 列描述chunk（所有列的描述合并为一个chunk）
 	columnChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              types.StableChunkID(resources.knowledge.ID, columnDescription, 1),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,

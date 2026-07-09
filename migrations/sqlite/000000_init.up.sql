@@ -769,3 +769,74 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
 
 CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_tenant ON tenant_api_keys(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_revoked_at ON tenant_api_keys(revoked_at);
+
+-- Content-addressed reparse cache tables (mirror of migration 000065).
+
+CREATE TABLE IF NOT EXISTS vlm_cache (
+    image_hash TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    prompt_kind TEXT NOT NULL,
+    output_text TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (image_hash, model_id, prompt_version, prompt_kind)
+);
+
+CREATE TABLE IF NOT EXISTS embedding_cache (
+    text_hash TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    dimension INTEGER NOT NULL,
+    vector TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (text_hash, model_id, dimension)
+);
+
+CREATE TABLE IF NOT EXISTS wiki_map_cache (
+    doc_content_hash TEXT NOT NULL,
+    granularity TEXT NOT NULL,
+    synthesis_model_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    payload TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (doc_content_hash, granularity, synthesis_model_id, prompt_version)
+);
+
+CREATE TABLE IF NOT EXISTS graph_chunk_cache (
+    chunk_content_hash TEXT NOT NULL,
+    extract_config_hash TEXT NOT NULL,
+    chat_model_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    payload TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chunk_content_hash, extract_config_hash, chat_model_id, prompt_version)
+);
+
+CREATE TABLE IF NOT EXISTS parse_product_cache (
+    file_hash TEXT NOT NULL,
+    parser_engine TEXT NOT NULL,
+    parser_config_hash TEXT NOT NULL,
+    render_config_hash TEXT NOT NULL,
+    payload TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (file_hash, parser_engine, parser_config_hash, render_config_hash)
+);
+
+CREATE TABLE IF NOT EXISTS summary_cache (
+    doc_content_hash TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
+    summary TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (doc_content_hash, model_id, prompt_version, config_hash)
+);
+
+CREATE TABLE IF NOT EXISTS question_cache (
+    chunk_content_hash TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
+    payload TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chunk_content_hash, model_id, prompt_version, config_hash)
+);

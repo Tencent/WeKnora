@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -212,6 +213,11 @@ type wikiIngestService struct {
 	// liteLocks provides per-KB mutual exclusion in Lite mode (no Redis).
 	// Keys are kbID strings; values are unused (presence = locked).
 	liteLocks sync.Map
+	// wikiMapCache content-addresses the complete per-doc map output
+	// (extracted entities/concepts, summary, citations, new-slugs) by
+	// frozen doc content + extraction granularity + synthesis model +
+	// prompt version. nil-safe: lite/test paths fall through to LLMs.
+	wikiMapCache apprepo.WikiMapCacheRepo
 }
 
 // NewWikiIngestService creates a new wiki ingest service
@@ -228,6 +234,7 @@ func NewWikiIngestService(
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
+	wikiMapCache apprepo.WikiMapCacheRepo,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
 		wikiService:    wikiService,
@@ -242,8 +249,21 @@ func NewWikiIngestService(
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
 		spanTracker:    spanTracker,
+		wikiMapCache:   wikiMapCache,
 	}
 	return svc
+}
+
+// wikiMapPromptVersion returns a stable hash of every prompt that
+// contributes to the per-document map output. Changing any of these
+// prompts automatically invalidates cached map entries.
+func (s *wikiIngestService) wikiMapPromptVersion() string {
+	return types.SHAChecksum(
+		agent.WikiCandidateSlugPrompt +
+			agent.WikiDeduplicationPrompt +
+			agent.WikiSummaryPrompt +
+			agent.WikiChunkCitationPrompt,
+	)
 }
 
 // tracker returns a non-nil span tracker so callers don't have to
@@ -1301,6 +1321,7 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 	}
 	return strings.TrimSpace(buf.String())
 }
+
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs

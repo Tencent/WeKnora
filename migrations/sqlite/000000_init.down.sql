@@ -23,3 +23,8 @@ DROP TABLE IF EXISTS knowledges;
 DROP TABLE IF EXISTS knowledge_bases;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS tenants;
+DROP TABLE IF EXISTS parse_product_cache;
+DROP TABLE IF EXISTS graph_chunk_cache;
+DROP TABLE IF EXISTS wiki_map_cache;
+DROP TABLE IF EXISTS embedding_cache;
+DROP TABLE IF EXISTS vlm_cache;

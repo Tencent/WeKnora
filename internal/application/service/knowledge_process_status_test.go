@@ -45,7 +45,7 @@ func TestFinalizeIndexedKnowledgeState(t *testing.T) {
 				SummaryStatus: types.SummaryStatusCompleted,
 			}
 
-			finalizeIndexedKnowledgeState(knowledge, 4096, tt.textChunkCount, tt.hasPendingMultimodal, now)
+			finalizeIndexedKnowledgeState(knowledge, 4096, tt.textChunkCount, tt.hasPendingMultimodal, now, false)
 
 			if knowledge.ParseStatus != tt.wantParseStatus {
 				t.Fatalf("ParseStatus = %q, want %q", knowledge.ParseStatus, tt.wantParseStatus)

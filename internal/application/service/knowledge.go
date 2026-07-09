@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -30,7 +30,7 @@ var (
 	// Aliases the repository sentinel so a chunk-not-found from the repo
 	// errors.Is-matches at the service and middleware layers (a single
 	// identity instead of two string-equal-but-distinct errors).
-	ErrChunkNotFound = repository.ErrChunkNotFound
+	ErrChunkNotFound = apprepo.ErrChunkNotFound
 	// ErrDuplicateFile is returned when trying to add a file that already exists
 	ErrDuplicateFile = errors.New("file already exists")
 	// ErrDuplicateURL is returned when trying to add a URL that already exists
@@ -75,6 +75,24 @@ type knowledgeService struct {
 	// handled because the public surface is the SpanTracker interface,
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
+
+	// parseCache content-addresses the full ReadResult produced by the
+	// docreader step (markdown + image references + metadata) by
+	// (file-bytes-hash, parser-engine, parser-config-hash,
+	// render-config-hash). A hit skips the CPU-hour-scale re-render of
+	// scanned documents. nil-safe: lite/test paths fall through to the
+	// docreader directly.
+	parseCache apprepo.ParseProductCacheRepo
+
+	// summaryCache content-addresses the LLM-generated document summary
+	// by (doc_content_hash, model_id, prompt_version, config_hash).
+	// nil-safe: a nil repo falls through to the LLM.
+	summaryCache apprepo.SummaryCacheRepo
+
+	// questionCache content-addresses the LLM-generated chunk questions
+	// by (chunk_content_hash, model_id, prompt_version, config_hash).
+	// nil-safe: a nil repo falls through to the LLM.
+	questionCache apprepo.QuestionCacheRepo
 }
 
 const (
@@ -109,6 +127,9 @@ func NewKnowledgeService(
 	wikiService interfaces.WikiPageService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
+	parseCache apprepo.ParseProductCacheRepo,
+	summaryCache apprepo.SummaryCacheRepo,
+	questionCache apprepo.QuestionCacheRepo,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -135,6 +156,9 @@ func NewKnowledgeService(
 		wikiService:     wikiService,
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
+		parseCache:      parseCache,
+		summaryCache:    summaryCache,
+		questionCache:   questionCache,
 	}, nil
 }
 
@@ -509,7 +533,7 @@ func (s *knowledgeService) GetOwningKBCreatorID(ctx context.Context, knowledgeID
 		return "", err
 	}
 	if kb == nil {
-		return "", repository.ErrKnowledgeBaseNotFound
+		return "", apprepo.ErrKnowledgeBaseNotFound
 	}
 	return kb.CreatorID, nil
 }
