@@ -361,6 +361,28 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 
 	logger.Infof(ctx, "wiki ingest: batch processing %d ops for KB %s", len(pendingOps), payload.KnowledgeBaseID)
 
+	// Crash/abort safety net (standard/claim mode only). If this batch exits
+	// abnormally — panic, ctx timeout, or an early error return — BEFORE it
+	// settles its claimed rows (trim + requeueFailedOps), release the claims
+	// so the next trigger can re-claim within seconds instead of waiting out
+	// wikiClaimStaleAfter (~90m). On the normal path claimsSettled flips true
+	// once the rows reach their terminal state, making this a no-op. Uses a
+	// background context because ctx may already be cancelled on the timeout
+	// path. Lite mode peeks without claiming, so there is nothing to release.
+	claimsSettled := false
+	if s.redisClient != nil && len(peekedIDs) > 0 {
+		defer func() {
+			if claimsSettled {
+				return
+			}
+			if err := s.pendingRepo.ReleaseByIDs(context.Background(), peekedIDs); err != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to release %d claims on abnormal exit for KB %s: %v", len(peekedIDs), payload.KnowledgeBaseID, err)
+				return
+			}
+			logger.Warnf(ctx, "wiki ingest: released %d claimed rows on abnormal exit for KB %s (re-claimable immediately)", len(peekedIDs), payload.KnowledgeBaseID)
+		}()
+	}
+
 	// Resolve extraction granularity once per batch. Historical rows with
 	// empty/unknown values fall back to Standard via Normalize(). Failures
 	// to load the KB (unlikely since we're already acting on it) also
@@ -852,6 +874,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	if len(failedOps) > 0 {
 		s.requeueFailedOps(ctx, payload, failedOps)
 	}
+	// All claimed rows have now reached a terminal state (deleted on success,
+	// released for retry, or dead-lettered), so disarm the abnormal-exit
+	// release net.
+	claimsSettled = true
 
 	logger.Infof(ctx, "wiki ingest: batch completed for KB %s, %d ops, %d pages affected", payload.KnowledgeBaseID, len(pendingOps), len(allPagesAffected))
 

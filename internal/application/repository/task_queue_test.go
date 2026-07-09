@@ -347,10 +347,13 @@ func TestTaskPendingOps_ClaimBatch_KeepsSameKeyTogether(t *testing.T) {
 	assert.Equal(t, "k3", second[0].DedupKey)
 }
 
-// TestTaskPendingOps_ClaimBatch_NewSiblingRowNotDoubleClaimed verifies a
-// row enqueued for an already-claimed (in-flight) document is left for a
-// later batch rather than being handed out alongside the fresh claim.
-func TestTaskPendingOps_ClaimBatch_NewSiblingRowNotDoubleClaimed(t *testing.T) {
+// TestTaskPendingOps_ClaimBatch_LateSiblingBlockedByFreshClaim verifies that a
+// row enqueued for an already-claimed (in-flight) document is NOT claimed on
+// its own: a dedup_key with any fresh claim is skipped WHOLESALE so the late
+// sibling waits for the holder to finish (rows deleted → key freed) or for the
+// claim to go stale, keeping same-document ops serialized across concurrent
+// batches.
+func TestTaskPendingOps_ClaimBatch_LateSiblingBlockedByFreshClaim(t *testing.T) {
 	db := setupTaskQueueTestDB(t)
 	repo := NewTaskPendingOpsRepository(db)
 	ctx := context.Background()
@@ -361,16 +364,51 @@ func TestTaskPendingOps_ClaimBatch_NewSiblingRowNotDoubleClaimed(t *testing.T) {
 	first, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 5, stale)
 	require.NoError(t, err)
 	require.Len(t, first, 1)
+	ingestID := first[0].ID
 
 	// A retract for the same, still-in-flight document arrives.
 	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "retract", "k1", nil)))
 
-	// The next claim gets ONLY the new (unclaimed) retract row — the
-	// still-claimed ingest row is not re-handed-out.
+	// The retract must NOT be claimed while the ingest claim is fresh —
+	// the whole k1 key is blocked.
 	second, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 5, stale)
 	require.NoError(t, err)
-	require.Len(t, second, 1)
-	assert.Equal(t, "retract", second[0].Op)
+	require.Len(t, second, 0, "late sibling blocked while holder's claim is fresh")
+
+	// Once the holder finishes (its claimed rows are deleted), the key is
+	// free and the retract becomes claimable.
+	require.NoError(t, repo.DeleteByIDs(ctx, []int64{ingestID}))
+	third, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 5, stale)
+	require.NoError(t, err)
+	require.Len(t, third, 1)
+	assert.Equal(t, "retract", third[0].Op)
+}
+
+// TestTaskPendingOps_ClaimBatch_LateSiblingClaimableAfterStale verifies the
+// other release path: if the holder CRASHES (claim never cleared), the whole
+// key — original row + late sibling — becomes claimable together once the
+// claim goes stale, so the pair is folded back into one batch.
+func TestTaskPendingOps_ClaimBatch_LateSiblingClaimableAfterStale(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "k1", nil)))
+	first, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 5, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	// Late retract arrives; holder then crashes (claim left stamped).
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "retract", "k1", nil)))
+
+	// A future stale threshold makes the crashed claim eligible again; both
+	// k1 rows are reclaimed together (never split).
+	got, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 5, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Len(t, got, 2, "stale key reclaims both the ingest and the late retract together")
+	for _, r := range got {
+		assert.Equal(t, "k1", r.DedupKey)
+	}
 }
 
 // TestTaskPendingOps_ClaimBatch_ReclaimsStale verifies a claim older than

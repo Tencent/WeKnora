@@ -81,8 +81,17 @@ func (r *taskPendingOpsRepository) PeekBatch(
 // otherwise each batch's per-batch last-write-wins dedup can't collapse the
 // pair and the two ops race (a stale ingest could resurrect a retracted doc).
 //
+// To uphold that invariant even for a sibling enqueued AFTER a batch already
+// claimed the key (e.g. a retract arriving while the ingest is still in
+// flight), a dedup_key that has ANY fresh claim (claimed_at >= staleBefore) is
+// skipped ENTIRELY — not just its already-claimed rows. The late sibling waits
+// for the holder to finish (which deletes the claimed rows, freeing the key) or
+// for the claim to go stale. This serializes same-document ops across
+// concurrent batches instead of letting them race on wall-clock completion.
+//
 // Eligibility = unclaimed (claimed_at IS NULL) OR stale claim
-// (claimed_at < staleBefore). The whole thing runs in one transaction:
+// (claimed_at < staleBefore), AND the key has no fresh claim. The whole thing
+// runs in one transaction:
 //
 //   - Postgres: we lock the ANCHOR row (earliest eligible id) of each
 //     candidate dedup_key with FOR UPDATE SKIP LOCKED. Because the anchor
@@ -113,11 +122,14 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	var claimed []*types.TaskPendingOp
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
+		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
+		//    of an in-flight document never gets claimed on its own.
 		var keys []string
 		if tx.Dialector.Name() == "postgres" {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
-			// the locked anchors back to their dedup_keys.
+			// the locked anchors back to their dedup_keys. The NOT IN subquery
+			// drops any key that still has a fresh (non-stale) claim.
 			const anchorSQL = `
 SELECT dedup_key FROM task_pending_ops
 WHERE id IN (
@@ -126,19 +138,32 @@ WHERE id IN (
 		FROM task_pending_ops
 		WHERE task_type = ? AND scope = ? AND scope_id = ?
 			AND (claimed_at IS NULL OR claimed_at < ?)
+			AND dedup_key NOT IN (
+				SELECT dedup_key FROM task_pending_ops
+				WHERE task_type = ? AND scope = ? AND scope_id = ?
+					AND claimed_at IS NOT NULL AND claimed_at >= ?
+			)
 	) anchors WHERE anchors.rn = 1
 )
 ORDER BY id ASC
 LIMIT ?
 FOR UPDATE SKIP LOCKED`
-			if err := tx.Raw(anchorSQL, taskType, scope, scopeID, staleBefore, limit).
+			if err := tx.Raw(anchorSQL,
+				taskType, scope, scopeID, staleBefore,
+				taskType, scope, scopeID, staleBefore,
+				limit).
 				Scan(&keys).Error; err != nil {
 				return err
 			}
 		} else {
+			freshKeys := tx.Model(&types.TaskPendingOp{}).
+				Select("dedup_key").
+				Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+				Where("claimed_at IS NOT NULL AND claimed_at >= ?", staleBefore)
 			if err := tx.Model(&types.TaskPendingOp{}).
 				Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
 				Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
+				Where("dedup_key NOT IN (?)", freshKeys).
 				Group("dedup_key").
 				Order("MIN(id) ASC").
 				Limit(limit).
