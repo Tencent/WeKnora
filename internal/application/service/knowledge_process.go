@@ -3192,6 +3192,8 @@ func (s *knowledgeService) convert(
 		ParserEngineOverrides: mergedOverrides,
 	}
 
+	parseCacheStatus := "disabled"
+	parseCacheKey := ""
 	if !isURL {
 		fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
 		if err != nil {
@@ -3209,6 +3211,28 @@ func (s *knowledgeService) convert(
 		req.FileContent = contentBytes
 		req.FileName = payload.FileName
 		req.FileType = fileType
+
+		if s.redisClient != nil {
+			parseCacheStatus = "miss"
+			parseCacheKey = parseArtifactCacheKey(contentBytes, parseArtifactConfig{
+				ParserEngine: parserEngine,
+				FileType:     fileType,
+				Overrides:    mergedOverrides,
+			})
+			if cached, ok := s.getCachedParseArtifact(ctx, parseCacheKey); ok {
+				docOutput := types.JSONMap{
+					"text_length":  len(cached.MarkdownContent),
+					"images_found": len(cached.ImageRefs),
+					"is_audio":     cached.IsAudio,
+					"parse_cache":  "hit",
+				}
+				if pages := cached.Metadata["pages"]; pages != "" {
+					docOutput["pages"] = pages
+				}
+				s.endStage(ctx, knowledge.ID, types.StageDocReader, docOutput)
+				return cached, nil
+			}
+		}
 	}
 
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
@@ -3235,10 +3259,14 @@ func (s *knowledgeService) convert(
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
 	}
+	if parseCacheKey != "" {
+		s.setCachedParseArtifact(ctx, parseCacheKey, result)
+	}
 	docOutput := types.JSONMap{
 		"text_length":  len(result.MarkdownContent),
 		"images_found": len(result.ImageRefs),
 		"is_audio":     result.IsAudio,
+		"parse_cache":  parseCacheStatus,
 	}
 	if pages := result.Metadata["pages"]; pages != "" {
 		docOutput["pages"] = pages

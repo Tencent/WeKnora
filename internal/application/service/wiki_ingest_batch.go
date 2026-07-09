@@ -921,6 +921,8 @@ func (s *wikiIngestService) mapOneDocument(
 		citations      map[string][]string
 		newSlugs       []newSlugFromCitation
 		batchCount     int
+		citationHits   int
+		citationMisses int
 	)
 
 	// Both calls run in parallel goroutines under the same wikiSpan
@@ -942,11 +944,12 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
+		var summaryCacheHit bool
+		summaryContent, summaryCacheHit, summaryErr = s.generateWikiMapWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
 			"Content":        content,
 			"Language":       lang,
 			"ExtractedSlugs": slugListing,
-		})
+		}, "summary", "wiki-summary-v1")
 		if summaryErr != nil {
 			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
 		} else {
@@ -955,6 +958,7 @@ func (s *wikiIngestService) mapOneDocument(
 				"chars":        utf8.RuneCountInString(summaryContent),
 				"summary_line": previewText(sumLine, 160),
 				"body_preview": previewText(sumBody, 320),
+				"cache_hit":    summaryCacheHit,
 			})
 		}
 	}()
@@ -968,11 +972,13 @@ func (s *wikiIngestService) mapOneDocument(
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
+		citations, newSlugs, batchCount, citationHits, citationMisses = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
 		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
 			"cited_slugs":      len(citations),
 			"new_slugs":        len(newSlugs),
 			"batches":          batchCount,
+			"cache_hits":       citationHits,
+			"cache_misses":     citationMisses,
 			"top_cited":        topCitedSlugs(citations, 8),
 			"new_slugs_sample": previewNewSlugs(newSlugs, 8),
 		})
@@ -1239,14 +1245,15 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 		prevSlugsText = "(none — this is a new document)"
 	}
 
-	extractionJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
+	extractionJSON, cacheHit, err := s.generateWikiMapWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
 		"Content":       content,
 		"Language":      lang,
 		"PreviousSlugs": prevSlugsText,
-	})
+	}, "legacy-extract", "wiki-legacy-extract-v1")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("combined extraction failed: %w", err)
 	}
+	logger.Infof(ctx, "wiki ingest: legacy extraction cache_hit=%v", cacheHit)
 
 	extractionJSON = cleanLLMJSON(extractionJSON)
 

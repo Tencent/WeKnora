@@ -108,7 +108,19 @@ func TestCacheKeysIncludeLayerInvalidationInputs(t *testing.T) {
 		t.Fatal("WikiMapKey must include extraction granularity")
 	}
 
-	for _, key := range []string{embeddingA, vlmA, wikiA} {
+	parseA := ParseArtifactKey(ImageHash([]byte("file")), "mineru", TextHash(`{"ocr":true}`))
+	parseB := ParseArtifactKey(ImageHash([]byte("file")), "mineru", TextHash(`{"ocr":false}`))
+	if parseA == parseB {
+		t.Fatal("ParseArtifactKey must include render config")
+	}
+
+	graphA := GraphExtractKey(TextHash("chunk"), TextHash("cfg-a"), "chat-a", "graph-v1")
+	graphB := GraphExtractKey(TextHash("chunk"), TextHash("cfg-b"), "chat-a", "graph-v1")
+	if graphA == graphB {
+		t.Fatal("GraphExtractKey must include extraction config")
+	}
+
+	for _, key := range []string{embeddingA, vlmA, wikiA, parseA, graphA} {
 		if strings.Contains(key, " ") {
 			t.Fatalf("cache key contains spaces: %q", key)
 		}

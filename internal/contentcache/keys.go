@@ -86,6 +86,10 @@ func ParseArtifactKey(fileHash, parserEngine, renderConfigHash string) string {
 	return joinKey("parse-artifact", fileHash, parserEngine, renderConfigHash)
 }
 
+func GraphExtractKey(chunkHash, configHash, modelID, promptVersion string) string {
+	return joinKey("graph-extract", chunkHash, configHash, modelID, promptVersion)
+}
+
 func joinKey(parts ...string) string {
 	clean := make([]string, 0, len(parts)+1)
 	clean = append(clean, keyVersion)

@@ -1301,6 +1301,7 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 	}
 	return strings.TrimSpace(buf.String())
 }
+
 // getExistingPageSlugsForKnowledge returns all page slugs that currently
 // reference a given knowledge ID in their source_refs. Used to snapshot
 // state before re-ingest so the reduce phase can reconcile additions vs
@@ -1700,14 +1701,15 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		writeDedupItemXML(&newBuf, item.Slug, item.Name, "concept", item.Aliases)
 	}
 
-	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
+	dedupeJSON, cacheHit, err := s.generateWikiMapWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
 		"NewItems":      newBuf.String(),
 		"ExistingPages": existingBuf.String(),
-	})
+	}, "dedup", "wiki-dedup-v1")
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: deduplication LLM call failed: %v", err)
 		return entities, concepts
 	}
+	logger.Infof(ctx, "wiki ingest: deduplication cache_hit=%v", cacheHit)
 
 	dedupeJSON = cleanLLMJSON(dedupeJSON)
 

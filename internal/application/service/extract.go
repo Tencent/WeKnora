@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -162,6 +163,7 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	redisClient       *redis.Client
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -176,6 +178,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	redisClient *redis.Client,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -185,6 +188,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		redisClient:       redisClient,
 		spanTracker:       spanTracker,
 	}
 }
@@ -326,12 +330,29 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+	graphCacheStatus := "disabled"
+	graphCacheKey := ""
+	var graph *types.GraphData
+	if s.redisClient != nil {
+		graphCacheStatus = "miss"
+		graphCacheKey = graphExtractCacheKey(chunk.Content, chatModel, template)
+		if cached, ok := s.getCachedGraphExtract(ctx, graphCacheKey); ok {
+			graph = cached
+			graphCacheStatus = "hit"
+		}
 	}
+	if graph == nil {
+		extractor := chatpipeline.NewExtractor(chatModel, template)
+		graph, err = extractor.Extract(ctx, chunk.Content)
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		if graphCacheKey != "" {
+			s.setCachedGraphExtract(ctx, graphCacheKey, graph)
+		}
+	}
+	graphOut["cache"] = graphCacheStatus
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {

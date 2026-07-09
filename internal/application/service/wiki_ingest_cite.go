@@ -92,16 +92,17 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
+	raw, cacheHit, err := s.generateWikiMapWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
 		"Content":             content,
 		"Language":            lang,
 		"PreviousSlugs":       prevSlugsText,
 		"Granularity":         string(granularity),
 		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
-	})
+	}, "candidate-slugs", "wiki-candidate-slugs-v1")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
 	}
+	logger.Infof(ctx, "wiki ingest: candidate slug extraction cache_hit=%v", cacheHit)
 
 	raw = cleanLLMJSON(raw)
 
@@ -280,10 +281,10 @@ func (s *wikiIngestService) classifyChunkCitations(
 	chunks []*types.Chunk,
 	lang string,
 	batchCtx *WikiBatchContext,
-) (map[string][]string, []newSlugFromCitation, int) {
+) (map[string][]string, []newSlugFromCitation, int, int, int) {
 	batches := splitChunksIntoCitationBatches(chunks)
 	if len(batches) == 0 || strings.TrimSpace(candidatesXML) == "" {
-		return map[string][]string{}, nil, 0
+		return map[string][]string{}, nil, 0, 0, 0
 	}
 
 	// Merge state. Using sets keyed by (slug, chunkID) to dedup across
@@ -291,6 +292,8 @@ func (s *wikiIngestService) classifyChunkCitations(
 	var mu sync.Mutex
 	citationSet := make(map[string]map[string]bool) // slug → set of real chunk IDs
 	var newSlugsAll []newSlugFromCitation
+	cacheHits := 0
+	cacheMisses := 0
 
 	eg, ectx := errgroup.WithContext(ctx)
 	eg.SetLimit(maxCitationBatchConcurrency)
@@ -300,11 +303,18 @@ func (s *wikiIngestService) classifyChunkCitations(
 		batchIdx := bi
 		eg.Go(func() error {
 			chunksXML := renderChunksXML(batch)
-			raw, err := s.generateWithTemplate(ectx, chatModel, agent.WikiChunkCitationPrompt, map[string]string{
+			raw, cacheHit, err := s.generateWikiMapWithTemplate(ectx, chatModel, agent.WikiChunkCitationPrompt, map[string]string{
 				"CandidateSlugs": candidatesXML,
 				"ChunksXML":      chunksXML,
 				"Language":       lang,
-			})
+			}, "chunk-citation", "wiki-chunk-citation-v1")
+			mu.Lock()
+			if cacheHit {
+				cacheHits++
+			} else {
+				cacheMisses++
+			}
+			mu.Unlock()
 			if err != nil {
 				logger.Warnf(ectx, "wiki ingest: citation batch %d failed: %v", batchIdx, err)
 				return nil // don't abort peer batches
@@ -376,7 +386,7 @@ func (s *wikiIngestService) classifyChunkCitations(
 		out[slug] = ids
 	}
 
-	return out, newSlugsAll, len(batches)
+	return out, newSlugsAll, len(batches), cacheHits, cacheMisses
 }
 
 // resolveCitedChunks loads the content of every chunk referenced by the
