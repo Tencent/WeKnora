@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -101,6 +102,10 @@ func TestConnectorType(t *testing.T) {
 	if NewConnector().Type() != types.ConnectorTypeWeComChatArchive {
 		t.Fatalf("Type() = %q", NewConnector().Type())
 	}
+}
+
+func TestConnectorSatisfiesDatasourceInterface(t *testing.T) {
+	var _ datasource.Connector = NewConnector()
 }
 
 func TestValidateUsesArchiveClient(t *testing.T) {
