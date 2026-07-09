@@ -16,3 +16,21 @@ Commits:
 
 Concerns:
 - The secret multiline field now uses a single-line password input, so pasted private keys are masked but less ergonomic than a secure multiline editor.
+
+---
+
+Status: DONE
+
+Fixes:
+- Rendered secret multiline credential fields as a masked textarea flow: hidden by default with a non-plaintext mask, revealable via a text toggle, and editable in a textarea to preserve newlines.
+- Updated field-rendering helper and focused frontend test so `secret + multiline` maps to `secret-textarea` instead of `password`.
+
+Tests:
+- `npm --prefix frontend test -- src/views/knowledge/settings/datasourceFieldRendering.test.ts` passed: 2 tests.
+- `npm --prefix frontend run type-check` passed.
+
+Commits:
+- d97c1be8 fix(frontend): support multiline secret credentials
+
+Concerns:
+- None.
