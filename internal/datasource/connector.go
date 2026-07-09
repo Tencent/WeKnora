@@ -203,6 +203,15 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "custom",
 		Capabilities: []string{"incremental"},
 	},
+	types.ConnectorTypeWeComChatArchive: {
+		Type:         types.ConnectorTypeWeComChatArchive,
+		Name:         "企业微信会话存档",
+		Description:  "从企业微信会话内容存档同步聊天记录到知识库",
+		Icon:         "wecom",
+		Priority:     2,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata
