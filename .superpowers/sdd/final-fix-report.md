@@ -12,7 +12,7 @@ Tests:
 - `git diff --check` passed.
 
 Commits:
-- Pending at report creation.
+- f8322dff fix(datasource): harden wecom archive sync
 
 Concerns:
 - The secret multiline field now uses a single-line password input, so pasted private keys are masked but less ergonomic than a secure multiline editor.
