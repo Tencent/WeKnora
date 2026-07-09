@@ -75,7 +75,7 @@ func TestConcurrencyEmbedderBackgroundGated(t *testing.T) {
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 2)
 
 	f := newFakeEmbedder("emb-bg")
-	w := wrapEmbeddingConcurrency(f)
+	w := wrapEmbeddingConcurrency(f, 0)
 
 	ctx := types.WithBackgroundTask(context.Background())
 	const n = 5
@@ -110,6 +110,46 @@ func TestConcurrencyEmbedderBackgroundGated(t *testing.T) {
 	}
 }
 
+// TestConcurrencyEmbedderPerModelLimitOverridesDefault verifies a model's own
+// configured limit takes precedence over the process-wide default.
+func TestConcurrencyEmbedderPerModelLimitOverridesDefault(t *testing.T) {
+	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
+	// Global default is generous (10), but this model is pinned to 1.
+	limiter.SetGovernor(limiter.NewLocalLimiter(), 10)
+
+	f := newFakeEmbedder("emb-permodel")
+	w := wrapEmbeddingConcurrency(f, 1)
+
+	ctx := types.WithBackgroundTask(context.Background())
+	const n = 3
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = w.BatchEmbed(ctx, []string{"x"})
+		}()
+	}
+
+	// Only one may be in flight because the per-model limit is 1.
+	select {
+	case <-f.enter:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("expected one call to enter, inFlight=%d", atomic.LoadInt32(&f.inFlight))
+	}
+	select {
+	case <-f.enter:
+		t.Fatal("a second call entered while per-model limit=1 slot was held")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(f.release)
+	wg.Wait()
+	if got := atomic.LoadInt32(&f.maxSeen); got > 1 {
+		t.Fatalf("max in-flight %d exceeded per-model limit 1", got)
+	}
+}
+
 // TestConcurrencyEmbedderInteractiveNotGated verifies interactive calls bypass
 // the governor entirely, even at limit 1.
 func TestConcurrencyEmbedderInteractiveNotGated(t *testing.T) {
@@ -117,7 +157,7 @@ func TestConcurrencyEmbedderInteractiveNotGated(t *testing.T) {
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
 
 	f := newFakeEmbedder("emb-interactive")
-	w := wrapEmbeddingConcurrency(f)
+	w := wrapEmbeddingConcurrency(f, 0)
 
 	ctx := context.Background() // no background marker
 	const n = 3
@@ -158,7 +198,7 @@ func TestConcurrencyEmbedderPoolFanOutGated(t *testing.T) {
 
 	f := newFakeEmbedder("emb-pool")
 	f.pooler = NewBatchEmbedder(pool)
-	w := wrapEmbeddingConcurrency(f)
+	w := wrapEmbeddingConcurrency(f, 0)
 
 	ctx := types.WithBackgroundTask(context.Background())
 	done := make(chan struct{})

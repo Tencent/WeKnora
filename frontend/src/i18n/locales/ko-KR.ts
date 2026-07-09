@@ -2765,6 +2765,9 @@ export default {
       dimensionOverrideDesc: "제공자 문서에서 이 모델이 dimensions 매개변수를 지원한다고 확인한 경우에만 켜세요.",
       supportsVisionLabel: "비전/멀티모달 지원",
       supportsVisionDesc: "모델의 이미지 등 멀티모달 입력 지원 여부",
+      maxConcurrencyLabel: "백그라운드 동시 실행 상한",
+      maxConcurrencyPlaceholder: "0이면 전역 기본값 사용",
+      maxConcurrencyDesc: "문서 인덱싱/보강 등 백그라운드 작업이 이 모델을 호출하는 동시 실행 수를 제한합니다(모델별로 모든 복제본이 공유). 0 또는 비워 두면 전역 기본값을 사용하며, 대화형 채팅에는 영향을 주지 않습니다.",
       thinkingControlLabel: "사고 모드 매개변수 형식",
       thinkingControlDesc:
         "에이전트 「사고 모드」 켜기/끄기 시 API에 어떻게 기록할지 결정합니다. 벤더/모델에 따라 미리 선택되며, 실제 API와 다르면 문서에 맞게 수정하세요. 「전송 안 함」을 선택하면 에이전트 「사고 모드」 스위치가 효과가 없습니다.",

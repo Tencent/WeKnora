@@ -26,19 +26,22 @@ import (
 // inner debug/langfuse timing.
 type concurrencyChat struct {
 	inner Chat
+	// limit is this model's configured per-model background cap; 0 falls back
+	// to the process-wide default (see limiter.GateN).
+	limit int
 }
 
 func (w *concurrencyChat) GetModelName() string { return w.inner.GetModelName() }
 func (w *concurrencyChat) GetModelID() string   { return w.inner.GetModelID() }
 
 func (w *concurrencyChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	release := limiter.Gate(ctx, w.inner.GetModelID())
+	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
 	defer release()
 	return w.inner.Chat(ctx, messages, opts)
 }
 
 func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
-	release := limiter.Gate(ctx, w.inner.GetModelID())
+	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
 	ch, err := w.inner.ChatStream(ctx, messages, opts)
 	if err != nil || ch == nil {
 		release()
@@ -71,9 +74,9 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 // wrapChatConcurrency installs the background concurrency governor as the
 // outermost Chat decorator. It is always applied; when no limiter is installed
 // or the call is interactive, the wrapper is a cheap passthrough.
-func wrapChatConcurrency(c Chat, err error) (Chat, error) {
+func wrapChatConcurrency(c Chat, limit int, err error) (Chat, error) {
 	if err != nil || c == nil {
 		return c, err
 	}
-	return &concurrencyChat{inner: c}, nil
+	return &concurrencyChat{inner: c, limit: limit}, nil
 }

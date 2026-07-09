@@ -2787,6 +2787,9 @@ export default {
       dimensionOverrideDesc: "仅在确认该模型支持 dimensions 参数时开启；默认只使用检测到的实际维度。",
       supportsVisionLabel: "支持视觉/多模态",
       supportsVisionDesc: "模型是否支持图片等多模态输入",
+      maxConcurrencyLabel: "后台并发上限",
+      maxConcurrencyPlaceholder: "0 表示使用全局默认",
+      maxConcurrencyDesc: "限制文档入库/富化等后台任务对该模型的并发调用数（按模型全副本共享）。0 或留空表示沿用全局默认；不影响交互式对话。",
       thinkingControlLabel: "思考模式参数格式",
       thinkingControlDesc:
         "决定智能体「思考模式」开/关时如何写入 API。已尝试按厂商/模型预选，若与实际情况不符请按 API 文档手动修改；选「不写入」时，智能体「思考模式」开关不生效。",

@@ -28,16 +28,28 @@ func SetGovernor(l ModelConcurrencyLimiter, limit int) {
 	governorN = limit
 }
 
-// Gate acquires a per-model concurrency slot when the call is a background task
-// (see types.IsBackgroundTask) and a governor is installed. It returns a
-// release func that is ALWAYS safe to call: on the passthrough / fail-open
-// paths it is a cheap no-op. The gate never blocks a call permanently — a
-// limiter/Redis outage or a cancelled context fails open.
+// Gate acquires a per-model concurrency slot using the process-wide default
+// limit. Equivalent to GateN(ctx, modelID, 0).
 func Gate(ctx context.Context, modelID string) func() {
+	return GateN(ctx, modelID, 0)
+}
+
+// GateN acquires a per-model concurrency slot when the call is a background task
+// (see types.IsBackgroundTask) and a governor is installed. modelLimit is the
+// model's own configured cap; a value <= 0 means "fall back to the process-wide
+// default" (governorN). It returns a release func that is ALWAYS safe to call:
+// on the passthrough / fail-open paths it is a cheap no-op. The gate never
+// blocks a call permanently — a limiter/Redis outage or a cancelled context
+// fails open.
+func GateN(ctx context.Context, modelID string, modelLimit int) func() {
 	governorMu.RLock()
-	l, limit := governor, governorN
+	l, defaultLimit := governor, governorN
 	governorMu.RUnlock()
 
+	limit := modelLimit
+	if limit <= 0 {
+		limit = defaultLimit
+	}
 	if l == nil || limit <= 0 || !types.IsBackgroundTask(ctx) {
 		return noop
 	}

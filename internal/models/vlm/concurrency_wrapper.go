@@ -13,13 +13,16 @@ import (
 // worker) calls are throttled — see limiter.Gate / types.IsBackgroundTask.
 type concurrencyVLM struct {
 	inner VLM
+	// limit is this model's configured per-model background cap; 0 falls back
+	// to the process-wide default (see limiter.GateN).
+	limit int
 }
 
 func (w *concurrencyVLM) GetModelName() string { return w.inner.GetModelName() }
 func (w *concurrencyVLM) GetModelID() string   { return w.inner.GetModelID() }
 
 func (w *concurrencyVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
-	release := limiter.Gate(ctx, w.inner.GetModelID())
+	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
 	defer release()
 	return w.inner.Predict(ctx, imgBytes, prompt)
 }
@@ -27,9 +30,9 @@ func (w *concurrencyVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt 
 // wrapVLMConcurrency installs the background concurrency governor as the
 // outermost VLM decorator. Always applied; a cheap passthrough when no limiter
 // is installed or the call is interactive.
-func wrapVLMConcurrency(v VLM, err error) (VLM, error) {
+func wrapVLMConcurrency(v VLM, limit int, err error) (VLM, error) {
 	if err != nil || v == nil {
 		return v, err
 	}
-	return &concurrencyVLM{inner: v}, nil
+	return &concurrencyVLM{inner: v, limit: limit}, nil
 }

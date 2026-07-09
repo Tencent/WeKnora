@@ -24,16 +24,19 @@ import (
 // is acceptable for background ingestion.
 type concurrencyEmbedder struct {
 	inner Embedder
+	// limit is this model's configured per-model background cap; 0 falls back
+	// to the process-wide default (see limiter.GateN).
+	limit int
 }
 
 func (w *concurrencyEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	release := limiter.Gate(ctx, w.inner.GetModelID())
+	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
 	defer release()
 	return w.inner.Embed(ctx, text)
 }
 
 func (w *concurrencyEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
-	release := limiter.Gate(ctx, w.inner.GetModelID())
+	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
 	defer release()
 	return w.inner.BatchEmbed(ctx, texts)
 }
@@ -55,9 +58,9 @@ func (w *concurrencyEmbedder) GetModelID() string   { return w.inner.GetModelID(
 // wrapEmbeddingConcurrency installs the background concurrency governor directly
 // around the real embedder. Always applied; a cheap passthrough when no limiter
 // is installed or the call is interactive.
-func wrapEmbeddingConcurrency(e Embedder) Embedder {
+func wrapEmbeddingConcurrency(e Embedder, limit int) Embedder {
 	if e == nil {
 		return e
 	}
-	return &concurrencyEmbedder{inner: e}
+	return &concurrencyEmbedder{inner: e, limit: limit}
 }
