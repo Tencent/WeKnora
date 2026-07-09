@@ -16,7 +16,13 @@ type fakeArchiveClient struct {
 
 func (f *fakeArchiveClient) Validate(ctx context.Context) error { return f.validateErr }
 func (f *fakeArchiveClient) FetchMessages(ctx context.Context, startSeq uint64, limit int) ([]ArchiveMessageEnvelope, bool, error) {
-	return f.messages, false, nil
+	var out []ArchiveMessageEnvelope
+	for _, msg := range f.messages {
+		if msg.Seq >= startSeq {
+			out = append(out, msg)
+		}
+	}
+	return out, false, nil
 }
 func (f *fakeArchiveClient) Close() error { return nil }
 
@@ -139,6 +145,55 @@ func TestResolveResourceAncestorsReturnsEmpty(t *testing.T) {
 	}
 	if len(ancestors) != 0 {
 		t.Fatalf("ancestors = %#v, want empty", ancestors)
+	}
+}
+
+func TestFetchAllAggregatesRecentMessages(t *testing.T) {
+	now := time.Now().UTC()
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		return &fakeArchiveClient{messages: []ArchiveMessageEnvelope{
+			{Seq: 1, MsgID: "old", MsgType: "text", ConversationID: "wr_xxx", ConversationName: "客户项目群", ConversationType: conversationTypeRoom, From: Sender{UserID: "old"}, MsgTime: now.AddDate(0, 0, -100), Raw: []byte("old")},
+			{Seq: 2, MsgID: "new", MsgType: "text", ConversationID: "wr_xxx", ConversationName: "客户项目群", ConversationType: conversationTypeRoom, From: Sender{UserID: "zhangsan", Name: "张三"}, MsgTime: now, Raw: []byte("new body")},
+		}}
+	}))
+	cfg := validConfig()
+	cfg.Settings = map[string]interface{}{"full_sync_days": float64(90)}
+	items, err := c.FetchAll(context.Background(), cfg, []string{"all"})
+	if err != nil {
+		t.Fatalf("FetchAll error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	if strings.Contains(string(items[0].Content), "old") {
+		t.Fatalf("old message was not filtered: %s", string(items[0].Content))
+	}
+	if !strings.Contains(string(items[0].Content), "new body") {
+		t.Fatalf("new message missing: %s", string(items[0].Content))
+	}
+}
+
+func TestFetchIncrementalStartsAfterCursorAndAdvancesSeq(t *testing.T) {
+	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		return &fakeArchiveClient{messages: []ArchiveMessageEnvelope{
+			{Seq: 10, MsgID: "skip", MsgType: "text", ConversationID: "wr_xxx", ConversationType: conversationTypeRoom, From: Sender{UserID: "a"}, MsgTime: now, Raw: []byte("skip")},
+			{Seq: 11, MsgID: "keep", MsgType: "text", ConversationID: "wr_xxx", ConversationType: conversationTypeRoom, From: Sender{UserID: "b"}, MsgTime: now.Add(time.Minute), Raw: []byte("keep")},
+		}}
+	}))
+	cursor := &types.SyncCursor{ConnectorCursor: map[string]interface{}{"last_seq": float64(10)}}
+	items, next, err := c.FetchIncremental(context.Background(), validConfig(), cursor)
+	if err != nil {
+		t.Fatalf("FetchIncremental error: %v", err)
+	}
+	if len(items) != 1 || strings.Contains(string(items[0].Content), "skip") {
+		t.Fatalf("items = %#v", items)
+	}
+	if next == nil || next.ConnectorCursor["last_seq"] == nil {
+		t.Fatalf("next cursor missing last_seq: %#v", next)
+	}
+	if got := uint64(next.ConnectorCursor["last_seq"].(float64)); got != 11 {
+		t.Fatalf("last_seq = %d, want 11", got)
 	}
 }
 
