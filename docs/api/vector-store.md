@@ -55,6 +55,19 @@ curl --location 'http://localhost:8080/api/v1/vector-stores/types' \
                 { "name": "username", "type": "string", "required": false },
                 { "name": "password", "type": "string", "required": false, "sensitive": true }
             ]
+        },
+        {
+            "type": "mysql",
+            "display_name": "MySQL",
+            "connection_fields": [
+                { "name": "addr", "type": "string", "required": true, "default": "mysql:3306" },
+                { "name": "database", "type": "string", "required": true, "default": "weknora" },
+                { "name": "username", "type": "string", "required": false, "default": "root" },
+                { "name": "password", "type": "string", "required": false, "sensitive": true }
+            ],
+            "index_fields": [
+                { "name": "collection_prefix", "type": "string", "required": false, "default": "weknora_embeddings" }
+            ]
         }
     ]
 }
@@ -421,6 +434,8 @@ curl --location --request POST 'http://localhost:8080/api/v1/vector-stores/550e8
 - **被知识库绑定时**：未指定 `vector_store_id` 创建的知识库默认使用环境变量存储；这种知识库在响应中显示为 `vector_store_name="System default"` + `vector_store_source="env"`。
 
 Tencent VectorDB 环境变量存储可通过 `TENCENT_VECTORDB_REPLICA_NUMBER` 覆盖默认集合副本数。默认值为 `1`；单节点 QA 环境可设为 `0`，生产环境可按 Tencent VectorDB 集群规模调整。
+
+MySQL 环境变量存储使用 `RETRIEVE_DRIVER=mysql`，并读取 `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_USERNAME`、`MYSQL_PASSWORD`、`MYSQL_DATABASE` 和 `MYSQL_TABLE_PREFIX`。物理向量表按维度创建为 `<prefix>_<dim>`。
 
 ## 错误码
 
