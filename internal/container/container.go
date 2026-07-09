@@ -287,6 +287,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// dispatches inline goroutines that the checkpoint-based abort
 		// already handles.
 		must(container.Provide(router.NewNoopTaskInspector))
+		// Even without Redis, background ingestion/enrichment can burst the
+		// worker pool against one provider, so install an in-process governor.
+		must(container.Invoke(registerLiteModelConcurrencyLimiter))
 	}
 
 	// Chat pipeline components for processing chat requests
@@ -448,21 +451,47 @@ func initLangfuse() (*langfuse.Manager, error) {
 // across every replica. Interactive chat is never gated.
 const defaultModelMaxConcurrency = 8
 
-// registerModelConcurrencyLimiter builds the Redis-backed per-model chat
-// concurrency governor and installs it into the chat package. The limit is
-// resolved from system settings / env, defaulting to defaultModelMaxConcurrency.
-func registerModelConcurrencyLimiter(rdb *redis.Client, ss interfaces.SystemSettingService) {
-	limit := defaultModelMaxConcurrency
-	if ss != nil {
-		n := ss.GetInt(context.Background(), "model.max_concurrency",
-			"WEKNORA_MODEL_MAX_CONCURRENCY", int64(defaultModelMaxConcurrency))
-		if n > 0 {
-			limit = int(n)
-		}
+// resolveModelMaxConcurrency reads the per-model background concurrency limit
+// from system settings / env, defaulting to defaultModelMaxConcurrency when
+// unset. A configured value of 0 (or negative) is honoured and disables the
+// governor — that is the supported way to turn throttling off via config/env.
+func resolveModelMaxConcurrency(ss interfaces.SystemSettingService) int {
+	if ss == nil {
+		return defaultModelMaxConcurrency
 	}
-	chat.SetConcurrencyLimiter(limiter.NewRedisLimiter(rdb), limit)
+	return int(ss.GetInt(context.Background(), "model.max_concurrency",
+		"WEKNORA_MODEL_MAX_CONCURRENCY", int64(defaultModelMaxConcurrency)))
+}
+
+// registerModelConcurrencyLimiter builds the Redis-backed per-model background
+// concurrency governor (chat + vlm) and installs it. Only available with Redis
+// (the shared semaphore backend); Lite mode uses registerLiteModelConcurrencyLimiter.
+func registerModelConcurrencyLimiter(rdb *redis.Client, ss interfaces.SystemSettingService) {
+	limit := resolveModelMaxConcurrency(ss)
+	limiter.SetGovernor(limiter.NewRedisLimiter(rdb), limit)
+	if limit <= 0 {
+		logger.Infof(context.Background(),
+			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
+		return
+	}
 	logger.Infof(context.Background(),
-		"[ModelLimiter] background chat concurrency governed per-model, limit=%d (distributed via redis)", limit)
+		"[ModelLimiter] background model concurrency governed per-model, limit=%d (distributed via redis)", limit)
+}
+
+// registerLiteModelConcurrencyLimiter installs an in-process per-model governor
+// for Lite mode (no Redis). Lite runs a single process, so an in-process
+// semaphore is sufficient to keep a background ingestion storm from bursting
+// the whole worker pool against one provider.
+func registerLiteModelConcurrencyLimiter(ss interfaces.SystemSettingService) {
+	limit := resolveModelMaxConcurrency(ss)
+	limiter.SetGovernor(limiter.NewLocalLimiter(), limit)
+	if limit <= 0 {
+		logger.Infof(context.Background(),
+			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
+		return
+	}
+	logger.Infof(context.Background(),
+		"[ModelLimiter] background model concurrency governed per-model, limit=%d (in-process, lite mode)", limit)
 }
 
 func initRedisClient() (*redis.Client, error) {

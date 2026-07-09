@@ -96,6 +96,16 @@ func (l *redisLimiter) Acquire(ctx context.Context, key string, limit int) (func
 	token := uuid.NewString()
 	ttlMs := l.ttl.Milliseconds()
 
+	// Reuse a single timer across poll iterations rather than allocating a new
+	// one via time.After each loop: under sustained contention a waiter can
+	// spin thousands of times, and every time.After timer lives until it fires.
+	// Start it stopped so the first Reset below arms it cleanly.
+	timer := time.NewTimer(0)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+
 	for {
 		now := time.Now().UnixMilli()
 		res, err := acquireScript.Run(ctx, l.rdb, []string{zkey},
@@ -109,13 +119,14 @@ func (l *redisLimiter) Acquire(ctx context.Context, key string, limit int) (func
 			return l.hold(zkey, token), nil
 		}
 
+		timer.Reset(l.pollInterval)
 		select {
 		case <-ctx.Done():
 			// Fail open on cancellation too: let the inner call observe the
 			// cancelled context and return its own error, rather than us
 			// synthesising one here.
 			return noop, nil
-		case <-time.After(l.pollInterval):
+		case <-timer.C:
 		}
 	}
 }
@@ -136,10 +147,19 @@ func (l *redisLimiter) hold(zkey, token string) func() {
 				// Detached ctx: the heartbeat must outlive request ctx up to
 				// release. Best-effort; a failed refresh just risks early
 				// reclamation, which the limit already tolerates.
-				_ = l.rdb.ZAdd(context.Background(), zkey, redis.Z{
+				//
+				// Refresh BOTH the member lease score AND the ZSET key's own
+				// TTL. The acquire script only PEXPIREs the key on admission,
+				// so a semaphore that stays saturated with no slot turnover
+				// would otherwise let the whole key expire after ttl*2 —
+				// dropping every live lease and admitting over the limit. The
+				// heartbeat pushes the key TTL out in lockstep with the lease.
+				bg := context.Background()
+				_ = l.rdb.ZAdd(bg, zkey, redis.Z{
 					Score:  float64(now + l.ttl.Milliseconds()),
 					Member: token,
 				}).Err()
+				_ = l.rdb.PExpire(bg, zkey, l.ttl*2).Err()
 			}
 		}
 	}()

@@ -87,7 +87,10 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 	if logger.LLMDebugEnabled() {
 		v = &debugVLM{inner: v}
 	}
-	return wrapVLMLangfuse(v, nil)
+	v, err = wrapVLMLangfuse(v, nil)
+	// Outermost: hold the per-model concurrency slot only around the real
+	// provider round-trip, so the wait is excluded from debug/langfuse timing.
+	return wrapVLMConcurrency(v, err)
 }
 
 func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {

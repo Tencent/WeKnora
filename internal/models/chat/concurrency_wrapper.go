@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"sync"
 
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -18,29 +17,8 @@ import (
 // Only background (asynq worker) calls are throttled; interactive chat is left
 // untouched (see types.IsBackgroundTask), so a document-ingestion storm cannot
 // exhaust the provider yet user-facing latency is never gated behind the
-// semaphore.
-var (
-	concurrencyMu      sync.RWMutex
-	concurrencyLimiter limiter.ModelConcurrencyLimiter
-	concurrencyLimit   int
-)
-
-// SetConcurrencyLimiter installs the process-wide background chat concurrency
-// governor and the default per-model limit. Called once at startup (see
-// container wiring). Passing a nil limiter or a non-positive limit disables
-// governance (all calls pass through).
-func SetConcurrencyLimiter(l limiter.ModelConcurrencyLimiter, defaultLimit int) {
-	concurrencyMu.Lock()
-	defer concurrencyMu.Unlock()
-	concurrencyLimiter = l
-	concurrencyLimit = defaultLimit
-}
-
-func getConcurrencyLimiter() (limiter.ModelConcurrencyLimiter, int) {
-	concurrencyMu.RLock()
-	defer concurrencyMu.RUnlock()
-	return concurrencyLimiter, concurrencyLimit
-}
+// semaphore. The governor singleton itself lives in the limiter package so chat
+// and vlm share the same limiter and per-model budget.
 
 // concurrencyChat throttles background LLM calls through a per-model
 // distributed semaphore. It is the outermost wrapper so the slot is held only
@@ -53,42 +31,38 @@ type concurrencyChat struct {
 func (w *concurrencyChat) GetModelName() string { return w.inner.GetModelName() }
 func (w *concurrencyChat) GetModelID() string   { return w.inner.GetModelID() }
 
-// gate acquires a concurrency slot when the call is a background task and a
-// limiter is installed. Returns a release func (always safe to call) and
-// whether the inner call may proceed — it always may; the gate never blocks a
-// call permanently and fails open on any limiter error.
-func (w *concurrencyChat) gate(ctx context.Context) func() {
-	lim, limit := getConcurrencyLimiter()
-	if lim == nil || limit <= 0 || !types.IsBackgroundTask(ctx) {
-		return func() {}
-	}
-	release, err := lim.Acquire(ctx, w.inner.GetModelID(), limit)
-	if err != nil || release == nil {
-		return func() {}
-	}
-	return release
-}
-
 func (w *concurrencyChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	release := w.gate(ctx)
+	release := limiter.Gate(ctx, w.inner.GetModelID())
 	defer release()
 	return w.inner.Chat(ctx, messages, opts)
 }
 
 func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
-	release := w.gate(ctx)
+	release := limiter.Gate(ctx, w.inner.GetModelID())
 	ch, err := w.inner.ChatStream(ctx, messages, opts)
 	if err != nil || ch == nil {
 		release()
 		return ch, err
 	}
-	// Hold the slot until the stream fully drains, then release.
+	// Hold the slot until the stream fully drains, then release. If the
+	// consumer abandons the stream (stops reading out) we would otherwise
+	// block forever on the send and never release the slot; select on
+	// ctx.Done() so a cancelled call frees its slot promptly, and drain the
+	// inner channel in the background so the upstream producer can exit.
 	out := make(chan types.StreamResponse)
 	go func() {
 		defer close(out)
 		defer release()
 		for resp := range ch {
-			out <- resp
+			select {
+			case out <- resp:
+			case <-ctx.Done():
+				go func() {
+					for range ch {
+					}
+				}()
+				return
+			}
 		}
 	}()
 	return out, nil
