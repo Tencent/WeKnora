@@ -18084,15 +18084,19 @@ const docTemplate = `{
                     ]
                 },
                 "ingest_batch_size": {
-                    "description": "IngestBatchSize controls how many pending ops a single batch\nprocesses before scheduling a follow-up. 0 falls back to the\nhard-coded default (5). Operators on large KBs (4w+ docs) can\nraise this to 10–20 to amortize the lock-acquire / index-rebuild\noverhead across more documents per round.",
+                    "description": "IngestBatchSize controls how many pending ops a single batch claims and\nprocesses before scheduling a follow-up. 0 falls back to the hard-coded\ndefault (5). Larger batches amortize per-batch setup and let more docs\nshare the batch-internal Map/Reduce fan-out; smaller batches spread a\nKB's backlog across more concurrent batches (finer scheduling grain).",
                     "type": "integer"
                 },
                 "ingest_map_parallel": {
-                    "description": "IngestMapParallel sets the errgroup limit for the Map phase\n(per-document extraction + summary + chunk citation). 0 falls\nback to 10. Bound by the LLM provider's concurrency limit and\nthe worker's outbound HTTP pool.",
+                    "description": "IngestMapParallel sets the errgroup limit for the Map phase\n(per-document extraction + summary + chunk citation) WITHIN one batch.\n0 falls back to 10. Bound by the LLM provider's concurrency limit and\nthe worker's outbound HTTP pool. Remember it multiplies with the number\nof concurrent batches (IngestMaxInflight).",
+                    "type": "integer"
+                },
+                "ingest_max_inflight": {
+                    "description": "IngestMaxInflight caps how many ingest batches for THIS KB may run\nconcurrently in the shared wiki worker pool (standard/Redis mode\nonly). 0 falls back to the hard-coded default (4). Since Phase 3\nremoved the exclusive per-KB lock, one KB's backlog could otherwise\nmonopolize the whole pool during a bulk import and starve other KBs;\nthis knob trades a single KB's peak throughput for cross-KB fairness.\nSet it \u003e= the wiki pool size to effectively disable the cap.",
                     "type": "integer"
                 },
                 "ingest_reduce_parallel": {
-                    "description": "IngestReduceParallel sets the errgroup limit for the Reduce phase\n(per-slug page write). 0 falls back to 10. Bound by the same\nLLM concurrency / HTTP pool considerations as the Map phase,\nplus DB connection pool size.",
+                    "description": "IngestReduceParallel sets the errgroup limit for the Reduce phase\n(per-slug page write) WITHIN one batch. 0 falls back to 10. Bound by the\nsame LLM concurrency / HTTP pool considerations as the Map phase, plus\nDB connection pool size. Same multiplier caveat as IngestMapParallel.",
                     "type": "integer"
                 },
                 "max_pages_per_ingest": {

@@ -1,8 +1,8 @@
 package types
 
-// Asynq queue names. MUST stay in sync with the Queues weight map in
-// router.NewAsynqServer — a task enqueued to a queue that the server does not
-// list will never be consumed.
+// Asynq queue names. MUST stay in sync with the Queues weight maps in
+// router.NewParseAsynqServer / router.NewWikiAsynqServer — a task enqueued to a
+// queue that no server subscribes to will never be consumed.
 const (
 	QueueCritical   = "critical"
 	QueueDefault    = "default"
@@ -21,6 +21,16 @@ const (
 	// question batches from starving the lightweight tasks in the low queue
 	// (summary, deletes, wiki ingest).
 	QueueQuestion = "question"
+	// QueueWiki is the dedicated lane for the Wiki ingest pipeline. Unlike the
+	// other queues above (which all share a single asynq worker pool), this
+	// queue is consumed by a SEPARATE asynq server (router.NewWikiAsynqServer)
+	// with its own concurrency budget. Hard capacity isolation: heavy document
+	// parsing in the upstream pool can never starve wiki generation, and a
+	// wiki-generation burst can never starve user-facing parsing. Sizing the
+	// two pools independently replaces the old weighted-lottery approach where
+	// wiki sat on the low queue (weight 1) and got ~1/13 of the schedule
+	// during upload storms.
+	QueueWiki = "wiki"
 )
 
 const (
@@ -41,6 +51,7 @@ const (
 	TypeManualProcess        = "manual:process"         // 手工知识更新任务（cleanup + 重新索引）
 	TypeDataSourceSync       = "datasource:sync"        // 数据源同步任务
 	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
+	TypeWikiFinalize         = "wiki:finalize"          // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 )
 
 // ExtractChunkPayload represents the extract chunk task payload

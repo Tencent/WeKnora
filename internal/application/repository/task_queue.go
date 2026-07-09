@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // taskPendingOpsRepository implements interfaces.TaskPendingOpsRepository.
@@ -69,6 +71,74 @@ func (r *taskPendingOpsRepository) PeekBatch(
 		return nil, err
 	}
 	return ops, nil
+}
+
+// ClaimBatch atomically claims up to `limit` eligible rows for the tuple.
+// Eligibility = unclaimed (claimed_at IS NULL) OR stale claim
+// (claimed_at < staleBefore). The whole thing runs in one transaction:
+// we first lock the candidate ids (FOR UPDATE SKIP LOCKED on Postgres so
+// concurrent claimers slide past each other's rows), stamp claimed_at,
+// then read the claimed rows back. SKIP LOCKED is Postgres-only; on other
+// dialects (SQLite, used by unit tests / Lite) writes are serialized by
+// the engine so the plain SELECT+UPDATE is already race-free within the
+// single-writer model.
+func (r *taskPendingOpsRepository) ClaimBatch(
+	ctx context.Context,
+	taskType, scope, scopeID string,
+	limit int,
+	staleBefore time.Time,
+) ([]*types.TaskPendingOp, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	now := time.Now()
+	var claimed []*types.TaskPendingOp
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		sel := tx.Model(&types.TaskPendingOp{}).
+			Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+			// Parentheses are explicit so the OR binds tightly and doesn't
+			// leak past the tuple filter (GORM ANDs Where clauses but does
+			// not parenthesize raw fragments).
+			Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
+			Order("id ASC").
+			Limit(limit)
+		if tx.Dialector.Name() == "postgres" {
+			sel = sel.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+		}
+		var ids []int64
+		if err := sel.Pluck("id", &ids).Error; err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if err := tx.Model(&types.TaskPendingOp{}).
+			Where("id IN ?", ids).
+			Update("claimed_at", now).Error; err != nil {
+			return err
+		}
+		return tx.Where("id IN ?", ids).Order("id ASC").Find(&claimed).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claimed, nil
+}
+
+// ReleaseByIDs clears claimed_at for the given rows, returning them to the
+// unclaimed pool. Empty input is a no-op. Setting claimed_at back to NULL
+// on a row that was never claimed is harmless.
+func (r *taskPendingOpsRepository) ReleaseByIDs(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("id IN ?", ids).
+		Update("claimed_at", nil).Error
 }
 
 // DeleteByIDs removes the given rows in one statement. Empty input is a

@@ -175,9 +175,23 @@ var registry = map[string]settingSpec{
 		Default:         int64(32),
 		Category:        "worker",
 		RequiresRestart: true,
-		Description: "异步任务 worker 并发数（asynq 线程池大小）。" +
+		Description: "文档解析池的 worker 并发数（asynq 线程池大小，不含 Wiki）。" +
 			"文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
 			"修改后需重启服务进程方可生效。",
+	},
+	// asynq.wiki_concurrency is the size of the DEDICATED wiki worker pool,
+	// separate from asynq.concurrency. Read once when the wiki asynq server
+	// starts — changing it in the UI requires a process restart. Mirrors
+	// WEKNORA_WIKI_ASYNQ_CONCURRENCY (default 16).
+	"asynq.wiki_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_WIKI_ASYNQ_CONCURRENCY",
+		Default:         int64(16),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description: "Wiki 生成专用池的 worker 并发数（与文档解析池相互隔离）。" +
+			"Wiki 生成以合成大模型调用为主，独立并发预算可避免上传高峰期被解析任务饿死，" +
+			"同时不会因 Wiki 洪峰拖慢用户面解析。修改后需重启服务进程方可生效。",
 	},
 }
 

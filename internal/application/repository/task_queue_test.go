@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -268,6 +269,97 @@ func TestTaskPendingOps_DeleteByDedupKey_Filters(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "k2", rows[0].DedupKey)
+}
+
+// TestTaskPendingOps_ClaimBatch_MarksAndReturnsDisjoint verifies that
+// ClaimBatch returns rows in FIFO order, stamps claimed_at, and that a
+// second claim does NOT re-return the already-claimed rows (the disjoint
+// property concurrent consumers rely on).
+func TestTaskPendingOps_ClaimBatch_MarksAndReturnsDisjoint(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	for _, k := range []string{"k1", "k2", "k3"} {
+		require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", k, nil)))
+	}
+	// Unrelated tuple must never be claimed.
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "other", "ingest", "z", nil)))
+
+	stale := time.Now().Add(-time.Hour)
+
+	first, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 2, stale)
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+	assert.Equal(t, "k1", first[0].DedupKey)
+	assert.Equal(t, "k2", first[1].DedupKey)
+	assert.NotNil(t, first[0].ClaimedAt, "claimed_at should be stamped")
+
+	// Second claim skips the two already-claimed rows and returns the last.
+	second, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, stale)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	assert.Equal(t, "k3", second[0].DedupKey)
+
+	// Nothing left to claim.
+	third, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, stale)
+	require.NoError(t, err)
+	assert.Len(t, third, 0)
+}
+
+// TestTaskPendingOps_ClaimBatch_ReclaimsStale verifies a claim older than
+// staleBefore is re-claimable (crash recovery), while a fresh claim is not.
+func TestTaskPendingOps_ClaimBatch_ReclaimsStale(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "k1", nil)))
+
+	// Claim it now.
+	got, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+
+	// A stale threshold in the past — the fresh claim is NOT stale yet.
+	got, err = repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	assert.Len(t, got, 0, "fresh claim must not be re-claimed")
+
+	// A stale threshold in the future makes every existing claim stale.
+	got, err = repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Len(t, got, 1, "stale claim must be recoverable")
+	assert.Equal(t, "k1", got[0].DedupKey)
+}
+
+// TestTaskPendingOps_ReleaseByIDs_ReturnsToPool verifies a released row
+// becomes immediately claimable again without waiting for staleness.
+func TestTaskPendingOps_ReleaseByIDs_ReturnsToPool(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	op := makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "k1", nil)
+	require.NoError(t, repo.Enqueue(ctx, op))
+
+	stale := time.Now().Add(-time.Hour)
+	got, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, stale)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+
+	// Claimed → not re-claimable.
+	got, err = repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, stale)
+	require.NoError(t, err)
+	require.Len(t, got, 0)
+
+	// Release → immediately claimable again.
+	require.NoError(t, repo.ReleaseByIDs(ctx, nil)) // no-op tolerated
+	require.NoError(t, repo.ReleaseByIDs(ctx, []int64{op.ID}))
+	got, err = repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, stale)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "k1", got[0].DedupKey)
 }
 
 // ---------------- TaskDeadLetterRepository ----------------

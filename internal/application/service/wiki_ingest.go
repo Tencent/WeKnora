@@ -20,30 +20,96 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
 
-// ErrWikiIngestConcurrent is returned by the wiki ingest handler when another
-// batch is already running for the same KB (i.e. the `wiki:active:<kbID>`
-// Redis lock is held). The asynq server's RetryDelayFunc uses errors.Is on
-// this sentinel to apply a short, fixed retry delay instead of asynq's default
-// exponential backoff — otherwise a freshly orphaned lock (e.g. from a crash
-// or restart) would force newcomers to wait minutes even after the lock
-// naturally expires.
+// ErrWikiIngestConcurrent is returned by the wiki ingest handler in Lite mode
+// when another batch is already running for the same KB (the in-process
+// liteLocks guard is held). The asynq/sync executor's RetryDelayFunc uses
+// errors.Is on this sentinel to apply a short, fixed retry delay instead of
+// exponential backoff, so the deferred batch retries promptly once the active
+// one releases. Standard (Redis) mode no longer takes an exclusive per-KB
+// lock (Phase 3) and never returns this.
 var ErrWikiIngestConcurrent = errors.New("concurrent wiki task active")
 
 const (
 	// maxContentForWiki limits the document content sent to LLM for wiki generation
 	maxContentForWiki = 32768
 
-	// wikiActiveKeyPrefix is the Redis key for the "batch in progress" flag.
-	// Key format: wiki:active:{kbID} → "1" with TTL. Prevents concurrent batches.
-	wikiActiveKeyPrefix = "wiki:active:"
+	// --- Phase 3: concurrent per-KB batches (standard/Redis mode) ---------
+	//
+	// Phase 3 removed the exclusive per-KB Redis "batch in progress" lock
+	// (wiki:active:<kbID>). Standard mode now allows concurrent batches for
+	// one KB, kept safe by row claiming (claimPendingList) plus per-slug
+	// reduce locks (withSlugLock). Lite mode still serializes per KB via the
+	// in-process liteLocks map.
+	//
+	// wikiClaimStaleAfter is how long a claimed-but-undrained ingest row
+	// waits before another worker may re-claim it. It MUST exceed the asynq
+	// task Timeout for wiki:ingest (60m) so a still-running batch's rows are
+	// never stolen mid-flight — only genuinely crashed/abandoned claims are
+	// recovered. This preserves the pre-claim crash behaviour where a dead
+	// batch's undeleted rows were simply re-peeked by the next trigger.
+	wikiClaimStaleAfter = 90 * time.Minute
+
+	// wikiSlugLockPrefix guards read-modify-write on a single shared wiki
+	// page (entity/concept/summary/index) so two concurrent batches for the
+	// same KB can't lost-update the same slug. Key: wiki:slug:{kbID}:{slug}.
+	wikiSlugLockPrefix = "wiki:slug:"
+	// wikiSlugLockTTL bounds the per-slug lock so a crashed reducer can't
+	// wedge a hot page forever. Comfortably longer than a single reduce
+	// (one LLM modify call).
+	wikiSlugLockTTL = 5 * time.Minute
+	// wikiSlugLockWait / Poll bound how long a reduce goroutine blocks
+	// waiting for a contended slug before falling back to a best-effort
+	// skip (matching the pre-existing reduce-failure semantics).
+	wikiSlugLockWait = 2 * time.Minute
+	wikiSlugLockPoll = 50 * time.Millisecond
+
+	// --- Phase 4: per-KB in-flight cap (standard/Redis mode) --------------
+	//
+	// Since Phase 3 lets many batches for one KB run at once, a single KB's
+	// bulk import could otherwise occupy the entire wiki pool and starve
+	// other KBs. Each running batch reserves a slot in a per-KB Redis sorted
+	// set (score = expiry). ZREMRANGEBYSCORE purges slots left behind by a
+	// crashed worker, so the cap is self-healing without an explicit lock.
+	//
+	// wikiInflightPrefix keys the per-KB slot set: wiki:inflight:{kbID}.
+	wikiInflightPrefix = "wiki:inflight:"
+	// wikiInflightDefault is the fallback cap when WikiConfig.IngestMaxInflight
+	// is unset. 4 leaves headroom in a default 16-worker wiki pool for other
+	// KBs while still giving one KB solid parallelism.
+	wikiInflightDefault = 4
+	// wikiInflightTTL is how long a reserved slot survives without renewal.
+	// MUST exceed wikiInflightRenew by a comfortable margin so a single
+	// missed renew (GC pause, Redis blip) doesn't drop a live batch's slot.
+	wikiInflightTTL = 90 * time.Second
+	// wikiInflightRenew is how often a running batch bumps its slot's expiry.
+	wikiInflightRenew = 30 * time.Second
+	// wikiInflightBackoff delays the follow-up trigger when a batch is turned
+	// away by the cap, so it retries after a slot plausibly frees.
+	wikiInflightBackoff = 10 * time.Second
 
 	// wikiIngestDelay is how long to wait after a document is added before
 	// the batch task fires. Debounces rapid uploads.
 	wikiIngestDelay = 30 * time.Second
+
+	// wikiFollowUpDelay is the normal light debounce before a follow-up
+	// batch drains the remaining pending rows. Standard mode already fans a
+	// KB's backlog across concurrent claiming batches, so this is just a
+	// short breather, not a lock-release wait.
+	wikiFollowUpDelay = 5 * time.Second
+
+	// wikiRateLimitBackoff is the (much longer) follow-up delay used when a
+	// batch's failures were caused by upstream rate limiting (HTTP 429 /
+	// quota). Retrying a rate-limited document at the normal 5s cadence just
+	// throws more requests at an already-saturated rpm budget — every retry
+	// re-issues extract + classify + summary calls for the doc — which keeps
+	// the limiter tripped and drags the whole KB's ingest out. Backing off
+	// gives the per-minute window time to reset before we try again.
+	wikiRateLimitBackoff = 60 * time.Second
 
 	// wikiMaxDocsPerBatch limits how many documents a single batch processes.
 	// Prevents unbounded execution time. Remaining ops stay in
@@ -75,20 +141,6 @@ const (
 	// exceed the longest plausible ingest run (LLM extraction + reduce).
 	wikiDeletedTTL = 1 * time.Hour
 
-	// wikiActiveLockTTL is the TTL for the per-KB "batch in progress" flag.
-	// Kept short (relative to total batch runtime) so that if the owning
-	// process crashes without running its `defer Del`, the orphaned lock
-	// expires quickly and newcomers aren't blocked. A periodic renew
-	// (wikiActiveLockRenew) keeps the lock alive while the handler is
-	// genuinely still running.
-	wikiActiveLockTTL = 60 * time.Second
-
-	// wikiActiveLockRenew is how often the in-flight handler bumps the TTL.
-	// Must be comfortably shorter than wikiActiveLockTTL so a single missed
-	// tick (GC pause, Redis blip) doesn't let the lock slip out from under a
-	// live handler.
-	wikiActiveLockRenew = 20 * time.Second
-
 	// wikiLLMMaxAttempts is the total attempt count (initial + retries) for
 	// every LLM call routed through generateWithTemplate. 3 was chosen to
 	// absorb transient 504/timeouts from upstream gateways without
@@ -108,7 +160,64 @@ const (
 	// wikiTaskScope is the scope used by both pending ops and dead letters.
 	// Wiki ingest is per-KB, so every op is scoped to a knowledge_base.
 	wikiTaskScope = types.TaskScopeKnowledgeBase
+
+	// --- Finalize lane (Phase 1: debounced KB-global convergence) ---------
+	//
+	// The KB-global convergence steps (index-intro rebuild, dead-link
+	// cleanup, cross-link injection) used to run at the tail of EVERY
+	// 5-doc ingest batch. On a bulk import that meant O(docs/batchSize)
+	// index rebuilds — each an LLM call plus an index-page write. They are
+	// now deferred to a debounced per-KB wiki:finalize task: each ingest
+	// batch records what changed into a separate lane of task_pending_ops
+	// (task_type=wiki:finalize) and schedules a coalesced trigger, so a
+	// burst of N documents rebuilds the index ONCE at the end.
+
+	// wikiFinalizeTaskType is the task_pending_ops lane for finalize work.
+	// Keyed by (task_type, scope, scope_id) like the ingest lane, but with a
+	// distinct task_type so PeekBatch never mixes the two.
+	wikiFinalizeTaskType = "wiki:finalize"
+
+	// wikiFinalizeOpSlug rows carry one affected page slug (+ its fresh title
+	// when this batch wrote it) for the dead-link / cross-link passes.
+	wikiFinalizeOpSlug = "slug"
+	// wikiFinalizeOpChange rows carry a doc-level add/remove change entry for
+	// the index-intro change description.
+	wikiFinalizeOpChange = "change"
+
+	wikiFinalizeAdded   = "added"
+	wikiFinalizeRemoved = "removed"
+
+	// wikiFinalizeDelay debounces the finalize trigger so multiple ingest
+	// batches within the window coalesce into a single index rebuild.
+	wikiFinalizeDelay = 20 * time.Second
+
+	// wikiFinalizeMaxRows caps how many finalize rows one run drains. A run
+	// that hits the cap reschedules itself for the remainder.
+	wikiFinalizeMaxRows = 5000
+
+	// wikiFinalizeLockTTL / Renew guard against two finalize runs for the
+	// same KB writing the index page concurrently (belt-and-suspenders on
+	// top of the asynq.TaskID coalescing).
+	wikiFinalizeLockTTL   = 60 * time.Second
+	wikiFinalizeLockRenew = 20 * time.Second
 )
+
+// wikiFinalizeChange is a doc-level add/remove entry for the index-intro
+// change description, persisted as a finalize-lane row payload.
+type wikiFinalizeChange struct {
+	Action     string `json:"action"` // wikiFinalizeAdded | wikiFinalizeRemoved
+	DocTitle   string `json:"doc_title,omitempty"`
+	DocSummary string `json:"doc_summary,omitempty"`
+}
+
+// wikiFinalizeRow is the JSON payload of a task_pending_ops row in the
+// finalize lane. Exactly one of {Slug, Change} is set, distinguished by the
+// row's Op column (wikiFinalizeOpSlug / wikiFinalizeOpChange).
+type wikiFinalizeRow struct {
+	Slug   string              `json:"slug,omitempty"`
+	Title  string              `json:"title,omitempty"`
+	Change *wikiFinalizeChange `json:"change,omitempty"`
+}
 
 // WikiDeletedTombstoneKey returns the Redis key used to mark a knowledge as
 // recently deleted, so wiki_ingest tasks in flight can short-circuit. Exposed
@@ -212,6 +321,10 @@ type wikiIngestService struct {
 	// liteLocks provides per-KB mutual exclusion in Lite mode (no Redis).
 	// Keys are kbID strings; values are unused (presence = locked).
 	liteLocks sync.Map
+	// liteFinalizeLocks is the Lite-mode counterpart of the Redis
+	// wiki:finalize:active:<kbID> lock, keeping two finalize runs for the
+	// same KB from overlapping when there is no Redis.
+	liteFinalizeLocks sync.Map
 }
 
 // NewWikiIngestService creates a new wiki ingest service
@@ -343,7 +456,7 @@ func EnqueueWikiIngest(
 	triggerBytes, _ := json.Marshal(trigger)
 
 	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
-		asynq.Queue("low"),
+		asynq.Queue(types.QueueWiki),
 		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(wikiIngestDelay),
@@ -401,7 +514,7 @@ func EnqueueWikiRetract(
 	langfuse.InjectTracing(ctx, &trigger)
 	triggerBytes, _ := json.Marshal(trigger)
 	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
-		asynq.Queue("low"),
+		asynq.Queue(types.QueueWiki),
 		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(5*time.Second), // Retract can trigger the batch quickly
@@ -411,11 +524,95 @@ func EnqueueWikiRetract(
 	}
 }
 
-// Handle implements interfaces.TaskHandler for asynq task processing.
-// Wiki ingest tasks are debounced via asynq.Unique + ProcessIn, so at most
-// one ingest task runs per KB at a time. No distributed lock needed.
+// Handle implements interfaces.TaskHandler for asynq task processing. The
+// wiki service owns two task types, dispatched here by type so a single
+// registered handler covers both the ingest batch and the debounced
+// KB-global finalize pass.
 func (s *wikiIngestService) Handle(ctx context.Context, t *asynq.Task) error {
-	return s.ProcessWikiIngest(ctx, t)
+	switch t.Type() {
+	case types.TypeWikiFinalize:
+		return s.ProcessWikiFinalize(ctx, t)
+	default:
+		return s.ProcessWikiIngest(ctx, t)
+	}
+}
+
+// enqueueFinalize persists this batch's KB-global convergence work into the
+// finalize lane of task_pending_ops and schedules a debounced trigger. One
+// "slug" row per affected page (carrying its fresh title when this batch wrote
+// it, for cross-linking) plus one "change" row per doc added/removed (for the
+// index-intro change description).
+func (s *wikiIngestService) enqueueFinalize(
+	ctx context.Context,
+	payload WikiIngestPayload,
+	affectedSlugs []string,
+	freshTitleBySlug map[string]string,
+	changes []wikiFinalizeChange,
+) {
+	if s.pendingRepo == nil {
+		return
+	}
+	for _, slug := range affectedSlugs {
+		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
+		b, err := json.Marshal(row)
+		if err != nil {
+			continue
+		}
+		if err := s.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+			TenantID: payload.TenantID,
+			TaskType: wikiFinalizeTaskType,
+			Scope:    wikiTaskScope,
+			ScopeID:  payload.KnowledgeBaseID,
+			Op:       wikiFinalizeOpSlug,
+			DedupKey: slug,
+			Payload:  b,
+		}); err != nil {
+			logger.Warnf(ctx, "wiki finalize: enqueue slug row for %s failed: %v", slug, err)
+		}
+	}
+	for i := range changes {
+		row := wikiFinalizeRow{Change: &changes[i]}
+		b, err := json.Marshal(row)
+		if err != nil {
+			continue
+		}
+		if err := s.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+			TenantID: payload.TenantID,
+			TaskType: wikiFinalizeTaskType,
+			Scope:    wikiTaskScope,
+			ScopeID:  payload.KnowledgeBaseID,
+			Op:       wikiFinalizeOpChange,
+			DedupKey: "",
+			Payload:  b,
+		}); err != nil {
+			logger.Warnf(ctx, "wiki finalize: enqueue change row failed: %v", err)
+		}
+	}
+	s.scheduleFinalize(ctx, payload)
+}
+
+// scheduleFinalize enqueues a debounced, coalesced KB-global finalize trigger.
+// asynq.TaskID ("wiki-finalize-<kbID>") makes concurrent schedules within the
+// debounce window collapse into one pending task; the conflict error is the
+// expected coalescing signal, not a failure. In Lite mode the sync executor
+// ignores TaskID, so finalize simply runs once per batch (acceptable at the
+// small scale Lite mode targets).
+func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIngestPayload) {
+	langfuse.InjectTracing(ctx, &payload)
+	b, _ := json.Marshal(payload)
+	t := asynq.NewTask(types.TypeWikiFinalize, b,
+		asynq.Queue(types.QueueWiki),
+		asynq.MaxRetry(wikiIngestMaxRetry),
+		asynq.Timeout(30*time.Minute),
+		asynq.ProcessIn(wikiFinalizeDelay),
+		asynq.TaskID("wiki-finalize-"+payload.KnowledgeBaseID),
+	)
+	if _, err := s.task.Enqueue(t); err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+			return // a finalize is already scheduled/running for this KB — coalesced
+		}
+		logger.Warnf(ctx, "wiki finalize: schedule trigger failed: %v", err)
+	}
 }
 
 // peekPendingList loads up to `limit` ops from task_pending_ops for
@@ -441,6 +638,178 @@ func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string, li
 		logger.Warnf(ctx, "wiki ingest: failed to peek pending list: %v", err)
 		return nil, nil
 	}
+	return s.decodePendingRows(ctx, rows)
+}
+
+// claimPendingList is the standard-mode (Redis) counterpart of
+// peekPendingList: it atomically CLAIMS up to `limit` ops (marks
+// claimed_at) so concurrent batches for the same KB — allowed since Phase 3
+// removed the exclusive per-KB lock — pull DISJOINT documents instead of
+// double-processing. Stale claims (older than wikiClaimStaleAfter, i.e. from
+// a crashed worker) are recovered. Dedup / peekedIDs semantics match
+// peekPendingList; the returned peekedIDs are the claimed rows that the
+// caller must DeleteByIDs on success or ReleaseByIDs to retry.
+func (s *wikiIngestService) claimPendingList(ctx context.Context, kbID string, limit int) (ops []WikiPendingOp, peekedIDs []int64) {
+	if s.pendingRepo == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = wikiMaxDocsPerBatch
+	}
+	rows, err := s.pendingRepo.ClaimBatch(ctx, wikiTaskType, wikiTaskScope, kbID, limit,
+		time.Now().Add(-wikiClaimStaleAfter))
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to claim pending list: %v", err)
+		return nil, nil
+	}
+	return s.decodePendingRows(ctx, rows)
+}
+
+// withSlugLock serializes read-modify-write on one shared wiki page across
+// concurrent batches. Phase 3 removed the exclusive per-KB batch lock, so
+// two batches for the same KB can both produce updates for a shared
+// entity/concept slug; without this lock their GetPageBySlug→UpdatePage
+// cycles would race and lose one contribution.
+//
+// Redis mode only: in Lite mode a single process runs one batch per KB at a
+// time (liteLocks), so same-slug contention cannot occur and fn runs
+// directly. Returns (false, nil) if the lock could not be acquired within
+// wikiSlugLockWait — the caller then treats the slug like a best-effort
+// reduce miss (matching pre-existing reduce-failure handling). On a Redis
+// error we fail OPEN (run fn unlocked): a rare lost-update on a shared page
+// is tolerated by the finalize/dead-link passes, whereas silently dropping
+// the update is strictly worse.
+func (s *wikiIngestService) withSlugLock(ctx context.Context, kbID, slug string, fn func() error) (bool, error) {
+	if s.redisClient == nil {
+		return true, fn()
+	}
+	key := wikiSlugLockPrefix + kbID + ":" + slug
+	deadline := time.Now().Add(wikiSlugLockWait)
+	for {
+		ok, rerr := s.redisClient.SetNX(ctx, key, "1", wikiSlugLockTTL).Result()
+		if rerr != nil {
+			logger.Warnf(ctx, "wiki reduce: slug lock SetNX failed for %s: %v (running unlocked)", slug, rerr)
+			return true, fn()
+		}
+		if ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(wikiSlugLockPoll):
+		}
+	}
+	defer s.redisClient.Del(context.Background(), key)
+	return true, fn()
+}
+
+// wikiInflightReserveScript atomically enforces the per-KB in-flight cap.
+// It purges expired slots (crash recovery), counts live slots, and adds the
+// caller's slot iff under the cap. Returning 1 = reserved, 0 = at cap.
+// Keeping purge+count+add in one Lua call closes the check-then-act race two
+// concurrent reservers would otherwise have.
+const wikiInflightReserveScript = `
+local now = tonumber(ARGV[1])
+local expiry = tonumber(ARGV[2])
+local maxInflight = tonumber(ARGV[3])
+local token = ARGV[4]
+local ttl = tonumber(ARGV[5])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, now)
+if redis.call('ZCARD', KEYS[1]) >= maxInflight then
+  return 0
+end
+redis.call('ZADD', KEYS[1], expiry, token)
+redis.call('PEXPIRE', KEYS[1], ttl)
+return 1
+`
+
+// reserveInflightSlot claims one of KB's concurrent-batch slots (Phase 4,
+// standard/Redis mode). Returns (release, true) when granted — release() MUST
+// run when the batch finishes; (nil, false) when the KB is already at
+// maxInflight, so the caller should reschedule and bail. A background renew
+// keeps the slot alive for the batch's duration; a crashed batch's slot simply
+// expires (wikiInflightTTL) and is purged by the next reserver. Lite mode has
+// no shared-pool contention (liteLocks already serialize per KB), so it always
+// grants a no-op slot. Fails OPEN on a Redis error: a blip must not halt wiki
+// generation, and the pool size still bounds total work.
+func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string, maxInflight int) (func(), bool) {
+	if s.redisClient == nil || maxInflight <= 0 {
+		return func() {}, true
+	}
+	key := wikiInflightPrefix + kbID
+	token := uuid.New().String()
+	now := time.Now()
+	res, err := s.redisClient.Eval(ctx, wikiInflightReserveScript,
+		[]string{key},
+		now.UnixMilli(),
+		now.Add(wikiInflightTTL).UnixMilli(),
+		maxInflight,
+		token,
+		wikiInflightTTL.Milliseconds(),
+	).Int()
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: inflight reserve failed for KB %s: %v (running uncapped)", kbID, err)
+		return func() {}, true
+	}
+	if res == 0 {
+		return nil, false
+	}
+
+	renewCtx, cancel := context.WithCancel(context.Background())
+	go func() {
+		ticker := time.NewTicker(wikiInflightRenew)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewCtx.Done():
+				return
+			case <-ticker.C:
+				exp := float64(time.Now().Add(wikiInflightTTL).UnixMilli())
+				s.redisClient.ZAdd(context.Background(), key, redis.Z{Score: exp, Member: token})
+				s.redisClient.PExpire(context.Background(), key, wikiInflightTTL)
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		s.redisClient.ZRem(context.Background(), key, token)
+	}, true
+}
+
+// scheduleCappedRetry enqueues a single coalesced follow-up trigger after a
+// batch was turned away by the in-flight cap. asynq.TaskID collapses all
+// turned-away triggers for one KB into a single pending retry (no thundering
+// herd), and the running batches that hold the slots also chain their own
+// follow-ups on completion, so the turned-away rows are guaranteed to drain
+// once a slot frees.
+func (s *wikiIngestService) scheduleCappedRetry(ctx context.Context, payload WikiIngestPayload) {
+	langfuse.InjectTracing(ctx, &payload)
+	b, _ := json.Marshal(payload)
+	t := asynq.NewTask(types.TypeWikiIngest, b,
+		asynq.Queue(types.QueueWiki),
+		asynq.MaxRetry(wikiIngestMaxRetry),
+		asynq.Timeout(60*time.Minute),
+		asynq.ProcessIn(wikiInflightBackoff),
+		asynq.TaskID("wiki-ingest-capped-"+payload.KnowledgeBaseID),
+	)
+	if _, err := s.task.Enqueue(t); err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+			return // a capped retry is already pending for this KB — coalesced
+		}
+		logger.Warnf(ctx, "wiki ingest: capped-retry enqueue failed: %v", err)
+	}
+}
+
+// decodePendingRows converts raw task_pending_ops rows into WikiPendingOps,
+// applying the last-write-wins dedup by knowledge_id. peekedIDs carries the
+// db ids of EVERY row (including dedup-collapsed ones) so the caller can
+// drain them all at trim time. Shared by peekPendingList (no claim) and
+// claimPendingList (claimed rows).
+func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types.TaskPendingOp) (ops []WikiPendingOp, peekedIDs []int64) {
 	if len(rows) == 0 {
 		return nil, nil
 	}
@@ -562,6 +931,14 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			continue
 		}
 		if count <= wikiMaxFailRetries {
+			// Release the claim so the row is immediately eligible for the
+			// next trigger's ClaimBatch instead of waiting out
+			// wikiClaimStaleAfter. No-op in Lite mode (row was peeked, never
+			// claimed). ReleaseByIDs preserves fail_count, so the retry
+			// budget still counts down.
+			if err := s.pendingRepo.ReleaseByIDs(ctx, []int64{op.dbID}); err != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to release claim for retry id=%d: %v", op.dbID, err)
+			}
 			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 			continue
 		}
