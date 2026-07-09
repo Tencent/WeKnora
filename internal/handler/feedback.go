@@ -60,6 +60,13 @@ func (h *FeedbackHandler) SubmitFeedback(c *gin.Context) {
 		return
 	}
 
+	// When feedback is cancelled (FeedbackNone), service returns nil feedback
+	// with no error. Return a clear confirmation to the client.
+	if fb == nil {
+		c.JSON(http.StatusOK, gin.H{"feedback": nil, "cancelled": true})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"feedback": fb})
 }
 

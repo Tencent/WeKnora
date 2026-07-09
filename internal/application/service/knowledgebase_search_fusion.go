@@ -49,68 +49,6 @@ func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*typ
 	return result
 }
 
-// applyRecallWeights multiplies each chunk's fused score by its RecallWeight
-// (derived from user feedback) and re-sorts the results. Chunks whose
-// RecallWeight is 1.0 (the default, no feedback received) are unaffected.
-//
-// This is the integration point between the like/dislike feedback feature
-// and the retrieval pipeline: high-quality chunks (approval_rate >= 80%)
-// get a weight > 1.0 so they rank higher, while low-quality chunks
-// (approval_rate < 50%) get a weight < 1.0 so they sink in the ranking.
-//
-// The weight lookup is best-effort: if the chunk repository is unavailable
-// or a chunk can't be found, its weight defaults to 1.0 (no change).
-func (s *knowledgeBaseService) applyRecallWeights(ctx context.Context, results []*types.IndexWithScore) []*types.IndexWithScore {
-	if len(results) == 0 {
-		return results
-	}
-
-	// Collect unique chunk IDs.
-	chunkIDs := make([]string, 0, len(results))
-	seen := make(map[string]bool, len(results))
-	for _, r := range results {
-		if r.ChunkID != "" && !seen[r.ChunkID] {
-			seen[r.ChunkID] = true
-			chunkIDs = append(chunkIDs, r.ChunkID)
-		}
-	}
-	if len(chunkIDs) == 0 {
-		return results
-	}
-
-	// Batch-fetch chunks to read their RecallWeight. Use the tenant-agnostic
-	// lookup since the search may span shared KBs across tenants.
-	chunks, err := s.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
-	if err != nil {
-		logger.Warnf(ctx, "applyRecallWeights: failed to fetch chunks for weight lookup: %v", err)
-		return results
-	}
-
-	weightMap := make(map[string]float64, len(chunks))
-	for _, ch := range chunks {
-		if ch.RecallWeight > 0 {
-			weightMap[ch.ID] = ch.RecallWeight
-		} else {
-			weightMap[ch.ID] = 1.0
-		}
-	}
-
-	// Apply weights and re-sort.
-	anyChanged := false
-	for _, r := range results {
-		if w, ok := weightMap[r.ChunkID]; ok && w != 1.0 {
-			r.Score *= w
-			anyChanged = true
-		}
-	}
-	if anyChanged {
-		slices.SortFunc(results, sortByScoreDesc)
-		logger.Debugf(ctx, "applyRecallWeights: re-sorted %d results after applying recall weights", len(results))
-	}
-
-	return results
-}
-
 // sortByScoreDesc is a reusable sort comparator for IndexWithScore slices (descending by Score).
 func sortByScoreDesc(a, b *types.IndexWithScore) int {
 	if a.Score > b.Score {

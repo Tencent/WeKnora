@@ -44,6 +44,8 @@ func NewFeedbackService(
 
 // SubmitFeedback records a user's like/dislike/cancel on a message and
 // propagates the effect to all cited chunks.
+// All mutable operations (upsert/delete feedback + chunk counter updates)
+// run within a single database transaction for consistency.
 func (s *feedbackService) SubmitFeedback(ctx context.Context, req *types.FeedbackRequest) (*types.MessageFeedback, error) {
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
@@ -66,7 +68,8 @@ func (s *feedbackService) SubmitFeedback(ctx context.Context, req *types.Feedbac
 		return nil, fmt.Errorf("feedback can only be submitted on assistant messages")
 	}
 
-	// Ensure chunk refs are persisted for this message.
+	// Ensure chunk refs are persisted for this message (outside the
+	// transaction since it's idempotent and non-critical).
 	if err := s.feedbackRepo.EnsureChunkRefs(ctx, msg); err != nil {
 		logger.Warnf(ctx, "Failed to ensure chunk refs for message %s: %v", req.MessageID, err)
 		// Non-fatal: we proceed even if ref population fails.
@@ -84,15 +87,23 @@ func (s *feedbackService) SubmitFeedback(ctx context.Context, req *types.Feedbac
 		return nil, fmt.Errorf("fetching previous feedback: %w", err)
 	}
 
-	// Handle "cancel" (FeedbackNone): delete the feedback row and reverse deltas.
+	// Handle "cancel" (FeedbackNone): delete the feedback row and reverse deltas
+	// inside a transaction so feedback deletion and chunk updates are atomic.
 	if req.FeedbackType == types.FeedbackNone {
-		if prevFeedback != nil {
+		if prevFeedback == nil {
+			return nil, nil
+		}
+		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := s.reverseFeedbackOnChunks(ctx, tenantID, chunkIDs, prevFeedback); err != nil {
-				return nil, fmt.Errorf("reversing feedback on chunks: %w", err)
+				return fmt.Errorf("reversing feedback on chunks: %w", err)
 			}
 			if err := s.feedbackRepo.DeleteFeedback(ctx, userID, req.MessageID); err != nil {
-				return nil, fmt.Errorf("deleting feedback: %w", err)
+				return fmt.Errorf("deleting feedback: %w", err)
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
 		return nil, nil
 	}
@@ -108,14 +119,18 @@ func (s *feedbackService) SubmitFeedback(ctx context.Context, req *types.Feedbac
 		ReasonDetail: req.ReasonDetail,
 	}
 
-	// Persist feedback (upsert).
-	if err := s.feedbackRepo.UpsertFeedback(ctx, newFeedback); err != nil {
-		return nil, fmt.Errorf("upserting feedback: %w", err)
-	}
-
-	// Apply delta to each cited chunk.
-	if err := s.applyFeedbackDelta(ctx, tenantID, chunkIDs, prevFeedback, newFeedback); err != nil {
-		return nil, fmt.Errorf("applying feedback delta to chunks: %w", err)
+	// Persist feedback and apply chunk deltas atomically.
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.feedbackRepo.UpsertFeedback(ctx, newFeedback); err != nil {
+			return fmt.Errorf("upserting feedback: %w", err)
+		}
+		if err := s.applyFeedbackDelta(ctx, tenantID, chunkIDs, prevFeedback, newFeedback); err != nil {
+			return fmt.Errorf("applying feedback delta to chunks: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return newFeedback, nil
@@ -123,6 +138,7 @@ func (s *feedbackService) SubmitFeedback(ctx context.Context, req *types.Feedbac
 
 // applyFeedbackDelta adjusts like/dislike counters on each cited chunk based
 // on the difference between the previous and new feedback type.
+// Uses batch fetch to avoid N+1 queries on the chunk table.
 func (s *feedbackService) applyFeedbackDelta(
 	ctx context.Context,
 	tenantID uint64,
@@ -133,12 +149,23 @@ func (s *feedbackService) applyFeedbackDelta(
 		return nil
 	}
 
-	// Compute the delta for like and dislike counters.
-	// For each chunk: new_count = old_count + (new_contribution - old_contribution)
+	// Batch-fetch all cited chunks in one query.
+	chunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
+	if err != nil {
+		return fmt.Errorf("batch fetching chunks for feedback delta: %w", err)
+	}
+
+	// Build a lookup map.
+	chunkMap := make(map[string]*types.Chunk, len(chunks))
+	for _, ch := range chunks {
+		chunkMap[ch.ID] = ch
+	}
+
+	now := time.Now()
 	for _, chunkID := range chunkIDs {
-		chunk, err := s.chunkRepo.GetChunkByID(ctx, tenantID, chunkID)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to fetch chunk %s for feedback update: %v", chunkID, err)
+		chunk, ok := chunkMap[chunkID]
+		if !ok {
+			logger.Warnf(ctx, "Chunk %s not found for feedback update, skipping", chunkID)
 			continue
 		}
 
@@ -179,7 +206,6 @@ func (s *feedbackService) applyFeedbackDelta(
 		newWeight, needsOpt := types.ComputeWeight(chunk.LikeCount, chunk.DislikeCount, s.thresholds)
 		chunk.RecallWeight = newWeight
 		chunk.NeedsOptimization = needsOpt
-		now := time.Now()
 		chunk.FeedbackUpdatedAt = &now
 
 		// Update the chunk.
@@ -221,6 +247,7 @@ func (s *feedbackService) applyFeedbackDelta(
 
 // reverseFeedbackOnChunks undoes the effect of a previous feedback on all
 // cited chunks. Used when feedback is cancelled (FeedbackNone).
+// Uses batch fetch to avoid N+1 queries on the chunk table.
 func (s *feedbackService) reverseFeedbackOnChunks(
 	ctx context.Context,
 	tenantID uint64,
@@ -231,10 +258,22 @@ func (s *feedbackService) reverseFeedbackOnChunks(
 		return nil
 	}
 
+	// Batch-fetch all cited chunks in one query.
+	chunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
+	if err != nil {
+		return fmt.Errorf("batch fetching chunks for feedback reversal: %w", err)
+	}
+
+	chunkMap := make(map[string]*types.Chunk, len(chunks))
+	for _, ch := range chunks {
+		chunkMap[ch.ID] = ch
+	}
+
+	now := time.Now()
 	for _, chunkID := range chunkIDs {
-		chunk, err := s.chunkRepo.GetChunkByID(ctx, tenantID, chunkID)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to fetch chunk %s for feedback reversal: %v", chunkID, err)
+		chunk, ok := chunkMap[chunkID]
+		if !ok {
+			logger.Warnf(ctx, "Chunk %s not found for feedback reversal, skipping", chunkID)
 			continue
 		}
 
@@ -260,7 +299,6 @@ func (s *feedbackService) reverseFeedbackOnChunks(
 		newWeight, needsOpt := types.ComputeWeight(chunk.LikeCount, chunk.DislikeCount, s.thresholds)
 		chunk.RecallWeight = newWeight
 		chunk.NeedsOptimization = needsOpt
-		now := time.Now()
 		chunk.FeedbackUpdatedAt = &now
 
 		if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
