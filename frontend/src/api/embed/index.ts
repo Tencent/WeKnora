@@ -1,5 +1,6 @@
 import { get, post, put, del } from '@/utils/request'
 import { resolveEmbedBaseUrl } from '@/utils/embedBaseUrl'
+import { getFrontendBasePath } from '@/utils/base-path'
 
 export interface EmbedChannel {
   id: string
@@ -461,7 +462,9 @@ export function buildEmbedURL(
   opts?: { locale?: string; refreshKey?: number; baseUrl?: string },
 ) {
   const base = safeBaseUrl(opts?.baseUrl) || resolveEmbedBaseUrl()
-  let path = `${base}/embed/${encodeURIComponent(channelId)}`
+  const isSameOrigin = typeof window !== 'undefined' && base.startsWith(window.location.origin)
+  const basePath = isSameOrigin ? getFrontendBasePath() : ''
+  let path = `${base}${basePath}/embed/${encodeURIComponent(channelId)}`
   const params = new URLSearchParams()
   if (opts?.locale?.trim()) params.set('locale', opts.locale.trim())
   if (opts?.refreshKey) params.set('r', String(opts.refreshKey))
@@ -506,9 +509,11 @@ export function buildWidgetSnippet(
   opts?: { primaryColor?: string; title?: string; position?: WidgetPosition; baseUrl?: string },
 ) {
   const base = safeBaseUrl(opts?.baseUrl)
+  const isSameOrigin = typeof window !== 'undefined' && base.startsWith(window.location.origin)
+  const basePath = isSameOrigin ? getFrontendBasePath() : ''
   const position = opts?.position || 'bottom-right'
   const attrs = [
-    `src="${escapeHtmlAttr(`${base}/weknora-widget.js`)}"`,
+    `src="${escapeHtmlAttr(`${base}${basePath}/weknora-widget.js`)}"`,
     `data-channel="${escapeHtmlAttr(channelId)}"`,
     `data-token="${escapeHtmlAttr(token)}"`,
     `data-position="${escapeHtmlAttr(position)}"`,
@@ -532,10 +537,12 @@ export function buildSecureWidgetSnippet(
   opts?: { primaryColor?: string; title?: string; position?: WidgetPosition; baseUrl?: string; tokenEndpoint?: string },
 ) {
   const base = safeBaseUrl(opts?.baseUrl)
+  const isSameOrigin = typeof window !== 'undefined' && base.startsWith(window.location.origin)
+  const basePath = isSameOrigin ? getFrontendBasePath() : ''
   const position = opts?.position || 'bottom-right'
   const endpoint = opts?.tokenEndpoint || SECURE_TOKEN_ENDPOINT_PLACEHOLDER
   const attrs = [
-    `src="${escapeHtmlAttr(`${base}/weknora-widget.js`)}"`,
+    `src="${escapeHtmlAttr(`${base}${basePath}/weknora-widget.js`)}"`,
     `data-channel="${escapeHtmlAttr(channelId)}"`,
     `data-token-endpoint="${escapeHtmlAttr(endpoint)}"`,
     `data-position="${escapeHtmlAttr(position)}"`,
@@ -552,7 +559,9 @@ export function buildSecureWidgetSnippet(
  */
 export function buildSecureServerNodeExample(channelId: string, opts?: { baseUrl?: string }) {
   const base = safeBaseUrl(opts?.baseUrl)
-  const exchangeUrl = `${base}/api/v1/embed/${channelId}/exchange`
+  const isSameOrigin = typeof window !== 'undefined' && base.startsWith(window.location.origin)
+  const basePath = isSameOrigin ? getFrontendBasePath() : ''
+  const exchangeUrl = `${base}${basePath}/api/v1/embed/${channelId}/exchange`
   return [
     `// Node/Express — keep WEKNORA_PUBLISH_TOKEN only on the server (env var).`,
     `app.get('/weknora/embed-token', async (req, res) => {`,
@@ -578,7 +587,9 @@ export function buildSecureServerNodeExample(channelId: string, opts?: { baseUrl
 
 export function buildSecureServerGoExample(channelId: string, opts?: { baseUrl?: string }) {
   const base = safeBaseUrl(opts?.baseUrl)
-  const exchangeUrl = `${base}/api/v1/embed/${channelId}/exchange`
+  const isSameOrigin = typeof window !== 'undefined' && base.startsWith(window.location.origin)
+  const basePath = isSameOrigin ? getFrontendBasePath() : ''
+  const exchangeUrl = `${base}${basePath}/api/v1/embed/${channelId}/exchange`
   return [
     `// Go net/http — keep WEKNORA_PUBLISH_TOKEN only on the server (env var).`,
     `func embedTokenHandler(w http.ResponseWriter, r *http.Request) {`,

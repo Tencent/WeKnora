@@ -67,7 +67,22 @@ function resolveVueOfficePptxEntry(): string {
   }
 }
 
+function normalizeBasePath(raw?: string): string {
+  const value = (raw || '').trim()
+  if (!value || value === '/') return '/'
+  
+  // 过滤开头和结尾的斜杠
+  const normalized = `/${value.replace(/^\/+|\/+$/g, '')}/`
+  
+  // 安全字符校验，防止 Nginx 配置注入与非法字符影响路径解析
+  if (!/^(\/[A-Za-z0-9._~-]+)+\/$/.test(normalized)) {
+    throw new Error(`[ERROR] Invalid WEKNORA_BASE_PATH character in value: "${raw}"`)
+  }
+  return normalized
+}
+
 export default defineConfig({
+  base: normalizeBasePath(process.env.WEKNORA_BASE_PATH),
   define: {
     __FRONTEND_VERSION__: JSON.stringify(FRONTEND_VERSION),
     __FRONTEND_COMMIT__: JSON.stringify(FRONTEND_COMMIT),

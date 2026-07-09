@@ -3,6 +3,7 @@ import axios from "axios";
 import { generateRandomString, MAX_FILE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
+import { getFrontendBasePath, withFrontendBasePath } from './base-path';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -98,15 +99,21 @@ const processQueue = (error: any, token: string | null = null) => {
 
 function isEmbedPage(): boolean {
   if (typeof window === 'undefined') return false;
-  return window.location.pathname.startsWith('/embed/');
+  const base = getFrontendBasePath();
+  return window.location.pathname.startsWith(`${base}/embed/`);
 }
 
 function redirectToLogin() {
   if (typeof window === 'undefined') return;
-  if (window.location.pathname === '/login') return;
+
+  const loginPath = withFrontendBasePath('/login');
+
+  if (window.location.pathname === loginPath) return;
+
   // Embed 渠道用 Embed token 鉴权，匿名访问不应被踢到登录页
   if (isEmbedPage()) return;
-  window.location.href = '/login';
+
+  window.location.href = loginPath;
 }
 
 instance.interceptors.response.use(
