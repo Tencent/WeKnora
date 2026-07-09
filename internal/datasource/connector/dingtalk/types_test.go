@@ -33,18 +33,15 @@ func TestParseDingTalkConfig_Valid(t *testing.T) {
 	}
 }
 
-func TestParseDingTalkConfig_OptionalOperatorID(t *testing.T) {
-	cfg, err := parseDingTalkConfig(&types.DataSourceConfig{
+func TestParseDingTalkConfig_MissingOperatorID(t *testing.T) {
+	_, err := parseDingTalkConfig(&types.DataSourceConfig{
 		Credentials: map[string]interface{}{
 			"client_id":     "dingabc123",
 			"client_secret": "secret456",
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.OperatorID != "" {
-		t.Errorf("OperatorID = %q, want empty", cfg.OperatorID)
+	if err == nil {
+		t.Fatal("expected error for missing operator_id")
 	}
 }
 
@@ -75,10 +72,24 @@ func TestParseDingTalkConfig_WhitespaceClientID(t *testing.T) {
 		Credentials: map[string]interface{}{
 			"client_id":     "   ",
 			"client_secret": "secret456",
+			"operator_id":   "user789",
 		},
 	})
 	if err == nil {
 		t.Fatal("expected error for whitespace-only client_id")
+	}
+}
+
+func TestParseDingTalkConfig_WhitespaceOperatorID(t *testing.T) {
+	_, err := parseDingTalkConfig(&types.DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"client_id":     "dingabc123",
+			"client_secret": "secret456",
+			"operator_id":   "   ",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for whitespace-only operator_id")
 	}
 }
 
@@ -400,7 +411,8 @@ func TestWikiWorkspacesResponse_JSON(t *testing.T) {
 		"workspaces": [
 			{"workspaceId": "ws-1", "name": "知识库1"},
 			{"workspaceId": "ws-2", "name": "知识库2"}
-		]
+		],
+		"nextToken": "next-page"
 	}`
 
 	var resp wikiWorkspacesResponse
@@ -410,6 +422,9 @@ func TestWikiWorkspacesResponse_JSON(t *testing.T) {
 
 	if len(resp.Workspaces) != 2 {
 		t.Errorf("len(Workspaces) = %d, want 2", len(resp.Workspaces))
+	}
+	if resp.NextToken != "next-page" {
+		t.Errorf("NextToken = %q, want next-page", resp.NextToken)
 	}
 }
 

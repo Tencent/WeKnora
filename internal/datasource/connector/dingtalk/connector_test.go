@@ -166,6 +166,19 @@ func TestConnectorValidate_MissingClientSecret(t *testing.T) {
 	}
 }
 
+func TestConnectorValidate_MissingOperatorID(t *testing.T) {
+	err := NewConnector().Validate(context.Background(), &types.DataSourceConfig{
+		Type: types.ConnectorTypeDingTalk,
+		Credentials: map[string]interface{}{
+			"client_id":     "id",
+			"client_secret": "secret",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for missing operator_id")
+	}
+}
+
 func TestConnectorValidate_NilConfig(t *testing.T) {
 	if err := NewConnector().Validate(context.Background(), nil); err == nil {
 		t.Fatal("expected error for nil config")

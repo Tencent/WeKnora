@@ -37,8 +37,8 @@ type Config struct {
 	// ClientSecret is the AppSecret from DingTalk application credentials.
 	ClientSecret string `json:"client_secret"`
 
-	// OperatorID is the unionId of the operator (used for API calls).
-	// This is optional and can be extracted from access_token response.
+	// OperatorID is the unionId of the operator used for DingTalk Wiki API
+	// calls. DingTalk requires it on workspace and node listing requests.
 	OperatorID string `json:"operator_id,omitempty"`
 
 	// BaseURL is only used by tests and private deployments. The frontend does
@@ -74,6 +74,9 @@ func parseDingTalkConfig(config *types.DataSourceConfig) (*Config, error) {
 	if strings.TrimSpace(cfg.ClientSecret) == "" {
 		return nil, fmt.Errorf("%w: client_secret is required", datasource.ErrInvalidCredentials)
 	}
+	if strings.TrimSpace(cfg.OperatorID) == "" {
+		return nil, fmt.Errorf("%w: operator_id is required", datasource.ErrInvalidCredentials)
+	}
 	cfg.ClientID = strings.TrimSpace(cfg.ClientID)
 	cfg.ClientSecret = strings.TrimSpace(cfg.ClientSecret)
 	cfg.OperatorID = strings.TrimSpace(cfg.OperatorID)
@@ -98,6 +101,7 @@ type accessTokenResponse struct {
 // wikiWorkspacesResponse wraps GET /v2.0/wiki/workspaces.
 type wikiWorkspacesResponse struct {
 	Workspaces []WikiWorkspace `json:"workspaces,omitempty"`
+	NextToken  string          `json:"nextToken,omitempty"`
 }
 
 // WikiWorkspace represents a DingTalk knowledge base (workspace).

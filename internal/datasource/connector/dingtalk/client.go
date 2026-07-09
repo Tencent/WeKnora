@@ -286,10 +286,10 @@ func (c *client) ListWorkspaces(ctx context.Context, operatorID string) ([]WikiW
 	for {
 		query := map[string]string{
 			"operatorId": operatorID,
+			"maxResults": fmt.Sprintf("%d", defaultPageSize),
 		}
 		if nextToken != "" {
 			query["nextToken"] = nextToken
-			query["maxResults"] = fmt.Sprintf("%d", defaultPageSize)
 		}
 
 		var resp wikiWorkspacesResponse
@@ -297,9 +297,10 @@ func (c *client) ListWorkspaces(ctx context.Context, operatorID string) ([]WikiW
 			return nil, err
 		}
 		all = append(all, resp.Workspaces...)
-		// Note: DingTalk's workspaces API doesn't have pagination token in response
-		// based on current API spec, but we handle it generically
-		break
+		if resp.NextToken == "" {
+			break
+		}
+		nextToken = resp.NextToken
 	}
 	return all, nil
 }

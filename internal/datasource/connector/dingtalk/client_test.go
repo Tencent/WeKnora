@@ -395,6 +395,57 @@ func TestClientDoRequest_QueryParams(t *testing.T) {
 	}
 }
 
+func TestClientListWorkspacesPaginates(t *testing.T) {
+	var seenTokens []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2.0/wiki/workspaces" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("operatorId"); got != "operator-1" {
+			t.Fatalf("operatorId = %q, want operator-1", got)
+		}
+		if got := r.URL.Query().Get("maxResults"); got == "" {
+			t.Fatal("expected maxResults on every workspace list request")
+		}
+
+		nextToken := r.URL.Query().Get("nextToken")
+		seenTokens = append(seenTokens, nextToken)
+		w.Header().Set("Content-Type", "application/json")
+		switch nextToken {
+		case "":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"workspaces": []WikiWorkspace{{WorkspaceID: "ws-1", Name: "First"}},
+				"nextToken":  "page-2",
+			})
+		case "page-2":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"workspaces": []WikiWorkspace{{WorkspaceID: "ws-2", Name: "Second"}},
+			})
+		default:
+			t.Fatalf("unexpected nextToken %q", nextToken)
+		}
+	}))
+	defer srv.Close()
+
+	c := &client{
+		baseURL:     srv.URL,
+		accessToken: "token",
+		tokenExpiry: time.Now().Add(time.Hour),
+		httpClient:  srv.Client(),
+	}
+
+	workspaces, err := c.ListWorkspaces(context.Background(), "operator-1")
+	if err != nil {
+		t.Fatalf("ListWorkspaces() error = %v", err)
+	}
+	if len(workspaces) != 2 {
+		t.Fatalf("len(workspaces) = %d, want 2: %+v", len(workspaces), workspaces)
+	}
+	if strings.Join(seenTokens, ",") != ",page-2" {
+		t.Fatalf("seen nextToken sequence = %v, want [ page-2]", seenTokens)
+	}
+}
+
 // TestClientDoRequest_EmptyQueryValue tests that empty query values are skipped.
 func TestClientDoRequest_EmptyQueryValue(t *testing.T) {
 	var receivedQuery string
