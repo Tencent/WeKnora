@@ -307,6 +307,72 @@ func TestTaskPendingOps_ClaimBatch_MarksAndReturnsDisjoint(t *testing.T) {
 	assert.Len(t, third, 0)
 }
 
+// TestTaskPendingOps_ClaimBatch_KeepsSameKeyTogether verifies the
+// dedup_key affinity invariant: all rows sharing a knowledge_id are claimed
+// in the SAME batch (never split), and `limit` counts distinct keys, not
+// rows. This is what stops a concurrent batch from processing one op of a
+// document while another batch processes a second op of the same document.
+func TestTaskPendingOps_ClaimBatch_KeepsSameKeyTogether(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	// Document k1 has TWO queued ops (ingest then retract); k2 and k3 have
+	// one each. Enqueue order interleaves them so a naive row-ordered claim
+	// would split k1 across batches.
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "k1", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "k2", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "retract", "k1", nil)))
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "k3", nil)))
+
+	stale := time.Now().Add(-time.Hour)
+
+	// limit=2 keys → k1 (both rows) + k2. k1 must NOT be split.
+	first, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 2, stale)
+	require.NoError(t, err)
+	require.Len(t, first, 3, "k1's two rows + k2's one row")
+	byKey := map[string]int{}
+	for _, r := range first {
+		byKey[r.DedupKey]++
+	}
+	assert.Equal(t, 2, byKey["k1"], "both k1 ops claimed together")
+	assert.Equal(t, 1, byKey["k2"])
+	assert.Zero(t, byKey["k3"], "k3 belongs to the next batch (limit was 2 keys)")
+
+	// A concurrent-style second claim gets the remaining key only — it can
+	// never see k1's rows again (disjoint).
+	second, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 10, stale)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	assert.Equal(t, "k3", second[0].DedupKey)
+}
+
+// TestTaskPendingOps_ClaimBatch_NewSiblingRowNotDoubleClaimed verifies a
+// row enqueued for an already-claimed (in-flight) document is left for a
+// later batch rather than being handed out alongside the fresh claim.
+func TestTaskPendingOps_ClaimBatch_NewSiblingRowNotDoubleClaimed(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "ingest", "k1", nil)))
+	stale := time.Now().Add(-time.Hour)
+
+	first, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 5, stale)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	// A retract for the same, still-in-flight document arrives.
+	require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb", "retract", "k1", nil)))
+
+	// The next claim gets ONLY the new (unclaimed) retract row — the
+	// still-claimed ingest row is not re-handed-out.
+	second, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb", 5, stale)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	assert.Equal(t, "retract", second[0].Op)
+}
+
 // TestTaskPendingOps_ClaimBatch_ReclaimsStale verifies a claim older than
 // staleBefore is re-claimable (crash recovery), while a fresh claim is not.
 func TestTaskPendingOps_ClaimBatch_ReclaimsStale(t *testing.T) {

@@ -35,13 +35,16 @@ type TaskPendingOpsRepository interface {
 	// IncrFailCount and leave them for the next pass).
 	PeekBatch(ctx context.Context, taskType, scope, scopeID string, limit int) ([]*types.TaskPendingOp, error)
 
-	// ClaimBatch atomically claims up to `limit` rows for the tuple,
-	// ordered by id ASC (FIFO), and returns them with claimed_at set to
-	// now. A row is eligible when it is unclaimed (claimed_at IS NULL) or
-	// its claim is stale (claimed_at < staleBefore) — the latter recovers
-	// rows abandoned by a crashed worker. On Postgres the selection uses
-	// FOR UPDATE SKIP LOCKED so concurrent claimers never block on or
-	// double-claim each other's rows.
+	// ClaimBatch atomically claims eligible rows for the tuple, grouped by
+	// dedup_key, and returns them with claimed_at set to now. `limit`
+	// counts DISTINCT dedup_keys (documents), NOT rows: ALL eligible rows
+	// sharing a chosen dedup_key are claimed together so a document with
+	// several queued ops is never split across two concurrent batches.
+	// A row is eligible when it is unclaimed (claimed_at IS NULL) or its
+	// claim is stale (claimed_at < staleBefore) — the latter recovers rows
+	// abandoned by a crashed worker. On Postgres the per-key anchor row is
+	// locked with FOR UPDATE SKIP LOCKED so concurrent claimers take
+	// disjoint key sets without blocking or double-claiming.
 	//
 	// Claimed rows are NOT removed: the consumer must DeleteByIDs on
 	// success, or ReleaseByIDs to hand a still-retryable row back to the

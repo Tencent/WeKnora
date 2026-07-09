@@ -512,6 +512,27 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// slugs out of the wiki log feed so users don't see clickable entries
 	// pointing at missing pages.
 	failedAdditionSlugs := make(map[string]struct{})
+	// unappliedSlugKIDs collects the knowledge_ids that contributed to a
+	// slug whose update never landed — either because we could NOT acquire
+	// the per-slug lock within wikiSlugLockWait, or because reduce returned
+	// an error. In both cases the page keeps its prior content, so the
+	// owning document(s) must be re-queued rather than trimmed — otherwise
+	// the row is deleted and the contribution is silently lost forever
+	// (finalize only rebuilds the index / cross-links, it does not re-run
+	// reduce). requeueFailedOps' fail_count budget bounds the retries and
+	// dead-letters a document whose slug fails/stays hot permanently.
+	unappliedSlugKIDs := make(map[string]struct{})
+	// collectUnapplied records every knowledge_id backing a slug we failed
+	// to apply. Caller holds no lock; it takes reduceMu itself.
+	collectUnapplied := func(updates []SlugUpdate) {
+		reduceMu.Lock()
+		for _, u := range updates {
+			if u.KnowledgeID != "" {
+				unappliedSlugKIDs[u.KnowledgeID] = struct{}{}
+			}
+		}
+		reduceMu.Unlock()
+	}
 
 	// Build the kid → wikiSpan lookup before kicking off reduce. Each
 	// per-slug reduce attaches a postprocess.wiki.page[slug] subspan
@@ -546,14 +567,22 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				return nil
 			}
 			if !acquired {
-				// Contended slug we couldn't get in time. Best-effort skip,
-				// matching reduce-failure semantics: the page keeps its prior
-				// content and the finalize/dead-link passes reconcile later.
+				// Contended slug we couldn't get in time. The page keeps its
+				// prior content, so the documents that fed this slug are NOT
+				// done: record their knowledge_ids so the trim phase re-queues
+				// them (via the failed-op retry budget) for a later,
+				// hopefully-uncontended batch instead of deleting their rows.
 				logger.Warnf(reduceCtx, "wiki ingest: slug %s busy > %s, deferring update", slug, wikiSlugLockWait)
+				collectUnapplied(updates)
 				return nil
 			}
 			if reduceErr != nil {
+				// The page's read-modify-write failed, so this slug's update
+				// never landed. Re-queue the contributing documents (same
+				// fail_count budget as a map failure) so a later batch retries
+				// instead of silently dropping the row at trim time.
 				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: %v", slug, reduceErr)
+				collectUnapplied(updates)
 				if isLikelyRateLimitError(reduceErr) {
 					reduceMu.Lock()
 					rateLimited = true
@@ -712,7 +741,14 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// the WikiSpan nil-check below so a doc that had no attempt to
 		// attach a span to still drains its counter slot. The matching +1
 		// is seeded by KnowledgePostProcess.SetFinalizing.
-		s.finalizeWikiSubtask(ctx, r.KnowledgeID)
+		//
+		// EXCEPT docs with an unapplied slug (contended lock or reduce
+		// error): those are re-queued below, so keep their finalizing slot
+		// held — the retry (or the dead-letter drain in requeueFailedOps)
+		// releases it once the op reaches a real terminal state.
+		if _, unapplied := unappliedSlugKIDs[r.KnowledgeID]; !unapplied {
+			s.finalizeWikiSubtask(ctx, r.KnowledgeID)
+		}
 		if r.WikiSpan == nil {
 			continue
 		}
@@ -747,6 +783,29 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// Failed-map docs already had FailSpan called inside
 	// mapOneDocument (the failedOps path returns before reaching
 	// docResults). Nothing extra to do here for them.
+
+	// Fold documents with an unapplied slug (contended lock or reduce error)
+	// into failedOps so they are neither trimmed nor promoted to completed:
+	// requeueFailedOps then runs them through the same fail_count budget
+	// (retry now, dead-letter once the slug stays permanently hot/broken) as
+	// a map-phase failure. A doc already counted as a map failure is skipped
+	// to avoid a double fail_count bump.
+	if len(unappliedSlugKIDs) > 0 {
+		failedKIDs := make(map[string]struct{}, len(failedOps))
+		for _, op := range failedOps {
+			failedKIDs[op.KnowledgeID] = struct{}{}
+		}
+		for _, op := range pendingOps {
+			if _, unapplied := unappliedSlugKIDs[op.KnowledgeID]; !unapplied {
+				continue
+			}
+			if _, already := failedKIDs[op.KnowledgeID]; already {
+				continue
+			}
+			failedOps = append(failedOps, op)
+			failedKIDs[op.KnowledgeID] = struct{}{}
+		}
+	}
 
 	// Build the trim set: rows that should be removed from
 	// task_pending_ops. We start from the full peekedIDs (every row we

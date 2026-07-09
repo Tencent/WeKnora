@@ -10,7 +10,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // taskPendingOpsRepository implements interfaces.TaskPendingOpsRepository.
@@ -73,15 +72,31 @@ func (r *taskPendingOpsRepository) PeekBatch(
 	return ops, nil
 }
 
-// ClaimBatch atomically claims up to `limit` eligible rows for the tuple.
+// ClaimBatch atomically claims eligible rows for the tuple, grouped by
+// dedup_key. `limit` counts DISTINCT dedup_keys (i.e. documents), NOT rows:
+// ALL eligible rows sharing a chosen dedup_key are claimed together and
+// returned in the same batch. This is the invariant the concurrent wiki
+// consumers rely on — a document with multiple queued ops (e.g. an ingest
+// followed by a retract) must never be split across two concurrent batches,
+// otherwise each batch's per-batch last-write-wins dedup can't collapse the
+// pair and the two ops race (a stale ingest could resurrect a retracted doc).
+//
 // Eligibility = unclaimed (claimed_at IS NULL) OR stale claim
 // (claimed_at < staleBefore). The whole thing runs in one transaction:
-// we first lock the candidate ids (FOR UPDATE SKIP LOCKED on Postgres so
-// concurrent claimers slide past each other's rows), stamp claimed_at,
-// then read the claimed rows back. SKIP LOCKED is Postgres-only; on other
-// dialects (SQLite, used by unit tests / Lite) writes are serialized by
-// the engine so the plain SELECT+UPDATE is already race-free within the
-// single-writer model.
+//
+//   - Postgres: we lock the ANCHOR row (earliest eligible id) of each
+//     candidate dedup_key with FOR UPDATE SKIP LOCKED. Because the anchor
+//     uniquely represents its key, SKIP LOCKED hands concurrent claimers
+//     DISJOINT key sets — a key whose anchor is already locked by another
+//     in-flight claim is skipped entirely rather than half-claimed. We then
+//     stamp every eligible row of the chosen keys and read them back.
+//   - Other dialects (SQLite, used by unit tests / Lite mode): writes are
+//     serialized by the single-writer engine, so a plain grouped SELECT +
+//     UPDATE is already race-free.
+//
+// Rows are claimed by explicit id (only the eligible ones), so a freshly
+// enqueued or still-in-flight sibling row of a chosen key is never handed
+// out twice.
 func (r *taskPendingOpsRepository) ClaimBatch(
 	ctx context.Context,
 	taskType, scope, scopeID string,
@@ -97,19 +112,55 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	now := time.Now()
 	var claimed []*types.TaskPendingOp
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		sel := tx.Model(&types.TaskPendingOp{}).
+		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
+		var keys []string
+		if tx.Dialector.Name() == "postgres" {
+			// Lock the anchor (earliest eligible) row of each key with SKIP
+			// LOCKED so concurrent claimers get disjoint KEY sets, then map
+			// the locked anchors back to their dedup_keys.
+			const anchorSQL = `
+SELECT dedup_key FROM task_pending_ops
+WHERE id IN (
+	SELECT id FROM (
+		SELECT id, ROW_NUMBER() OVER (PARTITION BY dedup_key ORDER BY id) AS rn
+		FROM task_pending_ops
+		WHERE task_type = ? AND scope = ? AND scope_id = ?
+			AND (claimed_at IS NULL OR claimed_at < ?)
+	) anchors WHERE anchors.rn = 1
+)
+ORDER BY id ASC
+LIMIT ?
+FOR UPDATE SKIP LOCKED`
+			if err := tx.Raw(anchorSQL, taskType, scope, scopeID, staleBefore, limit).
+				Scan(&keys).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Model(&types.TaskPendingOp{}).
+				Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+				Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
+				Group("dedup_key").
+				Order("MIN(id) ASC").
+				Limit(limit).
+				Pluck("dedup_key", &keys).Error; err != nil {
+				return err
+			}
+		}
+		if len(keys) == 0 {
+			return nil
+		}
+
+		// 2. Resolve the exact eligible rows for the chosen keys and claim
+		//    them by id. Claiming by id (not by "dedup_key IN keys") means a
+		//    sibling row that is still in flight elsewhere (claimed & fresh)
+		//    is left untouched and never returned to this batch.
+		var ids []int64
+		if err := tx.Model(&types.TaskPendingOp{}).
 			Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
-			// Parentheses are explicit so the OR binds tightly and doesn't
-			// leak past the tuple filter (GORM ANDs Where clauses but does
-			// not parenthesize raw fragments).
+			Where("dedup_key IN ?", keys).
 			Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
 			Order("id ASC").
-			Limit(limit)
-		if tx.Dialector.Name() == "postgres" {
-			sel = sel.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
-		}
-		var ids []int64
-		if err := sel.Pluck("id", &ids).Error; err != nil {
+			Pluck("id", &ids).Error; err != nil {
 			return err
 		}
 		if len(ids) == 0 {
