@@ -42,7 +42,7 @@ Tests/checks run and outputs summarized:
 - `npm --prefix frontend run type-check` passed with `vue-tsc --build` and exit code 0.
 
 Commit hash(es):
-- TBD after commit.
+- 8ba39912 fix(frontend): reset datasource defaults on connector switch
 
 Self-review notes and concerns:
 - No backend files were modified.
