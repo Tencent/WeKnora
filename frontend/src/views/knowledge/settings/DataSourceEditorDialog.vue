@@ -18,6 +18,7 @@ import {
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
+import { getDataSourceSelectionDefaults } from './datasourceDefaults'
 import { getDatasourceIconUrl } from './datasourceIcons'
 
 const props = defineProps<{
@@ -531,32 +532,18 @@ watch(
 
 function selectType(def: ConnectorDef) {
   if (!def.available) return
+  const defaults = getDataSourceSelectionDefaults(def.type)
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
+  form.value.config.resource_ids = defaults.resourceIds
+  selectedResourceIds.value = defaults.resourceIds
+  form.value.config.settings = defaults.settings
+  form.value.sync_schedule = defaults.syncSchedule
+  form.value.sync_mode = defaults.syncMode
+  form.value.conflict_strategy = defaults.conflictStrategy
+  form.value.sync_deletions = defaults.syncDeletions
   rssAuthHeaders.value = []
-  if (def.type === 'wecom_chat_archive') {
-    form.value.config.resource_ids = ['all']
-    selectedResourceIds.value = ['all']
-    form.value.config.settings = {
-      sync_scope: 'all_archived_conversations',
-      aggregation: 'conversation_day',
-      timezone: 'Asia/Shanghai',
-      full_sync_days: 90,
-      include_message_types: ['text', 'markdown', 'link', 'news', 'mixed'],
-      attachment_policy: 'metadata_only',
-      include_sender_name: true,
-      include_sender_id: true,
-      include_room_id: true,
-      include_external_user_id: true,
-      sync_revoke_as_delete: false,
-      record_participants_for_acl: true,
-    }
-    form.value.sync_schedule = '0 */30 * * * *'
-    form.value.sync_mode = 'incremental'
-    form.value.conflict_strategy = 'overwrite'
-    form.value.sync_deletions = false
-  }
   step.value = 1
 }
 
