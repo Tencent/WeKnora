@@ -64,6 +64,16 @@ export function buildCommands(ctx: CommandContext): CmdkCommand[] {
       },
     },
     {
+      id: 'open-knowledge-processing',
+      label: t('commandPalette.quick.knowledgeProcessing'),
+      icon: 'queue',
+      keywords: ['processing', 'pipeline', 'queue', 'knowledge', '看板', '处理', '队列'],
+      run: () => {
+        close()
+        router.push('/platform/knowledge-processing')
+      },
+    },
+    {
       id: 'open-organizations',
       label: t('commandPalette.quick.organizations'),
       icon: 'usergroup',
