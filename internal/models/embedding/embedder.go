@@ -90,6 +90,10 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if setter, ok := e.(interface{ SetSupportsDimensionOverride(bool) }); ok {
 		setter.SetSupportsDimensionOverride(config.SupportsDimensionOverride)
 	}
+	// Innermost: gate the real provider round-trips (including the per-sub-batch
+	// pool callbacks) before debug/langfuse wrap for logging/tracing. See
+	// concurrencyEmbedder for why this sits below the observability decorators.
+	e = wrapEmbeddingConcurrency(e)
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}
 	}
