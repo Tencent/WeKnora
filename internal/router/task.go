@@ -154,6 +154,18 @@ func newAsynqServer(concurrency int, queues map[string]int) *asynq.Server {
 	)
 }
 
+// backgroundTaskMiddleware tags every task's context as a background worker
+// execution (types.WithBackgroundTask) so the per-model chat concurrency
+// governor applies to ingestion/enrichment LLM calls but not to interactive
+// user-facing chat.
+func backgroundTaskMiddleware() asynq.MiddlewareFunc {
+	return func(next asynq.Handler) asynq.Handler {
+		return asynq.HandlerFunc(func(ctx context.Context, t *asynq.Task) error {
+			return next.ProcessTask(types.WithBackgroundTask(ctx), t)
+		})
+	}
+}
+
 // NewParseAsynqServer builds the upstream pool: every queue EXCEPT QueueWiki.
 // This is the user-facing document parse / post-process / enrichment pipeline.
 // Concurrency comes from WEKNORA_ASYNQ_CONCURRENCY (default 32), unchanged from
@@ -217,6 +229,12 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// UI signal users actually see.
 	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker)
 	mux.Use(asynqdl.MiddlewareWithCallback(params.DeadLetterRepo, knowledgeFailer))
+
+	// Mark every asynq worker execution as a background task so the chat
+	// concurrency governor throttles ingestion/enrichment LLM traffic while
+	// leaving user-facing interactive chat ungated. Installed early so all
+	// downstream handlers (and their model calls) inherit the flag.
+	mux.Use(backgroundTaskMiddleware())
 
 	// Install Langfuse middleware BEFORE handler registration so every task
 	// type is automatically wrapped. When Langfuse is disabled the middleware

@@ -78,6 +78,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/stream"
@@ -274,6 +275,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// dequeue of pending/scheduled/retry tasks + active-task cancel).
 		must(container.Provide(router.NewAsynqInspector))
 		must(container.Provide(router.NewAsynqTaskInspector))
+		// Install the distributed per-model chat concurrency governor. Only
+		// available with Redis (the shared semaphore backend); Lite mode is
+		// single-process and low-volume, so it runs ungated.
+		must(container.Invoke(registerModelConcurrencyLimiter))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
@@ -434,6 +439,30 @@ func must(err error) {
 func initLangfuse() (*langfuse.Manager, error) {
 	cfg := langfuse.LoadConfigFromEnv()
 	return langfuse.Init(cfg)
+}
+
+// defaultModelMaxConcurrency is the per-model cap on concurrent background
+// (ingestion/enrichment) chat calls when WEKNORA_MODEL_MAX_CONCURRENCY /
+// model.max_concurrency is unset. summary / question / graph enrichment all
+// share the same model, so this bounds their combined pressure on one provider
+// across every replica. Interactive chat is never gated.
+const defaultModelMaxConcurrency = 8
+
+// registerModelConcurrencyLimiter builds the Redis-backed per-model chat
+// concurrency governor and installs it into the chat package. The limit is
+// resolved from system settings / env, defaulting to defaultModelMaxConcurrency.
+func registerModelConcurrencyLimiter(rdb *redis.Client, ss interfaces.SystemSettingService) {
+	limit := defaultModelMaxConcurrency
+	if ss != nil {
+		n := ss.GetInt(context.Background(), "model.max_concurrency",
+			"WEKNORA_MODEL_MAX_CONCURRENCY", int64(defaultModelMaxConcurrency))
+		if n > 0 {
+			limit = int(n)
+		}
+	}
+	chat.SetConcurrencyLimiter(limiter.NewRedisLimiter(rdb), limit)
+	logger.Infof(context.Background(),
+		"[ModelLimiter] background chat concurrency governed per-model, limit=%d (distributed via redis)", limit)
 }
 
 func initRedisClient() (*redis.Client, error) {

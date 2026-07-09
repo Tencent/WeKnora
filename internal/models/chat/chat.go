@@ -147,7 +147,10 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 		return nil, fmt.Errorf("unsupported chat model source: %s", config.Source)
 	}
 	c, err = wrapChatDebug(c, err)
-	return wrapChatLangfuse(c, err)
+	c, err = wrapChatLangfuse(c, err)
+	// Outermost: hold the per-model concurrency slot only around the real
+	// provider round-trip, so the wait is excluded from debug/langfuse timing.
+	return wrapChatConcurrency(c, err)
 }
 
 // NewRemoteChat 根据 provider 创建远程聊天实例。

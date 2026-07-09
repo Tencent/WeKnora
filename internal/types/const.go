@@ -39,6 +39,12 @@ const (
 	LangfuseTraceContextKey ContextKey = "LangfuseTrace"
 	// SystemAdminContextKey is the context key indicating whether the user is a system administrator
 	SystemAdminContextKey ContextKey = "SystemAdmin"
+	// BackgroundTaskContextKey marks a context whose model calls originate from
+	// an asynq background worker (document parse / summary / question / graph /
+	// multimodal enrichment) rather than a user-facing HTTP request. The chat
+	// concurrency governor uses this to throttle only background LLM traffic,
+	// leaving interactive chat latency untouched. See WithBackgroundTask.
+	BackgroundTaskContextKey ContextKey = "BackgroundTask"
 	// MCPOAuthNonInteractiveContextKey marks a request whose channel cannot
 	// resolve an in-conversation MCP OAuth prompt (e.g. an IM bot: there is no
 	// live client to click "Authorize" and call the resolve endpoint). When set,
