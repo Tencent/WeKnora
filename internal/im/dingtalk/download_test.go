@@ -47,6 +47,10 @@ func TestDownloadFile_EndToEnd(t *testing.T) {
 	apiBaseURL = srv.URL
 	defer func() { apiBaseURL = orig }()
 
+	origValidate := validateFileDownloadURL
+	validateFileDownloadURL = func(string) error { return nil }
+	defer func() { validateFileDownloadURL = origValidate }()
+
 	a := &Adapter{clientID: "cid", clientSecret: "sec"}
 	msg := &im.IncomingMessage{
 		MessageType: im.MessageTypeFile,
@@ -104,10 +108,56 @@ func TestDownloadFile_TempURLError(t *testing.T) {
 	apiBaseURL = srv.URL
 	defer func() { apiBaseURL = orig }()
 
+	origValidate := validateFileDownloadURL
+	validateFileDownloadURL = func(string) error { return nil }
+	defer func() { validateFileDownloadURL = origValidate }()
+
 	a := &Adapter{clientID: "cid", clientSecret: "sec"}
 	msg := &im.IncomingMessage{FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"}}
 
 	if _, _, err := a.DownloadFile(context.Background(), msg); err == nil {
 		t.Errorf("expected error on non-200 download URL, got nil")
+	}
+}
+
+func TestDownloadFile_SSRFRejected(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"accessToken": "tok", "expireIn": 7200})
+		case "/v1.0/robot/messageFiles/download":
+			_ = json.NewEncoder(w).Encode(map[string]string{"downloadUrl": "http://127.0.0.1:1/internal"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	orig := apiBaseURL
+	apiBaseURL = srv.URL
+	defer func() { apiBaseURL = orig }()
+
+	a := &Adapter{clientID: "cid", clientSecret: "sec"}
+	msg := &im.IncomingMessage{FileKey: "DL-CODE", FileName: "x.pdf", Extra: map[string]string{"robot_code": "rc"}}
+
+	if _, _, err := a.DownloadFile(context.Background(), msg); err == nil {
+		t.Fatal("expected SSRF rejection error, got nil")
+	}
+}
+
+func TestIsAllowedDingTalkDownloadHost(t *testing.T) {
+	cases := []struct {
+		url   string
+		allow bool
+	}{
+		{"https://wukong-abc.oss-cn-hangzhou.aliyuncs.com/file?sig=x", true},
+		{"https://api.dingtalk.com/temp/file", true},
+		{"http://127.0.0.1:8080/file", false},
+	}
+	for _, tc := range cases {
+		if got := isAllowedDingTalkDownloadHost(tc.url); got != tc.allow {
+			t.Errorf("isAllowedDingTalkDownloadHost(%q) = %v, want %v", tc.url, got, tc.allow)
+		}
 	}
 }

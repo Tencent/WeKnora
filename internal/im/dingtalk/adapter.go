@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // httpClient is a shared HTTP client with a reasonable timeout for DingTalk API calls.
@@ -164,8 +166,9 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 // messages carry only downloadCode (original quality) and pictureDownloadCode.
 // See https://open-dingtalk.github.io/developerpedia/docs/learn/bot/message/
 type fileMessageContent struct {
-	DownloadCode string `json:"downloadCode"`
-	FileName     string `json:"fileName"`
+	DownloadCode        string `json:"downloadCode"`
+	PictureDownloadCode string `json:"pictureDownloadCode"`
+	FileName            string `json:"fileName"`
 }
 
 // parseFileContent maps a DingTalk msgtype + content object to WeKnora's file
@@ -173,18 +176,35 @@ type fileMessageContent struct {
 // caller keeps its text handling. Picture messages have no fileName; the IM
 // service appends an extension after download.
 func parseFileContent(msgtype string, content json.RawMessage) (im.MessageType, string, string, bool) {
-	var c fileMessageContent
-	if len(content) > 0 {
-		_ = json.Unmarshal(content, &c)
-	}
+	var msgType im.MessageType
 	switch msgtype {
 	case "file":
-		return im.MessageTypeFile, c.FileName, c.DownloadCode, true
+		msgType = im.MessageTypeFile
 	case "picture":
-		return im.MessageTypeImage, "", c.DownloadCode, true
+		msgType = im.MessageTypeImage
 	default:
 		return "", "", "", false
 	}
+
+	var c fileMessageContent
+	if len(content) > 0 {
+		if err := json.Unmarshal(content, &c); err != nil {
+			return "", "", "", false
+		}
+	}
+	downloadCode := c.DownloadCode
+	if downloadCode == "" {
+		downloadCode = c.PictureDownloadCode
+	}
+	if downloadCode == "" {
+		return "", "", "", false
+	}
+
+	fileName := c.FileName
+	if msgType == im.MessageTypeImage {
+		fileName = ""
+	}
+	return msgType, fileName, downloadCode, true
 }
 
 // parseDownloadURL extracts the temporary downloadUrl from the response of the
@@ -227,6 +247,9 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	downloadURL, err := parseDownloadURL(respBody)
 	if err != nil {
 		return nil, "", err
+	}
+	if err := validateFileDownloadURL(downloadURL); err != nil {
+		return nil, "", fmt.Errorf("download url rejected: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
@@ -287,12 +310,47 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 
 // defaultFileName gives picture messages (which carry no fileName) a name with a
 // real stem derived from the message ID, mirroring the WeCom adapter. File
-// messages keep their original name.
+// messages keep their original name; if missing, fall back to the message ID so
+// post-download extension resolution can still run.
 func defaultFileName(msgType im.MessageType, fileName, msgID string) string {
-	if msgType == im.MessageTypeImage && fileName == "" {
+	if fileName != "" {
+		return fileName
+	}
+	if msgType == im.MessageTypeImage {
 		return msgID + ".png"
 	}
-	return fileName
+	return msgID
+}
+
+// allowedDingTalkDownloadHostSuffixes lists CDN/OSS host suffixes DingTalk uses
+// for temporary file download links returned by messageFiles/download.
+var allowedDingTalkDownloadHostSuffixes = []string{
+	".aliyuncs.com",
+	".dingtalk.com",
+}
+
+// validateFileDownloadURL is overridable in tests (httptest uses loopback URLs).
+var validateFileDownloadURL = defaultValidateFileDownloadURL
+
+func defaultValidateFileDownloadURL(rawURL string) error {
+	if isAllowedDingTalkDownloadHost(rawURL) {
+		return nil
+	}
+	return secutils.ValidateURLForSSRF(rawURL)
+}
+
+func isAllowedDingTalkDownloadHost(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	hostname := strings.ToLower(u.Hostname())
+	for _, suffix := range allowedDingTalkDownloadHostSuffixes {
+		if strings.HasSuffix(hostname, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // streamToIncoming builds an IncomingMessage from a DingTalk Stream mode

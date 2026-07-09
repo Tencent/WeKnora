@@ -54,6 +54,53 @@ func TestParseFileContent_Text(t *testing.T) {
 	}
 }
 
+func TestParseFileContent_EmptyDownloadCode(t *testing.T) {
+	_, _, _, ok := parseFileContent("file", json.RawMessage(`{"fileName":"a.pdf"}`))
+	if ok {
+		t.Errorf("expected ok=false when downloadCode is missing")
+	}
+	_, _, _, ok = parseFileContent("picture", json.RawMessage(`{}`))
+	if ok {
+		t.Errorf("expected ok=false when picture has no download code")
+	}
+}
+
+func TestParseFileContent_PictureDownloadCodeFallback(t *testing.T) {
+	content := json.RawMessage(`{"pictureDownloadCode":"pWjAks="}`)
+	msgType, fileName, downloadCode, ok := parseFileContent("picture", content)
+	if !ok {
+		t.Fatalf("expected ok=true when only pictureDownloadCode is present")
+	}
+	if msgType != im.MessageTypeImage {
+		t.Errorf("msgType = %q, want %q", msgType, im.MessageTypeImage)
+	}
+	if fileName != "" {
+		t.Errorf("fileName = %q, want empty", fileName)
+	}
+	if downloadCode != "pWjAks=" {
+		t.Errorf("downloadCode = %q, want %q", downloadCode, "pWjAks=")
+	}
+}
+
+func TestParseFileContent_InvalidJSON(t *testing.T) {
+	_, _, _, ok := parseFileContent("file", json.RawMessage(`not-json`))
+	if ok {
+		t.Errorf("expected ok=false for malformed content JSON")
+	}
+}
+
+func TestDefaultFileName(t *testing.T) {
+	if got := defaultFileName(im.MessageTypeImage, "", "pic-1"); got != "pic-1.png" {
+		t.Errorf("image default = %q, want pic-1.png", got)
+	}
+	if got := defaultFileName(im.MessageTypeFile, "spec.pdf", "m1"); got != "spec.pdf" {
+		t.Errorf("file with name = %q, want spec.pdf", got)
+	}
+	if got := defaultFileName(im.MessageTypeFile, "", "m2"); got != "m2" {
+		t.Errorf("file without name = %q, want m2", got)
+	}
+}
+
 func TestParseDownloadURL(t *testing.T) {
 	url, err := parseDownloadURL(json.RawMessage(`{"downloadUrl":"https://example.com/file?token=abc"}`))
 	if err != nil {
