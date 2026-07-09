@@ -3,8 +3,8 @@ import test from 'node:test'
 
 import { getCredentialFieldRenderKind } from './datasourceFieldRendering.ts'
 
-test('renders secret multiline fields as password input instead of plaintext textarea', () => {
-  assert.equal(getCredentialFieldRenderKind({ secret: true, multiline: true }), 'password')
+test('renders secret multiline fields as masked textarea instead of single-line password input', () => {
+  assert.equal(getCredentialFieldRenderKind({ secret: true, multiline: true }), 'secret-textarea')
 })
 
 test('renders non-secret multiline fields as textarea', () => {
