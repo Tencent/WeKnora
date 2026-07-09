@@ -30,6 +30,8 @@ type ChunkRepository interface {
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListAllChunksByKnowledgeID lists every chunk type for a knowledge id.
+	ListAllChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagID is non-empty, results are filtered by tag_id.
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
@@ -117,7 +119,7 @@ type ChunkRepository interface {
 	// CountLowQualityChunks counts chunks with positive rate lower than or equal to maxRate.
 	CountLowQualityChunks(ctx context.Context, tenantID uint64, maxRate float64) (int64, error)
 	// GetChunkFeedbackOverview returns tenant-scoped aggregate feedback stats.
-	GetChunkFeedbackOverview(ctx context.Context, tenantID uint64) (*types.ChunkFeedbackOverviewResponse, error)
+	GetChunkFeedbackOverview(ctx context.Context, tenantID uint64, highThreshold, lowThreshold float64) (*types.ChunkFeedbackOverviewResponse, error)
 	// ResetChunkFeedback resets feedback counters and weight fields for a tenant-scoped chunk.
 	ResetChunkFeedback(ctx context.Context, tenantID uint64, chunkID string) error
 }
@@ -132,6 +134,8 @@ type ChunkService interface {
 	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error)
+	// ListAllChunksByKnowledgeID lists every chunk type for a knowledge id.
+	ListAllChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id
 	ListPagedChunksByKnowledgeID(
 		ctx context.Context,

@@ -125,15 +125,22 @@ type SubmitFeedbackResponse struct {
 
 // ChunkStatsResponse 片段统计响应
 type ChunkStatsResponse struct {
-	ChunkID             string     `json:"chunk_id"`              // 片段ID
-	LikeCount           int        `json:"like_count"`            // 点赞数
-	DislikeCount        int        `json:"dislike_count"`         // 点踩数
-	PositiveRate        float64    `json:"positive_rate"`         // 好评率
-	RecallWeight        float64    `json:"recall_weight"`         // 召回权重
-	QualityStatus       string     `json:"quality_status"`        // 质量状态
-	RelatedSessionCount int        `json:"related_session_count"` // 关联会话数
-	DislikeReasons      []string   `json:"dislike_reasons"`       // 点踩原因聚合
-	LastFeedbackAt      *time.Time `json:"last_feedback_at"`      // 最后反馈时间
+	ChunkID             string              `json:"chunk_id"`              // 片段ID
+	LikeCount           int                 `json:"like_count"`            // 点赞数
+	DislikeCount        int                 `json:"dislike_count"`         // 点踩数
+	PositiveRate        float64             `json:"positive_rate"`         // 好评率
+	RecallWeight        float64             `json:"recall_weight"`         // 召回权重
+	QualityStatus       string              `json:"quality_status"`        // 质量状态
+	RelatedSessionCount int                 `json:"related_session_count"` // 关联会话数
+	DislikeReasons      []string            `json:"dislike_reasons"`       // 点踩原因聚合
+	DislikeReasonStats  []DislikeReasonStat `json:"dislike_reason_stats"`  // 点踩原因计数
+	LastFeedbackAt      *time.Time          `json:"last_feedback_at"`      // 最后反馈时间
+}
+
+// DislikeReasonStat describes how often one dislike reason appears for a chunk.
+type DislikeReasonStat struct {
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
 }
 
 // ListLowQualityChunksRequest 列出低质量片段请求

@@ -104,6 +104,24 @@ func TestQualityStatusMarksPendingAfterEnoughLowQualityVotes(t *testing.T) {
 	}
 }
 
+func TestRecallWeightClampsToConfiguredBounds(t *testing.T) {
+	config := testConfig()
+	config.WeightBoostFactor = 5
+	config.WeightPenaltyFactor = 0.01
+	config.MinWeight = 0.25
+	config.MaxWeight = 2
+
+	boosted := RecallWeight(0.9, 10, config)
+	if boosted != 2 {
+		t.Fatalf("boosted RecallWeight = %v, want 2", boosted)
+	}
+
+	penalized := RecallWeight(0.2, 10, config)
+	if penalized != 0.25 {
+		t.Fatalf("penalized RecallWeight = %v, want 0.25", penalized)
+	}
+}
+
 func testConfig() Config {
 	return Config{
 		HighQualityThreshold: 0.8,
@@ -111,6 +129,8 @@ func testConfig() Config {
 		WeightBoostFactor:    1.5,
 		WeightPenaltyFactor:  0.5,
 		AutoMarkThreshold:    0.3,
+		MinWeight:            0.1,
+		MaxWeight:            2,
 	}
 }
 

@@ -17,7 +17,13 @@ export interface ChunkStatsResponse {
   quality_status: string
   related_session_count: number
   dislike_reasons: string[]
+  dislike_reason_stats?: DislikeReasonStat[]
   last_feedback_at?: string
+}
+
+export interface DislikeReasonStat {
+  reason: string
+  count: number
 }
 
 // ChunkQualityStats 低质量片段统计

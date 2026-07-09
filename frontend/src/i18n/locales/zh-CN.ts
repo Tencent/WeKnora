@@ -3443,6 +3443,7 @@ export default {
       qualityStatus: "质量状态",
       relatedSessions: "关联会话",
       dislikeReasons: "点踩原因",
+      weightLogs: "权重变更日志",
       columns: {
         content: "内容",
         likeCount: "点赞",
@@ -3451,12 +3452,27 @@ export default {
         recallWeight: "权重",
         qualityStatus: "状态",
         operations: "操作",
+        action: "动作",
+        trigger: "触发来源",
+        weightChange: "权重变化",
+        createdAt: "时间",
       },
       status: {
         normal: "正常",
         pending_optimization: "待优化",
         optimizing: "优化中",
         optimized: "已优化",
+      },
+      weightLogActions: {
+        adjust_weight: "自动调整",
+        reset: "重置",
+        manual_set: "手动设置",
+      },
+      weightLogTriggers: {
+        user_like: "用户点赞",
+        user_dislike: "用户点踩",
+        user_cancel: "用户取消",
+        admin_reset: "管理员重置",
       },
       messages: {
         loadFailed: "加载反馈数据失败",
@@ -6284,7 +6300,7 @@ export default {
     feedbackSubmitted: "感谢您的反馈",
     feedbackCanceled: "已取消反馈",
     feedbackFailed: "反馈提交失败，请稍后重试",
-    dislikeReasonTitle: "选择原因（可选）",
+    dislikeReasonTitle: "选择原因",
     dislikeReasonPlaceholder: "请选择或输入原因",
     dislikeReasons: {
       inaccurate: "回答不准确",

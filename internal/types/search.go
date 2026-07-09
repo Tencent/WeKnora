@@ -149,6 +149,34 @@ type SearchResult struct {
 	RecallWeight float64 `json:"recall_weight,omitempty"`
 }
 
+// CollectSearchResultChunkIDs returns every chunk ID represented by search
+// results, including chunks absorbed during merge or short-context expansion.
+func CollectSearchResultChunkIDs(results []*SearchResult) []string {
+	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(results))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	for _, result := range results {
+		if result == nil {
+			continue
+		}
+		add(result.ID)
+		for _, subID := range result.SubChunkID {
+			add(subID)
+		}
+	}
+	return ids
+}
+
 // SearchParams represents the search parameters
 type SearchParams struct {
 	QueryText            string    `json:"query_text"`

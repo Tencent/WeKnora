@@ -14,6 +14,7 @@ type QAReplyChunkRefRepository interface {
 	GetByChunkID(ctx context.Context, tenantID uint64, chunkID string) ([]*types.QAReplyChunkRef, error)
 	DeleteByMessageID(ctx context.Context, tenantID uint64, messageID string) error
 	CountByChunkID(ctx context.Context, tenantID uint64, chunkID string) (int64, error)
+	CountSessionsByChunkID(ctx context.Context, tenantID uint64, chunkID string) (int64, error)
 }
 
 // ChunkFeedbackRepository stores a user's current vote for an assistant reply.

@@ -64,6 +64,18 @@ func (r *qaReplyChunkRefRepository) CountByChunkID(ctx context.Context, tenantID
 	return count, err
 }
 
+func (r *qaReplyChunkRefRepository) CountSessionsByChunkID(ctx context.Context, tenantID uint64, chunkID string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("qa_reply_chunk_refs qrcr").
+		Joins("JOIN messages m ON m.id = qrcr.message_id AND m.deleted_at IS NULL").
+		Joins("JOIN sessions s ON s.id = m.session_id AND s.tenant_id = qrcr.tenant_id AND s.deleted_at IS NULL").
+		Where("qrcr.tenant_id = ? AND qrcr.chunk_id = ?", tenantID, chunkID).
+		Distinct("s.id").
+		Count(&count).Error
+	return count, err
+}
+
 type chunkFeedbackRepository struct {
 	db *gorm.DB
 }
@@ -165,7 +177,7 @@ func (r *chunkFeedbackRepository) GetDislikeReasonsByChunkIDs(ctx context.Contex
 	err := r.db.WithContext(ctx).
 		Table("chunk_feedbacks cf").
 		Select("qrcr.chunk_id as chunk_id, cf.dislike_reason as reason").
-		Joins("JOIN qa_reply_chunk_refs qrcr ON cf.message_id = qrcr.message_id").
+		Joins("JOIN qa_reply_chunk_refs qrcr ON cf.tenant_id = qrcr.tenant_id AND cf.message_id = qrcr.message_id").
 		Where("qrcr.tenant_id = ? AND cf.tenant_id = ? AND qrcr.chunk_id IN ? AND cf.is_positive = ? AND cf.dislike_reason IS NOT NULL AND cf.dislike_reason != ''", tenantID, tenantID, chunkIDs, false).
 		Find(&results).Error
 	if err != nil {

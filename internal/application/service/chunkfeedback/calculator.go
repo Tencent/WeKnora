@@ -13,6 +13,8 @@ type Config struct {
 	WeightBoostFactor    float64
 	WeightPenaltyFactor  float64
 	AutoMarkThreshold    float64
+	MinWeight            float64
+	MaxWeight            float64
 }
 
 type State struct {
@@ -70,13 +72,13 @@ func RecallWeight(positiveRate float64, total int, config Config) float64 {
 	if total == 0 {
 		return 1.0
 	}
+	weight := 1.0
 	if positiveRate >= config.HighQualityThreshold {
-		return config.WeightBoostFactor
+		weight = config.WeightBoostFactor
+	} else if positiveRate < config.LowQualityThreshold {
+		weight = config.WeightPenaltyFactor
 	}
-	if positiveRate < config.LowQualityThreshold {
-		return config.WeightPenaltyFactor
-	}
-	return 1.0
+	return clampWeight(weight, config)
 }
 
 func QualityStatus(current string, positiveRate float64, total int, config Config) string {
@@ -94,4 +96,14 @@ func decrementIfPositive(count int) int {
 		return 0
 	}
 	return count - 1
+}
+
+func clampWeight(weight float64, config Config) float64 {
+	if config.MinWeight > 0 && weight < config.MinWeight {
+		return config.MinWeight
+	}
+	if config.MaxWeight > 0 && weight > config.MaxWeight {
+		return config.MaxWeight
+	}
+	return weight
 }

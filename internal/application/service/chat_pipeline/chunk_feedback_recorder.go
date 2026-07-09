@@ -46,7 +46,7 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 	}
 
 	// 检查是否有 assistant message ID
-	if chatManage.AssistantMessageID == "" {
+	if chatManage.MessageID == "" {
 		pipelineWarn(ctx, "ChunkFeedbackRecorder", "skip", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"reason":     "no_assistant_message_id",
@@ -55,15 +55,7 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 	}
 
 	// 提取片段 ID 列表
-	chunkIDs := make([]string, 0, len(results))
-	seen := make(map[string]bool)
-	for _, result := range results {
-		if result.ID != "" && !seen[result.ID] {
-			chunkIDs = append(chunkIDs, result.ID)
-			seen[result.ID] = true
-		}
-	}
-
+	chunkIDs := types.CollectSearchResultChunkIDs(results)
 	if len(chunkIDs) == 0 {
 		pipelineInfo(ctx, "ChunkFeedbackRecorder", "skip", map[string]interface{}{
 			"session_id": chatManage.SessionID,
@@ -72,30 +64,26 @@ func (p *ChunkFeedbackRecorder) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// 异步记录关联关系（不阻塞流程）
-	go func() {
-		bgCtx := context.Background()
-		refs := make([]*types.QAReplyChunkRef, len(chunkIDs))
-		for i, chunkID := range chunkIDs {
-			refs[i] = &types.QAReplyChunkRef{
-				MessageID: chatManage.AssistantMessageID,
-				ChunkID:   chunkID,
-				TenantID:  chatManage.TenantID,
-			}
+	refs := make([]*types.QAReplyChunkRef, len(chunkIDs))
+	for i, chunkID := range chunkIDs {
+		refs[i] = &types.QAReplyChunkRef{
+			MessageID: chatManage.MessageID,
+			ChunkID:   chunkID,
+			TenantID:  chatManage.TenantID,
 		}
+	}
 
-		if err := p.qaRefRepo.CreateBatch(bgCtx, refs); err != nil {
-			logger.Errorf(bgCtx, "Failed to save QA-Chunk refs for message %s: %v",
-				chatManage.AssistantMessageID, err)
-		} else {
-			logger.Infof(bgCtx, "Saved %d QA-Chunk refs for message %s",
-				len(refs), chatManage.AssistantMessageID)
-		}
-	}()
+	if err := p.qaRefRepo.CreateBatch(ctx, refs); err != nil {
+		logger.Errorf(ctx, "Failed to save QA-Chunk refs for message %s: %v",
+			chatManage.MessageID, err)
+	} else {
+		logger.Infof(ctx, "Saved %d QA-Chunk refs for message %s",
+			len(refs), chatManage.MessageID)
+	}
 
 	pipelineInfo(ctx, "ChunkFeedbackRecorder", "recorded", map[string]interface{}{
 		"session_id":  chatManage.SessionID,
-		"message_id":  chatManage.AssistantMessageID,
+		"message_id":  chatManage.MessageID,
 		"result_set":  resultSet,
 		"chunk_count": len(chunkIDs),
 	})

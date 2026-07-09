@@ -2538,6 +2538,7 @@ export default {
       qualityStatus: 'Quality Status',
       relatedSessions: 'Related Sessions',
       dislikeReasons: 'Dislike Reasons',
+      weightLogs: 'Weight Change Logs',
       columns: {
         content: 'Content',
         likeCount: 'Likes',
@@ -2546,12 +2547,27 @@ export default {
         recallWeight: 'Weight',
         qualityStatus: 'Status',
         operations: 'Actions',
+        action: 'Action',
+        trigger: 'Trigger',
+        weightChange: 'Weight Change',
+        createdAt: 'Time',
       },
       status: {
         normal: 'Normal',
         pending_optimization: 'Needs Optimization',
         optimizing: 'Optimizing',
         optimized: 'Optimized',
+      },
+      weightLogActions: {
+        adjust_weight: 'Auto adjusted',
+        reset: 'Reset',
+        manual_set: 'Manual set',
+      },
+      weightLogTriggers: {
+        user_like: 'User like',
+        user_dislike: 'User dislike',
+        user_cancel: 'User cancel',
+        admin_reset: 'Admin reset',
       },
       messages: {
         loadFailed: 'Failed to load feedback data',
@@ -6275,7 +6291,7 @@ export default {
     feedbackSubmitted: 'Thank you for your feedback',
     feedbackCanceled: 'Feedback canceled',
     feedbackFailed: 'Failed to submit feedback, please try again later',
-    dislikeReasonTitle: 'Select a reason (optional)',
+    dislikeReasonTitle: 'Select a reason',
     dislikeReasonPlaceholder: 'Please select or enter a reason',
     dislikeReasons: {
       inaccurate: 'Inaccurate answer',

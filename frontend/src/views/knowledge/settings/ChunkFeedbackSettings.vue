@@ -136,13 +136,39 @@
           </t-descriptions-item>
         </t-descriptions>
 
-        <div v-if="chunkStats.dislike_reasons?.length" class="dislike-reasons">
+        <div v-if="chunkStats.dislike_reason_stats?.length" class="dislike-reasons">
           <h4>{{ $t('knowledgeEditor.feedback.dislikeReasons') }}</h4>
           <t-tag-group>
-            <t-tag v-for="reason in chunkStats.dislike_reasons" :key="reason" theme="danger">
-              {{ reason }}
+            <t-tag v-for="item in chunkStats.dislike_reason_stats" :key="item.reason" theme="danger">
+              {{ formatReasonLabel(item.reason) }} × {{ item.count }}
             </t-tag>
           </t-tag-group>
+        </div>
+
+        <div class="weight-logs">
+          <h4>{{ $t('knowledgeEditor.feedback.weightLogs') }}</h4>
+          <t-table
+            :data="weightLogs"
+            :columns="weightLogColumns"
+            row-key="id"
+            :pagination="false"
+            size="small"
+          >
+            <template #action="{ row }">
+              {{ getWeightLogActionLabel(row.action) }}
+            </template>
+            <template #trigger="{ row }">
+              {{ getWeightLogTriggerLabel(row.trigger_type) }}
+            </template>
+            <template #weightChange="{ row }">
+              <span :class="{ 'weight-boosted': row.new_weight > row.old_weight, 'weight-penalized': row.new_weight < row.old_weight }">
+                {{ row.old_weight.toFixed(2) }} → {{ row.new_weight.toFixed(2) }}
+              </span>
+            </template>
+            <template #createdAt="{ row }">
+              {{ formatDateTime(row.created_at) }}
+            </template>
+          </t-table>
         </div>
       </div>
     </t-dialog>
@@ -158,8 +184,10 @@ import {
   getChunkStats,
   getFeedbackOverview,
   resetChunkFeedback,
+  getChunkWeightLogs,
   type ChunkQualityStats,
   type ChunkStatsResponse,
+  type WeightLogItem,
 } from '@/api/feedback'
 
 interface Props {
@@ -176,6 +204,7 @@ const showLowQualityDialog = ref(false)
 const showChunkDetailDialog = ref(false)
 const lowQualityChunks = ref<ChunkQualityStats[]>([])
 const chunkStats = ref<ChunkStatsResponse | null>(null)
+const weightLogs = ref<WeightLogItem[]>([])
 const currentPage = ref(1)
 const pageSize = ref(10)
 const totalCount = ref(0)
@@ -204,6 +233,13 @@ const columns = [
   { colKey: 'recallWeight', header: t('knowledgeEditor.feedback.columns.recallWeight'), width: '10%' },
   { colKey: 'qualityStatus', header: t('knowledgeEditor.feedback.columns.qualityStatus'), width: '15%' },
   { colKey: 'operations', header: t('knowledgeEditor.feedback.columns.operations'), width: '10%' },
+]
+
+const weightLogColumns = [
+  { colKey: 'action', header: t('knowledgeEditor.feedback.columns.action'), width: '24%' },
+  { colKey: 'trigger', header: t('knowledgeEditor.feedback.columns.trigger'), width: '26%' },
+  { colKey: 'weightChange', header: t('knowledgeEditor.feedback.columns.weightChange'), width: '25%' },
+  { colKey: 'createdAt', header: t('knowledgeEditor.feedback.columns.createdAt'), width: '25%' },
 ]
 
 // 加载统计数据
@@ -244,9 +280,13 @@ const loadLowQualityChunks = async () => {
 // 查看片段详情
 const viewChunkStats = async (chunkId: string) => {
   try {
-    const res = await getChunkStats(chunkId)
-    if (res.data) {
-      chunkStats.value = res.data
+    const [statsRes, logsRes] = await Promise.all([
+      getChunkStats(chunkId),
+      getChunkWeightLogs(chunkId, 20),
+    ])
+    if (statsRes.data) {
+      chunkStats.value = statsRes.data
+      weightLogs.value = logsRes.data?.logs ?? []
       showChunkDetailDialog.value = true
     }
   } catch (error) {
@@ -291,6 +331,33 @@ const getStatusTheme = (status: string) => {
 
 const getStatusLabel = (status: string) => {
   return t(`knowledgeEditor.feedback.status.${status}`)
+}
+
+const getWeightLogActionLabel = (action: string) => {
+  return t(`knowledgeEditor.feedback.weightLogActions.${action}`)
+}
+
+const getWeightLogTriggerLabel = (trigger: string) => {
+  return t(`knowledgeEditor.feedback.weightLogTriggers.${trigger}`)
+}
+
+const formatReasonLabel = (reason: string) => {
+  const keyMap: Record<string, string> = {
+    inaccurate: 'inaccurate',
+    incomplete: 'incomplete',
+    unclear: 'unclear',
+    irrelevant: 'unrelated',
+    other: 'other',
+  }
+  const key = keyMap[reason]
+  return key ? t(`chunkFeedback.dislikeReasons.${key}`) : reason
+}
+
+const formatDateTime = (value?: string) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
 }
 
 onMounted(() => {
@@ -356,7 +423,8 @@ onMounted(() => {
   }
 
   .chunk-detail {
-    .dislike-reasons {
+    .dislike-reasons,
+    .weight-logs {
       margin-top: 16px;
 
       h4 {

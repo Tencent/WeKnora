@@ -349,7 +349,7 @@ const handleDislike = () => {
 const submitDislike = async () => {
     if (!props.session?.id) return;
 
-    const reason = selectedReason.value === 'other' ? customReason.value : selectedReason.value;
+    const reason = (selectedReason.value === 'other' ? customReason.value : selectedReason.value).trim();
     if (!reason) {
         MessagePlugin.warning(t('chunkFeedback.dislikeReasonPlaceholder'));
         return;
@@ -367,6 +367,20 @@ const submitDislike = async () => {
     } catch (error) {
         console.error('提交反馈失败:', error);
         MessagePlugin.error(t('chunkFeedback.feedbackFailed'));
+    }
+};
+
+const loadCurrentFeedback = async () => {
+    if (!props.session?.id) {
+        currentFeedback.value = null;
+        return;
+    }
+    try {
+        const res = await getUserFeedback(props.session.id);
+        currentFeedback.value = res?.data?.is_positive ?? null;
+    } catch (error) {
+        console.warn('获取反馈状态失败:', error);
+        currentFeedback.value = null;
     }
 };
 
@@ -400,15 +414,9 @@ onUpdated(() => {
     });
 });
 
+watch(() => props.session?.id, loadCurrentFeedback, { immediate: true });
+
 onMounted(async () => {
-    if (props.session?.id) {
-        try {
-            const res = await getUserFeedback(props.session.id);
-            currentFeedback.value = res?.data?.is_positive ?? null;
-        } catch (error) {
-            console.warn('获取反馈状态失败:', error);
-        }
-    }
     // 为 markdown-content 中的图片添加点击事件
     nextTick(async () => {
         if (parentMd.value) {

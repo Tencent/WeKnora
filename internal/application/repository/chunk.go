@@ -144,6 +144,20 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
+// ListAllChunksByKnowledgeID lists every chunk type for a knowledge ID.
+func (r *chunkRepository) ListAllChunksByKnowledgeID(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Order("chunk_index ASC, created_at ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	ctx context.Context,
@@ -1160,17 +1174,17 @@ func (r *chunkRepository) CountLowQualityChunks(ctx context.Context, tenantID ui
 }
 
 // GetChunkFeedbackOverview 获取租户下片段反馈聚合概览
-func (r *chunkRepository) GetChunkFeedbackOverview(ctx context.Context, tenantID uint64) (*types.ChunkFeedbackOverviewResponse, error) {
+func (r *chunkRepository) GetChunkFeedbackOverview(ctx context.Context, tenantID uint64, highThreshold, lowThreshold float64) (*types.ChunkFeedbackOverviewResponse, error) {
 	var overview types.ChunkFeedbackOverviewResponse
 	err := r.db.WithContext(ctx).
 		Model(&types.Chunk{}).
 		Select(`
 			COUNT(*) AS total_chunks,
-			COALESCE(SUM(CASE WHEN positive_rate >= ? THEN 1 ELSE 0 END), 0) AS high_quality_count,
-			COALESCE(SUM(CASE WHEN positive_rate <= ? THEN 1 ELSE 0 END), 0) AS low_quality_count,
+			COALESCE(SUM(CASE WHEN (like_count + dislike_count) > 0 AND positive_rate >= ? THEN 1 ELSE 0 END), 0) AS high_quality_count,
+			COALESCE(SUM(CASE WHEN (like_count + dislike_count) > 0 AND positive_rate <= ? THEN 1 ELSE 0 END), 0) AS low_quality_count,
 			COALESCE(SUM(like_count + dislike_count), 0) AS total_feedbacks
-		`, 0.8, 0.5).
-		Where("tenant_id = ? AND (like_count + dislike_count) > 0", tenantID).
+		`, highThreshold, lowThreshold).
+		Where("tenant_id = ?", tenantID).
 		Scan(&overview).Error
 	if err != nil {
 		return nil, err
