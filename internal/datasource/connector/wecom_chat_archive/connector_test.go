@@ -1,11 +1,23 @@
 package wecom_chat_archive
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+type fakeArchiveClient struct {
+	validateErr error
+	messages    []ArchiveMessageEnvelope
+}
+
+func (f *fakeArchiveClient) Validate(ctx context.Context) error { return f.validateErr }
+func (f *fakeArchiveClient) FetchMessages(ctx context.Context, startSeq uint64, limit int) ([]ArchiveMessageEnvelope, bool, error) {
+	return f.messages, false, nil
+}
+func (f *fakeArchiveClient) Close() error { return nil }
 
 func validConfig() *types.DataSourceConfig {
 	return &types.DataSourceConfig{
@@ -75,6 +87,57 @@ func TestParseConfigRequiresCredentialsWithoutLeakingSecrets(t *testing.T) {
 	}
 	if strings.Contains(err, "top-secret") || strings.Contains(err, "BEGIN PRIVATE KEY") {
 		t.Fatalf("error leaked secret material: %q", err)
+	}
+}
+
+func TestConnectorType(t *testing.T) {
+	if NewConnector().Type() != types.ConnectorTypeWeComChatArchive {
+		t.Fatalf("Type() = %q", NewConnector().Type())
+	}
+}
+
+func TestValidateUsesArchiveClient(t *testing.T) {
+	called := false
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		called = true
+		return &fakeArchiveClient{}
+	}))
+	if err := c.Validate(context.Background(), validConfig()); err != nil {
+		t.Fatalf("Validate error: %v", err)
+	}
+	if !called {
+		t.Fatal("client factory was not called")
+	}
+}
+
+func TestListResourcesReturnsVirtualAllOnlyAtRoot(t *testing.T) {
+	c := NewConnector()
+	resources, err := c.ListResources(context.Background(), validConfig(), "")
+	if err != nil {
+		t.Fatalf("ListResources error: %v", err)
+	}
+	if len(resources) != 1 || resources[0].ExternalID != "all" {
+		t.Fatalf("resources = %#v", resources)
+	}
+	if resources[0].Type != "wecom_chat_archive_scope" {
+		t.Fatalf("resource type = %q", resources[0].Type)
+	}
+	children, err := c.ListResources(context.Background(), validConfig(), "all")
+	if err != nil {
+		t.Fatalf("ListResources child error: %v", err)
+	}
+	if len(children) != 0 {
+		t.Fatalf("child resources = %#v, want empty", children)
+	}
+}
+
+func TestResolveResourceAncestorsReturnsEmpty(t *testing.T) {
+	ancestors, err := NewConnector().ResolveResourceAncestors(context.Background(), validConfig(), []string{"all"})
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors error: %v", err)
+	}
+	if len(ancestors) != 0 {
+		t.Fatalf("ancestors = %#v, want empty", ancestors)
 	}
 }
 
