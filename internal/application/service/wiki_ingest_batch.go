@@ -329,15 +329,33 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// batches); Lite mode peeks under its in-process lock.
 	var pendingOps []WikiPendingOp
 	var peekedIDs []int64
+	var loadErr error
 	if s.redisClient != nil {
-		pendingOps, peekedIDs = s.claimPendingList(ctx, payload.KnowledgeBaseID, batchSize)
+		pendingOps, peekedIDs, loadErr = s.claimPendingList(ctx, payload.KnowledgeBaseID, batchSize)
 	} else {
-		pendingOps, peekedIDs = s.peekPendingList(ctx, payload.KnowledgeBaseID, batchSize)
+		pendingOps, peekedIDs, loadErr = s.peekPendingList(ctx, payload.KnowledgeBaseID, batchSize)
+	}
+	if loadErr != nil {
+		// Transient failure loading the pending list. Return an error so
+		// asynq retries this trigger with backoff — acking here would strand
+		// the queue until an unrelated upload happened to re-trigger it.
+		exitStatus = "load_pending_failed"
+		logger.Warnf(ctx, "wiki ingest: failed to load pending list for KB %s: %v", payload.KnowledgeBaseID, loadErr)
+		return fmt.Errorf("wiki ingest: load pending list: %w", loadErr)
 	}
 	pendingOpsCount = len(pendingOps)
 	if len(pendingOps) == 0 {
 		exitStatus = "no_pending_ops"
 		logger.Infof(ctx, "wiki ingest: no pending operations for KB %s", payload.KnowledgeBaseID)
+		// We claimed nothing, but rows may still exist held by a FRESH claim
+		// (a concurrent batch that is still running, or one that crashed
+		// mid-flight and left claimed_at stamped). This no-op return does not
+		// chain a follow-up, so without a safety net a crashed batch's rows
+		// would sit unclaimable until wikiClaimStaleAfter AND never get
+		// re-triggered afterwards — stranding the KB indefinitely. Schedule a
+		// coalesced recheck timed past the stale threshold so those rows are
+		// reclaimed automatically once eligible.
+		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, payload)
 		return nil
 	}
 
@@ -875,7 +893,13 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		key := "wiki:finalize:active:" + payload.KnowledgeBaseID
 		acquired, err := s.redisClient.SetNX(ctx, key, "1", wikiFinalizeLockTTL).Result()
 		if err != nil {
-			logger.Warnf(ctx, "wiki finalize: SetNX failed: %v", err)
+			// Fail CLOSED: proceeding unlocked would let two finalize runs
+			// drain the same PeekBatch rows and double-rebuild the index page
+			// (GetPage→modify→UpdatePage lost update). Return an error so
+			// asynq retries the (coalesced) finalize once Redis recovers,
+			// instead of racing a concurrent finalize.
+			logger.Warnf(ctx, "wiki finalize: SetNX failed for KB %s: %v (retrying)", payload.KnowledgeBaseID, err)
+			return fmt.Errorf("wiki finalize: acquire lock: %w", err)
 		} else if !acquired {
 			// Another finalize is running; it will drain the lane and
 			// reschedule if rows remain. Safe to no-op.

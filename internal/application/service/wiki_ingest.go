@@ -626,19 +626,23 @@ func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIn
 // matches the legacy "LTrim peekedCount entries" semantics, where
 // duplicates collapsed by the consumer were also drained from the
 // list once their canonical sibling had been processed.
-func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string, limit int) (ops []WikiPendingOp, peekedIDs []int64) {
+func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string, limit int) (ops []WikiPendingOp, peekedIDs []int64, err error) {
 	if s.pendingRepo == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if limit <= 0 {
 		limit = wikiMaxDocsPerBatch
 	}
 	rows, err := s.pendingRepo.PeekBatch(ctx, wikiTaskType, wikiTaskScope, kbID, limit)
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to peek pending list: %v", err)
-		return nil, nil
+		// Surface the error so the caller can distinguish a transient DB
+		// failure from a genuinely empty queue: the former must trigger an
+		// asynq retry, whereas returning "no rows" here would ack the task
+		// as a false success and strand the pending list.
+		return nil, nil, err
 	}
-	return s.decodePendingRows(ctx, rows)
+	ops, peekedIDs = s.decodePendingRows(ctx, rows)
+	return ops, peekedIDs, nil
 }
 
 // claimPendingList is the standard-mode (Redis) counterpart of
@@ -649,9 +653,9 @@ func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string, li
 // a crashed worker) are recovered. Dedup / peekedIDs semantics match
 // peekPendingList; the returned peekedIDs are the claimed rows that the
 // caller must DeleteByIDs on success or ReleaseByIDs to retry.
-func (s *wikiIngestService) claimPendingList(ctx context.Context, kbID string, limit int) (ops []WikiPendingOp, peekedIDs []int64) {
+func (s *wikiIngestService) claimPendingList(ctx context.Context, kbID string, limit int) (ops []WikiPendingOp, peekedIDs []int64, err error) {
 	if s.pendingRepo == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if limit <= 0 {
 		limit = wikiMaxDocsPerBatch
@@ -659,10 +663,13 @@ func (s *wikiIngestService) claimPendingList(ctx context.Context, kbID string, l
 	rows, err := s.pendingRepo.ClaimBatch(ctx, wikiTaskType, wikiTaskScope, kbID, limit,
 		time.Now().Add(-wikiClaimStaleAfter))
 	if err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to claim pending list: %v", err)
-		return nil, nil
+		// A claim failure is transient (DB blip). Propagate it so the batch
+		// returns an error and asynq retries, instead of acking the trigger
+		// as a false "no pending ops" success and stranding the queue.
+		return nil, nil, err
 	}
-	return s.decodePendingRows(ctx, rows)
+	ops, peekedIDs = s.decodePendingRows(ctx, rows)
+	return ops, peekedIDs, nil
 }
 
 // withSlugLock serializes read-modify-write on one shared wiki page across
@@ -802,6 +809,50 @@ func (s *wikiIngestService) scheduleCappedRetry(ctx context.Context, payload Wik
 		}
 		logger.Warnf(ctx, "wiki ingest: capped-retry enqueue failed: %v", err)
 	}
+}
+
+// scheduleStaleClaimRecheck arms a single, far-future safety-net trigger for a
+// KB that still has pending rows but yielded nothing to claim (every eligible
+// row is held by a FRESH claim). Normally a running batch drains those rows and
+// chains its own fast follow-up on completion; this net exists only for the
+// case where the claim holder CRASHED, leaving claimed_at stamped so no worker
+// can re-claim until wikiClaimStaleAfter elapses — and where nothing else would
+// ever re-trigger the KB afterwards.
+//
+// The delay is set past the stale threshold so that when the net fires the
+// abandoned claims are guaranteed eligible again. asynq.TaskID coalesces all
+// rechecks for one KB into a single pending net (no thundering herd from
+// concurrent no-op batches). If PendingCount is already zero the KB has fully
+// drained and no net is needed. Returns true if a net is (or already was)
+// scheduled.
+func (s *wikiIngestService) scheduleStaleClaimRecheck(ctx context.Context, payload WikiIngestPayload) bool {
+	if s.pendingRepo == nil {
+		return false
+	}
+	count, err := s.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID)
+	if err != nil || count == 0 {
+		return false
+	}
+
+	logger.Infof(ctx, "wiki ingest: %d rows for KB %s held by fresh claims, arming stale-claim recheck", count, payload.KnowledgeBaseID)
+
+	langfuse.InjectTracing(ctx, &payload)
+	b, _ := json.Marshal(payload)
+	t := asynq.NewTask(types.TypeWikiIngest, b,
+		asynq.Queue(types.QueueWiki),
+		asynq.MaxRetry(wikiIngestMaxRetry),
+		asynq.Timeout(60*time.Minute),
+		asynq.ProcessIn(wikiClaimStaleAfter+wikiFollowUpDelay),
+		asynq.TaskID("wiki-ingest-recheck-"+payload.KnowledgeBaseID),
+	)
+	if _, err := s.task.Enqueue(t); err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+			return true // a recheck is already armed for this KB — coalesced
+		}
+		logger.Warnf(ctx, "wiki ingest: stale-claim recheck enqueue failed: %v", err)
+		return false
+	}
+	return true
 }
 
 // decodePendingRows converts raw task_pending_ops rows into WikiPendingOps,
