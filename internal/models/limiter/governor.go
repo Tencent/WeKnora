@@ -28,6 +28,17 @@ func SetGovernor(l ModelConcurrencyLimiter, limit int) {
 	governorN = limit
 }
 
+// SetGlobalLimit updates ONLY the process-wide default per-model limit,
+// leaving the installed limiter backend intact. Used by the system-settings
+// runtime bridge so an operator can retune model.max_concurrency without a
+// restart. A non-positive value disables the default (models that carry their
+// own MaxConcurrency still honour it).
+func SetGlobalLimit(limit int) {
+	governorMu.Lock()
+	defer governorMu.Unlock()
+	governorN = limit
+}
+
 // Gate acquires a per-model concurrency slot using the process-wide default
 // limit. Equivalent to GateN(ctx, modelID, 0).
 func Gate(ctx context.Context, modelID string) func() {

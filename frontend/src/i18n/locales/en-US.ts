@@ -3471,6 +3471,9 @@ export default {
         asynq: {
           concurrency: 'Async task worker concurrency',
         },
+        model: {
+          max_concurrency: 'Default per-model concurrency limit',
+        },
       },
       keyDescriptions: {
         auth: {
@@ -3490,6 +3493,10 @@ export default {
         asynq: {
           concurrency:
             'Async task worker concurrency (asynq thread-pool size). Document parsing, embedding, and similar tasks are mostly I/O-bound, so raising this value can shorten queue time for bulk uploads. Requires a service process restart to take effect.',
+        },
+        model: {
+          max_concurrency:
+            'Default cap on concurrent background (ingestion/enrichment) calls to a single model, keyed by model ID and shared across replicas. Read on every call and applied immediately with no restart. 0 or a negative value disables the default cap (each model still honours its own limit configured in model management). Affects background tasks only, not interactive chat.',
         },
       },
       enumLabels: {

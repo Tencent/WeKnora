@@ -19,6 +19,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -193,6 +194,23 @@ var registry = map[string]settingSpec{
 			"Wiki 生成以合成大模型调用为主，独立并发预算可避免上传高峰期被解析任务饿死，" +
 			"同时不会因 Wiki 洪峰拖慢用户面解析。修改后需重启服务进程方可生效。",
 	},
+	// model.max_concurrency is the DEFAULT per-model cap on concurrent
+	// background (ingestion/enrichment) LLM/embedding/VLM calls, keyed by
+	// model ID and shared across replicas. Read at every gated call via the
+	// limiter governor; a runtime bridge (applyModelMaxConcurrency) pushes UI
+	// edits into limiter.SetGlobalLimit so no restart is needed. Individual
+	// models may override this via their own max_concurrency parameter.
+	// Mirrors WEKNORA_MODEL_MAX_CONCURRENCY (default 8). 0/negative disables
+	// the default cap.
+	"model.max_concurrency": {
+		Type:     "int",
+		EnvName:  "WEKNORA_MODEL_MAX_CONCURRENCY",
+		Default:  int64(8),
+		Category: "worker",
+		Description: "后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。" +
+			"每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制" +
+			"（各模型仍会尊重自身在模型管理里配置的上限）。仅影响后台任务，不影响交互式对话。",
+	},
 }
 
 // systemSettingService wires the repository, audit log, and (P2)
@@ -298,6 +316,7 @@ func (s *systemSettingService) preload(ctx context.Context) {
 	// the subsystem doesn't lag the cache by a full request cycle.
 	// Add new bridges here as more env vars get migrated.
 	s.applySSRFWhitelist(ctx)
+	s.applyModelMaxConcurrency(ctx)
 }
 
 // encodeDefault produces the JSONB encoding for a spec's built-in
@@ -389,6 +408,8 @@ func (s *systemSettingService) dispatchSideEffects(ctx context.Context, changedK
 	switch changedKey {
 	case "ssrf.whitelist":
 		s.applySSRFWhitelist(ctx)
+	case "model.max_concurrency":
+		s.applyModelMaxConcurrency(ctx)
 	}
 }
 
@@ -415,6 +436,21 @@ func (s *systemSettingService) applySSRFWhitelist(ctx context.Context) {
 	utils.SetSSRFWhitelistFromRaw(merged)
 	logger.Infof(ctx, "[system_settings] SSRF whitelist applied (%d primary entries, extra=%v)",
 		len(list), extra != "")
+}
+
+// applyModelMaxConcurrency resolves model.max_concurrency via the 3-tier
+// resolver and pushes it into the model concurrency governor so UI edits take
+// effect without a restart. Only the process-wide default limit is retuned;
+// the installed limiter backend (redis/local) stays intact. The default (8)
+// deliberately mirrors container.defaultModelMaxConcurrency so the value here
+// matches what the container installs at boot.
+//
+// Called at preload (initial sync), after Update (this replica's edit), and
+// after reload (peer's edit via pubsub).
+func (s *systemSettingService) applyModelMaxConcurrency(ctx context.Context) {
+	limit := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 8))
+	limiter.SetGlobalLimit(limit)
+	logger.Infof(ctx, "[system_settings] model.max_concurrency applied (limit=%d)", limit)
 }
 
 // publishChange fans the change out to peers. Best-effort: a Redis

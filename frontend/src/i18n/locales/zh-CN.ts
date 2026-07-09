@@ -2479,6 +2479,9 @@ export default {
         asynq: {
           concurrency: "异步任务并发数",
         },
+        model: {
+          max_concurrency: "模型默认并发上限",
+        },
       },
       keyDescriptions: {
         auth: {
@@ -2505,6 +2508,12 @@ export default {
             "异步任务 worker 并发数（asynq 线程池大小）。" +
             "文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
             "修改后需重启服务进程方可生效。",
+        },
+        model: {
+          max_concurrency:
+            "后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。" +
+            "每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制" +
+            "（各模型仍会尊重自身在模型管理里配置的上限）。仅影响后台任务，不影响交互式对话。",
         },
       },
       enumLabels: {
