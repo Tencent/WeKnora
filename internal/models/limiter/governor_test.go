@@ -91,6 +91,43 @@ func TestLocalLimiterIndependentKeys(t *testing.T) {
 	rb()
 }
 
+// TestLocalLimiterHonorsChangedLimit verifies Lite mode uses the limit passed
+// to each acquire, not a capacity frozen on the first use of a model key.
+func TestLocalLimiterHonorsChangedLimit(t *testing.T) {
+	l := NewLocalLimiter()
+	ctx := context.Background()
+
+	r1, _ := l.Acquire(ctx, "k", 2)
+	r2, _ := l.Acquire(ctx, "k", 2)
+
+	done := make(chan func(), 1)
+	go func() {
+		r3, _ := l.Acquire(ctx, "k", 1)
+		done <- r3
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("acquire with lower limit should block while current holders exceed the new limit")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	r1()
+	select {
+	case <-done:
+		t.Fatal("acquire with limit=1 should still block while one holder remains")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	r2()
+	select {
+	case r3 := <-done:
+		r3()
+	case <-time.After(time.Second):
+		t.Fatal("waiter should proceed once holders drop below the new limit")
+	}
+}
+
 // TestLocalLimiterFailOpen verifies degraded inputs pass through.
 func TestLocalLimiterFailOpen(t *testing.T) {
 	l := NewLocalLimiter()

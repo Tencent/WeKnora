@@ -77,13 +77,17 @@ func GateN(ctx context.Context, modelID string, modelLimit int) func() {
 // available nor needed — but background ingestion can still burst the whole
 // worker pool against one provider, so we still cap concurrency locally.
 type localLimiter struct {
-	mu   sync.Mutex
-	sems map[string]chan struct{}
+	mu      sync.Mutex
+	holders map[string]int
+	notify  chan struct{}
 }
 
 // NewLocalLimiter builds an in-process per-key concurrency limiter.
 func NewLocalLimiter() ModelConcurrencyLimiter {
-	return &localLimiter{sems: make(map[string]chan struct{})}
+	return &localLimiter{
+		holders: make(map[string]int),
+		notify:  make(chan struct{}),
+	}
 }
 
 func (l *localLimiter) Acquire(ctx context.Context, key string, limit int) (func(), error) {
@@ -91,22 +95,35 @@ func (l *localLimiter) Acquire(ctx context.Context, key string, limit int) (func
 		return noop, nil
 	}
 
-	l.mu.Lock()
-	sem, ok := l.sems[key]
-	if !ok {
-		// Capacity is fixed at first use for a key; the limit is a
-		// process-wide constant, so it never changes across acquires.
-		sem = make(chan struct{}, limit)
-		l.sems[key] = sem
-	}
-	l.mu.Unlock()
+	for {
+		l.mu.Lock()
+		if l.holders[key] < limit {
+			l.holders[key]++
+			l.mu.Unlock()
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					l.mu.Lock()
+					if l.holders[key] > 0 {
+						l.holders[key]--
+						if l.holders[key] == 0 {
+							delete(l.holders, key)
+						}
+					}
+					close(l.notify)
+					l.notify = make(chan struct{})
+					l.mu.Unlock()
+				})
+			}, nil
+		}
+		notify := l.notify
+		l.mu.Unlock()
 
-	select {
-	case sem <- struct{}{}:
-		var once sync.Once
-		return func() { once.Do(func() { <-sem }) }, nil
-	case <-ctx.Done():
-		// Fail open on cancellation, mirroring the Redis limiter.
-		return noop, nil
+		select {
+		case <-notify:
+		case <-ctx.Done():
+			// Fail open on cancellation, mirroring the Redis limiter.
+			return noop, nil
+		}
 	}
 }
