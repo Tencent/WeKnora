@@ -19,6 +19,7 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDataSourceSelectionDefaults } from './datasourceDefaults'
+import { getCredentialFieldRenderKind } from './datasourceFieldRendering'
 import { getDatasourceIconUrl } from './datasourceIcons'
 
 const props = defineProps<{
@@ -1275,7 +1276,7 @@ const drawerConfirmText = computed(() => {
                 {{ t(field.labelKey) }}
               </label>
               <t-textarea
-                v-if="field.multiline"
+                v-if="getCredentialFieldRenderKind(field) === 'textarea'"
                 v-model="form.config.credentials[field.key]"
                 :placeholder="field.placeholder || t('credential.inputPlaceholder')"
                 :autosize="{ minRows: 2, maxRows: 6 }"
@@ -1286,7 +1287,7 @@ const drawerConfirmText = computed(() => {
                 v-else
                 v-model="form.config.credentials[field.key]"
                 :placeholder="field.placeholder || t('credential.inputPlaceholder')"
-                :type="field.secret ? 'password' : 'text'"
+                :type="getCredentialFieldRenderKind(field) === 'password' ? 'password' : 'text'"
                 autocomplete="off"
                 spellcheck="false"
               >

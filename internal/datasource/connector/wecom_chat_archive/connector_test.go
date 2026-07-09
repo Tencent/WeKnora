@@ -2,6 +2,7 @@ package wecom_chat_archive
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -12,11 +13,15 @@ import (
 
 type fakeArchiveClient struct {
 	validateErr error
+	fetchErr    error
 	messages    []ArchiveMessageEnvelope
 }
 
 func (f *fakeArchiveClient) Validate(ctx context.Context) error { return f.validateErr }
 func (f *fakeArchiveClient) FetchMessages(ctx context.Context, startSeq uint64, limit int) ([]ArchiveMessageEnvelope, bool, error) {
+	if f.fetchErr != nil {
+		return nil, false, f.fetchErr
+	}
 	var out []ArchiveMessageEnvelope
 	for _, msg := range f.messages {
 		if msg.Seq >= startSeq {
@@ -202,6 +207,63 @@ func TestFetchIncrementalStartsAfterCursorAndAdvancesSeq(t *testing.T) {
 	}
 }
 
+func TestFetchIncrementalAdvancesCursorPastEmptyConversation(t *testing.T) {
+	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		return &fakeArchiveClient{messages: []ArchiveMessageEnvelope{
+			{Seq: 11, MsgID: "empty", MsgType: "text", ConversationID: "", From: Sender{UserID: "a"}, MsgTime: now, Raw: []byte("empty")},
+			{Seq: 12, MsgID: "keep", MsgType: "text", ConversationID: "wr_xxx", ConversationType: conversationTypeRoom, From: Sender{UserID: "b"}, MsgTime: now.Add(time.Minute), Raw: []byte("keep")},
+		}}
+	}))
+	cursor := &types.SyncCursor{ConnectorCursor: map[string]interface{}{"last_seq": float64(10)}}
+	items, next, err := c.FetchIncremental(context.Background(), validConfig(), cursor)
+	if err != nil {
+		t.Fatalf("FetchIncremental error: %v", err)
+	}
+	if len(items) != 1 || !strings.Contains(string(items[0].Content), "keep") {
+		t.Fatalf("items = %#v", items)
+	}
+	if got := uint64(next.ConnectorCursor["last_seq"].(float64)); got != 12 {
+		t.Fatalf("last_seq = %d, want 12", got)
+	}
+}
+
+func TestFetchIncrementalAdvancesCursorWhenOnlyEmptyConversations(t *testing.T) {
+	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		return &fakeArchiveClient{messages: []ArchiveMessageEnvelope{
+			{Seq: 11, MsgID: "empty", MsgType: "text", ConversationID: "", From: Sender{UserID: "a"}, MsgTime: now, Raw: []byte("empty")},
+		}}
+	}))
+	cursor := &types.SyncCursor{ConnectorCursor: map[string]interface{}{"last_seq": float64(10)}}
+	items, next, err := c.FetchIncremental(context.Background(), validConfig(), cursor)
+	if err != nil {
+		t.Fatalf("FetchIncremental error: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %#v, want empty", items)
+	}
+	if got := uint64(next.ConnectorCursor["last_seq"].(float64)); got != 11 {
+		t.Fatalf("last_seq = %d, want 11", got)
+	}
+}
+
+func TestValidateRedactsConfiguredSecretsFromClientErrors(t *testing.T) {
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		return &fakeArchiveClient{validateErr: errors.New("auth failed with top-secret and -----BEGIN PRIVATE KEY-----")}
+	}))
+	err := c.Validate(context.Background(), validConfig())
+	assertErrorRedacted(t, err)
+}
+
+func TestFetchIncrementalRedactsConfiguredSecretsFromClientErrors(t *testing.T) {
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		return &fakeArchiveClient{fetchErr: errors.New("fetch failed with top-secret and -----BEGIN PRIVATE KEY-----")}
+	}))
+	_, _, err := c.FetchIncremental(context.Background(), validConfig(), nil)
+	assertErrorRedacted(t, err)
+}
+
 func TestBucketItemRendersTextAndParticipantMetadata(t *testing.T) {
 	msgTime := time.Date(2026, 7, 7, 9, 1, 22, 0, time.FixedZone("CST", 8*3600))
 	b := newDayBucket(ArchiveMessageEnvelope{
@@ -268,4 +330,15 @@ func parseConfigExpectError(cfg *types.DataSourceConfig) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func assertErrorRedacted(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "top-secret") || strings.Contains(msg, "BEGIN PRIVATE KEY") {
+		t.Fatalf("error leaked secret material: %q", msg)
+	}
 }

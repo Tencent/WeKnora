@@ -45,7 +45,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	client := c.newClient(cfg)
 	defer client.Close()
 	if err := client.Validate(ctx); err != nil {
-		return fmt.Errorf("wecom chat archive connection failed: %w", err)
+		return sanitizeConnectorError(cfg, fmt.Errorf("wecom chat archive connection failed: %w", err))
 	}
 	return nil
 }
@@ -81,7 +81,10 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 	defer client.Close()
 	start := time.Now().UTC().AddDate(0, 0, -cfg.Settings.FullSyncDays)
 	items, _, err := c.fetchAndAggregate(ctx, client, cfg, 0, start)
-	return items, err
+	if err != nil {
+		return nil, sanitizeConnectorError(cfg, err)
+	}
+	return items, nil
 }
 
 func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
@@ -94,7 +97,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 	defer client.Close()
 	items, next, err := c.fetchAndAggregate(ctx, client, cfg, prev.LastSeq+1, time.Time{})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, sanitizeConnectorError(cfg, err)
 	}
 	if next.LastSeq < prev.LastSeq {
 		next.LastSeq = prev.LastSeq
@@ -124,10 +127,13 @@ func (c *Connector) fetchAndAggregate(ctx context.Context, client ArchiveClient,
 			return nil, weComChatArchiveCursor{}, err
 		}
 		for _, msg := range messages {
+			if msg.Seq > next.LastSeq {
+				next.LastSeq = msg.Seq
+			}
+			if msg.Seq >= seq {
+				seq = msg.Seq + 1
+			}
 			if !minTime.IsZero() && msg.MsgTime.Before(minTime) {
-				if msg.Seq >= seq {
-					seq = msg.Seq + 1
-				}
 				continue
 			}
 			if msg.ConversationID == "" {
@@ -143,14 +149,8 @@ func (c *Connector) fetchAndAggregate(ctx context.Context, client ArchiveClient,
 			}
 			normalized := normalizeMessage(msg)
 			addToBucket(bucket, normalized)
-			if msg.Seq > next.LastSeq {
-				next.LastSeq = msg.Seq
-			}
 			if msg.MsgTime.Unix() > next.LastMsgTime {
 				next.LastMsgTime = msg.MsgTime.Unix()
-			}
-			if msg.Seq >= seq {
-				seq = msg.Seq + 1
 			}
 		}
 		if !hasMore {
