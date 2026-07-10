@@ -74,6 +74,25 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		m.sandbox = NewLocalSandbox(m.config)
 		return nil
 
+	case SandboxTypeCube:
+		// The Cube backend needs a proper Session-aware manager to preserve
+		// state across executions; DefaultManager only exposes stateless
+		// semantics. NewManagerFromType routes SandboxTypeCube requests to
+		// SessionBoundManager instead of arriving here. We keep the branch
+		// for defensive completeness: fall back to an ephemeral Cube backend
+		// that behaves like the other stateless sandboxes.
+		cubeSandbox := NewCubeSandbox(m.config)
+		if cubeSandbox.IsAvailable(ctx) {
+			m.sandbox = cubeSandbox
+			return nil
+		}
+		if m.config.FallbackEnabled {
+			log.Printf("[sandbox] cube api unavailable, falling back to local")
+			m.sandbox = NewLocalSandbox(m.config)
+			return nil
+		}
+		return ErrCubeUnavailable
+
 	default:
 		return fmt.Errorf("unknown sandbox type: %s", m.config.Type)
 	}
@@ -97,7 +116,7 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 
 	// Perform security validation unless explicitly skipped
 	if !config.SkipValidation {
-		if err := m.validateExecution(config); err != nil {
+		if err := runScriptValidation(m.validator, config); err != nil {
 			log.Printf("[sandbox] Security validation failed: %v", err)
 			return &ExecuteResult{
 				ExitCode: -1,
@@ -110,9 +129,13 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 	return sandbox.Execute(ctx, config)
 }
 
-// validateExecution performs comprehensive security validation on the execution config
-func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
-	if m.validator == nil {
+// runScriptValidation is the package-level helper that DefaultManager and
+// SessionBoundManager share for pre-execution security checks. Extracting
+// it avoids duplicating the same script/args/stdin validation logic across
+// two Manager implementations while keeping the ScriptValidator private to
+// the manager that owns it.
+func runScriptValidation(validator *ScriptValidator, config *ExecuteConfig) error {
+	if validator == nil || config == nil {
 		return nil
 	}
 
@@ -128,13 +151,11 @@ func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
 
 	// Validate script content
 	if scriptContent != "" {
-		result := m.validator.ValidateScript(scriptContent)
+		result := validator.ValidateScript(scriptContent)
 		if !result.Valid {
-			// Log all validation errors
 			for _, verr := range result.Errors {
 				log.Printf("[sandbox] Validation error: %s", verr.Error())
 			}
-			// Return the first error
 			if len(result.Errors) > 0 {
 				return result.Errors[0]
 			}
@@ -144,7 +165,7 @@ func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
 
 	// Validate arguments
 	if len(config.Args) > 0 {
-		result := m.validator.ValidateArgs(config.Args)
+		result := validator.ValidateArgs(config.Args)
 		if !result.Valid {
 			for _, verr := range result.Errors {
 				log.Printf("[sandbox] Arg validation error: %s", verr.Error())
@@ -158,7 +179,7 @@ func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
 
 	// Validate stdin
 	if config.Stdin != "" {
-		result := m.validator.ValidateStdin(config.Stdin)
+		result := validator.ValidateStdin(config.Stdin)
 		if !result.Valid {
 			for _, verr := range result.Errors {
 				log.Printf("[sandbox] Stdin validation error: %s", verr.Error())
@@ -171,6 +192,12 @@ func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
 	}
 
 	return nil
+}
+
+// validateExecution is a thin wrapper preserved for backwards compatibility;
+// it delegates to the shared runScriptValidation helper.
+func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
+	return runScriptValidation(m.validator, config)
 }
 
 // Cleanup releases all sandbox resources
@@ -224,6 +251,10 @@ func (s *disabledSandbox) IsAvailable(ctx context.Context) bool {
 
 // NewManagerFromType creates a sandbox manager with the specified type.
 // dockerImage is optional; if empty, the default image is used.
+//
+// For SandboxTypeCube the returned manager is a SessionBoundManager, which
+// keeps one persistent MicroVM per SessionID; for other types the returned
+// manager is a DefaultManager. Both satisfy the Manager interface.
 func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage string) (Manager, error) {
 	var sType SandboxType
 	switch sandboxType {
@@ -231,6 +262,8 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 		sType = SandboxTypeDocker
 	case "local":
 		sType = SandboxTypeLocal
+	case "cube":
+		sType = SandboxTypeCube
 	case "disabled", "":
 		sType = SandboxTypeDisabled
 	default:
@@ -244,6 +277,9 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 		config.DockerImage = dockerImage
 	}
 
+	if sType == SandboxTypeCube {
+		return NewSessionBoundManager(config)
+	}
 	return NewManager(config)
 }
 

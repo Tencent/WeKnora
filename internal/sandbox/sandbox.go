@@ -16,6 +16,12 @@ const (
 	SandboxTypeDocker SandboxType = "docker"
 	// SandboxTypeLocal uses local process with restrictions
 	SandboxTypeLocal SandboxType = "local"
+	// SandboxTypeCube uses Tencent CubeSandbox (E2B-compatible) MicroVM for isolation.
+	// Unlike Docker/Local backends which are stateless per execution, Cube supports
+	// session-scoped persistent sandboxes: multiple executions bound to the same
+	// SessionID share the same MicroVM instance and preserve installed packages,
+	// created files, running services, etc.
+	SandboxTypeCube SandboxType = "cube"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
 )
@@ -26,6 +32,30 @@ const (
 	DefaultMemoryLimit = 256 * 1024 * 1024 // 256MB
 	DefaultCPULimit    = 1.0               // 1 CPU core
 	DefaultDockerImage = "wechatopenai/weknora-sandbox:latest"
+
+	// DefaultCubeAPIURL is the default CubeAPI endpoint used when
+	// WEKNORA_SANDBOX_CUBE_API_URL is not configured.
+	DefaultCubeAPIURL = "http://127.0.0.1:33000"
+	// DefaultCubeProxyURL is the default CubeProxy endpoint (HTTP, port 80) used
+	// to reach the in-sandbox envd via host-header routing.
+	DefaultCubeProxyURL = "http://127.0.0.1:80"
+	// DefaultCubeSandboxDomain is the sandbox routing domain configured on
+	// CubeProxy (matches CUBE_API_SANDBOX_DOMAIN in the Cube deployment).
+	DefaultCubeSandboxDomain = "cube.app"
+	// DefaultCubeEnvdPort is the port on which envd listens inside every sandbox.
+	DefaultCubeEnvdPort = 49983
+	// DefaultCubeTemplate is the default template ID used to spawn Cube sandboxes.
+	DefaultCubeTemplate = "tpl-2b7911a5c3bb419a8745957a"
+	// DefaultCubeSandboxTTL is the Cube-side sandbox lifetime hint (in seconds)
+	// requested at creation; the sandbox is torn down by CubeMaster if the
+	// client goes silent for longer than this value.
+	DefaultCubeSandboxTTL = 30 * time.Minute
+	// DefaultCubeIdleTTL is the idle duration after which a session-bound sandbox
+	// is paused; sandboxes idle for 3x this duration are killed entirely.
+	DefaultCubeIdleTTL = 30 * time.Minute
+	// DefaultCubeHTTPTimeout bounds a single HTTP call to the CubeAPI
+	// (excluding user script execution which has its own per-call timeout).
+	DefaultCubeHTTPTimeout = 30 * time.Second
 )
 
 // Common errors
@@ -39,6 +69,7 @@ var (
 	ErrDangerousCommand  = errors.New("script contains dangerous command")
 	ErrArgInjection      = errors.New("argument injection detected")
 	ErrStdinInjection    = errors.New("stdin injection detected")
+	ErrCubeUnavailable   = errors.New("cube sandbox api is not reachable")
 )
 
 // Sandbox defines the interface for isolated script execution
@@ -113,6 +144,12 @@ type ExecuteConfig struct {
 
 	// ScriptContent is the script content for validation (optional, will be read from file if not provided)
 	ScriptContent string
+
+	// SessionID scopes the execution to a per-session persistent sandbox.
+	// Currently only honoured by the Cube backend; Docker/Local backends ignore it.
+	// When empty, Cube falls back to an ephemeral (one-shot) sandbox that is
+	// created and torn down inside the single Execute call.
+	SessionID string
 }
 
 // ExecuteResult contains the result of script execution
@@ -174,18 +211,62 @@ type Config struct {
 
 	// MaxCPU is the maximum CPU cores
 	MaxCPU float64
+
+	// CubeAPIURL is the base URL of the CubeAPI (E2B-compatible) endpoint.
+	// Only used when Type == SandboxTypeCube. Example: "http://127.0.0.1:33000".
+	CubeAPIURL string
+
+	// CubeProxyURL is the base URL of the CubeProxy HTTP endpoint through which
+	// in-sandbox envd traffic is routed via host-header rewriting. Example:
+	// "http://127.0.0.1:80".
+	CubeProxyURL string
+
+	// CubeSandboxDomain matches CubeAPI's CUBE_API_SANDBOX_DOMAIN. It is used to
+	// build the Host header "<port>-<sandboxID>.<domain>" that CubeProxy relies
+	// on to route requests into the correct MicroVM.
+	CubeSandboxDomain string
+
+	// CubeEnvdPort is the internal port envd listens on. Defaults to 49983.
+	CubeEnvdPort int
+
+	// CubeAPIKey is the API key sent via X-API-Key. Leave empty when the Cube
+	// deployment does not enforce authentication.
+	CubeAPIKey string
+
+	// CubeTemplate is the default template ID used when creating sandboxes.
+	CubeTemplate string
+
+	// CubeSandboxTTL is the Cube-side lifetime hint (passed as `timeout` when
+	// creating a sandbox). CubeMaster will reap the MicroVM if the client stops
+	// touching it for longer than this duration.
+	CubeSandboxTTL time.Duration
+
+	// CubeIdleTTL controls how long a session-bound sandbox may remain idle
+	// before it is paused (and later killed). Zero disables idle reaping.
+	CubeIdleTTL time.Duration
+
+	// CubeHTTPTimeout bounds each HTTP call to CubeAPI. Zero uses the default.
+	CubeHTTPTimeout time.Duration
 }
 
 // DefaultConfig returns a default sandbox configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Type:            SandboxTypeLocal,
-		FallbackEnabled: true,
-		DefaultTimeout:  DefaultTimeout,
-		DockerImage:     DefaultDockerImage,
-		AllowedCommands: defaultAllowedCommands(),
-		MaxMemory:       DefaultMemoryLimit,
-		MaxCPU:          DefaultCPULimit,
+		Type:              SandboxTypeLocal,
+		FallbackEnabled:   true,
+		DefaultTimeout:    DefaultTimeout,
+		DockerImage:       DefaultDockerImage,
+		AllowedCommands:   defaultAllowedCommands(),
+		MaxMemory:         DefaultMemoryLimit,
+		MaxCPU:            DefaultCPULimit,
+		CubeAPIURL:        DefaultCubeAPIURL,
+		CubeProxyURL:      DefaultCubeProxyURL,
+		CubeSandboxDomain: DefaultCubeSandboxDomain,
+		CubeEnvdPort:      DefaultCubeEnvdPort,
+		CubeTemplate:      DefaultCubeTemplate,
+		CubeSandboxTTL:    DefaultCubeSandboxTTL,
+		CubeIdleTTL:       DefaultCubeIdleTTL,
+		CubeHTTPTimeout:   DefaultCubeHTTPTimeout,
 	}
 }
 
@@ -222,7 +303,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeCube, SandboxTypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")
