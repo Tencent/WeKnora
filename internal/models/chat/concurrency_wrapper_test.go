@@ -38,8 +38,8 @@ func (f *fakeChat) ChatStream(ctx context.Context, _ []Message, _ *ChatOptions) 
 // TestConcurrencyChatInteractiveNotGated verifies interactive calls bypass the
 // governor entirely even at limit 1.
 func TestConcurrencyChatInteractiveNotGated(t *testing.T) {
-	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
-	limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
+	t.Cleanup(func() { limiter.SetGovernor(nil, nil, limiter.Limits{}) })
+	limiter.SetGovernor(limiter.NewLocalLimiter(), nil, limiter.Limits{Concurrency: 1})
 
 	w := &concurrencyChat{inner: &fakeChat{id: "model-x"}}
 	// No background marker: neither call should be throttled.
@@ -55,8 +55,8 @@ func TestConcurrencyChatInteractiveNotGated(t *testing.T) {
 // stops reading and cancels the context, the held slot is released rather than
 // leaked (the #9 fix).
 func TestConcurrencyChatStreamReleasesOnAbandon(t *testing.T) {
-	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
-	limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
+	t.Cleanup(func() { limiter.SetGovernor(nil, nil, limiter.Limits{}) })
+	limiter.SetGovernor(limiter.NewLocalLimiter(), nil, limiter.Limits{Concurrency: 1})
 
 	const id = "model-y"
 	w := &concurrencyChat{inner: &fakeChat{id: id}}

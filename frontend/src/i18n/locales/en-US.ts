@@ -3473,6 +3473,8 @@ export default {
         },
         model: {
           max_concurrency: 'Default per-model concurrency limit',
+          max_rpm: 'Default per-model requests-per-minute limit',
+          max_tpm: 'Default per-model tokens-per-minute limit',
         },
       },
       keyDescriptions: {
@@ -3497,6 +3499,10 @@ export default {
         model: {
           max_concurrency:
             'Default cap on concurrent background (ingestion/enrichment) calls to a single model, keyed by model ID and shared across replicas. Read on every call and applied immediately with no restart. 0 or a negative value disables the default cap (each model still honours its own limit configured in model management). Affects background tasks only, not interactive chat.',
+          max_rpm:
+            'Default cap on background requests per minute to a single model, keyed by model ID and shared across replicas, to align with the provider RPM quota. Applied immediately with no restart. 0 or a negative value disables the default cap (each model still honours its own limit). Affects background tasks only, not interactive chat.',
+          max_tpm:
+            'Default cap on background tokens per minute to a single model, keyed by model ID and shared across replicas, to align with the provider TPM quota (the limit large-document enrichment hits first). Applied immediately with no restart. 0 or a negative value disables the default cap (each model still honours its own limit). Affects background tasks only, not interactive chat.',
         },
       },
       enumLabels: {
@@ -3783,6 +3789,11 @@ export default {
       maxConcurrencyLabel: 'Background concurrency limit',
       maxConcurrencyPlaceholder: '0 = use global default',
       maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
+      maxRpmLabel: 'Background requests-per-minute (RPM) limit',
+      maxTpmLabel: 'Background tokens-per-minute (TPM) limit',
+      maxRatePlaceholder: '0 = use global default',
+      maxRpmDesc: 'Caps background (ingestion/enrichment) requests per minute to this model, shared per model across all replicas, to align with the provider RPM quota. 0 or empty falls back to the global default; interactive chat is never affected.',
+      maxTpmDesc: 'Caps background (ingestion/enrichment) tokens per minute to this model, shared per model across all replicas, to align with the provider TPM quota (the limit large-document enrichment hits first). 0 or empty falls back to the global default; interactive chat is never affected.',
       thinkingControlLabel: 'Thinking mode request format',
       thinkingControlDesc:
         'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',

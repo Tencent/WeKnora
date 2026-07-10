@@ -197,8 +197,8 @@ var registry = map[string]settingSpec{
 	// model.max_concurrency is the DEFAULT per-model cap on concurrent
 	// background (ingestion/enrichment) LLM/embedding/VLM calls, keyed by
 	// model ID and shared across replicas. Read at every gated call via the
-	// limiter governor; a runtime bridge (applyModelMaxConcurrency) pushes UI
-	// edits into limiter.SetGlobalLimit so no restart is needed. Individual
+	// limiter governor; a runtime bridge (applyModelLimits) pushes UI
+	// edits into limiter.SetGlobalLimits so no restart is needed. Individual
 	// models may override this via their own max_concurrency parameter.
 	// Mirrors WEKNORA_MODEL_MAX_CONCURRENCY (default 8). 0/negative disables
 	// the default cap.
@@ -210,6 +210,32 @@ var registry = map[string]settingSpec{
 		Description: "后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。" +
 			"每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制" +
 			"（各模型仍会尊重自身在模型管理里配置的上限）。仅影响后台任务，不影响交互式对话。",
+	},
+	// model.max_rpm is the DEFAULT per-model cap on background requests per
+	// minute (token bucket, keyed by model ID, shared across replicas). Pushed
+	// into the governor via applyModelLimits — no restart needed. Individual
+	// models may override via their own max_rpm parameter. Mirrors
+	// WEKNORA_MODEL_MAX_RPM (default 0 = disabled).
+	"model.max_rpm": {
+		Type:     "int",
+		EnvName:  "WEKNORA_MODEL_MAX_RPM",
+		Default:  int64(0),
+		Category: "worker",
+		Description: "后台任务对单个模型的默认每分钟请求数（RPM）上限，按模型 ID 全副本共享，用于对齐" +
+			"模型服务商的 RPM 配额。修改后立即生效、无需重启。0 或负数表示关闭默认限制" +
+			"（各模型仍会尊重自身配置的上限）。仅影响后台任务，不影响交互式对话。",
+	},
+	// model.max_tpm is the DEFAULT per-model cap on background tokens per
+	// minute (token bucket). Same bridge/override semantics as max_rpm.
+	// Mirrors WEKNORA_MODEL_MAX_TPM (default 0 = disabled).
+	"model.max_tpm": {
+		Type:     "int",
+		EnvName:  "WEKNORA_MODEL_MAX_TPM",
+		Default:  int64(0),
+		Category: "worker",
+		Description: "后台任务对单个模型的默认每分钟 token 数（TPM）上限，按模型 ID 全副本共享，用于对齐" +
+			"模型服务商的 TPM 配额（大文档富化最先触及的限制）。修改后立即生效、无需重启。" +
+			"0 或负数表示关闭默认限制（各模型仍会尊重自身配置的上限）。仅影响后台任务，不影响交互式对话。",
 	},
 }
 
@@ -316,7 +342,7 @@ func (s *systemSettingService) preload(ctx context.Context) {
 	// the subsystem doesn't lag the cache by a full request cycle.
 	// Add new bridges here as more env vars get migrated.
 	s.applySSRFWhitelist(ctx)
-	s.applyModelMaxConcurrency(ctx)
+	s.applyModelLimits(ctx)
 }
 
 // encodeDefault produces the JSONB encoding for a spec's built-in
@@ -408,8 +434,8 @@ func (s *systemSettingService) dispatchSideEffects(ctx context.Context, changedK
 	switch changedKey {
 	case "ssrf.whitelist":
 		s.applySSRFWhitelist(ctx)
-	case "model.max_concurrency":
-		s.applyModelMaxConcurrency(ctx)
+	case "model.max_concurrency", "model.max_rpm", "model.max_tpm":
+		s.applyModelLimits(ctx)
 	}
 }
 
@@ -438,19 +464,25 @@ func (s *systemSettingService) applySSRFWhitelist(ctx context.Context) {
 		len(list), extra != "")
 }
 
-// applyModelMaxConcurrency resolves model.max_concurrency via the 3-tier
-// resolver and pushes it into the model concurrency governor so UI edits take
-// effect without a restart. Only the process-wide default limit is retuned;
-// the installed limiter backend (redis/local) stays intact. The default (8)
-// deliberately mirrors container.defaultModelMaxConcurrency so the value here
-// matches what the container installs at boot.
+// applyModelLimits resolves the three model background limit defaults
+// (concurrency / RPM / TPM) via the 3-tier resolver and pushes them into the
+// model governor so UI edits take effect without a restart. Only the
+// process-wide default limits are retuned; the installed limiter backends
+// (redis/local) stay intact. The defaults here deliberately mirror
+// container.defaultModelMax* so the values match what the container installs at
+// boot.
 //
 // Called at preload (initial sync), after Update (this replica's edit), and
 // after reload (peer's edit via pubsub).
-func (s *systemSettingService) applyModelMaxConcurrency(ctx context.Context) {
-	limit := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 8))
-	limiter.SetGlobalLimit(limit)
-	logger.Infof(ctx, "[system_settings] model.max_concurrency applied (limit=%d)", limit)
+func (s *systemSettingService) applyModelLimits(ctx context.Context) {
+	def := limiter.Limits{
+		Concurrency: int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 8)),
+		RPM:         int(s.GetInt(ctx, "model.max_rpm", "WEKNORA_MODEL_MAX_RPM", 0)),
+		TPM:         int(s.GetInt(ctx, "model.max_tpm", "WEKNORA_MODEL_MAX_TPM", 0)),
+	}
+	limiter.SetGlobalLimits(def)
+	logger.Infof(ctx, "[system_settings] model limits applied (concurrency=%d, rpm=%d, tpm=%d)",
+		def.Concurrency, def.RPM, def.TPM)
 }
 
 // publishChange fans the change out to peers. Best-effort: a Redis

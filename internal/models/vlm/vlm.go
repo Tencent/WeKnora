@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -29,9 +30,11 @@ type Config struct {
 	ModelID       string
 	InterfaceType string // "ollama" or "openai" (default)
 	Provider      string
-	// MaxConcurrency caps concurrent background calls to this model; 0 falls
-	// back to the process-wide default (see limiter.GateN).
+	// MaxConcurrency / MaxRPM / MaxTPM cap background calls to this model; 0 in
+	// any dimension falls back to the process-wide default (see limiter.Admit).
 	MaxConcurrency int
+	MaxRPM         int
+	MaxTPM         int
 	Extra          map[string]any
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
@@ -64,6 +67,8 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 		InterfaceType:  ifType,
 		Provider:       m.Parameters.Provider,
 		MaxConcurrency: m.Parameters.MaxConcurrency,
+		MaxRPM:         m.Parameters.MaxRPM,
+		MaxTPM:         m.Parameters.MaxTPM,
 		Extra:          stringMapToAnyMap(m.Parameters.ExtraConfig),
 		CustomHeaders:  m.Parameters.CustomHeaders,
 		AppID:          appID,
@@ -92,9 +97,13 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 		v = &debugVLM{inner: v}
 	}
 	v, err = wrapVLMLangfuse(v, nil)
-	// Outermost: hold the per-model concurrency slot only around the real
+	// Outermost: hold the per-model governor reservation only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
-	return wrapVLMConcurrency(v, config.MaxConcurrency, err)
+	return wrapVLMConcurrency(v, limiter.Limits{
+		Concurrency: config.MaxConcurrency,
+		RPM:         config.MaxRPM,
+		TPM:         config.MaxTPM,
+	}, err)
 }
 
 func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {

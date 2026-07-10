@@ -16,8 +16,8 @@ func withBackground() context.Context {
 // TestGateOnlyGovernsBackground verifies interactive calls always pass through
 // (no-op release) and only background calls consult the installed limiter.
 func TestGateOnlyGovernsBackground(t *testing.T) {
-	t.Cleanup(func() { SetGovernor(nil, 0) })
-	SetGovernor(NewLocalLimiter(), 1)
+	t.Cleanup(func() { SetGovernor(nil, nil, Limits{}) })
+	SetGovernor(NewLocalLimiter(), nil, Limits{Concurrency: 1})
 
 	// Interactive (non-background) ctx: never gated, even at limit 1.
 	rel1 := Gate(context.Background(), "m")
@@ -42,7 +42,7 @@ func TestGateOnlyGovernsBackground(t *testing.T) {
 // TestGateDisabledWhenNoGovernor verifies Gate is a passthrough when no
 // governor is installed.
 func TestGateDisabledWhenNoGovernor(t *testing.T) {
-	SetGovernor(nil, 0)
+	SetGovernor(nil, nil, Limits{})
 	if rel := Gate(withBackground(), "m"); rel == nil {
 		t.Fatal("gate with no governor must return a usable release")
 	} else {
