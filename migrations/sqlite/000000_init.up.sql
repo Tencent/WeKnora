@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     credentials TEXT DEFAULT NULL,
     chat_history_config TEXT,
     retrieval_config TEXT,
+    api_principal_config TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     processed_at DATETIME,
     error_message TEXT,
+    pending_subtasks_count INTEGER NOT NULL DEFAULT 0,
     deleted_at DATETIME
 );
 
@@ -172,7 +174,9 @@ CREATE TABLE IF NOT EXISTS messages (
     knowledge_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME
+    deleted_at DATETIME,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    dislike_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
@@ -204,7 +208,14 @@ CREATE TABLE IF NOT EXISTS chunks (
     seq_id INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    deleted_at DATETIME
+    deleted_at DATETIME,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    dislike_count INTEGER NOT NULL DEFAULT 0,
+    positive_rate REAL NOT NULL DEFAULT 0.0,
+    recall_weight REAL NOT NULL DEFAULT 1.0,
+    quality_status VARCHAR(50) NOT NULL DEFAULT 'normal',
+    dislike_reasons TEXT DEFAULT '[]',
+    last_feedback_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_tenant_kg ON chunks(tenant_id, knowledge_id);
@@ -215,6 +226,62 @@ CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_seq_id ON chunks(seq_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb_tenant ON chunks(knowledge_base_id, tenant_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_knowledge_enabled ON chunks(knowledge_id, is_enabled, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_chunks_quality_status ON chunks(quality_status);
+CREATE INDEX IF NOT EXISTS idx_chunks_positive_rate ON chunks(positive_rate);
+CREATE INDEX IF NOT EXISTS idx_chunks_recall_weight ON chunks(recall_weight);
+CREATE INDEX IF NOT EXISTS idx_chunks_last_feedback_at ON chunks(last_feedback_at);
+
+CREATE TABLE IF NOT EXISTS qa_reply_chunk_refs (
+    id VARCHAR(36) PRIMARY KEY,
+    message_id VARCHAR(36) NOT NULL,
+    chunk_id VARCHAR(36) NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id, message_id, chunk_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_qa_reply_chunk_refs_message_id ON qa_reply_chunk_refs(message_id);
+CREATE INDEX IF NOT EXISTS idx_qa_reply_chunk_refs_chunk_id ON qa_reply_chunk_refs(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_qa_reply_chunk_refs_tenant_id ON qa_reply_chunk_refs(tenant_id);
+
+CREATE TABLE IF NOT EXISTS chunk_feedbacks (
+    id VARCHAR(36) PRIMARY KEY,
+    message_id VARCHAR(36) NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    user_id VARCHAR(36),
+    is_positive BOOLEAN NOT NULL DEFAULT 1,
+    dislike_reason VARCHAR(255),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id, message_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_message_id ON chunk_feedbacks(message_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_session_id ON chunk_feedbacks(session_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_tenant_id ON chunk_feedbacks(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_user_id ON chunk_feedbacks(user_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_feedbacks_created_at ON chunk_feedbacks(created_at);
+
+CREATE TABLE IF NOT EXISTS chunk_weight_logs (
+    id VARCHAR(36) PRIMARY KEY,
+    chunk_id VARCHAR(36) NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    old_weight REAL NOT NULL DEFAULT 1.0,
+    new_weight REAL NOT NULL DEFAULT 1.0,
+    trigger_type VARCHAR(50) NOT NULL,
+    trigger_detail VARCHAR(500),
+    operator VARCHAR(36),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_chunk_id ON chunk_weight_logs(chunk_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_tenant_id ON chunk_weight_logs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_action ON chunk_weight_logs(action);
+CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_trigger_type ON chunk_weight_logs(trigger_type);
+CREATE INDEX IF NOT EXISTS idx_chunk_weight_logs_created_at ON chunk_weight_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_feedback ON messages(like_count, dislike_count);
 
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,
@@ -225,6 +292,7 @@ CREATE TABLE IF NOT EXISTS users (
     tenant_id INTEGER,
     is_active BOOLEAN NOT NULL DEFAULT 1,
     can_access_all_tenants BOOLEAN NOT NULL DEFAULT 0,
+    is_system_admin BOOLEAN NOT NULL DEFAULT 0,
     -- Per-user JSON preferences (memory toggle, future UI knobs).
     -- SQLite has no JSONB; store as TEXT and let GORM (de)serialise via
     -- the driver.Valuer / sql.Scanner methods on types.UserPreferences.
@@ -238,6 +306,23 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_users_is_system_admin ON users(is_system_admin);
+
+CREATE TABLE IF NOT EXISTS system_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key VARCHAR(128) NOT NULL UNIQUE,
+    value TEXT NOT NULL,
+    value_type VARCHAR(16) NOT NULL,
+    category VARCHAR(32) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    is_secret BOOLEAN NOT NULL DEFAULT 0,
+    requires_restart BOOLEAN NOT NULL DEFAULT 0,
+    last_modified_by VARCHAR(36) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_system_settings_category ON system_settings(category);
 
 CREATE TABLE IF NOT EXISTS auth_tokens (
     id VARCHAR(36) PRIMARY KEY,
