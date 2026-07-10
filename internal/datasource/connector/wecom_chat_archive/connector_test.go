@@ -113,6 +113,13 @@ func TestConnectorSatisfiesDatasourceInterface(t *testing.T) {
 	var _ datasource.Connector = NewConnector()
 }
 
+func TestDefaultClientReportsSDKUnavailable(t *testing.T) {
+	err := NewConnector().Validate(context.Background(), validConfig())
+	if err == nil || !strings.Contains(err.Error(), "SDK client is not configured") {
+		t.Fatalf("Validate error = %v", err)
+	}
+}
+
 func TestValidateUsesArchiveClient(t *testing.T) {
 	called := false
 	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
