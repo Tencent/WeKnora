@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -202,11 +203,13 @@ func (h *TenantHandler) resolveMaxOwnedTenantsPerUser(ctx context.Context) int {
 // @Description  创建新的租户。任意已登录用户均可调用以建立自己的新工作区，
 // @Description  调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样
 // @Description  通过本接口创建任意租户。
+// @Description  当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）
+// @Description  开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。
 // @Tags         租户管理
 // @Accept       json
 // @Produce      json
 // @Param        request  body      handler.createTenantRequest  true  "租户信息"
-// @Success      201      {object}  map[string]interface{}  "创建的租户"
+// @Success      201      {object}  map[string]interface{}  "创建的租户（可选含 api_key）"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Router       /tenants [post]
@@ -405,10 +408,77 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		createdTenant.ID,
 		secutils.SanitizeForLog(createdTenant.Name),
 	)
+
+	// data carries the created tenant. When the legacy auto-create-key
+	// behaviour is enabled we embed the plaintext token as data.api_key so
+	// the response shape mirrors the pre-break-change behaviour integrations
+	// relied on.
+	var data any = createdTenant
+
+	// Optional legacy compatibility: mint a full-access API key on tenant
+	// creation and return its plaintext token, gated by the
+	// tenant.auto_create_api_key setting (env WEKNORA_TENANT_AUTO_CREATE_API_KEY).
+	// Default off — modern deployments create keys explicitly via
+	// tenant_api_keys. Failing to create the convenience key must NOT fail
+	// the whole tenant creation (the tenant is fully usable without a key);
+	// we log a warning and return the tenant as usual.
+	if h.autoCreateTenantAPIKey(ctx) && h.apiKeyService != nil {
+		result, keyErr := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+			TenantID:   createdTenant.ID,
+			Name:       "default",
+			FullAccess: true,
+		})
+		if keyErr != nil {
+			logger.Errorf(ctx,
+				"Auto-create default API key failed for tenant %d: %v — returning tenant without key",
+				createdTenant.ID, keyErr)
+		} else if merged, mErr := tenantWithAPIKey(createdTenant, result.Token); mErr != nil {
+			// Round-trip failure is unexpected; degrade gracefully by
+			// returning the tenant without embedding the key rather than
+			// failing the whole request.
+			logger.Errorf(ctx, "Failed to embed api_key into tenant response for tenant %d: %v",
+				createdTenant.ID, mErr)
+		} else {
+			data = merged
+		}
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    createdTenant,
+		"data":    data,
 	})
+}
+
+// tenantWithAPIKey returns the tenant serialized as a map with an extra
+// api_key field, so the create response can embed the plaintext token inside
+// data (mirroring the pre-break-change shape) without adding a persisted
+// api_key column back onto types.Tenant.
+func tenantWithAPIKey(tenant *types.Tenant, token string) (map[string]any, error) {
+	raw, err := json.Marshal(tenant)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]any{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	m["api_key"] = token
+	return m, nil
+}
+
+// autoCreateTenantAPIKey resolves whether tenant creation should also mint a
+// full-access API key (legacy compatibility). 3-tier resolver:
+// system_settings DB row > WEKNORA_TENANT_AUTO_CREATE_API_KEY env > false.
+func (h *TenantHandler) autoCreateTenantAPIKey(ctx context.Context) bool {
+	if h.systemSettingSvc == nil {
+		return false
+	}
+	return h.systemSettingSvc.GetBool(
+		ctx,
+		"tenant.auto_create_api_key",
+		"WEKNORA_TENANT_AUTO_CREATE_API_KEY",
+		false,
+	)
 }
 
 // GetTenant godoc

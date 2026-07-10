@@ -3949,6 +3949,50 @@
                 }
             }
         },
+        "/knowledge-bases/{id}/duplicate": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "创建知识库副本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "源知识库 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建后的知识库副本",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge-bases/{id}/faq/entries": {
             "get": {
                 "security": [
@@ -11487,7 +11531,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "创建新的租户。任意已登录用户均可调用以建立自己的新工作区，\n调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样\n通过本接口创建任意租户。",
+                "description": "创建新的租户。任意已登录用户均可调用以建立自己的新工作区，\n调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样\n通过本接口创建任意租户。\n当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）\n开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。",
                 "consumes": [
                     "application/json"
                 ],
@@ -11511,7 +11555,7 @@
                 ],
                 "responses": {
                     "201": {
-                        "description": "创建的租户",
+                        "description": "创建的租户（可选含 api_key）",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -16191,6 +16235,10 @@
                 "interface_type": {
                     "type": "string"
                 },
+                "max_concurrency": {
+                    "description": "MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /\nenrichment) calls to THIS specific model, keyed by model ID and shared\nacross all replicas. 0 (the default) means \"fall back to the\nprocess-wide model.max_concurrency\". Interactive user-facing calls are\nnever gated. Only chat / vlm / embedding honour this (see limiter.Gate).",
+                    "type": "integer"
+                },
                 "parameter_size": {
                     "description": "Ollama model parameter size (e.g., \"7B\", \"13B\", \"70B\")",
                     "type": "string"
@@ -20341,9 +20389,23 @@
                         "type": "string"
                     }
                 },
+                "mentioned_items": {
+                    "description": "Optional scoped tag mentions",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
+                    }
+                },
                 "query": {
                     "description": "Query text to search for",
                     "type": "string"
+                },
+                "tag_ids": {
+                    "description": "Tag IDs for filtering within a single KB",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
