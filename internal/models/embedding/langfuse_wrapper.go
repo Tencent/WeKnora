@@ -28,8 +28,9 @@ func (l *langfuseEmbedder) Embed(ctx context.Context, text string) ([]float32, e
 			"dimensions": l.inner.GetDimensions(),
 		},
 	})
-	result, err := l.inner.Embed(genCtx, text)
-	usage := approxEmbeddingUsage([]string{text})
+	usageCtx, capture := WithUsageCapture(genCtx)
+	result, err := l.inner.Embed(usageCtx, text)
+	usage := embeddingLangfuseUsage(capture.Usage(), []string{text}, l.inner.GetModelName())
 	var out interface{}
 	if len(result) > 0 {
 		out = map[string]interface{}{
@@ -61,8 +62,9 @@ func (l *langfuseEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]
 			"batch_size": len(texts),
 		},
 	})
-	result, err := l.inner.BatchEmbed(genCtx, texts)
-	usage := approxEmbeddingUsage(texts)
+	usageCtx, capture := WithUsageCapture(genCtx)
+	result, err := l.inner.BatchEmbed(usageCtx, texts)
+	usage := embeddingLangfuseUsage(capture.Usage(), texts, l.inner.GetModelName())
 	var out interface{}
 	if len(result) > 0 {
 		out = map[string]interface{}{
@@ -82,25 +84,17 @@ func (l *langfuseEmbedder) GetModelName() string { return l.inner.GetModelName()
 func (l *langfuseEmbedder) GetDimensions() int   { return l.inner.GetDimensions() }
 func (l *langfuseEmbedder) GetModelID() string   { return l.inner.GetModelID() }
 
-// approxEmbeddingUsage estimates input tokens as ~rune_count / 4, matching the
-// rule of thumb OpenAI uses in their tokenizer docs. This is purely for cost
-// reporting — Langfuse lets users define per-model cost multipliers, so the
-// approximation need only be proportional to length.
-func approxEmbeddingUsage(texts []string) *langfuse.TokenUsage {
-	total := 0
-	for _, t := range texts {
-		runes := len([]rune(t))
-		if runes == 0 {
-			continue
-		}
-		total += runes/4 + 1
+func embeddingLangfuseUsage(actual TokenUsage, texts []string, modelName string) *langfuse.TokenUsage {
+	usage := actual
+	if usage.TotalTokens <= 0 {
+		usage = estimateEmbeddingUsage(texts, modelName)
 	}
-	if total == 0 {
+	if usage.TotalTokens <= 0 {
 		return nil
 	}
 	return &langfuse.TokenUsage{
-		Input: total,
-		Total: total,
+		Input: usage.InputTokens,
+		Total: usage.TotalTokens,
 		Unit:  "TOKENS",
 	}
 }

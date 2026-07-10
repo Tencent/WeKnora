@@ -137,6 +137,7 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
+	reportTokenUsage(ctx, response.Usage.PromptTokens, response.Usage.TotalTokens, "provider:azure-openai")
 
 	embeddings := make([][]float32, 0, len(response.Data))
 	for _, data := range response.Data {

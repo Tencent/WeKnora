@@ -114,6 +114,7 @@ func (e *OllamaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 	if err != nil {
 		return nil, fmt.Errorf("failed to get embedding vectors: %w", err)
 	}
+	reportTokenUsage(ctx, resp.PromptEvalCount, resp.PromptEvalCount, "provider:ollama")
 
 	logger.GetLogger(ctx).Debugf("Embedding vector retrieval took: %v", time.Since(startTime))
 	return resp.Embeddings, nil

@@ -241,6 +241,7 @@ func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		logger.GetLogger(ctx).Errorf("AliyunEmbedder BatchEmbed unmarshal response error: %v", err)
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
+	reportTokenUsage(ctx, response.Usage.TotalTokens, response.Usage.TotalTokens, "provider:aliyun")
 
 	// Extract embedding vectors, preserving order by text_index
 	embeddings := make([][]float32, len(texts))

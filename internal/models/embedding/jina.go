@@ -53,6 +53,10 @@ type JinaEmbedResponse struct {
 		Embedding []float32 `json:"embedding"`
 		Index     int       `json:"index"`
 	} `json:"data"`
+	Usage struct {
+		PromptTokens int `json:"prompt_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
 // NewJinaEmbedder creates a new Jina embedder
@@ -188,6 +192,7 @@ func (e *JinaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]floa
 		logger.GetLogger(ctx).Errorf("JinaEmbedder EmbedBatch unmarshal response error: %v", err)
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
+	reportTokenUsage(ctx, response.Usage.PromptTokens, response.Usage.TotalTokens, "provider:jina")
 
 	// Extract embedding vectors
 	embeddings := make([][]float32, 0, len(response.Data))

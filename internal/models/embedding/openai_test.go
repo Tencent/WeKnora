@@ -44,6 +44,28 @@ func TestOpenAIEmbedderBatchEmbedOmitsDimensionsForFixedSizeModels(t *testing.T)
 	}
 }
 
+func TestOpenAIEmbedderReportsProviderUsage(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2],"index":0}],"usage":{"prompt_tokens":17,"total_tokens":17}}`))
+	}))
+	defer server.Close()
+
+	embedder, err := NewOpenAIEmbedder("test-key", server.URL, "text-embedding-3-small", 511, 2, "model-id", nil)
+	if err != nil {
+		t.Fatalf("NewOpenAIEmbedder: %v", err)
+	}
+	ctx, capture := WithUsageCapture(context.Background())
+	if _, err := embedder.BatchEmbed(ctx, []string{"hello"}); err != nil {
+		t.Fatalf("BatchEmbed: %v", err)
+	}
+	usage := capture.Usage()
+	if usage.InputTokens != 17 || usage.TotalTokens != 17 || usage.Source != "provider:openai-compatible" {
+		t.Fatalf("usage = %+v", usage)
+	}
+}
+
 func captureOpenAIEmbeddingRequest(t *testing.T, modelName string, dimensions int, supportsDimensionOverride bool) map[string]any {
 	t.Helper()
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")

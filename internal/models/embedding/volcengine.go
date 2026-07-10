@@ -246,6 +246,7 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 			logger.GetLogger(ctx).Errorf("VolcengineEmbedder BatchEmbed unmarshal response error: %v", err)
 			return nil, fmt.Errorf("unmarshal response: %w", err)
 		}
+		reportTokenUsage(ctx, response.Usage.PromptTokens, response.Usage.TotalTokens, "provider:volcengine")
 
 		embeddings[i] = response.Data.Embedding
 	}

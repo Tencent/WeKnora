@@ -75,6 +75,10 @@ type weKnoraCloudEmbedResponse struct {
 		Index     int       `json:"index"`
 		Embedding []float32 `json:"embedding"`
 	} `json:"data"`
+	Usage struct {
+		PromptTokens int `json:"prompt_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
 func (e *WeKnoraCloudEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -128,6 +132,7 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 	if err := json.Unmarshal(respBytes, &embedResp); err != nil {
 		return nil, fmt.Errorf("weknoracloud embedder: unmarshal: %w", err)
 	}
+	reportTokenUsage(ctx, embedResp.Usage.PromptTokens, embedResp.Usage.TotalTokens, "provider:weknoracloud")
 
 	result := make([][]float32, len(texts))
 	for _, item := range embedResp.Data {

@@ -45,6 +45,10 @@ type ZhipuEmbedResponse struct {
 		Index     int       `json:"index"`
 	} `json:"data"`
 	Model string `json:"model"`
+	Usage struct {
+		PromptTokens int `json:"prompt_tokens"`
+		TotalTokens  int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
 // NewZhipuEmbedder creates a new Zhipu embedder
@@ -226,6 +230,7 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 		logger.GetLogger(ctx).Errorf("ZhipuEmbedder BatchEmbed unmarshal response error: %v", err)
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
+	reportTokenUsage(ctx, response.Usage.PromptTokens, response.Usage.TotalTokens, "provider:zhipu")
 
 	// Extract embedding vectors
 	embeddings := make([][]float32, 0, len(response.Data))
