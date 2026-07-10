@@ -66,7 +66,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		node_import_query := `
 			UNWIND $data AS row
 			CALL apoc.merge.node(row.labels, {name: row.name, kg: row.knowledge_id}, row.props, {}) YIELD node
-			SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
+			SET node.chunks = apoc.coll.union(coalesce(node.chunks, []), row.chunks)
 			RETURN distinct 'done' AS result
 		`
 		nodeData := []map[string]interface{}{}
@@ -89,6 +89,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node as source
 			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node as target
 			CALL apoc.merge.relationship(source, row.type, {}, row.attributes, target) YIELD rel
+			SET rel.chunks = apoc.coll.union(coalesce(rel.chunks, []), row.chunks)
 			RETURN distinct 'done'
 		`
 		relData := []map[string]interface{}{}
@@ -98,6 +99,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"target":        rel.Node2,
 				"knowledge_id":  namespace.Knowledge,
 				"type":          rel.Type,
+				"chunks":        rel.Chunks,
 				"source_labels": n.Labels(namespace),
 				"target_labels": n.Labels(namespace),
 			})
@@ -110,6 +112,142 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 	if err != nil {
 		logger.Errorf(ctx, "failed to add graph: %v", err)
 		return err
+	}
+	return nil
+}
+
+// DelGraphChunks removes graph contributions attributed to stale chunk IDs.
+// Nodes and relationships are deleted only when no current chunk attribution
+// remains. Legacy relationships without a chunks property are preserved unless
+// one of their endpoint nodes becomes orphaned and is DETACH DELETEd.
+func (n *Neo4jRepository) DelGraphChunks(
+	ctx context.Context,
+	namespace types.NameSpace,
+	chunkIDs []string,
+) error {
+	if n.driver == nil || len(chunkIDs) == 0 {
+		return nil
+	}
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+
+	labelExpr := n.Label(namespace)
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		relQuery := `
+			MATCH (a:` + labelExpr + ` {kg: $knowledge_id})-[r]-(b:` + labelExpr + ` {kg: $knowledge_id})
+			WHERE any(chunk_id IN $chunk_ids WHERE chunk_id IN coalesce(r.chunks, []))
+			SET r.chunks = [chunk_id IN coalesce(r.chunks, []) WHERE NOT chunk_id IN $chunk_ids]
+			WITH DISTINCT r
+			WHERE size(r.chunks) = 0
+			DELETE r
+		`
+		if _, err := tx.Run(ctx, relQuery, map[string]interface{}{
+			"knowledge_id": namespace.Knowledge,
+			"chunk_ids":    chunkIDs,
+		}); err != nil {
+			return nil, fmt.Errorf("failed to delete stale graph relationships: %w", err)
+		}
+
+		nodeQuery := `
+			MATCH (n:` + labelExpr + ` {kg: $knowledge_id})
+			WHERE any(chunk_id IN $chunk_ids WHERE chunk_id IN coalesce(n.chunks, []))
+			SET n.chunks = [chunk_id IN coalesce(n.chunks, []) WHERE NOT chunk_id IN $chunk_ids]
+			WITH n
+			WHERE size(n.chunks) = 0
+			DETACH DELETE n
+		`
+		if _, err := tx.Run(ctx, nodeQuery, map[string]interface{}{
+			"knowledge_id": namespace.Knowledge,
+			"chunk_ids":    chunkIDs,
+		}); err != nil {
+			return nil, fmt.Errorf("failed to delete stale graph nodes: %w", err)
+		}
+		return nil, nil
+	})
+	return err
+}
+
+func (n *Neo4jRepository) ReplaceGraphChunk(
+	ctx context.Context,
+	namespace types.NameSpace,
+	chunkID string,
+	graph *types.GraphData,
+) error {
+	if n.driver == nil || chunkID == "" || graph == nil {
+		return nil
+	}
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer session.Close(ctx)
+	labelExpr := n.Label(namespace)
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		params := map[string]interface{}{
+			"knowledge_id": namespace.Knowledge,
+			"chunk_ids":    []string{chunkID},
+		}
+		relCleanup := `
+			MATCH (a:` + labelExpr + ` {kg: $knowledge_id})-[r]-(b:` + labelExpr + ` {kg: $knowledge_id})
+			WHERE any(chunk_id IN $chunk_ids WHERE chunk_id IN coalesce(r.chunks, []))
+			SET r.chunks = [chunk_id IN coalesce(r.chunks, []) WHERE NOT chunk_id IN $chunk_ids]
+			WITH DISTINCT r WHERE size(r.chunks) = 0 DELETE r
+		`
+		if _, err := tx.Run(ctx, relCleanup, params); err != nil {
+			return nil, err
+		}
+		nodeCleanup := `
+			MATCH (n:` + labelExpr + ` {kg: $knowledge_id})
+			WHERE any(chunk_id IN $chunk_ids WHERE chunk_id IN coalesce(n.chunks, []))
+			SET n.chunks = [chunk_id IN coalesce(n.chunks, []) WHERE NOT chunk_id IN $chunk_ids]
+			WITH n WHERE size(n.chunks) = 0 DETACH DELETE n
+		`
+		if _, err := tx.Run(ctx, nodeCleanup, params); err != nil {
+			return nil, err
+		}
+
+		nodeData := make([]map[string]interface{}, 0, len(graph.Node))
+		for _, node := range graph.Node {
+			nodeData = append(nodeData, map[string]interface{}{
+				"name":         node.Name,
+				"knowledge_id": namespace.Knowledge,
+				"props":        map[string][]string{"attributes": node.Attributes},
+				"chunks":       node.Chunks,
+				"labels":       n.Labels(namespace),
+			})
+		}
+		nodeImport := `
+			UNWIND $data AS row
+			CALL apoc.merge.node(row.labels, {name: row.name, kg: row.knowledge_id}, row.props, {}) YIELD node
+			SET node.chunks = apoc.coll.union(coalesce(node.chunks, []), row.chunks)
+		`
+		if _, err := tx.Run(ctx, nodeImport, map[string]interface{}{"data": nodeData}); err != nil {
+			return nil, err
+		}
+
+		relData := make([]map[string]interface{}, 0, len(graph.Relation))
+		for _, relation := range graph.Relation {
+			relData = append(relData, map[string]interface{}{
+				"source":        relation.Node1,
+				"target":        relation.Node2,
+				"knowledge_id":  namespace.Knowledge,
+				"type":          relation.Type,
+				"chunks":        relation.Chunks,
+				"source_labels": n.Labels(namespace),
+				"target_labels": n.Labels(namespace),
+			})
+		}
+		relImport := `
+			UNWIND $data AS row
+			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node AS source
+			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node AS target
+			CALL apoc.merge.relationship(source, row.type, {}, {}, target) YIELD rel
+			SET rel.chunks = apoc.coll.union(coalesce(rel.chunks, []), row.chunks)
+		`
+		if _, err := tx.Run(ctx, relImport, map[string]interface{}{"data": relData}); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+	if err != nil {
+		return fmt.Errorf("replace graph chunk %s: %w", chunkID, err)
 	}
 	return nil
 }

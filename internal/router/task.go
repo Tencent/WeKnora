@@ -219,6 +219,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register knowledge post process handler
 	mux.HandleFunc(types.TypeKnowledgePostProcess, params.KnowledgePostProcess.Handle)
+	mux.HandleFunc(types.TypeKnowledgeRebuildFinalize, params.KnowledgeService.ProcessKnowledgeRebuildFinalize)
 
 	// Register data source sync handler
 	mux.HandleFunc(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)

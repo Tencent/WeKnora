@@ -117,6 +117,41 @@ func TestCreateChunks_SQLite_UpsertsExistingStableID(t *testing.T) {
 	assert.False(t, saved[0].IsEnabled)
 }
 
+func TestListChunksByKnowledgeIDAndTypes_SQLite(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	otherKnowledgeID := uuid.New().String()
+	chunks := []*types.Chunk{
+		makeChunk(kbID, knowledgeID, types.ChunkTypeText),
+		makeChunk(kbID, knowledgeID, types.ChunkTypeParentText),
+		makeChunk(kbID, knowledgeID, types.ChunkTypeImageOCR),
+		makeChunk(kbID, knowledgeID, types.ChunkTypeImageCaption),
+		makeChunk(kbID, otherKnowledgeID, types.ChunkTypeImageOCR),
+	}
+	require.NoError(t, repo.CreateChunks(ctx, chunks))
+
+	got, err := repo.ListChunksByKnowledgeIDAndTypes(
+		ctx,
+		1,
+		knowledgeID,
+		[]types.ChunkType{types.ChunkTypeParentText, types.ChunkTypeImageOCR},
+	)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.ElementsMatch(t,
+		[]types.ChunkType{types.ChunkTypeParentText, types.ChunkTypeImageOCR},
+		[]types.ChunkType{got[0].ChunkType, got[1].ChunkType},
+	)
+
+	empty, err := repo.ListChunksByKnowledgeIDAndTypes(ctx, 1, knowledgeID, nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}
+
 func TestCreateChunks_SQLite_SeqIDContinuesFromExisting(t *testing.T) {
 	db := setupChunkTestDB(t)
 	repo := NewChunkRepository(db)

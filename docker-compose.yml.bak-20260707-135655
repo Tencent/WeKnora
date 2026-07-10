@@ -1,7 +1,7 @@
-﻿services:
+services:
   frontend:
     image: wechatopenai/weknora-ui:${WEKNORA_VERSION:-latest}
-    # Requires frontend/dist 鈥?run ./scripts/build_frontend_dist.sh before --build
+    # Requires frontend/dist — run ./scripts/build_frontend_dist.sh before --build
     build:
       context: ./frontend
     container_name: WeKnora-frontend
@@ -43,7 +43,7 @@
       # Optional: declarative built-in models. Copy config/builtin_models.yaml.example
       # to config/builtin_models.yaml, edit it for your deployment, then
       # uncomment the line below. See docs/BUILTIN_MODELS.md.
-      - ./config/builtin_models.yaml:/app/config/builtin_models.yaml:ro
+      # - ./config/builtin_models.yaml:/app/config/builtin_models.yaml:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -58,7 +58,7 @@
     # (env_file: - path: .env, required: false) because the map syntax
     # requires Docker Compose v2.24+ (Jan 2024) and would break parsing on
     # older deploys. The trade-off is that Compose errors out if .env is
-    # absent 鈥?see scripts/start_all.sh for the pre-flight touch that keeps
+    # absent — see scripts/start_all.sh for the pre-flight touch that keeps
     # fresh clones working.
     env_file:
       - .env
@@ -83,7 +83,7 @@
       - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
       # ========== Langfuse (optional observability) ==========
       # Enabled automatically when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are set.
-      # See docs/Langfuse闆嗘垚.md for the full list of tuning knobs.
+      # See docs/Langfuse集成.md for the full list of tuning knobs.
       - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
@@ -111,7 +111,7 @@
       - MILVUS_METRIC_TYPE=${MILVUS_METRIC_TYPE:-IP}
       - DOCREADER_ADDR=${DOCREADER_ADDR:-docreader:50051}
       - DOCREADER_TRANSPORT=${DOCREADER_TRANSPORT:-grpc}
-      # docreader gRPC TLS / 璁よ瘉锛堝鎴风渚э級
+      # docreader gRPC TLS / 认证（客户端侧）
       - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
       - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
       - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
@@ -159,7 +159,7 @@
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
-      # 淇濈暀鍘熷 URL 鐨勫浘鐗囧煙鍚嶇櫧鍚嶅崟锛堥€楀彿鍒嗛殧锛屼笉鏇挎崲涓?provider://锛?
+      # 保留原始 URL 的图片域名白名单（逗号分隔，不替换为 provider://）
       - IMAGE_HOST_KEEP_URL=${IMAGE_HOST_KEEP_URL:-}
       # Always allow the optional searxng sidecar and the bundled vector-store
       # service hostnames (compose service names). Vector-store create/test now
@@ -172,9 +172,9 @@
       - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
-      # Crypto: 涓诲瘑閽ュ拰鐩愬€硷紝鐢ㄤ簬 AppSecret 绛夋晱鎰熷瓧娈电殑 AES-256 鍔犲瘑
-      # 鑻ヤ笉璁剧疆鍒欒嚜鍔ㄧ敓鎴愬苟鎸佷箙鍖栧埌 data-files volume锛?data/files/.crypto_state.json锛?
-      # 閲嶅惎鏃惰嚜鍔ㄤ粠鏂囦欢鎭㈠锛屼繚璇佸凡鍔犲瘑鏁版嵁鍙户缁В瀵?
+      # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
+      # 若不设置则自动生成并持久化到 data-files volume（/data/files/.crypto_state.json）
+      # 重启时自动从文件恢复，保证已加密数据可继续解密
       - CRYPTO_MASTER_KEY=${CRYPTO_MASTER_KEY:-}
       - CRYPTO_SALT=${CRYPTO_SALT:-}
       # File size limit (in MB)
@@ -186,10 +186,10 @@
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
-      # Tenant / RBAC锛堣瑙?docs/RBAC璇存槑.md 涓?.env.example 娉ㄩ噴锛?
-      # - WEKNORA_TENANT_ENABLE_RBAC: 鏄惁鍚敤绉熸埛瑙掕壊寮哄埗閴存潈锛坱rue / false锛夛紝榛樿 true
-      # - WEKNORA_TENANT_MAX_OWNED_PER_USER: 鍗曚釜闈炶秴绠¤嚜鍔╁垱寤虹鎴风殑涓婇檺
-      #   >0 寮哄埗闄愰锛?0 璧?handler 榛樿锛?0 鍏抽棴闄愰锛堜笉寤鸿鍏变韩閮ㄧ讲浣跨敤锛?
+      # Tenant / RBAC（详见 docs/RBAC说明.md 与 .env.example 注释）
+      # - WEKNORA_TENANT_ENABLE_RBAC: 是否启用租户角色强制鉴权（true / false），默认 true
+      # - WEKNORA_TENANT_MAX_OWNED_PER_USER: 单个非超管自助创建租户的上限
+      #   >0 强制限额；=0 走 handler 默认；<0 关闭限额（不建议共享部署使用）
       - WEKNORA_TENANT_ENABLE_RBAC=${WEKNORA_TENANT_ENABLE_RBAC:-}
       - WEKNORA_TENANT_MAX_OWNED_PER_USER=${WEKNORA_TENANT_MAX_OWNED_PER_USER:-}
       - WEKNORA_ASYNQ_CONCURRENCY=${WEKNORA_ASYNQ_CONCURRENCY:-32}
@@ -208,7 +208,7 @@
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # Sandbox 闀滃儚锛氫粎鐢ㄤ簬 build/pull锛岄潪甯搁┗鏈嶅姟锛沘pp 鎵ц Skills 鏃舵寜闇€ docker run 璇ラ暅鍍忥紝鐢ㄦ瘯鍗抽噴
+  # Sandbox 镜像：仅用于 build/pull，非常驻服务；app 执行 Skills 时按需 docker run 该镜像，用毕即释
   sandbox:
     image: wechatopenai/weknora-sandbox:${WEKNORA_VERSION:-latest}
     container_name: WeKnora-sandbox
@@ -270,7 +270,7 @@
       - "host.docker.internal:host-gateway"
 
   # OpenDataLoader hybrid backend (optional). Default --no-ocr (no EasyOCR/libGL).
-  # Local build only 鈥?not published to Docker Hub; use --profile odl-hybrid --build.
+  # Local build only — not published to Docker Hub; use --profile odl-hybrid --build.
   odl-hybrid:
     build:
       context: .
@@ -287,7 +287,7 @@
       - WeKnora-network
     restart: unless-stopped
 
-  # 淇敼鐨凱ostgreSQL閰嶇疆
+  # 修改的PostgreSQL配置
   postgres:
     image: paradedb/paradedb:v0.22.2-pg17
     container_name: WeKnora-postgres
@@ -301,12 +301,12 @@
       - WeKnora-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
-      interval: 10s # 澧炲姞鏃堕棿闂撮殧
-      timeout: 10s # 澧炲姞瓒呮椂鏃堕棿
-      retries: 3 # 鍑忓皯閲嶈瘯娆℃暟锛岃澶辫触鏇村揩鍙嶉
-      start_period: 30s # 缁欎簣鍒濆鍚姩鏇村鏃堕棿
+      interval: 10s # 增加时间间隔
+      timeout: 10s # 增加超时时间
+      retries: 3 # 减少重试次数，让失败更快反馈
+      start_period: 30s # 给予初始启动更多时间
     restart: unless-stopped
-    # 娣诲姞鍋滄満鏃剁殑浼橀泤閫€鍑烘椂闂?
+    # 添加停机时的优雅退出时间
     stop_grace_period: 1m
 
   redis:
@@ -480,20 +480,20 @@
       - weaviate
 
   # ---------------------------------------------------------------------------
-  # Apache Doris 4.1锛團E + BE 鍗曞疄渚?standalone 閮ㄧ讲锛宱pt-in via `--profile doris`锛?
+  # Apache Doris 4.1（FE + BE 单实例 standalone 部署，opt-in via `--profile doris`）
   #
-  # 鐗堟湰瑕佹眰锛氬繀椤?>= 3.0锛圚NSW ANN 绱㈠紩銆乧osine_distance_approximate銆?
-  # Stream Load partial_columns锛夈€傛湰 compose 浣跨敤 4.1 瀹樻柟绋冲畾 tag銆?
+  # 版本要求：必须 >= 3.0（HNSW ANN 索引、cosine_distance_approximate、
+  # Stream Load partial_columns）。本 compose 使用 4.1 官方稳定 tag。
   #
-  # 绔彛璇存槑锛?
-  #   - 9030 (FE MySQL)锛歐eKnora 涓婚摼璺鍐欍€丼QL 鏌ヨ閮借蛋姝ょ鍙ｃ€?
-  #   - 8030 (FE HTTP)锛歋tream Load partial update 鍏ュ彛銆?
-  #   - 8040 (BE)     锛欱E 蹇冭烦涓庢暟鎹紶杈擄紱FE 浼氭妸 stream load 閲嶅畾鍚戝埌 BE銆?
+  # 端口说明：
+  #   - 9030 (FE MySQL)：WeKnora 主链路读写、SQL 查询都走此端口。
+  #   - 8030 (FE HTTP)：Stream Load partial update 入口。
+  #   - 8040 (BE)     ：BE 心跳与数据传输；FE 会把 stream load 重定向到 BE。
   #
-  # 鍚敤鏂瑰紡锛?
+  # 启用方式：
   #   docker compose --profile doris up -d
   #
-  # 鏁版嵁鎸佷箙鍖栧湪 doris_fe_data / doris_be_data 鍗蜂腑銆?
+  # 数据持久化在 doris_fe_data / doris_be_data 卷中。
   # ---------------------------------------------------------------------------
   doris-fe:
     image: apache/doris:fe-4.1.0
@@ -547,25 +547,25 @@
       - full
 
   # ---------------------------------------------------------------------------
-  # Langfuse 鑷缓鍙娴嬫爤 (opt-in via `--profile langfuse`)
+  # Langfuse 自建可观测栈 (opt-in via `--profile langfuse`)
   #
-  # 涓轰簡鏈€灏忓寲璧勬簮鍗犵敤锛孡angfuse 浼氬鐢?WeKnora 宸叉湁鐨?postgres 鍜?redis锛?
-  #   - postgres锛氬湪 WeKnora-postgres 涓垱寤虹嫭绔嬬殑 "langfuse" 鏁版嵁搴?
-  #   - redis  锛氬鐢?WeKnora-redis 鐨?DB 1锛圵eKnora 鑷繁鐢?DB 0锛?
-  # 闇€瑕佹柊澧炵殑鍙湁 Langfuse 搴旂敤鑷韩 + ClickHouse锛圤LAP锛? 涓撶敤 MinIO锛堜簨浠?濯掍綋 S3锛夈€?
+  # 为了最小化资源占用，Langfuse 会复用 WeKnora 已有的 postgres 和 redis：
+  #   - postgres：在 WeKnora-postgres 中创建独立的 "langfuse" 数据库
+  #   - redis  ：复用 WeKnora-redis 的 DB 1（WeKnora 自己用 DB 0）
+  # 需要新增的只有 Langfuse 应用自身 + ClickHouse（OLAP）+ 专用 MinIO（事件/媒体 S3）。
   #
-  # 鍚敤鏂瑰紡锛?
+  # 启用方式：
   #   docker compose --profile langfuse up -d
-  # 鍚敤鍚庯細
-  #   1. Langfuse UI: http://localhost:3000 锛堥娆¤闂敞鍐岀鐞嗗憳骞跺湪 Settings 鈫?API Keys 鐢熸垚 key锛?
-  #   2. 鍦?.env 閲屾妸 LANGFUSE_HOST 鏀规垚 http://langfuse-web:3000锛堝鍣ㄩ棿閫氫俊锛?
-  #      骞跺～鍏ュ垰鐢熸垚鐨?LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
-  #   3. 閲嶅惎 app 瀹瑰櫒锛歞ocker compose up -d app
-  # 鐩稿叧榛樿瀵嗙爜宸插啓鎴愬崰浣嶇锛岀敓浜ч儴缃插姟蹇呯敤 openssl rand 閲嶆柊鐢熸垚锛?
+  # 启用后：
+  #   1. Langfuse UI: http://localhost:3000 （首次访问注册管理员并在 Settings → API Keys 生成 key）
+  #   2. 在 .env 里把 LANGFUSE_HOST 改成 http://langfuse-web:3000（容器间通信）
+  #      并填入刚生成的 LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+  #   3. 重启 app 容器：docker compose up -d app
+  # 相关默认密码已写成占位符，生产部署务必用 openssl rand 重新生成！
   # ---------------------------------------------------------------------------
 
-  # 涓€娆℃€у垵濮嬪寲鑴氭湰锛氬湪宸叉湁鐨?WeKnora-postgres 閲屽垱寤?langfuse 鏁版嵁搴擄紙骞傜瓑锛屾暟鎹簱宸插瓨鍦ㄥ垯璺宠繃锛?
-  # 澶嶇敤 WeKnora-postgres 鐨?ParadeDB 闀滃儚锛岄伩鍏嶅鎷変竴涓?postgres 闀滃儚
+  # 一次性初始化脚本：在已有的 WeKnora-postgres 里创建 langfuse 数据库（幂等，数据库已存在则跳过）
+  # 复用 WeKnora-postgres 的 ParadeDB 镜像，避免多拉一个 postgres 镜像
   langfuse-db-init:
     image: paradedb/paradedb:v0.22.2-pg17
     container_name: WeKnora-langfuse-db-init
@@ -574,17 +574,17 @@
         condition: service_healthy
     environment:
       PGPASSWORD: ${DB_PASSWORD}
-    # ${LANGFUSE_DB_NAME:-langfuse} / ${DB_USER} 鐢?compose 瑙ｆ瀽鎴愬瓧闈㈤噺鍚庡啀浼犵粰 shell锛?
-    # 鑴氭湰涓渶瑕?shell 鑷繁灞曞紑鐨勫彉閲忥紙鏃狅級涓€寰嬬敤 $$ 杞箟銆?
+    # ${LANGFUSE_DB_NAME:-langfuse} / ${DB_USER} 由 compose 解析成字面量后再传给 shell；
+    # 脚本中需要 shell 自己展开的变量（无）一律用 $$ 转义。
     entrypoint: ["sh", "-c"]
     command:
       - |
         set -e
         echo "[langfuse-db-init] ensuring database '${LANGFUSE_DB_NAME:-langfuse}' exists in WeKnora-postgres..."
-        # 鍏堝埛鏂扮幇鏈夊簱鐨?collation锛堥暅鍍?ICU 2.36 涓庡涓?2.41 涓嶅尮閰嶆椂蹇呴』鍋氾級锛屽惁鍒?CREATE DATABASE 浼氬け璐?
+        # 先刷新现有库的 collation（镜像 ICU 2.36 与宿主 2.41 不匹配时必须做），否则 CREATE DATABASE 会失败
         psql -h postgres -U ${DB_USER} -d postgres -v ON_ERROR_STOP=0 -c "ALTER DATABASE template1 REFRESH COLLATION VERSION;" >/dev/null 2>&1 || true
         psql -h postgres -U ${DB_USER} -d postgres -v ON_ERROR_STOP=0 -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;" >/dev/null 2>&1 || true
-        # 骞傜瓑鍒涘缓锛氬凡瀛樺湪鍒欒烦杩囷紱涓嶅瓨鍦ㄥ垯浠?template0 鍏嬮殕锛坱emplate0 姘歌繙涓嶄細鏈?collation 婕傜Щ锛?
+        # 幂等创建：已存在则跳过；不存在则从 template0 克隆（template0 永远不会有 collation 漂移）
         if psql -h postgres -U ${DB_USER} -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${LANGFUSE_DB_NAME:-langfuse}'" | grep -q 1; then
           echo "[langfuse-db-init] database '${LANGFUSE_DB_NAME:-langfuse}' already exists, skipping."
         else
@@ -628,15 +628,15 @@
     container_name: WeKnora-langfuse-minio
     restart: unless-stopped
     entrypoint: sh
-    # 鍚姩鍓嶅垱寤?`langfuse` 妗讹紝Langfuse 寮€绠卞嵆鐢?
+    # 启动前创建 `langfuse` 桶，Langfuse 开箱即用
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     environment:
       MINIO_ROOT_USER: ${LANGFUSE_MINIO_USER:-langfuseminio}
       MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-langfuseminiosecret}
     ports:
-      # 9100锛歋3 API锛堟祻瑙堝櫒涓婁紶濯掍綋鏃朵細鐩磋繛姝ょ鍙ｏ紝蹇呴』瀵瑰鏆撮湶锛?
+      # 9100：S3 API（浏览器上传媒体时会直连此端口，必须对外暴露）
       - "${LANGFUSE_MINIO_S3_PORT:-9100}:9000"
-      # 9101锛歁inIO 鎺у埗鍙帮紙鍙€夛紝鏂逛究鎺掗殰锛?
+      # 9101：MinIO 控制台（可选，方便排障）
       - "${LANGFUSE_MINIO_CONSOLE_PORT:-9101}:9001"
     volumes:
       - langfuse_minio_data:/data
@@ -656,7 +656,7 @@
     container_name: WeKnora-langfuse-worker
     restart: unless-stopped
     depends_on: &langfuse-depends-on
-      # 澶嶇敤 WeKnora 宸叉湁鐨?postgres/redis锛岄渶瑕佸厛瀹屾垚 langfuse 鏁版嵁搴撶殑鍒涘缓
+      # 复用 WeKnora 已有的 postgres/redis，需要先完成 langfuse 数据库的创建
       langfuse-db-init:
         condition: service_completed_successfully
       redis:
@@ -665,10 +665,10 @@
         condition: service_healthy
       langfuse-minio:
         condition: service_healthy
-    # 鐢?wrapper entrypoint锛氬湪瀹瑰櫒鍚姩鏃舵妸 DB_PASSWORD / REDIS_PASSWORD 鍋?URL 缂栫爜锛?
-    # 閬垮厤 DB_PASSWORD 鍚?'@' / '#' 绛夊瓧绗﹀鑷?Prisma 鏃犳硶瑙ｆ瀽 DATABASE_URL (P1013)銆?
-    # Langfuse 闀滃儚鍩轰簬 Node.js锛岀洿鎺ョ敤 node 鐨?encodeURIComponent锛屼笉寮曞閮ㄤ緷璧栥€?
-    # 娉ㄦ剰锛歝ompose 瑕嗙洊 entrypoint 浼氭竻绌洪暅鍍忛粯璁?CMD锛屽洜姝ゅ湪 wrapper 鏈熬鍐欐 exec 鐨勫師濮嬪懡浠ゃ€?
+    # 用 wrapper entrypoint：在容器启动时把 DB_PASSWORD / REDIS_PASSWORD 做 URL 编码，
+    # 避免 DB_PASSWORD 含 '@' / '#' 等字符导致 Prisma 无法解析 DATABASE_URL (P1013)。
+    # Langfuse 镜像基于 Node.js，直接用 node 的 encodeURIComponent，不引外部依赖。
+    # 注意：compose 覆盖 entrypoint 会清空镜像默认 CMD，因此在 wrapper 末尾写死 exec 的原始命令。
     entrypoint:
       - /bin/sh
       - -ec
@@ -682,13 +682,13 @@
         unset _LF_DB_USER _LF_DB_PASSWORD _LF_REDIS_PASSWORD
         exec dumb-init -- ./worker/entrypoint.sh node worker/dist/index.js
     environment: &langfuse-env
-      # 鍘熷鍑瘉锛堟湭 URL 缂栫爜锛夛紝鐢?entrypoint wrapper 璇诲彇骞剁粍瑁呮垚 DATABASE_URL / REDIS_CONNECTION_STRING
+      # 原始凭证（未 URL 编码），由 entrypoint wrapper 读取并组装成 DATABASE_URL / REDIS_CONNECTION_STRING
       _LF_DB_USER: ${DB_USER}
       _LF_DB_PASSWORD: ${DB_PASSWORD}
       _LF_DB_NAME: ${LANGFUSE_DB_NAME:-langfuse}
       _LF_REDIS_PASSWORD: ${REDIS_PASSWORD}
       _LF_REDIS_DB: ${LANGFUSE_REDIS_DB:-1}
-      # SALT / ENCRYPTION_KEY 鐢熶骇鐜鍔″繀閲嶆柊鐢熸垚锛?
+      # SALT / ENCRYPTION_KEY 生产环境务必重新生成：
       #   SALT: openssl rand -base64 32
       #   ENCRYPTION_KEY: openssl rand -hex 32
       SALT: ${LANGFUSE_SALT:-weknora-langfuse-dev-salt-change-me}
@@ -713,7 +713,7 @@
       LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
       LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-langfuseminio}
       LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-langfuseminiosecret}
-      # 濯掍綋涓婁紶鐢ㄧ殑澶栭儴 endpoint锛堟祻瑙堝櫒鐩磋繛锛夛紝榛樿鎸囧悜瀹夸富鏈烘槧灏勭殑 9100 绔彛
+      # 媒体上传用的外部 endpoint（浏览器直连），默认指向宿主机映射的 9100 端口
       LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://localhost:9100}
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
       LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
@@ -730,7 +730,7 @@
     depends_on: *langfuse-depends-on
     ports:
       - "${LANGFUSE_WEB_PORT:-3000}:3000"
-    # 鍚屾牱璧?wrapper entrypoint锛屾湯灏惧啓姝?web 鐨勫師濮嬪惎鍔ㄥ懡浠わ紙瑙侀暅鍍?Dockerfile 鐨?CMD锛?
+    # 同样走 wrapper entrypoint，末尾写死 web 的原始启动命令（见镜像 Dockerfile 的 CMD）
     entrypoint:
       - /bin/sh
       - -ec
@@ -749,7 +749,7 @@
         fi
     environment:
       <<: *langfuse-env
-      # 鍙€夛細棣栨鍚姩鏃惰嚜鍔ㄥ垱寤虹粍缁囥€侀」鐩拰绠＄悊鍛橈紙濉簡灏变笉鐢ㄥ湪 UI 涓婃墜鍔ㄦ敞鍐岋級
+      # 可选：首次启动时自动创建组织、项目和管理员（填了就不用在 UI 上手动注册）
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
       LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}

@@ -160,8 +160,9 @@ const (
 // unexported and excluded from JSON so the persisted payload does not
 // duplicate the column.
 type WikiPendingOp struct {
-	Op          string `json:"op"`
-	KnowledgeID string `json:"knowledge_id"`
+	Op           string `json:"op"`
+	KnowledgeID  string `json:"knowledge_id"`
+	RebuildRunID string `json:"rebuild_run_id,omitempty"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
 	// Retract fields
@@ -195,6 +196,7 @@ type wikiIngestService struct {
 	kbService      interfaces.KnowledgeBaseService
 	knowledgeSvc   interfaces.KnowledgeService
 	knowledgeRepo  interfaces.KnowledgeRepository
+	rebuildRunRepo interfaces.KnowledgeRebuildRunRepository
 	chunkRepo      interfaces.ChunkRepository
 	modelService   interfaces.ModelService
 	cacheRepo      interfaces.ProcessingCacheRepository
@@ -221,6 +223,7 @@ func NewWikiIngestService(
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeSvc interfaces.KnowledgeService,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	rebuildRunRepo interfaces.KnowledgeRebuildRunRepository,
 	chunkRepo interfaces.ChunkRepository,
 	modelService interfaces.ModelService,
 	cacheRepo interfaces.ProcessingCacheRepository,
@@ -236,6 +239,7 @@ func NewWikiIngestService(
 		kbService:      kbService,
 		knowledgeSvc:   knowledgeSvc,
 		knowledgeRepo:  knowledgeRepo,
+		rebuildRunRepo: rebuildRunRepo,
 		chunkRepo:      chunkRepo,
 		modelService:   modelService,
 		cacheRepo:      cacheRepo,
@@ -303,7 +307,8 @@ func EnqueueWikiIngest(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	tenantID uint64,
 	kbID, knowledgeID string,
-) {
+	rebuildRunID string,
+) (bool, error) {
 	lang, _ := types.LanguageFromContext(ctx)
 
 	// Persist the pending op. A re-ingest of the same knowledge id while
@@ -312,29 +317,33 @@ func EnqueueWikiIngest(
 	// keeping the LATEST op for each knowledge — matching the legacy
 	// "RPush + reverse-dedupe" semantics.
 	op := WikiPendingOp{
-		Op:          WikiOpIngest,
-		KnowledgeID: knowledgeID,
-		Language:    lang,
+		Op:           WikiOpIngest,
+		KnowledgeID:  knowledgeID,
+		Language:     lang,
+		RebuildRunID: rebuildRunID,
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
-		return
+		return false, err
 	}
-	if pendingRepo != nil {
-		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
-			TenantID: tenantID,
-			TaskType: wikiTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  kbID,
-			Op:       WikiOpIngest,
-			DedupKey: knowledgeID,
-			Payload:  payloadBytes,
-		}); err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
-			// Fall through and still schedule the trigger task — the
-			// next upload (or the next retry pass) will catch the gap.
-		}
+	if pendingRepo == nil {
+		return false, fmt.Errorf("wiki ingest pending repository is nil")
+	}
+	if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+		TenantID: tenantID,
+		TaskType: wikiTaskType,
+		Scope:    wikiTaskScope,
+		ScopeID:  kbID,
+		Op:       WikiOpIngest,
+		DedupKey: knowledgeID,
+		Payload:  payloadBytes,
+	}); err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
+		return false, err
+	}
+	if task == nil {
+		return false, fmt.Errorf("wiki ingest task enqueuer is nil")
 	}
 
 	trigger := WikiIngestPayload{
@@ -343,7 +352,10 @@ func EnqueueWikiIngest(
 		Language:        lang,
 	}
 	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
+	triggerBytes, err := json.Marshal(trigger)
+	if err != nil {
+		return false, err
+	}
 
 	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
 		asynq.Queue("low"),
@@ -353,7 +365,9 @@ func EnqueueWikiIngest(
 	)
 	if _, err := task.Enqueue(t); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
+		return false, err
 	}
+	return true, nil
 }
 
 // EnqueueWikiRetract queues a wiki retraction op (a delete cleanup).
@@ -523,12 +537,32 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) {
 // already zero: FinalizeSubtask guards both the decrement (count > 0) and
 // the promote (parse_status = finalizing AND count = 0), so an op enqueued
 // before this accounting shipped is a harmless no-op.
-func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string) {
+func (s *wikiIngestService) finalizeWikiSubtask(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID, rebuildRunID string,
+	success bool,
+	errorMessage string,
+) {
+	if rebuildRunID != "" && s.rebuildRunRepo != nil {
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+		defer cancel()
+		if _, err := s.rebuildRunRepo.FinalizeWiki(
+			dctx, tenantID, rebuildRunID, knowledgeID, success, errorMessage,
+		); err != nil {
+			logger.Warnf(ctx, "wiki finalize failed run=%s knowledge=%s: %v", rebuildRunID, knowledgeID, err)
+		}
+		return
+	}
 	// Wiki is only finalized when its op reaches a terminal state, so this is
 	// always an intended drain (retErr=nil, final=true). Detached context: the
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
+	var resultErr error
+	if !success {
+		resultErr = errors.New(errorMessage)
+	}
+	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", resultErr, false, true)
 }
 
 // requeueFailedOps records in-batch failures.
@@ -575,7 +609,8 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		// for deleted knowledge that has no counter to drain). The
 		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
 		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
+			s.finalizeWikiSubtask(ctx, payload.TenantID, op.KnowledgeID, op.RebuildRunID, false,
+				fmt.Sprintf("wiki ingest exceeded retry limit %d", wikiMaxFailRetries))
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
@@ -601,9 +636,11 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 
 // docIngestResult captures per-document info for batch post-processing.
 type docIngestResult struct {
-	KnowledgeID string
-	DocTitle    string
-	Summary     string // one-line summary of the document (from summary page)
+	KnowledgeID  string
+	RebuildRunID string
+	RetractOnly  bool
+	DocTitle     string
+	Summary      string // one-line summary of the document (from summary page)
 	// Pages records the wiki pages this document touched, carrying both
 	// the slug (for navigation / retract lookups) and the human-readable
 	// title captured at ingest time (for the log feed's display layer).

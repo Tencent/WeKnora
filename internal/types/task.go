@@ -4,9 +4,9 @@ package types
 // router.NewAsynqServer — a task enqueued to a queue that the server does not
 // list will never be consumed.
 const (
-	QueueCritical   = "critical"
-	QueueDefault    = "default"
-	QueueLow        = "low"
+	QueueCritical = "critical"
+	QueueDefault  = "default"
+	QueueLow      = "low"
 	// QueueMultimodal isolates high-volume, slow VLM image tasks (OCR + caption)
 	// so a single large scanned PDF (hundreds–thousands of page images) cannot
 	// saturate the shared worker pool and block user-facing document parsing in
@@ -24,23 +24,24 @@ const (
 )
 
 const (
-	TypeChunkExtract         = "chunk:extract"
-	TypeDocumentProcess      = "document:process"       // 文档处理任务
-	TypeFAQImport            = "faq:import"             // FAQ导入任务（包含dry run模式）
-	TypeQuestionGeneration   = "question:generation"    // 问题生成任务
-	TypeSummaryGeneration    = "summary:generation"     // 摘要生成任务
-	TypeKBClone              = "kb:clone"               // 知识库复制任务
-	TypeIndexDelete          = "index:delete"           // 索引删除任务
-	TypeKBDelete             = "kb:delete"              // 知识库删除任务
-	TypeKnowledgeListDelete  = "knowledge:list_delete"  // 批量删除知识任务
-	TypeKnowledgeListReparse = "knowledge:list_reparse" // 批量重解析知识任务
-	TypeKnowledgeMove        = "knowledge:move"         // 知识移动任务
-	TypeDataTableSummary     = "datatable:summary"      // 表格摘要任务
-	TypeImageMultimodal      = "image:multimodal"       // 图片多模态处理任务（OCR + VLM Caption）
-	TypeKnowledgePostProcess = "knowledge:post_process" // 知识后处理任务（统一调度）
-	TypeManualProcess        = "manual:process"         // 手工知识更新任务（cleanup + 重新索引）
-	TypeDataSourceSync       = "datasource:sync"        // 数据源同步任务
-	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
+	TypeChunkExtract             = "chunk:extract"
+	TypeDocumentProcess          = "document:process"       // 文档处理任务
+	TypeFAQImport                = "faq:import"             // FAQ导入任务（包含dry run模式）
+	TypeQuestionGeneration       = "question:generation"    // 问题生成任务
+	TypeSummaryGeneration        = "summary:generation"     // 摘要生成任务
+	TypeKBClone                  = "kb:clone"               // 知识库复制任务
+	TypeIndexDelete              = "index:delete"           // 索引删除任务
+	TypeKBDelete                 = "kb:delete"              // 知识库删除任务
+	TypeKnowledgeListDelete      = "knowledge:list_delete"  // 批量删除知识任务
+	TypeKnowledgeListReparse     = "knowledge:list_reparse" // 批量重解析知识任务
+	TypeKnowledgeMove            = "knowledge:move"         // 知识移动任务
+	TypeDataTableSummary         = "datatable:summary"      // 表格摘要任务
+	TypeImageMultimodal          = "image:multimodal"       // 图片多模态处理任务（OCR + VLM Caption）
+	TypeKnowledgePostProcess     = "knowledge:post_process" // 知识后处理任务（统一调度）
+	TypeKnowledgeRebuildFinalize = "knowledge:rebuild_finalize"
+	TypeManualProcess            = "manual:process"  // 手工知识更新任务（cleanup + 重新索引）
+	TypeDataSourceSync           = "datasource:sync" // 数据源同步任务
+	TypeWikiIngest               = "wiki:ingest"     // Wiki 页面同步任务
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -58,7 +59,8 @@ type ExtractChunkPayload struct {
 	// ChunkIndex is the 0-based ordinal of this chunk inside the parent
 	// knowledge's text-chunk set, used as the subspan name suffix
 	// ("postprocess.graph.chunk[3]") so the timeline preserves order.
-	ChunkIndex int `json:"chunk_index,omitempty"`
+	ChunkIndex   int    `json:"chunk_index,omitempty"`
+	RebuildRunID string `json:"rebuild_run_id,omitempty"`
 }
 
 // DocumentProcessPayload represents the document process task payload
@@ -84,7 +86,8 @@ type DocumentProcessPayload struct {
 	// branch. Asynq retries within an attempt keep the same value so
 	// retried spans overwrite the previous attempt's row rather than
 	// fan out into a new attempt for every retry.
-	Attempt int `json:"attempt,omitempty"`
+	Attempt      int    `json:"attempt,omitempty"`
+	RebuildRunID string `json:"rebuild_run_id,omitempty"`
 }
 
 // FAQImportPayload represents the FAQ import task payload (including dry run mode)
@@ -142,8 +145,9 @@ type QuestionGenerationPayload struct {
 	// rebuild the same surrounding context the legacy whole-knowledge loop
 	// used at the batch boundaries, without re-listing every chunk of the
 	// knowledge. Empty when the batch is at a document boundary.
-	PrevChunkID string `json:"prev_chunk_id,omitempty"`
-	NextChunkID string `json:"next_chunk_id,omitempty"`
+	PrevChunkID  string `json:"prev_chunk_id,omitempty"`
+	NextChunkID  string `json:"next_chunk_id,omitempty"`
+	RebuildRunID string `json:"rebuild_run_id,omitempty"`
 }
 
 // SummaryGenerationPayload represents the summary generation task payload
@@ -156,7 +160,10 @@ type SummaryGenerationPayload struct {
 	// Attempt links this task to the parent parse attempt so the worker
 	// can record a postprocess.summary subspan under the right attempt's
 	// postprocess stage. See QuestionGenerationPayload.Attempt notes.
-	Attempt int `json:"attempt,omitempty"`
+	Attempt      int      `json:"attempt,omitempty"`
+	RebuildRunID string   `json:"rebuild_run_id,omitempty"`
+	ChunkIDs     []string `json:"chunk_ids,omitempty"`
+	Incremental  bool     `json:"incremental,omitempty"`
 }
 
 // KBClonePayload represents the knowledge base clone task payload
@@ -205,8 +212,8 @@ type KnowledgeListDeletePayload struct {
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
 type KnowledgeListReparsePayload struct {
 	TracingContext
-	TenantID      uint64                      `json:"tenant_id"`
-	KnowledgeIDs  []string                    `json:"knowledge_ids"`
+	TenantID      uint64                     `json:"tenant_id"`
+	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
@@ -247,6 +254,8 @@ type ManualProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	Attempt         int    `json:"attempt,omitempty"`
+	RebuildRunID    string `json:"rebuild_run_id,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.
@@ -265,7 +274,8 @@ type ImageMultimodalPayload struct {
 	// Attempt links this image task back to the parent ProcessDocument
 	// attempt so the worker can record its image[i] subspan under the
 	// same attempt's multimodal stage span.
-	Attempt int `json:"attempt,omitempty"`
+	Attempt      int    `json:"attempt,omitempty"`
+	RebuildRunID string `json:"rebuild_run_id,omitempty"`
 	// ImageIndex is the 0-based ordinal of this image inside the
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
@@ -280,6 +290,21 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
 	Attempt         int    `json:"attempt,omitempty"`
+	RebuildRunID    string `json:"rebuild_run_id,omitempty"`
+}
+
+// KnowledgeRebuildFinalizePayload coordinates the commit point of an
+// incremental rebuild. ReservedSubtasks is 1 for the commit task itself plus
+// one when Wiki Reduce must run after stale cleanup.
+type KnowledgeRebuildFinalizePayload struct {
+	TracingContext
+	TenantID         uint64 `json:"tenant_id"`
+	KnowledgeID      string `json:"knowledge_id"`
+	KnowledgeBaseID  string `json:"knowledge_base_id"`
+	Language         string `json:"language,omitempty"`
+	Attempt          int    `json:"attempt,omitempty"`
+	RebuildRunID     string `json:"rebuild_run_id"`
+	ReservedSubtasks int    `json:"reserved_subtasks"`
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

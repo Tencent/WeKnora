@@ -119,6 +119,14 @@ func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.
 	return chunk, nil
 }
 
+func (s *chunkService) ListChunksByID(ctx context.Context, ids []string) ([]*types.Chunk, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	return s.chunkRepository.ListChunksByID(ctx, tenantID, ids)
+}
+
 // ListChunksByKnowledgeID lists all chunks for a knowledge ID
 // This method retrieves all chunks belonging to a specific knowledge document
 // Parameters:
@@ -146,6 +154,15 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 
 	logger.Infof(ctx, "Retrieved %d chunks successfully", len(chunks))
 	return chunks, nil
+}
+
+func (s *chunkService) ListChunksByKnowledgeIDAndTypes(
+	ctx context.Context,
+	knowledgeID string,
+	chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	return s.chunkRepository.ListChunksByKnowledgeIDAndTypes(ctx, tenantID, knowledgeID, chunkTypes)
 }
 
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination

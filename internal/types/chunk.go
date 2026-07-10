@@ -84,6 +84,10 @@ func (f ChunkFlags) ToggleFlag(flag ChunkFlags) ChunkFlags {
 
 // ImageInfo 表示与 Chunk 关联的图片信息
 type ImageInfo struct {
+	// ImageIndex is the stable 0-based ordinal of this image inside the
+	// rebuild. A pointer distinguishes legacy records that predate this field
+	// from the first image, whose valid index is zero.
+	ImageIndex *int `json:"image_index,omitempty" gorm:"-"`
 	// 图片URL（COS）
 	URL string `json:"url"          gorm:"type:text"`
 	// 原始图片URL

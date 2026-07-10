@@ -46,6 +46,7 @@ type knowledgeService struct {
 	kbService       interfaces.KnowledgeBaseService
 	tenantRepo      interfaces.TenantRepository
 	cacheRepo       interfaces.ProcessingCacheRepository
+	rebuildRunRepo  interfaces.KnowledgeRebuildRunRepository
 	tenantService   interfaces.TenantService
 	documentReader  interfaces.DocumentReader
 	chunkService    interfaces.ChunkService
@@ -89,6 +90,7 @@ func NewKnowledgeService(
 	kbService interfaces.KnowledgeBaseService,
 	tenantRepo interfaces.TenantRepository,
 	cacheRepo interfaces.ProcessingCacheRepository,
+	rebuildRunRepo interfaces.KnowledgeRebuildRunRepository,
 	tenantService interfaces.TenantService,
 	chunkService interfaces.ChunkService,
 	chunkRepo interfaces.ChunkRepository,
@@ -115,6 +117,7 @@ func NewKnowledgeService(
 		kbService:       kbService,
 		tenantRepo:      tenantRepo,
 		cacheRepo:       cacheRepo,
+		rebuildRunRepo:  rebuildRunRepo,
 		tenantService:   tenantService,
 		documentReader:  documentReader,
 		chunkService:    chunkService,
@@ -229,6 +232,42 @@ func finalizeSubtaskDetached(
 	if _, _, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
 		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
 			source, knowledgeID, err)
+	}
+}
+
+func finalizeRebuildArtifactDetached(
+	ctx context.Context,
+	knowledgeRepo interfaces.KnowledgeRepository,
+	rebuildRepo interfaces.KnowledgeRebuildRunRepository,
+	tenantID uint64,
+	runID, knowledgeID, stage, artifactKey, source string,
+	retErr, stageErr error,
+	superseded, final bool,
+) {
+	terminal := !superseded && (retErr == nil || final)
+	if !terminal {
+		return
+	}
+	if runID == "" || rebuildRepo == nil {
+		finalizeSubtaskDetached(ctx, knowledgeRepo, knowledgeID, source, retErr, superseded, final)
+		return
+	}
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+	defer cancel()
+	resultErr := stageErr
+	if resultErr == nil {
+		resultErr = retErr
+	}
+	errorMessage := ""
+	if resultErr != nil {
+		errorMessage = resultErr.Error()
+	}
+	if _, err := rebuildRepo.FinalizeArtifact(
+		dctx, tenantID, runID, knowledgeID, stage, artifactKey, resultErr == nil, errorMessage,
+	); err != nil {
+		logger.Warnf(ctx,
+			"finalize rebuild artifact failed source=%s run=%s knowledge=%s err=%v",
+			source, runID, knowledgeID, err)
 	}
 }
 

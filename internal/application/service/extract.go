@@ -95,18 +95,20 @@ func NewChunkExtractTask(
 	knowledgeID string,
 	attempt int,
 	chunkIndex int,
+	rebuildRunID string,
 ) (bool, error) {
 	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
 		logger.Warn(ctx, "NEO4J is not enabled, skip chunk extract task")
 		return false, nil
 	}
 	taskPayload := types.ExtractChunkPayload{
-		TenantID:    tenantID,
-		ChunkID:     chunkID,
-		ModelID:     modelID,
-		KnowledgeID: knowledgeID,
-		Attempt:     attempt,
-		ChunkIndex:  chunkIndex,
+		TenantID:     tenantID,
+		ChunkID:      chunkID,
+		ModelID:      modelID,
+		KnowledgeID:  knowledgeID,
+		Attempt:      attempt,
+		ChunkIndex:   chunkIndex,
+		RebuildRunID: rebuildRunID,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payload, err := json.Marshal(taskPayload)
@@ -160,6 +162,7 @@ type ChunkExtractService struct {
 	modelService      interfaces.ModelService
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
 	knowledgeRepo     interfaces.KnowledgeRepository
+	rebuildRunRepo    interfaces.KnowledgeRebuildRunRepository
 	chunkRepo         interfaces.ChunkRepository
 	cacheRepo         interfaces.ProcessingCacheRepository
 	graphEngine       interfaces.RetrieveGraphRepository
@@ -175,6 +178,7 @@ func NewChunkExtractService(
 	modelService interfaces.ModelService,
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	rebuildRunRepo interfaces.KnowledgeRebuildRunRepository,
 	chunkRepo interfaces.ChunkRepository,
 	cacheRepo interfaces.ProcessingCacheRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
@@ -185,6 +189,7 @@ func NewChunkExtractService(
 		modelService:      modelService,
 		knowledgeBaseRepo: knowledgeBaseRepo,
 		knowledgeRepo:     knowledgeRepo,
+		rebuildRunRepo:    rebuildRunRepo,
 		chunkRepo:         chunkRepo,
 		cacheRepo:         cacheRepo,
 		graphEngine:       graphEngine,
@@ -245,9 +250,13 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		// completed (or terminally-failed) per-chunk extract releases its
 		// slot in pending_subtasks_count. KnowledgeID is the new (post-#? )
 		// payload field; legacy in-flight tasks without it are skipped.
-		finalizeSubtaskDetached(ctx, s.knowledgeRepo, p.KnowledgeID,
+		finalizeRebuildArtifactDetached(
+			ctx, s.knowledgeRepo, s.rebuildRunRepo, p.TenantID,
+			p.RebuildRunID, p.KnowledgeID,
+			types.RebuildArtifactStageGraph, p.ChunkID,
 			fmt.Sprintf("graph_chunk[%d]", p.ChunkIndex),
-			handleErr, false, isFinalAsynqAttempt(ctx))
+			handleErr, handleErr, false, isFinalAsynqAttempt(ctx),
+		)
 		if gSpan == nil {
 			return
 		}
@@ -361,10 +370,16 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
-	if err = s.graphEngine.AddGraph(ctx,
-		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
-		[]*types.GraphData{graph},
-	); err != nil {
+	for _, relation := range graph.Relation {
+		relation.Chunks = []string{chunk.ID}
+	}
+	namespace := types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID}
+	if p.RebuildRunID != "" {
+		err = s.graphEngine.ReplaceGraphChunk(ctx, namespace, chunk.ID, graph)
+	} else {
+		err = s.graphEngine.AddGraph(ctx, namespace, []*types.GraphData{graph})
+	}
+	if err != nil {
 		logger.Errorf(ctx, "failed to add graph: %v", err)
 		handleErr = err
 		return err

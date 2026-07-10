@@ -172,6 +172,9 @@ type KnowledgeService interface {
 	ProcessQuestionGeneration(ctx context.Context, t *asynq.Task) error
 	// ProcessSummaryGeneration handles Asynq summary generation tasks
 	ProcessSummaryGeneration(ctx context.Context, t *asynq.Task) error
+	// ProcessKnowledgeRebuildFinalize commits an incremental rebuild after
+	// all selective downstream artifacts have reached a terminal state.
+	ProcessKnowledgeRebuildFinalize(ctx context.Context, t *asynq.Task) error
 	// ProcessKBClone handles Asynq knowledge base clone tasks
 	ProcessKBClone(ctx context.Context, t *asynq.Task) error
 	// ProcessKnowledgeMove handles Asynq knowledge move tasks

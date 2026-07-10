@@ -23,9 +23,10 @@ type GraphNode struct {
 
 // GraphRelation represents the relation of the graph
 type GraphRelation struct {
-	Node1 string `json:"node1,omitempty"`
-	Node2 string `json:"node2,omitempty"`
-	Type  string `json:"type,omitempty"`
+	Node1  string   `json:"node1,omitempty"`
+	Node2  string   `json:"node2,omitempty"`
+	Type   string   `json:"type,omitempty"`
+	Chunks []string `json:"chunks,omitempty"`
 }
 
 type GraphData struct {

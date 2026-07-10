@@ -1063,6 +1063,8 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
 		Content:         content,
 		NeedCleanup:     needCleanup,
+		Attempt:         attemptFromCtx(ctx),
+		RebuildRunID:    rebuildRunFromCtx(ctx),
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)

@@ -452,7 +452,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				mapMu.Lock()
 				ingestSucceeded++
 				docResults = append(docResults, result)
-				docPreview = append(docPreview, fmt.Sprintf("ingest[%s]: title=%s summary=%s", previewText(result.KnowledgeID, 24), previewText(result.DocTitle, 40), previewText(result.Summary, 64)))
+				if result.RetractOnly {
+					docPreview = append(docPreview, fmt.Sprintf("retract-stale[%s]: title=%s", previewText(result.KnowledgeID, 24), previewText(result.DocTitle, 40)))
+				} else {
+					docPreview = append(docPreview, fmt.Sprintf("ingest[%s]: title=%s summary=%s", previewText(result.KnowledgeID, 24), previewText(result.DocTitle, 40), previewText(result.Summary, 64)))
+				}
 				for _, u := range updates {
 					slugUpdates[u.Slug] = append(slugUpdates[u.Slug], u)
 				}
@@ -478,7 +482,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// "finalizing" until the housekeeping sweep marks it
 				// failed. The matching +1 was seeded by
 				// KnowledgePostProcess.SetFinalizing.
-				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID)
+				s.finalizeWikiSubtask(mapCtx, payload.TenantID, op.KnowledgeID, op.RebuildRunID, true, "")
 			}
 			return nil
 		})
@@ -604,7 +608,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				pages = append(pages, ref)
 			}
 		}
-		logEntries = append(logEntries, s.buildLogEntry(payload.TenantID, payload.KnowledgeBaseID, "ingest", r.KnowledgeID, r.DocTitle, r.Summary, pages))
+		action := "ingest"
+		if r.RetractOnly {
+			action = "retract"
+		}
+		logEntries = append(logEntries, s.buildLogEntry(payload.TenantID, payload.KnowledgeBaseID, action, r.KnowledgeID, r.DocTitle, r.Summary, pages))
 	}
 	if len(logEntries) > 0 && s.logEntrySvc != nil {
 		if err := s.logEntrySvc.AppendBatch(ctx, logEntries); err != nil {
@@ -616,6 +624,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	var changeDesc strings.Builder
 	if len(docResults) > 0 {
 		for _, r := range docResults {
+			if r.RetractOnly {
+				fmt.Fprintf(&changeDesc, "<document_removed>\n<title>%s</title>\n<summary>%s</summary>\n</document_removed>\n\n", r.DocTitle, r.Summary)
+				continue
+			}
 			fmt.Fprintf(&changeDesc, "<document_added>\n<title>%s</title>\n<summary>%s</summary>\n</document_added>\n\n", r.DocTitle, r.Summary)
 		}
 	}
@@ -659,7 +671,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// targets exactly the affected pages with this fresh ref set.
 		freshRefs := make([]linkRef, 0, len(docResults)*4)
 		for _, dr := range docResults {
-			if dr == nil {
+			if dr == nil || dr.RetractOnly {
 				continue
 			}
 			for _, p := range dr.Pages {
@@ -699,7 +711,19 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// the WikiSpan nil-check below so a doc that had no attempt to
 		// attach a span to still drains its counter slot. The matching +1
 		// is seeded by KnowledgePostProcess.SetFinalizing.
-		s.finalizeWikiSubtask(ctx, r.KnowledgeID)
+		wikiSuccess := !indexRebuildAttempted || indexRebuildSucceeded
+		wikiError := ""
+		if !wikiSuccess {
+			wikiError = "wiki index reduce failed"
+		}
+		for _, page := range r.Pages {
+			if _, failed := failedAdditionSlugs[page.Slug]; failed {
+				wikiSuccess = false
+				wikiError = "one or more wiki page reductions failed"
+				break
+			}
+		}
+		s.finalizeWikiSubtask(ctx, payload.TenantID, r.KnowledgeID, r.RebuildRunID, wikiSuccess, wikiError)
 		if r.WikiSpan == nil {
 			continue
 		}
@@ -807,10 +831,57 @@ func (s *wikiIngestService) mapOneDocument(
 		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", err.Error(), err)
 		return nil, nil, fmt.Errorf("get chunks: %w", err)
 	}
+	docTitle := knowledgeID
+	if kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID); err == nil && kn != nil && kn.Title != "" {
+		docTitle = kn.Title
+	} else {
+		for _, ch := range chunks {
+			if ch.Content != "" {
+				lines := strings.SplitN(ch.Content, "\n", 2)
+				if len(lines) > 0 && len(lines[0]) > 0 && len(lines[0]) < 200 {
+					docTitle = strings.TrimPrefix(strings.TrimSpace(lines[0]), "# ")
+					break
+				}
+			}
+		}
+	}
+	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
+	retractOnly := func(reason, currentContent string) (*docIngestResult, []SlugUpdate, error) {
+		if len(oldPageSlugs) == 0 {
+			s.tracker().SkipSpan(ctx, wikiSpan, reason)
+			return nil, nil, nil
+		}
+		priorContribution := batchCtx.SummaryContentByKnowledgeID(ctx, knowledgeID)
+		updates := make([]SlugUpdate, 0, len(oldPageSlugs))
+		pages := make([]types.WikiLogPageRef, 0, len(oldPageSlugs))
+		for slug := range oldPageSlugs {
+			retractContent := currentContent
+			if strings.TrimSpace(retractContent) == "" {
+				retractContent = priorContribution
+			}
+			updates = append(updates, SlugUpdate{
+				Slug:              slug,
+				Type:              "retractStale",
+				RetractDocContent: retractContent,
+				DocTitle:          docTitle,
+				KnowledgeID:       knowledgeID,
+				Language:          lang,
+			})
+			pages = append(pages, types.WikiLogPageRef{Slug: slug, Title: slug})
+		}
+		return &docIngestResult{
+			KnowledgeID:  knowledgeID,
+			RebuildRunID: op.RebuildRunID,
+			RetractOnly:  true,
+			DocTitle:     docTitle,
+			Pages:        pages,
+			MapStats:     types.JSONMap{"retract_only": true, "reason": reason, "stale_slugs": len(oldPageSlugs)},
+			WikiSpan:     wikiSpan,
+		}, updates, nil
+	}
 	if len(chunks) == 0 {
-		logger.Infof(ctx, "wiki ingest: document %s has no chunks, skip", knowledgeID)
-		s.tracker().SkipSpan(ctx, wikiSpan, "no_chunks")
-		return nil, nil, nil
+		logger.Infof(ctx, "wiki ingest: document %s has no chunks, retracting prior pages", knowledgeID)
+		return retractOnly("no_chunks", "")
 	}
 
 	content := reconstructEnrichedContent(ctx, s.chunkRepo, payload.TenantID, chunks)
@@ -829,23 +900,7 @@ func (s *wikiIngestService) mapOneDocument(
 			"wiki ingest: doc %s has insufficient text content after stripping image markup (raw_len=%d), skipping LLM extraction",
 			knowledgeID, rawRuneCount,
 		)
-		s.tracker().SkipSpan(ctx, wikiSpan, "insufficient_text_content")
-		return nil, nil, nil
-	}
-
-	docTitle := knowledgeID
-	if kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID); err == nil && kn != nil && kn.Title != "" {
-		docTitle = kn.Title
-	} else {
-		for _, ch := range chunks {
-			if ch.Content != "" {
-				lines := strings.SplitN(ch.Content, "\n", 2)
-				if len(lines) > 0 && len(lines[0]) > 0 && len(lines[0]) < 200 {
-					docTitle = strings.TrimPrefix(strings.TrimSpace(lines[0]), "# ")
-					break
-				}
-			}
-		}
+		return retractOnly("insufficient_text_content", content)
 	}
 
 	// Citation source reference. We deliberately use only the knowledge ID
@@ -853,13 +908,13 @@ func (s *wikiIngestService) mapOneDocument(
 	// does not leak into citation strings that downstream LLM prompts may
 	// surface during wiki page editing.
 	sourceRef := knowledgeID
-	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
 	chunkIDsForCache := make([]string, 0, len(chunks))
 	for _, ch := range chunks {
 		chunkIDsForCache = append(chunkIDsForCache, ch.ID)
 	}
 	mapCacheKey := wikiMapCacheKey(content, payload.KnowledgeBaseID, knowledgeID, lang, synthesisModelID, chunkIDsForCache)
 	if cachedResult, cachedUpdates, ok := s.getWikiMapCache(ctx, payload.TenantID, mapCacheKey, wikiSpan, oldPageSlugs, batchCtx, content, lang); ok {
+		cachedResult.RebuildRunID = op.RebuildRunID
 		logger.Infof(ctx, "wiki ingest: map cache hit for knowledge %s", knowledgeID)
 		return cachedResult, cachedUpdates, nil
 	}
@@ -1213,12 +1268,13 @@ func (s *wikiIngestService) mapOneDocument(
 	}
 
 	result := &docIngestResult{
-		KnowledgeID: knowledgeID,
-		DocTitle:    docTitle,
-		Summary:     docSummaryLine,
-		Pages:       extractedPages,
-		MapStats:    mapStats,
-		WikiSpan:    wikiSpan,
+		KnowledgeID:  knowledgeID,
+		RebuildRunID: op.RebuildRunID,
+		DocTitle:     docTitle,
+		Summary:      docSummaryLine,
+		Pages:        extractedPages,
+		MapStats:     mapStats,
+		WikiSpan:     wikiSpan,
 	}
 	s.putWikiMapCache(ctx, payload.TenantID, mapCacheKey, result, updates, map[string]string{
 		"knowledge_base_id":  payload.KnowledgeBaseID,

@@ -144,6 +144,7 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeKBDelete, params.KnowledgeBaseService.ProcessKBDelete)
 	params.Executor.RegisterHandler(types.TypeImageMultimodal, params.ImageMultimodal.Handle)
 	params.Executor.RegisterHandler(types.TypeKnowledgePostProcess, params.KnowledgePostProcess.Handle)
+	params.Executor.RegisterHandler(types.TypeKnowledgeRebuildFinalize, params.KnowledgeService.ProcessKnowledgeRebuildFinalize)
 	params.Executor.RegisterHandler(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
 	params.Executor.RegisterHandler(types.TypeWikiIngest, params.WikiIngest.Handle)
 	logger.Infof(context.Background(), "[SyncTask] All task handlers registered (Lite mode, no Redis)")
