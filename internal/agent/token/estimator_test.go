@@ -82,6 +82,55 @@ func TestEstimator(t *testing.T) {
 	})
 }
 
+func TestEstimateRequestCountsCompleteShape(t *testing.T) {
+	e, err := NewEstimatorForModel("gpt-4o")
+	require.NoError(t, err)
+
+	base := []chat.Message{{Role: "user", Content: "inspect this"}}
+	baseEstimate := e.EstimateRequest(base, nil)
+
+	withShape := []chat.Message{{
+		Role:    "assistant",
+		Content: "inspect this",
+		MultiContent: []chat.MessageContentPart{
+			{Type: "text", Text: "additional text"},
+			{Type: "image_url", ImageURL: &chat.ImageURL{URL: "data:image/png;base64,AAAA", Detail: "high"}},
+		},
+		ReasoningContent: "prior reasoning state",
+		ToolCalls: []chat.ToolCall{{
+			ID:   "call_123",
+			Type: "function",
+			Function: chat.FunctionCall{
+				Name:      "search",
+				Arguments: `{"query":"token accounting"}`,
+			},
+		}},
+	}}
+	opts := &chat.ChatOptions{
+		MaxCompletionTokens: 2048,
+		Tools: []chat.Tool{{
+			Type: "function",
+			Function: chat.FunctionDef{
+				Name:        "search",
+				Description: "Search a corpus",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+			},
+		}},
+		Format: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer"}}`),
+	}
+	estimate := e.EstimateRequest(withShape, opts)
+
+	assert.Greater(t, estimate.InputTokens, baseEstimate.InputTokens+highDetailImageCost)
+	assert.Equal(t, 2048, estimate.ReservedOutputTokens)
+	assert.Contains(t, estimate.Source, "tokenizer")
+}
+
+func TestInputBudgetReservesOutputAndSafetyMargin(t *testing.T) {
+	assert.Equal(t, 124416, InputBudget(128000, 1024))
+	assert.Equal(t, 1, InputBudget(4096, 4096))
+	assert.Zero(t, InputBudget(0, 1000))
+}
+
 func TestCompressContext(t *testing.T) {
 	e, err := NewEstimator()
 	require.NoError(t, err)

@@ -75,6 +75,10 @@ type ModelParameters struct {
 	// 保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
 	CustomHeaders  map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
 	SupportsVision bool              `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	// ContextWindowTokens is the provider/model context-window capacity used
+	// for preflight admission and agent compression. 0 keeps compatibility with
+	// existing records by selecting the application fallback.
+	ContextWindowTokens int `yaml:"context_window_tokens,omitempty" json:"context_window_tokens,omitempty"`
 	// MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /
 	// enrichment) calls to THIS specific model, keyed by model ID and shared
 	// across all replicas. 0 (the default) means "fall back to the

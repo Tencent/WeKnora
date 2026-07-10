@@ -383,6 +383,13 @@
           it just for those three. 0 = fall back to the global default.
         -->
         <div class="form-item">
+		  <label class="form-label">{{ $t('model.editor.contextWindowLabel') }}</label>
+		  <t-input v-model.number="formData.contextWindowTokens" type="number" :min="0" :max="10000000"
+			:placeholder="$t('model.editor.contextWindowPlaceholder')" />
+		  <p class="form-desc">{{ $t('model.editor.contextWindowDesc') }}</p>
+		</div>
+
+		<div class="form-item">
           <label class="form-label">{{ $t('model.editor.maxConcurrencyLabel') }}</label>
           <t-input v-model.number="formData.maxConcurrency" type="number" :min="0" :max="4096"
             :placeholder="$t('model.editor.maxConcurrencyPlaceholder')" />
@@ -437,6 +444,8 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+	/** Provider/model context window; 0/undefined uses the server fallback. */
+	contextWindowTokens?: number
   /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
   maxConcurrency?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
@@ -833,6 +842,7 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
+	contextWindowTokens: undefined,
   maxConcurrency: undefined,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
@@ -1074,6 +1084,7 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
+	contextWindowTokens: undefined,
     maxConcurrency: undefined,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],

@@ -61,10 +61,12 @@ type AgentConfig struct {
 	// Outputs exceeding this limit are truncated with head + tail preservation.
 	MaxToolOutputChars int `json:"max_tool_output_chars,omitempty"`
 
-	// Maximum context window tokens for the agent (default: 200000).
-	// The agent compresses older messages to stay within this limit,
-	// preserving tool_call/tool_result pairs.
+	// Maximum context window tokens for the selected model (default: 200000).
+	// Runtime resolution prefers ModelParameters.ContextWindowTokens.
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
+	// Maximum tokens reserved for the model response. Runtime-only for ReAct;
+	// copied from CustomAgentConfig.MaxCompletionTokens.
+	MaxCompletionTokens int `json:"-"`
 
 	// Whether to execute independent tool calls in parallel (default: false).
 	// When enabled and the LLM returns multiple tool calls, they run concurrently via errgroup.

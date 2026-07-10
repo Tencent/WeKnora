@@ -188,6 +188,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
+	contextWindowTokens: model.parameters.context_window_tokens,
     maxConcurrency: model.parameters.max_concurrency,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
@@ -445,6 +446,10 @@ const handleModelSave = async (modelData: any) => {
         } : saveType === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
         } : {}),
+		...(['chat', 'vllm'].includes(saveType)
+		  && Number(modelData.contextWindowTokens) > 0
+		  ? { context_window_tokens: Number(modelData.contextWindowTokens) }
+		  : {}),
         // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
         ...(['chat', 'embedding', 'vllm'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0

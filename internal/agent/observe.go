@@ -17,8 +17,7 @@ import (
 )
 
 // manageContextWindow consolidates or compresses messages if approaching the token limit.
-// currentTokens is the caller's best estimate of the current context size (using
-// API-reported Usage when available, falling back to BPE estimation).
+// currentTokens is the caller's complete preflight estimate for the next request.
 func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.Message, round, currentTokens int) []chat.Message {
 	if e.config.MaxContextTokens <= 0 {
 		return messages
@@ -39,11 +38,12 @@ func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.M
 		}
 	}
 
-	messages = agenttoken.CompressContext(messages, e.tokenEstimator, e.config.MaxContextTokens, currentTokens)
+	inputBudget := agenttoken.InputBudget(e.config.MaxContextTokens, e.config.MaxCompletionTokens)
+	messages = agenttoken.CompressContext(messages, e.tokenEstimator, inputBudget, currentTokens)
 
 	if len(messages) < beforeLen {
-		logger.Infof(ctx, "[Agent][Round-%d] Context managed: %d → %d messages (max_tokens=%d)",
-			round, beforeLen, len(messages), e.config.MaxContextTokens)
+		logger.Infof(ctx, "[Agent][Round-%d] Context managed: %d → %d messages (context_window=%d, input_budget=%d)",
+			round, beforeLen, len(messages), e.config.MaxContextTokens, inputBudget)
 	}
 
 	return messages

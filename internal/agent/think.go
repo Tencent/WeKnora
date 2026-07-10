@@ -121,13 +121,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	logger.Debugf(ctx, "[Agent][Thinking] Iteration-%d: temp=%.2f, tools=%d, thinking=%v",
 		iteration+1, e.config.Temperature, len(tools), e.config.Thinking)
 
-	parallelToolCalls := true
-	opts := &chat.ChatOptions{
-		Temperature:       e.config.Temperature,
-		Tools:             tools,
-		Thinking:          e.config.Thinking,
-		ParallelToolCalls: &parallelToolCalls,
-	}
+	opts := e.thinkingChatOptions(tools)
 
 	pendingToolCalls := make(map[string]bool)
 	thinkingToolIDs := make(map[string]string) // tool_call_id -> event ID for thinking tool streams
@@ -322,6 +316,19 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		resp.Usage = *llmResult.Usage
 	}
 	return resp, nil
+}
+
+// thinkingChatOptions is shared by preflight token counting and the actual
+// request builder so the counted request shape cannot drift from what is sent.
+func (e *AgentEngine) thinkingChatOptions(tools []chat.Tool) *chat.ChatOptions {
+	parallelToolCalls := true
+	return &chat.ChatOptions{
+		Temperature:         e.config.Temperature,
+		MaxCompletionTokens: e.config.MaxCompletionTokens,
+		Tools:               tools,
+		Thinking:            e.config.Thinking,
+		ParallelToolCalls:   &parallelToolCalls,
+	}
 }
 
 // callLLMWithRetry logs messages, sanitizes them, calls the LLM with retry on transient errors,

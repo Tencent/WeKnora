@@ -88,6 +88,16 @@ func (s *sessionService) AgentQA(
 		logger.Warnf(ctx, "Failed to get chat model: %v", err)
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
+	modelInfo, modelInfoErr := s.modelService.GetModelByID(ctx, effectiveModelID)
+	if modelInfoErr != nil {
+		logger.Warnf(ctx, "Failed to load model metadata for token budgeting: %v", modelInfoErr)
+	}
+	if agentConfig.MaxContextTokens <= 0 && modelInfo != nil {
+		agentConfig.MaxContextTokens = modelInfo.Parameters.ContextWindowTokens
+	}
+	if agentConfig.MaxContextTokens <= 0 {
+		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
+	}
 
 	// Get rerank model from custom agent config only when knowledge_search can
 	// actually run. A disabled KB scope makes all KB tools ineffective, so it
@@ -158,10 +168,8 @@ func (s *sessionService) AgentQA(
 
 	// Route image data based on agent model's vision capability
 	var agentModelSupportsVision bool
-	if effectiveModelID != "" {
-		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
-			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
-		}
+	if modelInfo != nil {
+		agentModelSupportsVision = modelInfo.Parameters.SupportsVision
 	}
 
 	agentQuery := req.Query
@@ -229,6 +237,7 @@ func (s *sessionService) buildAgentConfig(
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
+		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
@@ -308,10 +317,6 @@ func (s *sessionService) buildAgentConfig(
 	}
 	agentConfig.SearchTargets = searchTargets
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
-
-	if agentConfig.MaxContextTokens <= 0 {
-		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
-	}
 
 	return agentConfig, nil
 }

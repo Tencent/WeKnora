@@ -97,6 +97,21 @@ func emptyTools() []chat.Tool {
 	return nil
 }
 
+func TestEstimateCurrentTokensRecountsNextRequestWithoutPriorUsage(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	messages := emptyMessages()
+	first := engine.estimateCurrentTokens(messages, nil)
+
+	// This assistant completion is part of the next input exactly once. The old
+	// TotalTokens+delta implementation counted it once in TotalTokens and again
+	// after appending it to messages.
+	messages = append(messages, chat.Message{Role: "assistant", Content: "a completed response"})
+	second := engine.estimateCurrentTokens(messages, nil)
+
+	expectedDelta := engine.tokenEstimator.EstimateMessage(&messages[len(messages)-1])
+	assert.Equal(t, first.InputTokens+expectedDelta, second.InputTokens)
+}
+
 // ---------------------------------------------------------------------------
 // TC1: Empty content + stop → should NOT complete with empty FinalAnswer
 // ---------------------------------------------------------------------------

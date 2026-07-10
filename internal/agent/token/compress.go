@@ -4,12 +4,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 )
 
-// DefaultContextThresholdRatio is the ratio of context window usage that triggers compression.
-// When message tokens exceed MaxContextTokens * threshold, old messages are trimmed.
-const DefaultContextThresholdRatio = 0.8
-
 // CompressContext trims older history messages to bring total token count below
-// the threshold.  It preserves:
+// maxTokens, which is the already-derived input budget. It preserves:
 //   - The system prompt (first message)
 //   - The current turn: user query (last user message) and all subsequent
 //     assistant/tool messages
@@ -26,8 +22,7 @@ func CompressContext(
 		return messages
 	}
 
-	threshold := int(float64(maxTokens) * DefaultContextThresholdRatio)
-	if currentTokens <= threshold {
+	if currentTokens <= maxTokens {
 		return messages
 	}
 
@@ -51,7 +46,7 @@ func CompressContext(
 
 	groups := groupToolMessages(history)
 
-	tokensToFree := currentTokens - threshold
+	tokensToFree := currentTokens - maxTokens
 	freed := 0
 	removeUpTo := 0
 
