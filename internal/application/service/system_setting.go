@@ -200,12 +200,12 @@ var registry = map[string]settingSpec{
 	// limiter governor; a runtime bridge (applyModelMaxConcurrency) pushes UI
 	// edits into limiter.SetGlobalLimit so no restart is needed. Individual
 	// models may override this via their own max_concurrency parameter.
-	// Mirrors WEKNORA_MODEL_MAX_CONCURRENCY (default 8). 0/negative disables
+	// Mirrors WEKNORA_MODEL_MAX_CONCURRENCY (default 32). 0/negative disables
 	// the default cap.
 	"model.max_concurrency": {
 		Type:     "int",
 		EnvName:  "WEKNORA_MODEL_MAX_CONCURRENCY",
-		Default:  int64(8),
+		Default:  int64(32),
 		Category: "worker",
 		Description: "后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。" +
 			"每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制" +
@@ -448,7 +448,7 @@ func (s *systemSettingService) applySSRFWhitelist(ctx context.Context) {
 // Called at preload (initial sync), after Update (this replica's edit), and
 // after reload (peer's edit via pubsub).
 func (s *systemSettingService) applyModelMaxConcurrency(ctx context.Context) {
-	limit := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 8))
+	limit := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 32))
 	limiter.SetGlobalLimit(limit)
 	logger.Infof(ctx, "[system_settings] model.max_concurrency applied (limit=%d)", limit)
 }

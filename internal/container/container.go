@@ -449,7 +449,7 @@ func initLangfuse() (*langfuse.Manager, error) {
 // model.max_concurrency is unset. summary / question / graph enrichment all
 // share the same model, so this bounds their combined pressure on one provider
 // across every replica. Interactive chat is never gated.
-const defaultModelMaxConcurrency = 8
+const defaultModelMaxConcurrency = 32
 
 // resolveModelMaxConcurrency reads the per-model background concurrency limit
 // from system settings / env, defaulting to defaultModelMaxConcurrency when
