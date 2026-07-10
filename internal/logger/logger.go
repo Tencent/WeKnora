@@ -526,6 +526,7 @@ func CloneContext(ctx context.Context) context.Context {
 		types.SystemAdminContextKey,
 		types.LanguageContextKey,
 		types.SessionTenantIDContextKey,
+		types.SessionIDContextKey,
 		types.EmbedQueryContextKey,
 		types.EmbedVisitorContextKey,
 		// Keep the Langfuse trace alive across CloneContext boundaries so

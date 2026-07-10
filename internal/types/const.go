@@ -27,6 +27,10 @@ const (
 	// SessionTenantIDContextKey is the context key for session owner's tenant ID.
 	// When set (e.g. in pipeline with shared agent), session/message lookups use this instead of TenantIDContextKey.
 	SessionTenantIDContextKey ContextKey = "SessionTenantID"
+	// SessionIDContextKey carries the current session ID through the chat pipeline
+	// so that stateful sandbox backends (notably CubeSandbox) can route script
+	// execution to the persistent, per-session MicroVM instance.
+	SessionIDContextKey ContextKey = "SessionID"
 	// EmbedQueryContextKey is the context key for embedding query text
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
 	// WikiEditSourceContextKey carries who is authoring the current wiki

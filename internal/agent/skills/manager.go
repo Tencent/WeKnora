@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Manager manages skills lifecycle including discovery, loading, and script execution
@@ -203,11 +205,14 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 	}
 
 	// Prepare execution config
+	logger.Info(ctx, "[Tool][ExecuteScript]:Prepare execution config")
+	sessionID, _ := types.SessionIDFromContext(ctx)
 	config := &sandbox.ExecuteConfig{
-		Script:  file.Path,
-		Args:    args,
-		WorkDir: basePath,
-		Stdin:   stdin,
+		Script:    file.Path,
+		Args:      args,
+		WorkDir:   basePath,
+		Stdin:     stdin,
+		SessionID: sessionID,
 	}
 
 	// Execute in sandbox
