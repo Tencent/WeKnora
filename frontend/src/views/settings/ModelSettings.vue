@@ -189,6 +189,8 @@ function convertToLegacyFormat(model: ModelConfig) {
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
     maxConcurrency: model.parameters.max_concurrency,
+    maxRpm: model.parameters.max_rpm,
+    maxTpm: model.parameters.max_tpm,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
@@ -445,10 +447,18 @@ const handleModelSave = async (modelData: any) => {
         } : saveType === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
         } : {}),
-        // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
+        // 后台限流上限：仅 chat/embedding/vllm 受治理，各维度 >0 才写入（0/空沿用全局默认）。
         ...(['chat', 'embedding', 'vllm'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0
           ? { max_concurrency: Number(modelData.maxConcurrency) }
+          : {}),
+        ...(['chat', 'embedding', 'vllm'].includes(saveType)
+          && Number(modelData.maxRpm) > 0
+          ? { max_rpm: Number(modelData.maxRpm) }
+          : {}),
+        ...(['chat', 'embedding', 'vllm'].includes(saveType)
+          && Number(modelData.maxTpm) > 0
+          ? { max_tpm: Number(modelData.maxTpm) }
           : {})
       }
     }

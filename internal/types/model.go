@@ -79,8 +79,17 @@ type ModelParameters struct {
 	// enrichment) calls to THIS specific model, keyed by model ID and shared
 	// across all replicas. 0 (the default) means "fall back to the
 	// process-wide model.max_concurrency". Interactive user-facing calls are
-	// never gated. Only chat / vlm / embedding honour this (see limiter.Gate).
+	// never gated. Only chat / vlm / embedding honour this (see limiter.Admit).
 	MaxConcurrency int `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	// MaxRPM caps BACKGROUND requests-per-minute to THIS model (token bucket,
+	// keyed by model ID, shared across replicas). 0 falls back to the
+	// process-wide model.max_rpm. Aligns with the provider's RPM quota.
+	MaxRPM int `yaml:"max_rpm,omitempty" json:"max_rpm,omitempty"`
+	// MaxTPM caps BACKGROUND tokens-per-minute to THIS model (token bucket,
+	// keyed by model ID, shared across replicas). 0 falls back to the
+	// process-wide model.max_tpm. Aligns with the provider's TPM quota — the
+	// limit large-document enrichment hits first.
+	MaxTPM int `yaml:"max_tpm,omitempty" json:"max_tpm,omitempty"`
 	// WeKnoraCloud 厂商专用凭证
 	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -105,9 +106,11 @@ type ChatConfig struct {
 	APIKey    string
 	ModelID   string
 	Provider  string
-	// MaxConcurrency caps concurrent background calls to this model; 0 falls
-	// back to the process-wide default (see limiter.GateN).
+	// MaxConcurrency / MaxRPM / MaxTPM cap background calls to this model; 0 in
+	// any dimension falls back to the process-wide default (see limiter.Admit).
 	MaxConcurrency int
+	MaxRPM         int
+	MaxTPM         int
 	ExtraConfig    map[string]string
 	// CustomHeaders 允许在调用远程 OpenAI 兼容 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
@@ -131,6 +134,8 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 		Source:         m.Source,
 		Provider:       m.Parameters.Provider,
 		MaxConcurrency: m.Parameters.MaxConcurrency,
+		MaxRPM:         m.Parameters.MaxRPM,
+		MaxTPM:         m.Parameters.MaxTPM,
 		ExtraConfig:    m.Parameters.ExtraConfig,
 		CustomHeaders:  m.Parameters.CustomHeaders,
 		AppID:          appID,
@@ -152,9 +157,13 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	}
 	c, err = wrapChatDebug(c, err)
 	c, err = wrapChatLangfuse(c, err)
-	// Outermost: hold the per-model concurrency slot only around the real
+	// Outermost: hold the per-model governor reservation only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
-	return wrapChatConcurrency(c, config.MaxConcurrency, err)
+	return wrapChatConcurrency(c, limiter.Limits{
+		Concurrency: config.MaxConcurrency,
+		RPM:         config.MaxRPM,
+		TPM:         config.MaxTPM,
+	}, err)
 }
 
 // NewRemoteChat 根据 provider 创建远程聊天实例。

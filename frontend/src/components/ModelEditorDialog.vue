@@ -388,6 +388,24 @@
             :placeholder="$t('model.editor.maxConcurrencyPlaceholder')" />
           <p class="form-desc">{{ $t('model.editor.maxConcurrencyDesc') }}</p>
         </div>
+
+        <!--
+          Background per-minute rate caps for this model (RPM / TPM). Aligns with
+          the provider's requests-/tokens-per-minute quota. 0 = global default.
+        -->
+        <div class="form-item">
+          <label class="form-label">{{ $t('model.editor.maxRpmLabel') }}</label>
+          <t-input v-model.number="formData.maxRpm" type="number" :min="0" :max="1000000"
+            :placeholder="$t('model.editor.maxRatePlaceholder')" />
+          <p class="form-desc">{{ $t('model.editor.maxRpmDesc') }}</p>
+        </div>
+
+        <div class="form-item">
+          <label class="form-label">{{ $t('model.editor.maxTpmLabel') }}</label>
+          <t-input v-model.number="formData.maxTpm" type="number" :min="0" :max="100000000"
+            :placeholder="$t('model.editor.maxRatePlaceholder')" />
+          <p class="form-desc">{{ $t('model.editor.maxTpmDesc') }}</p>
+        </div>
       </section>
 
     </t-form>
@@ -439,6 +457,10 @@ interface ModelFormData {
   supportsVision?: boolean
   /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
   maxConcurrency?: number
+  /** 后台任务对该模型的每分钟请求数（RPM）上限；0/undefined 表示沿用全局默认。 */
+  maxRpm?: number
+  /** 后台任务对该模型的每分钟 token 数（TPM）上限；0/undefined 表示沿用全局默认。 */
+  maxTpm?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
@@ -834,6 +856,8 @@ const formData = ref<ModelFormData>({
   isDefault: false,
   supportsVision: false,
   maxConcurrency: undefined,
+  maxRpm: undefined,
+  maxTpm: undefined,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
   appSecret: '',
@@ -1075,6 +1099,8 @@ const resetForm = () => {
     isDefault: false,
     supportsVision: false,
     maxConcurrency: undefined,
+    maxRpm: undefined,
+    maxTpm: undefined,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],
     appSecret: '',

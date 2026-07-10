@@ -48,6 +48,8 @@ type ModelParametersDTO struct {
 	CustomHeaders       map[string]string         `json:"custom_headers,omitempty"`
 	SupportsVision      bool                      `json:"supports_vision"`
 	MaxConcurrency      int                       `json:"max_concurrency,omitempty"`
+	MaxRPM              int                       `json:"max_rpm,omitempty"`
+	MaxTPM              int                       `json:"max_tpm,omitempty"`
 	AppID               string                    `json:"app_id,omitempty"`
 }
 
@@ -69,6 +71,8 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		CustomHeaders:       m.Parameters.CustomHeaders,
 		SupportsVision:      m.Parameters.SupportsVision,
 		MaxConcurrency:      m.Parameters.MaxConcurrency,
+		MaxRPM:              m.Parameters.MaxRPM,
+		MaxTPM:              m.Parameters.MaxTPM,
 		AppID:               m.Parameters.AppID,
 	}
 	if !CanViewIntegrationSecrets(ctx) {

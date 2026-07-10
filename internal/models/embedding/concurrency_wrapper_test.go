@@ -71,11 +71,11 @@ func (f *fakeEmbedder) GetModelID() string   { return f.id }
 // TestConcurrencyEmbedderBackgroundGated verifies background BatchEmbed calls
 // are capped at the per-model limit.
 func TestConcurrencyEmbedderBackgroundGated(t *testing.T) {
-	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
-	limiter.SetGovernor(limiter.NewLocalLimiter(), 2)
+	t.Cleanup(func() { limiter.SetGovernor(nil, nil, limiter.Limits{}) })
+	limiter.SetGovernor(limiter.NewLocalLimiter(), nil, limiter.Limits{Concurrency: 2})
 
 	f := newFakeEmbedder("emb-bg")
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, limiter.Limits{})
 
 	ctx := types.WithBackgroundTask(context.Background())
 	const n = 5
@@ -113,12 +113,12 @@ func TestConcurrencyEmbedderBackgroundGated(t *testing.T) {
 // TestConcurrencyEmbedderPerModelLimitOverridesDefault verifies a model's own
 // configured limit takes precedence over the process-wide default.
 func TestConcurrencyEmbedderPerModelLimitOverridesDefault(t *testing.T) {
-	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
+	t.Cleanup(func() { limiter.SetGovernor(nil, nil, limiter.Limits{}) })
 	// Global default is generous (10), but this model is pinned to 1.
-	limiter.SetGovernor(limiter.NewLocalLimiter(), 10)
+	limiter.SetGovernor(limiter.NewLocalLimiter(), nil, limiter.Limits{Concurrency: 10})
 
 	f := newFakeEmbedder("emb-permodel")
-	w := wrapEmbeddingConcurrency(f, 1)
+	w := wrapEmbeddingConcurrency(f, limiter.Limits{Concurrency: 1})
 
 	ctx := types.WithBackgroundTask(context.Background())
 	const n = 3
@@ -153,11 +153,11 @@ func TestConcurrencyEmbedderPerModelLimitOverridesDefault(t *testing.T) {
 // TestConcurrencyEmbedderInteractiveNotGated verifies interactive calls bypass
 // the governor entirely, even at limit 1.
 func TestConcurrencyEmbedderInteractiveNotGated(t *testing.T) {
-	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
-	limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
+	t.Cleanup(func() { limiter.SetGovernor(nil, nil, limiter.Limits{}) })
+	limiter.SetGovernor(limiter.NewLocalLimiter(), nil, limiter.Limits{Concurrency: 1})
 
 	f := newFakeEmbedder("emb-interactive")
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, limiter.Limits{})
 
 	ctx := context.Background() // no background marker
 	const n = 3
@@ -187,8 +187,8 @@ func TestConcurrencyEmbedderInteractiveNotGated(t *testing.T) {
 // wrapper sits innermost.
 func TestConcurrencyEmbedderPoolFanOutGated(t *testing.T) {
 	t.Setenv("BATCH_EMBED_SIZE", "1") // one provider round-trip per text
-	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
-	limiter.SetGovernor(limiter.NewLocalLimiter(), 2)
+	t.Cleanup(func() { limiter.SetGovernor(nil, nil, limiter.Limits{}) })
+	limiter.SetGovernor(limiter.NewLocalLimiter(), nil, limiter.Limits{Concurrency: 2})
 
 	pool, err := ants.NewPool(16)
 	if err != nil {
@@ -198,7 +198,7 @@ func TestConcurrencyEmbedderPoolFanOutGated(t *testing.T) {
 
 	f := newFakeEmbedder("emb-pool")
 	f.pooler = NewBatchEmbedder(pool)
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, limiter.Limits{})
 
 	ctx := types.WithBackgroundTask(context.Background())
 	done := make(chan struct{})
