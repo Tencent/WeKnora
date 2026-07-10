@@ -540,6 +540,17 @@ func (h *SystemHandler) isKS3Configured(c *gin.Context) bool {
 	return false
 }
 
+// isOBSConfigured checks whether OBS connection info is available from tenant config.
+func (h *SystemHandler) isOBSConfigured(c *gin.Context) bool {
+	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.OBS != nil {
+			obsConf := tenant.StorageEngineConfig.OBS
+			return obsConf.Endpoint != "" && obsConf.Region != "" && obsConf.AccessKey != "" && obsConf.SecretKey != "" && obsConf.BucketName != ""
+		}
+	}
+	return false
+}
+
 // isTOSEnvAvailable checks whether TOS env vars are set.
 func (h *SystemHandler) isTOSEnvAvailable() bool {
 	return os.Getenv("TOS_ENDPOINT") != "" &&
@@ -551,7 +562,7 @@ func (h *SystemHandler) isTOSEnvAvailable() bool {
 
 // StorageEngineStatusItem describes one storage engine's availability and description.
 type StorageEngineStatusItem struct {
-	Name        string `json:"name"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3"
+	Name        string `json:"name"` // one of supportedStorageProviders: "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 	Allowed     bool   `json:"allowed"`
 	Available   bool   `json:"available"`   // whether the engine can be used
 	Description string `json:"description"` // short description for UI
@@ -579,22 +590,48 @@ func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 	s3Configured := h.isS3Configured(c)
 	ossConfigured := h.isOSSConfigured(c)
 	ks3Configured := h.isKS3Configured(c)
+	obsConfigured := h.isOBSConfigured(c)
 	allowed := getAllowedStorageProviders()
+
+	// avail and desc are keyed by provider name and must stay in sync with
+	// supportedStorageProviders. When adding a new provider to that slice,
+	// add a matching entry here — a missing entry will surface as available=false
+	// with an empty description rather than silently disappearing from the list.
+	avail := map[string]bool{
+		"local": true,
+		"minio": minioConfigured || minioEnvAvailable,
+		"cos":   cosConfigured,
+		"tos":   tosConfigured,
+		"s3":    s3Configured,
+		"oss":   ossConfigured,
+		"ks3":   ks3Configured,
+		"obs":   obsConfigured,
+	}
+	desc := map[string]string{
+		"local": "本地文件系统存储，仅适合单机部署",
+		"minio": "S3 兼容的自托管对象存储，适合内网和私有云部署",
+		"cos":   "腾讯云对象存储服务，适合公有云部署，支持 CDN 加速",
+		"tos":   "火山引擎对象存储服务，适合公有云部署",
+		"s3":    "AWS S3 与兼容对象存储服务，适合公有云与混合云部署",
+		"oss":   "阿里云对象存储服务，适合公有云部署，支持 S3 兼容协议",
+		"ks3":   "金山云对象存储服务，适合公有云部署",
+		"obs":   "华为云对象存储服务，适合公有云部署",
+	}
+
 	allowedProviders := make([]string, 0, len(supportedStorageProviders))
+	engines := make([]StorageEngineStatusItem, 0, len(supportedStorageProviders))
 	for _, provider := range getSupportedStorageProviders() {
 		if allowed[provider] {
 			allowedProviders = append(allowedProviders, provider)
 		}
+		engines = append(engines, StorageEngineStatusItem{
+			Name:        provider,
+			Allowed:     allowed[provider],
+			Available:   avail[provider],
+			Description: desc[provider],
+		})
 	}
-	engines := []StorageEngineStatusItem{
-		{Name: "local", Allowed: allowed["local"], Available: true, Description: "本地文件系统存储，仅适合单机部署"},
-		{Name: "minio", Allowed: allowed["minio"], Available: minioConfigured || minioEnvAvailable, Description: "S3 兼容的自托管对象存储，适合内网和私有云部署"},
-		{Name: "cos", Allowed: allowed["cos"], Available: cosConfigured, Description: "腾讯云对象存储服务，适合公有云部署，支持 CDN 加速"},
-		{Name: "tos", Allowed: allowed["tos"], Available: tosConfigured, Description: "火山引擎对象存储服务，适合公有云部署"},
-		{Name: "s3", Allowed: allowed["s3"], Available: s3Configured, Description: "AWS S3 与兼容对象存储服务，适合公有云与混合云部署"},
-		{Name: "oss", Allowed: allowed["oss"], Available: ossConfigured, Description: "阿里云对象存储服务，适合公有云部署，支持 S3 兼容协议"},
-		{Name: "ks3", Allowed: allowed["ks3"], Available: ks3Configured, Description: "金山云对象存储服务，适合公有云部署"},
-	}
+
 	c.JSON(200, gin.H{
 		"code": 0,
 		"msg":  "success",

@@ -79,78 +79,35 @@ const allowedProviders = ref<string[]>([])
 const hasAnyConfig = ref(false)
 
 const engineOptions = computed(() => {
-  const statusMap: Record<string, boolean> = {}
-  const allowedMap: Record<string, boolean> = {}
-  for (const e of engineStatus.value) {
-    statusMap[e.name] = e.available
-    allowedMap[e.name] = e.allowed !== false
+  // UI display metadata keyed by provider name.
+  // When adding a new provider to the backend (storage_allowlist.go → supportedStorageProviders),
+  // add a matching entry here. Unknown providers fall back to an uppercase name and the
+  // backend-supplied description so the UI degrades gracefully rather than hiding the engine.
+  const meta: Record<string, { label: string; desc: string }> = {
+    local: { label: t('kbSettings.storage.engineLocal'), desc: t('kbSettings.storage.engineLocalDesc') },
+    minio: { label: 'MinIO',                             desc: t('kbSettings.storage.engineMinioDesc') },
+    cos:   { label: t('kbSettings.storage.engineCos'),   desc: t('kbSettings.storage.engineCosDesc') },
+    tos:   { label: t('kbSettings.storage.engineTos'),   desc: t('kbSettings.storage.engineTosDesc') },
+    s3:    { label: t('kbSettings.storage.engineS3'),    desc: t('kbSettings.storage.engineS3Desc') },
+    oss:   { label: t('kbSettings.storage.engineOss'),   desc: t('kbSettings.storage.engineOssDesc') },
+    ks3:   { label: t('kbSettings.storage.engineKs3'),   desc: t('kbSettings.storage.engineKs3Desc') },
+    obs:   { label: t('kbSettings.storage.engineObs'),   desc: t('kbSettings.storage.engineObsDesc') },
   }
-  return [
-    {
-      value: 'local',
-      label: t('kbSettings.storage.engineLocal'),
-      desc: t('kbSettings.storage.engineLocalDesc'),
-      allowed: allowedMap.local !== false,
-      available: statusMap.local !== false,
-      disabled: allowedMap.local === false,
-    },
-    {
-      value: 'minio',
-      label: 'MinIO',
-      desc: t('kbSettings.storage.engineMinioDesc'),
-      allowed: allowedMap.minio !== false,
-      available: statusMap.minio,
-      disabled: allowedMap.minio === false || statusMap.minio === false,
-    },
-    {
-      value: 'cos',
-      label: t('kbSettings.storage.engineCos'),
-      desc: t('kbSettings.storage.engineCosDesc'),
-      allowed: allowedMap.cos !== false,
-      available: statusMap.cos,
-      disabled: allowedMap.cos === false || statusMap.cos === false,
-    },
-    {
-      value: 'tos',
-      label: t('kbSettings.storage.engineTos'),
-      desc: t('kbSettings.storage.engineTosDesc'),
-      allowed: allowedMap.tos !== false,
-      available: statusMap.tos,
-      disabled: allowedMap.tos === false || statusMap.tos === false,
-    },
-    {
-      value: 's3',
-      label: t('kbSettings.storage.engineS3'),
-      desc: t('kbSettings.storage.engineS3Desc'),
-      allowed: allowedMap.s3 !== false,
-      available: statusMap.s3,
-      disabled: allowedMap.s3 === false || statusMap.s3 === false,
-    },
-    {
-      value: 'oss',
-      label: t('kbSettings.storage.engineOss'),
-      desc: t('kbSettings.storage.engineOssDesc'),
-      allowed: allowedMap.oss !== false,
-      available: statusMap.oss,
-      disabled: allowedMap.oss === false || statusMap.oss === false,
-    },
-    {
-      value: 'ks3',
-      label: t('kbSettings.storage.engineKs3'),
-      desc: t('kbSettings.storage.engineKs3Desc'),
-      allowed: allowedMap.ks3 !== false,
-      available: statusMap.ks3,
-      disabled: allowedMap.ks3 === false || statusMap.ks3 === false,
-    },
-    {
-      value: 'obs',
-      label: t('kbSettings.storage.engineObs'),
-      desc: t('kbSettings.storage.engineObsDesc'),
-      allowed: allowedMap.obs !== false,
-      available: statusMap.obs,
-      disabled: allowedMap.obs === false || statusMap.obs === false,
-    },
-  ]
+  // Derive options directly from the backend status response so this list never
+  // drifts out of sync with supportedStorageProviders on the backend.
+  return engineStatus.value.map(e => {
+    const { label, desc } = meta[e.name] ?? { label: e.name.toUpperCase(), desc: e.description }
+    const isAllowed = e.allowed !== false
+    return {
+      value: e.name,
+      label,
+      desc,
+      allowed: isAllowed,
+      available: e.available,
+      // disabled when not allowed by STORAGE_ALLOW_LIST OR not yet configured
+      disabled: !isAllowed || !e.available,
+    }
+  })
 })
 
 const showGoSettings = computed(() =>
