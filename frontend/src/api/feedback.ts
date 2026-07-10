@@ -92,7 +92,7 @@ export function getDislikeReasons() {
 
 // 获取片段统计
 export function getChunkStats(chunkId: string) {
-  return get<{ success: boolean; data: ChunkStatsResponse }>(`/api/v1/chunks/${chunkId}/stats`)
+  return get<{ success: boolean; data: ChunkStatsResponse }>(`/api/v1/admin/chunks/${chunkId}/stats`)
 }
 
 // 获取低质量片段列表

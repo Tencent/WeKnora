@@ -365,6 +365,10 @@
                   <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
                 </div>
 
+                <div v-if="mode === 'edit' && kbId && currentSection === 'feedback'" class="section">
+                  <ChunkFeedbackSettings />
+                </div>
+
                 <!-- 共享设置（仅编辑模式） -->
                 <div v-if="mode === 'edit' && kbId && currentSection === 'share'" class="section">
                   <KBShareSettings :kb-id="kbId" :can-share="canShareKB" />
@@ -413,6 +417,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
+import ChunkFeedbackSettings from './settings/ChunkFeedbackSettings.vue'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -544,6 +549,7 @@ const navItems = computed(() => {
     )
     if (props.mode === 'edit' && props.kbId) {
       items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
+      items.push({ key: 'feedback', icon: 'chart-pie', label: t('knowledgeEditor.feedback.title') })
     }
   }
   if (props.mode === 'edit' && props.kbId && !authStore.isLiteMode) {
@@ -571,7 +577,7 @@ const navGroups = computed(() => {
     {
       key: 'data',
       label: t('knowledgeEditor.navGroups.data'),
-      items: pickItems(['storage', 'datasource']),
+      items: pickItems(['storage', 'datasource', 'feedback']),
     },
     {
       key: 'integration',

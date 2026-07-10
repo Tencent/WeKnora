@@ -1828,7 +1828,7 @@ func RegisterFeedbackRoutes(r *gin.RouterGroup, handler *handler.ChunkFeedbackHa
 	// 后台片段统计 - 管理员可查看租户级质量数据
 	r.GET("/chunks/low-quality", g.Admin(), handler.ListLowQualityChunks)
 	r.GET("/chunks/feedback-overview", g.Admin(), handler.GetFeedbackOverview)
-	r.GET("/chunks/:chunk_id/stats", g.Admin(), handler.GetChunkStats)
+	r.GET("/admin/chunks/:chunk_id/stats", g.Admin(), handler.GetChunkStats)
 
 	// 管理员操作 - 需要管理员权限
 	r.POST("/admin/chunks/:chunk_id/reset-feedback", g.Admin(), handler.ResetChunkFeedback)
