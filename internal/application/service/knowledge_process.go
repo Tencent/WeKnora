@@ -2246,7 +2246,7 @@ func (s *knowledgeService) ReparseKnowledge(
 //   - Any in-flight worker reads the new status at its next checkpoint and
 //     bails (see processChunks / ProcessDocument / downstream handlers).
 //   - The asynq inspector (if available) dequeues pending / scheduled / retry
-//     tasks for this knowledge_id across the default / critical / low queues
+//     tasks for this knowledge_id across all queues used by the pipeline
 //     and signals active workers to stop. Lite mode (no Redis) skips the
 //     dequeue step — the checkpoint-based abort is the only stop signal there.
 //   - Idempotent: re-calling on an already-cancelled row is a no-op.

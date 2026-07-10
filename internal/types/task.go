@@ -4,9 +4,8 @@ package types
 // router.NewParseAsynqServer / router.NewWikiAsynqServer — a task enqueued to a
 // queue that no server subscribes to will never be consumed.
 const (
-	QueueCritical   = "critical"
-	QueueDefault    = "default"
-	QueueLow        = "low"
+	QueueDefault = "default"
+	QueueLow     = "low"
 	// QueueMultimodal isolates high-volume, slow VLM image tasks (OCR + caption)
 	// so a single large scanned PDF (hundreds–thousands of page images) cannot
 	// saturate the shared worker pool and block user-facing document parsing in
@@ -32,6 +31,39 @@ const (
 	// during upload storms.
 	QueueWiki = "wiki"
 )
+
+// QueueStat is a read-only depth snapshot of a single asynq queue, used
+// by the System Admin runtime dashboard. Field names mirror the counts
+// exposed by asynq.QueueInfo. Pool / Weight are static metadata (which
+// worker pool drains the queue and its scheduling weight within that
+// pool) so the UI can group and explain the lanes without the frontend
+// hard-coding the topology.
+type QueueStat struct {
+	Name string `json:"name"`
+	// Pool is the worker pool that drains this queue: "parse" or "wiki".
+	Pool string `json:"pool"`
+	// Weight is the queue's scheduling weight inside its pool. Must match
+	// the maps in router.NewParseAsynqServer / NewWikiAsynqServer.
+	Weight int `json:"weight"`
+	// Size is the total number of tasks in the queue (pending + active +
+	// scheduled + retry + aggregating + archived).
+	Size      int `json:"size"`
+	Pending   int `json:"pending"`
+	Active    int `json:"active"`
+	Scheduled int `json:"scheduled"`
+	Retry     int `json:"retry"`
+	Archived  int `json:"archived"`
+	Completed int `json:"completed"`
+	// Processed / Failed are today's counters (reset daily).
+	Processed int `json:"processed"`
+	Failed    int `json:"failed"`
+	// Paused reports whether the queue is paused (tasks not consumed).
+	Paused bool `json:"paused"`
+	// LatencyMs is the age of the oldest pending task, in milliseconds.
+	LatencyMs int64 `json:"latency_ms"`
+	// MemoryUsageBytes is the approximate Redis memory the queue occupies.
+	MemoryUsageBytes int64 `json:"memory_usage_bytes"`
+}
 
 const (
 	TypeChunkExtract         = "chunk:extract"
@@ -216,8 +248,8 @@ type KnowledgeListDeletePayload struct {
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
 type KnowledgeListReparsePayload struct {
 	TracingContext
-	TenantID      uint64                      `json:"tenant_id"`
-	KnowledgeIDs  []string                    `json:"knowledge_ids"`
+	TenantID      uint64                     `json:"tenant_id"`
+	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 

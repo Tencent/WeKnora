@@ -474,3 +474,57 @@ export async function listSystemAuditLog(
   const url = `/api/v1/system/admin/audit-log${tail ? '?' + tail : ''}`
   return (await get(url)) as unknown as ListAuditLogResponse
 }
+
+// ---- Runtime queue observability (system-scope) ----
+
+/**
+ * QueueStat mirrors types.QueueStat on the backend: a read-only depth
+ * snapshot of one asynq queue. `pool` groups the queue by worker pool
+ * ("parse" | "wiki"); `weight` is its scheduling weight within that pool.
+ * Counts follow asynq.QueueInfo semantics — `active` is the number of
+ * tasks currently being processed (the closest thing to "workers busy"),
+ * `pending` is the backlog waiting to be picked up.
+ */
+export interface QueueStat {
+  name: string
+  pool: string
+  weight: number
+  size: number
+  pending: number
+  active: number
+  scheduled: number
+  retry: number
+  archived: number
+  completed: number
+  processed: number
+  failed: number
+  paused: boolean
+  latency_ms: number
+  memory_usage_bytes: number
+}
+
+/**
+ * Runtime queue dashboard payload. `available` is false in Lite mode
+ * (no Redis/asynq) — render an "unavailable in this deployment" state
+ * rather than an empty table. `parse_concurrency` / `wiki_concurrency`
+ * are the CONFIGURED worker-pool sizes (effective on next restart), not
+ * the live busy-worker count (see QueueStat.active for that).
+ */
+export interface RuntimeQueuesResponse {
+  available: boolean
+  parse_concurrency: number
+  wiki_concurrency: number
+  queues: QueueStat[]
+  timestamp: number
+}
+
+/**
+ * Fetch the live asynq queue depths + worker-pool concurrency.
+ * Backend: GET /api/v1/system/admin/runtime/queues (SystemAdmin only).
+ * Returns the object directly — no {data: ...} wrapping (see
+ * utils/request.ts interceptor).
+ */
+export async function getRuntimeQueues(): Promise<RuntimeQueuesResponse> {
+  const response = await get('/api/v1/system/admin/runtime/queues')
+  return response as unknown as RuntimeQueuesResponse
+}

@@ -43,6 +43,11 @@ type SystemHandler struct {
 	// tests that wire a partial container still compile. In production
 	// the dig graph always provides one.
 	auditSvc interfaces.AuditLogService
+	// taskInspector backs the SystemAdmin runtime queue dashboard. Always
+	// provided by the container (asynq-backed in Redis mode, a no-op in
+	// Lite mode), so GetRuntimeQueues can distinguish "no queues in this
+	// deployment" from "queues are empty".
+	taskInspector interfaces.TaskInspector
 }
 
 // NewSystemHandler creates a new system handler
@@ -53,6 +58,7 @@ func NewSystemHandler(cfg *config.Config,
 	userSvc interfaces.UserService,
 	systemSettingSvc interfaces.SystemSettingService,
 	auditSvc interfaces.AuditLogService,
+	taskInspector interfaces.TaskInspector,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:              cfg,
@@ -62,6 +68,7 @@ func NewSystemHandler(cfg *config.Config,
 		userSvc:          userSvc,
 		systemSettingSvc: systemSettingSvc,
 		auditSvc:         auditSvc,
+		taskInspector:    taskInspector,
 	}
 }
 
@@ -1374,6 +1381,76 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 // @Success      200 {array} types.SystemSetting "list of settings"
 // @Failure      403 {object} map[string]interface{} "Forbidden: not a system admin"
 // @Router       /system/admin/settings [get]
+// RuntimeQueuesResponse is the payload for the SystemAdmin runtime queue
+// dashboard. `available` is false in Lite mode (no Redis/asynq) so the
+// UI can render an "unavailable in this deployment" state instead of an
+// empty table. ParseConcurrency / WikiConcurrency are the *configured*
+// worker-pool sizes (resolved DB > ENV > default); they are static
+// capacity, not the live active-worker count (see QueueStat.Active for
+// what's actually running).
+type RuntimeQueuesResponse struct {
+	Available        bool              `json:"available"`
+	ParseConcurrency int               `json:"parse_concurrency"`
+	WikiConcurrency  int               `json:"wiki_concurrency"`
+	Queues           []types.QueueStat `json:"queues"`
+	Timestamp        int64             `json:"timestamp"`
+}
+
+// defaultParseConcurrency / defaultWikiConcurrency mirror the unexported
+// router constants (defaultAsynqConcurrency / defaultWikiAsynqConcurrency).
+// Duplicated here rather than exported from router to avoid an import
+// cycle (router already imports handler); kept in sync by convention.
+const (
+	defaultParseConcurrency = 32
+	defaultWikiConcurrency  = 16
+)
+
+// GetRuntimeQueues godoc
+// @Summary      获取解析任务队列运行时状态
+// @Description  返回各 asynq 队列的实时深度（pending/active/scheduled/retry 等）与 worker 并发配置，仅系统管理员可见
+// @Tags         系统管理
+// @Produce      json
+// @Success      200  {object}  RuntimeQueuesResponse
+// @Router       /system/admin/runtime/queues [get]
+func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+	resp := RuntimeQueuesResponse{
+		ParseConcurrency: defaultParseConcurrency,
+		WikiConcurrency:  defaultWikiConcurrency,
+		Timestamp:        time.Now().Unix(),
+	}
+
+	if h.taskInspector != nil {
+		stats, supported, err := h.taskInspector.QueueStats(ctx)
+		if err != nil {
+			logger.Errorf(ctx, "get queue stats failed: %v", err)
+		}
+		resp.Available = supported
+		if stats != nil {
+			resp.Queues = stats
+		}
+	}
+	// Always emit a non-nil array so the JSON serialises to `[]` rather
+	// than `null`, keeping the frontend iteration simple.
+	if resp.Queues == nil {
+		resp.Queues = []types.QueueStat{}
+	}
+
+	// Resolve configured worker-pool sizes (DB > ENV > default). These
+	// are the same keys NewParseAsynqServer / NewWikiAsynqServer read at
+	// startup, so operators see the value that will apply on next restart.
+	if h.systemSettingSvc != nil {
+		resp.ParseConcurrency = int(h.systemSettingSvc.GetInt(
+			ctx, "asynq.concurrency", "WEKNORA_ASYNQ_CONCURRENCY", defaultParseConcurrency,
+		))
+		resp.WikiConcurrency = int(h.systemSettingSvc.GetInt(
+			ctx, "asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", defaultWikiConcurrency,
+		))
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 	rows, err := h.systemSettingSvc.List(ctx)

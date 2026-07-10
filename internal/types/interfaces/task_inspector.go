@@ -1,6 +1,10 @@
 package interfaces
 
-import "context"
+import (
+	"context"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
 
 // TaskInspector abstracts queue inspection / cancellation against the
 // task backend. It is best-effort: implementations may scan a finite
@@ -39,4 +43,18 @@ type TaskInspector interface {
 	// always returns false — inline executors never queue, so the
 	// span/updated_at checks remain authoritative there.
 	HasQueuedTasksForKnowledge(ctx context.Context, knowledgeID string) (bool, error)
+
+	// QueueStats returns a read-only depth snapshot for every queue this
+	// application enqueues into, for the System Admin runtime dashboard.
+	//
+	// The `supported` bool reports whether queue inspection is available
+	// on the current backend: true in asynq/Redis mode, false in Lite
+	// mode (no Redis) where tasks run inline and no queue exists. Callers
+	// use it to render an "unavailable in this deployment" state rather
+	// than an empty table.
+	//
+	// Best-effort: a per-queue backend error is logged and that queue is
+	// surfaced as a zeroed row (so the full lane set stays visible) rather
+	// than failing the whole call.
+	QueueStats(ctx context.Context) (stats []types.QueueStat, supported bool, err error)
 }

@@ -182,7 +182,6 @@ func NewParseAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
 	log.Printf("asynq parse-pool server starting with concurrency=%d redis_op_timeout=%dms",
 		concurrency, readRedisOpTimeoutMs())
 	return newAsynqServer(concurrency, map[string]int{
-		types.QueueCritical:   6, // Highest priority queue
 		types.QueueDefault:    3, // Default priority queue
 		types.QueueLow:        1, // Lowest priority queue
 		types.QueueMultimodal: 1, // Isolated lane for high-volume slow VLM image tasks
