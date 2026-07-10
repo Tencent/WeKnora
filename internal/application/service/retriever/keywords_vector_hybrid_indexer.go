@@ -72,7 +72,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		embedding, err := embedder.Embed(ctx, SanitizeForEmbedding(ctx, indexInfo.Content))
 		if err != nil {
 			return err
 		}
@@ -92,13 +92,27 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
+		embeddings := make([][]float32, len(indexInfoList))
 		var contentList []string
-		for _, indexInfo := range indexInfoList {
-			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
+		var missingPositions []int
+		for i, indexInfo := range indexInfoList {
+			if len(indexInfo.PrecomputedEmbedding) > 0 && len(indexInfo.PrecomputedEmbedding) == embedder.GetDimensions() {
+				embeddings[i] = indexInfo.PrecomputedEmbedding
+				continue
+			}
+			missingPositions = append(missingPositions, i)
+			contentList = append(contentList, SanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
-		if err != nil {
-			return err
+		if len(contentList) > 0 {
+			computed, err := BatchEmbedWithBackoff(ctx, embedder, contentList)
+			if err != nil {
+				return err
+			}
+			for i, pos := range missingPositions {
+				if i < len(computed) {
+					embeddings[pos] = computed[i]
+				}
+			}
 		}
 
 		batchSize := 40
@@ -125,10 +139,10 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, maxConcurrency)
 }
 
-// batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
+// BatchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
 // transient failures (200 / 400 / 800 / 1600 / 3200 ms). It returns the last
 // embedding result on success or the last error if every attempt failed.
-func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string) ([][]float32, error) {
+func BatchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string) ([][]float32, error) {
 	delay := embedRetryBaseDelay
 	var (
 		embeddings [][]float32
@@ -152,11 +166,11 @@ func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, con
 	return embeddings, err
 }
 
-// sanitizeForEmbedding caps content length at safetyMaxChars characters so
+// SanitizeForEmbedding caps content length at safetyMaxChars characters so
 // pathologically large inputs cannot blow up the embedding API call. The
 // truncation point is char-based, not token-based, so it sits well above any
 // realistic token limit. We log a warning whenever truncation kicks in.
-func sanitizeForEmbedding(ctx context.Context, content string) string {
+func SanitizeForEmbedding(ctx context.Context, content string) string {
 	sanitized := content
 	// Scrubbing only matters when an inline base64 payload is present; skip the
 	// regex passes otherwise so the common (no-image) path stays cheap.

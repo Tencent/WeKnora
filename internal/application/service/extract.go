@@ -162,6 +162,7 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	graphCacheRepo    interfaces.GraphExtractionCacheRepository
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -176,6 +177,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	graphCacheRepo interfaces.GraphExtractionCacheRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -185,6 +187,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		graphCacheRepo:    graphCacheRepo,
 		spanTracker:       spanTracker,
 	}
 }
@@ -326,11 +329,55 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+	var graph *types.GraphData
+	chunkHash := stableContentHash(chunk.Content)
+	configHash := stableJSONHash(map[string]any{
+		"extract_config": extractCfg,
+		"template":       template,
+		"temperature":    0.3,
+		"max_tokens":     4096,
+		"thinking":       false,
+	})
+	modelFingerprint := modelCacheFingerprint(
+		ctx, s.modelService, chatModel.GetModelID(), chatModel.GetModelName(),
+	)
+	cacheKey := graphExtractionCacheKey(p.TenantID, chunkHash, modelFingerprint, configHash)
+	if s.graphCacheRepo != nil {
+		cached, cacheErr := s.graphCacheRepo.Get(ctx, p.TenantID, cacheKey)
+		if cacheErr != nil {
+			logger.Warnf(ctx, "graph extract cache lookup failed: %v", cacheErr)
+			graphOut["cache_error"] = cacheErr.Error()
+		} else if cached != nil && len(cached.GraphData) > 0 {
+			if err := json.Unmarshal(cached.GraphData, &graph); err != nil {
+				logger.Warnf(ctx, "graph extract cache decode failed: %v", err)
+			} else {
+				graphOut["cache_hit"] = true
+			}
+		}
+	}
+	if graph == nil {
+		graphOut["cache_hit"] = false
+		extractor := chatpipeline.NewExtractor(chatModel, template)
+		graph, err = extractor.Extract(ctx, chunk.Content)
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		if s.graphCacheRepo != nil {
+			entry := &types.GraphExtractionCache{
+				CacheKey:      cacheKey,
+				TenantID:      p.TenantID,
+				ChunkHash:     chunkHash,
+				ModelID:       chatModel.GetModelID(),
+				ModelName:     chatModel.GetModelName(),
+				ConfigHash:    configHash,
+				PromptVersion: graphExtractPromptVersion,
+				GraphData:     marshalJSONRaw(graph),
+			}
+			if err := s.graphCacheRepo.Upsert(ctx, entry); err != nil {
+				logger.Warnf(ctx, "graph extract cache upsert failed: %v", err)
+			}
+		}
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)

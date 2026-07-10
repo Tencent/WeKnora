@@ -145,6 +145,19 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 	return chunks, nil
 }
 
+func (s *chunkService) ListAllChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	chunks, err := s.chunkRepository.ListAllChunksByKnowledgeID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": knowledgeID,
+			"tenant_id":    tenantID,
+		})
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 // This method retrieves chunks with pagination support for better performance with large datasets
 // Parameters:
@@ -279,6 +292,21 @@ func (s *chunkService) DeleteChunks(ctx context.Context, ids []string) error {
 	}
 
 	logger.Infof(ctx, "Successfully deleted %d chunks", len(ids))
+	return nil
+}
+
+func (s *chunkService) DeleteChunksPermanently(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	if err := s.chunkRepository.DeleteChunksPermanently(ctx, tenantID, ids); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"chunk_ids": ids,
+			"tenant_id": tenantID,
+		})
+		return err
+	}
 	return nil
 }
 

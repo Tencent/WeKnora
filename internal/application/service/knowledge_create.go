@@ -814,7 +814,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 
 	if status == types.ManualKnowledgeStatusPublish {
 		logger.Infof(ctx, "Manual knowledge created, enqueuing async processing task, ID: %s", knowledge.ID)
-		if err := s.enqueueManualProcessing(ctx, knowledge, cleanContent, false); err != nil {
+		if err := s.enqueueManualProcessing(ctx, knowledge, cleanContent, false, 0); err != nil {
 			logger.Errorf(ctx, "Failed to enqueue manual processing task for new knowledge: %v", err)
 			// Non-fatal: mark as failed so user can retry
 			knowledge.ParseStatus = "failed"
@@ -1040,7 +1040,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Manual knowledge updated, enqueuing async processing task, ID: %s", existing.ID)
-	if err := s.enqueueManualProcessing(ctx, existing, cleanContent, true); err != nil {
+	if err := s.enqueueManualProcessing(ctx, existing, cleanContent, true, 0); err != nil {
 		logger.Errorf(ctx, "Failed to enqueue manual processing task: %v", err)
 		// Non-fatal: mark as failed so user can retry
 		existing.ParseStatus = "failed"
@@ -1053,7 +1053,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 
 // enqueueManualProcessing enqueues a manual:process Asynq task for async cleanup + re-indexing.
 func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
-	knowledge *types.Knowledge, content string, needCleanup bool,
+	knowledge *types.Knowledge, content string, needCleanup bool, attempt int,
 ) error {
 	requestID, _ := types.RequestIDFromContext(ctx)
 	payload := types.ManualProcessPayload{
@@ -1063,6 +1063,7 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		KnowledgeBaseID: knowledge.KnowledgeBaseID,
 		Content:         content,
 		NeedCleanup:     needCleanup,
+		Attempt:         attempt,
 	}
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)

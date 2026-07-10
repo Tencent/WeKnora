@@ -170,6 +170,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewWikiLogEntryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewEmbeddingCacheRepository))
+	must(container.Provide(repository.NewImageMultimodalCacheRepository))
+	must(container.Provide(repository.NewGraphExtractionCacheRepository))
+	must(container.Provide(repository.NewWikiMapCacheRepository))
+	must(container.Provide(repository.NewReparseArtifactCacheRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
