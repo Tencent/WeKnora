@@ -99,16 +99,20 @@
             <h3>{{ t('system.globalSettings.runtime.poolsTitle') }}</h3>
             <p>{{ t('system.globalSettings.runtime.poolsDescription') }}</p>
           </div>
-          <span>{{ t('system.globalSettings.runtime.perInstance') }}</span>
+          <span class="rq-pools-note">{{ t('system.globalSettings.runtime.perInstance') }}</span>
         </div>
-        <div class="rq-pool-strip">
-          <div v-for="pool in pools" :key="pool.name" class="rq-pool-item">
+        <div class="rq-pool-grid">
+          <div v-for="pool in pools" :key="pool.name" class="rq-pool-card">
             <div class="rq-pool-topline">
-              <span>{{ poolLabel(pool.name) }}</span>
-              <strong>{{ pool.concurrency }}</strong>
+              <span class="rq-pool-name">{{ poolLabel(pool.name) }}</span>
+              <strong class="rq-pool-value">{{ pool.concurrency }}</strong>
             </div>
-            <p>{{ poolDescription(pool.name) }}</p>
-            <small>{{ t('system.globalSettings.runtime.queueCount', { value: pool.queue_count }) }}</small>
+            <p class="rq-pool-desc">
+              {{ poolDescription(pool.name) }}
+              <span class="rq-pool-meta">
+                {{ t('system.globalSettings.runtime.queueCount', { value: pool.queue_count }) }}
+              </span>
+            </p>
           </div>
         </div>
       </section>
@@ -347,8 +351,8 @@ onUnmounted(() => stopPolling())
     max-width: 560px;
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
-    line-height: 1.65;
+    font-size: 14px;
+    line-height: 1.6;
     text-wrap: pretty;
   }
 }
@@ -366,7 +370,7 @@ onUnmounted(() => stopPolling())
   gap: 7px;
   min-height: 32px;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -440,7 +444,7 @@ onUnmounted(() => stopPolling())
   span {
     max-width: 560px;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.55;
   }
 }
@@ -467,7 +471,7 @@ onUnmounted(() => stopPolling())
   align-items: center;
   gap: 9px;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -511,7 +515,7 @@ onUnmounted(() => stopPolling())
 
 .rq-metric-label {
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.35;
   white-space: nowrap;
 }
@@ -530,85 +534,92 @@ onUnmounted(() => stopPolling())
 
 .rq-pools-header {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 
   h3 {
-    margin: 0 0 4px;
+    margin: 0 0 6px;
     color: var(--td-text-color-primary);
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
   }
 
-  p,
-  > span {
+  p {
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
-  > span {
-    flex-shrink: 0;
-    color: var(--td-text-color-secondary);
-    font-size: 11px;
+    font-size: 13px;
+    line-height: 1.55;
   }
 }
 
-.rq-pool-strip {
+.rq-pools-note {
+  flex-shrink: 0;
+  margin-top: 2px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.rq-pool-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  background: var(--td-component-stroke);
+  gap: 12px;
 }
 
-.rq-pool-item {
+.rq-pool-card {
   display: flex;
   min-width: 0;
-  min-height: 106px;
   flex-direction: column;
-  padding: 14px 16px 13px;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
   background: var(--td-bg-color-container);
-
-  p {
-    margin: 6px 0 8px;
-    color: var(--td-text-color-secondary);
-    font-size: 11px;
-    line-height: 1.45;
-    text-wrap: pretty;
-  }
-
-  small {
-    margin-top: auto;
-    color: var(--td-text-color-placeholder);
-    font-size: 10px;
-  }
 }
 
 .rq-pool-topline {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
 
-  span {
-    color: var(--td-text-color-primary);
-    font-size: 12px;
-    font-weight: 500;
-  }
+.rq-pool-name {
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+}
 
-  strong {
-    color: var(--td-brand-color);
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-  }
+.rq-pool-value {
+  color: var(--td-brand-color);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rq-pool-desc {
+  margin: 0;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.rq-pool-meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .rq-details {
@@ -617,23 +628,23 @@ onUnmounted(() => stopPolling())
 
 .rq-details-header {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 13px;
+  margin-bottom: 14px;
 
   h3 {
-    margin: 0 0 4px;
+    margin: 0 0 6px;
     color: var(--td-text-color-primary);
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
   }
 
   p {
     margin: 0;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.55;
   }
 }
 
@@ -643,7 +654,7 @@ onUnmounted(() => stopPolling())
   gap: 5px;
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -670,7 +681,7 @@ onUnmounted(() => stopPolling())
 .rq-queue-name {
   overflow: hidden;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -679,8 +690,8 @@ onUnmounted(() => stopPolling())
 
 .rq-queue-meta {
   color: var(--td-text-color-placeholder);
-  font-size: 10px;
-  line-height: 1.35;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .rq-number,
@@ -712,7 +723,7 @@ onUnmounted(() => stopPolling())
 
   small {
     color: var(--td-text-color-placeholder);
-    font-size: 9px;
+    font-size: 11px;
     white-space: nowrap;
   }
 }
@@ -722,7 +733,7 @@ onUnmounted(() => stopPolling())
   align-items: center;
   gap: 6px;
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 
   i {
@@ -754,18 +765,19 @@ onUnmounted(() => stopPolling())
   background-color: var(--td-bg-color-container);
 
   &:deep(thead th) {
-    height: 38px;
+    height: 40px;
     color: var(--td-text-color-secondary);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     letter-spacing: 0.01em;
     background-color: var(--td-bg-color-secondarycontainer) !important;
   }
 
   &:deep(.t-table td) {
-    height: 54px;
-    padding-top: 8px;
-    padding-bottom: 8px;
+    height: 56px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    font-size: 14px;
     font-variant-numeric: tabular-nums;
   }
 
@@ -777,8 +789,8 @@ onUnmounted(() => stopPolling())
 .rq-footnote {
   margin: 12px 0 0;
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 @media (max-width: 860px) {
@@ -808,7 +820,7 @@ onUnmounted(() => stopPolling())
     grid-template-columns: repeat(4, minmax(64px, 1fr));
   }
 
-  .rq-pool-strip {
+  .rq-pool-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -824,7 +836,7 @@ onUnmounted(() => stopPolling())
     gap: 16px;
   }
 
-  .rq-pool-strip {
+  .rq-pool-grid {
     grid-template-columns: 1fr;
   }
 
