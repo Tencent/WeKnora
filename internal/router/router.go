@@ -11,6 +11,7 @@ import (
 	"time"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
+	appservice "github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -133,7 +134,18 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
-	serveFiles(r, params.FileService)
+	storageAccess := appservice.NewStorageAccessAuthorizer(
+		params.KBShareService,
+		params.AgentShareService,
+		params.KBService.GetRepository(),
+		params.KnowledgeService.GetRepository(),
+		params.ChunkService.GetRepository(),
+	)
+	serveFiles(r, fileServeConfig{
+		globalFileService: params.FileService,
+		tenantService:     params.TenantService,
+		storageAccess:     storageAccess,
+	})
 
 	// Presigned file access: no auth required, signature-verified.
 	servePresignedFiles(r, params.TenantService)
@@ -1190,11 +1202,24 @@ func setFrontendCacheHeaders(w http.ResponseWriter, path string) {
 //
 // Route:
 //   - /files?file_path=<provider://...>
+//   - /files?file_path=<provider://...>&kb_id=<uuid>   (optional shared-KB hint)
+//   - /files?file_path=<provider://...>&agent_id=<uuid> (optional shared-agent hint)
+type fileServeConfig struct {
+	globalFileService interfaces.FileService
+	tenantService     fileOwnerTenantLoader
+	storageAccess     *appservice.StorageAccessAuthorizer
+}
+
+// fileOwnerTenantLoader loads the tenant that owns a storage path.
+type fileOwnerTenantLoader interface {
+	GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error)
+}
+
 type getRouteRegistrar interface {
 	GET(string, ...gin.HandlerFunc) gin.IRoutes
 }
 
-func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
+func serveFiles(r getRouteRegistrar, cfg fileServeConfig) {
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
 		baseDir = "/data/files"
@@ -1207,8 +1232,11 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 	}
 
 	logger.Infof(context.Background(), "[Router] Serving files from /files (local base: %s)", absDir)
+	r.GET("/files", newFileServeHandler(cfg, absDir))
+}
 
-	r.GET("/files", func(c *gin.Context) {
+func newFileServeHandler(cfg fileServeConfig, absDir string) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		filePath := strings.TrimSpace(c.Query("file_path"))
 		if filePath == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
@@ -1221,16 +1249,44 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 
 		provider := types.ParseProviderScheme(filePath)
 
-		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant == nil {
+		callerTenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
+		if callerTenant == nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
 			return
 		}
 
-		if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
-			logger.Warnf(context.Background(), "[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v", tenant.ID, filePath, err)
-			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
-			return
+		ctx := c.Request.Context()
+		ownerTenant := callerTenant
+
+		if err := secutils.ValidateStoragePathTenant(filePath, callerTenant.ID); err != nil {
+			if cfg.storageAccess == nil || cfg.tenantService == nil {
+				logger.Warnf(ctx, "[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v",
+					callerTenant.ID, filePath, err)
+				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+				return
+			}
+
+			callerRole := types.TenantRoleFromContext(ctx)
+			kbID := strings.TrimSpace(c.Query("kb_id"))
+			agentID := strings.TrimSpace(c.Query("agent_id"))
+			access, authErr := cfg.storageAccess.AuthorizeSharedStoragePath(
+				ctx, callerTenant.ID, callerRole, filePath, kbID, agentID,
+			)
+			if authErr != nil {
+				logger.Warnf(ctx, "[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v",
+					callerTenant.ID, filePath, authErr)
+				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+				return
+			}
+
+			resolvedOwner, loadErr := cfg.tenantService.GetTenantByID(ctx, access.OwnerTenantID)
+			if loadErr != nil || resolvedOwner == nil {
+				logger.Warnf(ctx, "[Router] /files owner tenant lookup failed: owner_tenant=%d err=%v",
+					access.OwnerTenantID, loadErr)
+				c.Status(http.StatusNotFound)
+				return
+			}
+			ownerTenant = resolvedOwner
 		}
 
 		var (
@@ -1239,8 +1295,8 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 			err              error
 		)
 
-		if tenant.StorageEngineConfig != nil {
-			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		if ownerTenant.StorageEngineConfig != nil {
+			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, ownerTenant.StorageEngineConfig, absDir)
 		} else {
 			err = http.ErrMissingFile
 		}
@@ -1249,12 +1305,14 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 			if globalStorageType == "" {
 				globalStorageType = "local"
 			}
-			if provider == globalStorageType && globalFileService != nil {
-				logger.Warnf(context.Background(), "[Router] /files tenant storage config missing or invalid, fallback to global file service: tenant_id=%d provider=%s err=%v", tenant.ID, provider, err)
-				fileSvc = globalFileService
+			if provider == globalStorageType && cfg.globalFileService != nil {
+				logger.Warnf(ctx, "[Router] /files tenant storage config missing or invalid, fallback to global file service: tenant_id=%d provider=%s err=%v",
+					ownerTenant.ID, provider, err)
+				fileSvc = cfg.globalFileService
 				resolvedProvider = globalStorageType
 			} else {
-				logger.Warnf(context.Background(), "[Router] /files resolve file service failed without fallback: tenant_id=%d provider=%s global_storage_type=%s err=%v", tenant.ID, provider, globalStorageType, err)
+				logger.Warnf(ctx, "[Router] /files resolve file service failed without fallback: tenant_id=%d provider=%s global_storage_type=%s err=%v",
+					ownerTenant.ID, provider, globalStorageType, err)
 				c.Status(http.StatusBadRequest)
 				return
 			}
@@ -1262,7 +1320,8 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 
 		reader, err := fileSvc.GetFile(c.Request.Context(), filePath)
 		if err != nil {
-			logger.Warnf(context.Background(), "[Router] /files get file failed: tenant_id=%d provider=%s path=%q err=%v", tenant.ID, resolvedProvider, filePath, err)
+			logger.Warnf(ctx, "[Router] /files get file failed: tenant_id=%d provider=%s path=%q err=%v",
+				ownerTenant.ID, resolvedProvider, filePath, err)
 			c.Status(http.StatusNotFound)
 			return
 		}
@@ -1293,9 +1352,9 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 		c.Header("Cache-Control", "public, max-age=86400")
 		c.Status(http.StatusOK)
 		if _, err := io.Copy(c.Writer, reader); err != nil {
-			logger.Warnf(context.Background(), "[Router] /files write response failed: %v", err)
+			logger.Warnf(ctx, "[Router] /files write response failed: %v", err)
 		}
-	})
+	}
 }
 
 // servePresignedFiles serves files via HMAC-signed URLs without requiring authentication.

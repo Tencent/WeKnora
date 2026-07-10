@@ -248,4 +248,8 @@ type KnowledgeRepository interface {
 	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error)
 	// ListIDsByTagID returns all knowledge IDs that have the specified tag ID.
 	ListIDsByTagID(ctx context.Context, tenantID uint64, kbID, tagID string) ([]string, error)
+
+	// ListKnowledgeBaseIDsByFilePath returns distinct KB IDs whose knowledge
+	// rows store the exact provider:// file_path at the given tenant.
+	ListKnowledgeBaseIDsByFilePath(ctx context.Context, tenantID uint64, filePath string) ([]string, error)
 }

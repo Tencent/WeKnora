@@ -445,6 +445,26 @@ func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantI
 	).Delete(&types.Chunk{}).Error
 }
 
+// ListKnowledgeBaseIDsByStorageReference returns distinct KB IDs whose chunk
+// content or image_info JSON references the given provider:// storage path.
+func (r *chunkRepository) ListKnowledgeBaseIDsByStorageReference(
+	ctx context.Context, tenantID uint64, storageRef string,
+) ([]string, error) {
+	if storageRef == "" {
+		return nil, nil
+	}
+	pattern := "%" + escapeLikeKeyword(storageRef) + "%"
+	var kbIDs []string
+	err := r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where(
+			"tenant_id = ? AND (content LIKE ? ESCAPE '\\' OR image_info LIKE ? ESCAPE '\\')",
+			tenantID, pattern, pattern,
+		).
+		Distinct("knowledge_base_id").
+		Pluck("knowledge_base_id", &kbIDs).Error
+	return kbIDs, err
+}
+
 // ListImageInfoByKnowledgeIDs returns non-empty image_info values for the given knowledge IDs.
 // No chunk_type filter — collects from text, image_ocr, and image_caption chunks.
 func (r *chunkRepository) ListImageInfoByKnowledgeIDs(

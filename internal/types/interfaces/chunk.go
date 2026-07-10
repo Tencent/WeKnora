@@ -107,6 +107,10 @@ type ChunkRepository interface {
 	// Filter by kbIDs and/or knowledgeIDs. At least one of them must be non-empty.
 	// Returns up to `limit` chunks sorted by updated_at descending.
 	ListRecentDocumentChunksWithQuestions(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, limit int) ([]*types.Chunk, error)
+
+	// ListKnowledgeBaseIDsByStorageReference returns distinct KB IDs whose
+	// chunk content or image_info references the storage path (provider://...).
+	ListKnowledgeBaseIDsByStorageReference(ctx context.Context, tenantID uint64, storageRef string) ([]string, error)
 }
 
 // ChunkService defines the interface for chunk service operations

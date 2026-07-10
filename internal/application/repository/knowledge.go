@@ -721,3 +721,19 @@ func (r *knowledgeRepository) ListIDsByTagID(
 		Pluck("id", &ids).Error
 	return ids, err
 }
+
+// ListKnowledgeBaseIDsByFilePath returns distinct KB IDs for knowledge rows
+// whose file_path exactly matches the provider:// storage path.
+func (r *knowledgeRepository) ListKnowledgeBaseIDsByFilePath(
+	ctx context.Context, tenantID uint64, filePath string,
+) ([]string, error) {
+	if filePath == "" {
+		return nil, nil
+	}
+	var kbIDs []string
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND file_path = ?", tenantID, filePath).
+		Distinct("knowledge_base_id").
+		Pluck("knowledge_base_id", &kbIDs).Error
+	return kbIDs, err
+}
