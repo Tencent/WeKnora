@@ -30,6 +30,8 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd/download cmd/download
 RUN go run cmd/download/duckdb/duckdb.go
 COPY . .
+RUN test -f sdk_x86_v3_20250205/C_sdk/WeWorkFinanceSdk_C.h && \
+    test -f sdk_x86_v3_20250205/C_sdk/libWeWorkFinanceSdk_C.so
 
 # Get version and commit info for build injection
 ARG VERSION_ARG
@@ -90,6 +92,8 @@ RUN mkdir -p /data/files && \
 # Copy migrate tool from builder stage
 COPY --from=builder /go/bin/migrate /usr/local/bin/
 COPY --from=builder /app/yanyiwu/ /go/pkg/mod/github.com/yanyiwu/
+COPY --from=builder /app/sdk_x86_v3_20250205/C_sdk/libWeWorkFinanceSdk_C.so /usr/local/lib/libWeWorkFinanceSdk_C.so
+RUN ldconfig
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/config ./config
