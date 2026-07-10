@@ -32,5 +32,4 @@ func TestProductionGetters(t *testing.T) {
 	a, b := p.IsStdoutTTY(), p.IsStderrTTY()
 	assert.Equal(t, a, p.IsStdoutTTY())
 	assert.Equal(t, b, p.IsStderrTTY())
-	_ = p.ColorEnabled() // smoke
 }

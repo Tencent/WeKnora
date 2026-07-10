@@ -11,7 +11,7 @@ import (
 
 // The confirmation message verb must match the actual operation: an `edit`
 // must not be described as `delete`. Regression for the hardcoded-"delete"
-// confirmation message that mislabeled kb/agent edits.
+// confirmation message that mislabeled kb/agent updates.
 func TestConfirmDestructive_VerbMatchesOperation(t *testing.T) {
 	iostreams.SetForTest(t) // non-TTY buffers ⇒ the jsonOut/non-TTY branch
 
@@ -25,7 +25,7 @@ func TestConfirmDestructive_VerbMatchesOperation(t *testing.T) {
 		{"remove", "current profile", "prod", "remove current profile prod requires", "delete"},
 	}
 	for _, tc := range cases {
-		err := cmdutil.ConfirmDestructive(&testutil.ConfirmPrompter{}, false, true, tc.verb, tc.what, tc.id, tc.what+"."+tc.verb, "")
+		err := cmdutil.ConfirmDestructive(&testutil.ConfirmPrompter{}, false, true, tc.verb, tc.what, tc.id, tc.what+"."+tc.verb, nil)
 		if err == nil {
 			t.Fatalf("verb %q: expected confirmation_required error", tc.verb)
 		}
@@ -45,7 +45,7 @@ func TestConfirmDestructive_VerbMatchesOperation(t *testing.T) {
 // The batch flavor must likewise honor the verb.
 func TestConfirmDestructiveBatch_VerbMatchesOperation(t *testing.T) {
 	iostreams.SetForTest(t)
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{}, false, true, "delete", "document", 3, "doc.delete", "")
+	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{}, false, true, "delete", "document", 3, "doc.delete", nil)
 	if err == nil {
 		t.Fatal("expected confirmation_required error")
 	}

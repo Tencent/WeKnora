@@ -57,6 +57,7 @@ var queuesScanned = []string{
 	types.QueueMultimodal,
 	types.QueueGraph,
 	types.QueueQuestion,
+	types.QueueWiki,
 }
 
 // taskTypesForKnowledgeCancel lists every asynq task type that carries

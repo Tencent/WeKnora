@@ -15,7 +15,9 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// fakePinSvc satisfies PinService: GetKnowledgeBase + TogglePinKnowledgeBase.
+// fakePinSvc satisfies PinService: ListKnowledgeBases + TogglePinKnowledgeBase.
+// The fake's `current` is returned as the single KB in the list (the list is
+// the canonical pin-state source).
 type fakePinSvc struct {
 	current      sdk.KnowledgeBase
 	getErr       error
@@ -23,13 +25,15 @@ type fakePinSvc struct {
 	toggleCalled bool
 }
 
-func (f *fakePinSvc) GetKnowledgeBase(_ context.Context, id string) (*sdk.KnowledgeBase, error) {
+func (f *fakePinSvc) ListKnowledgeBases(_ context.Context) ([]sdk.KnowledgeBase, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
 	c := f.current
-	c.ID = id
-	return &c, nil
+	if c.ID == "" {
+		c.ID = "kb_abc" // tests address this id
+	}
+	return []sdk.KnowledgeBase{c}, nil
 }
 
 func (f *fakePinSvc) TogglePinKnowledgeBase(_ context.Context, id string) (*sdk.KnowledgeBase, error) {

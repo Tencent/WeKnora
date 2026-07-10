@@ -200,7 +200,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <!-- The card menu always exists when the card is visible: pin
                      is now per-user and available to anyone who can see the KB
                      (backend route only requires KB read access). Settings /
@@ -215,6 +218,11 @@
                       <div class="popup-menu-item" @click.stop="handleTogglePinById(kb.id)">
                         <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                         <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                      </div>
+                      <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item"
+                        @click.stop="handleDuplicateById(kb.id)">
+                        <t-icon class="menu-icon" name="file-copy" />
+                        <span>{{ $t('knowledgeList.menu.duplicate') }}</span>
                       </div>
                       <template v-if="canManageKBCard(kb)">
                         <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
@@ -296,7 +304,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
                   <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetailFromAll(kb)"
                     :aria-label="$t('knowledgeList.menu.viewDetails')">
@@ -424,7 +435,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <!-- See the matching block in the "all" tab template for why
                      this is no longer gated by canManageKBCard. -->
                 <t-popup v-model="kb.showMore" overlayClassName="card-more-popup"
@@ -438,6 +452,10 @@
                       <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
                         <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                         <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                      </div>
+                      <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item" @click.stop="handleDuplicate(kb)">
+                        <t-icon class="menu-icon" name="file-copy" />
+                        <span>{{ $t('knowledgeList.menu.duplicate') }}</span>
                       </div>
                       <template v-if="canManageKBCard(kb)">
                         <div class="popup-menu-item" @click.stop="handleSettings(kb)">
@@ -570,7 +588,10 @@
             }" @click="handleSharedKbClick(shared)">
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
+                <span class="card-title" :title="shared.knowledge_base.name">
+                  <KbWikiBadge v-if="isWikiKb(shared.knowledge_base)" />
+                  <span class="card-title-text">{{ shared.knowledge_base.name }}</span>
+                </span>
                 <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
                   <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
                     :aria-label="$t('knowledgeList.menu.viewDetails')">
@@ -762,7 +783,7 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { deleteKnowledgeBase, duplicateKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
@@ -771,6 +792,7 @@ import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
+import KbWikiBadge from './components/KbWikiBadge.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
@@ -1335,6 +1357,10 @@ function canManageKBCard(kb: KB): boolean {
   return authStore.hasRole('admin')
 }
 
+function canDuplicateKBCard(kb: any): boolean {
+  return authStore.hasRole('contributor') && kb.isMine !== false
+}
+
 // isMyKb 仅用于卡片右下角徽章在「我创建」与「同租户其他成员创建」之间切换。
 // 与 canManageKBCard 不同：管理权限有 admin 兜底，徽章纯粹按创建者匹配。
 // creator_id 为空（PR 5 RBAC 迁移之前的老 KB）一律按 tenant 处理——避免把
@@ -1404,6 +1430,33 @@ const handleTogglePinById = async (id: string) => {
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
+  }
+}
+
+const handleDuplicate = async (kb: KB) => {
+  kb.showMore = false
+  await duplicateKB(kb.id)
+}
+
+const handleDuplicateById = async (id: string) => {
+  await duplicateKB(id)
+}
+
+const duplicateKB = async (id: string) => {
+  try {
+    const res: any = await duplicateKnowledgeBase(id)
+    if (res?.success) {
+      const newKbId = res.data?.target_id || res.data?.knowledge_base?.id
+      MessagePlugin.success(t('knowledgeList.messages.duplicateSuccess'))
+      await fetchList(true)
+      if (newKbId) {
+        triggerHighlightFlash(newKbId)
+      }
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeList.messages.duplicateFailed'))
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeList.messages.duplicateFailed'))
   }
 }
 
@@ -1505,6 +1558,9 @@ const isInitialized = (kb: KB) => {
   if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
   return true
 }
+
+const isWikiKb = (kb: { indexing_strategy?: { wiki_enabled?: boolean } } | null | undefined) =>
+  !!kb?.indexing_strategy?.wiki_enabled
 
 // 计算是否有未初始化的知识库
 const hasUninitializedKbs = computed(() => {
@@ -2415,7 +2471,15 @@ const handleUploadFinishedEvent = (event: Event) => {
     text-overflow: ellipsis;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .card-title-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .card-more-btn {

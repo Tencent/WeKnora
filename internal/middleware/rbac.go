@@ -68,6 +68,13 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+		// API-key principals are authorized solely by the APIKeyGate
+		// (role + KB scope + default-deny). The JWT role ladder does not
+		// apply to a machine principal, so short-circuit here.
+		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			c.Next()
+			return
+		}
 		role := types.TenantRoleFromContext(ctx)
 		if role.HasPermission(min) {
 			c.Next()
@@ -121,6 +128,18 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+		// API-key principals must never reach system-admin routes, even if a
+		// future route registration mistakenly declares an apiKey* policy.
+		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			logger.Warnf(ctx,
+				"[rbac] system admin required: API-key principal denied path=%s",
+				c.Request.URL.Path)
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "Forbidden: API keys cannot access this endpoint",
+			})
+			c.Abort()
+			return
+		}
 		if types.IsSystemAdminFromContext(ctx) {
 			c.Next()
 			return
@@ -169,6 +188,15 @@ func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *con
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+		// API-key principals are authorized solely by the APIKeyGate.
+		// Ownership ("creator OR Admin+") is a human concept that cannot
+		// apply to a machine principal (its synthetic system-user never
+		// matches creator_id), so short-circuit here. KB-scope for API
+		// keys is still enforced by the KBAccess guards + handler checks.
+		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+			c.Next()
+			return
+		}
 		role := types.TenantRoleFromContext(ctx)
 
 		// 1. Fast path: role meets the bar.
@@ -246,6 +274,54 @@ func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *con
 // rollout window incurs no per-request DB cost.
 func rbacEnforcementEnabled(cfg *config.Config) bool {
 	return cfg != nil && cfg.Tenant.IsRBACEnforced()
+}
+
+// ErrOwnershipForbidden is returned by EvaluateOwnershipOrRole when the
+// caller is neither the resource creator nor meets the minimum role.
+var ErrOwnershipForbidden = errors.New("rbac: ownership or role insufficient")
+
+// EvaluateOwnershipOrRole applies the same decision matrix as
+// RequireOwnershipOrRole for handlers that resolve creator_id out-of-band
+// (e.g. KB id carried in a JSON body rather than a URL param).
+//
+// Returns nil when access is allowed. ErrResourceNotFound means the
+// handler should issue its own 404. ErrOwnershipForbidden maps to 403.
+// Any other error is a transient lookup failure (503).
+func EvaluateOwnershipOrRole(
+	ctx context.Context,
+	cfg *config.Config,
+	min types.TenantRole,
+	creatorID string,
+	lookupErr error,
+) error {
+	role := types.TenantRoleFromContext(ctx)
+	if role.HasPermission(min) {
+		return nil
+	}
+	if IsCrossTenantSuperuser(ctx, cfg) {
+		return nil
+	}
+	if !rbacEnforcementEnabled(cfg) {
+		uid, _ := types.UserIDFromContext(ctx)
+		logger.Warnf(ctx,
+			"[rbac] ownership/role would be checked (enforcement off, lookup skipped): user=%s have=%s need=%s",
+			uid, role, min)
+		return nil
+	}
+	if errors.Is(lookupErr, ErrResourceNotFound) {
+		return ErrResourceNotFound
+	}
+	if lookupErr != nil {
+		return lookupErr
+	}
+	uid, _ := types.UserIDFromContext(ctx)
+	if creatorID != "" && creatorID == uid {
+		return nil
+	}
+	logger.Warnf(ctx,
+		"[rbac] ownership/role insufficient: user=%s have=%s need=%s creator=%q",
+		uid, role, min, creatorID)
+	return ErrOwnershipForbidden
 }
 
 // isCrossTenantSuperuser was moved to access.go (renamed to

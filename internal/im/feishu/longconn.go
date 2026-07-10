@@ -53,6 +53,19 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 	return c.wsClient.Start(ctx)
 }
 
+// Close tears down the WebSocket long connection.
+//
+// This is the only reliable way to stop a Feishu long connection: the SDK's
+// Start blocks on a bare select{} and neither Start, pingLoop, nor
+// receiveMessageLoop observe the passed context, so cancelling ctx alone leaves
+// the underlying socket alive and the SDK auto-reconnecting. Client.Close()
+// (added in oapi-sdk-go v3.9.7) flips autoReconnect off and calls disconnect,
+// which actually closes the socket. Callers should still cancel the start ctx
+// as a belt-and-braces fallback for the start goroutine.
+func (c *LongConnClient) Close() {
+	c.wsClient.Close()
+}
+
 // feishuLoggerAdapter bridges the Feishu SDK logger to our unified logger,
 // replacing raw SDK connection messages with a consistent format.
 type feishuLoggerAdapter struct {

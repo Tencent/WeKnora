@@ -90,8 +90,6 @@ type Tenant struct {
 	Name string `yaml:"name"                json:"name"`
 	// Description
 	Description string `yaml:"description"         json:"description"`
-	// API key
-	APIKey string `yaml:"api_key"             json:"api_key"`
 	// Status
 	Status string `yaml:"status"              json:"status"              gorm:"default:'active'"`
 	// Retriever engines
@@ -144,31 +142,6 @@ func (t *Tenant) BeforeCreate(tx *gorm.DB) error {
 	if t.RetrieverEngines.Engines == nil {
 		t.RetrieverEngines.Engines = []RetrieverEngineParams{}
 	}
-	return nil
-}
-
-// BeforeSave encrypts APIKey before persisting to database.
-// Uses tx.Statement.SetColumn to avoid polluting the in-memory struct.
-func (t *Tenant) BeforeSave(tx *gorm.DB) error {
-	if key := utils.GetAESKey(); key != nil && t.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(t.APIKey, key); err == nil {
-			tx.Statement.SetColumn("api_key", encrypted)
-		}
-	}
-	return nil
-}
-
-// AfterFind decrypts APIKey after loading from database.
-// Legacy plaintext (without enc:v1: prefix) is returned as-is. When the value
-// is encrypted but SYSTEM_AES_KEY is missing/rotated and the data cannot be
-// decrypted, the error is propagated so the read fails loudly instead of
-// returning ciphertext to callers.
-func (t *Tenant) AfterFind(tx *gorm.DB) error {
-	decrypted, err := utils.DecryptStoredSecret(t.APIKey)
-	if err != nil {
-		return fmt.Errorf("decrypt tenants.api_key (id=%d): %w", t.ID, err)
-	}
-	t.APIKey = decrypted
 	return nil
 }
 

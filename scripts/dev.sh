@@ -85,6 +85,27 @@ show_help() {
     echo "  $0 frontend                 # 在另一个终端启动前端"
 }
 
+# 加载 .env 与可选的 .env.local（后者覆盖前者）
+load_env_files() {
+    if [ -f ".env" ]; then
+        set -a
+        # shellcheck source=/dev/null
+        source .env
+        set +a
+    else
+        return 1
+    fi
+
+    if [ -f ".env.local" ]; then
+        log_info "加载 .env.local 覆盖配置..."
+        set -a
+        # shellcheck source=/dev/null
+        source .env.local
+        set +a
+    fi
+    return 0
+}
+
 # 检查 Docker
 check_docker() {
     if ! command -v docker &> /dev/null; then
@@ -162,10 +183,18 @@ start_services() {
         return 1
     fi
 
-    set -a
-    # shellcheck source=/dev/null
-    source .env
-    set +a
+    load_env_files
+    if [ $? -ne 0 ]; then
+        log_error ".env 文件不存在，请先创建"
+        return 1
+    fi
+
+    if [ -n "${DEV_REMOTE_HOST:-}" ]; then
+        log_warning "已配置 DEV_REMOTE_HOST=${DEV_REMOTE_HOST}，跳过本地 Docker 基础设施启动"
+        log_info "远程服务: PostgreSQL/Redis/DocReader/Langfuse → ${DEV_REMOTE_HOST}"
+        log_info "接下来: make dev-app（本地后端）或 make dev-frontend（前端）"
+        return 0
+    fi
     
     # 解析 profile 参数
     shift  # 移除 "start" 命令本身
@@ -320,6 +349,53 @@ show_status() {
     "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml ps
 }
 
+# 远程开发模式下检查基础设施端口是否可达
+check_remote_dev_connectivity() {
+    local host="${DEV_REMOTE_HOST:-}"
+    if [ -z "$host" ]; then
+        return 0
+    fi
+
+    local db_port="${DB_PORT:-5432}"
+    local redis_port
+    redis_port="${REDIS_ADDR#*:}"
+    if [ "$redis_port" = "$REDIS_ADDR" ]; then
+        redis_port=6379
+    fi
+    local docreader_port="${DOCREADER_PORT:-50051}"
+
+    log_info "检查远程基础设施连通性 (${host})..."
+    local failed=0
+    for spec in "PostgreSQL:${host}:${db_port}" "Redis:${host}:${redis_port}" "DocReader:${host}:${docreader_port}"; do
+        local name="${spec%%:*}"
+        local rest="${spec#*:}"
+        local h="${rest%%:*}"
+        local p="${rest##*:}"
+        if command -v nc &> /dev/null; then
+            if nc -z -G 3 "$h" "$p" 2>/dev/null; then
+                log_success "${name} ${h}:${p} 可达"
+            else
+                log_error "${name} ${h}:${p} 不可达 (no route / connection refused)"
+                failed=1
+            fi
+        else
+            log_warning "未安装 nc，跳过 ${name} 连通性检查"
+        fi
+    done
+
+    if [ "$failed" -ne 0 ]; then
+        echo ""
+        log_error "无法连接远程开发环境 ${host}"
+        log_info "排查建议:"
+        echo "  1. 确认远程机器 Docker 容器在运行 (postgres/redis/docreader)"
+        echo "  2. 确认本机与 ${host} 在同一局域网 (本机: $(ipconfig getifaddr en0 2>/dev/null || echo '未知'))"
+        echo "  3. 在远程检查端口映射: docker ps --format 'table {{.Names}}\t{{.Ports}}'"
+        echo "  4. 检查远程防火墙是否放行 5432/6379/50051"
+        return 1
+    fi
+    return 0
+}
+
 # 启动后端应用（本地）
 start_app() {
     log_info "启动后端应用（本地开发模式）..."
@@ -332,26 +408,40 @@ start_app() {
         return 1
     fi
     
-    # 加载环境变量（使用 set -a 确保所有变量都被导出）
-    if [ -f ".env" ]; then
-        log_info "加载 .env 文件..."
-        set -a
-        source .env
-        set +a
-    else
+    log_info "加载环境配置..."
+    if ! load_env_files; then
         log_error ".env 文件不存在，请先创建配置文件"
         return 1
     fi
     
-    # 设置本地开发环境变量（覆盖 Docker 容器地址）
-    export DB_HOST=localhost
-    export DOCREADER_ADDR=localhost:50051
-    export DOCREADER_TRANSPORT=grpc
-    export MINIO_ENDPOINT=localhost:9000
-    export REDIS_ADDR=localhost:6379
-    export MILVUS_ADDRESS=localhost:19530
-    export NEO4J_URI=bolt://localhost:7687
-    export QDRANT_HOST=localhost
+    # 本地 docker-compose.dev 模式：把容器服务名映射到 localhost
+    # 远程开发模式（DEV_REMOTE_HOST 或 .env.local 已设地址）则保留 .env/.env.local 中的值
+    if [ -n "${DEV_REMOTE_HOST:-}" ]; then
+        log_info "远程开发模式: 基础设施 → ${DEV_REMOTE_HOST}"
+        export DB_HOST="${DB_HOST:-$DEV_REMOTE_HOST}"
+        export REDIS_ADDR="${REDIS_ADDR:-$DEV_REMOTE_HOST:6379}"
+        export DOCREADER_ADDR="${DOCREADER_ADDR:-$DEV_REMOTE_HOST:50051}"
+        export MINIO_ENDPOINT="${MINIO_ENDPOINT:-$DEV_REMOTE_HOST:9000}"
+        export MILVUS_ADDRESS="${MILVUS_ADDRESS:-$DEV_REMOTE_HOST:19530}"
+        export NEO4J_URI="${NEO4J_URI:-bolt://$DEV_REMOTE_HOST:7687}"
+        export QDRANT_HOST="${QDRANT_HOST:-$DEV_REMOTE_HOST}"
+        if [ -z "${LANGFUSE_HOST:-}" ] || [ "$LANGFUSE_HOST" = "http://langfuse-web:3000" ]; then
+            export LANGFUSE_HOST="http://${DEV_REMOTE_HOST}:3000"
+        fi
+    else
+        export DB_HOST=localhost
+        export DOCREADER_ADDR=localhost:50051
+        export MINIO_ENDPOINT=localhost:9000
+        export REDIS_ADDR=localhost:6379
+        export MILVUS_ADDRESS=localhost:19530
+        export NEO4J_URI=bolt://localhost:7687
+        export QDRANT_HOST=localhost
+    fi
+    export DOCREADER_TRANSPORT="${DOCREADER_TRANSPORT:-grpc}"
+
+    if ! check_remote_dev_connectivity; then
+        return 1
+    fi
 
     # .env.example uses /data/files for the Docker app container, where a
     # volume is mounted at that path. When the backend runs directly on the
@@ -394,6 +484,11 @@ start_app() {
 # 启动前端（本地）
 start_frontend() {
     log_info "启动前端开发服务器..."
+
+    cd "$PROJECT_ROOT"
+    if [ -f ".env" ] || [ -f ".env.local" ]; then
+        load_env_files >/dev/null 2>&1 || true
+    fi
     
     cd "$PROJECT_ROOT/frontend"
     

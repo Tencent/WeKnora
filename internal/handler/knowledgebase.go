@@ -395,7 +395,8 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base
+// validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base.
+// Enforces per-API-key KB scope before tenant/share/agent resolution.
 // Returns the knowledge base, knowledge base ID, effective tenant ID for embedding, permission level, and any errors encountered
 // For owned KBs, effectiveTenantID is the caller's tenant ID
 // For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
@@ -418,6 +419,9 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, "", 0, "", apperrors.NewBadRequestError("Knowledge base ID cannot be empty")
+	}
+	if err := requireTenantAPIKeyKnowledgeBase(ctx, id); err != nil {
+		return nil, id, 0, "", err
 	}
 
 	// Verify tenant has permission to access this knowledge base
@@ -602,6 +606,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 			}
 			kbs = filtered
 		}
+		kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
 
 		// `all` mode: authoritative server-side capability filter so a client
 		// that bypassed the frontend (old tab, curl, rogue plugin) can't @ a
@@ -669,6 +674,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		}
 		kbs = filtered
 	}
+	kbs = filterKnowledgeBasesForAPIKeyScope(ctx, kbs)
 
 	// Get share counts for all knowledge bases
 	if len(kbs) > 0 && h.kbShareService != nil {
@@ -699,6 +705,20 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		"success": true,
 		"data":    h.buildKBListResponse(ctx, kbs, callerTenantID),
 	})
+}
+
+func filterKnowledgeBasesForAPIKeyScope(ctx context.Context, kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || len(scope.KnowledgeBaseIDs) == 0 {
+		return kbs
+	}
+	filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil && scope.AllowsKnowledgeBase(kb.ID) {
+			filtered = append(filtered, kb)
+		}
+	}
+	return filtered
 }
 
 // enrichKBCreatorNames 把 KB 列表里的 CreatorID 批量解析成展示名（username
@@ -916,6 +936,13 @@ type CopyKnowledgeBaseResponse struct {
 	Message  string `json:"message"`
 }
 
+type DuplicateKnowledgeBaseResponse struct {
+	SourceID      string      `json:"source_id"`
+	TargetID      string      `json:"target_id"`
+	Message       string      `json:"message"`
+	KnowledgeBase interface{} `json:"knowledge_base"`
+}
+
 // CopyKnowledgeBase godoc
 // @Summary      复制知识库
 // @Description  将一个知识库的内容复制到另一个知识库（异步任务）
@@ -942,6 +969,14 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
 		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	kbIDs := []string{req.SourceID}
+	if req.TargetID != "" {
+		kbIDs = append(kbIDs, req.TargetID)
+	}
+	if err := requireTenantAPIKeyKnowledgeBases(ctx, kbIDs...); err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -1086,6 +1121,72 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	})
 }
 
+// DuplicateKnowledgeBase godoc
+// @Summary      创建知识库副本
+// @Description  创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "源知识库 ID"
+// @Success      201      {object}  map[string]interface{}  "创建后的知识库副本"
+// @Failure      400      {object}  errors.AppError                 "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/duplicate [post]
+func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	sourceID := c.Param("id")
+	if sourceID == "" {
+		c.Error(apperrors.NewBadRequestError("Knowledge base ID cannot be empty"))
+		return
+	}
+
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	sourceKB, err := h.service.GetKnowledgeBaseByID(ctx, sourceID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if sourceKB.TenantID != callerTenantID {
+		logger.Warnf(ctx,
+			"Knowledge base duplicate rejected: source belongs to another tenant, source_id: %s, caller_tenant: %d, kb_tenant: %d",
+			secutils.SanitizeForLog(sourceID), callerTenantID, sourceKB.TenantID)
+		c.Error(errors.NewForbiddenError("No permission to duplicate this knowledge base"))
+		return
+	}
+
+	targetKB, err := h.service.DuplicateKnowledgeBase(ctx, sourceID)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge base duplicate created, source: %s, target: %s",
+		secutils.SanitizeForLog(sourceID), secutils.SanitizeForLog(targetKB.ID))
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data": DuplicateKnowledgeBaseResponse{
+			SourceID:      sourceID,
+			TargetID:      targetKB.ID,
+			Message:       "Knowledge base duplicate created",
+			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), nil),
+		},
+	})
+}
+
 // GetKBCloneProgress godoc
 // @Summary      获取知识库复制进度
 // @Description  获取知识库复制任务的进度
@@ -1105,6 +1206,10 @@ func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 	if taskID == "" {
 		logger.Error(ctx, "Task ID is empty")
 		c.Error(apperrors.NewBadRequestError("Task ID cannot be empty"))
+		return
+	}
+	if err := requireTaskProgressTenant(ctx, taskID); err != nil {
+		c.Error(err)
 		return
 	}
 

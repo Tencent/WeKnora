@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/compat"
+	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -506,4 +507,55 @@ func TestDoctor_RunE_WarnReturnsNil(t *testing.T) {
 	if r.Summary.Warned == 0 {
 		t.Fatalf("setup error: expected Warned>=1, got %+v", r.Summary)
 	}
+}
+
+// TestResolveDoctorHost_EnvCredentials - doctor's base_url probe must honor
+// WEKNORA_HOST when stateless env credentials are in effect (the headless
+// agent path), mirroring buildClientFromEnv. Regression: doctor previously
+// read only the active profile host, so `WEKNORA_API_KEY=... WEKNORA_HOST=...
+// weknora doctor` reported "no host configured" and exited 1 while every
+// other command worked.
+func TestResolveDoctorHost_EnvCredentials(t *testing.T) {
+	cfg := &config.Config{
+		CurrentProfile: "prod",
+		Profiles:       map[string]config.Profile{"prod": {Host: "https://profile-host"}},
+	}
+
+	t.Run("env creds + WEKNORA_HOST wins over profile", func(t *testing.T) {
+		t.Setenv("WEKNORA_TOKEN", "")
+		t.Setenv("WEKNORA_API_KEY", "sk-test")
+		t.Setenv("WEKNORA_HOST", "https://env-host:8080")
+		t.Setenv("WEKNORA_BASE_URL", "")
+		if got := resolveDoctorHost(cfg); got != "https://env-host:8080" {
+			t.Errorf("want env host, got %q", got)
+		}
+	})
+
+	t.Run("env creds without WEKNORA_HOST falls back to profile", func(t *testing.T) {
+		t.Setenv("WEKNORA_API_KEY", "sk-test")
+		t.Setenv("WEKNORA_HOST", "")
+		t.Setenv("WEKNORA_BASE_URL", "")
+		if got := resolveDoctorHost(cfg); got != "https://profile-host" {
+			t.Errorf("want profile host, got %q", got)
+		}
+	})
+
+	t.Run("no env creds ignores WEKNORA_HOST (matches client builder)", func(t *testing.T) {
+		t.Setenv("WEKNORA_TOKEN", "")
+		t.Setenv("WEKNORA_API_KEY", "")
+		t.Setenv("WEKNORA_HOST", "https://should-be-ignored")
+		t.Setenv("WEKNORA_BASE_URL", "")
+		if got := resolveDoctorHost(cfg); got != "https://profile-host" {
+			t.Errorf("want profile host, got %q", got)
+		}
+	})
+
+	t.Run("WEKNORA_BASE_URL test override always wins", func(t *testing.T) {
+		t.Setenv("WEKNORA_API_KEY", "sk-test")
+		t.Setenv("WEKNORA_HOST", "https://env-host")
+		t.Setenv("WEKNORA_BASE_URL", "https://base-url-override")
+		if got := resolveDoctorHost(cfg); got != "https://base-url-override" {
+			t.Errorf("want base-url override, got %q", got)
+		}
+	})
 }

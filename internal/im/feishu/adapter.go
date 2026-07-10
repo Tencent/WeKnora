@@ -19,13 +19,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -688,7 +691,12 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	return a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, fullContent, seq)
+	// Feishu card markdown only accepts an uploaded image_key inside ![alt](...),
+	// not an external HTTP/COS URL. Convert markdown image URLs to image_keys
+	// (uploading on demand) so the card update does not fail with 200570.
+	content := a.resolveMarkdownImages(ctx, accessToken, fullContent)
+
+	return a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, content, seq)
 }
 
 // FinalizeStream replaces the card with answer-only content.
@@ -867,6 +875,169 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 		return fmt.Errorf("update element error: code=%d msg=%s", result.Code, result.Msg)
 	}
 	return nil
+}
+
+// Card markdown image handling.
+//
+// Feishu card markdown images use the syntax ![hover_text](image_key) where the
+// value inside the parentheses MUST be an image_key obtained from the Feishu
+// "upload image" API. External HTTP/COS URLs are rejected with
+// code=200570 "card contains invalid image keys". WeKnora's content pipeline
+// rewrites provider:// storage URLs to signed HTTP URLs, so by the time content
+// reaches the card we must download each referenced image and re-upload it to
+// Feishu to obtain a usable image_key.
+
+// feishuMarkdownImageRe matches a markdown image whose target is an http(s) URL.
+var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\((https?://[^)\s]+)\)`)
+
+// feishuMaxImageBytes caps the download size of an image before uploading to
+// Feishu (Feishu's limit is 10MB; keep a small margin).
+const feishuMaxImageBytes = 10 << 20
+
+var (
+	feishuImageKeyMu    sync.Mutex
+	feishuImageKeyCache = make(map[string]string)
+	// feishuImageDownloadClient validates resolved IPs before connecting so that
+	// downloading a URL embedded in model/knowledge content cannot be abused for
+	// SSRF against internal services.
+	feishuImageDownloadClient = utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig())
+)
+
+// imageCacheKey normalizes a URL for caching by dropping the query string, so a
+// COS/MinIO signed URL (whose signature changes every request) maps to a stable
+// key across streaming updates of the same object.
+func imageCacheKey(rawURL string) string {
+	if i := strings.IndexByte(rawURL, '?'); i >= 0 {
+		return rawURL[:i]
+	}
+	return rawURL
+}
+
+// resolveMarkdownImages replaces the URL inside every ![alt](httpURL) with a
+// Feishu image_key. On failure it degrades the image to a plain text link so the
+// rest of the card still renders instead of failing the whole update.
+func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, content string) string {
+	if !strings.Contains(content, "![") {
+		return content
+	}
+	return feishuMarkdownImageRe.ReplaceAllStringFunc(content, func(match string) string {
+		sub := feishuMarkdownImageRe.FindStringSubmatch(match)
+		alt, rawURL := sub[1], sub[2]
+		imgKey, err := a.imageKeyForURL(ctx, accessToken, rawURL)
+		if err != nil || imgKey == "" {
+			logger.Warnf(ctx, "[Feishu] image upload failed, degrading to link: url=%s err=%v", rawURL, err)
+			label := alt
+			if label == "" {
+				label = "图片"
+			}
+			return fmt.Sprintf("[%s](%s)", label, rawURL)
+		}
+		return fmt.Sprintf("![%s](%s)", alt, imgKey)
+	})
+}
+
+// imageKeyForURL returns a Feishu image_key for the given URL, uploading it if
+// not already cached.
+func (a *Adapter) imageKeyForURL(ctx context.Context, accessToken, rawURL string) (string, error) {
+	key := imageCacheKey(rawURL)
+
+	feishuImageKeyMu.Lock()
+	if v, ok := feishuImageKeyCache[key]; ok {
+		feishuImageKeyMu.Unlock()
+		return v, nil
+	}
+	feishuImageKeyMu.Unlock()
+
+	imgKey, err := a.uploadImageFromURL(ctx, accessToken, rawURL)
+	if err != nil {
+		return "", err
+	}
+
+	feishuImageKeyMu.Lock()
+	feishuImageKeyCache[key] = imgKey
+	feishuImageKeyMu.Unlock()
+	return imgKey, nil
+}
+
+// uploadImageFromURL downloads the image at rawURL and uploads it to Feishu,
+// returning the resulting image_key.
+// POST /open-apis/im/v1/images  (multipart: image_type=message, image=<binary>)
+func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL string) (string, error) {
+	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
+		return "", fmt.Errorf("ssrf validation: %w", err)
+	}
+
+	imgReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	imgResp, err := feishuImageDownloadClient.Do(imgReq)
+	if err != nil {
+		return "", fmt.Errorf("download image: %w", err)
+	}
+	defer imgResp.Body.Close()
+	if imgResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download image: status=%d", imgResp.StatusCode)
+	}
+
+	imgData, err := io.ReadAll(io.LimitReader(imgResp.Body, feishuMaxImageBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read image: %w", err)
+	}
+	if len(imgData) == 0 {
+		return "", fmt.Errorf("empty image body")
+	}
+	if len(imgData) > feishuMaxImageBytes {
+		return "", fmt.Errorf("image exceeds %d bytes", feishuMaxImageBytes)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("image_type", "message"); err != nil {
+		return "", err
+	}
+	part, err := writer.CreateFormFile("image", "image")
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(imgData); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://open.feishu.cn/open-apis/im/v1/images", &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("upload image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ImageKey string `json:"image_key"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode upload response: %w", err)
+	}
+	if result.Code != 0 {
+		return "", fmt.Errorf("upload image error: code=%d msg=%s", result.Code, result.Msg)
+	}
+	if result.Data.ImageKey == "" {
+		return "", fmt.Errorf("upload image: empty image_key")
+	}
+	return result.Data.ImageKey, nil
 }
 
 // cardkitSetStreaming updates the card's streaming_mode setting.

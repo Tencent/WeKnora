@@ -441,7 +441,7 @@ func (c *Client) OpenKnowledgeFile(ctx context.Context, knowledgeID string) (str
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return "", nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		return "", nil, newAPIError(resp.StatusCode, body)
 	}
 	filename := filenameFromContentDisposition(resp.Header.Get("Content-Disposition"))
 	return filename, resp.Body, nil

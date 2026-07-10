@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ContinueStream godoc
@@ -74,6 +75,16 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			// surface as ErrSessionNotFound. Map to 404 so clients can tell
 			// "wrong URL" from a real 5xx instead of seeing a generic 500.
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			// The message_id doesn't exist (e.g. a wrong / non-persisted id, or an
+			// expired replay buffer). That is a client error, not a server fault:
+			// return 404 so callers read resource.not_found (a permanent condition
+			// they must not retry) instead of a retryable 5xx. Mirrors the
+			// ErrSessionNotFound branch above and the kb/doc/chunk not-found fix.
+			logger.Warnf(ctx, "Message not found, session ID: %s, message ID: %s", sessionID, messageID)
 			c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}

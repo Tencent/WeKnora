@@ -4,9 +4,9 @@
 // Unlike Ctrl-C (which only drops the local connection while the server keeps
 // generating and billing tokens), this tells the server to stop.
 //
-// This is the symmetric counterpart to `session continue-stream`: both key on
+// This is the symmetric counterpart to `session resume`: both key on
 // (session_id, message_id). The message_id comes from the init event of the
-// original chat / session ask / continue-stream stream.
+// original chat / session ask / resume stream.
 package sessioncmd
 
 import (
@@ -52,7 +52,7 @@ func NewCmdStop(f *cmdutil.Factory) *cobra.Command {
 session. Unlike Ctrl-C (which only drops the local connection while the server
 keeps generating and billing tokens), this tells the server to stop.
 
-Symmetric with 'session continue-stream': both key on (session_id, message_id).`,
+Symmetric with 'session resume': both key on (session_id, message_id).`,
 		Example: `  weknora session stop sess_xyz --message msg_abc`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -81,8 +81,8 @@ Symmetric with 'session continue-stream': both key on (session_id, message_id).`
 	cmdutil.AddFormatFlag(cmd, stopFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "Stop server-side generation for an in-flight assistant message (counterpart to continue-stream). The message_id comes from the init event of the chat / session ask / continue-stream stream you're stopping.",
-		RequiredFlags: []string{"--message (message_id from the init event of the stream you're stopping)"},
+		UsedFor:       "Stop server-side generation for an in-flight assistant message (counterpart to resume). The message_id comes from the init event of the chat / session ask / resume stream you're stopping.",
+		RequiredFlags: []string{"<session-id> (positional)", "--message (message_id from the init event of the stream you're stopping)"},
 		Examples:      []string{"weknora session stop sess_xyz --message msg_abc"},
 		Output:        "envelope {session_id, message_id, stopped:true}",
 	})

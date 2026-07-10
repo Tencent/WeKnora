@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -69,6 +70,151 @@ func (r *taskPendingOpsRepository) PeekBatch(
 		return nil, err
 	}
 	return ops, nil
+}
+
+// ClaimBatch atomically claims eligible rows for the tuple, grouped by
+// dedup_key. `limit` counts DISTINCT dedup_keys (i.e. documents), NOT rows:
+// ALL eligible rows sharing a chosen dedup_key are claimed together and
+// returned in the same batch. This is the invariant the concurrent wiki
+// consumers rely on — a document with multiple queued ops (e.g. an ingest
+// followed by a retract) must never be split across two concurrent batches,
+// otherwise each batch's per-batch last-write-wins dedup can't collapse the
+// pair and the two ops race (a stale ingest could resurrect a retracted doc).
+//
+// To uphold that invariant even for a sibling enqueued AFTER a batch already
+// claimed the key (e.g. a retract arriving while the ingest is still in
+// flight), a dedup_key that has ANY fresh claim (claimed_at >= staleBefore) is
+// skipped ENTIRELY — not just its already-claimed rows. The late sibling waits
+// for the holder to finish (which deletes the claimed rows, freeing the key) or
+// for the claim to go stale. This serializes same-document ops across
+// concurrent batches instead of letting them race on wall-clock completion.
+//
+// Eligibility = unclaimed (claimed_at IS NULL) OR stale claim
+// (claimed_at < staleBefore), AND the key has no fresh claim. The whole thing
+// runs in one transaction:
+//
+//   - Postgres: we lock the ANCHOR row (earliest eligible id) of each
+//     candidate dedup_key with FOR UPDATE SKIP LOCKED. Because the anchor
+//     uniquely represents its key, SKIP LOCKED hands concurrent claimers
+//     DISJOINT key sets — a key whose anchor is already locked by another
+//     in-flight claim is skipped entirely rather than half-claimed. We then
+//     stamp every eligible row of the chosen keys and read them back.
+//   - Other dialects (SQLite, used by unit tests / Lite mode): writes are
+//     serialized by the single-writer engine, so a plain grouped SELECT +
+//     UPDATE is already race-free.
+//
+// Rows are claimed by explicit id (only the eligible ones), so a freshly
+// enqueued or still-in-flight sibling row of a chosen key is never handed
+// out twice.
+func (r *taskPendingOpsRepository) ClaimBatch(
+	ctx context.Context,
+	taskType, scope, scopeID string,
+	limit int,
+	staleBefore time.Time,
+) ([]*types.TaskPendingOp, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	now := time.Now()
+	var claimed []*types.TaskPendingOp
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. Pick up to `limit` distinct dedup_keys to claim, oldest first.
+		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
+		//    of an in-flight document never gets claimed on its own.
+		var keys []string
+		if tx.Dialector.Name() == "postgres" {
+			// Lock the anchor (earliest eligible) row of each key with SKIP
+			// LOCKED so concurrent claimers get disjoint KEY sets, then map
+			// the locked anchors back to their dedup_keys. The NOT IN subquery
+			// drops any key that still has a fresh (non-stale) claim.
+			const anchorSQL = `
+SELECT dedup_key FROM task_pending_ops
+WHERE id IN (
+	SELECT id FROM (
+		SELECT id, ROW_NUMBER() OVER (PARTITION BY dedup_key ORDER BY id) AS rn
+		FROM task_pending_ops
+		WHERE task_type = ? AND scope = ? AND scope_id = ?
+			AND (claimed_at IS NULL OR claimed_at < ?)
+			AND dedup_key NOT IN (
+				SELECT dedup_key FROM task_pending_ops
+				WHERE task_type = ? AND scope = ? AND scope_id = ?
+					AND claimed_at IS NOT NULL AND claimed_at >= ?
+			)
+	) anchors WHERE anchors.rn = 1
+)
+ORDER BY id ASC
+LIMIT ?
+FOR UPDATE SKIP LOCKED`
+			if err := tx.Raw(anchorSQL,
+				taskType, scope, scopeID, staleBefore,
+				taskType, scope, scopeID, staleBefore,
+				limit).
+				Scan(&keys).Error; err != nil {
+				return err
+			}
+		} else {
+			freshKeys := tx.Model(&types.TaskPendingOp{}).
+				Select("dedup_key").
+				Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+				Where("claimed_at IS NOT NULL AND claimed_at >= ?", staleBefore)
+			if err := tx.Model(&types.TaskPendingOp{}).
+				Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+				Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
+				Where("dedup_key NOT IN (?)", freshKeys).
+				Group("dedup_key").
+				Order("MIN(id) ASC").
+				Limit(limit).
+				Pluck("dedup_key", &keys).Error; err != nil {
+				return err
+			}
+		}
+		if len(keys) == 0 {
+			return nil
+		}
+
+		// 2. Resolve the exact eligible rows for the chosen keys and claim
+		//    them by id. Claiming by id (not by "dedup_key IN keys") means a
+		//    sibling row that is still in flight elsewhere (claimed & fresh)
+		//    is left untouched and never returned to this batch.
+		var ids []int64
+		if err := tx.Model(&types.TaskPendingOp{}).
+			Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+			Where("dedup_key IN ?", keys).
+			Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
+			Order("id ASC").
+			Pluck("id", &ids).Error; err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if err := tx.Model(&types.TaskPendingOp{}).
+			Where("id IN ?", ids).
+			Update("claimed_at", now).Error; err != nil {
+			return err
+		}
+		return tx.Where("id IN ?", ids).Order("id ASC").Find(&claimed).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claimed, nil
+}
+
+// ReleaseByIDs clears claimed_at for the given rows, returning them to the
+// unclaimed pool. Empty input is a no-op. Setting claimed_at back to NULL
+// on a row that was never claimed is harmless.
+func (r *taskPendingOpsRepository) ReleaseByIDs(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.TaskPendingOp{}).
+		Where("id IN ?", ids).
+		Update("claimed_at", nil).Error
 }
 
 // DeleteByIDs removes the given rows in one statement. Empty input is a

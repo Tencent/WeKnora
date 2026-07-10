@@ -313,7 +313,7 @@
       </template>
 
       <!-- Section 3 — 高级选项（仅在有内容时渲染，避免空 section 出现底部分隔线） -->
-      <section v-if="activeModelType === 'embedding' || activeModelType === 'chat'" class="setting-drawer__section">
+      <section v-if="['embedding', 'chat', 'vllm'].includes(activeModelType)" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
 
         <!-- Embedding 专用：维度 -->
@@ -376,6 +376,18 @@
           </t-select>
           <p class="form-desc">{{ $t('model.editor.thinkingControlDesc') }}</p>
         </div>
+
+        <!--
+          Background concurrency cap for this model. Only chat / embedding / vllm
+          are gated by the governor (see internal/models/limiter), so we surface
+          it just for those three. 0 = fall back to the global default.
+        -->
+        <div class="form-item">
+          <label class="form-label">{{ $t('model.editor.maxConcurrencyLabel') }}</label>
+          <t-input v-model.number="formData.maxConcurrency" type="number" :min="0" :max="4096"
+            :placeholder="$t('model.editor.maxConcurrencyPlaceholder')" />
+          <p class="form-desc">{{ $t('model.editor.maxConcurrencyDesc') }}</p>
+        </div>
       </section>
 
     </t-form>
@@ -425,6 +437,8 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
+  maxConcurrency?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
@@ -819,6 +833,7 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
+  maxConcurrency: undefined,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
   appSecret: '',
@@ -1059,6 +1074,7 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
+    maxConcurrency: undefined,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],
     appSecret: '',

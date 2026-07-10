@@ -16,9 +16,9 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// scriptedContinueStreamSvc serves a canned stream of StreamResponse events
-// to runContinueStream and records the (sessionID, messageID) passed in.
-type scriptedContinueStreamSvc struct {
+// scriptedResumeSvc serves a canned stream of StreamResponse events
+// to runResume and records the (sessionID, messageID) passed in.
+type scriptedResumeSvc struct {
 	events    []*sdk.StreamResponse
 	streamErr error
 	got       struct {
@@ -27,7 +27,7 @@ type scriptedContinueStreamSvc struct {
 	}
 }
 
-func (s *scriptedContinueStreamSvc) ContinueStream(_ context.Context, sessionID, messageID string, cb func(*sdk.StreamResponse) error) error {
+func (s *scriptedResumeSvc) ContinueStream(_ context.Context, sessionID, messageID string, cb func(*sdk.StreamResponse) error) error {
 	s.got.sessionID = sessionID
 	s.got.messageID = messageID
 	for _, e := range s.events {
@@ -51,11 +51,11 @@ func contStreamComplete() *sdk.StreamResponse {
 // arrives.
 func TestContinueStream_NDJSON_FirstLineIsInitWithMessageID(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	svc := &scriptedContinueStreamSvc{
+	svc := &scriptedResumeSvc{
 		events: []*sdk.StreamResponse{contStreamAnswer("hello"), contStreamComplete()},
 	}
-	opts := &ContinueStreamOptions{SessionID: "sess_xyz", MessageID: "msg_abc"}
-	require.NoError(t, runContinueStream(context.Background(), opts, ndjsonOpts(), svc))
+	opts := &ResumeOptions{SessionID: "sess_xyz", MessageID: "msg_abc"}
+	require.NoError(t, runResume(context.Background(), opts, ndjsonOpts(), svc))
 
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
 	require.GreaterOrEqual(t, len(lines), 1, "expected at least the init line")
@@ -75,15 +75,15 @@ func TestContinueStream_NDJSON_FirstLineIsInitWithMessageID(t *testing.T) {
 // events = N+1 total lines, all valid JSON.
 func TestContinueStream_NDJSON_PassthroughEvents(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	svc := &scriptedContinueStreamSvc{
+	svc := &scriptedResumeSvc{
 		events: []*sdk.StreamResponse{
 			contStreamAnswer("alpha"),
 			contStreamAnswer("beta"),
 			contStreamComplete(),
 		},
 	}
-	opts := &ContinueStreamOptions{SessionID: "sess_x", MessageID: "msg_y"}
-	require.NoError(t, runContinueStream(context.Background(), opts, ndjsonOpts(), svc))
+	opts := &ResumeOptions{SessionID: "sess_x", MessageID: "msg_y"}
+	require.NoError(t, runResume(context.Background(), opts, ndjsonOpts(), svc))
 
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
 	// 1 init + 3 SDK events = 4 lines.
@@ -98,9 +98,9 @@ func TestContinueStream_NDJSON_PassthroughEvents(t *testing.T) {
 // flow through to the SDK call.
 func TestContinueStream_PassesSessionAndMessageIDToSDK(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	svc := &scriptedContinueStreamSvc{events: []*sdk.StreamResponse{contStreamComplete()}}
-	opts := &ContinueStreamOptions{SessionID: "sess_42", MessageID: "msg_99"}
-	require.NoError(t, runContinueStream(context.Background(), opts, ndjsonOpts(), svc))
+	svc := &scriptedResumeSvc{events: []*sdk.StreamResponse{contStreamComplete()}}
+	opts := &ResumeOptions{SessionID: "sess_42", MessageID: "msg_99"}
+	require.NoError(t, runResume(context.Background(), opts, ndjsonOpts(), svc))
 	assert.Equal(t, "sess_42", svc.got.sessionID)
 	assert.Equal(t, "msg_99", svc.got.messageID)
 }
@@ -110,9 +110,9 @@ func TestContinueStream_PassesSessionAndMessageIDToSDK(t *testing.T) {
 // core must also refuse empty strings).
 func TestContinueStream_EmptySessionID_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	svc := &scriptedContinueStreamSvc{}
-	opts := &ContinueStreamOptions{SessionID: "", MessageID: "msg_x"}
-	err := runContinueStream(context.Background(), opts, ndjsonOpts(), svc)
+	svc := &scriptedResumeSvc{}
+	opts := &ResumeOptions{SessionID: "", MessageID: "msg_x"}
+	err := runResume(context.Background(), opts, ndjsonOpts(), svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -123,9 +123,9 @@ func TestContinueStream_EmptySessionID_Rejected(t *testing.T) {
 // point.
 func TestContinueStream_EmptyMessageID_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	svc := &scriptedContinueStreamSvc{}
-	opts := &ContinueStreamOptions{SessionID: "sess_x", MessageID: ""}
-	err := runContinueStream(context.Background(), opts, ndjsonOpts(), svc)
+	svc := &scriptedResumeSvc{}
+	opts := &ResumeOptions{SessionID: "sess_x", MessageID: ""}
+	err := runResume(context.Background(), opts, ndjsonOpts(), svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -138,9 +138,9 @@ func TestContinueStream_Cancellation_MapsToOperationCancelled(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	svc := &scriptedContinueStreamSvc{streamErr: context.Canceled}
-	opts := &ContinueStreamOptions{SessionID: "sess_x", MessageID: "msg_x"}
-	err := runContinueStream(ctx, opts, ndjsonOpts(), svc)
+	svc := &scriptedResumeSvc{streamErr: context.Canceled}
+	opts := &ResumeOptions{SessionID: "sess_x", MessageID: "msg_x"}
+	err := runResume(ctx, opts, ndjsonOpts(), svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -152,20 +152,36 @@ func TestContinueStream_Cancellation_MapsToOperationCancelled(t *testing.T) {
 // the canonical HTTP classifier.
 func TestContinueStream_NotFound_MapsToResourceNotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	svc := &scriptedContinueStreamSvc{streamErr: errors.New("HTTP error 404: not found")}
-	opts := &ContinueStreamOptions{SessionID: "sess_x", MessageID: "msg_missing"}
-	err := runContinueStream(context.Background(), opts, ndjsonOpts(), svc)
+	svc := &scriptedResumeSvc{streamErr: errors.New("HTTP error 404: not found")}
+	opts := &ResumeOptions{SessionID: "sess_x", MessageID: "msg_missing"}
+	err := runResume(context.Background(), opts, ndjsonOpts(), svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeResourceNotFound, typed.Code)
 }
 
+// TestResume_TerminalStreamError_MapsToServerError pins that a terminal SSE
+// error frame (surfaced by the SDK as *SSEStreamError) classifies as
+// server.error (exit 7) — the SAME as chat / session ask. Guards against the
+// prior inconsistency where resume reported the identical server condition as
+// exit 1 while chat/ask reported exit 7.
+func TestResume_TerminalStreamError_MapsToServerError(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &scriptedResumeSvc{streamErr: sdk.NewSSEStreamError("no chat model configured")}
+	opts := &ResumeOptions{SessionID: "sess_x", MessageID: "msg_x"}
+	err := runResume(context.Background(), opts, ndjsonOpts(), svc)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
+}
+
 // TestContinueStream_RequiresMessageFlag verifies cobra refuses to run the
 // command without --message (the flag is marked required).
 func TestContinueStream_RequiresMessageFlag(t *testing.T) {
 	f := &cmdutil.Factory{}
-	cmd := NewCmdContinueStream(f)
+	cmd := NewCmdResume(f)
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
@@ -185,7 +201,7 @@ func TestContinueStream_RequiresMessageFlag(t *testing.T) {
 // command without the positional <session-id>.
 func TestContinueStream_RequiresSessionIDArg(t *testing.T) {
 	f := &cmdutil.Factory{}
-	cmd := NewCmdContinueStream(f)
+	cmd := NewCmdResume(f)
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)

@@ -247,6 +247,35 @@ func (h *WikiPageHandler) KBCreatorLookupFromKBPath(c *gin.Context) (string, err
 	return kb.CreatorID, nil
 }
 
+// resolveKBCreatorByKBID resolves a KB id to CreatorID, scoped to the
+// caller's tenant. Used by cross-KB handlers whose body carries kb_id
+// instead of a URL param (batch-delete, move, etc.).
+func resolveKBCreatorByKBID(
+	c *gin.Context,
+	kbService interfaces.KnowledgeBaseService,
+	kbID string,
+) (string, error) {
+	ctx := c.Request.Context()
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return "", errors.New("tenant context missing")
+	}
+	kb, err := kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) {
+			return "", middleware.ErrResourceNotFound
+		}
+		return "", err
+	}
+	if kb == nil {
+		return "", middleware.ErrResourceNotFound
+	}
+	if kb.TenantID != tenantID {
+		return "", middleware.ErrResourceNotFound
+	}
+	return kb.CreatorID, nil
+}
+
 // resolveKBCreatorByKnowledgeID is the shared body for the knowledge /
 // chunk lookups. The service-layer chain helper does the tenant-scoped
 // fetch (knowledge -> KB) and returns repository sentinel errors;

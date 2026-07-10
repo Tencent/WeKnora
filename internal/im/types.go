@@ -35,6 +35,60 @@ func (IMChannel) TableName() string {
 	return "im_channels"
 }
 
+// IMChannelSummary is the HTTP-safe list shape for IM channels. Credentials
+// are never included — use Admin+ Create/Update responses to read back
+// values immediately after a mutation.
+type IMChannelSummary struct {
+	ID                    string    `json:"id"`
+	TenantID              uint64    `json:"tenant_id"`
+	AgentID               string    `json:"agent_id"`
+	Platform              string    `json:"platform"`
+	Name                  string    `json:"name"`
+	Enabled               bool      `json:"enabled"`
+	Mode                  string    `json:"mode"`
+	OutputMode            string    `json:"output_mode"`
+	KnowledgeBaseID       string    `json:"knowledge_base_id"`
+	BotIdentity           string    `json:"bot_identity"`
+	SessionMode           string    `json:"session_mode"`
+	CredentialsConfigured bool      `json:"credentials_configured"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+// SummarizeIMChannel converts a stored channel into its list response shape.
+func SummarizeIMChannel(ch IMChannel) IMChannelSummary {
+	return IMChannelSummary{
+		ID:                    ch.ID,
+		TenantID:              ch.TenantID,
+		AgentID:               ch.AgentID,
+		Platform:              ch.Platform,
+		Name:                  ch.Name,
+		Enabled:               ch.Enabled,
+		Mode:                  ch.Mode,
+		OutputMode:            ch.OutputMode,
+		KnowledgeBaseID:       ch.KnowledgeBaseID,
+		BotIdentity:           ch.BotIdentity,
+		SessionMode:           ch.SessionMode,
+		CredentialsConfigured: imCredentialsConfigured(ch.Credentials),
+		CreatedAt:             ch.CreatedAt,
+		UpdatedAt:             ch.UpdatedAt,
+	}
+}
+
+// SummarizeIMChannels converts stored channels into list response shapes.
+func SummarizeIMChannels(channels []IMChannel) []IMChannelSummary {
+	out := make([]IMChannelSummary, 0, len(channels))
+	for _, ch := range channels {
+		out = append(out, SummarizeIMChannel(ch))
+	}
+	return out
+}
+
+func imCredentialsConfigured(cred types.JSON) bool {
+	s := strings.TrimSpace(string(cred))
+	return s != "" && s != "{}"
+}
+
 func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 	if ch.ID == "" {
 		ch.ID = uuid.New().String()

@@ -60,9 +60,11 @@ import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';
 import ContentPopup from './tool-results/ContentPopup.vue';
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 
 const router = useRouter();
 const { t } = useI18n();
+const referencesDrawer = useChatReferencesDrawer();
 
 const props = defineProps({
     content: {
@@ -91,6 +93,11 @@ const showReferBox = ref(false);
 const expandedGroups = reactive({});
 
 const referBoxSwitch = () => {
+    const refs = props.session?.knowledge_references;
+    if (referencesDrawer && refs?.length) {
+        referencesDrawer.open({ references: refs });
+        return;
+    }
     showReferBox.value = !showReferBox.value;
 };
 
@@ -138,6 +145,9 @@ const headerText = computed(() => {
     }
     if (docCount > 0) {
         return t('chat.referencesDocCount', { count: docCount });
+    }
+    if (webCount > 0) {
+        return t('chat.referencesWebCount', { count: webCount });
     }
     return t('chat.referencesTitle', { count: total });
 });

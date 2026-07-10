@@ -660,6 +660,11 @@ definitions:
           ===== Agent Mode Settings =====
           Maximum iterations for ReAct loop (only for agent type)
         type: integer
+      mcp_auth_wait_timeout:
+        description: |-
+          MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth
+          authorization before skipping. <=0 uses the gate's configured timeout.
+        type: integer
       mcp_selection_mode:
         description: 'MCP service selection mode: "all" = all enabled MCP services,
           "selected" = specific services, "none" = no MCP'
@@ -2056,6 +2061,14 @@ definitions:
         type: object
       interface_type:
         type: string
+      max_concurrency:
+        description: |-
+          MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /
+          enrichment) calls to THIS specific model, keyed by model ID and shared
+          across all replicas. 0 (the default) means "fall back to the
+          process-wide model.max_concurrency". Interactive user-facing calls are
+          never gated. Only chat / vlm / embedding honour this (see limiter.Gate).
+        type: integer
       parameter_size:
         description: Ollama model parameter size (e.g., "7B", "13B", "70B")
         type: string
@@ -2787,8 +2800,8 @@ definitions:
         type: string
       user_id:
         description: |-
-          UserID is the owner of the session. Empty for legacy rows (visible at
-          tenant level) and for IM-created sessions that do not map to a WeKnora user.
+          UserID is the owner scope for this session. WeKnora user UUIDs, API
+          external-user principals, and embed visitor principals all use this column.
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.SessionLastRequestState:
@@ -3044,9 +3057,6 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.Tenant:
     properties:
-      api_key:
-        description: API key
-        type: string
       business:
         description: Business
         type: string
@@ -3457,6 +3467,7 @@ definitions:
     - ollama
     - baidu
     - searxng
+    - keenable
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBing
@@ -3466,6 +3477,7 @@ definitions:
     - WebSearchProviderTypeOllama
     - WebSearchProviderTypeBaidu
     - WebSearchProviderTypeSearxng
+    - WebSearchProviderTypeKeenable
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       extraction_granularity:
@@ -3476,25 +3488,36 @@ definitions:
           per document. Empty / unknown value is treated as WikiExtractionStandard.
       ingest_batch_size:
         description: |-
-          IngestBatchSize controls how many pending ops a single batch
-          processes before scheduling a follow-up. 0 falls back to the
-          hard-coded default (5). Operators on large KBs (4w+ docs) can
-          raise this to 10–20 to amortize the lock-acquire / index-rebuild
-          overhead across more documents per round.
+          IngestBatchSize controls how many pending ops a single batch claims and
+          processes before scheduling a follow-up. 0 falls back to the hard-coded
+          default (5). Larger batches amortize per-batch setup and let more docs
+          share the batch-internal Map/Reduce fan-out; smaller batches spread a
+          KB's backlog across more concurrent batches (finer scheduling grain).
         type: integer
       ingest_map_parallel:
         description: |-
           IngestMapParallel sets the errgroup limit for the Map phase
-          (per-document extraction + summary + chunk citation). 0 falls
-          back to 10. Bound by the LLM provider's concurrency limit and
-          the worker's outbound HTTP pool.
+          (per-document extraction + summary + chunk citation) WITHIN one batch.
+          0 falls back to 10. Bound by the LLM provider's concurrency limit and
+          the worker's outbound HTTP pool. Remember it multiplies with the number
+          of concurrent batches (IngestMaxInflight).
+        type: integer
+      ingest_max_inflight:
+        description: |-
+          IngestMaxInflight caps how many ingest batches for THIS KB may run
+          concurrently in the shared wiki worker pool (standard/Redis mode
+          only). 0 falls back to the hard-coded default (4). Since Phase 3
+          removed the exclusive per-KB lock, one KB's backlog could otherwise
+          monopolize the whole pool during a bulk import and starve other KBs;
+          this knob trades a single KB's peak throughput for cross-KB fairness.
+          Set it >= the wiki pool size to effectively disable the cap.
         type: integer
       ingest_reduce_parallel:
         description: |-
           IngestReduceParallel sets the errgroup limit for the Reduce phase
-          (per-slug page write). 0 falls back to 10. Bound by the same
-          LLM concurrency / HTTP pool considerations as the Map phase,
-          plus DB connection pool size.
+          (per-slug page write) WITHIN one batch. 0 falls back to 10. Bound by the
+          same LLM concurrency / HTTP pool considerations as the Map phase, plus
+          DB connection pool size. Same multiplier caveat as IngestMapParallel.
         type: integer
       max_pages_per_ingest:
         description: MaxPagesPerIngest limits pages created/updated per ingest operation
@@ -4806,6 +4829,13 @@ definitions:
       signed_token_header_name:
         type: string
     type: object
+  internal_handler.apiPrincipalTestTokenRequest:
+    properties:
+      expires_in_seconds:
+        type: integer
+      external_user_id:
+        type: string
+    type: object
   internal_handler.auditLogListResponse:
     properties:
       data:
@@ -5101,9 +5131,19 @@ definitions:
         items:
           type: string
         type: array
+      mentioned_items:
+        description: Optional scoped tag mentions
+        items:
+          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
+        type: array
       query:
         description: Query text to search for
         type: string
+      tag_ids:
+        description: Tag IDs for filtering within a single KB
+        items:
+          type: string
+        type: array
     required:
     - query
     type: object
@@ -7585,6 +7625,34 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 更新知识库
+      tags:
+      - 知识库
+  /knowledge-bases/{id}/duplicate:
+    post:
+      consumes:
+      - application/json
+      description: 创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态
+      parameters:
+      - description: 源知识库 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建后的知识库副本
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 创建知识库副本
       tags:
       - 知识库
   /knowledge-bases/{id}/faq/entries:
@@ -12468,6 +12536,8 @@ paths:
         创建新的租户。任意已登录用户均可调用以建立自己的新工作区，
         调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样
         通过本接口创建任意租户。
+        当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）
+        开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。
       parameters:
       - description: 租户信息
         in: body
@@ -12479,7 +12549,7 @@ paths:
       - application/json
       responses:
         "201":
-          description: 创建的租户
+          description: 创建的租户（可选含 api_key）
           schema:
             additionalProperties: true
             type: object
@@ -12585,38 +12655,6 @@ paths:
       summary: 更新租户
       tags:
       - 租户管理
-  /tenants/{id}/api-key:
-    post:
-      consumes:
-      - application/json
-      description: 为指定租户生成一个新的 API Key，旧 Key 立即失效
-      parameters:
-      - description: 租户ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 新生成的 API Key
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "403":
-          description: 权限不足
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: 重置租户 API Key
-      tags:
-      - 租户管理
   /tenants/{id}/api-principal-config:
     get:
       consumes:
@@ -12684,6 +12722,44 @@ paths:
       security:
       - Bearer: []
       summary: 更新租户 API Key 用户身份配置
+      tags:
+      - 租户管理
+  /tenants/{id}/api-principal-test-token:
+    post:
+      consumes:
+      - application/json
+      description: 使用租户已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）
+      parameters:
+      - description: 租户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 测试 Token 参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.apiPrincipalTestTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 短期 JWT
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 生成 API Playground 测试 JWT
       tags:
       - 租户管理
   /tenants/{id}/audit-log:

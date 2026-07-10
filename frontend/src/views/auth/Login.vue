@@ -553,7 +553,6 @@ const persistLoginResponse = async (response: any) => {
     authStore.setTenant({
       id: String(activeTenant.id) || '',
       name: activeTenant.name || '',
-      api_key: activeTenant.api_key || '',
       owner_id: response.user.id || '',
       created_at: activeTenant.created_at || new Date().toISOString(),
       updated_at: activeTenant.updated_at || new Date().toISOString()

@@ -20,7 +20,7 @@ import (
 // keyring; agents who need to verify the credential should re-run
 // `auth status`.
 var authLoginFields = []string{
-	"profile", "host", "mode", "user", "tenant_id",
+	"profile", "host", "mode", "email", "tenant_id",
 }
 
 // LoginOptions is the configuration captured from flags + prompts. Host and
@@ -104,7 +104,7 @@ Credentials are persisted to the OS keyring when available; otherwise to a
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:  "authenticate the active profile; --with-token reads an API key from stdin (non-interactive)",
 		Examples: []string{`echo "$WEKNORA_API_KEY" | weknora auth login --with-token`},
-		Output:   "envelope.data is {profile, host, mode, user, tenant_id} on success",
+		Output:   "envelope.data is {profile, host, mode, email, tenant_id} on success (email matches `auth status`)",
 		Warnings: []string{
 			"a profile must exist and be active first (`weknora profile add <n> --host <url> --use`)",
 			"password login is interactive-only (no flags) — agents must use --with-token with the key piped to stdin",
@@ -128,8 +128,12 @@ func resolveActiveProfile(f *cmdutil.Factory) (name, host string, err error) {
 	}
 	active := cfg.CurrentProfile
 	if active == "" {
-		return "", "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			"no active profile; run `weknora profile add <name> --host <h> --use` first")
+		msg := "no active profile; run `weknora profile add <name> --host <h> --use` first"
+		if envActive, kind := cmdutil.EnvCredential(); envActive {
+			msg = "no active profile to log in — you are already authenticated this session via " + kind +
+				"; `auth login` only persists a named profile, so run `weknora profile add <name> --host <h> --use` first if you want one"
+		}
+		return "", "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, msg)
 	}
 	prof, ok := cfg.Profiles[active]
 	if !ok {
@@ -171,7 +175,7 @@ func runLogin(ctx context.Context, opts *LoginOptions, fopts *cmdutil.FormatOpti
 	}
 	// Reject shell-metacharacter / path-like names up-front so opts.Profile
 	// stays safe to interpolate into the keyring namespace, config.yaml
-	// keys, and (later) envelope.error.retry_command. Matches `profile add`.
+	// keys, and envelope.error.retry_argv. Matches `profile add`.
 	if err := cmdutil.ValidateProfileName(opts.Profile); err != nil {
 		return err
 	}
@@ -310,10 +314,13 @@ func applyUser(prof *config.Profile, user *sdk.AuthUser) {
 // loginResult is the typed payload emitted by `--format json`. mode is derived from
 // whether the server returned a user (password flow) vs API-key flow.
 type loginResult struct {
-	Profile  string `json:"profile"`
-	Host     string `json:"host"`
-	Mode     string `json:"mode"` // ModeBearer or ModeAPIKey
-	User     string `json:"user,omitempty"`
+	Profile string `json:"profile"`
+	Host    string `json:"host"`
+	Mode    string `json:"mode"` // ModeBearer or ModeAPIKey
+	// Email is the authenticated principal's email. Named "email" (not
+	// "user") so the identity field matches `auth status`, which also
+	// exposes it as `email` — one key for one concept across both commands.
+	Email    string `json:"email,omitempty"`
 	TenantID uint64 `json:"tenant_id,omitempty"`
 }
 
@@ -344,7 +351,7 @@ func saveProfileRef(opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil
 		// user != nil would mislabel it as bearer.
 		result := loginResult{Profile: opts.Profile, Host: opts.Host, Mode: mode}
 		if user != nil {
-			result.User = user.Email
+			result.Email = user.Email
 			result.TenantID = user.TenantID
 		}
 		return fopts.Emit(iostreams.IO.Out, result, nil)

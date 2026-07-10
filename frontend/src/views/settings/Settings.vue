@@ -44,6 +44,7 @@
                         <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3"
                           stroke-linecap="round" stroke-linejoin="round" fill="none" />
                       </svg>
+                      <span v-else-if="item.emoji" class="nav-icon nav-icon-emoji">{{ item.emoji }}</span>
                       <t-icon v-else :name="item.icon" class="nav-icon" />
                       <span class="nav-label">{{ item.label }}</span>
                       <t-icon v-if="item.children && item.children.length > 0"
@@ -70,7 +71,7 @@
             <div class="settings-content">
               <div class="content-wrapper" :class="{
                 'content-wrapper--wide': currentSection === 'members',
-                'content-wrapper--full': currentSection === 'system-global',
+                'content-wrapper--full': currentSection === 'system-global' || isIntegrationSection(currentSection),
               }">
                 <!-- 角色不允许访问当前 section（deep-link 进来 / 跨租户切换后角色降级）—— 优先于具体 section 渲染。
                      正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
@@ -139,7 +140,6 @@
                   </div>
 
                   <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
-                     从 ApiInfo.vue 拆出来，原页面挂的是 owner-only 入口，
                      用户的基本信息不该跟 owner 权限绑定。 -->
                   <div v-if="currentSection === 'userprofile'" class="section">
                     <UserProfile />
@@ -155,9 +155,9 @@
                     <TenantMembers />
                   </div>
 
-                  <!-- API 信息 -->
-                  <div v-if="currentSection === 'api'" class="section">
-                    <ApiInfo />
+                  <!-- 发布集成 -->
+                  <div v-if="isIntegrationSection(currentSection)" class="section">
+                    <IntegrationSettingsSection :tab="integrationTabFromSection(currentSection)" />
                   </div>
 
                   <!-- MCP 服务 -->
@@ -182,7 +182,6 @@ import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
-import ApiInfo from './ApiInfo.vue'
 import UserProfile from './UserProfile.vue'
 import GeneralSettings from './GeneralSettings.vue'
 import ModelSettings from './ModelSettings.vue'
@@ -196,6 +195,13 @@ import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
+import IntegrationSettingsSection from '@/views/integrations/IntegrationSettingsSection.vue'
+import {
+  INTEGRATION_PREVIEW_ITEMS,
+  INTEGRATION_TAB_MIN_ROLE,
+  INTEGRATION_TABS,
+  type IntegrationTab,
+} from '@/config/integrations'
 
 const route = useRoute()
 const router = useRouter()
@@ -211,6 +217,7 @@ type NavItem = {
   key: string
   icon: string
   label: string
+  emoji?: string
   children?: Array<{ key: string; label: string }>
 }
 
@@ -250,12 +257,45 @@ const SECTION_MIN_ROLE: Record<string, RoleKey> = {
   userprofile: 'viewer',
   tenant: 'viewer',
   members: 'viewer',
-  api: 'owner',
 }
 
 const SYSTEM_ADMIN_SECTIONS = new Set(['system-global'])
+const INTEGRATION_SECTION_PREFIX = 'integration-'
+
+const integrationSectionKey = (tab: IntegrationTab) => `${INTEGRATION_SECTION_PREFIX}${tab}`
+
+const integrationTabFromSection = (section: string): IntegrationTab => {
+  const raw = section.startsWith(INTEGRATION_SECTION_PREFIX)
+    ? section.slice(INTEGRATION_SECTION_PREFIX.length)
+    : section
+  if (INTEGRATION_TABS.includes(raw as IntegrationTab)) {
+    return raw as IntegrationTab
+  }
+  return 'im'
+}
+
+const isIntegrationSection = (section: string) => {
+  return section.startsWith(INTEGRATION_SECTION_PREFIX) &&
+    INTEGRATION_TABS.includes(integrationTabFromSection(section))
+}
+
+const normalizeSettingsSection = (section: string) => {
+  if (section === 'api') {
+    return integrationSectionKey('api')
+  }
+  if (section === 'integrations') {
+    return integrationSectionKey(integrationTabFromSection((route.query.tab as string) || 'im'))
+  }
+  return section
+}
 
 const canSeeSection = (key: string): boolean => {
+  if (isIntegrationSection(key)) {
+    const min = INTEGRATION_TAB_MIN_ROLE[integrationTabFromSection(key)]
+    if (!min) return true
+    if (authStore.canAccessAllTenants) return true
+    return authStore.hasRole(min)
+  }
   if (SYSTEM_ADMIN_SECTIONS.has(key)) {
     return authStore.isSystemAdmin
   }
@@ -270,6 +310,12 @@ const navItems = computed(() => {
   // 一律走 SECTION_MIN_ROLE 表，避免 ad-hoc isAdmin/isOwner 散落在多处。
   // 服务端在每条路由上仍以 g.Viewer/Admin/Owner 为准，这里只决定 UI 是
   // 否露入口；改动入口规则请同步更新 SECTION_MIN_ROLE 注释里的对照路由。
+  const integrationItems: NavItem[] = INTEGRATION_PREVIEW_ITEMS.map((item) => ({
+    key: integrationSectionKey(item.key),
+    icon: item.icon.type === 'icon' ? item.icon.name : 'integration',
+    emoji: item.icon.type === 'emoji' ? item.icon.value : undefined,
+    label: t(`integrations.tabs.${item.key}`),
+  }))
   const all: NavItem[] = [
     { key: 'general', icon: 'setting', label: t('general.title') },
     { key: 'ollama', icon: 'server', label: 'Ollama' },
@@ -286,7 +332,7 @@ const navItems = computed(() => {
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
-    { key: 'api', icon: 'secured', label: t('settings.apiInfo') },
+    ...integrationItems,
   ]
   // currentTenantRole 为空表示「membership 还没加载」—— 比起渲染整套
   // viewer 入口然后角色一返回又消失，先卡住不渲染更稳，跟原先 members
@@ -300,15 +346,15 @@ const navItems = computed(() => {
 const navGroups = computed<NavGroup[]>(() => {
   const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
   const pickItems = (keys: string[]) => keys.map((key) => itemMap.get(key)).filter(Boolean) as NavItem[]
-  // 分组：账户 → 空间 → 模型 → 数据与扩展 → 平台（文案见 i18n settings.navGroups）
-  // 关键调整：把个人偏好(general)和个人凭证(api)收进「账户」；
+  // 分组：账户 → 空间 → 模型 → 发布集成 → 数据与扩展 → 平台（文案见 i18n settings.navGroups）
+  // 关键调整：把个人偏好(general)和用户信息收进「账户」；
   // 把空间内功能开关(chathistory)从「平台」挪到「空间」；
   // 把检索引擎和外部集成合并为「数据与扩展」，避免两个 2~3 项的窄分组。
   return [
     {
       key: 'account',
       label: t('settings.navGroups.account'),
-      items: pickItems(['general', 'userprofile', 'api']),
+      items: pickItems(['general', 'userprofile']),
     },
     {
       key: 'workspace',
@@ -321,9 +367,26 @@ const navGroups = computed<NavGroup[]>(() => {
       items: pickItems(['models', 'ollama', 'weknoracloud']),
     },
     {
+      key: 'integrations',
+      label: t('integrations.title'),
+      items: pickItems([
+        integrationSectionKey('im'),
+        integrationSectionKey('embed'),
+        integrationSectionKey('api'),
+        integrationSectionKey('chrome'),
+        integrationSectionKey('claw'),
+      ]),
+    },
+    {
       key: 'data_extensions',
       label: t('settings.navGroups.dataExtensions'),
-      items: pickItems(['vectorstore', 'parser', 'storage', 'websearch', 'mcp']),
+      items: pickItems([
+        'vectorstore',
+        'parser',
+        'storage',
+        'websearch',
+        'mcp',
+      ]),
     },
     {
       key: 'platform',
@@ -350,6 +413,16 @@ const handleNavClick = (item: any) => {
 
   // 切换到对应页面
   currentSection.value = item.key
+  if (isIntegrationSection(item.key) && route.path === '/platform/settings') {
+    router.replace({
+      path: '/platform/settings',
+      query: {
+        ...route.query,
+        section: 'integrations',
+        tab: integrationTabFromSection(item.key),
+      },
+    })
+  }
 }
 
 // 子菜单点击处理
@@ -388,8 +461,9 @@ const handleClose = () => {
 // 监听初始导航设置
 watch(() => uiStore.settingsInitialSection, (section) => {
   if (section && visible.value) {
-    currentSection.value = section
-    const navItem = (navItems.value as any[]).find((item) => item.key === section)
+    const normalizedSection = normalizeSettingsSection(section)
+    currentSection.value = normalizedSection
+    const navItem = (navItems.value as any[]).find((item) => item.key === normalizedSection)
     if (navItem && navItem.children && navItem.children.length > 0) {
       if (!expandedMenus.value.includes(section)) {
         expandedMenus.value.push(section)
@@ -413,7 +487,7 @@ watch(
   () => [visible.value, route.query.section],
   ([isVisible, section]) => {
     if (!isVisible || typeof section !== 'string') return
-    currentSection.value = section
+    currentSection.value = normalizeSettingsSection(section)
     currentSubSection.value = ''
   },
   { immediate: true },
@@ -439,9 +513,10 @@ const handleEscape = (e: KeyboardEvent) => {
 const handleSettingsNav = (e: CustomEvent) => {
   const { section, subsection } = e.detail
   if (section) {
-    currentSection.value = section
+    const normalizedSection = normalizeSettingsSection(section)
+    currentSection.value = normalizedSection
     // 如果有子菜单，自动展开
-    const navItem = (navItems.value as any[]).find((item: any) => item.key === section)
+    const navItem = (navItems.value as any[]).find((item: any) => item.key === normalizedSection)
     if (navItem && navItem.children && navItem.children.length > 0) {
       if (!expandedMenus.value.includes(section)) {
         expandedMenus.value.push(section)
@@ -599,6 +674,11 @@ onUnmounted(() => {
   justify-content: center;
   flex-shrink: 0;
   color: inherit;
+}
+
+.nav-icon-emoji {
+  font-size: 14px;
+  line-height: 1;
 }
 
 .nav-label {

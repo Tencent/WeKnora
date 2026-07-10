@@ -19,7 +19,7 @@ const (
 	defaultPageSize = 50
 	maxPageSize     = 1000
 	defaultLimit    = 50
-	maxLimit        = 1000
+	maxLimit        = 10000
 	previewWidth    = 80
 )
 
@@ -45,7 +45,7 @@ type ListOptions struct {
 	DocID string
 	// PageSize is the server batch size (1..1000, default 50).
 	PageSize int
-	// Limit caps the client-side accumulated slice (1..1000, default 50).
+	// Limit caps the client-side accumulated slice (1..10000, default 50).
 	// Default 50 chosen as domain-tuned for chunk enumeration (RAG debug).
 	Limit int
 	// AllPages walks server pages internally until total exhausted or
@@ -65,7 +65,7 @@ For relevance-ranked retrieval (the RAG runtime surface), use
 vector + keyword scoring across all chunks of a knowledge base.
 
 Typed exit codes:
-  input.invalid_argument   --limit / --page-size out of 1..1000 range (exit 5)
+  input.invalid_argument   --limit out of 1..10000 or --page-size out of 1..1000 (exit 5)
   resource.not_found       no document with the given id (exit 4)
 
 AI agents: prefer 'search chunks' for retrieval tasks. Use 'chunk list'
@@ -91,6 +91,12 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate static input before building the client so a bad
+			// --limit/--page-size returns input.invalid_argument (exit 5), not
+			// an auth error (exit 3).
+			if err := validateListOpts(opts); err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -100,20 +106,24 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Document id (SDK knowledge_id) to enumerate chunks for")
 	_ = cmd.MarkFlagRequired("doc")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return (1..1000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return — client-side cap; meta.has_more/total_count report truncation (1..10000)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmdutil.AddFormatFlag(cmd, chunkListFields...)
+	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "List chunks of a specific document in stored order (admin/debug). Results come with meta.count; use --limit (1..1000) and --all-pages to paginate. Prefer 'search chunks' for RAG retrieval.",
+		UsedFor:       "List chunks of a specific document in stored order (admin/debug). Results come with meta.count; use --limit (1..10000) and --all-pages to paginate. Prefer 'search chunks' for RAG retrieval.",
 		RequiredFlags: []string{"--doc"},
 		Examples:      []string{"weknora chunk list --doc doc_abc --format json", "weknora chunk list --doc doc_abc --all-pages --format json"},
-		Output:        "envelope.data is an array of Chunk objects with id, chunk_index, content, is_enabled; meta.count is the total returned",
+		Output:        "envelope.data is an array of Chunk objects with id, chunk_index, content, is_enabled; meta.count is the returned count, meta.total_count the document's full chunk count, meta.has_more true when --limit truncated",
 	})
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
+// validateListOpts checks --limit / --page-size. Called from RunE before the
+// client is built (so a bad value surfaces as exit 5, not an auth error) and at
+// runList's top for direct callers; idempotent.
+func validateListOpts(opts *ListOptions) error {
 	if opts.Limit < 1 || opts.Limit > maxLimit {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -126,8 +136,16 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			Message: fmt.Sprintf("--page-size must be in 1..%d, got %d", maxPageSize, opts.PageSize),
 		}
 	}
+	return nil
+}
+
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
+	if err := validateListOpts(opts); err != nil {
+		return err
+	}
 
 	var items []sdk.Chunk
+	var serverTotal int64
 	truncated := false
 	if opts.AllPages {
 		accum := make([]sdk.Chunk, 0)
@@ -136,6 +154,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			if err != nil {
 				return cmdutil.WrapHTTP(err, "list chunks for doc %s", opts.DocID)
 			}
+			serverTotal = total
 			accum = append(accum, chunks...)
 			if len(accum) >= opts.Limit {
 				accum = accum[:opts.Limit]
@@ -148,10 +167,11 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		}
 		items = accum
 	} else {
-		chunks, _, err := svc.ListKnowledgeChunks(ctx, opts.DocID, 1, opts.PageSize)
+		chunks, total, err := svc.ListKnowledgeChunks(ctx, opts.DocID, 1, opts.PageSize)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list chunks for doc %s", opts.DocID)
 		}
+		serverTotal = total
 		items = chunks
 	}
 	if items == nil {
@@ -163,7 +183,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	if fopts.WantsJSON() {
-		meta := &output.Meta{Count: len(items), HasMore: truncated}
+		meta := &output.Meta{Count: output.IntPtr(len(items)), TotalCount: output.IntPtr(int(serverTotal)), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 

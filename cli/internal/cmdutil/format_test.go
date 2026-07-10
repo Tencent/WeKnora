@@ -96,6 +96,9 @@ func TestFormatOptions_TextModeReturnsError(t *testing.T) {
 
 // TestResolveDefault_AlwaysJSON verifies v0.7 semantics: default is FormatJSON
 // regardless of whether stdout is a TTY (BREAKING change from v0.6).
+// TestResolveDefault_AlwaysJSON pins the deliberate JSON-always default (no
+// TTY switch to text): the default output never depends on whether stdout is a
+// TTY, so agents get predictable JSON. Humans opt into text with --format text.
 func TestResolveDefault_AlwaysJSON(t *testing.T) {
 	for _, isTTY := range []bool{true, false} {
 		o := &FormatOptions{}
@@ -117,7 +120,7 @@ func TestResolveDefault(t *testing.T) {
 		isTTY    bool
 		wantMode FormatMode
 	}{
-		// v0.7: empty Mode always resolves to FormatJSON regardless of TTY.
+		// JSON-always default regardless of TTY (predictable for agents).
 		{"empty isTTY", "", "", true, FormatJSON},
 		{"empty no-tty", "", "", false, FormatJSON},
 		{"already set keeps value tty", FormatNDJSON, "", true, FormatNDJSON},
@@ -234,5 +237,40 @@ func TestFromEnv_InvalidValueIgnored(t *testing.T) {
 	o.FromEnv()
 	if o.Mode != "" {
 		t.Errorf("invalid env should be ignored; got %v", o.Mode)
+	}
+}
+
+// TestResolveDefault_AppliesEnv pins that ResolveDefault honours
+// WEKNORA_FORMAT. Regression: commands call CheckFormatFlag + ResolveDefault
+// but (nearly) none called FromEnv, so the documented env var was silently
+// ignored on success output across the whole CLI until ResolveDefault folded
+// it in. This is the path every command's RunE actually takes.
+func TestResolveDefault_AppliesEnv(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "text")
+	o := &FormatOptions{} // no --format → Mode empty, as after CheckFormatFlag
+	o.ResolveDefault(false)
+	if o.Mode != FormatText {
+		t.Errorf("WEKNORA_FORMAT=text must drive ResolveDefault to text; got %v", o.Mode)
+	}
+}
+
+// TestResolveDefault_FlagBeatsEnv pins precedence: an explicit --format
+// (Mode already set) wins over WEKNORA_FORMAT.
+func TestResolveDefault_FlagBeatsEnv(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "text")
+	o := &FormatOptions{Mode: FormatJSON} // --format json supplied
+	o.ResolveDefault(false)
+	if o.Mode != FormatJSON {
+		t.Errorf("explicit --format json must beat WEKNORA_FORMAT=text; got %v", o.Mode)
+	}
+}
+
+// TestResolveDefault_NoEnvNoFlag_UsesDefault pins the fallback.
+func TestResolveDefault_NoEnvNoFlag_UsesDefault(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "")
+	o := &FormatOptions{}
+	o.ResolveDefault(false)
+	if o.Mode != DefaultFormatMode {
+		t.Errorf("no flag + no env must fall back to default %v; got %v", DefaultFormatMode, o.Mode)
 	}
 }

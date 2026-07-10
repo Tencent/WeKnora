@@ -52,6 +52,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -77,6 +78,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/stream"
@@ -137,6 +139,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Data repositories layer
 	logger.Debugf(ctx, "[Container] Registering repositories...")
 	must(container.Provide(repository.NewTenantRepository))
+	must(container.Provide(repository.NewTenantAPIKeyRepository))
 	must(container.Provide(repository.NewTenantMemberRepository))
 	must(container.Provide(repository.NewTenantInvitationRepository))
 	must(container.Provide(repository.NewAuditLogRepository))
@@ -184,6 +187,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
 	must(container.Provide(service.NewTenantService))
+	must(container.Provide(service.NewTenantAPIKeyService))
 	must(container.Provide(service.NewTenantMemberService))
 	must(container.Provide(service.NewTenantInvitationService))
 	must(container.Provide(service.NewAuditLogService))
@@ -265,11 +269,21 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
 	if redisAvailable {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
-		must(container.Provide(router.NewAsynqServer))
+		// Two independent asynq worker pools with separate concurrency budgets:
+		// the parse pool (all queues except QueueWiki) and the wiki pool
+		// (QueueWiki only). Hard capacity isolation so upstream parsing and the
+		// downstream wiki pipeline can't starve each other during concurrent
+		// uploads. Both run the same mux (see router.RunAsynqServer).
+		must(container.Provide(router.NewParseAsynqServer, dig.Name("parseAsynqServer")))
+		must(container.Provide(router.NewWikiAsynqServer, dig.Name("wikiAsynqServer")))
 		// Asynq inspector for cancel-by-knowledge-id (best-effort
 		// dequeue of pending/scheduled/retry tasks + active-task cancel).
 		must(container.Provide(router.NewAsynqInspector))
 		must(container.Provide(router.NewAsynqTaskInspector))
+		// Install the distributed per-model chat concurrency governor. Only
+		// available with Redis (the shared semaphore backend); Lite mode is
+		// single-process and low-volume, so it runs ungated.
+		must(container.Invoke(registerModelConcurrencyLimiter))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
@@ -278,6 +292,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// dispatches inline goroutines that the checkpoint-based abort
 		// already handles.
 		must(container.Provide(router.NewNoopTaskInspector))
+		// Even without Redis, background ingestion/enrichment can burst the
+		// worker pool against one provider, so install an in-process governor.
+		must(container.Invoke(registerLiteModelConcurrencyLimiter))
 	}
 
 	// Chat pipeline components for processing chat requests
@@ -432,6 +449,56 @@ func initLangfuse() (*langfuse.Manager, error) {
 	return langfuse.Init(cfg)
 }
 
+// defaultModelMaxConcurrency is the per-model cap on concurrent background
+// (ingestion/enrichment) chat calls when WEKNORA_MODEL_MAX_CONCURRENCY /
+// model.max_concurrency is unset. summary / question / graph enrichment all
+// share the same model, so this bounds their combined pressure on one provider
+// across every replica. Interactive chat is never gated.
+const defaultModelMaxConcurrency = 32
+
+// resolveModelMaxConcurrency reads the per-model background concurrency limit
+// from system settings / env, defaulting to defaultModelMaxConcurrency when
+// unset. A configured value of 0 (or negative) is honoured and disables the
+// governor — that is the supported way to turn throttling off via config/env.
+func resolveModelMaxConcurrency(ss interfaces.SystemSettingService) int {
+	if ss == nil {
+		return defaultModelMaxConcurrency
+	}
+	return int(ss.GetInt(context.Background(), "model.max_concurrency",
+		"WEKNORA_MODEL_MAX_CONCURRENCY", int64(defaultModelMaxConcurrency)))
+}
+
+// registerModelConcurrencyLimiter builds the Redis-backed per-model background
+// concurrency governor (chat + vlm) and installs it. Only available with Redis
+// (the shared semaphore backend); Lite mode uses registerLiteModelConcurrencyLimiter.
+func registerModelConcurrencyLimiter(rdb *redis.Client, ss interfaces.SystemSettingService) {
+	limit := resolveModelMaxConcurrency(ss)
+	limiter.SetGovernor(limiter.NewRedisLimiter(rdb), limit)
+	if limit <= 0 {
+		logger.Infof(context.Background(),
+			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
+		return
+	}
+	logger.Infof(context.Background(),
+		"[ModelLimiter] background model concurrency governed per-model, limit=%d (distributed via redis)", limit)
+}
+
+// registerLiteModelConcurrencyLimiter installs an in-process per-model governor
+// for Lite mode (no Redis). Lite runs a single process, so an in-process
+// semaphore is sufficient to keep a background ingestion storm from bursting
+// the whole worker pool against one provider.
+func registerLiteModelConcurrencyLimiter(ss interfaces.SystemSettingService) {
+	limit := resolveModelMaxConcurrency(ss)
+	limiter.SetGovernor(limiter.NewLocalLimiter(), limit)
+	if limit <= 0 {
+		logger.Infof(context.Background(),
+			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
+		return
+	}
+	logger.Infof(context.Background(),
+		"[ModelLimiter] background model concurrency governed per-model, limit=%d (in-process, lite mode)", limit)
+}
+
 func initRedisClient() (*redis.Client, error) {
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {
@@ -444,10 +511,11 @@ func initRedisClient() (*redis.Client, error) {
 	}
 
 	client := redis.NewClient(&redis.Options{
-		Addr:     redisAddr,
-		Username: os.Getenv("REDIS_USERNAME"),
-		Password: os.Getenv("REDIS_PASSWORD"),
-		DB:       db,
+		Addr:      redisAddr,
+		Username:  os.Getenv("REDIS_USERNAME"),
+		Password:  os.Getenv("REDIS_PASSWORD"),
+		DB:        db,
+		TLSConfig: common.RedisTLSConfig(),
 	})
 
 	_, err = client.Ping(context.Background()).Result()
@@ -1336,6 +1404,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("ollama", infra_web_search.NewOllamaProvider)
 	registry.Register("baidu", infra_web_search.NewBaiduProvider)
 	registry.Register("searxng", infra_web_search.NewSearxngProvider)
+	registry.Register("keenable", infra_web_search.NewKeenableProvider)
 }
 
 // registerIMAdapterFactories registers adapter factories for each IM platform

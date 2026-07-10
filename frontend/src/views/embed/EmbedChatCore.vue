@@ -100,6 +100,7 @@
         @stop-generation="handleStopGeneration"
       />
     </div>
+    <ChatReferencesDrawer embedded-mode />
   </div>
 </template>
 
@@ -110,7 +111,11 @@ import { getEmbedSuggestedQuestions, onEmbedHostOpenWithQuery, type SuggestedQue
 import EmbedInputField from '@/components/EmbedInputField.vue'
 import EmbedBotMessage from '@/views/embed/EmbedBotMessage.vue'
 import EmbedUserMessage from '@/views/embed/EmbedUserMessage.vue'
+import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue'
+import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
+
+provideChatReferencesDrawer()
 
 type EmbedImage = { url?: string; data?: string }
 type EmbedAttachment = { file_name: string; file_size?: number }

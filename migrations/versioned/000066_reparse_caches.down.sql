@@ -1,3 +1,4 @@
+-- Roll back migration 000066.
 DROP TABLE IF EXISTS reparse_artifact_caches;
 DROP TABLE IF EXISTS wiki_map_caches;
 DROP TABLE IF EXISTS graph_extraction_caches;

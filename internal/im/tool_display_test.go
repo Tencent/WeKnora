@@ -81,6 +81,17 @@ func TestFormatIMRagPipelineLine_searchWithQuery(t *testing.T) {
 	}
 }
 
+func TestFormatIMRagPipelineLine_webSearchWithQuery(t *testing.T) {
+	line := FormatIMRagPipelineLine(IMToolStep{
+		ToolName:  "knowledge_search",
+		Pending:   true,
+		Arguments: map[string]any{"query": "任素汐演唱会", "search_source": "web"},
+	})
+	if line != "正在检索网络：「任素汐演唱会」" {
+		t.Fatalf("line = %q", line)
+	}
+}
+
 func TestIMGetQueryText_joinsUniqueQueries(t *testing.T) {
 	got := imGetQueryText(map[string]any{
 		"query":   "foo",

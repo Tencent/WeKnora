@@ -131,13 +131,12 @@ func (h *IMHandler) ListIMChannels(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": channels})
+	c.JSON(http.StatusOK, gin.H{"data": im.SummarizeIMChannels(channels)})
 }
 
 // ListAllIMChannels lists every IM channel in the current tenant, across
 // agents, for the cross-agent overview page. Credentials are intentionally
-// NOT included in the response — callers that need credentials must use the
-// per-agent endpoint (GET /agents/:id/im-channels).
+// NOT included in the response.
 func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
 	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
 	if !ok {

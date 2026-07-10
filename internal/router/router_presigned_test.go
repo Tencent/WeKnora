@@ -51,10 +51,6 @@ func (s *stubTenantService) UpdateTenant(context.Context, *types.Tenant) (*types
 	panic("unexpected")
 }
 func (s *stubTenantService) DeleteTenant(context.Context, uint64) error { panic("unexpected") }
-func (s *stubTenantService) UpdateAPIKey(context.Context, uint64) (string, error) {
-	panic("unexpected")
-}
-func (s *stubTenantService) ExtractTenantIDFromAPIKey(string) (uint64, error) { panic("unexpected") }
 func (s *stubTenantService) ListAllTenants(context.Context) ([]*types.Tenant, error) {
 	panic("unexpected")
 }
@@ -167,6 +163,28 @@ func TestPresignedFile_GET_ReturnsContent(t *testing.T) {
 	}
 	if got := w.Body.String(); got != "PNG-BYTES" {
 		t.Fatalf("body = %q, want %q", got, "PNG-BYTES")
+	}
+}
+
+func TestPresignedFile_ForcesActiveContentDownload(t *testing.T) {
+	engine, baseDir, signURL := setupPresignedTestServer(t)
+	storagePath := writeTestFile(t, baseDir, "1/payload.svg", `<svg onload="alert(1)"></svg>`)
+
+	req := httptest.NewRequest(http.MethodGet, signURL(storagePath, 1, time.Hour), nil)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, req)
+
+	if got, want := w.Code, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want application/octet-stream", got)
+	}
+	if got := w.Header().Get("Content-Disposition"); got != "attachment" {
+		t.Fatalf("Content-Disposition = %q, want attachment", got)
+	}
+	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 	}
 }
 

@@ -237,16 +237,31 @@ func TestRequireKBAccess_OwnKB(t *testing.T) {
 	require.Equal(t, uint64(100), got)
 }
 
+// TestIsResourceNotFound_RecognisesKnowledgeSentinel pins that a missing
+// *document* (knowledge) is treated as not-found, not a transient error.
+// Regression: ErrKnowledgeNotFound was absent from the predicate, so
+// GET/DELETE /knowledge/:id and chunk list resolved a missing doc into a
+// raw 500 instead of a 404 — which the CLI then surfaced as a retryable
+// server.error (exit 7), looping agents on a permanently-absent doc.
+func TestIsResourceNotFound_RecognisesKnowledgeSentinel(t *testing.T) {
+	require.True(t, isResourceNotFound(apprepo.ErrKnowledgeNotFound),
+		"missing document (ErrKnowledgeNotFound) must classify as not-found")
+	require.True(t, isResourceNotFound(apprepo.ErrKnowledgeBaseNotFound),
+		"missing KB must still classify as not-found")
+	require.True(t, isResourceNotFound(apprepo.ErrChunkNotFound),
+		"missing chunk (ErrChunkNotFound) must classify as not-found — chunk view/by-id resolved a missing chunk into a raw 500 (exit 7) otherwise")
+	require.True(t, isResourceNotFound(ErrResourceNotFound),
+		"generic resource-not-found sentinel must still classify as not-found")
+	require.False(t, isResourceNotFound(errors.New("connection refused")),
+		"a genuine transient error must NOT be classified as not-found")
+}
+
 func TestRequireKBAccess_NotFound_Aborts(t *testing.T) {
 	_, c := runGuard(t, 100, "kb-missing", types.OrgRoleViewer, nil, nil, guardOpts{})
 	require.True(t, c.IsAborted(), "missing KB must abort")
 	require.NotEmpty(t, c.Errors)
 	_, ok := KBAccessFromContext(c)
 	require.False(t, ok, "no access should be stashed on failure")
-}
-
-func TestIsResourceNotFound_ChunkNotFound(t *testing.T) {
-	require.True(t, isResourceNotFound(errors.New("chunk not found")))
 }
 
 func TestRequireKBAccess_SharedKB_RewritesTenantContext(t *testing.T) {

@@ -1,5 +1,5 @@
 // Package sessioncmd holds `weknora session` command tree (list / view /
-// delete / ask / continue-stream / stop) for chat history and agent invocation.
+// delete / ask / resume / stop) for chat history and agent invocation.
 //
 // Package name `sessioncmd` (not `session`) so callers can `import sdk
 // "github.com/Tencent/WeKnora/client"` and use `sdk.Session` without
@@ -22,7 +22,8 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(NewCmdView(f))
 	cmd.AddCommand(NewCmdDelete(f))
 	cmd.AddCommand(NewCmdAsk(f))
-	cmd.AddCommand(NewCmdContinueStream(f))
+	cmd.AddCommand(NewCmdResume(f))
 	cmd.AddCommand(NewCmdStop(f))
+	cmd.AddCommand(NewCmdToolApproval(f))
 	return cmd
 }

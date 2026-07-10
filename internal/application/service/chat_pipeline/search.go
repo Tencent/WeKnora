@@ -469,7 +469,7 @@ func (p *PluginSearch) searchSingleTarget(
 ) {
 	searchKnowledgeIDs := t.KnowledgeIDs
 
-	if t.Type == types.SearchTargetTypeKnowledge {
+	if t.Type == types.SearchTargetTypeKnowledge && !t.DisableDirectLoad {
 		directResults, skippedIDs := p.tryDirectChunkLoading(ctx, chatManage.TenantID, t.KnowledgeIDs)
 
 		if len(directResults) > 0 {

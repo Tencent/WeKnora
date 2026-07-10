@@ -58,7 +58,6 @@ const syncOIDCUserContext = async () => {
     authStore.setTenant({
       id: String(tenant.id) || '',
       name: tenant.name || '',
-      api_key: tenant.api_key || '',
       owner_id: tenant.owner_id || user.id || '',
       description: tenant.description,
       status: tenant.status,

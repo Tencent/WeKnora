@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -326,15 +327,22 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 1, "msg": "请求体格式错误"})
 		return
 	}
-	overrides := body.ToOverridesMap()
+	var existing *types.ParserEngineConfig
+	var tenant *types.Tenant
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
+		if t, ok := v.(*types.Tenant); ok && t != nil {
+			tenant = t
+			existing = t.ParserEngineConfig
+		}
+	}
+	merged := types.MergeParserEngineConfigForUpdate(&body, existing)
+	overrides := merged.ToOverridesMap()
+	if tenant != nil {
+		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+			if overrides == nil {
+				overrides = make(map[string]string)
 			}
+			overrides["weknoracloud_app_id"] = creds.AppID
 		}
 	}
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
@@ -627,14 +635,35 @@ func sanitizeStorageCheckError(err error) string {
 	}
 }
 
+// storageEndpointHost extracts the hostname from a storage endpoint string.
+// Endpoints may be bare host:port, hostnames, or full URLs with a scheme
+// (e.g. "http://127.0.0.1:9000" for S3-compatible stores).
+func storageEndpointHost(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	if strings.Contains(endpoint, "://") {
+		if u, err := url.Parse(endpoint); err == nil {
+			if h := u.Hostname(); h != "" {
+				return h
+			}
+		}
+	}
+	if host, _, err := net.SplitHostPort(endpoint); err == nil {
+		return host
+	}
+	return endpoint
+}
+
 // isBlockedStorageEndpoint checks whether a storage endpoint resolves to a dangerous
 // address (cloud metadata, loopback, link-local). Unlike the stricter isSSRFSafeURL,
 // this allows private IPs since MinIO is commonly deployed on internal networks.
 // It also respects the SSRF_WHITELIST environment variable for whitelisted hosts.
 func isBlockedStorageEndpoint(endpoint string) (bool, string) {
-	host, _, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		host = endpoint
+	host := storageEndpointHost(endpoint)
+	if host == "" {
+		return true, "无效的地址"
 	}
 
 	// Check SSRF whitelist first – whitelisted hosts bypass the block check.

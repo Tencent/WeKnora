@@ -13,11 +13,15 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
+
+const oidcNonceCookieName = "weknora_oidc_nonce"
+const oidcNonceCookieMaxAge = 600
 
 // AuthHandler implements HTTP request handlers for user authentication
 // Provides functionality for user registration, login, logout, and token management
@@ -210,14 +214,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Check if login was successful
 	if !response.Success {
 		logger.Warnf(ctx, "Login failed: %s", response.Message)
-		c.JSON(http.StatusUnauthorized, response)
+		c.JSON(http.StatusUnauthorized, dto.NewAuthLoginResponse(response))
 		return
 	}
 
 	// User is already in the correct format from service
 
 	logger.Infof(ctx, "User logged in successfully, email: %s", email)
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(response))
 }
 
 // GetOIDCAuthorizationURL godoc
@@ -246,6 +250,14 @@ func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
 		c.Error(appErr)
 		return
+	}
+
+	// Bind the state nonce to this browser so an attacker cannot replay
+	// their own authorization code into a victim's callback.
+	if resp.Nonce != "" {
+		secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+		c.SetSameSite(http.SameSiteLaxMode)
+		c.SetCookie(oidcNonceCookieName, resp.Nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
 	}
 
 	c.JSON(http.StatusOK, resp)
@@ -300,12 +312,14 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 	}
 
 	state := strings.TrimSpace(c.Query("state"))
-	decodedState, err := decodeOIDCState(state)
+	decodedState, err := decodeOIDCState(state, c.Request)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to decode OIDC state: %v", err)
 		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("invalid_state"))
 		return
 	}
+	// One-time use: clear the binding cookie as soon as it is checked.
+	c.SetCookie(oidcNonceCookieName, "", -1, "/", "", false, true)
 
 	code := strings.TrimSpace(c.Query("code"))
 	if code == "" {
@@ -335,7 +349,7 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 }
 
 func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error) {
-	payload, err := json.Marshal(resp)
+	payload, err := json.Marshal(dto.NewAuthOIDCCallbackResponse(resp))
 	if err != nil {
 		return "", err
 	}
@@ -343,23 +357,26 @@ func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error)
 }
 
 type oidcStatePayload struct {
-	Nonce       string `json:"nonce"`
-	RedirectURI string `json:"redirect_uri,omitempty"`
+	Nonce       string
+	RedirectURI string
 }
 
-func decodeOIDCState(raw string) (*oidcStatePayload, error) {
-	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
+func decodeOIDCState(raw string, req *http.Request) (*oidcStatePayload, error) {
+	payload, err := secutils.VerifyOIDCState(raw)
 	if err != nil {
 		return nil, err
 	}
-	var payload oidcStatePayload
-	if err := json.Unmarshal(decoded, &payload); err != nil {
-		return nil, err
+	cookieNonce, err := req.Cookie(oidcNonceCookieName)
+	if err != nil || cookieNonce == nil || strings.TrimSpace(cookieNonce.Value) == "" {
+		return nil, errors.NewValidationError("oidc nonce cookie missing")
 	}
-	if strings.TrimSpace(payload.RedirectURI) == "" {
-		return nil, errors.NewValidationError("state.redirect_uri is required")
+	if cookieNonce.Value != payload.Nonce {
+		return nil, errors.NewValidationError("oidc nonce mismatch")
 	}
-	return &payload, nil
+	return &oidcStatePayload{
+		Nonce:       payload.Nonce,
+		RedirectURI: strings.TrimSpace(payload.RedirectURI),
+	}, nil
 }
 
 func urlQueryEscape(value string) string {
@@ -410,8 +427,9 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 
 	token := tokenParts[1]
 
-	// Revoke token
-	err := h.userService.RevokeToken(ctx, token)
+	// Revoke every outstanding session for this user so refresh tokens
+	// cannot keep working after logout.
+	err := h.userService.Logout(ctx, token)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to revoke token: %v", err)
 		appErr := errors.NewInternalServerError("Logout failed").WithDetails(err.Error())
@@ -522,7 +540,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"user":        userInfo,
-			"tenant":      tenant,
+			"tenant":      dto.NewTenantResponse(ctx, tenant),
 			"memberships": memberships,
 		},
 	})
@@ -710,10 +728,9 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(resp))
 }
 
-// AutoSetup godoc
 // @Summary      自动初始化（Lite 桌面版）
 // @Description  Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
 // @Tags         认证
@@ -776,7 +793,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 	tenant, _ := h.tenantService.GetTenantByID(ctx, user.TenantID)
 
 	logger.Info(ctx, "Auto-setup: completed successfully")
-	c.JSON(http.StatusOK, &types.LoginResponse{
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(&types.LoginResponse{
 		Success:      true,
 		Message:      "Auto-setup successful",
 		User:         user,
@@ -788,7 +805,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 		}},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
-	})
+	}))
 }
 
 // tenantNameOrEmpty returns t.Name when t is non-nil, "" otherwise.

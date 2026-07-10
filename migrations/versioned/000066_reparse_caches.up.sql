@@ -1,3 +1,4 @@
+-- Migration 000066: cache reusable reparse artifacts.
 CREATE TABLE IF NOT EXISTS embedding_caches (
     cache_key VARCHAR(64) PRIMARY KEY,
     tenant_id BIGINT NOT NULL,

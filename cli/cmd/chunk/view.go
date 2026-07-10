@@ -81,6 +81,7 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, chunkViewFields...)
+	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "fetch one chunk's fields and content by id (scope-less; no --doc needed)",
 		RequiredFlags: []string{"<chunk-id> (positional)"},

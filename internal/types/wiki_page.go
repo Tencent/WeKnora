@@ -348,24 +348,43 @@ type WikiConfig struct {
 	// per document. Empty / unknown value is treated as WikiExtractionStandard.
 	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty"`
 
-	// IngestBatchSize controls how many pending ops a single batch
-	// processes before scheduling a follow-up. 0 falls back to the
-	// hard-coded default (5). Operators on large KBs (4w+ docs) can
-	// raise this to 10–20 to amortize the lock-acquire / index-rebuild
-	// overhead across more documents per round.
+	// Wiki ingest concurrency is two-level:
+	//   1. batch-level: multiple batches per KB run concurrently in the wiki
+	//      worker pool, capped by IngestMaxInflight (below).
+	//   2. batch-internal: within one batch, Map and Reduce fan out with
+	//      errgroups sized by IngestMapParallel / IngestReduceParallel.
+	// Effective peak in-flight LLM calls for one KB ≈
+	//   IngestMaxInflight × max(IngestMapParallel, IngestReduceParallel),
+	// further bounded by the wiki pool size (WEKNORA_WIKI_ASYNQ_CONCURRENCY).
+
+	// IngestBatchSize controls how many pending ops a single batch claims and
+	// processes before scheduling a follow-up. 0 falls back to the hard-coded
+	// default (5). Larger batches amortize per-batch setup and let more docs
+	// share the batch-internal Map/Reduce fan-out; smaller batches spread a
+	// KB's backlog across more concurrent batches (finer scheduling grain).
 	IngestBatchSize int `yaml:"ingest_batch_size" json:"ingest_batch_size,omitempty"`
 
 	// IngestMapParallel sets the errgroup limit for the Map phase
-	// (per-document extraction + summary + chunk citation). 0 falls
-	// back to 10. Bound by the LLM provider's concurrency limit and
-	// the worker's outbound HTTP pool.
+	// (per-document extraction + summary + chunk citation) WITHIN one batch.
+	// 0 falls back to 10. Bound by the LLM provider's concurrency limit and
+	// the worker's outbound HTTP pool. Remember it multiplies with the number
+	// of concurrent batches (IngestMaxInflight).
 	IngestMapParallel int `yaml:"ingest_map_parallel" json:"ingest_map_parallel,omitempty"`
 
 	// IngestReduceParallel sets the errgroup limit for the Reduce phase
-	// (per-slug page write). 0 falls back to 10. Bound by the same
-	// LLM concurrency / HTTP pool considerations as the Map phase,
-	// plus DB connection pool size.
+	// (per-slug page write) WITHIN one batch. 0 falls back to 10. Bound by the
+	// same LLM concurrency / HTTP pool considerations as the Map phase, plus
+	// DB connection pool size. Same multiplier caveat as IngestMapParallel.
 	IngestReduceParallel int `yaml:"ingest_reduce_parallel" json:"ingest_reduce_parallel,omitempty"`
+
+	// IngestMaxInflight caps how many ingest batches for THIS KB may run
+	// concurrently in the shared wiki worker pool (standard/Redis mode
+	// only). 0 falls back to the hard-coded default (4). Since Phase 3
+	// removed the exclusive per-KB lock, one KB's backlog could otherwise
+	// monopolize the whole pool during a bulk import and starve other KBs;
+	// this knob trades a single KB's peak throughput for cross-KB fairness.
+	// Set it >= the wiki pool size to effectively disable the cap.
+	IngestMaxInflight int `yaml:"ingest_max_inflight" json:"ingest_max_inflight,omitempty"`
 }
 
 // IngestBatchSizeOrDefault returns IngestBatchSize when set (> 0),
@@ -394,6 +413,15 @@ func (c *WikiConfig) IngestReduceParallelOrDefault(fallback int) int {
 		return fallback
 	}
 	return c.IngestReduceParallel
+}
+
+// IngestMaxInflightOrDefault returns IngestMaxInflight when set,
+// otherwise the hard-coded fallback.
+func (c *WikiConfig) IngestMaxInflightOrDefault(fallback int) int {
+	if c == nil || c.IngestMaxInflight <= 0 {
+		return fallback
+	}
+	return c.IngestMaxInflight
 }
 
 // Value implements the driver.Valuer interface

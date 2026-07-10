@@ -36,6 +36,11 @@ type SearchTarget struct {
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
 	// TagIDs limits retrieval to chunks/documents carrying any of these KB-local tags.
 	TagIDs []string `json:"tag_ids,omitempty"`
+	// DisableDirectLoad forces the target through retrieval even when it is
+	// represented as specific knowledge IDs. Tag-derived document scopes need
+	// this so tag filtering limits the candidate documents without loading every
+	// matching document chunk as context.
+	DisableDirectLoad bool `json:"disable_direct_load,omitempty"`
 }
 
 // SearchTargets is a list of search targets, pre-computed at request entry point

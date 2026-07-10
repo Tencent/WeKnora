@@ -30,15 +30,29 @@ func WriteBatchEnvelope(w io.Writer, items []BatchItem, indent bool, profile str
 		}
 	}
 	env := Envelope{
-		OK:   failures == 0,
-		Data: items,
+		OK:     failures == 0,
+		Status: batchStatus(successes, failures),
+		Data:   items,
 		Meta: &Meta{
-			Count:     len(items),
+			Count:     IntPtr(len(items)),
 			Successes: &successes,
 			Failures:  &failures,
 		},
-		Notice:  GetNotice(),
 		Profile: profile,
 	}
 	return writeJSON(w, env, indent)
+}
+
+// batchStatus maps the (successes, failures) counts to the tri-state envelope
+// status: "success" when no failures, "error" when no successes, "partial"
+// when both occur.
+func batchStatus(successes, failures int) string {
+	switch {
+	case failures == 0:
+		return "success"
+	case successes == 0:
+		return "error"
+	default:
+		return "partial"
+	}
 }

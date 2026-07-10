@@ -125,3 +125,75 @@ func TestApi_DryRunWithPost_EmitsPlan(t *testing.T) {
 	require.True(t, ok, "plan.body must be a JSON object when --input is valid JSON, got %T", env.Meta.Plan["body"])
 	assert.Equal(t, "foo", body["name"])
 }
+
+// TestApi_FieldBody_TypedDryRun: -F/--field builds a typed JSON object body —
+// true/false/null and numbers are typed, everything else stays a string — and
+// the resolved body is surfaced in the dry-run plan for agent inspection.
+func TestApi_FieldBody_TypedDryRun(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	root := withRootHarness(NewCmd(apiDryRunFactory(t)),
+		"/api/v1/x", "-X", "POST",
+		"-F", "name=Hello", "-F", "enabled=true", "-F", "count=3",
+		"-F", "ratio=1.5", "-F", "empty=null",
+		"--dry-run", "--format", "json")
+	require.NoError(t, root.Execute(), "-F + --dry-run must succeed without SDK")
+
+	var env struct {
+		Meta struct {
+			Plan map[string]any `json:"plan"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env), "envelope: %q", out.String())
+	body, ok := env.Meta.Plan["body"].(map[string]any)
+	require.True(t, ok, "plan.body must be a JSON object, got %T", env.Meta.Plan["body"])
+	assert.Equal(t, "Hello", body["name"], "non-numeric stays string")
+	assert.Equal(t, true, body["enabled"], "true -> JSON bool")
+	assert.Equal(t, float64(3), body["count"], "integer -> JSON number")
+	assert.Equal(t, 1.5, body["ratio"], "float -> JSON number")
+	assert.Nil(t, body["empty"], "null -> JSON null")
+}
+
+// TestApi_FieldBody_AutoPromotesPost: -F on its own (no -X) auto-promotes
+// GET -> POST, matching -d/--input body behavior.
+func TestApi_FieldBody_AutoPromotesPost(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	root := withRootHarness(NewCmd(apiDryRunFactory(t)),
+		"/api/v1/x", "-F", "a=b", "--dry-run", "--format", "json")
+	require.NoError(t, root.Execute())
+	var env struct {
+		Meta struct {
+			Plan map[string]any `json:"plan"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	assert.Equal(t, "POST", env.Meta.Plan["method"], "-F must auto-promote GET -> POST")
+}
+
+// TestApi_FieldBody_ConflictsWithData: -F and -d are mutually exclusive — the
+// conflict is reported as input.invalid_argument (exit 5), consistent with the
+// existing -d/--input conflict.
+func TestApi_FieldBody_ConflictsWithData(t *testing.T) {
+	iostreams.SetForTest(t)
+	root := withRootHarness(NewCmd(apiDryRunFactory(t)),
+		"/api/v1/x", "-X", "POST", "-F", "a=b", "-d", "{}", "--dry-run", "--format", "json")
+	err := root.Execute()
+	require.Error(t, err, "-F + -d must conflict")
+	var ce *cmdutil.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, ce.Code)
+	assert.Equal(t, 5, cmdutil.ExitCode(err))
+}
+
+// TestApi_FieldBody_Malformed: a -F value without '=' (or empty key) is a typed
+// input error, not a panic or a silently-dropped field.
+func TestApi_FieldBody_Malformed(t *testing.T) {
+	iostreams.SetForTest(t)
+	root := withRootHarness(NewCmd(apiDryRunFactory(t)),
+		"/api/v1/x", "-X", "POST", "-F", "nope", "--dry-run", "--format", "json")
+	err := root.Execute()
+	require.Error(t, err)
+	var ce *cmdutil.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, ce.Code)
+	assert.Contains(t, err.Error(), "key=value")
+}
