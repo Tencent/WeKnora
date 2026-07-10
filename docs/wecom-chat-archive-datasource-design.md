@@ -40,6 +40,8 @@ SDK 细节必须封装在内部 `ArchiveClient` 边界后面，连接器主体�
 
 Docker 镜像需要在后续实现计划中明确官方 SDK 动态库、头文件、运行时库路径和 Linux amd64 构建方式。
 
+SDK 文件准备、本地 Linux amd64 CGO 构建、Docker 打包和运行时排查步骤见 `docs/wecom-chat-archive-sdk.md`。
+
 ## 连接器类型与元数据
 
 在 `internal/types/datasource.go` 新增：
