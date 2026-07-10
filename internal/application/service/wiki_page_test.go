@@ -1,10 +1,58 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+type wikiPageKBLookupStub struct {
+	kb  *types.KnowledgeBase
+	err error
+}
+
+func (s *wikiPageKBLookupStub) GetKnowledgeBaseByIDOnly(
+	_ context.Context,
+	_ string,
+) (*types.KnowledgeBase, error) {
+	return s.kb, s.err
+}
+
+func TestInheritWikiPageTenant(t *testing.T) {
+	t.Run("inherits tenant from knowledge base", func(t *testing.T) {
+		page := &types.WikiPage{KnowledgeBaseID: "kb-1"}
+		err := inheritWikiPageTenant(context.Background(), page, &wikiPageKBLookupStub{
+			kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 10000},
+		})
+		if err != nil {
+			t.Fatalf("inheritWikiPageTenant: %v", err)
+		}
+		if page.TenantID != 10000 {
+			t.Fatalf("TenantID = %d, want 10000", page.TenantID)
+		}
+	})
+
+	t.Run("keeps explicit tenant without lookup", func(t *testing.T) {
+		page := &types.WikiPage{KnowledgeBaseID: "kb-1", TenantID: 42}
+		if err := inheritWikiPageTenant(context.Background(), page, nil); err != nil {
+			t.Fatalf("inheritWikiPageTenant: %v", err)
+		}
+		if page.TenantID != 42 {
+			t.Fatalf("TenantID = %d, want 42", page.TenantID)
+		}
+	})
+
+	t.Run("returns lookup error", func(t *testing.T) {
+		page := &types.WikiPage{KnowledgeBaseID: "kb-1"}
+		sentinel := errors.New("lookup failed")
+		err := inheritWikiPageTenant(context.Background(), page, &wikiPageKBLookupStub{err: sentinel})
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("error = %v, want wrapped lookup error", err)
+		}
+	})
+}
 
 func TestParseOutLinks(t *testing.T) {
 	svc := &wikiPageService{}
@@ -271,7 +319,7 @@ func TestComputeGraphSubset_OverviewTruncatesByLinkCount(t *testing.T) {
 		t.Errorf("want 3 nodes, got %d (%v)", len(got.Nodes), nodeSlugs(got))
 	}
 	slugs := nodeSlugs(got)
-	// hub has link_count 6 (4 out + 2 in), must survive the cap.
+	// hub has the largest distinct live-neighbor count, so it must survive the cap.
 	if !slugs["hub"] {
 		t.Errorf("expected hub to survive the top-3 cap, got %v", slugs)
 	}
@@ -291,6 +339,51 @@ func TestComputeGraphSubset_OverviewTruncatesByLinkCount(t *testing.T) {
 			t.Errorf("edge %s->%s references a non-returned node", e.Source, e.Target)
 		}
 	}
+}
+
+func TestComputeGraphSubset_LinkCountDeduplicatesBidirectionalNeighbors(t *testing.T) {
+	pages := []*types.WikiPage{
+		{
+			Slug:     "concept/a",
+			Title:    "A",
+			PageType: types.WikiPageTypeConcept,
+			InLinks:  types.StringArray{"concept/b", "missing"},
+			OutLinks: types.StringArray{"concept/b", "concept/c"},
+		},
+		{
+			Slug:     "concept/b",
+			Title:    "B",
+			PageType: types.WikiPageTypeConcept,
+			InLinks:  types.StringArray{"concept/a"},
+			OutLinks: types.StringArray{"concept/a"},
+		},
+		{
+			Slug:     "concept/c",
+			Title:    "C",
+			PageType: types.WikiPageTypeConcept,
+			InLinks:  types.StringArray{"concept/a"},
+		},
+	}
+
+	got, err := computeGraphSubset(pages, &types.WikiGraphRequest{
+		Mode:   types.WikiGraphModeEgo,
+		Center: "concept/a",
+		Depth:  1,
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatalf("computeGraphSubset: %v", err)
+	}
+
+	for _, node := range got.Nodes {
+		if node.Slug == "concept/a" {
+			if node.LinkCount != 2 {
+				t.Fatalf("concept/a LinkCount = %d, want 2 distinct live neighbors", node.LinkCount)
+			}
+			return
+		}
+	}
+	t.Fatal("concept/a not found in graph response")
 }
 
 // TestComputeGraphSubset_OverviewUncapped ensures the Limit<=0 escape hatch
