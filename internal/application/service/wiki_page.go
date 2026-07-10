@@ -1042,9 +1042,10 @@ func (s *wikiPageService) ListIssues(ctx context.Context, kbID string, slug stri
 	return s.repo.ListIssues(ctx, kbID, slug, status)
 }
 
-// UpdateIssueStatus updates an issue's status
-func (s *wikiPageService) UpdateIssueStatus(ctx context.Context, issueID string, status string) error {
-	return s.repo.UpdateIssueStatus(ctx, issueID, status)
+// UpdateIssueStatus updates an issue's status, scoped to kbID so a caller
+// holding an out-of-scope issue_id cannot mutate issues in other KBs.
+func (s *wikiPageService) UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error {
+	return s.repo.UpdateIssueStatus(ctx, kbID, issueID, status)
 }
 
 // --- Folder tree (wiki_folders) ---

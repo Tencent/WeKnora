@@ -65,12 +65,31 @@ CREATE TABLE IF NOT EXISTS wiki_folders (
 );
 `
 
+// wikiPageIssuesTestDDL mirrors the production wiki_page_issues DDL for SQLite.
+const wikiPageIssuesTestDDL = `
+CREATE TABLE IF NOT EXISTS wiki_page_issues (
+    id                       VARCHAR(36) PRIMARY KEY,
+    tenant_id                INTEGER NOT NULL DEFAULT 0,
+    knowledge_base_id        VARCHAR(36) NOT NULL,
+    slug                     VARCHAR(255) NOT NULL DEFAULT '',
+    issue_type               VARCHAR(50) NOT NULL DEFAULT '',
+    description              TEXT NOT NULL DEFAULT '',
+    suspected_knowledge_ids  TEXT DEFAULT '[]',
+    status                   VARCHAR(20) NOT NULL DEFAULT 'pending',
+    reported_by              VARCHAR(100) NOT NULL DEFAULT '',
+    created_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at               DATETIME
+);
+`
+
 func setupWikiPagesTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(wikiPagesTestDDL).Error)
 	require.NoError(t, db.Exec(wikiFoldersTestDDL).Error)
+	require.NoError(t, db.Exec(wikiPageIssuesTestDDL).Error)
 	return db
 }
 
@@ -323,4 +342,58 @@ func TestListByTypeLight_ClampsLimit(t *testing.T) {
 	clampedEntries, _, err := repo.ListByTypeLight(ctx, "kb-cap", types.WikiPageTypeEntity, 5000, 0)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(clampedEntries), 200)
+}
+
+// makeWikiPageIssue builds a minimal WikiPageIssue for insert.
+func makeWikiPageIssue(kbID, slug, status string) *types.WikiPageIssue {
+	return &types.WikiPageIssue{
+		ID:              uuid.New().String(),
+		TenantID:        1,
+		KnowledgeBaseID: kbID,
+		Slug:            slug,
+		IssueType:       "contradictory_facts",
+		Description:     "issue on " + slug,
+		Status:          status,
+		ReportedBy:      "test",
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+}
+
+// TestUpdateIssueStatus_ScopedByKB covers three invariants added by the
+// scope-escape fix:
+//  1. An issue in the caller's KB updates successfully and returns nil.
+//  2. An issue that exists in a *different* KB is invisible to this caller:
+//     RowsAffected=0 surfaces as ErrWikiIssueNotFound, not a silent success.
+//  3. A non-existent issue id also surfaces as ErrWikiIssueNotFound.
+func TestUpdateIssueStatus_ScopedByKB(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	ownIssue := makeWikiPageIssue("kb-A", "entity/foo", "pending")
+	otherIssue := makeWikiPageIssue("kb-B", "entity/bar", "pending")
+	require.NoError(t, repo.CreateIssue(ctx, ownIssue))
+	require.NoError(t, repo.CreateIssue(ctx, otherIssue))
+
+	// 1. In-scope update succeeds.
+	err := repo.UpdateIssueStatus(ctx, "kb-A", ownIssue.ID, "resolved")
+	require.NoError(t, err)
+	got, err := repo.ListIssues(ctx, "kb-A", "entity/foo", "")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "resolved", got[0].Status)
+
+	// 2. Cross-KB attempt: issue id exists but belongs to kb-B; caller scoped
+	//    to kb-A must not affect it and must surface ErrWikiIssueNotFound.
+	err = repo.UpdateIssueStatus(ctx, "kb-A", otherIssue.ID, "resolved")
+	assert.ErrorIs(t, err, ErrWikiIssueNotFound)
+	gotOther, err := repo.ListIssues(ctx, "kb-B", "entity/bar", "")
+	require.NoError(t, err)
+	require.Len(t, gotOther, 1)
+	assert.Equal(t, "pending", gotOther[0].Status, "cross-KB update must not mutate the row")
+
+	// 3. Non-existent issue id surfaces the same typed error.
+	err = repo.UpdateIssueStatus(ctx, "kb-A", "does-not-exist", "resolved")
+	assert.ErrorIs(t, err, ErrWikiIssueNotFound)
 }

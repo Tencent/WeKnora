@@ -26,6 +26,10 @@ This will log an issue for human review or automated maintenance.`,
 			json.RawMessage(`{
   "type": "object",
   "properties": {
+    "knowledge_base_id": {
+      "type": "string",
+      "description": "The knowledge base ID of the wiki page. If not provided, uses the first available wiki KB."
+    },
     "slug": {
       "type": "string",
       "description": "The slug of the wiki page that has an issue (e.g. 'entity/hunyuan-damoxing')"
@@ -59,6 +63,7 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		IssueType             string   `json:"issue_type"`
 		Description           string   `json:"description"`
 		SuspectedKnowledgeIDs []string `json:"suspected_knowledge_ids"`
+		KnowledgeBaseID       string   `json:"knowledge_base_id"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return &types.ToolResult{Success: false, Error: "Invalid parameters: " + err.Error()}, nil
@@ -69,12 +74,17 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		return &types.ToolResult{Success: false, Error: "slug is required"}, nil
 	}
 
-	if len(t.kbIDs) == 0 {
+	var kbID string
+	if params.KnowledgeBaseID != "" {
+		if !containsString(t.kbIDs, params.KnowledgeBaseID) {
+			return &types.ToolResult{Success: false, Error: "knowledge_base_id not in allowed scope"}, nil
+		}
+		kbID = params.KnowledgeBaseID
+	} else if len(t.kbIDs) > 0 {
+		kbID = t.kbIDs[0]
+	} else {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for issue tracking"}, nil
 	}
-	
-	// Default to first KB ID if multiple (normally there's only one in this context)
-	kbID := t.kbIDs[0]
 
 	// Verify the page exists
 	page, err := t.wikiService.GetPageBySlug(ctx, kbID, slug)

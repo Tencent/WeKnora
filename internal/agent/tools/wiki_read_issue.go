@@ -23,6 +23,10 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
 			json.RawMessage(`{
   "type": "object",
   "properties": {
+    "knowledge_base_id": {
+      "type": "string",
+      "description": "The knowledge base ID of the wiki. If not provided, uses the first available wiki KB."
+    },
     "issue_id": {
       "type": "string",
       "description": "Optional: The ID of a specific issue to read."
@@ -42,8 +46,9 @@ func NewWikiReadIssueTool(wikiService interfaces.WikiPageService, kbIDs []string
 
 func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
-		IssueID string `json:"issue_id"`
-		Slug    string `json:"slug"`
+		IssueID         string `json:"issue_id"`
+		Slug            string `json:"slug"`
+		KnowledgeBaseID string `json:"knowledge_base_id"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
 		return &types.ToolResult{Success: false, Error: "Invalid parameters: " + err.Error()}, nil
@@ -56,11 +61,17 @@ func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		return &types.ToolResult{Success: false, Error: "Either issue_id or slug is required"}, nil
 	}
 
-	if len(t.kbIDs) == 0 {
+	var kbID string
+	if params.KnowledgeBaseID != "" {
+		if !containsString(t.kbIDs, params.KnowledgeBaseID) {
+			return &types.ToolResult{Success: false, Error: "knowledge_base_id not in allowed scope"}, nil
+		}
+		kbID = params.KnowledgeBaseID
+	} else if len(t.kbIDs) > 0 {
+		kbID = t.kbIDs[0]
+	} else {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available"}, nil
 	}
-
-	kbID := t.kbIDs[0]
 
 	if issueID != "" {
 		// Just reuse ListIssues since there's no GetIssueByID yet

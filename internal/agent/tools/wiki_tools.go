@@ -120,6 +120,18 @@ func NewWikiScopesFromKBIDs(kbIDs []string) []WikiScope {
 	return scopes
 }
 
+// containsString reports whether s is in list. Used by wiki write tools to
+// validate that a caller-supplied knowledge_base_id is within the session scope
+// (t.kbIDs) before touching the underlying wiki service.
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
 // scopeKnowledgeFilter returns the server-enforced knowledge-ID whitelist for
 // a KB, derived purely from the agent scope (never from tool arguments).
 // The model does not see this filter; it is applied silently by Execute.

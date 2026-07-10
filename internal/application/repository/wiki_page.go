@@ -18,6 +18,11 @@ var ErrWikiPageNotFound = errors.New("wiki page not found")
 // ErrWikiPageConflict is returned when an optimistic lock conflict is detected
 var ErrWikiPageConflict = errors.New("wiki page version conflict")
 
+// ErrWikiIssueNotFound is returned when a wiki page issue is not found or is
+// outside the caller's knowledge-base scope (the repo UpdateIssueStatus
+// filters by knowledge_base_id, so 0 rows affected covers both cases).
+var ErrWikiIssueNotFound = errors.New("wiki page issue not found")
+
 // wikiPageRepository implements the WikiPageRepository interface
 type wikiPageRepository struct {
 	db *gorm.DB
@@ -1063,8 +1068,15 @@ func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug s
 	return issues, nil
 }
 
-func (r *wikiPageRepository) UpdateIssueStatus(ctx context.Context, issueID string, status string) error {
-	return r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
-		Where("id = ?", issueID).
-		Update("status", status).Error
+func (r *wikiPageRepository) UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error {
+	result := r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
+		Where("id = ? AND knowledge_base_id = ?", issueID, kbID).
+		Update("status", status)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrWikiIssueNotFound
+	}
+	return nil
 }
