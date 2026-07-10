@@ -47,6 +47,9 @@ type Settings struct {
 	IncludeExternalUserID    bool     `json:"include_external_user_id"`
 	SyncRevokeAsDelete       bool     `json:"sync_revoke_as_delete"`
 	RecordParticipantsForACL bool     `json:"record_participants_for_acl"`
+	Proxy                    string   `json:"proxy"`
+	ProxyPassword            string   `json:"proxy_password"`
+	TimeoutSeconds           int      `json:"timeout_seconds"`
 }
 
 type credentials struct {
@@ -177,6 +180,7 @@ func defaultSettings() Settings {
 		IncludeExternalUserID:    true,
 		SyncRevokeAsDelete:       false,
 		RecordParticipantsForACL: true,
+		TimeoutSeconds:           5,
 	}
 }
 
@@ -207,5 +211,8 @@ func (s *Settings) applyDefaults() {
 	}
 	if !s.RecordParticipantsForACL {
 		s.RecordParticipantsForACL = true
+	}
+	if s.TimeoutSeconds <= 0 {
+		s.TimeoutSeconds = 5
 	}
 }

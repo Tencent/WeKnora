@@ -91,6 +91,20 @@ func TestParseConfigReadsSettings(t *testing.T) {
 	}
 }
 
+func TestParseConfigReadsSDKNetworkSettings(t *testing.T) {
+	cfg := validConfig()
+	cfg.Settings["proxy"] = "socks5://127.0.0.1:8081"
+	cfg.Settings["proxy_password"] = "user:pass"
+	cfg.Settings["timeout_seconds"] = float64(7)
+	parsed, err := parseConfig(cfg)
+	if err != nil {
+		t.Fatalf("parseConfig error: %v", err)
+	}
+	if parsed.Settings.Proxy != "socks5://127.0.0.1:8081" || parsed.Settings.ProxyPassword != "user:pass" || parsed.Settings.TimeoutSeconds != 7 {
+		t.Fatalf("settings = %#v", parsed.Settings)
+	}
+}
+
 func TestParseConfigRequiresCredentialsWithoutLeakingSecrets(t *testing.T) {
 	cfg := validConfig()
 	cfg.Credentials["private_key"] = ""
