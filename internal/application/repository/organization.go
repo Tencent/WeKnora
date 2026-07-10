@@ -91,7 +91,11 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 	if query != "" {
 		pattern := "%" + query + "%"
 		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
-		q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+			q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		} else {
+			q = q.Where("LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?) OR id LIKE ?", pattern, pattern, pattern)
+		}
 	}
 	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
 	if err != nil {
@@ -334,7 +338,7 @@ func (r *organizationRepository) UpdateJoinRequestStatus(ctx context.Context, id
 		Updates(map[string]interface{}{
 			"status":         status,
 			"reviewed_by":    reviewedBy,
-			"reviewed_at":    gorm.Expr("NOW()"),
+			"reviewed_at":    time.Now().UTC(),
 			"review_message": reviewMessage,
 		}).Error
 }

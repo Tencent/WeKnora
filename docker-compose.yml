@@ -200,8 +200,6 @@ services:
     depends_on:
       redis:
         condition: service_started
-      postgres:
-        condition: service_healthy
       docreader:
         condition: service_healthy
     networks:

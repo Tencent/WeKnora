@@ -162,13 +162,18 @@ func (r *messageRepository) SearchMessagesByKeyword(
 
 	var results []*types.MessageWithSession
 
+	contentLikeExpr := "LOWER(messages.content) LIKE LOWER(?)"
+	if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+		contentLikeExpr = "messages.content ILIKE ?"
+	}
+
 	query := r.db.WithContext(ctx).
 		Table("messages").
 		Select("messages.*, sessions.title as session_title").
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
 		Where("sessions.tenant_id = ?", tenantID).
 		Where("messages.deleted_at IS NULL").
-		Where("messages.content ILIKE ?", "%"+escapeLikeKeyword(keyword)+"%")
+		Where(contentLikeExpr, "%"+escapeLikeKeyword(keyword)+"%")
 
 	if len(sessionIDs) > 0 {
 		query = query.Where("messages.session_id IN ?", sessionIDs)

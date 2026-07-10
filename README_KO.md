@@ -153,6 +153,7 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 | 기능 | 상세 |
 |------|------|
 | 배포 | 로컬 / Docker / Kubernetes (Helm), 프라이빗/오프라인 배포 지원 |
+| 데이터베이스 | 기본 PostgreSQL / ParadeDB, 신규 배포에서는 MySQL 8.0.17+를 업무 DB로 지원 (외부 검색 백엔드 필수) |
 | UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / 웹사이트 임베드 Widget / WeChat 미니 프로그램 |
 | 관측 가능성 | Langfuse(단일 추적 백엔드)로 ReAct 루프·토큰 소비·도구 호출·파이프라인 추적; Langfuse 스타일의 문서 파싱 추적 타임라인 내장으로 단계별 진행 표시 |
 | 작업 관리 | MQ 비동기 작업, 버전 업그레이드 시 자동 DB 마이그레이션 |
