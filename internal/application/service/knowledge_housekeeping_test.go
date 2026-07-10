@@ -120,18 +120,70 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 	return f.queued[knowledgeID], nil
 }
 
+// fakePendingOpsRepo covers the small TaskPendingOpsRepository surface
+// housekeeping needs. All mutating methods intentionally fail if called:
+// the sweep must only inspect durable wiki pending ops, never consume them.
+type fakePendingOpsRepo struct {
+	queued map[string]bool
+	err    error
+}
+
+func (f fakePendingOpsRepo) Enqueue(_ context.Context, _ *types.TaskPendingOp) error {
+	return errors.New("unexpected Enqueue call")
+}
+
+func (f fakePendingOpsRepo) PeekBatch(_ context.Context, _, _, _ string, _ int) ([]*types.TaskPendingOp, error) {
+	return nil, errors.New("unexpected PeekBatch call")
+}
+
+func (f fakePendingOpsRepo) DeleteByIDs(_ context.Context, _ []int64) error {
+	return errors.New("unexpected DeleteByIDs call")
+}
+
+func (f fakePendingOpsRepo) IncrFailCount(_ context.Context, _ int64) (int, error) {
+	return 0, errors.New("unexpected IncrFailCount call")
+}
+
+func (f fakePendingOpsRepo) PendingCount(_ context.Context, _, _, _ string) (int64, error) {
+	return 0, errors.New("unexpected PendingCount call")
+}
+
+func (f fakePendingOpsRepo) DeleteByDedupKey(_ context.Context, _, _, _, _, _ string) error {
+	return errors.New("unexpected DeleteByDedupKey call")
+}
+
+func (f fakePendingOpsRepo) HasPendingDedupKey(_ context.Context, taskType, scope, scopeID, dedupKey, op string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	key := taskType + "|" + scope + "|" + scopeID + "|" + dedupKey + "|" + op
+	return f.queued[key], nil
+}
+
 func newHousekeepingSvcForTest(db *gorm.DB) *HousekeepingService {
 	return newHousekeepingSvcWithInspector(db, fakeTaskInspector{})
 }
 
 func newHousekeepingSvcWithInspector(db *gorm.DB, inspector interfaces.TaskInspector) *HousekeepingService {
+	return newHousekeepingSvcWithDeps(db, inspector, nil)
+}
+
+func newHousekeepingSvcWithDeps(
+	db *gorm.DB,
+	inspector interfaces.TaskInspector,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+) *HousekeepingService {
 	cfg := &config.Config{KnowledgeBase: &config.KnowledgeBaseConfig{
 		// 1h floor + 10min buffer = 70min cutoff. Tight enough to keep
 		// the test's relative timestamps in seconds; the production
 		// default of 2h+10min is just a constant scale factor.
 		DocumentProcessTimeout: 1 * time.Hour,
 	}}
-	return NewHousekeepingService(db, cfg, inspector)
+	return NewHousekeepingService(db, cfg, inspector, pendingRepo)
+}
+
+func wikiPendingKey(kbID, knowledgeID, op string) string {
+	return "wiki:ingest|knowledge_base|" + kbID + "|" + knowledgeID + "|" + op
 }
 
 // TestHousekeeping_RecoversAbandoned exercises the happy path: a
@@ -222,6 +274,123 @@ func TestHousekeeping_NoFalseKill_TasksStillQueued(t *testing.T) {
 	).Row().Scan(&status))
 	assert.Equal(t, types.ParseStatusFinalizing, status,
 		"finalizing row with tasks still queued must NOT be flipped to failed")
+}
+
+// TestHousekeeping_NoFalseKill_WikiPendingOpStillQueued covers the
+// durable wiki queue path. Wiki ingest tasks are KB-scoped in asynq and
+// carry the per-knowledge identity only in task_pending_ops; housekeeping
+// must consult that table before declaring a stale finalizing row orphaned.
+func TestHousekeeping_NoFalseKill_WikiPendingOpStillQueued(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithDeps(db, fakeTaskInspector{}, fakePendingOpsRepo{
+		queued: map[string]bool{
+			wikiPendingKey("kb-1", "kid-wiki", "ingest"): true,
+		},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, knowledge_base_id, parse_status, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		"kid-wiki", "kb-1", types.ParseStatusFinalizing, stale,
+	).Error)
+	insertSpan(t, db, "kid-wiki", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-wiki",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFinalizing, status,
+		"finalizing row with a matching wiki ingest pending op must NOT be flipped to failed")
+}
+
+// TestHousekeeping_WikiPendingOpMustMatchKnowledgeAndOp ensures the
+// durable queue guard is exact. Another document in the same KB, or a
+// retract cleanup op for this document, must not preserve a genuinely
+// orphaned finalizing row.
+func TestHousekeeping_WikiPendingOpMustMatchKnowledgeAndOp(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithDeps(db, fakeTaskInspector{}, fakePendingOpsRepo{
+		queued: map[string]bool{
+			wikiPendingKey("kb-1", "kid-other", "ingest"):   true,
+			wikiPendingKey("kb-1", "kid-target", "retract"): true,
+		},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, knowledge_base_id, parse_status, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		"kid-target", "kb-1", types.ParseStatusFinalizing, stale,
+	).Error)
+	insertSpan(t, db, "kid-target", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-target",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFailed, status,
+		"unrelated wiki pending ops must not preserve an orphaned finalizing row")
+}
+
+// TestHousekeeping_WikiPendingProbeErrorPreserves confirms the fail-safe
+// direction for the durable queue. If the DB-backed pending-op source is
+// unavailable, the sweep must not make the destructive failed transition.
+func TestHousekeeping_WikiPendingProbeErrorPreserves(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithDeps(db, fakeTaskInspector{}, fakePendingOpsRepo{
+		err: errors.New("pending ops query failed"),
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, knowledge_base_id, parse_status, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		"kid-queryerr", "kb-1", types.ParseStatusFinalizing, stale,
+	).Error)
+	insertSpan(t, db, "kid-queryerr", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-queryerr",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFinalizing, status,
+		"pending-op probe errors must preserve finalizing rows for the next sweep")
+}
+
+// TestHousekeeping_QueueProbeErrorStillChecksWikiPending covers the
+// mixed-backend failure mode: Redis/asynq inspection can be unavailable
+// while the durable DB queue still proves this finalizing knowledge is
+// merely waiting for wiki ingest. The asynq error must not bypass that
+// durable guard.
+func TestHousekeeping_QueueProbeErrorStillChecksWikiPending(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithDeps(db, fakeTaskInspector{
+		err: errors.New("redis unavailable"),
+	}, fakePendingOpsRepo{
+		queued: map[string]bool{
+			wikiPendingKey("kb-1", "kid-wiki-rediserr", "ingest"): true,
+		},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, knowledge_base_id, parse_status, updated_at)
+		 VALUES (?, ?, ?, ?)`,
+		"kid-wiki-rediserr", "kb-1", types.ParseStatusFinalizing, stale,
+	).Error)
+	insertSpan(t, db, "kid-wiki-rediserr", 1, "post-1", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-wiki-rediserr",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFinalizing, status,
+		"asynq inspector errors must not bypass a matching durable wiki pending op")
 }
 
 // TestHousekeeping_QueueProbeError_FailsSafe confirms the fail-safe
