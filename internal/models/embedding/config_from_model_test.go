@@ -8,9 +8,10 @@ import (
 
 func TestConfigFromModel(t *testing.T) {
 	m := &types.Model{
-		ID:     "emb-1",
-		Name:   "text-embedding-3-small",
-		Source: types.ModelSourceRemote,
+		ID:       "emb-1",
+		TenantID: 42,
+		Name:     "text-embedding-3-small",
+		Source:   types.ModelSourceRemote,
 		Parameters: types.ModelParameters{
 			BaseURL:  "https://api.example.com/v1",
 			APIKey:   "sk-xxx",
@@ -22,6 +23,7 @@ func TestConfigFromModel(t *testing.T) {
 			},
 			ExtraConfig:   map[string]string{"region": "us-east"},
 			CustomHeaders: map[string]string{"X-Gateway": "g1"},
+			QuotaGroup:    "embedding-account", RequestsPerMinute: 300, TokensPerMinute: 500000,
 		},
 	}
 
@@ -43,5 +45,8 @@ func TestConfigFromModel(t *testing.T) {
 	}
 	if cfg.AppID != "app" || cfg.AppSecret != "secret" {
 		t.Errorf("cloud creds mismatch: %+v", cfg)
+	}
+	if cfg.TenantID != 42 || cfg.QuotaGroup != "embedding-account" || cfg.RequestsPerMinute != 300 || cfg.TokensPerMinute != 500000 {
+		t.Errorf("quota config not propagated: %+v", cfg)
 	}
 }

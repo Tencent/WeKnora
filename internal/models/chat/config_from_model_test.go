@@ -10,9 +10,10 @@ import (
 // 避免后续新加字段时只在生产路径或测试路径其中一侧更新导致功能漏配。
 func TestConfigFromModel(t *testing.T) {
 	m := &types.Model{
-		ID:     "model-123",
-		Name:   "gpt-4o-mini",
-		Source: types.ModelSourceRemote,
+		ID:       "model-123",
+		TenantID: 42,
+		Name:     "gpt-4o-mini",
+		Source:   types.ModelSourceRemote,
 		Parameters: types.ModelParameters{
 			BaseURL:  "https://api.example.com/v1",
 			APIKey:   "sk-xxx",
@@ -24,6 +25,11 @@ func TestConfigFromModel(t *testing.T) {
 				"X-Gateway-Token": "abc",
 				"X-Trace-ID":      "t-1",
 			},
+			QuotaGroup:                    "openai-prod",
+			MaxConcurrency:                7,
+			RequestsPerMinute:             120,
+			TokensPerMinute:               100000,
+			InteractiveConcurrencyReserve: 2,
 		},
 	}
 
@@ -49,6 +55,10 @@ func TestConfigFromModel(t *testing.T) {
 	}
 	if cfg.AppID != "app-id" || cfg.AppSecret != "app-secret" {
 		t.Errorf("cloud credentials not propagated: %+v", cfg)
+	}
+	if cfg.TenantID != 42 || cfg.QuotaGroup != "openai-prod" || cfg.MaxConcurrency != 7 ||
+		cfg.RequestsPerMinute != 120 || cfg.TokensPerMinute != 100000 || cfg.InteractiveConcurrencyReserve != 2 {
+		t.Errorf("quota config not propagated: %+v", cfg)
 	}
 }
 

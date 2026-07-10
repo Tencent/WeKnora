@@ -75,7 +75,7 @@ func TestConcurrencyEmbedderBackgroundGated(t *testing.T) {
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 2)
 
 	f := newFakeEmbedder("emb-bg")
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, Config{})
 
 	ctx := types.WithBackgroundTask(context.Background())
 	const n = 5
@@ -118,7 +118,7 @@ func TestConcurrencyEmbedderPerModelLimitOverridesDefault(t *testing.T) {
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 10)
 
 	f := newFakeEmbedder("emb-permodel")
-	w := wrapEmbeddingConcurrency(f, 1)
+	w := wrapEmbeddingConcurrency(f, Config{MaxConcurrency: 1})
 
 	ctx := types.WithBackgroundTask(context.Background())
 	const n = 3
@@ -150,14 +150,14 @@ func TestConcurrencyEmbedderPerModelLimitOverridesDefault(t *testing.T) {
 	}
 }
 
-// TestConcurrencyEmbedderInteractiveNotGated verifies interactive calls bypass
-// the governor entirely, even at limit 1.
-func TestConcurrencyEmbedderInteractiveNotGated(t *testing.T) {
+// TestConcurrencyEmbedderInteractiveSharesLimit verifies interactive calls are
+// included in the provider's total concurrency budget.
+func TestConcurrencyEmbedderInteractiveSharesLimit(t *testing.T) {
 	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
 
 	f := newFakeEmbedder("emb-interactive")
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, Config{})
 
 	ctx := context.Background() // no background marker
 	const n = 3
@@ -169,14 +169,15 @@ func TestConcurrencyEmbedderInteractiveNotGated(t *testing.T) {
 			_, _ = w.Embed(ctx, "x")
 		}()
 	}
-	// All three must be able to run at once despite limit=1.
-	for i := range n {
-		select {
-		case <-f.enter:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("interactive call %d did not enter (should be ungated), inFlight=%d",
-				i, atomic.LoadInt32(&f.inFlight))
-		}
+	select {
+	case <-f.enter:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first interactive call did not enter")
+	}
+	select {
+	case <-f.enter:
+		t.Fatal("second interactive call exceeded total concurrency limit")
+	case <-time.After(150 * time.Millisecond):
 	}
 	close(f.release)
 	wg.Wait()
@@ -198,7 +199,7 @@ func TestConcurrencyEmbedderPoolFanOutGated(t *testing.T) {
 
 	f := newFakeEmbedder("emb-pool")
 	f.pooler = NewBatchEmbedder(pool)
-	w := wrapEmbeddingConcurrency(f, 0)
+	w := wrapEmbeddingConcurrency(f, Config{})
 
 	ctx := types.WithBackgroundTask(context.Background())
 	done := make(chan struct{})

@@ -7,56 +7,50 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// Model provider budgets are the real bottleneck shared by every LLM-backed
-// background stage (summary / question / graph / multimodal enrichment), which
-// all target the same model. This governor caps concurrent calls per model at
-// the client layer — the one place that sees all task types — instead of at the
-// asynq queue layer, whose weights are scheduling priority rather than
-// throttling.
-//
-// Only background (asynq worker) calls are throttled; interactive chat is left
-// untouched (see types.IsBackgroundTask), so a document-ingestion storm cannot
-// exhaust the provider yet user-facing latency is never gated behind the
-// semaphore. The governor singleton itself lives in the limiter package so chat
-// and vlm share the same limiter and per-model budget.
-
-// concurrencyChat throttles background LLM calls through a per-model
-// distributed semaphore. It is the outermost wrapper so the slot is held only
-// around the actual provider round-trip and the wait time is excluded from the
-// inner debug/langfuse timing.
-type concurrencyChat struct {
-	inner Chat
-	// limit is this model's configured per-model background cap; 0 falls back
-	// to the process-wide default (see limiter.GateN).
-	limit int
+type quotaChat struct {
+	inner  Chat
+	key    string
+	limits limiter.Limits
 }
 
-func (w *concurrencyChat) GetModelName() string { return w.inner.GetModelName() }
-func (w *concurrencyChat) GetModelID() string   { return w.inner.GetModelID() }
+func (w *quotaChat) GetModelName() string { return w.inner.GetModelName() }
+func (w *quotaChat) GetModelID() string   { return w.inner.GetModelID() }
 
-func (w *concurrencyChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
-	defer release()
-	return w.inner.Chat(ctx, messages, opts)
+func (w *quotaChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+	estimate := estimateChatRequestTokens(w.inner.GetModelName(), messages, opts)
+	permit, err := limiter.Admit(ctx, w.key, w.limits, estimate)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := w.inner.Chat(ctx, messages, opts)
+	actual := 0
+	if resp != nil {
+		actual = resp.Usage.TotalTokens
+	}
+	permit.Complete(actual)
+	return resp, err
 }
 
-func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
-	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
+func (w *quotaChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+	estimate := estimateChatRequestTokens(w.inner.GetModelName(), messages, opts)
+	permit, err := limiter.Admit(ctx, w.key, w.limits, estimate)
+	if err != nil {
+		return nil, err
+	}
 	ch, err := w.inner.ChatStream(ctx, messages, opts)
 	if err != nil || ch == nil {
-		release()
+		permit.Release()
 		return ch, err
 	}
-	// Hold the slot until the stream fully drains, then release. If the
-	// consumer abandons the stream (stops reading out) we would otherwise
-	// block forever on the send and never release the slot; select on
-	// ctx.Done() so a cancelled call frees its slot promptly, and drain the
-	// inner channel in the background so the upstream producer can exit.
 	out := make(chan types.StreamResponse)
 	go func() {
 		defer close(out)
-		defer release()
+		actual := 0
+		defer func() { permit.Complete(actual) }()
 		for resp := range ch {
+			if resp.Usage != nil && resp.Usage.TotalTokens > 0 {
+				actual = resp.Usage.TotalTokens
+			}
 			select {
 			case out <- resp:
 			case <-ctx.Done():
@@ -71,12 +65,18 @@ func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, op
 	return out, nil
 }
 
-// wrapChatConcurrency installs the background concurrency governor as the
-// outermost Chat decorator. It is always applied; when no limiter is installed
-// or the call is interactive, the wrapper is a cheap passthrough.
-func wrapChatConcurrency(c Chat, limit int, err error) (Chat, error) {
+func wrapChatConcurrency(c Chat, config *ChatConfig, err error) (Chat, error) {
 	if err != nil || c == nil {
 		return c, err
 	}
-	return &concurrencyChat{inner: c, limit: limit}, nil
+	return &quotaChat{
+		inner: c,
+		key:   limiter.QuotaKey(config.TenantID, c.GetModelID(), config.QuotaGroup),
+		limits: limiter.Limits{
+			MaxConcurrency:                config.MaxConcurrency,
+			RequestsPerMinute:             config.RequestsPerMinute,
+			TokensPerMinute:               config.TokensPerMinute,
+			InteractiveConcurrencyReserve: config.InteractiveConcurrencyReserve,
+		},
+	}, nil
 }

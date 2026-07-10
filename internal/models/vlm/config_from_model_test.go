@@ -8,15 +8,17 @@ import (
 
 func TestConfigFromModel_RemoteDefaultsToOpenAI(t *testing.T) {
 	m := &types.Model{
-		ID:     "v1",
-		Name:   "gpt-4o",
-		Source: types.ModelSourceRemote,
+		ID:       "v1",
+		TenantID: 42,
+		Name:     "gpt-4o",
+		Source:   types.ModelSourceRemote,
 		Parameters: types.ModelParameters{
 			BaseURL:       "https://api.example.com/v1",
 			APIKey:        "sk",
 			Provider:      "openai",
 			ExtraConfig:   map[string]string{"x": "y"},
 			CustomHeaders: map[string]string{"H": "v"},
+			QuotaGroup:    "vision-account", MaxConcurrency: 4, TokensPerMinute: 80000,
 		},
 	}
 	cfg := ConfigFromModel(m, "app", "secret")
@@ -31,6 +33,9 @@ func TestConfigFromModel_RemoteDefaultsToOpenAI(t *testing.T) {
 	}
 	if cfg.AppID != "app" || cfg.AppSecret != "secret" {
 		t.Errorf("cloud creds mismatch: %+v", cfg)
+	}
+	if cfg.TenantID != 42 || cfg.QuotaGroup != "vision-account" || cfg.MaxConcurrency != 4 || cfg.TokensPerMinute != 80000 {
+		t.Errorf("quota config not propagated: %+v", cfg)
 	}
 }
 

@@ -35,14 +35,13 @@ func (f *fakeChat) ChatStream(ctx context.Context, _ []Message, _ *ChatOptions) 
 	return ch, nil
 }
 
-// TestConcurrencyChatInteractiveNotGated verifies interactive calls bypass the
-// governor entirely even at limit 1.
-func TestConcurrencyChatInteractiveNotGated(t *testing.T) {
+// TestQuotaChatInteractiveUsesSharedAdmission verifies interactive calls use
+// the same quota group (sequential calls release cleanly).
+func TestQuotaChatInteractiveUsesSharedAdmission(t *testing.T) {
 	t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
 
-	w := &concurrencyChat{inner: &fakeChat{id: "model-x"}}
-	// No background marker: neither call should be throttled.
+	w := &quotaChat{inner: &fakeChat{id: "model-x"}, key: "model-x"}
 	if _, err := w.Chat(context.Background(), nil, nil); err != nil {
 		t.Fatalf("interactive chat: %v", err)
 	}
@@ -59,7 +58,7 @@ func TestConcurrencyChatStreamReleasesOnAbandon(t *testing.T) {
 	limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
 
 	const id = "model-y"
-	w := &concurrencyChat{inner: &fakeChat{id: id}}
+	w := &quotaChat{inner: &fakeChat{id: id}, key: id}
 
 	streamCtx, cancel := context.WithCancel(types.WithBackgroundTask(context.Background()))
 	out, err := w.ChatStream(streamCtx, nil, nil)

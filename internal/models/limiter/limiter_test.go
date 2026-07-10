@@ -2,6 +2,7 @@ package limiter
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func newTestLimiter(t *testing.T, ttl, poll time.Duration) (*redisLimiter, *mini
 
 func zcard(t *testing.T, rdb *redis.Client, key string) int64 {
 	t.Helper()
-	n, err := rdb.ZCard(context.Background(), keyPrefix+key).Result()
+	n, err := rdb.ZCard(context.Background(), keyPrefix+key+":inflight").Result()
 	if err != nil {
 		t.Fatalf("zcard: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestRedisLimiterReclaimsExpiredLease(t *testing.T) {
 
 	// Simulate a dead holder: a member whose lease already expired.
 	expired := float64(time.Now().Add(-time.Second).UnixMilli())
-	if err := rdb.ZAdd(ctx, keyPrefix+key, redis.Z{Score: expired, Member: "dead"}).Err(); err != nil {
+	if err := rdb.ZAdd(ctx, keyPrefix+key+":inflight", redis.Z{Score: expired, Member: "dead"}).Err(); err != nil {
 		t.Fatalf("seed dead holder: %v", err)
 	}
 
@@ -105,7 +106,7 @@ func TestRedisLimiterReclaimsExpiredLease(t *testing.T) {
 	if got := zcard(t, rdb, key); got != 1 {
 		t.Fatalf("expected only the live holder, got %d", got)
 	}
-	if exists, _ := rdb.ZScore(ctx, keyPrefix+key, "dead").Result(); exists != 0 {
+	if exists, _ := rdb.ZScore(ctx, keyPrefix+key+":inflight", "dead").Result(); exists != 0 {
 		t.Fatal("expired lease should have been pruned")
 	}
 	release()
@@ -129,9 +130,9 @@ func TestRedisLimiterIndependentKeys(t *testing.T) {
 	rb()
 }
 
-// TestRedisLimiterFailsOpen verifies every degraded path allows the call
-// instead of blocking model traffic.
-func TestRedisLimiterFailsOpen(t *testing.T) {
+// TestRedisLimiterBackendErrorsAreExplicit verifies quota enforcement does not
+// silently disappear when the shared backend is unavailable.
+func TestRedisLimiterBackendErrorsAreExplicit(t *testing.T) {
 	ctx := context.Background()
 
 	// Nil client.
@@ -146,17 +147,15 @@ func TestRedisLimiterFailsOpen(t *testing.T) {
 		t.Fatalf("limit<=0 should fail open, got release==nil=%v err=%v", release == nil, err)
 	}
 
-	// Backend error (server down) must fail open too.
+	// Backend error (server down) is explicit.
 	lim3, s, _ := newTestLimiter(t, time.Minute, 10*time.Millisecond)
 	s.Close()
-	if release, err := lim3.Acquire(ctx, "k", 4); err != nil || release == nil {
-		t.Fatalf("backend error should fail open, got release==nil=%v err=%v", release == nil, err)
+	if release, err := lim3.Acquire(ctx, "k", 4); err == nil || release != nil {
+		t.Fatalf("backend error should block admission, got release==nil=%v err=%v", release == nil, err)
 	}
 }
 
-// TestRedisLimiterCancelledContextFailsOpen verifies a waiter whose context is
-// cancelled while blocked returns a usable (no-op) release rather than erroring.
-func TestRedisLimiterCancelledContextFailsOpen(t *testing.T) {
+func TestRedisLimiterCancelledContextReturnsError(t *testing.T) {
 	lim, _, _ := newTestLimiter(t, time.Minute, 10*time.Millisecond)
 
 	r1, err := lim.Acquire(context.Background(), "m3", 1)
@@ -168,8 +167,31 @@ func TestRedisLimiterCancelledContextFailsOpen(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	release, err := lim.Acquire(ctx, "m3", 1)
-	if err != nil || release == nil {
-		t.Fatalf("cancelled wait should fail open, got release==nil=%v err=%v", release == nil, err)
+	if err == nil || release != nil {
+		t.Fatalf("cancelled wait should return an error, got release==nil=%v err=%v", release == nil, err)
 	}
-	release()
+}
+
+func TestRedisLimiterEnforcesAndReconcilesTPM(t *testing.T) {
+	lim, _, _ := newTestLimiter(t, time.Minute, 5*time.Millisecond)
+	limits := Limits{TokensPerMinute: 10}
+	permit, err := lim.Admit(context.Background(), "tpm", limits, Request{EstimatedTokens: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	permit.Complete(2)
+
+	permit, err = lim.Admit(context.Background(), "tpm", limits, Request{EstimatedTokens: 8})
+	if err != nil {
+		t.Fatalf("provider usage refund should be visible in Redis: %v", err)
+	}
+	permit.Release()
+}
+
+func TestRedisLimiterRejectsRequestLargerThanTPMCapacity(t *testing.T) {
+	lim, _, _ := newTestLimiter(t, time.Minute, 5*time.Millisecond)
+	permit, err := lim.Admit(context.Background(), "oversize", Limits{TokensPerMinute: 100}, Request{EstimatedTokens: 101})
+	if !errors.Is(err, ErrRequestExceedsTPM) || permit != nil {
+		t.Fatalf("permit=%v err=%v", permit, err)
+	}
 }

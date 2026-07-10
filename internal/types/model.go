@@ -79,12 +79,20 @@ type ModelParameters struct {
 	// for preflight admission and agent compression. 0 keeps compatibility with
 	// existing records by selecting the application fallback.
 	ContextWindowTokens int `yaml:"context_window_tokens,omitempty" json:"context_window_tokens,omitempty"`
-	// MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /
-	// enrichment) calls to THIS specific model, keyed by model ID and shared
-	// across all replicas. 0 (the default) means "fall back to the
-	// process-wide model.max_concurrency". Interactive user-facing calls are
-	// never gated. Only chat / vlm / embedding honour this (see limiter.Gate).
+	// QuotaGroup joins models that consume the same upstream provider/account
+	// quota. Empty preserves per-model isolation.
+	QuotaGroup string `yaml:"quota_group,omitempty" json:"quota_group,omitempty"`
+	// MaxConcurrency caps all in-flight calls in the quota group. 0 falls back
+	// to model.max_concurrency; -1 disables that dimension for this model.
 	MaxConcurrency int `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	// RequestsPerMinute and TokensPerMinute share the same quota group. 0 uses
+	// the global default; -1 disables that dimension for this model.
+	RequestsPerMinute int `yaml:"requests_per_minute,omitempty" json:"requests_per_minute,omitempty"`
+	TokensPerMinute   int `yaml:"tokens_per_minute,omitempty" json:"tokens_per_minute,omitempty"`
+	// InteractiveConcurrencyReserve keeps slots unavailable to background
+	// ingestion so user-facing requests cannot be starved. 0 uses the global
+	// default; -1 disables the reserve.
+	InteractiveConcurrencyReserve int `yaml:"interactive_concurrency_reserve,omitempty" json:"interactive_concurrency_reserve,omitempty"`
 	// WeKnoraCloud 厂商专用凭证
 	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key

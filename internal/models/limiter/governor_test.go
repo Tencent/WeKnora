@@ -13,8 +13,8 @@ func withBackground() context.Context {
 	return types.WithBackgroundTask(context.Background())
 }
 
-// TestGateOnlyGovernsBackground verifies interactive calls always pass through
-// (no-op release) and only background calls consult the installed limiter.
+// TestGateOnlyGovernsBackground pins the compatibility Gate API. Unified model
+// wrappers use Admit for both interactive and background calls.
 func TestGateOnlyGovernsBackground(t *testing.T) {
 	t.Cleanup(func() { SetGovernor(nil, 0) })
 	SetGovernor(NewLocalLimiter(), 1)
@@ -130,4 +130,60 @@ func TestLocalLimiterReleaseIdempotent(t *testing.T) {
 	}
 	r2()
 	<-done
+}
+
+func TestLocalLimiterEnforcesRPMAndTPM(t *testing.T) {
+	l := NewLocalLimiter()
+
+	rpmPermit, err := l.Admit(context.Background(), "rpm", Limits{RequestsPerMinute: 1}, Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpmPermit.Release()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if permit, err := l.Admit(ctx, "rpm", Limits{RequestsPerMinute: 1}, Request{}); err == nil || permit != nil {
+		t.Fatalf("second request should wait for RPM refill, permit=%v err=%v", permit, err)
+	}
+
+	permit, err := l.Admit(context.Background(), "tpm", Limits{TokensPerMinute: 10}, Request{EstimatedTokens: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	permit.Complete(2) // refund six reserved tokens
+	permit, err = l.Admit(context.Background(), "tpm", Limits{TokensPerMinute: 10}, Request{EstimatedTokens: 8})
+	if err != nil {
+		t.Fatalf("actual usage reconciliation should make the next request admissible: %v", err)
+	}
+	permit.Release()
+}
+
+func TestLocalLimiterReservesInteractiveCapacity(t *testing.T) {
+	l := NewLocalLimiter()
+	limits := Limits{MaxConcurrency: 3, InteractiveConcurrencyReserve: 1}
+	bg := Request{Background: true}
+	p1, _ := l.Admit(context.Background(), "shared", limits, bg)
+	p2, _ := l.Admit(context.Background(), "shared", limits, bg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if p3, err := l.Admit(ctx, "shared", limits, bg); err == nil || p3 != nil {
+		t.Fatalf("third background call should yield the reserved slot, permit=%v err=%v", p3, err)
+	}
+	interactive, err := l.Admit(context.Background(), "shared", limits, Request{})
+	if err != nil {
+		t.Fatalf("interactive call should use the reserved slot: %v", err)
+	}
+	interactive.Release()
+	p1.Release()
+	p2.Release()
+}
+
+func TestQuotaKeySharesExplicitGroupWithinTenant(t *testing.T) {
+	if got, want := QuotaKey(42, "model-a", "provider-account"), QuotaKey(42, "model-b", "provider-account"); got != want {
+		t.Fatalf("same group should share a key: %q != %q", got, want)
+	}
+	if QuotaKey(42, "model-a", "provider-account") == QuotaKey(43, "model-a", "provider-account") {
+		t.Fatal("quota groups must be tenant namespaced")
+	}
 }

@@ -41,19 +41,22 @@ type EmbedderType string
 
 // Config represents the embedder configuration
 type Config struct {
-	Source                    types.ModelSource `json:"source"`
-	BaseURL                   string            `json:"base_url"`
-	ModelName                 string            `json:"model_name"`
-	APIKey                    string            `json:"api_key"`
-	TruncatePromptTokens      int               `json:"truncate_prompt_tokens"`
-	Dimensions                int               `json:"dimensions"`
-	SupportsDimensionOverride bool              `json:"supports_dimension_override"`
-	ModelID                   string            `json:"model_id"`
-	Provider                  string            `json:"provider"`
-	// MaxConcurrency caps concurrent background calls to this model; 0 falls
-	// back to the process-wide default (see limiter.GateN).
-	MaxConcurrency int               `json:"max_concurrency"`
-	ExtraConfig    map[string]string `json:"extra_config"`
+	TenantID                      uint64            `json:"tenant_id"`
+	Source                        types.ModelSource `json:"source"`
+	BaseURL                       string            `json:"base_url"`
+	ModelName                     string            `json:"model_name"`
+	APIKey                        string            `json:"api_key"`
+	TruncatePromptTokens          int               `json:"truncate_prompt_tokens"`
+	Dimensions                    int               `json:"dimensions"`
+	SupportsDimensionOverride     bool              `json:"supports_dimension_override"`
+	ModelID                       string            `json:"model_id"`
+	Provider                      string            `json:"provider"`
+	QuotaGroup                    string            `json:"quota_group"`
+	MaxConcurrency                int               `json:"max_concurrency"`
+	RequestsPerMinute             int               `json:"requests_per_minute"`
+	TokensPerMinute               int               `json:"tokens_per_minute"`
+	InteractiveConcurrencyReserve int               `json:"interactive_concurrency_reserve"`
+	ExtraConfig                   map[string]string `json:"extra_config"`
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string `json:"custom_headers"`
 	AppID         string
@@ -68,20 +71,25 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 		return Config{}
 	}
 	return Config{
-		Source:                    m.Source,
-		BaseURL:                   m.Parameters.BaseURL,
-		APIKey:                    m.Parameters.APIKey,
-		ModelID:                   m.ID,
-		ModelName:                 m.Name,
-		Dimensions:                m.Parameters.EmbeddingParameters.Dimension,
-		SupportsDimensionOverride: m.Parameters.EmbeddingParameters.SupportsDimensionOverride,
-		TruncatePromptTokens:      m.Parameters.EmbeddingParameters.TruncatePromptTokens,
-		Provider:                  m.Parameters.Provider,
-		MaxConcurrency:            m.Parameters.MaxConcurrency,
-		ExtraConfig:               m.Parameters.ExtraConfig,
-		CustomHeaders:             m.Parameters.CustomHeaders,
-		AppID:                     appID,
-		AppSecret:                 appSecret,
+		TenantID:                      m.TenantID,
+		Source:                        m.Source,
+		BaseURL:                       m.Parameters.BaseURL,
+		APIKey:                        m.Parameters.APIKey,
+		ModelID:                       m.ID,
+		ModelName:                     m.Name,
+		Dimensions:                    m.Parameters.EmbeddingParameters.Dimension,
+		SupportsDimensionOverride:     m.Parameters.EmbeddingParameters.SupportsDimensionOverride,
+		TruncatePromptTokens:          m.Parameters.EmbeddingParameters.TruncatePromptTokens,
+		Provider:                      m.Parameters.Provider,
+		MaxConcurrency:                m.Parameters.MaxConcurrency,
+		QuotaGroup:                    m.Parameters.QuotaGroup,
+		RequestsPerMinute:             m.Parameters.RequestsPerMinute,
+		TokensPerMinute:               m.Parameters.TokensPerMinute,
+		InteractiveConcurrencyReserve: m.Parameters.InteractiveConcurrencyReserve,
+		ExtraConfig:                   m.Parameters.ExtraConfig,
+		CustomHeaders:                 m.Parameters.CustomHeaders,
+		AppID:                         appID,
+		AppSecret:                     appSecret,
 	}
 }
 
@@ -97,7 +105,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	// Innermost: gate the real provider round-trips (including the per-sub-batch
 	// pool callbacks) before debug/langfuse wrap for logging/tracing. See
 	// concurrencyEmbedder for why this sits below the observability decorators.
-	e = wrapEmbeddingConcurrency(e, config.MaxConcurrency)
+	e = wrapEmbeddingConcurrency(e, config)
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}
 	}

@@ -2,37 +2,60 @@ package vlm
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/tiktoken-go/tokenizer"
 )
 
-// Multimodal enrichment (image OCR / caption) is a high-volume, slow background
-// stage that hits the same provider budget as chat. Like chat, it must be
-// governed at the client layer so an image-heavy ingestion storm can't burst
-// the whole worker pool against one VLM provider. Only background (asynq
-// worker) calls are throttled — see limiter.Gate / types.IsBackgroundTask.
-type concurrencyVLM struct {
-	inner VLM
-	// limit is this model's configured per-model background cap; 0 falls back
-	// to the process-wide default (see limiter.GateN).
-	limit int
+type quotaVLM struct {
+	inner  VLM
+	key    string
+	limits limiter.Limits
 }
 
-func (w *concurrencyVLM) GetModelName() string { return w.inner.GetModelName() }
-func (w *concurrencyVLM) GetModelID() string   { return w.inner.GetModelID() }
+func (w *quotaVLM) GetModelName() string { return w.inner.GetModelName() }
+func (w *quotaVLM) GetModelID() string   { return w.inner.GetModelID() }
 
-func (w *concurrencyVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
-	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
-	defer release()
-	return w.inner.Predict(ctx, imgBytes, prompt)
+func (w *quotaVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
+	estimate := estimateVLMRequestTokens(w.inner.GetModelName(), prompt, len(imgBytes))
+	permit, err := limiter.Admit(ctx, w.key, w.limits, estimate)
+	if err != nil {
+		return "", err
+	}
+	result, err := w.inner.Predict(ctx, imgBytes, prompt)
+	permit.Release()
+	return result, err
 }
 
-// wrapVLMConcurrency installs the background concurrency governor as the
-// outermost VLM decorator. Always applied; a cheap passthrough when no limiter
-// is installed or the call is interactive.
-func wrapVLMConcurrency(v VLM, limit int, err error) (VLM, error) {
+func wrapVLMConcurrency(v VLM, config *Config, err error) (VLM, error) {
 	if err != nil || v == nil {
 		return v, err
 	}
-	return &concurrencyVLM{inner: v, limit: limit}, nil
+	return &quotaVLM{
+		inner: v,
+		key:   limiter.QuotaKey(config.TenantID, v.GetModelID(), config.QuotaGroup),
+		limits: limiter.Limits{
+			MaxConcurrency:                config.MaxConcurrency,
+			RequestsPerMinute:             config.RequestsPerMinute,
+			TokensPerMinute:               config.TokensPerMinute,
+			InteractiveConcurrencyReserve: config.InteractiveConcurrencyReserve,
+		},
+	}, nil
+}
+
+func estimateVLMRequestTokens(modelName, prompt string, images int) int {
+	codec, err := tokenizer.ForModel(tokenizer.Model(strings.ToLower(strings.TrimSpace(modelName))))
+	if err != nil {
+		codec, _ = tokenizer.Get(tokenizer.Cl100kBase)
+	}
+	promptTokens := 0
+	if codec != nil && prompt != "" {
+		if ids, _, encodeErr := codec.Encode(prompt); encodeErr == nil {
+			promptTokens = len(ids)
+		} else {
+			promptTokens = (len([]rune(prompt)) + 2) / 3
+		}
+	}
+	return promptTokens + images*1024 + 4096
 }

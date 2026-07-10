@@ -22,17 +22,20 @@ type VLM interface {
 
 // Config holds the configuration needed to create a VLM instance.
 type Config struct {
-	Source        types.ModelSource
-	BaseURL       string
-	ModelName     string
-	APIKey        string
-	ModelID       string
-	InterfaceType string // "ollama" or "openai" (default)
-	Provider      string
-	// MaxConcurrency caps concurrent background calls to this model; 0 falls
-	// back to the process-wide default (see limiter.GateN).
-	MaxConcurrency int
-	Extra          map[string]any
+	TenantID                      uint64
+	Source                        types.ModelSource
+	BaseURL                       string
+	ModelName                     string
+	APIKey                        string
+	ModelID                       string
+	InterfaceType                 string // "ollama" or "openai" (default)
+	Provider                      string
+	QuotaGroup                    string
+	MaxConcurrency                int
+	RequestsPerMinute             int
+	TokensPerMinute               int
+	InteractiveConcurrencyReserve int
+	Extra                         map[string]any
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string
 	AppID         string
@@ -56,18 +59,23 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 		}
 	}
 	return &Config{
-		ModelID:        m.ID,
-		APIKey:         m.Parameters.APIKey,
-		BaseURL:        m.Parameters.BaseURL,
-		ModelName:      m.Name,
-		Source:         m.Source,
-		InterfaceType:  ifType,
-		Provider:       m.Parameters.Provider,
-		MaxConcurrency: m.Parameters.MaxConcurrency,
-		Extra:          stringMapToAnyMap(m.Parameters.ExtraConfig),
-		CustomHeaders:  m.Parameters.CustomHeaders,
-		AppID:          appID,
-		AppSecret:      appSecret,
+		TenantID:                      m.TenantID,
+		ModelID:                       m.ID,
+		APIKey:                        m.Parameters.APIKey,
+		BaseURL:                       m.Parameters.BaseURL,
+		ModelName:                     m.Name,
+		Source:                        m.Source,
+		InterfaceType:                 ifType,
+		Provider:                      m.Parameters.Provider,
+		MaxConcurrency:                m.Parameters.MaxConcurrency,
+		QuotaGroup:                    m.Parameters.QuotaGroup,
+		RequestsPerMinute:             m.Parameters.RequestsPerMinute,
+		TokensPerMinute:               m.Parameters.TokensPerMinute,
+		InteractiveConcurrencyReserve: m.Parameters.InteractiveConcurrencyReserve,
+		Extra:                         stringMapToAnyMap(m.Parameters.ExtraConfig),
+		CustomHeaders:                 m.Parameters.CustomHeaders,
+		AppID:                         appID,
+		AppSecret:                     appSecret,
 	}
 }
 
@@ -94,7 +102,7 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 	v, err = wrapVLMLangfuse(v, nil)
 	// Outermost: hold the per-model concurrency slot only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
-	return wrapVLMConcurrency(v, config.MaxConcurrency, err)
+	return wrapVLMConcurrency(v, config, err)
 }
 
 func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
