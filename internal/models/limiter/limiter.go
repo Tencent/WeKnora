@@ -3,6 +3,7 @@ package limiter
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sync"
@@ -169,7 +170,7 @@ func (l *redisLimiter) Admit(ctx context.Context, key string, limits Limits, req
 		return nil, fmt.Errorf("%w: estimated=%d tpm=%d", ErrRequestExceedsTPM, req.EstimatedTokens, limits.TokensPerMinute)
 	}
 
-	base := keyPrefix + key
+	base := redisKeyBase(key)
 	keys := []string{base + ":inflight", base + ":background", base + ":buckets"}
 	token := uuid.NewString()
 	timer := time.NewTimer(0)
@@ -209,6 +210,14 @@ func (l *redisLimiter) Admit(ctx context.Context, key string, limits Limits, req
 		case <-timer.C:
 		}
 	}
+}
+
+// redisKeyBase hashes user-configured group names and wraps the digest in a
+// Redis Cluster hash tag so all keys used by the atomic Lua script are placed
+// in the same slot.
+func redisKeyBase(key string) string {
+	digest := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%s{%x}", keyPrefix, digest[:16])
 }
 
 func (l *redisLimiter) hold(keys []string, token string, limits Limits, reserved int) *Permit {

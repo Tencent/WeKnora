@@ -3,6 +3,7 @@ package limiter
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func newTestLimiter(t *testing.T, ttl, poll time.Duration) (*redisLimiter, *mini
 
 func zcard(t *testing.T, rdb *redis.Client, key string) int64 {
 	t.Helper()
-	n, err := rdb.ZCard(context.Background(), keyPrefix+key+":inflight").Result()
+	n, err := rdb.ZCard(context.Background(), redisKeyBase(key)+":inflight").Result()
 	if err != nil {
 		t.Fatalf("zcard: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestRedisLimiterReclaimsExpiredLease(t *testing.T) {
 
 	// Simulate a dead holder: a member whose lease already expired.
 	expired := float64(time.Now().Add(-time.Second).UnixMilli())
-	if err := rdb.ZAdd(ctx, keyPrefix+key+":inflight", redis.Z{Score: expired, Member: "dead"}).Err(); err != nil {
+	if err := rdb.ZAdd(ctx, redisKeyBase(key)+":inflight", redis.Z{Score: expired, Member: "dead"}).Err(); err != nil {
 		t.Fatalf("seed dead holder: %v", err)
 	}
 
@@ -106,7 +107,7 @@ func TestRedisLimiterReclaimsExpiredLease(t *testing.T) {
 	if got := zcard(t, rdb, key); got != 1 {
 		t.Fatalf("expected only the live holder, got %d", got)
 	}
-	if exists, _ := rdb.ZScore(ctx, keyPrefix+key+":inflight", "dead").Result(); exists != 0 {
+	if exists, _ := rdb.ZScore(ctx, redisKeyBase(key)+":inflight", "dead").Result(); exists != 0 {
 		t.Fatal("expired lease should have been pruned")
 	}
 	release()
@@ -193,5 +194,18 @@ func TestRedisLimiterRejectsRequestLargerThanTPMCapacity(t *testing.T) {
 	permit, err := lim.Admit(context.Background(), "oversize", Limits{TokensPerMinute: 100}, Request{EstimatedTokens: 101})
 	if !errors.Is(err, ErrRequestExceedsTPM) || permit != nil {
 		t.Fatalf("permit=%v err=%v", permit, err)
+	}
+}
+
+func TestRedisQuotaKeysShareAClusterHashSlot(t *testing.T) {
+	base := redisKeyBase("42:provider-account")
+	for _, suffix := range []string{":inflight", ":background", ":buckets"} {
+		key := base + suffix
+		if !strings.Contains(key, "{") || !strings.Contains(key, "}") {
+			t.Fatalf("key %q has no Redis Cluster hash tag", key)
+		}
+	}
+	if strings.Contains(base, "provider-account") {
+		t.Fatal("raw quota group should not be exposed in Redis keys")
 	}
 }
