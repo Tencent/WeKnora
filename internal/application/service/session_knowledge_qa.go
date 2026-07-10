@@ -202,6 +202,9 @@ func (s *sessionService) KnowledgeQA(
 
 	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, req.Session.TenantID)
+	// Propagate the session ID so stateful sandbox backends (CubeSandbox) can
+	// bind script execution to a per-session MicroVM instance.
+	ctx = types.WithSessionID(ctx, req.Session.ID)
 	logger.Info(ctx, "Triggering question answering event")
 	setupSpan.Finish(map[string]interface{}{
 		"stages":             len(pipeline),

@@ -178,6 +178,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(mcp.NewMCPManager))
 	must(container.Provide(mcp.NewOAuthManager))
 
+	// Sandbox manager (script execution backend for skills). Reads
+	// WEKNORA_SANDBOX_MODE env var: "docker" | "local" | "cube" | "disabled"
+	// (default). The Cube mode wires a SessionBoundManager so each Session
+	// gets its own persistent MicroVM. See internal/sandbox/session_manager.go.
+	logger.Debugf(ctx, "[Container] Registering sandbox manager...")
+	must(container.Provide(newSandboxManager))
+
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
 	must(container.Provide(service.NewTenantService))
