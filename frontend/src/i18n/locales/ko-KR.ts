@@ -2511,6 +2511,16 @@ export default {
           attention: "확인 필요",
           paused: "일시중지됨",
         },
+        models: {
+          title: "모델 동시성",
+          description: "백그라운드 작업이 실제로 모델 서비스에 진입할 때의 동시성입니다. 위 섹션은 작업 스케줄링이고, 이 섹션은 별도의 모델 서비스 스로틀 단계입니다.",
+          scope: "실행 중은 클러스터 전체 · 대기는 로컬",
+          disabled: "백그라운드 모델 동시성 제어가 비활성화되어 있습니다. 전역 설정에서 모델 기본 동시성 상한을 구성하세요.",
+          empty: "아직 모델 활동이 없습니다. 첫 백그라운드 호출 후 모델이 표시됩니다.",
+          backgroundOnly: "백그라운드 작업만; 대화형 채팅은 제외",
+          columns: { model: "모델 ID", active: "실행 중", waiting: "스로틀 대기", usage: "동시성" },
+          status: { queued: "스로틀 중", full: "한도 도달" },
+        },
         pools: {
           core: "핵심 파싱",
           enrichment: "콘텐츠 보강",

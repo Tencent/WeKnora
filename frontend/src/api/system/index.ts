@@ -509,6 +509,14 @@ export interface RuntimeWorkerPool {
   queue_count: number
 }
 
+export interface ModelRuntimeStat {
+  model_id: string
+  name: string
+  active: number
+  waiting: number
+  limit: number
+}
+
 /**
  * Runtime queue dashboard payload. `available` is false in Lite mode
  * (no Redis/asynq) — render an "unavailable in this deployment" state
@@ -523,6 +531,8 @@ export interface RuntimeQueuesResponse {
   wiki_concurrency: number
   pools: RuntimeWorkerPool[]
   queues: QueueStat[]
+  model_limiter_available: boolean
+  models: ModelRuntimeStat[]
   timestamp: number
 }
 

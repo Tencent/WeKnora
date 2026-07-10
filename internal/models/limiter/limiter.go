@@ -15,7 +15,10 @@ package limiter
 
 import (
 	"context"
+	"sort"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -34,15 +37,38 @@ type ModelConcurrencyLimiter interface {
 	Acquire(ctx context.Context, key string, limit int) (release func(), err error)
 }
 
+// RuntimeStat is a point-in-time view of a model semaphore. Active is
+// cluster-wide for the Redis backend and process-local in Lite mode. Waiting is
+// deliberately process-local: waiters block in application processes and are
+// not represented in Redis.
+type RuntimeStat struct {
+	ModelID string `json:"model_id"`
+	Name    string `json:"name"`
+	Active  int64  `json:"active"`
+	Waiting int64  `json:"waiting"`
+	Limit   int    `json:"limit"`
+}
+
+type runtimeInspectable interface {
+	RuntimeStats(context.Context) ([]RuntimeStat, error)
+}
+
+type trackedSemaphore struct {
+	limit   atomic.Int64
+	waiting atomic.Int64
+	name    atomic.Value // string
+}
+
 // noop is the release returned on the fail-open / passthrough paths.
 func noop() {}
 
 const (
-	// defaultLeaseTTL is how long a held slot survives without a heartbeat
-	// before another acquirer may reclaim it. Sized well above a typical
-	// enrichment LLM call so a slow provider never loses its slot mid-call;
-	// the heartbeat refreshes it for genuinely long calls.
-	defaultLeaseTTL = 5 * time.Minute
+	// defaultLeaseTTL is the crash-recovery window, not a request timeout.
+	// Live calls refresh their lease every ttl/3, so even a very long provider
+	// request keeps its slot. Keeping this short prevents an app/container
+	// restart from leaving an entire model budget apparently occupied for
+	// minutes while the replacement workers are blocked behind dead holders.
+	defaultLeaseTTL = 30 * time.Second
 	// defaultPollInterval is how often a waiting acquirer re-checks for a free
 	// slot. Small enough to stay responsive, large enough to avoid hammering
 	// Redis under contention.
@@ -75,6 +101,7 @@ type redisLimiter struct {
 	rdb          *redis.Client
 	ttl          time.Duration
 	pollInterval time.Duration
+	tracked      sync.Map // model ID -> *trackedSemaphore
 }
 
 // NewRedisLimiter builds a distributed limiter backed by rdb. A nil client
@@ -93,6 +120,11 @@ func (l *redisLimiter) Acquire(ctx context.Context, key string, limit int) (func
 	}
 
 	zkey := keyPrefix + key
+	entry, _ := l.tracked.LoadOrStore(key, &trackedSemaphore{})
+	tracked := entry.(*trackedSemaphore)
+	tracked.limit.Store(int64(limit))
+	tracked.waiting.Add(1)
+	defer tracked.waiting.Add(-1)
 	token := uuid.NewString()
 	ttlMs := l.ttl.Milliseconds()
 
@@ -129,6 +161,39 @@ func (l *redisLimiter) Acquire(ctx context.Context, key string, limit int) (func
 		case <-timer.C:
 		}
 	}
+}
+
+func (l *redisLimiter) RuntimeStats(ctx context.Context) ([]RuntimeStat, error) {
+	stats := make([]RuntimeStat, 0)
+	if l == nil || l.rdb == nil {
+		return stats, nil
+	}
+	var firstErr error
+	now := time.Now().UnixMilli()
+	l.tracked.Range(func(rawKey, rawValue any) bool {
+		modelID := rawKey.(string)
+		tracked := rawValue.(*trackedSemaphore)
+		active, err := l.rdb.ZCount(ctx, keyPrefix+modelID, strconv.FormatInt(now+1, 10), "+inf").Result()
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			return true
+		}
+		name, _ := tracked.name.Load().(string)
+		stats = append(stats, RuntimeStat{ModelID: modelID, Name: name, Active: active, Waiting: tracked.waiting.Load(), Limit: int(tracked.limit.Load())})
+		return true
+	})
+	sort.Slice(stats, func(i, j int) bool { return stats[i].ModelID < stats[j].ModelID })
+	return stats, firstErr
+}
+
+func (l *redisLimiter) SetModelName(modelID, name string) {
+	if modelID == "" || name == "" {
+		return
+	}
+	entry, _ := l.tracked.LoadOrStore(modelID, &trackedSemaphore{})
+	entry.(*trackedSemaphore).name.Store(name)
 }
 
 // hold starts a heartbeat that refreshes the lease and returns an idempotent

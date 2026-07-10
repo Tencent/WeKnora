@@ -3506,6 +3506,16 @@ export default {
           attention: "Attention",
           paused: "Paused",
         },
+        models: {
+          title: "Model concurrency",
+          description: "Actual model-service concurrency from background tasks. The section above schedules tasks; this section shows the separate model-service throttle stage.",
+          scope: "Active is cluster-wide · waiting is local",
+          disabled: "Background model concurrency governance is disabled. Configure the default model concurrency limit in Global settings.",
+          empty: "No model activity yet. A model appears after its first background call.",
+          backgroundOnly: "Background tasks only; interactive chat is excluded",
+          columns: { model: "Model ID", active: "In flight", waiting: "Throttled", usage: "Concurrency" },
+          status: { queued: "Throttling", full: "At limit" },
+        },
         pools: {
           core: "Core parsing",
           enrichment: "Enrichment",

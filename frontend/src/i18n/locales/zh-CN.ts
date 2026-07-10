@@ -2514,6 +2514,16 @@ export default {
           attention: "需关注",
           paused: "已暂停",
         },
+        models: {
+          title: "模型并发占用",
+          description: "观察后台任务实际进入模型服务时的并发占用；上方是任务调度，这里是模型服务限流，两者处于不同处理阶段。",
+          scope: "占用为集群全局 · 等待为当前实例",
+          disabled: "模型后台并发治理未启用。可在全局设置中配置模型默认并发上限。",
+          empty: "暂无模型调用数据；模型首次执行后台任务后会出现在这里。",
+          backgroundOnly: "仅统计后台任务，不包含交互式对话",
+          columns: { model: "模型 ID", active: "调用中", waiting: "限流等待", usage: "并发用量" },
+          status: { queued: "限流中", full: "已满载" },
+        },
         pools: {
           core: "核心解析",
           enrichment: "内容富化",

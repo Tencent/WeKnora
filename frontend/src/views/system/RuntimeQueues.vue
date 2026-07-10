@@ -59,7 +59,7 @@
       </t-button>
     </div>
 
-    <div v-else-if="!available" class="rq-state">
+    <div v-else-if="!available && !modelLimiterAvailable" class="rq-state">
       <div class="rq-state-icon"><t-icon name="info-circle" size="24px" /></div>
       <div class="rq-state-copy">
         <strong>{{ t('system.globalSettings.runtime.unavailableTitle') }}</strong>
@@ -68,6 +68,7 @@
     </div>
 
     <template v-else>
+      <template v-if="available">
       <section class="rq-overview" :aria-label="t('system.globalSettings.runtime.summary.title')">
         <div class="rq-overview-title">
           <span class="rq-overview-mark"><t-icon name="chart-line" /></span>
@@ -181,6 +182,46 @@
           </t-table>
         </div>
       </section>
+      </template>
+
+      <section class="rq-details rq-models">
+        <div class="rq-details-header">
+          <div>
+            <h3>{{ t('system.globalSettings.runtime.models.title') }}</h3>
+            <p>{{ t('system.globalSettings.runtime.models.description') }}</p>
+          </div>
+          <span class="rq-pools-note">{{ t('system.globalSettings.runtime.models.scope') }}</span>
+        </div>
+        <div v-if="!modelLimiterAvailable" class="rq-empty">
+          <t-icon name="info-circle" size="28px" />
+          <span>{{ t('system.globalSettings.runtime.models.disabled') }}</span>
+        </div>
+        <div v-else-if="models.length === 0" class="rq-empty">
+          <t-icon name="server" size="28px" />
+          <span>{{ t('system.globalSettings.runtime.models.empty') }}</span>
+        </div>
+        <div v-else class="data-table-shell rq-table-shell">
+          <t-table row-key="model_id" :data="models" :columns="modelColumns" size="medium" hover>
+            <template #model_id="{ row }">
+              <div class="rq-queue-cell">
+                <span class="rq-queue-name">{{ row.name || row.model_id }}</span>
+                <span class="rq-queue-meta">{{ row.name ? row.model_id : t('system.globalSettings.runtime.models.backgroundOnly') }}</span>
+              </div>
+            </template>
+            <template #active="{ row }"><span class="rq-number" :class="{ 'rq-number--active': row.active > 0 }">{{ row.active }}</span></template>
+            <template #waiting="{ row }"><span class="rq-number" :class="{ 'rq-number--warning': row.waiting > 0 }">{{ row.waiting }}</span></template>
+            <template #usage="{ row }">
+              <div class="rq-model-usage">
+                <t-progress :percentage="modelUsage(row)" size="small" :label="false" />
+                <span>{{ row.active }} / {{ row.limit }}</span>
+              </div>
+            </template>
+            <template #status="{ row }">
+              <span class="rq-status" :class="`rq-status--${modelState(row).tone}`"><i />{{ modelState(row).label }}</span>
+            </template>
+          </t-table>
+        </div>
+      </section>
 
       <p class="rq-footnote">{{ t('system.globalSettings.runtime.footnote') }}</p>
     </template>
@@ -190,7 +231,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getRuntimeQueues, type QueueStat, type RuntimeWorkerPool } from '@/api/system'
+import { getRuntimeQueues, type QueueStat, type RuntimeWorkerPool, type ModelRuntimeStat } from '@/api/system'
 
 const { t, te, locale } = useI18n()
 
@@ -198,6 +239,8 @@ const POLL_INTERVAL_MS = 5000
 
 const queues = ref<QueueStat[]>([])
 const pools = ref<RuntimeWorkerPool[]>([])
+const models = ref<ModelRuntimeStat[]>([])
+const modelLimiterAvailable = ref(false)
 const available = ref(true)
 const loading = ref(false)
 const loadedOnce = ref(false)
@@ -216,6 +259,24 @@ const columns = computed(() => [
   { colKey: 'latency_ms', title: t('system.globalSettings.runtime.columns.latency'), width: 104, align: 'right' as const },
   { colKey: 'status', title: t('system.globalSettings.runtime.columns.status'), width: 96 },
 ])
+const modelColumns = computed(() => [
+  { colKey: 'model_id', title: t('system.globalSettings.runtime.models.columns.model'), minWidth: 240 },
+  { colKey: 'active', title: t('system.globalSettings.runtime.models.columns.active'), width: 86, align: 'right' as const },
+  { colKey: 'waiting', title: t('system.globalSettings.runtime.models.columns.waiting'), width: 86, align: 'right' as const },
+  { colKey: 'usage', title: t('system.globalSettings.runtime.models.columns.usage'), width: 190 },
+  { colKey: 'status', title: t('system.globalSettings.runtime.columns.status'), width: 96 },
+])
+
+function modelUsage(row: ModelRuntimeStat): number {
+  return row.limit > 0 ? Math.min(100, Math.round(row.active / row.limit * 100)) : 0
+}
+
+function modelState(row: ModelRuntimeStat): { label: string; tone: string } {
+  if (row.waiting > 0) return { label: t('system.globalSettings.runtime.models.status.queued'), tone: 'attention' }
+  if (row.active >= row.limit) return { label: t('system.globalSettings.runtime.models.status.full'), tone: 'waiting' }
+  if (row.active > 0) return { label: t('system.globalSettings.runtime.status.working'), tone: 'working' }
+  return { label: t('system.globalSettings.runtime.status.idle'), tone: 'idle' }
+}
 
 const totalActive = computed(() => queues.value.reduce((s, q) => s + q.active, 0))
 const totalPending = computed(() => queues.value.reduce((s, q) => s + q.pending, 0))
@@ -282,6 +343,8 @@ async function load(showSpinner: boolean) {
     available.value = resp.available
     pools.value = resp.pools || []
     queues.value = resp.queues || []
+    models.value = resp.models || []
+    modelLimiterAvailable.value = Boolean(resp.model_limiter_available)
     updatedAt.value = new Date((resp.timestamp || Date.now() / 1000) * 1000)
       .toLocaleTimeString(locale.value, { hour12: false })
     error.value = ''
@@ -329,6 +392,21 @@ onUnmounted(() => stopPolling())
 <style lang="less" scoped>
 .runtime-queues {
   color: var(--td-text-color-primary);
+}
+
+.rq-models {
+  margin-top: 40px;
+  padding-top: 32px;
+}
+
+.rq-model-usage {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--td-text-color-secondary);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
 }
 
 .rq-header {
