@@ -39,17 +39,21 @@ type ModelResponse struct {
 // identifier the WeKnora Cloud frontend renders. CustomHeaders is also kept
 // (structural metadata, not a credential).
 type ModelParametersDTO struct {
-	BaseURL             string                    `json:"base_url"`
-	InterfaceType       string                    `json:"interface_type"`
-	EmbeddingParameters types.EmbeddingParameters `json:"embedding_parameters"`
-	ParameterSize       string                    `json:"parameter_size"`
-	Provider            string                    `json:"provider"`
-	ExtraConfig         map[string]string         `json:"extra_config,omitempty"`
-	CustomHeaders       map[string]string         `json:"custom_headers,omitempty"`
-	SupportsVision      bool                      `json:"supports_vision"`
-	ContextWindowTokens int                       `json:"context_window_tokens,omitempty"`
-	MaxConcurrency      int                       `json:"max_concurrency,omitempty"`
-	AppID               string                    `json:"app_id,omitempty"`
+	BaseURL                       string                    `json:"base_url"`
+	InterfaceType                 string                    `json:"interface_type"`
+	EmbeddingParameters           types.EmbeddingParameters `json:"embedding_parameters"`
+	ParameterSize                 string                    `json:"parameter_size"`
+	Provider                      string                    `json:"provider"`
+	ExtraConfig                   map[string]string         `json:"extra_config,omitempty"`
+	CustomHeaders                 map[string]string         `json:"custom_headers,omitempty"`
+	SupportsVision                bool                      `json:"supports_vision"`
+	ContextWindowTokens           int                       `json:"context_window_tokens,omitempty"`
+	QuotaGroup                    string                    `json:"quota_group,omitempty"`
+	MaxConcurrency                int                       `json:"max_concurrency,omitempty"`
+	RequestsPerMinute             int                       `json:"requests_per_minute,omitempty"`
+	TokensPerMinute               int                       `json:"tokens_per_minute,omitempty"`
+	InteractiveConcurrencyReserve int                       `json:"interactive_concurrency_reserve,omitempty"`
+	AppID                         string                    `json:"app_id,omitempty"`
 }
 
 // NewModelResponse converts a stored Model into its response shape.
@@ -61,17 +65,21 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		return nil
 	}
 	params := ModelParametersDTO{
-		BaseURL:             m.Parameters.BaseURL,
-		InterfaceType:       m.Parameters.InterfaceType,
-		EmbeddingParameters: m.Parameters.EmbeddingParameters,
-		ParameterSize:       m.Parameters.ParameterSize,
-		Provider:            m.Parameters.Provider,
-		ExtraConfig:         m.Parameters.ExtraConfig,
-		CustomHeaders:       m.Parameters.CustomHeaders,
-		SupportsVision:      m.Parameters.SupportsVision,
-		ContextWindowTokens: m.Parameters.ContextWindowTokens,
-		MaxConcurrency:      m.Parameters.MaxConcurrency,
-		AppID:               m.Parameters.AppID,
+		BaseURL:                       m.Parameters.BaseURL,
+		InterfaceType:                 m.Parameters.InterfaceType,
+		EmbeddingParameters:           m.Parameters.EmbeddingParameters,
+		ParameterSize:                 m.Parameters.ParameterSize,
+		Provider:                      m.Parameters.Provider,
+		ExtraConfig:                   m.Parameters.ExtraConfig,
+		CustomHeaders:                 m.Parameters.CustomHeaders,
+		SupportsVision:                m.Parameters.SupportsVision,
+		ContextWindowTokens:           m.Parameters.ContextWindowTokens,
+		QuotaGroup:                    m.Parameters.QuotaGroup,
+		MaxConcurrency:                m.Parameters.MaxConcurrency,
+		RequestsPerMinute:             m.Parameters.RequestsPerMinute,
+		TokensPerMinute:               m.Parameters.TokensPerMinute,
+		InteractiveConcurrencyReserve: m.Parameters.InteractiveConcurrencyReserve,
+		AppID:                         m.Parameters.AppID,
 	}
 	if !CanViewIntegrationSecrets(ctx) {
 		params.ExtraConfig = nil

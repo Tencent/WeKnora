@@ -444,17 +444,12 @@ func initLangfuse() (*langfuse.Manager, error) {
 	return langfuse.Init(cfg)
 }
 
-// defaultModelMaxConcurrency is the per-model cap on concurrent background
-// (ingestion/enrichment) chat calls when WEKNORA_MODEL_MAX_CONCURRENCY /
-// model.max_concurrency is unset. summary / question / graph enrichment all
-// share the same model, so this bounds their combined pressure on one provider
-// across every replica. Interactive chat is never gated.
+// defaultModelMaxConcurrency is the total per-quota-group in-flight cap.
 const defaultModelMaxConcurrency = 8
 
-// resolveModelMaxConcurrency reads the per-model background concurrency limit
-// from system settings / env, defaulting to defaultModelMaxConcurrency when
-// unset. A configured value of 0 (or negative) is honoured and disables the
-// governor — that is the supported way to turn throttling off via config/env.
+const defaultModelInteractiveConcurrencyReserve = 1
+
+// resolveModelMaxConcurrency reads the default total quota-group concurrency.
 func resolveModelMaxConcurrency(ss interfaces.SystemSettingService) int {
 	if ss == nil {
 		return defaultModelMaxConcurrency
@@ -463,35 +458,47 @@ func resolveModelMaxConcurrency(ss interfaces.SystemSettingService) int {
 		"WEKNORA_MODEL_MAX_CONCURRENCY", int64(defaultModelMaxConcurrency)))
 }
 
-// registerModelConcurrencyLimiter builds the Redis-backed per-model background
-// concurrency governor (chat + vlm) and installs it. Only available with Redis
-// (the shared semaphore backend); Lite mode uses registerLiteModelConcurrencyLimiter.
+func applyModelQuotaDefaults(ss interfaces.SystemSettingService) (rpm, tpm, reserve int) {
+	if ss == nil {
+		limiter.SetRateDefaults(0, 0, defaultModelInteractiveConcurrencyReserve)
+		return 0, 0, defaultModelInteractiveConcurrencyReserve
+	}
+	ctx := context.Background()
+	rpm = int(ss.GetInt(ctx, "model.requests_per_minute", "WEKNORA_MODEL_REQUESTS_PER_MINUTE", 0))
+	tpm = int(ss.GetInt(ctx, "model.tokens_per_minute", "WEKNORA_MODEL_TOKENS_PER_MINUTE", 0))
+	reserve = int(ss.GetInt(ctx, "model.interactive_concurrency_reserve", "WEKNORA_MODEL_INTERACTIVE_CONCURRENCY_RESERVE", defaultModelInteractiveConcurrencyReserve))
+	limiter.SetRateDefaults(rpm, tpm, reserve)
+	return rpm, tpm, reserve
+}
+
+// registerModelConcurrencyLimiter installs distributed quota admission.
 func registerModelConcurrencyLimiter(rdb *redis.Client, ss interfaces.SystemSettingService) {
 	limit := resolveModelMaxConcurrency(ss)
 	limiter.SetGovernor(limiter.NewRedisLimiter(rdb), limit)
-	if limit <= 0 {
+	rpm, tpm, reserve := applyModelQuotaDefaults(ss)
+	if limit <= 0 && rpm <= 0 && tpm <= 0 {
 		logger.Infof(context.Background(),
-			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
+			"[ModelQuota] quota admission disabled (all limits <= 0)")
 		return
 	}
 	logger.Infof(context.Background(),
-		"[ModelLimiter] background model concurrency governed per-model, limit=%d (distributed via redis)", limit)
+		"[ModelQuota] admission enabled, concurrency=%d rpm=%d tpm=%d interactive_reserve=%d (redis)",
+		limit, rpm, tpm, reserve)
 }
 
-// registerLiteModelConcurrencyLimiter installs an in-process per-model governor
-// for Lite mode (no Redis). Lite runs a single process, so an in-process
-// semaphore is sufficient to keep a background ingestion storm from bursting
-// the whole worker pool against one provider.
+// registerLiteModelConcurrencyLimiter installs matching in-process semantics.
 func registerLiteModelConcurrencyLimiter(ss interfaces.SystemSettingService) {
 	limit := resolveModelMaxConcurrency(ss)
 	limiter.SetGovernor(limiter.NewLocalLimiter(), limit)
-	if limit <= 0 {
+	rpm, tpm, reserve := applyModelQuotaDefaults(ss)
+	if limit <= 0 && rpm <= 0 && tpm <= 0 {
 		logger.Infof(context.Background(),
-			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
+			"[ModelQuota] quota admission disabled (all limits <= 0)")
 		return
 	}
 	logger.Infof(context.Background(),
-		"[ModelLimiter] background model concurrency governed per-model, limit=%d (in-process, lite mode)", limit)
+		"[ModelQuota] admission enabled, concurrency=%d rpm=%d tpm=%d interactive_reserve=%d (lite)",
+		limit, rpm, tpm, reserve)
 }
 
 func initRedisClient() (*redis.Client, error) {

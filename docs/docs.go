@@ -3956,6 +3956,50 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-bases/{id}/duplicate": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "创建知识库副本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "源知识库 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建后的知识库副本",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge-bases/{id}/faq/entries": {
             "get": {
                 "security": [
@@ -16178,6 +16222,10 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
+                "context_window_tokens": {
+                    "description": "ContextWindowTokens is the provider/model context-window capacity used\nfor preflight admission and agent compression. 0 keeps compatibility with\nexisting records by selecting the application fallback.",
+                    "type": "integer"
+                },
                 "custom_headers": {
                     "description": "CustomHeaders 允许在调用远程模型 API 时附加自定义 HTTP 请求头，\n用途类似 Python OpenAI SDK 的 extra_headers 参数，\n常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。\n保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。",
                     "type": "object",
@@ -16195,8 +16243,16 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "interactive_concurrency_reserve": {
+                    "description": "InteractiveConcurrencyReserve keeps slots unavailable to background\ningestion so user-facing requests cannot be starved. 0 uses the global\ndefault; -1 disables the reserve.",
+                    "type": "integer"
+                },
                 "interface_type": {
                     "type": "string"
+                },
+                "max_concurrency": {
+                    "description": "MaxConcurrency caps all in-flight calls in the quota group. 0 falls back\nto model.max_concurrency; -1 disables that dimension for this model.",
+                    "type": "integer"
                 },
                 "parameter_size": {
                     "description": "Ollama model parameter size (e.g., \"7B\", \"13B\", \"70B\")",
@@ -16206,9 +16262,20 @@ const docTemplate = `{
                     "description": "Provider identifier: openai, aliyun, zhipu, generic",
                     "type": "string"
                 },
+                "quota_group": {
+                    "description": "QuotaGroup joins models that consume the same upstream provider/account\nquota. Empty preserves per-model isolation.",
+                    "type": "string"
+                },
+                "requests_per_minute": {
+                    "description": "RequestsPerMinute and TokensPerMinute share the same quota group. 0 uses\nthe global default; -1 disables that dimension for this model.",
+                    "type": "integer"
+                },
                 "supports_vision": {
                     "description": "Whether the model accepts image/multimodal input",
                     "type": "boolean"
+                },
+                "tokens_per_minute": {
+                    "type": "integer"
                 }
             }
         },
@@ -20348,9 +20415,23 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "mentioned_items": {
+                    "description": "Optional scoped tag mentions",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
+                    }
+                },
                 "query": {
                     "description": "Query text to search for",
                     "type": "string"
+                },
+                "tag_ids": {
+                    "description": "Tag IDs for filtering within a single KB",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

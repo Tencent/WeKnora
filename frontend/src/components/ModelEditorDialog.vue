@@ -377,11 +377,7 @@
           <p class="form-desc">{{ $t('model.editor.thinkingControlDesc') }}</p>
         </div>
 
-        <!--
-          Background concurrency cap for this model. Only chat / embedding / vllm
-          are gated by the governor (see internal/models/limiter), so we surface
-          it just for those three. 0 = fall back to the global default.
-        -->
+		<!-- Shared provider quota controls for chat / embedding / VLM models. -->
         <div class="form-item">
 		  <label class="form-label">{{ $t('model.editor.contextWindowLabel') }}</label>
 		  <t-input v-model.number="formData.contextWindowTokens" type="number" :min="0" :max="10000000"
@@ -390,11 +386,38 @@
 		</div>
 
 		<div class="form-item">
+		  <label class="form-label">{{ $t('model.editor.quotaGroupLabel') }}</label>
+		  <t-input v-model="formData.quotaGroup" :placeholder="$t('model.editor.quotaGroupPlaceholder')" />
+		  <p class="form-desc">{{ $t('model.editor.quotaGroupDesc') }}</p>
+		</div>
+
+		<div class="form-item">
           <label class="form-label">{{ $t('model.editor.maxConcurrencyLabel') }}</label>
-          <t-input v-model.number="formData.maxConcurrency" type="number" :min="0" :max="4096"
+		  <t-input v-model.number="formData.maxConcurrency" type="number" :min="-1" :max="4096"
             :placeholder="$t('model.editor.maxConcurrencyPlaceholder')" />
           <p class="form-desc">{{ $t('model.editor.maxConcurrencyDesc') }}</p>
         </div>
+
+		<div class="form-item">
+		  <label class="form-label">{{ $t('model.editor.rpmLabel') }}</label>
+		  <t-input v-model.number="formData.requestsPerMinute" type="number" :min="-1" :max="10000000"
+			:placeholder="$t('model.editor.quotaLimitPlaceholder')" />
+		  <p class="form-desc">{{ $t('model.editor.rpmDesc') }}</p>
+		</div>
+
+		<div class="form-item">
+		  <label class="form-label">{{ $t('model.editor.tpmLabel') }}</label>
+		  <t-input v-model.number="formData.tokensPerMinute" type="number" :min="-1" :max="1000000000"
+			:placeholder="$t('model.editor.quotaLimitPlaceholder')" />
+		  <p class="form-desc">{{ $t('model.editor.tpmDesc') }}</p>
+		</div>
+
+		<div class="form-item">
+		  <label class="form-label">{{ $t('model.editor.interactiveReserveLabel') }}</label>
+		  <t-input v-model.number="formData.interactiveConcurrencyReserve" type="number" :min="-1" :max="4096"
+			:placeholder="$t('model.editor.interactiveReservePlaceholder')" />
+		  <p class="form-desc">{{ $t('model.editor.interactiveReserveDesc') }}</p>
+		</div>
       </section>
 
     </t-form>
@@ -446,8 +469,11 @@ interface ModelFormData {
   supportsVision?: boolean
 	/** Provider/model context window; 0/undefined uses the server fallback. */
 	contextWindowTokens?: number
-  /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
-  maxConcurrency?: number
+	quotaGroup?: string
+	maxConcurrency?: number
+	requestsPerMinute?: number
+	tokensPerMinute?: number
+	interactiveConcurrencyReserve?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
@@ -843,7 +869,11 @@ const formData = ref<ModelFormData>({
   isDefault: false,
   supportsVision: false,
 	contextWindowTokens: undefined,
+	quotaGroup: '',
   maxConcurrency: undefined,
+	requestsPerMinute: undefined,
+	tokensPerMinute: undefined,
+	interactiveConcurrencyReserve: undefined,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
   appSecret: '',
@@ -1085,7 +1115,11 @@ const resetForm = () => {
     isDefault: false,
     supportsVision: false,
 	contextWindowTokens: undefined,
+	quotaGroup: '',
     maxConcurrency: undefined,
+	requestsPerMinute: undefined,
+	tokensPerMinute: undefined,
+	interactiveConcurrencyReserve: undefined,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],
     appSecret: '',

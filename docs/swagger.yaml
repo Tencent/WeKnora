@@ -2043,6 +2043,12 @@ definitions:
         type: string
       base_url:
         type: string
+      context_window_tokens:
+        description: |-
+          ContextWindowTokens is the provider/model context-window capacity used
+          for preflight admission and agent compression. 0 keeps compatibility with
+          existing records by selecting the application fallback.
+        type: integer
       custom_headers:
         additionalProperties:
           type: string
@@ -2059,17 +2065,40 @@ definitions:
           type: string
         description: Provider-specific configuration
         type: object
+      interactive_concurrency_reserve:
+        description: |-
+          InteractiveConcurrencyReserve keeps slots unavailable to background
+          ingestion so user-facing requests cannot be starved. 0 uses the global
+          default; -1 disables the reserve.
+        type: integer
       interface_type:
         type: string
+      max_concurrency:
+        description: |-
+          MaxConcurrency caps all in-flight calls in the quota group. 0 falls back
+          to model.max_concurrency; -1 disables that dimension for this model.
+        type: integer
       parameter_size:
         description: Ollama model parameter size (e.g., "7B", "13B", "70B")
         type: string
       provider:
         description: 'Provider identifier: openai, aliyun, zhipu, generic'
         type: string
+      quota_group:
+        description: |-
+          QuotaGroup joins models that consume the same upstream provider/account
+          quota. Empty preserves per-model isolation.
+        type: string
+      requests_per_minute:
+        description: |-
+          RequestsPerMinute and TokensPerMinute share the same quota group. 0 uses
+          the global default; -1 disables that dimension for this model.
+        type: integer
       supports_vision:
         description: Whether the model accepts image/multimodal input
         type: boolean
+      tokens_per_minute:
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.ModelSource:
     enum:
@@ -5123,9 +5152,19 @@ definitions:
         items:
           type: string
         type: array
+      mentioned_items:
+        description: Optional scoped tag mentions
+        items:
+          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
+        type: array
       query:
         description: Query text to search for
         type: string
+      tag_ids:
+        description: Tag IDs for filtering within a single KB
+        items:
+          type: string
+        type: array
     required:
     - query
     type: object
@@ -7607,6 +7646,34 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 更新知识库
+      tags:
+      - 知识库
+  /knowledge-bases/{id}/duplicate:
+    post:
+      consumes:
+      - application/json
+      description: 创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态
+      parameters:
+      - description: 源知识库 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建后的知识库副本
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 创建知识库副本
       tags:
       - 知识库
   /knowledge-bases/{id}/faq/entries:

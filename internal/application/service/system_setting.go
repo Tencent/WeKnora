@@ -194,22 +194,36 @@ var registry = map[string]settingSpec{
 			"Wiki 生成以合成大模型调用为主，独立并发预算可避免上传高峰期被解析任务饿死，" +
 			"同时不会因 Wiki 洪峰拖慢用户面解析。修改后需重启服务进程方可生效。",
 	},
-	// model.max_concurrency is the DEFAULT per-model cap on concurrent
-	// background (ingestion/enrichment) LLM/embedding/VLM calls, keyed by
-	// model ID and shared across replicas. Read at every gated call via the
-	// limiter governor; a runtime bridge (applyModelMaxConcurrency) pushes UI
-	// edits into limiter.SetGlobalLimit so no restart is needed. Individual
-	// models may override this via their own max_concurrency parameter.
-	// Mirrors WEKNORA_MODEL_MAX_CONCURRENCY (default 8). 0/negative disables
-	// the default cap.
+	// Model quota defaults are hot-reloaded into the shared governor. Models may
+	// override each dimension and join a shared provider-account quota group.
 	"model.max_concurrency": {
 		Type:     "int",
 		EnvName:  "WEKNORA_MODEL_MAX_CONCURRENCY",
 		Default:  int64(8),
 		Category: "worker",
-		Description: "后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。" +
-			"每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制" +
-			"（各模型仍会尊重自身在模型管理里配置的上限）。仅影响后台任务，不影响交互式对话。",
+		Description: "模型配额组的默认总并发上限，交互请求和后台任务共同计入，Redis 模式下全副本共享。" +
+			"后台任务会为交互请求预留并发槽。修改后立即生效；0 或负数关闭默认限制。",
+	},
+	"model.requests_per_minute": {
+		Type:        "int",
+		EnvName:     "WEKNORA_MODEL_REQUESTS_PER_MINUTE",
+		Default:     int64(0),
+		Category:    "worker",
+		Description: "模型配额组默认每分钟请求数（RPM/QPM）。0 表示不设置全局限制；模型管理中的正数可单独启用，-1 可关闭继承。修改后立即生效。",
+	},
+	"model.tokens_per_minute": {
+		Type:        "int",
+		EnvName:     "WEKNORA_MODEL_TOKENS_PER_MINUTE",
+		Default:     int64(0),
+		Category:    "worker",
+		Description: "模型配额组默认每分钟 Token 数（TPM），请求前预占、响应后按真实 usage 校准。0 表示不设置全局限制；-1 可关闭继承。修改后立即生效。",
+	},
+	"model.interactive_concurrency_reserve": {
+		Type:        "int",
+		EnvName:     "WEKNORA_MODEL_INTERACTIVE_CONCURRENCY_RESERVE",
+		Default:     int64(1),
+		Category:    "worker",
+		Description: "每个模型配额组为交互请求预留的并发槽数，避免文档入库/富化耗尽全部并发。默认 1；修改后立即生效。",
 	},
 }
 
@@ -316,7 +330,7 @@ func (s *systemSettingService) preload(ctx context.Context) {
 	// the subsystem doesn't lag the cache by a full request cycle.
 	// Add new bridges here as more env vars get migrated.
 	s.applySSRFWhitelist(ctx)
-	s.applyModelMaxConcurrency(ctx)
+	s.applyModelQuotaDefaults(ctx)
 }
 
 // encodeDefault produces the JSONB encoding for a spec's built-in
@@ -408,8 +422,8 @@ func (s *systemSettingService) dispatchSideEffects(ctx context.Context, changedK
 	switch changedKey {
 	case "ssrf.whitelist":
 		s.applySSRFWhitelist(ctx)
-	case "model.max_concurrency":
-		s.applyModelMaxConcurrency(ctx)
+	case "model.max_concurrency", "model.requests_per_minute", "model.tokens_per_minute", "model.interactive_concurrency_reserve":
+		s.applyModelQuotaDefaults(ctx)
 	}
 }
 
@@ -438,19 +452,20 @@ func (s *systemSettingService) applySSRFWhitelist(ctx context.Context) {
 		len(list), extra != "")
 }
 
-// applyModelMaxConcurrency resolves model.max_concurrency via the 3-tier
-// resolver and pushes it into the model concurrency governor so UI edits take
-// effect without a restart. Only the process-wide default limit is retuned;
-// the installed limiter backend (redis/local) stays intact. The default (8)
-// deliberately mirrors container.defaultModelMaxConcurrency so the value here
-// matches what the container installs at boot.
+// applyModelQuotaDefaults resolves all quota defaults via the 3-tier resolver
+// and pushes them into the installed Redis/local backend without rebuilding it.
 //
 // Called at preload (initial sync), after Update (this replica's edit), and
 // after reload (peer's edit via pubsub).
-func (s *systemSettingService) applyModelMaxConcurrency(ctx context.Context) {
-	limit := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 8))
-	limiter.SetGlobalLimit(limit)
-	logger.Infof(ctx, "[system_settings] model.max_concurrency applied (limit=%d)", limit)
+func (s *systemSettingService) applyModelQuotaDefaults(ctx context.Context) {
+	concurrency := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 8))
+	rpm := int(s.GetInt(ctx, "model.requests_per_minute", "WEKNORA_MODEL_REQUESTS_PER_MINUTE", 0))
+	tpm := int(s.GetInt(ctx, "model.tokens_per_minute", "WEKNORA_MODEL_TOKENS_PER_MINUTE", 0))
+	reserve := int(s.GetInt(ctx, "model.interactive_concurrency_reserve", "WEKNORA_MODEL_INTERACTIVE_CONCURRENCY_RESERVE", 1))
+	limiter.SetGlobalLimit(concurrency)
+	limiter.SetRateDefaults(rpm, tpm, reserve)
+	logger.Infof(ctx, "[system_settings] model quota defaults applied (concurrency=%d rpm=%d tpm=%d interactive_reserve=%d)",
+		concurrency, rpm, tpm, reserve)
 }
 
 // publishChange fans the change out to peers. Best-effort: a Redis

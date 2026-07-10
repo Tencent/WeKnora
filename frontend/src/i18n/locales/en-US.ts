@@ -3473,6 +3473,9 @@ export default {
         },
         model: {
           max_concurrency: 'Default per-model concurrency limit',
+		  requests_per_minute: 'Default model RPM/QPM',
+		  tokens_per_minute: 'Default model TPM',
+		  interactive_concurrency_reserve: 'Interactive concurrency reserve',
         },
       },
       keyDescriptions: {
@@ -3496,7 +3499,10 @@ export default {
         },
         model: {
           max_concurrency:
-            'Default cap on concurrent background (ingestion/enrichment) calls to a single model, keyed by model ID and shared across replicas. Read on every call and applied immediately with no restart. 0 or a negative value disables the default cap (each model still honours its own limit configured in model management). Affects background tasks only, not interactive chat.',
+			'Default total concurrency per model quota group, including interactive and background calls. 0 or negative disables the default.',
+		  requests_per_minute: 'Default RPM/QPM per model quota group; 0 leaves the global dimension unlimited.',
+		  tokens_per_minute: 'Default TPM per model quota group, reserved before calls and reconciled from provider usage; 0 leaves it unlimited.',
+		  interactive_concurrency_reserve: 'Concurrency slots reserved for interactive calls so background ingestion cannot exhaust the group.',
         },
       },
       enumLabels: {
@@ -3783,9 +3789,20 @@ export default {
 	  contextWindowLabel: 'Context window (tokens)',
 	  contextWindowPlaceholder: 'e.g. 128000',
 	  contextWindowDesc: 'Shared input/output context capacity used for agent compression and token quota preflight. Empty uses the server default.',
-      maxConcurrencyLabel: 'Background concurrency limit',
-      maxConcurrencyPlaceholder: '0 = use global default',
-      maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
+	  quotaGroupLabel: 'Quota group',
+	  quotaGroupPlaceholder: 'e.g. openai-prod-account',
+	  quotaGroupDesc: 'Give models using the same upstream account/quota pool the same name. Empty keeps per-model limits. Groups are tenant-scoped.',
+	  maxConcurrencyLabel: 'Total concurrency limit',
+	  maxConcurrencyPlaceholder: '0 = global default, -1 = disabled',
+	  maxConcurrencyDesc: 'Interactive and background calls both count. Redis shares the group limit across replicas.',
+	  rpmLabel: 'Requests per minute (RPM/QPM)',
+	  tpmLabel: 'Tokens per minute (TPM)',
+	  quotaLimitPlaceholder: '0 = global default, -1 = disabled',
+	  rpmDesc: 'Limits request rate for the quota group; the token bucket allows short bursts.',
+	  tpmDesc: 'Reserves complete input plus output budget before the call, then reconciles provider usage.',
+	  interactiveReserveLabel: 'Interactive concurrency reserve',
+	  interactiveReservePlaceholder: '0 = global default, -1 = disabled',
+	  interactiveReserveDesc: 'Slots held for user conversations that background ingestion cannot consume.',
       thinkingControlLabel: 'Thinking mode request format',
       thinkingControlDesc:
         'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',

@@ -2478,6 +2478,9 @@ export default {
         },
         model: {
           max_concurrency: "모델 기본 동시 처리 상한",
+		  requests_per_minute: "모델 기본 RPM/QPM",
+		  tokens_per_minute: "모델 기본 TPM",
+		  interactive_concurrency_reserve: "대화형 동시 실행 예약",
         },
       },
       keyDescriptions: {
@@ -2501,7 +2504,10 @@ export default {
         },
         model: {
           max_concurrency:
-            "백그라운드 작업(문서 색인/보강)이 단일 모델에 대해 갖는 기본 동시 호출 상한이며, 모델 ID 기준으로 모든 복제본이 공유합니다. 매 호출마다 실시간으로 읽고 재시작 없이 즉시 적용됩니다. 0 또는 음수는 기본 상한을 해제합니다(각 모델은 모델 관리에서 설정한 자체 상한을 계속 준수함). 백그라운드 작업에만 영향을 주며 대화형 채팅에는 영향을 주지 않습니다.",
+			"대화형 및 백그라운드 호출을 포함한 모델 할당량 그룹의 기본 전체 동시 실행 상한입니다.",
+		  requests_per_minute: "모델 할당량 그룹의 기본 RPM/QPM이며 0은 전역 제한 없음입니다.",
+		  tokens_per_minute: "호출 전에 예약하고 공급자 usage로 보정하는 기본 TPM이며 0은 제한 없음입니다.",
+		  interactive_concurrency_reserve: "백그라운드 수집이 소진하지 못하도록 대화형 호출에 예약하는 슬롯입니다.",
         },
       },
       enumLabels: {
@@ -2775,9 +2781,20 @@ export default {
 	  contextWindowLabel: "컨텍스트 창(Token)",
 	  contextWindowPlaceholder: "예: 128000",
 	  contextWindowDesc: "에이전트 압축 및 Token 할당량 사전 검사에 사용하는 입력/출력 공유 컨텍스트 용량입니다. 비워 두면 서버 기본값을 사용합니다.",
-      maxConcurrencyLabel: "백그라운드 동시 실행 상한",
-      maxConcurrencyPlaceholder: "0이면 전역 기본값 사용",
-      maxConcurrencyDesc: "문서 인덱싱/보강 등 백그라운드 작업이 이 모델을 호출하는 동시 실행 수를 제한합니다(모델별로 모든 복제본이 공유). 0 또는 비워 두면 전역 기본값을 사용하며, 대화형 채팅에는 영향을 주지 않습니다.",
+	  quotaGroupLabel: "할당량 그룹",
+	  quotaGroupPlaceholder: "예: openai-prod-account",
+	  quotaGroupDesc: "동일한 업스트림 계정/할당량 풀을 사용하는 모델에 같은 이름을 지정합니다. 비워 두면 모델별로 제한됩니다.",
+	  maxConcurrencyLabel: "전체 동시 실행 상한",
+	  maxConcurrencyPlaceholder: "0=전역 기본값, -1=비활성화",
+	  maxConcurrencyDesc: "대화형 요청과 백그라운드 작업이 모두 포함되며 Redis에서 복제본 간 공유됩니다.",
+	  rpmLabel: "분당 요청 수(RPM/QPM)",
+	  tpmLabel: "분당 Token 수(TPM)",
+	  quotaLimitPlaceholder: "0=전역 기본값, -1=비활성화",
+	  rpmDesc: "할당량 그룹의 요청 속도를 제한하며 짧은 버스트를 허용합니다.",
+	  tpmDesc: "호출 전에 전체 입력과 출력 예산을 예약하고 공급자 usage로 보정합니다.",
+	  interactiveReserveLabel: "대화형 동시 실행 예약",
+	  interactiveReservePlaceholder: "0=전역 기본값, -1=비활성화",
+	  interactiveReserveDesc: "백그라운드 수집이 사용할 수 없는 사용자 대화용 슬롯입니다.",
       thinkingControlLabel: "사고 모드 매개변수 형식",
       thinkingControlDesc:
         "에이전트 「사고 모드」 켜기/끄기 시 API에 어떻게 기록할지 결정합니다. 벤더/모델에 따라 미리 선택되며, 실제 API와 다르면 문서에 맞게 수정하세요. 「전송 안 함」을 선택하면 에이전트 「사고 모드」 스위치가 효과가 없습니다.",

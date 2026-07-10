@@ -189,7 +189,11 @@ function convertToLegacyFormat(model: ModelConfig) {
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
 	contextWindowTokens: model.parameters.context_window_tokens,
+	quotaGroup: model.parameters.quota_group || '',
     maxConcurrency: model.parameters.max_concurrency,
+	requestsPerMinute: model.parameters.requests_per_minute,
+	tokensPerMinute: model.parameters.tokens_per_minute,
+	interactiveConcurrencyReserve: model.parameters.interactive_concurrency_reserve,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
@@ -450,11 +454,15 @@ const handleModelSave = async (modelData: any) => {
 		  && Number(modelData.contextWindowTokens) > 0
 		  ? { context_window_tokens: Number(modelData.contextWindowTokens) }
 		  : {}),
-        // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
-        ...(['chat', 'embedding', 'vllm'].includes(saveType)
-          && Number(modelData.maxConcurrency) > 0
-          ? { max_concurrency: Number(modelData.maxConcurrency) }
-          : {})
+		...(['chat', 'embedding', 'vllm'].includes(saveType) ? {
+		  ...(modelData.quotaGroup?.trim() ? { quota_group: modelData.quotaGroup.trim() } : {}),
+		  ...(modelData.maxConcurrency !== undefined ? { max_concurrency: Number(modelData.maxConcurrency) } : {}),
+		  ...(modelData.requestsPerMinute !== undefined ? { requests_per_minute: Number(modelData.requestsPerMinute) } : {}),
+		  ...(modelData.tokensPerMinute !== undefined ? { tokens_per_minute: Number(modelData.tokensPerMinute) } : {}),
+		  ...(modelData.interactiveConcurrencyReserve !== undefined
+			? { interactive_concurrency_reserve: Number(modelData.interactiveConcurrencyReserve) }
+			: {})
+		} : {})
       }
     }
 

@@ -2481,6 +2481,9 @@ export default {
         },
         model: {
           max_concurrency: "模型默认并发上限",
+		  requests_per_minute: "模型默认 RPM/QPM",
+		  tokens_per_minute: "模型默认 TPM",
+		  interactive_concurrency_reserve: "交互并发预留",
         },
       },
       keyDescriptions: {
@@ -2511,9 +2514,10 @@ export default {
         },
         model: {
           max_concurrency:
-            "后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。" +
-            "每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制" +
-            "（各模型仍会尊重自身在模型管理里配置的上限）。仅影响后台任务，不影响交互式对话。",
+			"模型配额组的默认总并发上限，交互与后台调用共同计入。0 或负数关闭默认限制。",
+		  requests_per_minute: "模型配额组默认 RPM/QPM；0 不设置全局限制。",
+		  tokens_per_minute: "模型配额组默认 TPM；请求前预占并按真实 usage 校准，0 不设置全局限制。",
+		  interactive_concurrency_reserve: "为交互请求预留的并发槽，防止后台任务耗尽并发。",
         },
       },
       enumLabels: {
@@ -2799,9 +2803,20 @@ export default {
 	  contextWindowLabel: "上下文窗口（Token）",
 	  contextWindowPlaceholder: "例如：128000",
 	  contextWindowDesc: "模型请求与输出共享的上下文容量。用于智能体压缩和 Token 配额预检；留空时使用服务端默认值。",
-      maxConcurrencyLabel: "后台并发上限",
-      maxConcurrencyPlaceholder: "0 表示使用全局默认",
-      maxConcurrencyDesc: "限制文档入库/富化等后台任务对该模型的并发调用数（按模型全副本共享）。0 或留空表示沿用全局默认；不影响交互式对话。",
+	  quotaGroupLabel: "配额组",
+	  quotaGroupPlaceholder: "例如：openai-prod-account",
+	  quotaGroupDesc: "使用同一上游账号/配额池的模型填写同一个名称；留空时按模型独立限制。配额组按租户隔离。",
+	  maxConcurrencyLabel: "总并发上限",
+	  maxConcurrencyPlaceholder: "0 使用全局默认，-1 关闭",
+	  maxConcurrencyDesc: "交互请求与后台任务共同计入。Redis 模式下同一配额组跨副本共享。",
+	  rpmLabel: "每分钟请求数（RPM/QPM）",
+	  tpmLabel: "每分钟 Token 数（TPM）",
+	  quotaLimitPlaceholder: "0 使用全局默认，-1 关闭",
+	  rpmDesc: "限制配额组的请求速率；Token bucket 支持短时突发。",
+	  tpmDesc: "请求前按完整输入和预留输出占用，响应后按厂商真实 usage 校准。",
+	  interactiveReserveLabel: "交互并发预留",
+	  interactiveReservePlaceholder: "0 使用全局默认，-1 关闭",
+	  interactiveReserveDesc: "为用户对话保留的并发槽，后台入库任务不能占用。",
       thinkingControlLabel: "思考模式参数格式",
       thinkingControlDesc:
         "决定智能体「思考模式」开/关时如何写入 API。已尝试按厂商/模型预选，若与实际情况不符请按 API 文档手动修改；选「不写入」时，智能体「思考模式」开关不生效。",
