@@ -369,6 +369,22 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com/',
+    permissionDocUrl: 'https://open.dingtalk.com/document/',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'doc:space:read',
+      'doc:read',
+    ],
+    fields: [
+      { key: 'app_key', labelKey: 'datasource.field.appKey', placeholder: 'dingxxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://api.dingtalk.com', optional: true, hintKey: 'datasource.field.dingtalkBaseUrlHint' },
+    ],
+  },
+  {
     type: 'notion',
     available: true,
     docUrl: 'https://www.notion.so/my-integrations',
@@ -900,6 +916,9 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  doc_space: 'datasource.resourceType.docSpace',
+  folder: 'datasource.resourceType.folder',
+  document: 'datasource.resourceType.document',
 }
 
 function resourceTypeLabel(type: string): string {
