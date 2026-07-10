@@ -24,14 +24,13 @@ import (
 type AsynqTaskParams struct {
 	dig.In
 
-	// ParseServer drains every queue EXCEPT QueueWiki: the user-facing
-	// document parsing / post-processing / enrichment pipeline. WikiServer
-	// drains QueueWiki only. Two independent worker pools give hard capacity
-	// isolation between the upstream parse pipeline and the downstream wiki
-	// pipeline (see NewParseAsynqServer / NewWikiAsynqServer). The same mux is
-	// run on both; asynq routes by the queue each server subscribes to, and
-	// queue↔task-type is 1:1 by convention, so no task is processed twice.
-	ParseServer          *asynq.Server `name:"parseAsynqServer"`
+	// Four independent servers provide hard capacity isolation between the
+	// user-facing parse path, high-fanout enrichment, maintenance/sync work,
+	// and Wiki generation. They share one handler mux but subscribe to disjoint
+	// queue sets from types.QueueDefinitions.
+	CoreServer           *asynq.Server `name:"coreAsynqServer"`
+	EnrichmentServer     *asynq.Server `name:"enrichmentAsynqServer"`
+	MaintenanceServer    *asynq.Server `name:"maintenanceAsynqServer"`
 	WikiServer           *asynq.Server `name:"wikiAsynqServer"`
 	KnowledgeService     interfaces.KnowledgeService
 	KnowledgeBaseService interfaces.KnowledgeBaseService
@@ -120,28 +119,14 @@ func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 	return asynq.DefaultRetryDelayFunc(n, e, t)
 }
 
-// defaultAsynqConcurrency is the worker pool size used when
-// WEKNORA_ASYNQ_CONCURRENCY is unset. The asynq library defaults to
-// runtime.NumCPU(), which under-provisions during batch document uploads:
-// a single 4-core container can only process 4 documents in parallel even
-// when 100 are queued, so the queue wait time eats into each task's
-// DocumentProcessTimeout budget. 32 is a safer default for the I/O-bound
-// nature of doc parsing (most time is spent in DocReader / embedding RPCs,
-// not on local CPU).
-const defaultAsynqConcurrency = 32
-
-// defaultWikiAsynqConcurrency is the worker pool size for the dedicated wiki
-// pool (QueueWiki) when WEKNORA_WIKI_ASYNQ_CONCURRENCY is unset. Kept
-// independent from the parse pool so the two can be sized separately for the
-// host / LLM-provider budget. The wiki pipeline is LLM-bound (synthesis model
-// calls dominate), so a moderate default avoids overrunning upstream provider
-// concurrency while still letting many documents' wiki generation run in
-// parallel across knowledge bases.
-const defaultWikiAsynqConcurrency = 16
+// Worker defaults live in types so server construction and runtime reporting
+// cannot drift. The upstream budget is divided without increasing historical
+// total capacity; Wiki remains separate because its model-heavy workload has a
+// different provider-capacity profile.
 
 // newAsynqServer builds an asynq server bound to a specific queue set and
-// concurrency. Shared by the parse and wiki pools so both inherit the same
-// Redis options and retry-delay policy.
+// concurrency. Every worker pool uses it so Redis options and retry-delay
+// policy stay consistent across the topology.
 func newAsynqServer(concurrency int, queues map[string]int) *asynq.Server {
 	opt := getAsynqRedisClientOpt()
 	return asynq.NewServer(
@@ -166,47 +151,60 @@ func backgroundTaskMiddleware() asynq.MiddlewareFunc {
 	}
 }
 
-// NewParseAsynqServer builds the upstream pool: every queue EXCEPT QueueWiki.
-// This is the user-facing document parse / post-process / enrichment pipeline.
-// Concurrency comes from WEKNORA_ASYNQ_CONCURRENCY (default 32), unchanged from
-// the historical single-pool behaviour so existing deployments see the same
-// parse throughput.
-func NewParseAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
-	concurrency := defaultAsynqConcurrency
+func resolveUpstreamPoolConcurrency(svc interfaces.SystemSettingService) types.WorkerPoolConcurrency {
+	total := types.DefaultUpstreamWorkerConcurrency
 	if svc != nil {
-		n := svc.GetInt(context.Background(), "asynq.concurrency", "WEKNORA_ASYNQ_CONCURRENCY", defaultAsynqConcurrency)
+		n := svc.GetInt(context.Background(), "asynq.concurrency", "WEKNORA_ASYNQ_CONCURRENCY", types.DefaultUpstreamWorkerConcurrency)
 		if n > 0 {
-			concurrency = int(n)
+			total = int(n)
 		}
 	}
-	log.Printf("asynq parse-pool server starting with concurrency=%d redis_op_timeout=%dms",
-		concurrency, readRedisOpTimeoutMs())
-	return newAsynqServer(concurrency, map[string]int{
-		types.QueueDefault:    3, // Default priority queue
-		types.QueueLow:        1, // Lowest priority queue
-		types.QueueMultimodal: 1, // Isolated lane for high-volume slow VLM image tasks
-		types.QueueGraph:      1, // Isolated lane for high-volume slow graph-extraction tasks
-		types.QueueQuestion:   1, // Isolated lane for high-volume slow question-generation tasks
-	})
+	return types.AllocateWorkerPoolConcurrency(total)
 }
 
-// NewWikiAsynqServer builds the dedicated wiki pool: QueueWiki only. Runs the
-// same mux as the parse pool but only ever pulls wiki tasks, so its concurrency
+// NewCoreAsynqServer runs the latency-sensitive document parse and
+// post-process orchestration path.
+func NewCoreAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
+	allocation := resolveUpstreamPoolConcurrency(svc)
+	log.Printf("asynq core-pool server starting with concurrency=%d total_upstream=%d redis_op_timeout=%dms",
+		allocation.Core, allocation.Total, readRedisOpTimeoutMs())
+	return newAsynqServer(allocation.Core, types.QueueWeightsForPool(types.WorkerPoolCore))
+}
+
+// NewEnrichmentAsynqServer runs high-fanout summary, multimodal, graph, and
+// question generation without consuming core parsing capacity.
+func NewEnrichmentAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
+	allocation := resolveUpstreamPoolConcurrency(svc)
+	log.Printf("asynq enrichment-pool server starting with concurrency=%d total_upstream=%d",
+		allocation.Enrichment, allocation.Total)
+	return newAsynqServer(allocation.Enrichment, types.QueueWeightsForPool(types.WorkerPoolEnrichment))
+}
+
+// NewMaintenanceAsynqServer runs connector sync, cleanup, deletion, and batch
+// dispatch work. QueueMaintenance keeps the legacy Redis name "low", so old
+// tasks are drained safely during rolling upgrades.
+func NewMaintenanceAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
+	allocation := resolveUpstreamPoolConcurrency(svc)
+	log.Printf("asynq maintenance-pool server starting with concurrency=%d total_upstream=%d",
+		allocation.Maintenance, allocation.Total)
+	return newAsynqServer(allocation.Maintenance, types.QueueWeightsForPool(types.WorkerPoolMaintenance))
+}
+
+// NewWikiAsynqServer builds the dedicated wiki pool: QueueWiki only. It runs
+// the shared handler mux but only ever pulls wiki tasks, so its concurrency
 // budget (WEKNORA_WIKI_ASYNQ_CONCURRENCY, default 16) is spent exclusively on
 // wiki generation. This is the hard capacity isolation that prevents the parse
 // pipeline from starving wiki (and vice-versa) during concurrent uploads.
 func NewWikiAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
-	concurrency := defaultWikiAsynqConcurrency
+	concurrency := types.DefaultWikiWorkerConcurrency
 	if svc != nil {
-		n := svc.GetInt(context.Background(), "asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", defaultWikiAsynqConcurrency)
+		n := svc.GetInt(context.Background(), "asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", types.DefaultWikiWorkerConcurrency)
 		if n > 0 {
 			concurrency = int(n)
 		}
 	}
 	log.Printf("asynq wiki-pool server starting with concurrency=%d", concurrency)
-	return newAsynqServer(concurrency, map[string]int{
-		types.QueueWiki: 1,
-	})
+	return newAsynqServer(concurrency, types.QueueWeightsForPool(types.WorkerPoolWiki))
 }
 
 func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
@@ -295,11 +293,8 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	mux.HandleFunc(types.TypeWikiIngest, params.WikiIngest.Handle)
 	mux.HandleFunc(types.TypeWikiFinalize, params.WikiIngest.Handle)
 
-	// Run the same mux on both pools. Each server subscribes to a disjoint set
-	// of queues (parse pool = everything except QueueWiki; wiki pool =
-	// QueueWiki only), so a given task is dequeued by exactly one pool. This is
-	// how the two pools get independent concurrency budgets while sharing one
-	// handler registration.
+	// Run the same mux on every pool. Queue definitions are disjoint, so a given
+	// task is dequeued by exactly one pool while handlers stay registered once.
 	runPool := func(name string, srv *asynq.Server) {
 		go func() {
 			if err := srv.Run(mux); err != nil {
@@ -307,7 +302,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 			}
 		}()
 	}
-	runPool("parse-pool", params.ParseServer)
+	runPool("core-pool", params.CoreServer)
+	runPool("enrichment-pool", params.EnrichmentServer)
+	runPool("maintenance-pool", params.MaintenanceServer)
 	runPool("wiki-pool", params.WikiServer)
 	return mux
 }

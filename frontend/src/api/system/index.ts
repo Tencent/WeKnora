@@ -479,8 +479,8 @@ export async function listSystemAuditLog(
 
 /**
  * QueueStat mirrors types.QueueStat on the backend: a read-only depth
- * snapshot of one asynq queue. `pool` groups the queue by worker pool
- * ("parse" | "wiki"); `weight` is its scheduling weight within that pool.
+ * snapshot of one asynq queue. `pool` identifies the independent worker pool;
+ * `weight` is the queue's scheduling weight within that pool.
  * Counts follow asynq.QueueInfo semantics — `active` is the number of
  * tasks currently being processed (the closest thing to "workers busy"),
  * `pending` is the backlog waiting to be picked up.
@@ -503,17 +503,25 @@ export interface QueueStat {
   memory_usage_bytes: number
 }
 
+export interface RuntimeWorkerPool {
+  name: string
+  concurrency: number
+  queue_count: number
+}
+
 /**
  * Runtime queue dashboard payload. `available` is false in Lite mode
  * (no Redis/asynq) — render an "unavailable in this deployment" state
- * rather than an empty table. `parse_concurrency` / `wiki_concurrency`
- * are the CONFIGURED worker-pool sizes (effective on next restart), not
- * the live busy-worker count (see QueueStat.active for that).
+ * rather than an empty table. Pool concurrency values are CONFIGURED
+ * per-process capacity (effective on next restart), not live busy-worker
+ * count or cluster-wide capacity.
  */
 export interface RuntimeQueuesResponse {
   available: boolean
+  upstream_concurrency: number
   parse_concurrency: number
   wiki_concurrency: number
+  pools: RuntimeWorkerPool[]
   queues: QueueStat[]
   timestamp: number
 }

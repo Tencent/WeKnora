@@ -1070,7 +1070,8 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		return fmt.Errorf("failed to marshal manual process payload: %w", err)
 	}
 
-	task := asynq.NewTask(types.TypeManualProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeManualProcess, payloadBytes,
+		asynq.Queue(types.QueueDefault), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		return fmt.Errorf("failed to enqueue manual process task: %w", err)

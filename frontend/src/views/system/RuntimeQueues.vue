@@ -86,13 +86,29 @@
             <span class="rq-metric-label">{{ t('system.globalSettings.runtime.summary.retry') }}</span>
             <strong class="rq-metric-value">{{ totalRetry }}</strong>
           </div>
-          <div class="rq-metric rq-capacity">
-            <span class="rq-metric-label">{{ t('system.globalSettings.runtime.summary.concurrency') }}</span>
-            <span class="rq-capacity-values">
-              <span><strong>{{ parseConcurrency }}</strong><small>{{ poolLabel('parse') }}</small></span>
-              <i>/</i>
-              <span><strong>{{ wikiConcurrency }}</strong><small>{{ poolLabel('wiki') }}</small></span>
-            </span>
+          <div class="rq-metric" :class="{ 'rq-metric--danger': totalArchived > 0 }">
+            <span class="rq-metric-label">{{ t('system.globalSettings.runtime.summary.archived') }}</span>
+            <strong class="rq-metric-value">{{ totalArchived }}</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="rq-pools">
+        <div class="rq-pools-header">
+          <div>
+            <h3>{{ t('system.globalSettings.runtime.poolsTitle') }}</h3>
+            <p>{{ t('system.globalSettings.runtime.poolsDescription') }}</p>
+          </div>
+          <span>{{ t('system.globalSettings.runtime.perInstance') }}</span>
+        </div>
+        <div class="rq-pool-strip">
+          <div v-for="pool in pools" :key="pool.name" class="rq-pool-item">
+            <div class="rq-pool-topline">
+              <span>{{ poolLabel(pool.name) }}</span>
+              <strong>{{ pool.concurrency }}</strong>
+            </div>
+            <p>{{ poolDescription(pool.name) }}</p>
+            <small>{{ t('system.globalSettings.runtime.queueCount', { value: pool.queue_count }) }}</small>
           </div>
         </div>
       </section>
@@ -126,8 +142,10 @@
               <div class="rq-queue-cell">
                 <span class="rq-queue-name">{{ queueLabel(row.name) }}</span>
                 <span class="rq-queue-meta">
-                  {{ queueDescription(row.name) }} · {{ poolLabel(row.pool) }} ·
-                  {{ t('system.globalSettings.runtime.weight', { value: row.weight }) }}
+                  {{ queueDescription(row.name) }} · {{ poolLabel(row.pool) }}
+                  <template v-if="poolQueueCount(row.pool) > 1">
+                    · {{ t('system.globalSettings.runtime.weight', { value: row.weight }) }}
+                  </template>
                 </span>
               </div>
             </template>
@@ -168,16 +186,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getRuntimeQueues, type QueueStat } from '@/api/system'
+import { getRuntimeQueues, type QueueStat, type RuntimeWorkerPool } from '@/api/system'
 
 const { t, te, locale } = useI18n()
 
 const POLL_INTERVAL_MS = 5000
 
 const queues = ref<QueueStat[]>([])
+const pools = ref<RuntimeWorkerPool[]>([])
 const available = ref(true)
-const parseConcurrency = ref(0)
-const wikiConcurrency = ref(0)
 const loading = ref(false)
 const loadedOnce = ref(false)
 const error = ref('')
@@ -199,6 +216,7 @@ const columns = computed(() => [
 const totalActive = computed(() => queues.value.reduce((s, q) => s + q.active, 0))
 const totalPending = computed(() => queues.value.reduce((s, q) => s + q.pending, 0))
 const totalRetry = computed(() => queues.value.reduce((s, q) => s + q.retry, 0))
+const totalArchived = computed(() => queues.value.reduce((s, q) => s + q.archived, 0))
 
 // Friendly per-queue label lives in i18n; falls back to the raw queue
 // name so a queue added on the backend still renders before translations
@@ -216,6 +234,15 @@ function queueDescription(name: string): string {
 function poolLabel(pool: string): string {
   const path = `system.globalSettings.runtime.pools.${pool}`
   return te(path) ? (t(path) as string) : pool
+}
+
+function poolDescription(pool: string): string {
+  const path = `system.globalSettings.runtime.poolDescriptions.${pool}`
+  return te(path) ? (t(path) as string) : pool
+}
+
+function poolQueueCount(pool: string): number {
+  return pools.value.find((item) => item.name === pool)?.queue_count ?? 0
 }
 
 function formatLatency(ms: number): string {
@@ -249,8 +276,7 @@ async function load(showSpinner: boolean) {
   try {
     const resp = await getRuntimeQueues()
     available.value = resp.available
-    parseConcurrency.value = resp.parse_concurrency
-    wikiConcurrency.value = resp.wiki_concurrency
+    pools.value = resp.pools || []
     queues.value = resp.queues || []
     updatedAt.value = new Date((resp.timestamp || Date.now() / 1000) * 1000)
       .toLocaleTimeString(locale.value, { hour12: false })
@@ -459,7 +485,7 @@ onUnmounted(() => stopPolling())
 
 .rq-overview-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(64px, 1fr)) minmax(190px, 1.8fr);
+  grid-template-columns: repeat(4, minmax(64px, 1fr));
   align-items: stretch;
   gap: 24px;
   flex: 1;
@@ -494,42 +520,94 @@ onUnmounted(() => stopPolling())
   color: var(--td-warning-color);
 }
 
-.rq-capacity {
-  padding-left: 28px;
-  border-left: 1px solid var(--td-component-stroke);
+.rq-metric--danger .rq-metric-value {
+  color: var(--td-error-color);
 }
 
-.rq-capacity-values {
-  display: flex;
-  min-height: 22px;
-  align-items: center;
-  gap: 10px;
-  font-variant-numeric: tabular-nums;
+.rq-pools {
+  margin-bottom: 30px;
+}
 
-  > span {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
+.rq-pools-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 12px;
+
+  h3 {
+    margin: 0 0 4px;
+    color: var(--td-text-color-primary);
+    font-size: 15px;
+    font-weight: 600;
   }
 
-  i {
-    color: var(--td-text-color-placeholder);
+  p,
+  > span {
+    margin: 0;
+    color: var(--td-text-color-secondary);
     font-size: 12px;
-    font-style: normal;
+    line-height: 1.5;
+  }
+
+  > span {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+    font-size: 11px;
+  }
+}
+
+.rq-pool-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-component-stroke);
+}
+
+.rq-pool-item {
+  display: flex;
+  min-width: 0;
+  min-height: 106px;
+  flex-direction: column;
+  padding: 14px 16px 13px;
+  background: var(--td-bg-color-container);
+
+  p {
+    margin: 6px 0 8px;
+    color: var(--td-text-color-secondary);
+    font-size: 11px;
+    line-height: 1.45;
+    text-wrap: pretty;
   }
 
   small {
-    color: var(--td-text-color-secondary);
+    margin-top: auto;
+    color: var(--td-text-color-placeholder);
     font-size: 10px;
-    white-space: nowrap;
+  }
+}
+
+.rq-pool-topline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+
+  span {
+    color: var(--td-text-color-primary);
+    font-size: 12px;
+    font-weight: 500;
   }
 
   strong {
-    color: var(--td-text-color-primary);
-    font-size: 20px;
+    color: var(--td-brand-color);
+    font-size: 18px;
     font-weight: 600;
-    line-height: 1.1;
     letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -601,7 +679,6 @@ onUnmounted(() => stopPolling())
 
 .rq-queue-meta {
   color: var(--td-text-color-placeholder);
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 10px;
   line-height: 1.35;
 }
@@ -706,7 +783,8 @@ onUnmounted(() => stopPolling())
 
 @media (max-width: 860px) {
   .rq-header,
-  .rq-details-header {
+  .rq-details-header,
+  .rq-pools-header {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -727,11 +805,11 @@ onUnmounted(() => stopPolling())
 
   .rq-overview-metrics {
     width: 100%;
-    grid-template-columns: repeat(3, minmax(64px, 1fr)) minmax(180px, 1.6fr);
+    grid-template-columns: repeat(4, minmax(64px, 1fr));
   }
 
-  .rq-capacity {
-    padding-left: 20px;
+  .rq-pool-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -742,16 +820,12 @@ onUnmounted(() => stopPolling())
 
   .rq-overview-metrics {
     width: 100%;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
   }
 
-  .rq-capacity {
-    grid-column: 1 / -1;
-    padding-top: 12px;
-    padding-left: 0;
-    border-top: 1px solid var(--td-component-stroke);
-    border-left: 0;
+  .rq-pool-strip {
+    grid-template-columns: 1fr;
   }
 
   .rq-state {

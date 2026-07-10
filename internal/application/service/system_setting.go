@@ -183,19 +183,19 @@ var registry = map[string]settingSpec{
 			"用于兼容旧版本「创建租户即下发默认 API Key」的行为（属于破坏性变更的回退开关）。" +
 			"每次创建租户时实时读取，修改后立即生效。默认 false（不自动创建，需通过 API Key 管理显式创建）。",
 	},
-	// asynq.concurrency is the asynq worker pool size (parallel in-flight
-	// tasks). Read once when the asynq server starts — changing it in the
-	// UI requires a process restart to take effect. Mirrors
-	// WEKNORA_ASYNQ_CONCURRENCY (default 32).
+	// asynq.concurrency is the total per-process upstream worker budget.
+	// It is divided deterministically across independent core, enrichment,
+	// and maintenance servers. Read once at startup; changing it requires a
+	// process restart. Mirrors WEKNORA_ASYNQ_CONCURRENCY (default 32).
 	"asynq.concurrency": {
 		Type:            "int",
 		EnvName:         "WEKNORA_ASYNQ_CONCURRENCY",
-		Default:         int64(32),
+		Default:         int64(types.DefaultUpstreamWorkerConcurrency),
 		Category:        "worker",
 		RequiresRestart: true,
-		Description: "文档解析池的 worker 并发数（asynq 线程池大小，不含 Wiki）。" +
-			"文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
-			"修改后需重启服务进程方可生效。",
+		Description: "上游任务的每实例 worker 总并发预算（不含 Wiki）。系统会按核心解析 1/2、" +
+			"内容富化 3/8、维护与同步为剩余容量，拆分为相互隔离的 worker 池。" +
+			"最小值为 3；修改后需重启服务进程方可生效。",
 	},
 	// asynq.wiki_concurrency is the size of the DEDICATED wiki worker pool,
 	// separate from asynq.concurrency. Read once when the wiki asynq server
@@ -204,7 +204,7 @@ var registry = map[string]settingSpec{
 	"asynq.wiki_concurrency": {
 		Type:            "int",
 		EnvName:         "WEKNORA_WIKI_ASYNQ_CONCURRENCY",
-		Default:         int64(16),
+		Default:         int64(types.DefaultWikiWorkerConcurrency),
 		Category:        "worker",
 		RequiresRestart: true,
 		Description: "Wiki 生成专用池的 worker 并发数（与文档解析池相互隔离）。" +
@@ -1228,13 +1228,17 @@ func encodeForType(declared string, rawValue any) (types.JSON, error) {
 //     400 body verbatim).
 func validateRegistryEntry(key string, rawValue any) error {
 	switch key {
-	case "asynq.concurrency":
+	case "asynq.concurrency", "asynq.wiki_concurrency":
 		n, err := coerceToPositiveInt64(rawValue)
 		if err != nil {
 			return err
 		}
-		if n <= 0 {
-			return errors.New("concurrency must be a positive integer")
+		minimum := int64(1)
+		if key == "asynq.concurrency" {
+			minimum = 3
+		}
+		if n < minimum {
+			return fmt.Errorf("concurrency must be at least %d", minimum)
 		}
 	case "ssrf.whitelist":
 		// Coerce into the same shape encodeForType produced. We don't

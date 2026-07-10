@@ -3461,7 +3461,7 @@ export default {
       },
       runtime: {
         title: "Task Queue Runtime",
-        description: "Live depth of the background task queues (parsing / enrichment) and the worker concurrency config. Read-only; auto-refreshes every 5s.",
+        description: "Live background-queue load and per-process capacity for each isolated worker pool. Read-only; auto-refreshes every 5s.",
         refresh: "Refresh",
         autoRefresh: "Auto-refresh (every 5s)",
         loading: "Loading...",
@@ -3472,8 +3472,12 @@ export default {
         empty: "No queue data available",
         detailsTitle: "Queue details",
         detailsDescription: "Live load and wait time for every processing lane.",
-        weight: "Weight {value}",
-        footnote: "Concurrency is the configured worker-pool cap (takes effect after restart); \"Active\" is the number of tasks currently being processed.",
+        poolsTitle: "Worker pools",
+        poolsDescription: "Core parsing, enrichment, maintenance, and Wiki use isolated concurrency budgets.",
+        perInstance: "Concurrency is per process",
+        queueCount: "{value} queues",
+        weight: "Pool weight {value}",
+        footnote: "Concurrency is a per-process cap (restart required); weight only controls scheduling within one pool; Active is cluster-wide.",
         updatedAt: "Updated at {value}",
         errors: {
           generic: "Failed to load queue stats",
@@ -3483,7 +3487,7 @@ export default {
           active: "Active",
           pending: "Pending",
           retry: "Retrying",
-          concurrency: "Parse / Wiki concurrency",
+          archived: "Dead letters",
         },
         columns: {
           queue: "Queue",
@@ -3503,11 +3507,21 @@ export default {
           paused: "Paused",
         },
         pools: {
-          parse: "Parse pool",
+          core: "Core parsing",
+          enrichment: "Enrichment",
+          maintenance: "Maintenance & sync",
           wiki: "Wiki pool",
+        },
+        poolDescriptions: {
+          core: "Document parsing and post-process orchestration",
+          enrichment: "Summaries, images, graph, and question generation",
+          maintenance: "Source sync, batch work, and deletion cleanup",
+          wiki: "Wiki content generation and global finalization",
         },
         queueNames: {
           default: "Default (document parse)",
+          summary: "Summary generation",
+          sync: "Source sync",
           low: "Maintenance & batch jobs",
           multimodal: "Multimodal (images)",
           graph: "Graph extraction",
@@ -3515,8 +3529,10 @@ export default {
           wiki: "Wiki ingest",
         },
         queueDescriptions: {
-          default: "Document parsing and general post-processing",
-          low: "Summaries, source sync, batch reparse, and deletion cleanup",
+          default: "Document parsing, manual updates, and post-process orchestration",
+          summary: "Document and data-table summaries",
+          sync: "Manual and scheduled data-source sync",
+          low: "FAQ import, clone/move, batch reparse, and deletion cleanup",
           multimodal: "Image OCR and multimodal descriptions",
           graph: "Knowledge graph extraction from document chunks",
           question: "Question generation from document chunks",
@@ -3535,7 +3551,8 @@ export default {
           default_storage_quota_gb: 'Default storage quota for new tenants (GB)',
         },
         asynq: {
-          concurrency: 'Async task worker concurrency',
+          concurrency: 'Total upstream worker budget',
+          wiki_concurrency: 'Wiki worker concurrency',
         },
         model: {
           max_concurrency: 'Default per-model concurrency limit',
@@ -3558,7 +3575,9 @@ export default {
         },
         asynq: {
           concurrency:
-            'Async task worker concurrency (asynq thread-pool size). Document parsing, embedding, and similar tasks are mostly I/O-bound, so raising this value can shorten queue time for bulk uploads. Requires a service process restart to take effect.',
+            'Total per-process concurrency budget for upstream background work (excluding Wiki). It is split into isolated pools: 1/2 core parsing, 3/8 enrichment, and the remainder maintenance and sync. Minimum 3; requires a service restart.',
+          wiki_concurrency:
+            'Per-process concurrency for the dedicated Wiki worker pool, isolated from upstream tasks. Minimum 1; requires a service restart.',
         },
         model: {
           max_concurrency:

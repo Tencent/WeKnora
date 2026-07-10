@@ -1,36 +1,142 @@
 package types
 
-// Asynq queue names. MUST stay in sync with the Queues weight maps in
-// router.NewParseAsynqServer / router.NewWikiAsynqServer — a task enqueued to a
-// queue that no server subscribes to will never be consumed.
+// Worker-pool names are part of the runtime observability API. Each pool is
+// backed by an independent asynq.Server, so concurrency is hard-isolated
+// between pools instead of being only a weighted dequeue preference.
 const (
-	QueueDefault = "default"
-	QueueLow     = "low"
-	// QueueMultimodal isolates high-volume, slow VLM image tasks (OCR + caption)
-	// so a single large scanned PDF (hundreds–thousands of page images) cannot
-	// saturate the shared worker pool and block user-facing document parsing in
-	// the default queue.
-	QueueMultimodal = "multimodal"
-	// QueueGraph isolates high-volume, slow graph-extraction tasks (one per
-	// chunk, LLM-backed, only when Neo4j is enabled). Same rationale as
-	// QueueMultimodal: a large document must not flood the default queue.
-	QueueGraph = "graph"
-	// QueueQuestion isolates high-volume, slow question-generation tasks (one
-	// per 20-chunk batch, LLM-backed). Keeps a large document's hundreds of
-	// question batches from starving the lightweight tasks in the low queue
-	// (summary, deletes, wiki ingest).
-	QueueQuestion = "question"
-	// QueueWiki is the dedicated lane for the Wiki ingest pipeline. Unlike the
-	// other queues above (which all share a single asynq worker pool), this
-	// queue is consumed by a SEPARATE asynq server (router.NewWikiAsynqServer)
-	// with its own concurrency budget. Hard capacity isolation: heavy document
-	// parsing in the upstream pool can never starve wiki generation, and a
-	// wiki-generation burst can never starve user-facing parsing. Sizing the
-	// two pools independently replaces the old weighted-lottery approach where
-	// wiki sat on the low queue (weight 1) and got ~1/13 of the schedule
-	// during upload storms.
-	QueueWiki = "wiki"
+	WorkerPoolCore        = "core"
+	WorkerPoolEnrichment  = "enrichment"
+	WorkerPoolMaintenance = "maintenance"
+	WorkerPoolWiki        = "wiki"
+
+	// DefaultUpstreamWorkerConcurrency is split across core, enrichment,
+	// and maintenance. Wiki stays separately configurable because its model
+	// workload has a different capacity profile.
+	DefaultUpstreamWorkerConcurrency = 32
+	DefaultWikiWorkerConcurrency     = 16
 )
+
+// Asynq queue names. QueueMaintenance intentionally keeps the physical Redis
+// name "low" so tasks enqueued by older releases remain consumable during a
+// rolling deployment. New code uses the business-semantic constant.
+const (
+	QueueDefault     = "default"
+	QueueSummary     = "summary"
+	QueueMultimodal  = "multimodal"
+	QueueGraph       = "graph"
+	QueueQuestion    = "question"
+	QueueSync        = "sync"
+	QueueMaintenance = "low"
+	QueueWiki        = "wiki"
+)
+
+// QueueDefinition is the single source of truth for queue topology. Worker
+// servers and runtime inspection both consume this registry, preventing the
+// scheduling weights shown to operators from drifting from the actual server
+// configuration.
+type QueueDefinition struct {
+	Name      string
+	Pool      string
+	Weight    int
+	TaskTypes []string
+}
+
+var queueDefinitions = []QueueDefinition{
+	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, TaskTypes: []string{
+		TypeDocumentProcess, TypeManualProcess, TypeKnowledgePostProcess,
+	}},
+	{Name: QueueSummary, Pool: WorkerPoolEnrichment, Weight: 2, TaskTypes: []string{
+		TypeSummaryGeneration, TypeDataTableSummary,
+	}},
+	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeImageMultimodal}},
+	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeChunkExtract}},
+	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeQuestionGeneration}},
+	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
+	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
+		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
+		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
+	}},
+	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
+}
+
+// QueueDefinitions returns a copy so callers cannot mutate global topology.
+func QueueDefinitions() []QueueDefinition {
+	definitions := make([]QueueDefinition, len(queueDefinitions))
+	for i, definition := range queueDefinitions {
+		definitions[i] = definition
+		definitions[i].TaskTypes = append([]string(nil), definition.TaskTypes...)
+	}
+	return definitions
+}
+
+// QueueForTaskType returns the declared queue for a task type. Producers still
+// pass the queue explicitly to asynq, while tests and observability can use
+// this mapping to detect drift.
+func QueueForTaskType(taskType string) (string, bool) {
+	for _, definition := range queueDefinitions {
+		for _, declaredType := range definition.TaskTypes {
+			if declaredType == taskType {
+				return definition.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
+// QueueWeightsForPool returns the asynq queue configuration for one worker
+// pool. An empty map indicates a programming error in the pool declaration.
+func QueueWeightsForPool(pool string) map[string]int {
+	weights := make(map[string]int)
+	for _, definition := range queueDefinitions {
+		if definition.Pool == pool {
+			weights[definition.Name] = definition.Weight
+		}
+	}
+	return weights
+}
+
+// WorkerPoolConcurrency is the deterministic split of the total upstream
+// worker budget. Keeping this pure allocation function in types lets the
+// server constructors and the System Admin API report identical values.
+type WorkerPoolConcurrency struct {
+	Total       int
+	Core        int
+	Enrichment  int
+	Maintenance int
+}
+
+// AllocateWorkerPoolConcurrency reserves 1/2 of the upstream budget for the
+// latency-sensitive core pipeline, 3/8 for LLM/VLM enrichment, and the
+// remainder for sync/cleanup/batch work. A minimum total of three guarantees
+// every independent server has at least one worker.
+func AllocateWorkerPoolConcurrency(total int) WorkerPoolConcurrency {
+	if total < 3 {
+		total = 3
+	}
+	core := total / 2
+	enrichment := (total * 3) / 8
+	if core < 1 {
+		core = 1
+	}
+	if enrichment < 1 {
+		enrichment = 1
+	}
+	maintenance := total - core - enrichment
+	if maintenance < 1 {
+		maintenance = 1
+		if core >= enrichment && core > 1 {
+			core--
+		} else if enrichment > 1 {
+			enrichment--
+		}
+	}
+	return WorkerPoolConcurrency{
+		Total:       total,
+		Core:        core,
+		Enrichment:  enrichment,
+		Maintenance: maintenance,
+	}
+}
 
 // QueueStat is a read-only depth snapshot of a single asynq queue, used
 // by the System Admin runtime dashboard. Field names mirror the counts
@@ -40,10 +146,9 @@ const (
 // hard-coding the topology.
 type QueueStat struct {
 	Name string `json:"name"`
-	// Pool is the worker pool that drains this queue: "parse" or "wiki".
+	// Pool is the independent worker pool that drains this queue.
 	Pool string `json:"pool"`
-	// Weight is the queue's scheduling weight inside its pool. Must match
-	// the maps in router.NewParseAsynqServer / NewWikiAsynqServer.
+	// Weight is the queue's scheduling weight inside its pool.
 	Weight int `json:"weight"`
 	// Size is the total number of tasks in the queue (pending + active +
 	// scheduled + retry + aggregating + archived).

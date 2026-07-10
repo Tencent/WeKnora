@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -113,7 +114,8 @@ func NewChunkExtractTask(
 	if err != nil {
 		return false, err
 	}
-	task := asynq.NewTask(types.TypeChunkExtract, payload, asynq.Queue(types.QueueGraph), asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeChunkExtract, payload,
+		asynq.Queue(types.QueueGraph), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue task: %v", err)
@@ -143,7 +145,8 @@ func NewDataTableSummaryTask(
 	if err != nil {
 		return err
 	}
-	task := asynq.NewTask(types.TypeDataTableSummary, payload, asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeDataTableSummary, payload,
+		asynq.Queue(types.QueueSummary), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue data table summary task: %v", err)

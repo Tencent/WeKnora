@@ -50,30 +50,13 @@ type knowledgeIDProbe struct {
 // MUST include every queue any cancelable task type can land in; the
 // multimodal queue is required here so cancelling a knowledge also purges
 // its (potentially hundreds of) pending image:multimodal tasks.
-var queuesScanned = []string{
-	types.QueueDefault,
-	types.QueueLow,
-	types.QueueMultimodal,
-	types.QueueGraph,
-	types.QueueQuestion,
-	types.QueueWiki,
-}
-
-// queueMeta records each queue's worker pool and scheduling weight for
-// the runtime dashboard. Weights MUST stay in sync with the maps in
-// NewParseAsynqServer / NewWikiAsynqServer (task.go) — this is display
-// metadata only, the servers remain the source of truth for scheduling.
-var queueMeta = map[string]struct {
-	pool   string
-	weight int
-}{
-	types.QueueDefault:    {pool: "parse", weight: 3},
-	types.QueueLow:        {pool: "parse", weight: 1},
-	types.QueueMultimodal: {pool: "parse", weight: 1},
-	types.QueueGraph:      {pool: "parse", weight: 1},
-	types.QueueQuestion:   {pool: "parse", weight: 1},
-	types.QueueWiki:       {pool: "wiki", weight: 1},
-}
+var queuesScanned = func() []string {
+	queues := make([]string, 0, len(types.QueueDefinitions()))
+	for _, definition := range types.QueueDefinitions() {
+		queues = append(queues, definition.Name)
+	}
+	return queues
+}()
 
 // taskTypesForKnowledgeCancel lists every asynq task type that carries
 // a knowledge_id in its payload and should be cancelable. The set is
@@ -155,7 +138,7 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 // QueueStats returns a depth snapshot for every queue this app enqueues
 // into. Read-only: it calls Inspector.GetQueueInfo per queue and maps
 // the result onto types.QueueStat, attaching static pool/weight metadata
-// from queueMeta. A queue that has never received a task yields
+// from the central queue registry. A queue that has never received a task yields
 // ErrQueueNotFound from asynq; we still surface it as a zeroed row so the
 // dashboard shows the complete lane set even before a queue receives its
 // first task.
@@ -165,13 +148,14 @@ func (a *asynqTaskInspector) QueueStats(
 	if a == nil || a.inspector == nil {
 		return nil, false, nil
 	}
-	stats := make([]types.QueueStat, 0, len(queuesScanned))
-	for _, queue := range queuesScanned {
-		meta := queueMeta[queue]
+	definitions := types.QueueDefinitions()
+	stats := make([]types.QueueStat, 0, len(definitions))
+	for _, definition := range definitions {
+		queue := definition.Name
 		stat := types.QueueStat{
 			Name:   queue,
-			Pool:   meta.pool,
-			Weight: meta.weight,
+			Pool:   definition.Pool,
+			Weight: definition.Weight,
 		}
 		info, err := a.inspector.GetQueueInfo(queue)
 		if err != nil {

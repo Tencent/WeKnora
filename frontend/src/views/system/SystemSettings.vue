@@ -234,7 +234,7 @@
             :disabled="savingKey === item.key"
             theme="normal"
             :step="1"
-            :min="0"
+            :min="minimumFor(item)"
             class="setting-input"
             @blur="onChange(item)"
           />
@@ -758,6 +758,12 @@ function placeholderFor(item: SystemSettingItem): string {
   if (v === null || v === undefined) return ''
   if (Array.isArray(v)) return v.join(', ')
   return String(v)
+}
+
+function minimumFor(item: SystemSettingItem): number {
+  if (item.key === 'asynq.concurrency') return 3
+  if (item.key === 'asynq.wiki_concurrency') return 1
+  return 0
 }
 
 async function loadSettings() {

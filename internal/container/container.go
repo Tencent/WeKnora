@@ -264,12 +264,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
 	if redisAvailable {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
-		// Two independent asynq worker pools with separate concurrency budgets:
-		// the parse pool (all queues except QueueWiki) and the wiki pool
-		// (QueueWiki only). Hard capacity isolation so upstream parsing and the
-		// downstream wiki pipeline can't starve each other during concurrent
-		// uploads. Both run the same mux (see router.RunAsynqServer).
-		must(container.Provide(router.NewParseAsynqServer, dig.Name("parseAsynqServer")))
+		// Independent worker pools keep user-facing parsing, high-fanout
+		// enrichment, maintenance/sync, and Wiki generation from consuming one
+		// another's capacity. All pools share one handler mux but subscribe to
+		// disjoint queues from the central topology registry.
+		must(container.Provide(router.NewCoreAsynqServer, dig.Name("coreAsynqServer")))
+		must(container.Provide(router.NewEnrichmentAsynqServer, dig.Name("enrichmentAsynqServer")))
+		must(container.Provide(router.NewMaintenanceAsynqServer, dig.Name("maintenanceAsynqServer")))
 		must(container.Provide(router.NewWikiAsynqServer, dig.Name("wikiAsynqServer")))
 		// Asynq inspector for cancel-by-knowledge-id (best-effort
 		// dequeue of pending/scheduled/retry tasks + active-task cancel).

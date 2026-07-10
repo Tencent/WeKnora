@@ -256,7 +256,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 	task := asynq.NewTask(types.TypeKnowledgeListDelete, payloadBytes,
-		asynq.Queue("low"), asynq.MaxRetry(3))
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		return "", fmt.Errorf("enqueue task: %w", err)
@@ -280,7 +280,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 	task := asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
-		asynq.Queue("low"), asynq.MaxRetry(3))
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		return "", fmt.Errorf("enqueue task: %w", err)
@@ -2186,7 +2186,8 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 
 	// Enqueue move task
 	task := asynq.NewTask(types.TypeKnowledgeMove, payloadBytes,
-		asynq.TaskID(taskID), asynq.Queue("default"), asynq.MaxRetry(3))
+		asynq.TaskID(taskID), asynq.Queue(types.QueueMaintenance),
+		asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "MoveKnowledge: failed to enqueue task: %v", err)
