@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 type chunkSyncStats struct {
@@ -98,29 +99,65 @@ func (s *knowledgeService) upsertStableChunk(
 	tenantID uint64,
 	chunk *types.Chunk,
 ) (created bool, updated bool, err error) {
-	existingChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, []string{chunk.ID})
+	stats, err := upsertStableChunks(ctx, s.chunkRepo, tenantID, []*types.Chunk{chunk})
 	if err != nil {
 		return false, false, err
 	}
-	if len(existingChunks) == 0 {
-		if err := s.chunkRepo.HardDeleteChunks(ctx, tenantID, []string{chunk.ID}); err != nil {
-			return false, false, err
-		}
-		if err := s.chunkRepo.CreateChunks(ctx, []*types.Chunk{chunk}); err != nil {
-			return false, false, err
-		}
-		return true, false, nil
+	return stats.Created == 1, stats.Updated == 1, nil
+}
+
+func upsertStableChunks(
+	ctx context.Context,
+	repo interfaces.ChunkRepository,
+	tenantID uint64,
+	chunks []*types.Chunk,
+) (chunkSyncStats, error) {
+	stats := chunkSyncStats{Planned: len(chunks)}
+	if len(chunks) == 0 {
+		return stats, nil
 	}
 
-	existing := existingChunks[0]
-	preserveExistingChunkIdentity(chunk, existing)
-	if persistedChunkEqual(existing, chunk) {
-		return false, false, nil
+	existingChunks, err := repo.ListChunksByID(ctx, tenantID, chunkIDs(chunks))
+	if err != nil {
+		return stats, err
 	}
-	if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
-		return false, false, err
+	existingByID := make(map[string]*types.Chunk, len(existingChunks))
+	for _, chunk := range existingChunks {
+		existingByID[chunk.ID] = chunk
 	}
-	return false, true, nil
+
+	toCreate := make([]*types.Chunk, 0)
+	toUpdate := make([]*types.Chunk, 0)
+	for _, chunk := range chunks {
+		existing, ok := existingByID[chunk.ID]
+		if !ok {
+			toCreate = append(toCreate, chunk)
+			continue
+		}
+		preserveExistingChunkIdentity(chunk, existing)
+		if persistedChunkEqual(existing, chunk) {
+			stats.Reused++
+			continue
+		}
+		toUpdate = append(toUpdate, chunk)
+	}
+
+	if len(toCreate) > 0 {
+		if err := repo.HardDeleteChunks(ctx, tenantID, chunkIDs(toCreate)); err != nil {
+			return stats, err
+		}
+		if err := repo.CreateChunks(ctx, toCreate); err != nil {
+			return stats, err
+		}
+		stats.Created = len(toCreate)
+	}
+	for _, chunk := range toUpdate {
+		if err := repo.UpdateChunk(ctx, chunk); err != nil {
+			return stats, err
+		}
+		stats.Updated++
+	}
+	return stats, nil
 }
 
 func preserveExistingChunkIdentity(desired *types.Chunk, existing *types.Chunk) {

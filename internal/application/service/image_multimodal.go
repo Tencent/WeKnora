@@ -401,7 +401,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			UpdatedAt:       time.Now(),
 		})
 	}
-	imgOut["chunks_created"] = len(newChunks)
+	imgOut["chunks_planned"] = len(newChunks)
 
 	if len(newChunks) == 0 {
 		// Deferred finalize will count this image on success.
@@ -409,13 +409,18 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
-	// Persist chunks
-	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
-		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
+	// Persist chunks by stable ID. A reparse of the same image should reuse or
+	// update OCR/caption chunks instead of failing on duplicate primary keys.
+	chunkWriteStats, err := upsertStableChunks(ctx, s.chunkService.GetRepository(), payload.TenantID, newChunks)
+	if err != nil {
+		handleErr = fmt.Errorf("upsert multimodal chunks: %w", err)
 		return handleErr
 	}
+	imgOut["chunks_created"] = chunkWriteStats.Created
+	imgOut["chunks_updated"] = chunkWriteStats.Updated
+	imgOut["chunks_reused"] = chunkWriteStats.Reused
 	for _, c := range newChunks {
-		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
+		logger.Infof(ctx, "[ImageMultimodal] Saved %s chunk %s for image %s, len=%d",
 			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
 	}
 
