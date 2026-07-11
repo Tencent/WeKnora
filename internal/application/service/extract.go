@@ -165,6 +165,7 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	graphCacheRepo    interfaces.GraphExtractionCacheRepository
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
@@ -179,6 +180,7 @@ func NewChunkExtractService(
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	graphCacheRepo interfaces.GraphExtractionCacheRepository,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
@@ -188,6 +190,7 @@ func NewChunkExtractService(
 		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		graphCacheRepo:    graphCacheRepo,
 		spanTracker:       spanTracker,
 	}
 }
@@ -197,6 +200,118 @@ func (s *ChunkExtractService) tracker() SpanTracker {
 		return noopSpanTracker{}
 	}
 	return s.spanTracker
+}
+
+func graphExtractionContentHash(content string) string {
+	return types.CacheFingerprint("graph-extraction-content", map[string]any{
+		"content": strings.TrimSpace(content),
+	})
+}
+
+func graphExtractionConfigHash(template *types.PromptTemplateStructured) string {
+	if template == nil {
+		return types.CacheFingerprint("graph-extraction-config", nil)
+	}
+	return types.CacheFingerprint("graph-extraction-config", map[string]any{
+		"description": template.Description,
+		"tags":        template.Tags,
+		"examples":    template.Examples,
+	})
+}
+
+func graphExtractionModelID(chatModel chat.Chat, fallback string) string {
+	if chatModel != nil {
+		if id := strings.TrimSpace(chatModel.GetModelID()); id != "" {
+			return id
+		}
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func graphExtractionCacheKey(contentHash, modelID, configHash string) string {
+	return types.CacheFingerprint("graph-extraction-result", map[string]any{
+		"schema":       types.GraphExtractionCacheSchemaV1,
+		"content_hash": strings.TrimSpace(contentHash),
+		"model_id":     strings.TrimSpace(modelID),
+		"config_hash":  strings.TrimSpace(configHash),
+	})
+}
+
+func cloneGraphData(graph *types.GraphData) *types.GraphData {
+	if graph == nil {
+		return nil
+	}
+	out := &types.GraphData{
+		Text: graph.Text,
+	}
+	if len(graph.Node) > 0 {
+		out.Node = make([]*types.GraphNode, 0, len(graph.Node))
+		for _, node := range graph.Node {
+			if node == nil {
+				out.Node = append(out.Node, nil)
+				continue
+			}
+			copied := &types.GraphNode{
+				Name:       node.Name,
+				Chunks:     append([]string(nil), node.Chunks...),
+				Attributes: append([]string(nil), node.Attributes...),
+			}
+			out.Node = append(out.Node, copied)
+		}
+	}
+	if len(graph.Relation) > 0 {
+		out.Relation = make([]*types.GraphRelation, 0, len(graph.Relation))
+		for _, relation := range graph.Relation {
+			if relation == nil {
+				out.Relation = append(out.Relation, nil)
+				continue
+			}
+			copied := &types.GraphRelation{
+				Node1: relation.Node1,
+				Node2: relation.Node2,
+				Type:  relation.Type,
+			}
+			out.Relation = append(out.Relation, copied)
+		}
+	}
+	return out
+}
+
+func graphForExtractionCache(graph *types.GraphData) *types.GraphData {
+	out := cloneGraphData(graph)
+	if out == nil {
+		return nil
+	}
+	for _, node := range out.Node {
+		if node != nil {
+			node.Chunks = nil
+		}
+	}
+	return out
+}
+
+func bindGraphToChunk(graph *types.GraphData, chunkID string) *types.GraphData {
+	out := cloneGraphData(graph)
+	if out == nil {
+		return nil
+	}
+	for _, node := range out.Node {
+		if node != nil {
+			node.Chunks = []string{chunkID}
+		}
+	}
+	return out
+}
+
+func graphFromExtractionCache(cache *types.GraphExtractionCache) (*types.GraphData, error) {
+	if cache == nil || len(cache.Graph) == 0 {
+		return nil, nil
+	}
+	var graph types.GraphData
+	if err := json.Unmarshal(cache.Graph, &graph); err != nil {
+		return nil, err
+	}
+	return &graph, nil
 }
 
 // Handle handles the chunk extraction task
@@ -329,11 +444,53 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if err != nil {
-		handleErr = err
-		return err
+	modelID := graphExtractionModelID(chatModel, p.ModelID)
+	contentHash := graphExtractionContentHash(chunk.Content)
+	configHash := graphExtractionConfigHash(template)
+	cacheKey := graphExtractionCacheKey(contentHash, modelID, configHash)
+	graphOut["cache_key"] = cacheKey
+	graphOut["cache_schema"] = types.GraphExtractionCacheSchemaV1
+	graphOut["cache_layer"] = "graph_extraction"
+	graphOut["cache_hit"] = false
+
+	var graph *types.GraphData
+	if s.graphCacheRepo != nil {
+		cache, cacheErr := s.graphCacheRepo.GetByKey(ctx, p.TenantID, cacheKey)
+		if cacheErr != nil {
+			logger.Warnf(ctx, "failed to get graph extraction cache: %v", cacheErr)
+		} else if cachedGraph, decodeErr := graphFromExtractionCache(cache); decodeErr != nil {
+			logger.Warnf(ctx, "failed to decode graph extraction cache: %v", decodeErr)
+		} else if cachedGraph != nil {
+			graph = bindGraphToChunk(cachedGraph, chunk.ID)
+			graphOut["cache_hit"] = true
+		}
+	}
+	if graph == nil {
+		extractor := chatpipeline.NewExtractor(chatModel, template)
+		graph, err = extractor.Extract(ctx, chunk.Content)
+		if err != nil {
+			handleErr = err
+			return err
+		}
+		if s.graphCacheRepo != nil {
+			cacheGraph := graphForExtractionCache(graph)
+			if cacheGraph != nil {
+				rawGraph, marshalErr := json.Marshal(cacheGraph)
+				if marshalErr != nil {
+					logger.Warnf(ctx, "failed to marshal graph extraction cache: %v", marshalErr)
+				} else if err := s.graphCacheRepo.Upsert(ctx, &types.GraphExtractionCache{
+					TenantID:    p.TenantID,
+					CacheKey:    cacheKey,
+					ContentHash: contentHash,
+					ModelID:     modelID,
+					ConfigHash:  configHash,
+					SchemaVer:   types.GraphExtractionCacheSchemaV1,
+					Graph:       types.JSON(rawGraph),
+				}); err != nil {
+					logger.Warnf(ctx, "failed to upsert graph extraction cache: %v", err)
+				}
+			}
+		}
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -343,9 +500,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
-	for _, node := range graph.Node {
-		node.Chunks = []string{chunk.ID}
-	}
+	graph = bindGraphToChunk(graph, chunk.ID)
 	if err = s.graphEngine.AddGraph(ctx,
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
 		[]*types.GraphData{graph},

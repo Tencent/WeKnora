@@ -151,6 +151,22 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	return chunks, nil
 }
 
+// ListChunksForKnowledgeReuse lists existing chunks before an incremental
+// reparse. It includes every chunk type so callers can delete stale enrichment
+// rows after they decide which document chunks are still reusable.
+func (r *chunkRepository) ListChunksForKnowledgeReuse(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Order("chunk_index ASC, created_at ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListPagedChunksByKnowledgeID lists chunks for a knowledge ID with pagination
 func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	ctx context.Context,

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -59,6 +61,7 @@ type ImageMultimodalService struct {
 	kbService      interfaces.KnowledgeBaseService
 	knowledgeRepo  interfaces.KnowledgeRepository
 	tenantRepo     interfaces.TenantRepository
+	cacheRepo      interfaces.MultimodalResultCacheRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ownership      retriever.TenantStoreOwnership
 	ollamaService  *ollama.OllamaService
@@ -82,6 +85,7 @@ func NewImageMultimodalService(
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	tenantRepo interfaces.TenantRepository,
+	cacheRepo interfaces.MultimodalResultCacheRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
 	ollamaService *ollama.OllamaService,
@@ -96,6 +100,7 @@ func NewImageMultimodalService(
 		kbService:      kbService,
 		knowledgeRepo:  knowledgeRepo,
 		tenantRepo:     tenantRepo,
+		cacheRepo:      cacheRepo,
 		retrieveEngine: retrieveEngine,
 		ownership:      ownership,
 		ollamaService:  ollamaService,
@@ -103,6 +108,81 @@ func NewImageMultimodalService(
 		redisClient:    redisClient,
 		fileSvc:        fileSvc,
 		spanTracker:    spanTracker,
+	}
+}
+
+func multimodalModelCacheID(vlmCfg types.VLMConfig) string {
+	if id := strings.TrimSpace(vlmCfg.ModelID); id != "" {
+		return id
+	}
+	return "legacy_inline"
+}
+
+func multimodalImageHash(imageBytes []byte) string {
+	sum := sha256.Sum256(imageBytes)
+	return hex.EncodeToString(sum[:])
+}
+
+func multimodalPromptHash(prompt string) string {
+	return types.CacheFingerprint("multimodal-prompt", map[string]any{
+		"prompt": strings.TrimSpace(prompt),
+	})
+}
+
+func multimodalResultCacheKey(imageHash, modelID, promptHash string, outputType types.MultimodalOutputType) string {
+	return types.CacheFingerprint("multimodal-result", map[string]any{
+		"schema":      types.MultimodalResultCacheSchemaV1,
+		"image_hash":  strings.TrimSpace(imageHash),
+		"model_id":    strings.TrimSpace(modelID),
+		"prompt_hash": strings.TrimSpace(promptHash),
+		"output_type": strings.TrimSpace(outputType),
+	})
+}
+
+func (s *ImageMultimodalService) getCachedMultimodalResult(
+	ctx context.Context,
+	tenantID uint64,
+	cacheKey string,
+) (string, bool) {
+	if s.cacheRepo == nil || cacheKey == "" {
+		return "", false
+	}
+	cache, err := s.cacheRepo.GetByKey(ctx, tenantID, cacheKey)
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Cache lookup failed key=%s: %v", cacheKey, err)
+		return "", false
+	}
+	if cache == nil || strings.TrimSpace(cache.Content) == "" {
+		return "", false
+	}
+	return cache.Content, true
+}
+
+func (s *ImageMultimodalService) upsertMultimodalResultCache(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+	cacheKey string,
+	imageHash string,
+	modelID string,
+	promptHash string,
+	outputType types.MultimodalOutputType,
+	content string,
+) {
+	if s.cacheRepo == nil || strings.TrimSpace(content) == "" {
+		return
+	}
+	if err := s.cacheRepo.Upsert(ctx, &types.MultimodalResultCache{
+		TenantID:   payload.TenantID,
+		CacheKey:   cacheKey,
+		ImageHash:  imageHash,
+		ModelID:    modelID,
+		PromptHash: promptHash,
+		OutputType: outputType,
+		SchemaVer:  types.MultimodalResultCacheSchemaV1,
+		Content:    content,
+	}); err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Cache upsert failed key=%s type=%s: %v",
+			cacheKey, outputType, err)
 	}
 }
 
@@ -210,11 +290,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// legacy inline-config path) so the trace shows WHICH model handled
 	// this image. Without this, debugging "VLM is slow" requires a
 	// separate hop to the KB config.
-	if id := strings.TrimSpace(vlmCfg.ModelID); id != "" {
-		imgOut["vlm_model_id"] = id
-	} else {
-		imgOut["vlm_model_id"] = "legacy_inline"
-	}
+	vlmCacheModelID := multimodalModelCacheID(vlmCfg)
+	imgOut["vlm_model_id"] = vlmCacheModelID
 
 	// Read image bytes. A provider:// URL must be resolved via FileService —
 	// it must NEVER be handed to the HTTP downloader (which would fail with
@@ -228,6 +305,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 	imgOut["image_bytes"] = len(imgBytes)
+	imageHash := multimodalImageHash(imgBytes)
+	imgOut["image_hash"] = imageHash
 
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
@@ -236,40 +315,68 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if payload.EnableOCR {
 		prompt := vlmOCRPrompt
+		promptKind := "default"
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
+			promptKind = "scanned_pdf"
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
-			imgOut["ocr_prompt"] = "scanned_pdf"
-		} else {
-			imgOut["ocr_prompt"] = "default"
 		}
+		imgOut["ocr_prompt"] = promptKind
+		imgOut["ocr_cache_layer"] = "multimodal_ocr"
+		ocrPromptHash := multimodalPromptHash(prompt)
+		ocrCacheKey := multimodalResultCacheKey(imageHash, vlmCacheModelID, ocrPromptHash, types.MultimodalOutputOCR)
+		imgOut["ocr_cache_key"] = ocrCacheKey
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-			imgOut["ocr_error"] = ocrErr.Error()
+		if cachedText, ok := s.getCachedMultimodalResult(ctx, payload.TenantID, ocrCacheKey); ok {
+			imageInfo.OCRText = cachedText
+			imgOut["ocr_cache_hit"] = true
+			imgOut["ocr_chars"] = len([]rune(cachedText))
+			imgOut["ocr_preview"] = previewText(cachedText, 200)
 		} else {
-			ocrText = sanitizeOCRText(ocrText)
-			if ocrText != "" {
-				imageInfo.OCRText = ocrText
-				imgOut["ocr_chars"] = len([]rune(ocrText))
-				imgOut["ocr_preview"] = previewText(ocrText, 200)
+			imgOut["ocr_cache_hit"] = false
+			ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+			if ocrErr != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
+				imgOut["ocr_error"] = ocrErr.Error()
 			} else {
-				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
-				imgOut["ocr_chars"] = 0
-				imgOut["ocr_skipped"] = "empty_or_invalid"
+				ocrText = sanitizeOCRText(ocrText)
+				if ocrText != "" {
+					imageInfo.OCRText = ocrText
+					imgOut["ocr_chars"] = len([]rune(ocrText))
+					imgOut["ocr_preview"] = previewText(ocrText, 200)
+					s.upsertMultimodalResultCache(ctx, payload, ocrCacheKey, imageHash,
+						vlmCacheModelID, ocrPromptHash, types.MultimodalOutputOCR, ocrText)
+				} else {
+					logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
+					imgOut["ocr_chars"] = 0
+					imgOut["ocr_skipped"] = "empty_or_invalid"
+				}
 			}
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	captionPromptHash := multimodalPromptHash(vlmCaptionPrompt)
+	captionCacheKey := multimodalResultCacheKey(imageHash, vlmCacheModelID, captionPromptHash, types.MultimodalOutputCaption)
+	imgOut["caption_cache_layer"] = "multimodal_caption"
+	imgOut["caption_cache_key"] = captionCacheKey
+	if cachedCaption, ok := s.getCachedMultimodalResult(ctx, payload.TenantID, captionCacheKey); ok {
+		imageInfo.Caption = cachedCaption
+		imgOut["caption_cache_hit"] = true
+		imgOut["caption_chars"] = len([]rune(cachedCaption))
+		imgOut["caption_preview"] = previewText(cachedCaption, 200)
+	} else {
+		imgOut["caption_cache_hit"] = false
+		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else if caption != "" {
+			imageInfo.Caption = caption
+			imgOut["caption_chars"] = len([]rune(caption))
+			imgOut["caption_preview"] = previewText(caption, 200)
+			s.upsertMultimodalResultCache(ctx, payload, captionCacheKey, imageHash,
+				vlmCacheModelID, captionPromptHash, types.MultimodalOutputCaption, caption)
+		}
 	}
 
 	// Build child chunks for OCR and caption results

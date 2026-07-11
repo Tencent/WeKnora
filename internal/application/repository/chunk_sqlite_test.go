@@ -215,3 +215,35 @@ func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
 	assert.Equal(t, "updated content", saved.Content)
 }
+
+func TestListChunksForKnowledgeReuse_SQLite(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	text := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	text.ContentHash = "text-hash"
+	parent := makeChunk(kbID, knowledgeID, types.ChunkTypeParentText)
+	parent.ContentHash = "parent-hash"
+	imageOCR := makeChunk(kbID, knowledgeID, types.ChunkTypeImageOCR)
+	imageOCR.ParentChunkID = text.ID
+	otherKnowledge := makeChunk(kbID, uuid.New().String(), types.ChunkTypeText)
+	otherKnowledge.ContentHash = "other-hash"
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{text, parent, imageOCR, otherKnowledge}))
+
+	got, err := repo.ListChunksForKnowledgeReuse(ctx, 1, knowledgeID)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+
+	ids := map[string]bool{}
+	for _, chunk := range got {
+		ids[chunk.ID] = true
+	}
+	assert.True(t, ids[text.ID])
+	assert.True(t, ids[parent.ID])
+	assert.True(t, ids[imageOCR.ID], "non-reusable enrichment chunks must still be returned for stale cleanup")
+	assert.False(t, ids[otherKnowledge.ID])
+}
