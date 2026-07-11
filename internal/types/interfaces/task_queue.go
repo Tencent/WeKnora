@@ -24,6 +24,11 @@ type TaskPendingOpsRepository interface {
 	// are server-side defaults.
 	Enqueue(ctx context.Context, op *types.TaskPendingOp) error
 
+	// ReplaceByDedupKey atomically replaces any queued operation with the
+	// same non-empty dedup key. Wiki ingest uses this to preserve "latest
+	// operation wins" without accumulating duplicate rows for one document.
+	ReplaceByDedupKey(ctx context.Context, op *types.TaskPendingOp) error
+
 	// PeekBatch returns up to `limit` rows for the given queue tuple,
 	// ordered by id ASC (FIFO within the queue). Rows are NOT removed —
 	// callers must DeleteByIDs once the ops have been processed (or

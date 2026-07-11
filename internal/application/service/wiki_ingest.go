@@ -128,6 +128,10 @@ type WikiIngestPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"`
+	// TriggerPhase alternates between 0 and 1 for follow-ups. It lets a
+	// running task enqueue exactly one successor with a different stable
+	// task ID while duplicate producers for the same phase coalesce.
+	TriggerPhase uint8 `json:"trigger_phase,omitempty"`
 }
 
 // WikiRetractPayload is the asynq task payload for wiki content retraction
@@ -163,6 +167,7 @@ type WikiPendingOp struct {
 	Op           string `json:"op"`
 	KnowledgeID  string `json:"knowledge_id"`
 	RebuildRunID string `json:"rebuild_run_id,omitempty"`
+	Attempt      int    `json:"attempt,omitempty"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
 	// Retract fields
@@ -272,11 +277,13 @@ func (s *wikiIngestService) tracker() SpanTracker {
 // Lookups are by `LatestAttempt(knowledgeID)` because the asynq task
 // payload (WikiIngestPayload) is KB-scoped and carries no per-doc
 // attempt — see the type's comment for the batch architecture.
-func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID string, input types.JSONMap) *Span {
+func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID string, attempt int, input types.JSONMap) *Span {
 	if knowledgeID == "" {
 		return nil
 	}
-	attempt := s.tracker().LatestAttempt(ctx, knowledgeID)
+	if attempt <= 0 {
+		attempt = s.tracker().LatestAttempt(ctx, knowledgeID)
+	}
 	if attempt <= 0 {
 		return nil
 	}
@@ -308,6 +315,7 @@ func EnqueueWikiIngest(
 	tenantID uint64,
 	kbID, knowledgeID string,
 	rebuildRunID string,
+	attempt int,
 ) (bool, error) {
 	lang, _ := types.LanguageFromContext(ctx)
 
@@ -321,6 +329,7 @@ func EnqueueWikiIngest(
 		KnowledgeID:  knowledgeID,
 		Language:     lang,
 		RebuildRunID: rebuildRunID,
+		Attempt:      attempt,
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
@@ -330,7 +339,7 @@ func EnqueueWikiIngest(
 	if pendingRepo == nil {
 		return false, fmt.Errorf("wiki ingest pending repository is nil")
 	}
-	if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+	if err := pendingRepo.ReplaceByDedupKey(ctx, &types.TaskPendingOp{
 		TenantID: tenantID,
 		TaskType: wikiTaskType,
 		Scope:    wikiTaskScope,
@@ -352,22 +361,28 @@ func EnqueueWikiIngest(
 		Language:        lang,
 	}
 	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, err := json.Marshal(trigger)
-	if err != nil {
-		return false, err
+	// Debounce only when there is actually a batch to coalesce. A single
+	// rebuild has no future upload to wait for and should wake the worker
+	// immediately; otherwise the fixed debounce becomes pure user-visible
+	// latency on every reparse.
+	pendingCount, countErr := pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, kbID)
+	delay := wikiIngestTriggerDelay(rebuildRunID, pendingCount, countErr)
+	if countErr != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to count pending ops for delay selection: %v", countErr)
 	}
-
-	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
-		asynq.Queue("low"),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(wikiIngestDelay),
-	)
-	if _, err := task.Enqueue(t); err != nil {
+	enqueued, err := enqueueWikiTrigger(task, trigger, delay)
+	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
 		return false, err
 	}
-	return true, nil
+	return enqueued, nil
+}
+
+func wikiIngestTriggerDelay(rebuildRunID string, pendingCount int64, countErr error) time.Duration {
+	if rebuildRunID != "" || (countErr == nil && pendingCount <= 1) {
+		return 0
+	}
+	return wikiIngestDelay
 }
 
 // EnqueueWikiRetract queues a wiki retraction op (a delete cleanup).
@@ -397,7 +412,7 @@ func EnqueueWikiRetract(
 		return
 	}
 	if pendingRepo != nil {
-		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+		if err := pendingRepo.ReplaceByDedupKey(ctx, &types.TaskPendingOp{
 			TenantID: payload.TenantID,
 			TaskType: wikiTaskType,
 			Scope:    wikiTaskScope,
@@ -416,21 +431,51 @@ func EnqueueWikiRetract(
 		Language:        payload.Language,
 	}
 	langfuse.InjectTracing(ctx, &trigger)
-	triggerBytes, _ := json.Marshal(trigger)
-	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
-		asynq.Queue("low"),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(5*time.Second), // Retract can trigger the batch quickly
-	)
-	if _, err := task.Enqueue(t); err != nil {
+	if _, err := enqueueWikiTrigger(task, trigger, 5*time.Second); err != nil {
 		logger.Warnf(ctx, "wiki retract: failed to enqueue trigger task: %v", err)
 	}
 }
 
+func wikiTriggerTaskID(payload WikiIngestPayload) string {
+	return fmt.Sprintf("wiki-ingest-%d-%s-%d", payload.TenantID, payload.KnowledgeBaseID, payload.TriggerPhase%2)
+}
+
+// enqueueWikiTrigger uses two stable task IDs per KB. If phase 0 is already
+// scheduled/running, a producer schedules phase 1 instead. This closes the
+// narrow lost-wakeup window where a new pending op lands after the running
+// batch's final PendingCount check but before its task ID is released.
+func enqueueWikiTrigger(task interfaces.TaskEnqueuer, payload WikiIngestPayload, delay time.Duration) (bool, error) {
+	if task == nil {
+		return false, fmt.Errorf("wiki ingest task enqueuer is nil")
+	}
+	startPhase := payload.TriggerPhase % 2
+	for i := uint8(0); i < 2; i++ {
+		payload.TriggerPhase = (startPhase + i) % 2
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return false, err
+		}
+		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
+			asynq.Queue("low"),
+			asynq.MaxRetry(wikiIngestMaxRetry),
+			asynq.Timeout(60*time.Minute),
+			asynq.ProcessIn(delay),
+		)
+		if _, err := task.Enqueue(t, asynq.TaskID(wikiTriggerTaskID(payload))); err != nil {
+			if errors.Is(err, asynq.ErrTaskIDConflict) {
+				continue
+			}
+			return false, err
+		}
+		return true, nil
+	}
+	// Both phases already exist. At least one durable wakeup is guaranteed.
+	return true, nil
+}
+
 // Handle implements interfaces.TaskHandler for asynq task processing.
-// Wiki ingest tasks are debounced via asynq.Unique + ProcessIn, so at most
-// one ingest task runs per KB at a time. No distributed lock needed.
+// Wiki ingest triggers are coalesced by stable task IDs; the distributed lock
+// remains the final guard that prevents two batches running for one KB.
 func (s *wikiIngestService) Handle(ctx context.Context, t *asynq.Task) error {
 	return s.ProcessWikiIngest(ctx, t)
 }
@@ -541,6 +586,7 @@ func (s *wikiIngestService) finalizeWikiSubtask(
 	ctx context.Context,
 	tenantID uint64,
 	knowledgeID, rebuildRunID string,
+	attempt int,
 	success bool,
 	errorMessage string,
 ) {
@@ -562,7 +608,8 @@ func (s *wikiIngestService) finalizeWikiSubtask(
 	if !success {
 		resultErr = errors.New(errorMessage)
 	}
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", resultErr, false, true)
+	superseded := attemptSuperseded(ctx, s.tracker(), knowledgeID, attempt)
+	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", resultErr, superseded, true)
 }
 
 // requeueFailedOps records in-batch failures.
@@ -609,7 +656,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		// for deleted knowledge that has no counter to drain). The
 		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
 		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, payload.TenantID, op.KnowledgeID, op.RebuildRunID, false,
+			s.finalizeWikiSubtask(ctx, payload.TenantID, op.KnowledgeID, op.RebuildRunID, op.Attempt, false,
 				fmt.Sprintf("wiki ingest exceeded retry limit %d", wikiMaxFailRetries))
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
@@ -638,6 +685,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 type docIngestResult struct {
 	KnowledgeID  string
 	RebuildRunID string
+	Attempt      int
 	RetractOnly  bool
 	DocTitle     string
 	Summary      string // one-line summary of the document (from summary page)
@@ -652,6 +700,13 @@ type docIngestResult struct {
 	// cleanup phases complete (so the user-visible duration covers the
 	// whole pipeline for this doc, not just LLM extraction).
 	MapStats types.JSONMap
+	// ContributionManifest is the successful Map output reduced to one
+	// deterministic fingerprint per slug. It is committed only after the
+	// corresponding page writes and index update succeed.
+	ContributionManifest     map[string]string
+	ContributionStateFound   bool
+	ContributionChanged      bool
+	ContributionChangedSlugs []string
 	// WikiSpan is the postprocess.wiki subspan opened at the start of
 	// mapOneDocument. ProcessWikiIngest holds it open across the reduce
 	// + cleanup phases and closes it once this doc's pages have all

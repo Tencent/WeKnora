@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -32,6 +33,13 @@ func TestStableQuestionID(t *testing.T) {
 	}
 	if id1 == stableQuestionID("chunk-1", "What is WeKnora?", 1) {
 		t.Fatal("question ordinal should be part of the stable ID")
+	}
+	sourceID := strings.Repeat("c", 36) + "-" + stableQuestionID(strings.Repeat("c", 36), "question", 0)
+	if len(sourceID) > 128 {
+		t.Fatalf("question source ID must fit VARCHAR(128), got %d characters", len(sourceID))
+	}
+	if len(sourceID) <= 64 {
+		t.Fatalf("regression fixture must demonstrate why VARCHAR(64) was insufficient, got %d", len(sourceID))
 	}
 }
 
@@ -78,21 +86,30 @@ func TestVLMCacheKeysInvalidateOnlyOnVLMInputs(t *testing.T) {
 }
 
 func TestWikiMapCacheKeyLayeredInvalidation(t *testing.T) {
-	key := wikiMapCacheKey(" hello   wiki ", "kb-1", "kid-1", "zh", "chat-a", []string{"c2", "c1"})
-	if key != wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "zh", "chat-a", []string{"c1", "c2"}) {
-		t.Fatal("same normalized document and same chunk set should produce same wiki map key")
+	key := wikiMapCacheKey(" hello   wiki ", "kb-1", "kid-1", "zh", "standard", "chat-a", "prompt-a")
+	if key != wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "zh", "standard", "chat-a", "prompt-a") {
+		t.Fatal("same normalized document should produce same wiki map key")
 	}
-	if key == wikiMapCacheKey("changed wiki", "kb-1", "kid-1", "zh", "chat-a", []string{"c1", "c2"}) {
+	if key == wikiMapCacheKey("changed wiki", "kb-1", "kid-1", "zh", "standard", "chat-a", "prompt-a") {
 		t.Fatal("document content changes must invalidate wiki map cache")
 	}
-	if key == wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "en", "chat-a", []string{"c1", "c2"}) {
+	if key == wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "en", "standard", "chat-a", "prompt-a") {
 		t.Fatal("language changes must invalidate wiki map cache")
 	}
-	if key == wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "zh", "chat-b", []string{"c1", "c2"}) {
+	if key == wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "zh", "standard", "chat-b", "prompt-a") {
 		t.Fatal("synthesis model changes must invalidate wiki map cache")
 	}
-	if key == wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "zh", "chat-a", []string{"c1", "c3"}) {
-		t.Fatal("chunk identity changes must invalidate wiki map cache")
+	if key == wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "zh", "focused", "chat-a", "prompt-a") {
+		t.Fatal("extraction granularity changes must invalidate wiki map cache")
+	}
+	if key == wikiMapCacheKey("hello wiki", "kb-1", "kid-1", "zh", "standard", "chat-a", "prompt-b") {
+		t.Fatal("prompt bundle changes must invalidate wiki map cache")
+	}
+	withOldURL := `<image url="local://old"><image_original>![x](local://old)</image_original><image_ocr>same</image_ocr></image>`
+	withNewURL := `<image url="local://new"><image_original>![x](local://new)</image_original><image_ocr>same</image_ocr></image>`
+	if wikiMapCacheKey(withOldURL, "kb-1", "kid-1", "zh", "standard", "chat-a", "prompt-a") !=
+		wikiMapCacheKey(withNewURL, "kb-1", "kid-1", "zh", "standard", "chat-a", "prompt-a") {
+		t.Fatal("image storage URL changes must not invalidate frozen wiki content")
 	}
 }
 

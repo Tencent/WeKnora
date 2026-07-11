@@ -41,19 +41,23 @@ func rebuildConfigFingerprint(
 	kb *types.KnowledgeBase,
 	eff types.EffectiveProcessConfig,
 	overrides *types.KnowledgeProcessOverrides,
-	embeddingModelID *string,
+	_ *string,
 ) string {
+	// This fingerprint is intentionally the downstream-artifact fingerprint,
+	// not a whole-pipeline fingerprint. Embedding has its own model/dimension
+	// cache and VLM invalidation is decided from the actual OCR/Caption chunk
+	// diff. Including either here would incorrectly force summary, question,
+	// graph and Wiki work when their inputs did not change.
+	eff.VLMConfig = types.VLMConfig{}
+	eff.EnableMultimodel = false
 	snapshot := rebuildConfigSnapshot{EffectiveConfig: eff}
 	if overrides != nil {
 		snapshot.ParserOverrides = overrides.ParserEngineOverrides
 	}
 	if kb != nil {
-		snapshot.EmbeddingModelID = kb.EmbeddingModelID
+		snapshot.EmbeddingModelID = ""
 		snapshot.SummaryModelID = kb.SummaryModelID
 		snapshot.WikiEnabled = kb.IsWikiEnabled()
-	}
-	if embeddingModelID != nil {
-		snapshot.EmbeddingModelID = *embeddingModelID
 	}
 	return jsonStableHash(snapshot)
 }

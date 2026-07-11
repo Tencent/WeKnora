@@ -43,6 +43,56 @@ func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPe
 	return r.db.WithContext(ctx).Create(op).Error
 }
 
+// ReplaceByDedupKey serializes producers for one logical queue key, removes
+// older rows, then inserts the newest operation. PostgreSQL uses a transaction-
+// scoped advisory lock so concurrent upload/delete/reparse requests cannot
+// race into duplicate rows; lightweight databases still get the transactional
+// delete+insert behavior.
+func (r *taskPendingOpsRepository) ReplaceByDedupKey(ctx context.Context, op *types.TaskPendingOp) error {
+	if op == nil {
+		return errors.New("task pending ops: nil op")
+	}
+	if op.TaskType == "" || op.Scope == "" || op.ScopeID == "" || op.Op == "" {
+		return errors.New("task pending ops: task_type, scope, scope_id, op are required")
+	}
+	if op.DedupKey == "" {
+		return errors.New("task pending ops: dedup_key is required for replacement")
+	}
+	if len(op.Payload) == 0 {
+		op.Payload = []byte("{}")
+	}
+
+	lockKey := taskPendingOpLockKey(op.TaskType, op.Scope, op.ScopeID, op.DedupKey)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if tx.Dialector.Name() == "postgres" {
+			if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", lockKey).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where(
+			"task_type = ? AND scope = ? AND scope_id = ? AND dedup_key = ?",
+			op.TaskType, op.Scope, op.ScopeID, op.DedupKey,
+		).Delete(&types.TaskPendingOp{}).Error; err != nil {
+			return err
+		}
+		op.ID = 0
+		op.FailCount = 0
+		op.ClaimedAt = nil
+		return tx.Create(op).Error
+	})
+}
+
+// taskPendingOpLockKey produces an unambiguous PostgreSQL text value. NUL is
+// not valid in PostgreSQL text, so use length-prefixed components instead of
+// the in-memory \x00 separator commonly used for hash inputs.
+func taskPendingOpLockKey(parts ...string) string {
+	var key string
+	for _, part := range parts {
+		key += fmt.Sprintf("%d:%s", len(part), part)
+	}
+	return key
+}
+
 // PeekBatch returns up to `limit` rows for the (task_type, scope, scope_id)
 // tuple ordered by id ASC. Rows are not removed; callers must
 // DeleteByIDs once they have been consumed (or IncrFailCount and leave

@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"regexp"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -98,17 +98,29 @@ func vlmCaptionCacheKey(imageBytes []byte, vlmModelID, prompt string) string {
 	return processingCacheKey(stableBytesHash(imageBytes), vlmModelID, vlmCaptionVersion, prompt)
 }
 
-func wikiMapCacheKey(content, knowledgeBaseID, knowledgeID, lang, synthesisModelID string, chunkIDs []string) string {
-	ids := append([]string(nil), chunkIDs...)
-	sort.Strings(ids)
+var (
+	wikiImageURLPattern      = regexp.MustCompile(`<image\s+url="[^"]*">`)
+	wikiImageOriginalPattern = regexp.MustCompile(`(?s)<image_original>.*?</image_original>`)
+)
+
+func canonicalWikiMapContent(content string) string {
+	content = wikiImageURLPattern.ReplaceAllString(content, "<image>")
+	content = wikiImageOriginalPattern.ReplaceAllString(content, "<image_original>[image]</image_original>")
+	return content
+}
+
+func wikiMapCacheKey(
+	content, knowledgeBaseID, knowledgeID, lang, extractionGranularity,
+	synthesisModelID, promptBundleHash string,
+) string {
 	return processingCacheKey(
-		normalizedContentHash(content),
+		normalizedContentHash(canonicalWikiMapContent(content)),
 		knowledgeBaseID,
 		knowledgeID,
 		lang,
-		wikiMapPromptVersion,
+		extractionGranularity,
 		synthesisModelID,
-		stableHash(ids...),
+		promptBundleHash,
 	)
 }
 

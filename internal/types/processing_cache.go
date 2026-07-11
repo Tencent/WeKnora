@@ -7,14 +7,15 @@ import (
 )
 
 const (
-	ProcessingCacheStageVLMOCR     = "vlm_ocr"
-	ProcessingCacheStageVLMCaption = "vlm_caption"
-	ProcessingCacheStageWikiMap    = "wiki_map"
-	ProcessingCacheStageEmbedding  = "embedding"
-	ProcessingCacheStageGraphChunk = "graph_chunk"
-	ProcessingCacheStageSummary    = "summary"
-	ProcessingCacheStageQuestion   = "question"
-	ProcessingCacheStageParse      = "parse_artifact"
+	ProcessingCacheStageVLMOCR           = "vlm_ocr"
+	ProcessingCacheStageVLMCaption       = "vlm_caption"
+	ProcessingCacheStageWikiMap          = "wiki_map"
+	ProcessingCacheStageEmbedding        = "embedding"
+	ProcessingCacheStageGraphChunk       = "graph_chunk"
+	ProcessingCacheStageSummary          = "summary"
+	ProcessingCacheStageQuestion         = "question"
+	ProcessingCacheStageParse            = "parse_artifact"
+	ProcessingCacheStageWikiContribution = "wiki_contribution"
 )
 
 // ProcessingCache stores deterministic intermediate processing artifacts.

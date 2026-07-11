@@ -124,7 +124,7 @@ func (s *knowledgeService) ProcessKnowledgeRebuildFinalize(ctx context.Context, 
 	if run.WikiReduceRequired && run.WikiReduceEnqueuedAt == nil {
 		enqueued, enqueueErr := EnqueueWikiIngest(
 			ctx, s.task, s.taskPendingRepo,
-			payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID, payload.RebuildRunID,
+			payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID, payload.RebuildRunID, payload.Attempt,
 		)
 		if enqueueErr != nil || !enqueued {
 			if enqueueErr != nil {

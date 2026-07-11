@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     attempt         INT                      NOT NULL DEFAULT 1,
     span_id         VARCHAR(64)              NOT NULL,
     parent_span_id  VARCHAR(64),
-    name            VARCHAR(64)              NOT NULL,
+    name            VARCHAR(256)             NOT NULL,
     kind            VARCHAR(16)              NOT NULL,                       -- root / stage / subspan / generation
     status          VARCHAR(16)              NOT NULL,                       -- pending/running/done/failed/skipped/cancelled
     input           JSONB,

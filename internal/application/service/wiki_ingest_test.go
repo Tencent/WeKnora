@@ -2,12 +2,28 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestWikiIngestTriggerDelay(t *testing.T) {
+	if got := wikiIngestTriggerDelay("rebuild-run", 10, nil); got != 0 {
+		t.Fatalf("rebuild should trigger immediately, got %v", got)
+	}
+	if got := wikiIngestTriggerDelay("", 1, nil); got != 0 {
+		t.Fatalf("single pending op should trigger immediately, got %v", got)
+	}
+	if got := wikiIngestTriggerDelay("", 2, nil); got != wikiIngestDelay {
+		t.Fatalf("batch should retain debounce, got %v", got)
+	}
+	if got := wikiIngestTriggerDelay("", 0, errors.New("count failed")); got != wikiIngestDelay {
+		t.Fatalf("count failure should retain safe debounce, got %v", got)
+	}
+}
 
 func TestSlugify(t *testing.T) {
 	tests := []struct {

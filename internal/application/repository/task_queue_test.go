@@ -86,6 +86,34 @@ func TestTaskPendingOps_Enqueue_AssignsIDAndDefaults(t *testing.T) {
 	assert.Equal(t, json.RawMessage("{}"), op.Payload, "nil payload should default to {}")
 }
 
+func TestTaskPendingOps_ReplaceByDedupKey_KeepsLatestOperation(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	ctx := context.Background()
+
+	first := makePendingOp("wiki:ingest", "knowledge_base", "kb-1", "ingest", "k-1", []byte(`{"version":1}`))
+	require.NoError(t, repo.ReplaceByDedupKey(ctx, first))
+	latest := makePendingOp("wiki:ingest", "knowledge_base", "kb-1", "retract", "k-1", []byte(`{"version":2}`))
+	require.NoError(t, repo.ReplaceByDedupKey(ctx, latest))
+
+	rows, err := repo.PeekBatch(ctx, "wiki:ingest", "knowledge_base", "kb-1", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "retract", rows[0].Op)
+	assert.JSONEq(t, `{"version":2}`, string(rows[0].Payload))
+	assert.Equal(t, 0, rows[0].FailCount)
+}
+
+func TestTaskPendingOpLockKeyIsPostgresSafeAndUnambiguous(t *testing.T) {
+	key := taskPendingOpLockKey("wiki:ingest", "knowledge_base", "kb-1", "knowledge-1")
+	assert.NotContains(t, key, "\x00")
+	assert.NotEqual(t,
+		taskPendingOpLockKey("ab", "c"),
+		taskPendingOpLockKey("a", "bc"),
+		"length prefixes must prevent component-boundary collisions",
+	)
+}
+
 // TestTaskPendingOps_Enqueue_RejectsMissingFields covers the validation
 // layer: every required field must be set, otherwise the call returns an
 // error WITHOUT touching the DB.

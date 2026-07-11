@@ -25,7 +25,7 @@ BEGIN
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
-        source_id VARCHAR(64) NOT NULL,
+        source_id VARCHAR(128) NOT NULL,
         source_type INTEGER NOT NULL,
         chunk_id VARCHAR(64),
         knowledge_id VARCHAR(64),

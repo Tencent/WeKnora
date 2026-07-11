@@ -423,7 +423,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    and drain on its own".
 	enqueuedWiki := false
 	if willSpawnWiki && payload.RebuildRunID == "" {
-		enqueuedWiki, _ = EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID, "")
+		enqueuedWiki, _ = EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID, "", attempt)
 		if enqueuedWiki {
 			logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
 		}

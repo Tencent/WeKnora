@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -31,7 +33,7 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     attempt         INTEGER     NOT NULL DEFAULT 1,
     span_id         VARCHAR(64) NOT NULL,
     parent_span_id  VARCHAR(64),
-    name            VARCHAR(64) NOT NULL,
+    name            VARCHAR(256) NOT NULL,
     kind            VARCHAR(16) NOT NULL,
     status          VARCHAR(16) NOT NULL,
     input           TEXT,
@@ -194,6 +196,33 @@ func TestSpanTracker_BeginSubSpan_HangsUnderParent(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, types.SpanKindGeneration, rows[0].Kind)
 	assert.Equal(t, parent.SpanID, rows[0].ParentSpanID, "subspan must reference parent stage's span_id")
+}
+
+func TestSpanTracker_LongSubSpanNameIsStableAndRetryable(t *testing.T) {
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := context.Background()
+	root, attempt, err := tracker.OpenAttempt(ctx, "kid-long-span", "")
+	require.NoError(t, err)
+
+	originalName := "postprocess.wiki.page[" + strings.Repeat("超长页面路径/", 40) + "]"
+	normalized := normalizeProcessingSpanName(originalName)
+	assert.LessOrEqual(t, utf8.RuneCountInString(normalized), maxProcessingSpanNameRunes)
+	assert.Equal(t, normalized, normalizeProcessingSpanName(originalName), "normalization must be deterministic")
+
+	first := tracker.BeginSubSpan(ctx, root, originalName, types.SpanKindSubSpan, nil)
+	require.NotNil(t, first)
+	assert.Equal(t, normalized, first.Name)
+	require.NotNil(t, tracker.LookupSpanByName(ctx, "kid-long-span", attempt, originalName))
+
+	second := tracker.BeginSubSpan(ctx, root, originalName, types.SpanKindSubSpan, nil)
+	require.NotNil(t, second)
+	assert.NotEqual(t, first.SpanID, second.SpanID)
+	assert.Equal(t, normalized, second.Name)
+
+	var firstStatus string
+	require.NoError(t, db.Table("knowledge_processing_spans").
+		Select("status").Where("span_id = ?", first.SpanID).Scan(&firstStatus).Error)
+	assert.Equal(t, types.SpanStatusCancelled, firstStatus, "retry must supersede the normalized prior span")
 }
 
 // TestSpanTracker_BeginStage_ReentryIsIdempotent guarantees that a second

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -37,6 +38,7 @@ type chunkCandidateDiff struct {
 	ChangedNew   []*types.Chunk
 	Stale        []*types.Chunk
 	Results      []*types.KnowledgeRebuildChunkResult
+	IDRewrites   map[string]string
 }
 
 type chunkSourceMetadata struct {
@@ -58,14 +60,56 @@ type chunkSourceMetadata struct {
 }
 
 func classifyChunkCandidates(oldChunks, candidates []*types.Chunk) chunkCandidateDiff {
-	diff := chunkCandidateDiff{}
+	diff := chunkCandidateDiff{IDRewrites: make(map[string]string)}
 	oldByID := make(map[string]*types.Chunk, len(oldChunks))
+	oldByContent := make(map[string][]*types.Chunk, len(oldChunks))
 	for _, chunk := range oldChunks {
 		if chunk != nil && chunk.ID != "" {
 			oldByID[chunk.ID] = chunk
+			fingerprint := chunkContentFingerprint(chunk)
+			oldByContent[fingerprint] = append(oldByContent[fingerprint], chunk)
 		}
 	}
 	matched := make(map[string]struct{}, len(candidates))
+	candidateMatches := make(map[*types.Chunk]*types.Chunk, len(candidates))
+
+	// Reserve exact ID matches first. Remaining candidates may reuse an old ID
+	// when their canonical source content is unchanged. This keeps downstream
+	// vector, Wiki and graph references stable across reparses whose parser
+	// positions or generated image URLs drift.
+	for _, candidate := range candidates {
+		if candidate == nil || candidate.ID == "" {
+			continue
+		}
+		if existing := oldByID[candidate.ID]; existing != nil {
+			candidateMatches[candidate] = existing
+			matched[existing.ID] = struct{}{}
+		}
+	}
+	for _, candidate := range candidates {
+		if candidate == nil || candidate.ID == "" || candidateMatches[candidate] != nil {
+			continue
+		}
+		fingerprint := chunkContentFingerprint(candidate)
+		existing := closestUnmatchedChunk(oldByContent[fingerprint], matched, candidate)
+		if existing == nil {
+			continue
+		}
+		oldCandidateID := candidate.ID
+		candidate.ID = existing.ID
+		diff.IDRewrites[oldCandidateID] = existing.ID
+		candidateMatches[candidate] = existing
+		matched[existing.ID] = struct{}{}
+	}
+
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		candidate.ParentChunkID = rewriteChunkReference(candidate.ParentChunkID, diff.IDRewrites)
+		candidate.PreChunkID = rewriteChunkReference(candidate.PreChunkID, diff.IDRewrites)
+		candidate.NextChunkID = rewriteChunkReference(candidate.NextChunkID, diff.IDRewrites)
+	}
 
 	for _, candidate := range candidates {
 		if candidate == nil || candidate.ID == "" {
@@ -74,20 +118,17 @@ func classifyChunkCandidates(oldChunks, candidates []*types.Chunk) chunkCandidat
 		candidateContentFingerprint := chunkContentFingerprint(candidate)
 		candidate.ContentHash = candidateContentFingerprint
 		candidateSourceMetadata := chunkSourceMetadataFor(candidate)
-		existing, found := oldByID[candidate.ID]
+		existing, found := candidateMatches[candidate]
 		classification := types.RebuildChunkClassChangedNew
 		switch {
 		case !found:
 			diff.ChangedNew = append(diff.ChangedNew, candidate)
 		case chunkContentFingerprint(existing) != candidateContentFingerprint:
-			matched[candidate.ID] = struct{}{}
 			diff.ChangedNew = append(diff.ChangedNew, candidate)
 		case chunkSourceMetadataFor(existing) != candidateSourceMetadata:
-			matched[candidate.ID] = struct{}{}
 			classification = types.RebuildChunkClassMetadataOnly
 			diff.MetadataOnly = append(diff.MetadataOnly, chunkMetadataUpdate{Existing: existing, Candidate: candidate})
 		default:
-			matched[candidate.ID] = struct{}{}
 			classification = types.RebuildChunkClassUnchanged
 			diff.Unchanged = append(diff.Unchanged, existing)
 		}
@@ -120,14 +161,54 @@ func classifyChunkCandidates(oldChunks, candidates []*types.Chunk) chunkCandidat
 	return diff
 }
 
+func closestUnmatchedChunk(chunks []*types.Chunk, matched map[string]struct{}, candidate *types.Chunk) *types.Chunk {
+	var best *types.Chunk
+	bestDistance := 0
+	for _, existing := range chunks {
+		if existing == nil {
+			continue
+		}
+		if _, ok := matched[existing.ID]; ok {
+			continue
+		}
+		distance := existing.StartAt - candidate.StartAt
+		if distance < 0 {
+			distance = -distance
+		}
+		if best == nil || distance < bestDistance ||
+			(distance == bestDistance && existing.ChunkIndex < best.ChunkIndex) ||
+			(distance == bestDistance && existing.ChunkIndex == best.ChunkIndex && existing.ID < best.ID) {
+			best = existing
+			bestDistance = distance
+		}
+	}
+	return best
+}
+
+func rewriteChunkReference(id string, rewrites map[string]string) string {
+	if rewritten, ok := rewrites[id]; ok {
+		return rewritten
+	}
+	return id
+}
+
+var markdownImageReferencePattern = regexp.MustCompile(`!\[([^\]]*)\]\((?:<)?[^)\s]+(?:>)?(?:\s+["'][^"']*["'])?\)`)
+
+func canonicalChunkContent(content string) string {
+	// Image bytes are tracked by the VLM cache and image child chunks. The
+	// storage URL embedded in parser markdown is an implementation detail and
+	// may change on every parse despite identical source bytes.
+	return markdownImageReferencePattern.ReplaceAllString(content, `![$1](<image>)`)
+}
+
 func chunkContentFingerprint(chunk *types.Chunk) string {
 	if chunk == nil {
 		return ""
 	}
 	return stableHash(
-		"chunk-content-v1",
+		"chunk-content-v2",
 		string(chunk.ChunkType),
-		normalizedContentHash(chunk.Content),
+		normalizedContentHash(canonicalChunkContent(chunk.Content)),
 	)
 }
 
@@ -236,6 +317,7 @@ func imageChunksForImage(
 	}
 	var exact []*types.Chunk
 	var legacy []*types.Chunk
+	var indexedFallback []*types.Chunk
 	for _, chunk := range chunks {
 		if chunk == nil || (chunk.ChunkType != types.ChunkTypeImageOCR && chunk.ChunkType != types.ChunkTypeImageCaption) {
 			continue
@@ -246,6 +328,9 @@ func imageChunksForImage(
 		var infos []types.ImageInfo
 		if json.Unmarshal([]byte(chunk.ImageInfo), &infos) == nil {
 			for _, info := range infos {
+				if info.ImageIndex != nil && *info.ImageIndex == imageIndex {
+					indexedFallback = append(indexedFallback, chunk)
+				}
 				if strings.TrimSpace(info.URL) == imageURL || strings.TrimSpace(info.OriginalURL) == imageURL {
 					if info.ImageIndex != nil {
 						if *info.ImageIndex == imageIndex {
@@ -261,6 +346,9 @@ func imageChunksForImage(
 	}
 	if len(exact) > 0 {
 		return exact
+	}
+	if len(indexedFallback) > 0 {
+		return indexedFallback
 	}
 	return legacy
 }

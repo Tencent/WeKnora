@@ -26,6 +26,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,25 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+const (
+	maxProcessingSpanNameRunes = 256
+	processingSpanHashRunes    = 12
+)
+
+// normalizeProcessingSpanName keeps dynamic names within the database
+// contract without losing their identity. PostgreSQL VARCHAR limits count
+// characters, so truncate by rune rather than byte.
+func normalizeProcessingSpanName(name string) string {
+	runes := []rune(name)
+	if len(runes) <= maxProcessingSpanNameRunes {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	suffix := "~" + hex.EncodeToString(sum[:processingSpanHashRunes/2])
+	prefixRunes := maxProcessingSpanNameRunes - len([]rune(suffix))
+	return string(runes[:prefixRunes]) + suffix
+}
 
 // Span is the in-memory handle the pipeline holds while a stage / subspan
 // is executing. It carries enough context for End/Fail/Skip to write back
@@ -280,8 +301,8 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 		return nil
 	}
 	var (
-		rootID    string
-		existing  *types.KnowledgeProcessingSpan
+		rootID   string
+		existing *types.KnowledgeProcessingSpan
 	)
 	for i := range rows {
 		r := rows[i]
@@ -373,6 +394,7 @@ func (t *spanTracker) BeginSubSpan(ctx context.Context, parent *Span, name, kind
 	if parent == nil || name == "" {
 		return nil
 	}
+	name = normalizeProcessingSpanName(name)
 	if kind != types.SpanKindGeneration && kind != types.SpanKindSubSpan {
 		kind = types.SpanKindSubSpan
 	}
@@ -558,6 +580,7 @@ func (t *spanTracker) LookupSpanByName(ctx context.Context, knowledgeID string, 
 	if name == "" || knowledgeID == "" || attempt <= 0 {
 		return nil
 	}
+	name = normalizeProcessingSpanName(name)
 	rows, err := t.repo.ListByAttempt(ctx, knowledgeID, attempt)
 	if err != nil {
 		logger.Warnf(ctx, "[SpanTracker] LookupSpanByName list failed kid=%s attempt=%d: %v",

@@ -89,6 +89,83 @@ func TestChunkMetadataFingerprintIgnoresDerivedFields(t *testing.T) {
 	assert.Empty(t, diff.Stale)
 }
 
+func TestClassifyChunkCandidatesReusesOldIDByCanonicalContent(t *testing.T) {
+	oldChunk := rebuildTestChunk("old-id", "before ![diagram](local://old/image.png) after", types.ChunkTypeText)
+	candidate := rebuildTestChunk("new-id", "before ![diagram](local://new/image.png) after", types.ChunkTypeText)
+
+	diff := classifyChunkCandidates([]*types.Chunk{oldChunk}, []*types.Chunk{candidate})
+
+	require.Len(t, diff.MetadataOnly, 1)
+	assert.Equal(t, "old-id", candidate.ID)
+	assert.Equal(t, "old-id", diff.IDRewrites["new-id"])
+	assert.Empty(t, diff.ChangedNew)
+	assert.Empty(t, diff.Stale)
+}
+
+func TestClassifyChunkCandidatesRewritesCandidateReferences(t *testing.T) {
+	oldParent := rebuildTestChunk("old-parent", "parent", types.ChunkTypeParentText)
+	oldChild := rebuildTestChunk("old-child", "child", types.ChunkTypeText)
+	oldChild.ParentChunkID = oldParent.ID
+
+	parent := rebuildTestChunk("new-parent", "parent", types.ChunkTypeParentText)
+	child := rebuildTestChunk("new-child", "child", types.ChunkTypeText)
+	child.ParentChunkID = parent.ID
+	parent.NextChunkID = child.ID
+	child.PreChunkID = parent.ID
+
+	diff := classifyChunkCandidates([]*types.Chunk{oldParent, oldChild}, []*types.Chunk{parent, child})
+
+	assert.Equal(t, oldParent.ID, parent.ID)
+	assert.Equal(t, oldChild.ID, child.ID)
+	assert.Equal(t, oldChild.ID, parent.NextChunkID)
+	assert.Equal(t, oldParent.ID, child.PreChunkID)
+	assert.Equal(t, oldParent.ID, child.ParentChunkID)
+	assert.Empty(t, diff.ChangedNew)
+	assert.Empty(t, diff.Stale)
+}
+
+func TestClassifyChunkCandidatesMatchesDuplicateContentOneToOne(t *testing.T) {
+	oldFirst := rebuildTestChunk("old-first", "duplicate", types.ChunkTypeText)
+	oldFirst.StartAt = 0
+	oldFirst.ChunkIndex = 0
+	oldSecond := rebuildTestChunk("old-second", "duplicate", types.ChunkTypeText)
+	oldSecond.StartAt = 100
+	oldSecond.ChunkIndex = 1
+	first := rebuildTestChunk("new-first", "duplicate", types.ChunkTypeText)
+	first.StartAt = 5
+	first.ChunkIndex = 0
+	second := rebuildTestChunk("new-second", "duplicate", types.ChunkTypeText)
+	second.StartAt = 105
+	second.ChunkIndex = 1
+
+	diff := classifyChunkCandidates([]*types.Chunk{oldSecond, oldFirst}, []*types.Chunk{second, first})
+
+	assert.Equal(t, "old-second", second.ID)
+	assert.Equal(t, "old-first", first.ID)
+	assert.Empty(t, diff.ChangedNew)
+	assert.Empty(t, diff.Stale)
+}
+
+func TestClassifyChunkCandidatesPreservesLaterIDsAfterInsertion(t *testing.T) {
+	oldA := rebuildTestChunk("old-a", "alpha", types.ChunkTypeText)
+	oldA.StartAt = 0
+	oldB := rebuildTestChunk("old-b", "beta", types.ChunkTypeText)
+	oldB.StartAt = 100
+	inserted := rebuildTestChunk("new-inserted", "inserted", types.ChunkTypeText)
+	inserted.StartAt = 0
+	a := rebuildTestChunk("new-a", "alpha", types.ChunkTypeText)
+	a.StartAt = 50
+	b := rebuildTestChunk("new-b", "beta", types.ChunkTypeText)
+	b.StartAt = 150
+
+	diff := classifyChunkCandidates([]*types.Chunk{oldA, oldB}, []*types.Chunk{inserted, a, b})
+
+	assert.Equal(t, "old-a", a.ID)
+	assert.Equal(t, "old-b", b.ID)
+	assert.Equal(t, []string{"new-inserted"}, chunkIDs(diff.ChangedNew))
+	assert.Empty(t, diff.Stale)
+}
+
 func TestMergeChunkSourceMetadataPreservesDerivedFields(t *testing.T) {
 	createdAt := time.Unix(100, 0)
 	existing := rebuildTestChunk("chunk-1", "old", types.ChunkTypeText)
@@ -153,6 +230,10 @@ func TestImageChunksForImage(t *testing.T) {
 	assert.Equal(t, []string{"legacy"}, chunkIDs(imageChunksForImage(
 		[]*types.Chunk{legacy}, "provider://bucket/legacy.png", "parent-1", otherIndex,
 	)))
+
+	assert.Equal(t, []string{"ocr", "caption"}, chunkIDs(imageChunksForImage(
+		[]*types.Chunk{matching, originalMatching}, "provider://bucket/reparsed.png", "parent-1", imageIndex,
+	)))
 }
 
 func TestBuildRebuildPostProcessPlanSelective(t *testing.T) {
@@ -197,6 +278,31 @@ func TestBuildRebuildPostProcessPlanSelective(t *testing.T) {
 	plan = buildRebuildPostProcessPlan(run, results, chunks, kb, eff)
 	assert.ElementsMatch(t, []string{"unchanged", "changed"}, chunkIDs(plan.QuestionTargets))
 	assert.ElementsMatch(t, []string{"unchanged", "changed", "image"}, chunkIDs(plan.GraphTargets))
+}
+
+func TestBuildRebuildPostProcessPlanSkipsAllDerivedWorkWhenUnchanged(t *testing.T) {
+	run := &types.KnowledgeRebuildRun{OldConfigFingerprint: "same", NewConfigFingerprint: "same"}
+	kb := &types.KnowledgeBase{
+		EmbeddingModelID: "embedding",
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true, WikiEnabled: true, GraphEnabled: true},
+	}
+	eff := types.EffectiveProcessConfig{
+		QuestionGenerationConfig: types.QuestionGenerationConfig{Enabled: true},
+		GraphEnabled:             true,
+	}
+	chunks := []*types.Chunk{rebuildTestChunk("same", "same", types.ChunkTypeText)}
+	results := []*types.KnowledgeRebuildChunkResult{
+		rebuildChunkPlanResult("same", types.ChunkTypeText, types.RebuildChunkClassUnchanged),
+	}
+
+	plan := buildRebuildPostProcessPlan(run, results, chunks, kb, eff)
+
+	assert.False(t, plan.ContentChanged)
+	assert.False(t, plan.ConfigChanged)
+	assert.Empty(t, plan.QuestionTargets)
+	assert.Empty(t, plan.GraphTargets)
+	assert.False(t, plan.SummaryRequired)
+	assert.False(t, plan.WikiRequired)
 }
 
 func TestPlanSelectiveQuestionBatchesPreservesRealNeighbors(t *testing.T) {

@@ -37,15 +37,9 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 
 	logger.Infof(ctx, "wiki ingest: %d more documents pending for KB %s, scheduling follow-up", count, payload.KnowledgeBaseID)
 
+	payload.TriggerPhase = (payload.TriggerPhase + 1) % 2
 	langfuse.InjectTracing(ctx, &payload)
-	payloadBytes, _ := json.Marshal(payload)
-	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
-		asynq.Queue("low"),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(5*time.Second), // short delay — active flag will be released by then
-	)
-	if _, err := s.task.Enqueue(t); err != nil {
+	if _, err := enqueueWikiTrigger(s.task, payload, 5*time.Second); err != nil {
 		logger.Warnf(ctx, "wiki ingest: follow-up enqueue failed: %v", err)
 		return false
 	}
@@ -133,25 +127,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			logger.Warnf(ctx, "wiki ingest: redis SetNX failed: %v", err)
 		} else if !acquired {
 			exitStatus = "active_lock_conflict"
-			// If task_pending_ops is already empty for this KB, the active
-			// batch will drain whatever was queued. Returning nil avoids
-			// burning through the retry budget on tasks that would be
-			// no-ops when they eventually acquire the lock. If rows still
-			// remain, retry so we don't miss them in case the active
-			// batch drained its peek before our op landed.
+			// The lock owner drains its peek and schedules a follow-up when
+			// rows remain. Retrying every duplicate trigger creates a retry
+			// storm without adding durability because pending ops already live
+			// in PostgreSQL. A newly-enqueued op also creates a coalesced wakeup.
 			n, nErr := s.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, payload.KnowledgeBaseID)
 			if nErr != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to read pending count during lock conflict for KB %s: %v", payload.KnowledgeBaseID, nErr)
-				logger.Infof(ctx, "wiki ingest: another batch active for KB %s, deferring to asynq retry", payload.KnowledgeBaseID)
-				return ErrWikiIngestConcurrent
 			}
-			if n == 0 {
-				exitStatus = "active_lock_conflict_empty"
-				logger.Infof(ctx, "wiki ingest: concurrent batch active for KB %s, pending queue empty — skipping", payload.KnowledgeBaseID)
-				return nil
-			}
-			logger.Infof(ctx, "wiki ingest: another batch active for KB %s, deferring to asynq retry", payload.KnowledgeBaseID)
-			return ErrWikiIngestConcurrent
+			logger.Infof(ctx, "wiki ingest: concurrent batch active for KB %s, coalescing trigger (pending=%d)", payload.KnowledgeBaseID, n)
+			return nil
 		}
 		lockAcquired = acquired
 
@@ -178,8 +163,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// In-process mutual exclusion: mirrors the Redis SetNX lock above.
 		if _, loaded := s.liteLocks.LoadOrStore(payload.KnowledgeBaseID, struct{}{}); loaded {
 			exitStatus = "active_lock_conflict"
-			logger.Infof(ctx, "wiki ingest: another batch active for KB %s (lite lock), deferring to asynq retry", payload.KnowledgeBaseID)
-			return ErrWikiIngestConcurrent
+			logger.Infof(ctx, "wiki ingest: another batch active for KB %s (lite lock), coalescing trigger", payload.KnowledgeBaseID)
+			return nil
 		}
 		lockAcquired = true
 		defer s.liteLocks.Delete(payload.KnowledgeBaseID)
@@ -449,6 +434,23 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			}
 
 			if result != nil {
+				newManifest := buildWikiContributionManifest(updates)
+				oldManifest, oldStateFound := s.getWikiContributionState(
+					mapCtx, payload.TenantID, payload.KnowledgeBaseID, result.KnowledgeID,
+				)
+				updates, result.ContributionChangedSlugs = filterUnchangedWikiContributions(
+					updates, oldManifest, newManifest, oldStateFound,
+				)
+				result.ContributionManifest = newManifest
+				result.ContributionStateFound = oldStateFound
+				result.ContributionChanged = !oldStateFound || len(result.ContributionChangedSlugs) > 0
+				if result.MapStats == nil {
+					result.MapStats = types.JSONMap{}
+				}
+				result.MapStats["contribution_state_found"] = oldStateFound
+				result.MapStats["contribution_changed"] = result.ContributionChanged
+				result.MapStats["contribution_changed_slugs"] = len(result.ContributionChangedSlugs)
+
 				mapMu.Lock()
 				ingestSucceeded++
 				docResults = append(docResults, result)
@@ -482,7 +484,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// "finalizing" until the housekeeping sweep marks it
 				// failed. The matching +1 was seeded by
 				// KnowledgePostProcess.SetFinalizing.
-				s.finalizeWikiSubtask(mapCtx, payload.TenantID, op.KnowledgeID, op.RebuildRunID, true, "")
+				s.finalizeWikiSubtask(mapCtx, payload.TenantID, op.KnowledgeID, op.RebuildRunID, op.Attempt, true, "")
 			}
 			return nil
 		})
@@ -594,6 +596,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 	}
 	for _, r := range docResults {
+		if r == nil || !r.ContributionChanged {
+			continue
+		}
 		// Drop any slugs whose page generation failed in reduce so the
 		// log feed never offers a clickable entry that 404s. The summary
 		// page itself (slug = summary/<knowledgeID>) is always created
@@ -624,6 +629,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	var changeDesc strings.Builder
 	if len(docResults) > 0 {
 		for _, r := range docResults {
+			if r == nil || !r.ContributionChanged {
+				continue
+			}
 			if r.RetractOnly {
 				fmt.Fprintf(&changeDesc, "<document_removed>\n<title>%s</title>\n<summary>%s</summary>\n</document_removed>\n\n", r.DocTitle, r.Summary)
 				continue
@@ -723,7 +731,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				break
 			}
 		}
-		s.finalizeWikiSubtask(ctx, payload.TenantID, r.KnowledgeID, r.RebuildRunID, wikiSuccess, wikiError)
+		if wikiSuccess {
+			s.putWikiContributionState(
+				ctx, payload.TenantID, payload.KnowledgeBaseID, r.KnowledgeID, r.ContributionManifest,
+			)
+		}
+		s.finalizeWikiSubtask(ctx, payload.TenantID, r.KnowledgeID, r.RebuildRunID, r.Attempt, wikiSuccess, wikiError)
 		if r.WikiSpan == nil {
 			continue
 		}
@@ -741,11 +754,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			writtenPages = append(writtenPages, entry)
 		}
 		output := types.JSONMap{
-			"pages_written":         len(writtenPages),
-			"pages_dropped":         len(droppedPages),
-			"pages_total":           len(r.Pages),
-			"failed_slug_writes":    failedAdditionSlugCount,
-			"pages_written_preview": writtenPages,
+			"pages_written":              len(writtenPages),
+			"pages_dropped":              len(droppedPages),
+			"pages_total":                len(r.Pages),
+			"failed_slug_writes":         failedAdditionSlugCount,
+			"pages_written_preview":      writtenPages,
+			"contribution_changed":       r.ContributionChanged,
+			"contribution_changed_slugs": len(r.ContributionChangedSlugs),
 		}
 		if len(droppedPages) > 0 {
 			output["pages_dropped_preview"] = droppedPages
@@ -810,7 +825,7 @@ func (s *wikiIngestService) mapOneDocument(
 	// summary + classification) shows up in the trace tree. Returns
 	// nil when the parent attempt is gone (no panic on missing
 	// lookups — span tracker is best-effort).
-	wikiSpan := s.beginWikiSubspan(ctx, knowledgeID, types.JSONMap{
+	wikiSpan := s.beginWikiSubspan(ctx, knowledgeID, op.Attempt, types.JSONMap{
 		"language":          lang,
 		"knowledge_base_id": payload.KnowledgeBaseID,
 	})
@@ -872,6 +887,7 @@ func (s *wikiIngestService) mapOneDocument(
 		return &docIngestResult{
 			KnowledgeID:  knowledgeID,
 			RebuildRunID: op.RebuildRunID,
+			Attempt:      op.Attempt,
 			RetractOnly:  true,
 			DocTitle:     docTitle,
 			Pages:        pages,
@@ -908,13 +924,15 @@ func (s *wikiIngestService) mapOneDocument(
 	// does not leak into citation strings that downstream LLM prompts may
 	// surface during wiki page editing.
 	sourceRef := knowledgeID
-	chunkIDsForCache := make([]string, 0, len(chunks))
-	for _, ch := range chunks {
-		chunkIDsForCache = append(chunkIDsForCache, ch.ID)
-	}
-	mapCacheKey := wikiMapCacheKey(content, payload.KnowledgeBaseID, knowledgeID, lang, synthesisModelID, chunkIDsForCache)
+	granularity := batchCtx.ExtractionGranularity.Normalize()
+	promptBundleHash := wikiMapPromptBundleHash(granularity)
+	mapCacheKey := wikiMapCacheKey(
+		content, payload.KnowledgeBaseID, knowledgeID, lang, string(granularity),
+		synthesisModelID, promptBundleHash,
+	)
 	if cachedResult, cachedUpdates, ok := s.getWikiMapCache(ctx, payload.TenantID, mapCacheKey, wikiSpan, oldPageSlugs, batchCtx, content, lang); ok {
 		cachedResult.RebuildRunID = op.RebuildRunID
+		cachedResult.Attempt = op.Attempt
 		logger.Infof(ctx, "wiki ingest: map cache hit for knowledge %s", knowledgeID)
 		return cachedResult, cachedUpdates, nil
 	}
@@ -1270,6 +1288,7 @@ func (s *wikiIngestService) mapOneDocument(
 	result := &docIngestResult{
 		KnowledgeID:  knowledgeID,
 		RebuildRunID: op.RebuildRunID,
+		Attempt:      op.Attempt,
 		DocTitle:     docTitle,
 		Summary:      docSummaryLine,
 		Pages:        extractedPages,
@@ -1277,13 +1296,27 @@ func (s *wikiIngestService) mapOneDocument(
 		WikiSpan:     wikiSpan,
 	}
 	s.putWikiMapCache(ctx, payload.TenantID, mapCacheKey, result, updates, map[string]string{
-		"knowledge_base_id":  payload.KnowledgeBaseID,
-		"knowledge_id":       knowledgeID,
-		"language":           lang,
-		"synthesis_model_id": synthesisModelID,
+		"knowledge_base_id":      payload.KnowledgeBaseID,
+		"knowledge_id":           knowledgeID,
+		"language":               lang,
+		"synthesis_model_id":     synthesisModelID,
+		"extraction_granularity": string(granularity),
+		"prompt_bundle_hash":     promptBundleHash,
 	})
 
 	return result, updates, nil
+}
+
+func wikiMapPromptBundleHash(granularity types.WikiExtractionGranularity) string {
+	return stableHash(
+		wikiMapPromptVersion,
+		agent.WikiKnowledgeExtractPrompt,
+		agent.WikiCandidateSlugPrompt,
+		agent.WikiGranularityGuidance(string(granularity)),
+		agent.WikiChunkCitationPrompt,
+		agent.WikiSummaryPrompt,
+		agent.WikiDeduplicationPrompt,
+	)
 }
 
 type wikiMapCachePayload struct {
@@ -1685,6 +1718,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	var newContentBuilder strings.Builder
 	var docTitles []string
 	var language string
+	removedSourceRef := false
 
 	if len(retracts) > 0 {
 		language = retracts[0].Language
@@ -1710,6 +1744,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 
 			if retractKIDs[refKnowledgeID] {
+				removedSourceRef = true
 				continue
 			}
 
@@ -1785,6 +1820,18 @@ func (s *wikiIngestService) reduceSlugUpdates(
 				page.PageType = add.Type
 			}
 		}
+	}
+
+	// A generated page has no reason to survive after its last real source is
+	// retracted. Sending this state through the editor model used to persist an
+	// "(empty page)" placeholder, leaving a ghost entry in the index. Only
+	// delete when this batch actually matched and removed a source ref; this
+	// protects manually-authored source-less pages from stale retract payloads.
+	if exists && removedSourceRef && len(additions) == 0 && len(page.SourceRefs) == 0 {
+		if err = s.wikiService.DeletePage(ctx, kbID, slug); err != nil {
+			return false, affectedType, false, err
+		}
+		return true, affectedType, false, nil
 	}
 
 	if len(additions) > 0 || len(retracts) > 0 {

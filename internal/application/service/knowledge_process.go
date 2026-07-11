@@ -502,6 +502,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	chunkDiff := classifyChunkCandidates(oldManagedChunks, insertChunks)
+	for i := range chunks {
+		if rewritten, ok := chunkDiff.IDRewrites[chunks[i].ChunkID]; ok {
+			chunks[i].ChunkID = rewritten
+		}
+	}
 	if err := s.replaceRebuildChunkResults(
 		ctx, knowledge.TenantID, rebuildRunFromCtx(ctx), chunkDiff.Results,
 	); err != nil {
