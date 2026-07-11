@@ -61,6 +61,27 @@ func TestTruncateString(t *testing.T) {
 	}
 }
 
+func TestWikiPageSpanName(t *testing.T) {
+	t.Run("keeps short slugs intact", func(t *testing.T) {
+		const slug = "concept/retrieval-augmented-generation"
+		want := "postprocess.wiki.page[" + slug + "]"
+		if got := wikiPageSpanName(slug); got != want {
+			t.Fatalf("wikiPageSpanName(%q) = %q, want %q", slug, got, want)
+		}
+	})
+
+	t.Run("truncates long slugs within the database limit", func(t *testing.T) {
+		slug := "concept/" + strings.Repeat("long-page-name-", 8)
+		got := wikiPageSpanName(slug)
+		if length := len([]rune(got)); length > maxKnowledgeProcessingSpanNameRunes {
+			t.Fatalf("span name length = %d, want at most %d", length, maxKnowledgeProcessingSpanNameRunes)
+		}
+		if !strings.HasPrefix(got, "postprocess.wiki.page[") || !strings.HasSuffix(got, "…]") {
+			t.Fatalf("unexpected truncated span name %q", got)
+		}
+	})
+}
+
 func TestAppendUnique(t *testing.T) {
 	arr := types.StringArray{"a", "b"}
 

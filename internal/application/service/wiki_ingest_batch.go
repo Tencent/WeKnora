@@ -1637,7 +1637,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			contributors = append(contributors, kid)
 			if pageSpan == nil {
 				if sp, ok := kidToWikiSpan[kid]; ok && sp != nil {
-					pageSpan = s.tracker().BeginSubSpan(ctx, sp, fmt.Sprintf("postprocess.wiki.page[%s]", slug), types.SpanKindSubSpan, types.JSONMap{
+					pageSpan = s.tracker().BeginSubSpan(ctx, sp, wikiPageSpanName(slug), types.SpanKindSubSpan, types.JSONMap{
 						"slug":         slug,
 						"updates":      len(updates),
 						"contributors": contributors,
@@ -1965,6 +1965,21 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	}
 
 	return false, "", additionFailed, nil
+}
+
+const maxKnowledgeProcessingSpanNameRunes = 64
+
+func wikiPageSpanName(slug string) string {
+	const prefix = "postprocess.wiki.page["
+	const truncatedSuffix = "…]"
+
+	name := prefix + slug + "]"
+	if len([]rune(name)) <= maxKnowledgeProcessingSpanNameRunes {
+		return name
+	}
+
+	maxSlugRunes := maxKnowledgeProcessingSpanNameRunes - len([]rune(prefix)) - len([]rune(truncatedSuffix))
+	return prefix + string([]rune(slug)[:maxSlugRunes]) + truncatedSuffix
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones
