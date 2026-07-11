@@ -55,5 +55,9 @@ Claude.md
 configure-ollama.sh
 fix-docker.sh
 
+# Local deployment configuration and backups
+/config/builtin_models.yaml
+/docker-compose.yml.bak-*
+
 # WeChat Mini Program local/private configuration
 miniprogram/project.private.config.json

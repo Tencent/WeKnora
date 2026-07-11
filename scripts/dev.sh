@@ -235,7 +235,7 @@ start_services() {
         echo ""
         log_info "服务访问地址:"
         echo "  - PostgreSQL:    localhost:5432"
-        echo "  - Redis:         localhost:${REDIS_PORT:-6379}"
+        echo "  - Redis:         localhost:6379"
         echo "  - DocReader:     localhost:50051"
         
         # 根据启用的 profile 显示额外服务
@@ -344,11 +344,11 @@ start_app() {
     fi
     
     # 设置本地开发环境变量（覆盖 Docker 容器地址）
-    export DB_HOST=127.0.0.1
+    export DB_HOST=localhost
     export DOCREADER_ADDR=localhost:50051
     export DOCREADER_TRANSPORT=grpc
     export MINIO_ENDPOINT=localhost:9000
-    export REDIS_ADDR=127.0.0.1:${REDIS_PORT:-6379}
+    export REDIS_ADDR=localhost:6379
     export MILVUS_ADDRESS=localhost:19530
     export NEO4J_URI=bolt://localhost:7687
     export QDRANT_HOST=localhost
@@ -372,7 +372,6 @@ start_app() {
     log_info "环境变量已设置，启动应用..."
     log_info "数据库地址: $DB_HOST:${DB_PORT:-5432}"
     
-    export CGO_ENABLED=1
     export CGO_CFLAGS="-Wno-deprecated-declarations -Wno-gnu-folding-constant"
     if [[ "$(uname)" == "Darwin" ]]; then
       export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
@@ -412,8 +411,7 @@ start_frontend() {
     
     log_info "启动 Vite 开发服务器..."
     log_info "前端将运行在 http://localhost:5173"
-    export VITE_DEV_PROXY_TARGET="${VITE_DEV_PROXY_TARGET:-${FRONTEND_BACKEND_URL:-http://localhost:8080}}"
-    log_info "前端 API 代理目标: ${VITE_DEV_PROXY_TARGET}"
+    log_info "前端 API 代理目标: ${VITE_DEV_PROXY_TARGET:-${FRONTEND_BACKEND_URL:-http://localhost:8080}}"
     
     # 运行开发服务器
     npm run dev
