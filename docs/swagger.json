@@ -16270,6 +16270,7 @@
                 "siliconflow",
                 "jina",
                 "openrouter",
+                "requesty",
                 "nvidia",
                 "novita",
                 "azure_openai"
@@ -16289,6 +16290,7 @@
                 "ModelSourceOpenAI": "OpenAI model",
                 "ModelSourceOpenRouter": "OpenRouter model",
                 "ModelSourceRemote": "Remote model",
+                "ModelSourceRequesty": "Requesty model",
                 "ModelSourceSiliconFlow": "SiliconFlow model",
                 "ModelSourceVolcengine": "Volcengine model",
                 "ModelSourceZhipu": "Zhipu model"
@@ -16308,6 +16310,7 @@
                 "SiliconFlow model",
                 "Jina AI model",
                 "OpenRouter model",
+                "Requesty model",
                 "NVIDIA model",
                 "Novita AI model",
                 "Azure OpenAI model"
@@ -16327,6 +16330,7 @@
                 "ModelSourceSiliconFlow",
                 "ModelSourceJina",
                 "ModelSourceOpenRouter",
+                "ModelSourceRequesty",
                 "ModelSourceNvidia",
                 "ModelSourceNovita",
                 "ModelSourceAzureOpenAI"

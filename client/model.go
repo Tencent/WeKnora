@@ -48,6 +48,7 @@ const (
 	ModelSourceSiliconFlow ModelSource = "siliconflow"  // SiliconFlow model
 	ModelSourceJina        ModelSource = "jina"         // Jina AI model
 	ModelSourceOpenRouter  ModelSource = "openrouter"   // OpenRouter model
+	ModelSourceRequesty    ModelSource = "requesty"     // Requesty model
 	ModelSourceNvidia      ModelSource = "nvidia"       // NVIDIA model
 	ModelSourceNovita      ModelSource = "novita"       // Novita AI model
 	ModelSourceAzureOpenAI ModelSource = "azure_openai" // Azure OpenAI model
@@ -63,7 +64,7 @@ func AllModelSources() []ModelSource {
 		ModelSourceLocal, ModelSourceRemote, ModelSourceAliyun, ModelSourceZhipu,
 		ModelSourceVolcengine, ModelSourceDeepseek, ModelSourceHunyuan, ModelSourceMinimax,
 		ModelSourceOpenAI, ModelSourceGemini, ModelSourceMimo, ModelSourceSiliconFlow,
-		ModelSourceJina, ModelSourceOpenRouter, ModelSourceNvidia, ModelSourceNovita,
+		ModelSourceJina, ModelSourceOpenRouter, ModelSourceRequesty, ModelSourceNvidia, ModelSourceNovita,
 		ModelSourceAzureOpenAI,
 	}
 }

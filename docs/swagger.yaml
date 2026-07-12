@@ -2095,6 +2095,7 @@ definitions:
     - siliconflow
     - jina
     - openrouter
+    - requesty
     - nvidia
     - novita
     - azure_openai
@@ -2114,6 +2115,7 @@ definitions:
       ModelSourceOpenAI: OpenAI model
       ModelSourceOpenRouter: OpenRouter model
       ModelSourceRemote: Remote model
+      ModelSourceRequesty: Requesty model
       ModelSourceSiliconFlow: SiliconFlow model
       ModelSourceVolcengine: Volcengine model
       ModelSourceZhipu: Zhipu model
@@ -2132,6 +2134,7 @@ definitions:
     - SiliconFlow model
     - Jina AI model
     - OpenRouter model
+    - Requesty model
     - NVIDIA model
     - Novita AI model
     - Azure OpenAI model
@@ -2150,6 +2153,7 @@ definitions:
     - ModelSourceSiliconFlow
     - ModelSourceJina
     - ModelSourceOpenRouter
+    - ModelSourceRequesty
     - ModelSourceNvidia
     - ModelSourceNovita
     - ModelSourceAzureOpenAI

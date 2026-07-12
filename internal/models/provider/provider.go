@@ -23,6 +23,8 @@ const (
 	ProviderZhipu ProviderName = "zhipu"
 	// OpenRouter
 	ProviderOpenRouter ProviderName = "openrouter"
+	// Requesty
+	ProviderRequesty ProviderName = "requesty"
 	// 硅基流动
 	ProviderSiliconFlow ProviderName = "siliconflow"
 	// Jina AI (Embedding and Rerank)
@@ -83,6 +85,7 @@ func AllProviders() []ProviderName {
 		ProviderAnthropic,
 		ProviderGemini,
 		ProviderOpenRouter,
+		ProviderRequesty,
 		ProviderJina,
 		ProviderMimo,
 		ProviderLongCat,
@@ -224,6 +227,8 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderZhipu
 	case containsAny(baseURL, "openrouter.ai"):
 		return ProviderOpenRouter
+	case containsAny(baseURL, "router.requesty.ai", "requesty.ai"):
+		return ProviderRequesty
 	case containsAny(baseURL, "siliconflow.cn"):
 		return ProviderSiliconFlow
 	case containsAny(baseURL, "api.jina.ai"):

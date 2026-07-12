@@ -551,6 +551,16 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding']
   },
   {
+    value: 'requesty',
+    label: t('model.editor.providers.requesty.label'),
+    defaultUrls: {
+      chat: 'https://router.requesty.ai/v1',
+      embedding: 'https://router.requesty.ai/v1'
+    },
+    description: t('model.editor.providers.requesty.description'),
+    modelTypes: ['chat', 'embedding']
+  },
+  {
     value: 'gemini',
     label: t('model.editor.providers.gemini.label'),
     defaultUrls: {
