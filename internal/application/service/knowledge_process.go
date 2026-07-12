@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	hashutil "github.com/Tencent/WeKnora/internal/utils/hash"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
@@ -382,20 +383,20 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if hasParentChild {
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
-			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
-				TenantID:        knowledge.TenantID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				Content:         pc.Content,
-				ChunkIndex:      pc.Seq,
-				IsEnabled:       true,
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
-				StartAt:         pc.Start,
-				EndAt:           pc.End,
-				ChunkType:       types.ChunkTypeParentText,
-			}
+		parentDBChunks[i] = &types.Chunk{
+			ID:              hashutil.StableParentChunkID(knowledge.ID, pc.Content, pc.Seq),
+			TenantID:        knowledge.TenantID,
+			KnowledgeID:     knowledge.ID,
+			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			Content:         pc.Content,
+			ChunkIndex:      pc.Seq,
+			IsEnabled:       true,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+			StartAt:         pc.Start,
+			EndAt:           pc.End,
+			ChunkType:       types.ChunkTypeParentText,
+		}
 		}
 		// Set prev/next links for parent chunks
 		for i := range parentDBChunks {
@@ -420,9 +421,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			continue
 		}
 
-		// 创建主文本Chunk
+		// 创建主文本Chunk (stable ID for cache reuse across reparses)
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              hashutil.StableChunkID(knowledge.ID, chunkData.Content, int(chunkData.Seq)),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
