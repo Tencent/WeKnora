@@ -13,7 +13,7 @@
           <p class="desc">{{ $t('knowledgeEditor.feedback.lowQualityChunksDesc') }}</p>
         </div>
         <div class="setting-control">
-          <t-button variant="outline" @click="showLowQualityDialog = true">
+          <t-button variant="outline" @click="openLowQualityDialog">
             {{ $t('knowledgeEditor.feedback.viewLowQuality') }}
           </t-button>
         </div>
@@ -99,7 +99,7 @@
           </template>
           <template #operations="{ row }">
             <t-button size="small" variant="text" @click="viewChunkStats(row.chunk_id)">
-              {{ $t('common.view') }}
+              {{ $t('knowledgeEditor.feedback.viewDetails') }}
             </t-button>
             <t-button size="small" variant="text" @click="resetChunkFeedbackHandler(row.chunk_id)">
               {{ $t('knowledgeEditor.feedback.reset') }}
@@ -262,8 +262,10 @@ const loadStats = async () => {
 // 加载低质量片段
 const loadLowQualityChunks = async () => {
   try {
+    const parsedMaxRate = Number(filterMaxRate.value)
+    const maxRate = Number.isFinite(parsedMaxRate) && parsedMaxRate > 0 ? parsedMaxRate : 0.5
     const res = await listLowQualityChunks({
-      max_rate: filterMaxRate.value,
+      max_rate: maxRate,
       limit: pageSize.value,
       offset: (currentPage.value - 1) * pageSize.value,
     })
@@ -275,6 +277,12 @@ const loadLowQualityChunks = async () => {
     console.error('加载低质量片段失败:', error)
     MessagePlugin.error(t('knowledgeEditor.feedback.messages.loadFailed'))
   }
+}
+
+const openLowQualityDialog = () => {
+  showLowQualityDialog.value = true
+  currentPage.value = 1
+  loadLowQualityChunks()
 }
 
 // 查看片段详情
@@ -323,6 +331,7 @@ const getStatusTheme = (status: string) => {
   const map: Record<string, string> = {
     normal: 'default',
     pending_optimization: 'warning',
+    needs_optimization: 'danger',
     optimizing: 'primary',
     optimized: 'success',
   }

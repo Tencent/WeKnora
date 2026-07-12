@@ -3433,6 +3433,7 @@ export default {
       totalFeedbacks: "总反馈数",
       lowQualityList: "低质量片段列表",
       maxRate: "最高好评率",
+      viewDetails: "查看",
       reset: "重置",
       chunkDetail: "片段详情",
       chunkId: "片段 ID",
@@ -3460,15 +3461,19 @@ export default {
       status: {
         normal: "正常",
         pending_optimization: "待优化",
+        needs_optimization: "待优化",
         optimizing: "优化中",
         optimized: "已优化",
       },
       weightLogActions: {
         adjust_weight: "自动调整",
+        increase: "权重上调",
+        decrease: "权重下调",
         reset: "重置",
         manual_set: "手动设置",
       },
       weightLogTriggers: {
+        user_feedback: "用户反馈",
         user_like: "用户点赞",
         user_dislike: "用户点踩",
         user_cancel: "用户取消",

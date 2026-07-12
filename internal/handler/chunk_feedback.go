@@ -199,7 +199,10 @@ func (h *ChunkFeedbackHandler) GetChunkStats(c *gin.Context) {
 // @Security Bearer
 // @Router /chunks/low-quality [get]
 func (h *ChunkFeedbackHandler) ListLowQualityChunks(c *gin.Context) {
-	maxRate, _ := strconv.ParseFloat(c.DefaultQuery("max_rate", "0.5"), 64)
+	maxRate, err := strconv.ParseFloat(c.DefaultQuery("max_rate", "0.5"), 64)
+	if err != nil || maxRate <= 0 {
+		maxRate = 0.5
+	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 

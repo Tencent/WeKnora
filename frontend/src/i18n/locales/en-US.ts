@@ -2528,6 +2528,7 @@ export default {
       totalFeedbacks: 'Total Feedback',
       lowQualityList: 'Low-quality Chunk List',
       maxRate: 'Maximum positive rate',
+      viewDetails: 'View',
       reset: 'Reset',
       chunkDetail: 'Chunk Detail',
       chunkId: 'Chunk ID',
@@ -2555,15 +2556,19 @@ export default {
       status: {
         normal: 'Normal',
         pending_optimization: 'Needs Optimization',
+        needs_optimization: 'Needs Optimization',
         optimizing: 'Optimizing',
         optimized: 'Optimized',
       },
       weightLogActions: {
         adjust_weight: 'Auto adjusted',
+        increase: 'Weight increased',
+        decrease: 'Weight decreased',
         reset: 'Reset',
         manual_set: 'Manual set',
       },
       weightLogTriggers: {
+        user_feedback: 'User feedback',
         user_like: 'User like',
         user_dislike: 'User dislike',
         user_cancel: 'User cancel',
