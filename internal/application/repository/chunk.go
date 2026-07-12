@@ -179,44 +179,44 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 
 			// Document type: search content only
 			if knowledgeType != types.KnowledgeTypeFAQ {
-				db = db.Where("content LIKE ?", like)
+				db = db.Where(caseInsensitiveLikeCondition(db, "content"), like)
 				return db
 			}
 
 			// FAQ type: search based on searchField
 			// 根据数据库类型使用不同的 JSON 查询语法
-			isPostgres := db.Dialector.Name() == "postgres"
+			isPostgres := isPostgres(db)
 
 			switch searchField {
 			case "standard_question":
 				// Search only in standard_question field of metadata
 				if isPostgres {
-					db = db.Where("metadata->>'standard_question' ILIKE ?", like)
+					db = db.Where(caseInsensitiveLikeCondition(db, jsonTextExpr(db, "metadata", "standard_question")), like)
 				} else {
 					// MySQL: metadata->>'$.standard_question' (MySQL 5.7.13+)
 					// 也可以用 JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))
-					db = db.Where("metadata->>'$.standard_question' LIKE ?", like)
+					db = db.Where(caseInsensitiveLikeCondition(db, jsonTextExpr(db, "metadata", "standard_question")), like)
 				}
 			case "similar_questions":
 				// Search in similar_questions array of metadata
 				if isPostgres {
-					db = db.Where("(metadata->'similar_questions')::text ILIKE ?", like)
+					db = db.Where(caseInsensitiveLikeCondition(db, jsonTextCastExpr(db, "metadata")), like)
 				} else {
-					db = db.Where("JSON_EXTRACT(metadata, '$.similar_questions') LIKE ?", like)
+					db = db.Where(caseInsensitiveLikeCondition(db, jsonTextCastExpr(db, "metadata")), like)
 				}
 			case "answers":
 				// Search in answers array of metadata
 				if isPostgres {
-					db = db.Where("(metadata->'answers')::text ILIKE ?", like)
+					db = db.Where(caseInsensitiveLikeCondition(db, jsonTextCastExpr(db, "metadata")), like)
 				} else {
-					db = db.Where("JSON_EXTRACT(metadata, '$.answers') LIKE ?", like)
+					db = db.Where(caseInsensitiveLikeCondition(db, jsonTextCastExpr(db, "metadata")), like)
 				}
 			default:
 				// Search in all fields (content and metadata)
 				if isPostgres {
-					db = db.Where("(content ILIKE ? OR metadata::text ILIKE ?)", like, like)
+					db = db.Where("("+caseInsensitiveLikeCondition(db, "content")+" OR "+caseInsensitiveLikeCondition(db, jsonTextCastExpr(db, "metadata"))+")", like, like)
 				} else {
-					db = db.Where("(content LIKE ? OR CAST(metadata AS CHAR) LIKE ?)", like, like)
+					db = db.Where("("+caseInsensitiveLikeCondition(db, "content")+" OR "+caseInsensitiveLikeCondition(db, jsonTextCastExpr(db, "metadata"))+")", like, like)
 				}
 			}
 		}
@@ -377,7 +377,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
+	isPostgres := isPostgres(r.db)
 
 	var sql string
 	if isPostgres {
@@ -406,7 +406,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = CASE %s END,
 				status = CASE %s END,
-				updated_at = datetime('now')
+				updated_at = %s
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -414,6 +414,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(tagIDCases, " "),
 			strings.Join(flagsCases, " "),
 			strings.Join(statusCases, " "),
+			nowSQL(r.db),
 			strings.Join(inPlaceholders, ","),
 		)
 	}
@@ -663,7 +664,7 @@ func (r *chunkRepository) FindFAQChunkWithDuplicateQuestion(
 		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status = ? AND id != ?",
 			tenantID, kbID, types.ChunkTypeFAQ, types.ChunkStatusIndexed, excludeChunkID)
 
-	switch r.db.Name() {
+	switch dialectName(r.db) {
 	case "mysql":
 		// MySQL 5.7+: JSON_EXTRACT for standard_question, JSON_CONTAINS for similar_questions
 		parts := []string{
@@ -994,10 +995,7 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 	}
 	query = query.Where("("+strings.Join(scopeClauses, " OR ")+")", scopeArgs...)
 
-	orderClause := "RANDOM()"
-	if r.db.Dialector.Name() == "mysql" {
-		orderClause = "RAND()"
-	}
+	orderClause := randomOrderSQL(r.db)
 
 	if err := query.
 		Order(orderClause).
@@ -1040,13 +1038,10 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 		baseQuery = baseQuery.Where("knowledge_base_id IN ?", kbIDs)
 	}
 
-	orderClause := "RANDOM()"
-	if r.db.Dialector.Name() == "mysql" {
-		orderClause = "RAND()"
-	}
+	orderClause := randomOrderSQL(r.db)
 
 	// Query chunks that have non-empty generated_questions in metadata
-	switch r.db.Name() {
+	switch dialectName(r.db) {
 	case "postgres":
 		if err := baseQuery.
 			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").

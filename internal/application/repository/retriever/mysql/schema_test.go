@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 )
 
@@ -39,7 +40,7 @@ func TestCreateTableSQLTemplate(t *testing.T) {
 	}
 
 	for _, elem := range expectedElements {
-		if !contains(createTableTpl, elem) {
+		if !containsNormalized(createTableTpl, elem) {
 			t.Errorf("Table template missing expected element: %s", elem)
 		}
 	}
@@ -108,16 +109,6 @@ func TestTableNameUniqueness(t *testing.T) {
 	}
 }
 
-// contains is a helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+func containsNormalized(s, substr string) bool {
+	return strings.Contains(strings.Join(strings.Fields(s), " "), strings.Join(strings.Fields(substr), " "))
 }

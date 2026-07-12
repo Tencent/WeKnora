@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // taskPendingOpsRepository implements interfaces.TaskPendingOpsRepository.
@@ -125,11 +126,12 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if isPostgres(tx) || isMySQL(tx) {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
-			// the locked anchors back to their dedup_keys. The NOT IN subquery
-			// drops any key that still has a fresh (non-stale) claim.
+			// the locked anchors back to their dedup_keys. MySQL 8+ supports
+			// the same row-locking primitive, which keeps primary DB mode
+			// concurrency-safe instead of falling back to a racy grouped SELECT.
 			const anchorSQL = `
 SELECT dedup_key FROM task_pending_ops
 WHERE id IN (
@@ -229,14 +231,36 @@ func (r *taskPendingOpsRepository) DeleteByIDs(ctx context.Context, ids []int64)
 }
 
 // IncrFailCount atomically bumps fail_count for one row and returns the
-// new value. We use UPDATE ... RETURNING so the read+write happens in
-// one round trip and races between concurrent IncrFailCount callers
-// resolve to monotonic counts.
+// new value. PostgreSQL/SQLite use UPDATE ... RETURNING; MySQL uses a
+// SELECT ... FOR UPDATE transaction because it does not support UPDATE
+// RETURNING.
 //
 // A missing row returns (0, nil): the caller's ID may have been removed
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
 	var newCount int
+	if isMySQL(r.db) {
+		err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var op types.TaskPendingOp
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Select("id", "fail_count").
+				Where("id = ?", id).
+				First(&op).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+			newCount = op.FailCount + 1
+			return tx.Model(&types.TaskPendingOp{}).
+				Where("id = ?", id).
+				Update("fail_count", newCount).Error
+		})
+		if err != nil {
+			return 0, err
+		}
+		return newCount, nil
+	}
 	err := r.db.WithContext(ctx).Raw(
 		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
 		id,

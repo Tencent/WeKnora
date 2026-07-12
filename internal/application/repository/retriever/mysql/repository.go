@@ -238,7 +238,99 @@ func (r *mysqlRepository) deleteByField(
 	return nil
 }
 
-// Retrieve 根据类型分发检索请求。
+// BatchUpdateChunkEnabledStatus updates is_enabled for chunks across all
+// dimension tables owned by this MySQL retriever.
+func (r *mysqlRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, chunkStatusMap map[string]bool) error {
+	if len(chunkStatusMap) == 0 {
+		return nil
+	}
+	tables, err := r.listEmbeddingTables(ctx)
+	if err != nil {
+		return fmt.Errorf("list embedding tables: %w", err)
+	}
+	for _, table := range tables {
+		for enabled, chunkIDs := range groupChunkStatus(chunkStatusMap) {
+			if err := r.updateChunkField(ctx, table, "is_enabled", enabled, chunkIDs); err != nil {
+				return fmt.Errorf("update chunk enabled status in %s: %w", table, err)
+			}
+		}
+	}
+	return nil
+}
+
+// BatchUpdateChunkTagID updates tag_id for chunks across all dimension tables
+// owned by this MySQL retriever.
+func (r *mysqlRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error {
+	if len(chunkTagMap) == 0 {
+		return nil
+	}
+	tables, err := r.listEmbeddingTables(ctx)
+	if err != nil {
+		return fmt.Errorf("list embedding tables: %w", err)
+	}
+	for _, table := range tables {
+		for tagID, chunkIDs := range groupChunkTags(chunkTagMap) {
+			if err := r.updateChunkField(ctx, table, "tag_id", tagID, chunkIDs); err != nil {
+				return fmt.Errorf("update chunk tag in %s: %w", table, err)
+			}
+		}
+	}
+	return nil
+}
+
+func groupChunkStatus(chunkStatusMap map[string]bool) map[bool][]string {
+	groups := map[bool][]string{
+		true:  {},
+		false: {},
+	}
+	for chunkID, enabled := range chunkStatusMap {
+		if chunkID == "" {
+			continue
+		}
+		groups[enabled] = append(groups[enabled], chunkID)
+	}
+	return groups
+}
+
+func groupChunkTags(chunkTagMap map[string]string) map[string][]string {
+	groups := make(map[string][]string)
+	for chunkID, tagID := range chunkTagMap {
+		if chunkID == "" {
+			continue
+		}
+		groups[tagID] = append(groups[tagID], chunkID)
+	}
+	return groups
+}
+
+func (r *mysqlRepository) updateChunkField(
+	ctx context.Context,
+	table string,
+	field string,
+	value interface{},
+	chunkIDs []string,
+) error {
+	if len(chunkIDs) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(chunkIDs))
+	args := make([]interface{}, 0, len(chunkIDs)+1)
+	args = append(args, value)
+	for i, id := range chunkIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	stmt := fmt.Sprintf(
+		"UPDATE %s SET %s = ? WHERE chunk_id IN (%s)",
+		quoteIdentifier(table),
+		field,
+		strings.Join(placeholders, ", "),
+	)
+	_, err := r.db.ExecContext(ctx, stmt, args...)
+	return err
+}
+
+// Retrieve dispatches MySQL retrieval requests by retriever type.
 func (r *mysqlRepository) Retrieve(
 	ctx context.Context,
 	params types.RetrieveParams,

@@ -1,9 +1,12 @@
 package mysql
 
 import (
+	"context"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -60,6 +63,63 @@ func TestBuildKeywordRetrieveSQLPlacesFullTextQueryBeforeFilters(t *testing.T) {
 		if args[i] != wantArgs[i] {
 			t.Fatalf("args[%d] = %#v, want %#v; all args=%#v", i, args[i], wantArgs[i], args)
 		}
+	}
+}
+
+func TestBatchUpdateChunkEnabledStatusUpdatesEveryEmbeddingTable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.MatchExpectationsInOrder(false)
+
+	repo := &mysqlRepository{db: db, database: "weknora", tablePrefix: defaultTablePrefix}
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT TABLE_NAME FROM information_schema.tables
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME LIKE ?`)).
+		WithArgs("weknora", defaultTablePrefix+"%").
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow("weknora_embeddings_768"))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `weknora_embeddings_768` SET is_enabled = ? WHERE chunk_id IN (?)")).
+		WithArgs(true, "chunk-enabled").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `weknora_embeddings_768` SET is_enabled = ? WHERE chunk_id IN (?)")).
+		WithArgs(false, "chunk-disabled").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err = repo.BatchUpdateChunkEnabledStatus(context.Background(), map[string]bool{
+		"chunk-enabled":  true,
+		"chunk-disabled": false,
+	})
+	if err != nil {
+		t.Fatalf("BatchUpdateChunkEnabledStatus() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestBatchUpdateChunkTagIDUpdatesEveryEmbeddingTable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := &mysqlRepository{db: db, database: "weknora", tablePrefix: defaultTablePrefix}
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT TABLE_NAME FROM information_schema.tables
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME LIKE ?`)).
+		WithArgs("weknora", defaultTablePrefix+"%").
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).AddRow("weknora_embeddings_1024"))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE `weknora_embeddings_1024` SET tag_id = ? WHERE chunk_id IN (?)")).
+		WithArgs("tag-a", "chunk-a").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err = repo.BatchUpdateChunkTagID(context.Background(), map[string]string{"chunk-a": "tag-a"})
+	if err != nil {
+		t.Fatalf("BatchUpdateChunkTagID() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
 	}
 }
 

@@ -262,7 +262,11 @@ func (r *userRepository) SearchUsers(ctx context.Context, query string, limit in
 	searchPattern := "%" + query + "%"
 
 	dbQuery := r.db.WithContext(ctx).
-		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where(
+			caseInsensitiveLikeCondition(r.db, "username")+" OR "+
+				caseInsensitiveLikeCondition(r.db, "email"),
+			searchPattern, searchPattern,
+		).
 		Where("is_active = ?", true).
 		Order("username ASC")
 
