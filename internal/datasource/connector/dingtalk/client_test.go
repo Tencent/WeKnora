@@ -45,7 +45,7 @@ func TestTruncate(t *testing.T) {
 		{"exactly10!", 10, "exactly10!"},
 		{"this is longer", 10, "this is lo..."},
 		{"", 10, ""},
-		{"中文测试", 5, "中文测..."},
+		{"中文测试", 5, "中..."},
 	}
 
 	for _, tt := range tests {

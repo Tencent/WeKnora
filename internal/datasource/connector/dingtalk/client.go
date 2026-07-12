@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -270,7 +271,18 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	if maxLen <= 0 {
+		return "..."
+	}
+	result := s[:maxLen]
+	for len(result) > 0 {
+		r, size := utf8.DecodeLastRuneInString(result)
+		if r != utf8.RuneError || size != 1 {
+			break
+		}
+		result = result[:len(result)-1]
+	}
+	return result + "..."
 }
 
 // Ping verifies the credentials by calling workspaces endpoint.

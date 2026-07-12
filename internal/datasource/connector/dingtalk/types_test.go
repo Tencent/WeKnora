@@ -7,7 +7,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -102,10 +101,15 @@ func TestParseDingTalkConfig_NilConfig(t *testing.T) {
 
 func TestParseDingTalkConfig_InvalidCredentials(t *testing.T) {
 	_, err := parseDingTalkConfig(&types.DataSourceConfig{
-		Credentials: "not-a-map",
+		Credentials: map[string]interface{}{
+			"client_id":     "dingabc123",
+			"client_secret": "secret456",
+			"operator_id":   "user789",
+			"bad_value":     make(chan struct{}),
+		},
 	})
 	if err == nil {
-		t.Fatal("expected error for invalid credentials type")
+		t.Fatal("expected error for credentials that cannot be marshaled")
 	}
 }
 
@@ -247,11 +251,11 @@ func TestRedactClientID(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"dingabc123def", "ding...cdef"},
+		{"dingabc123def", "ding...3def"},
 		{"1234", "***"},
 		{"", "***"},
 		{"short", "***"},
-		{"exactly8chars", "exac...chars"},
+		{"exactly8chars", "exac...hars"},
 	}
 
 	for _, tt := range tests {

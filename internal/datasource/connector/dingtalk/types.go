@@ -268,6 +268,10 @@ func sanitizeFileName(name string) string {
 		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_",
 	)
 	result := replacer.Replace(name)
+	result = strings.Trim(result, " ._")
+	if result == "" {
+		return "untitled"
+	}
 	const maxBytes = 200
 	if len(result) > maxBytes {
 		result = result[:maxBytes]
@@ -277,6 +281,10 @@ func sanitizeFileName(name string) string {
 				break
 			}
 			result = result[:len(result)-1]
+		}
+		result = strings.Trim(result, " ._")
+		if result == "" {
+			return "untitled"
 		}
 	}
 	return result
