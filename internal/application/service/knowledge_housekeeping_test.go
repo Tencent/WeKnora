@@ -262,3 +262,87 @@ func TestHousekeeping_PreservesRecentlyTouched(t *testing.T) {
 	assert.Equal(t, types.ParseStatusProcessing, status,
 		"knowledge updated within the cutoff must be left alone")
 }
+
+func TestHousekeeping_ClosesResidualSpanForTerminalKnowledge(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-completed", types.ParseStatusCompleted, stale)
+	insertSpan(t, db, "kid-completed", 1, "wiki-page-old", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status, errorCode string
+	require.NoError(t, db.Raw(
+		`SELECT status, error_code FROM knowledge_processing_spans WHERE knowledge_id = ? AND span_id = ?`,
+		"kid-completed", "wiki-page-old",
+	).Row().Scan(&status, &errorCode))
+	assert.Equal(t, types.SpanStatusFailed, status)
+	assert.Equal(t, "ORPHANED_SPAN", errorCode)
+}
+
+func TestHousekeeping_ClosesSupersededAttemptSpan(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-reparse", types.ParseStatusProcessing, time.Now())
+	insertSpan(t, db, "kid-reparse", 1, "old-attempt", types.SpanStatusRunning, stale)
+	insertSpan(t, db, "kid-reparse", 2, "current-attempt", types.SpanStatusRunning, time.Now())
+
+	svc.runSweep(context.Background())
+
+	var oldStatus, currentStatus string
+	require.NoError(t, db.Raw(
+		`SELECT status FROM knowledge_processing_spans WHERE knowledge_id = ? AND span_id = ?`,
+		"kid-reparse", "old-attempt",
+	).Row().Scan(&oldStatus))
+	require.NoError(t, db.Raw(
+		`SELECT status FROM knowledge_processing_spans WHERE knowledge_id = ? AND span_id = ?`,
+		"kid-reparse", "current-attempt",
+	).Row().Scan(&currentStatus))
+	assert.Equal(t, types.SpanStatusFailed, oldStatus)
+	assert.Equal(t, types.SpanStatusRunning, currentStatus)
+}
+
+func TestHousekeeping_PreservesLatestOpenSpanForActiveKnowledge(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		queued: map[string]bool{"kid-finalizing": true},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-finalizing", types.ParseStatusFinalizing, stale)
+	insertSpan(t, db, "kid-finalizing", 1, "wiki-current", types.SpanStatusRunning, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT status FROM knowledge_processing_spans WHERE knowledge_id = ? AND span_id = ?`,
+		"kid-finalizing", "wiki-current",
+	).Row().Scan(&status))
+	assert.Equal(t, types.SpanStatusRunning, status,
+		"the latest attempt of an active knowledge must not be treated as residual")
+}
+
+func TestHousekeeping_DeletesOnlyExpiredTerminalSpans(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	old := time.Now().Add(-31 * 24 * time.Hour)
+	recent := time.Now().Add(-24 * time.Hour)
+	insertSpan(t, db, "kid-retention", 1, "old-done", types.SpanStatusDone, old)
+	insertSpan(t, db, "kid-retention", 1, "recent-failed", types.SpanStatusFailed, recent)
+	insertSpan(t, db, "kid-retention", 1, "old-running", types.SpanStatusRunning, old)
+
+	svc.runSweep(context.Background())
+
+	var oldDone, recentFailed, oldRunning int64
+	require.NoError(t, db.Model(&types.KnowledgeProcessingSpan{}).
+		Where("span_id = ?", "old-done").Count(&oldDone).Error)
+	require.NoError(t, db.Model(&types.KnowledgeProcessingSpan{}).
+		Where("span_id = ?", "recent-failed").Count(&recentFailed).Error)
+	require.NoError(t, db.Model(&types.KnowledgeProcessingSpan{}).
+		Where("span_id = ?", "old-running").Count(&oldRunning).Error)
+	assert.Zero(t, oldDone)
+	assert.Equal(t, int64(1), recentFailed)
+	assert.Equal(t, int64(1), oldRunning, "retention cleanup must never delete an open span")
+}

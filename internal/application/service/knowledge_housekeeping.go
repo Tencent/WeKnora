@@ -33,6 +33,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const processingSpanRetention = 30 * 24 * time.Hour
+
 // HousekeepingService runs background sweeps to recover stuck rows.
 type HousekeepingService struct {
 	db   *gorm.DB
@@ -193,7 +195,15 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 			queueSkipped)
 	}
 
-	// Sweep B: knowledge summary stuck. Summary is post-parse; threshold
+	// Sweep B: close orphaned processing spans without changing the parent
+	// knowledge lifecycle. A span is safe to fail only when its knowledge is
+	// already terminal (or deleted), or when a newer attempt has superseded it.
+	// The same stale cutoff protects short commit races where the knowledge row
+	// reaches a terminal state just before the worker persists its final span.
+	h.cleanupResidualSpans(ctx, cutoff)
+	h.purgeExpiredProcessingSpans(ctx, time.Now().Add(-processingSpanRetention))
+
+	// Sweep C: knowledge summary stuck. Summary is post-parse; threshold
 	// is shorter because summary tasks are bounded by a single LLM call.
 	// No span heartbeat exists for the summary stage (it lives in a
 	// downstream asynq task), so we accept the original simple check.
@@ -205,6 +215,103 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		logger.Warnf(ctx, "[Housekeeping] summary sweep failed: %v", resSummary.Error)
 	} else if resSummary.RowsAffected > 0 {
 		logger.Infof(ctx, "[Housekeeping] recovered %d stuck summary rows", resSummary.RowsAffected)
+	}
+}
+
+// purgeExpiredProcessingSpans bounds trace-table growth while preserving all
+// active work and the most recent 30 days of terminal processing history.
+func (h *HousekeepingService) purgeExpiredProcessingSpans(ctx context.Context, cutoff time.Time) {
+	terminalStatuses := []string{
+		types.SpanStatusDone,
+		types.SpanStatusFailed,
+		types.SpanStatusSkipped,
+		types.SpanStatusCancelled,
+	}
+	res := h.db.WithContext(ctx).
+		Where("status IN ? AND updated_at < ?", terminalStatuses, cutoff).
+		Delete(&types.KnowledgeProcessingSpan{})
+	if res.Error != nil {
+		logger.Warnf(ctx, "[Housekeeping] processing span retention cleanup failed: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		logger.Infof(ctx, "[Housekeeping] deleted %d terminal processing spans older than %s",
+			res.RowsAffected, processingSpanRetention)
+	}
+}
+
+// cleanupResidualSpans marks stale pending/running spans as failed when they
+// can no longer represent live work. It deliberately does not modify the
+// parent knowledge row, rebuild-run state, task queue, or Wiki lock.
+func (h *HousekeepingService) cleanupResidualSpans(ctx context.Context, cutoff time.Time) {
+	now := time.Now()
+	terminalKnowledgeStatuses := []string{
+		types.ParseStatusCompleted,
+		types.ParseStatusFailed,
+		types.ParseStatusCancelled,
+	}
+	openSpanStatuses := []string{types.SpanStatusPending, types.SpanStatusRunning}
+
+	type spanIDRow struct {
+		ID int64 `gorm:"column:id"`
+	}
+	ids := make(map[int64]struct{})
+	var terminalRows []spanIDRow
+	if err := h.db.WithContext(ctx).
+		Table("knowledge_processing_spans AS spans").
+		Select("spans.id").
+		Joins("LEFT JOIN knowledges k ON k.id = spans.knowledge_id").
+		Where("spans.status IN ? AND spans.updated_at < ?", openSpanStatuses, cutoff).
+		Where("k.id IS NULL OR k.parse_status IN ? OR k.deleted_at IS NOT NULL", terminalKnowledgeStatuses).
+		Find(&terminalRows).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] residual terminal-span query failed: %v", err)
+		return
+	}
+	for _, row := range terminalRows {
+		ids[row.ID] = struct{}{}
+	}
+
+	var supersededRows []spanIDRow
+	latestAttempts := h.db.WithContext(ctx).
+		Table("knowledge_processing_spans").
+		Select("knowledge_id, MAX(attempt) AS latest_attempt").
+		Group("knowledge_id")
+	if err := h.db.WithContext(ctx).
+		Table("knowledge_processing_spans AS spans").
+		Select("spans.id").
+		Joins("JOIN (?) AS latest ON latest.knowledge_id = spans.knowledge_id", latestAttempts).
+		Where("spans.status IN ? AND spans.updated_at < ?", openSpanStatuses, cutoff).
+		Where("spans.attempt < latest.latest_attempt").
+		Find(&supersededRows).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] residual superseded-span query failed: %v", err)
+		return
+	}
+	for _, row := range supersededRows {
+		ids[row.ID] = struct{}{}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	spanIDs := make([]int64, 0, len(ids))
+	for id := range ids {
+		spanIDs = append(spanIDs, id)
+	}
+	res := h.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+		Where("id IN ? AND status IN ?", spanIDs, openSpanStatuses).
+		Updates(map[string]interface{}{
+			"status":        types.SpanStatusFailed,
+			"error_code":    "ORPHANED_SPAN",
+			"error_message": "stale processing span closed by housekeeping",
+			"finished_at":   now,
+			"updated_at":    now,
+		})
+	if res.Error != nil {
+		logger.Warnf(ctx, "[Housekeeping] residual span cleanup failed: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		logger.Infof(ctx, "[Housekeeping] closed %d residual processing spans", res.RowsAffected)
 	}
 }
 
