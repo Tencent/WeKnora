@@ -1077,6 +1077,10 @@ func (s *wikiIngestService) mapOneDocument(
 	op WikiPendingOp,
 	batchCtx *WikiBatchContext,
 ) (*docIngestResult, []SlugUpdate, error) {
+	// Only the per-document map phase is content-addressed. Reduce continues
+	// to use the uncached model because it depends on the live contributions
+	// of every document in the knowledge base.
+	chatModel = cacheArtifactChat(s.redisClient, chatModel, "wiki-map-v1")
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
 	lang := types.LanguageLocaleName(op.Language)

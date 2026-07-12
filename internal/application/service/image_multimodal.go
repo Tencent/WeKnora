@@ -18,7 +18,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -206,6 +205,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
 	}
+	vlmModel = cacheVLM(s.redisClient, vlmModel)
 	// Capture the resolved VLM model id (or "legacy_inline" for the
 	// legacy inline-config path) so the trace shows WHICH model handled
 	// this image. Without this, debugging "VLM is slow" requires a
@@ -278,7 +278,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              contentAddressedChunkID(payload.KnowledgeID, "ocr:"+payload.ImageURL, 0, imageInfo.OCRText),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -295,7 +295,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              contentAddressedChunkID(payload.KnowledgeID, "caption:"+payload.ImageURL, 0, imageInfo.Caption),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -399,6 +399,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: %v", err)
 		return
 	}
+	embeddingModel = cacheEmbeddingModel(s.redisClient, embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {

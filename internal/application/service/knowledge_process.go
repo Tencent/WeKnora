@@ -277,6 +277,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
 			return
 		}
+		embeddingModel = cacheEmbeddingModel(s.redisClient, embeddingModel)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
@@ -383,7 +384,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              contentAddressedChunkID(knowledge.ID, "parent", int(pc.Seq), pc.Content),
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -422,7 +423,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// 创建主文本Chunk
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              contentAddressedChunkID(knowledge.ID, "text", int(chunkData.Seq), chunkData.Content),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -823,6 +824,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		"language": types.LanguageNameFromContext(ctx),
 	})
 	thinking := false
+	summaryModel = cacheArtifactChat(s.redisClient, summaryModel, "document-summary-v1")
 	summary, err := summaryModel.Chat(ctx, []chat.Message{
 		{
 			Role:    "system",
@@ -1117,7 +1119,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
 		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              contentAddressedChunkID(knowledge.ID, "summary", maxChunkIndex+1, summary),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -1162,6 +1164,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			summaryErr = err
 			return fmt.Errorf("failed to get embedding model: %w", err)
 		}
+		embeddingModel = cacheEmbeddingModel(s.redisClient, embeddingModel)
 
 		indexInfo := []*types.IndexInfo{{
 			Content:         summaryChunk.Content,
@@ -1432,6 +1435,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = cacheEmbeddingModel(s.redisClient, embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -1728,6 +1732,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = cacheEmbeddingModel(s.redisClient, embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -1911,6 +1916,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	})
 
 	thinking := false
+	chatModel = cacheArtifactChat(s.redisClient, chatModel, "chunk-questions-v1")
 	response, err := chatModel.Chat(ctx, []chat.Message{
 		{
 			Role:    "user",
@@ -2358,6 +2364,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 	if err != nil {
 		return err
 	}
+	embeddingModel = cacheEmbeddingModel(s.redisClient, embeddingModel)
 
 	// Initialize composite retrieve engine from tenant configuration
 	indexInfo := make([]*types.IndexInfo, 0, len(chunks))
@@ -2483,7 +2490,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new caption chunk if it doesn't exist and we have caption data
 	if !hasCaptionChunk && image.Caption != "" {
 		captionChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              contentAddressedChunkID(chunk.KnowledgeID, "caption:"+image.OriginalURL, 0, image.Caption),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
@@ -2499,7 +2506,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new OCR chunk if it doesn't exist and we have OCR data
 	if !hasOCRChunk && image.OCRText != "" {
 		ocrChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              contentAddressedChunkID(chunk.KnowledgeID, "ocr:"+image.OriginalURL, 0, image.OCRText),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
@@ -3168,7 +3175,7 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
-	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	result, err := s.readDocumentCached(ctx, reader, req)
 	if err != nil {
 		// Distinguish DocReader timeout (a knowable user-facing
 		// failure) from generic read errors so the UI can suggest
