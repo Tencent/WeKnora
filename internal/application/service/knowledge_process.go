@@ -838,7 +838,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		"language": types.LanguageNameFromContext(ctx),
 	})
 	thinking := false
-	summary, err := summaryModel.Chat(ctx, []chat.Message{
+	messages := []chat.Message{
 		{
 			Role:    "system",
 			Content: summaryPrompt,
@@ -847,15 +847,24 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 			Role:    "user",
 			Content: contentWithMetadata,
 		},
-	}, &chat.ChatOptions{
+	}
+	opts := &chat.ChatOptions{
 		Temperature: 0.3,
 		MaxTokens:   maxTokens,
 		Thinking:    &thinking,
-	})
+	}
+	cacheKey := postprocessLLMCacheKey("summary", summaryModel, messages, opts, "summary-v1")
+	if cached, ok := s.getCachedPostprocessLLMText(ctx, cacheKey); ok {
+		logger.GetLogger(ctx).Infof("summary LLM cache hit for knowledge %s", knowledge.ID)
+		return cached, nil
+	}
+
+	summary, err := summaryModel.Chat(ctx, messages, opts)
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
 		return "", err
 	}
+	s.setCachedPostprocessLLMText(ctx, cacheKey, summary.Content)
 	logger.GetLogger(ctx).WithField("summary", summary.Content).Infof("GetSummary success")
 	return summary.Content, nil
 }
@@ -1939,22 +1948,34 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	})
 
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	messages := []chat.Message{
 		{
 			Role:    "user",
 			Content: prompt,
 		},
-	}, &chat.ChatOptions{
+	}
+	opts := &chat.ChatOptions{
 		Temperature: 0.7,
 		MaxTokens:   512,
 		Thinking:    &thinking,
-	})
+	}
+	cacheKey := postprocessLLMCacheKey("question", chatModel, messages, opts, "question-v1")
+	if cached, ok := s.getCachedPostprocessLLMText(ctx, cacheKey); ok {
+		logger.Infof(ctx, "question LLM cache hit")
+		return parseGeneratedQuestions(cached, questionCount), nil
+	}
+
+	response, err := chatModel.Chat(ctx, messages, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate questions: %w", err)
 	}
+	s.setCachedPostprocessLLMText(ctx, cacheKey, response.Content)
 
-	// Parse response
-	lines := strings.Split(response.Content, "\n")
+	return parseGeneratedQuestions(response.Content, questionCount), nil
+}
+
+func parseGeneratedQuestions(text string, questionCount int) []string {
+	lines := strings.Split(text, "\n")
 	questions := make([]string, 0, questionCount)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -1971,7 +1992,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		}
 	}
 
-	return questions, nil
+	return questions
 }
 
 // ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.

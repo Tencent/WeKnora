@@ -108,6 +108,12 @@ func TestCacheKeysIncludeLayerInvalidationInputs(t *testing.T) {
 		t.Fatal("WikiMapKey must include extraction granularity")
 	}
 
+	postprocessA := PostprocessLLMKey(TextHash("payload"), "summary", "chat-a", "summary-v1")
+	postprocessB := PostprocessLLMKey(TextHash("payload"), "question", "chat-a", "summary-v1")
+	if postprocessA == postprocessB {
+		t.Fatal("PostprocessLLMKey must include postprocess layer")
+	}
+
 	parseA := ParseArtifactKey(ImageHash([]byte("file")), "mineru", TextHash(`{"ocr":true}`))
 	parseB := ParseArtifactKey(ImageHash([]byte("file")), "mineru", TextHash(`{"ocr":false}`))
 	if parseA == parseB {
@@ -120,7 +126,7 @@ func TestCacheKeysIncludeLayerInvalidationInputs(t *testing.T) {
 		t.Fatal("GraphExtractKey must include extraction config")
 	}
 
-	for _, key := range []string{embeddingA, vlmA, wikiA, parseA, graphA} {
+	for _, key := range []string{embeddingA, vlmA, wikiA, postprocessA, parseA, graphA} {
 		if strings.Contains(key, " ") {
 			t.Fatalf("cache key contains spaces: %q", key)
 		}

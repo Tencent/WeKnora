@@ -82,6 +82,10 @@ func WikiMapKey(documentHash, granularity, modelID, promptVersion string) string
 	return joinKey("wiki-map", documentHash, granularity, modelID, promptVersion)
 }
 
+func PostprocessLLMKey(payloadHash, layer, modelID, promptVersion string) string {
+	return joinKey("postprocess-llm", layer, payloadHash, modelID, promptVersion)
+}
+
 func ParseArtifactKey(fileHash, parserEngine, renderConfigHash string) string {
 	return joinKey("parse-artifact", fileHash, parserEngine, renderConfigHash)
 }
