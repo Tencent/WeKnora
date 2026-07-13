@@ -387,11 +387,14 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 		// FAQ import result display status
 		faq.PUT("/import/last-result/display", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateLastImportResultDisplayStatus)
 	}
-	// FAQ import progress route (outside of knowledge-base scope) — Viewer+
-	faqImport := r.Group("/faq/import")
-	{
-		faqImport.GET("/progress/:task_id", g.Viewer(), handler.GetImportProgress)
-	}
+	// FAQ import progress route (outside of knowledge-base scope) — Viewer+.
+	// Scoped API keys that can ingest (they start the import) or retrieve may
+	// poll their own import/dry-run progress. The task is tenant-scoped by
+	// requireTaskProgressTenant, so a key only ever sees its own tenant's
+	// tasks. Declared through apiKeyRoute so the APIKeyGate doesn't fail-closed
+	// and 403 the poller with "scope does not allow this operation".
+	g.apiKeyRoute(r, http.MethodGet, "/faq/import/progress/:task_id",
+		apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.GetImportProgress)
 }
 
 // RegisterKnowledgeBaseRoutes 注册知识库相关的路由

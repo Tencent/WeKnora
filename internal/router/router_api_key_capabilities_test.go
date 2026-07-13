@@ -401,6 +401,25 @@ func TestChunkerPreviewRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
 	}
 }
 
+func TestFAQImportProgressRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterFAQRoutes(v1, &handler.FAQHandler{}, g)
+
+	policy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/faq/import/progress/:task_id")
+	if !policy.RequireFullAccess {
+		t.Fatal("policy should require full access without a matching capability")
+	}
+	if !policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+		t.Fatalf("policy capabilities = %#v, want retrieve", policy.Capabilities)
+	}
+	if !policyHasCapability(policy, types.APIKeyCapabilityIngest) {
+		t.Fatalf("policy capabilities = %#v, want ingest", policy.Capabilities)
+	}
+}
+
 func mustLookupAPIKeyPolicy(
 	t *testing.T,
 	g *rbacGuards,
