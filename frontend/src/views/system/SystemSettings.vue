@@ -55,29 +55,6 @@
       </p>
     </div>
 
-    <!--
-      Priority hint. We surface the 3-tier resolver semantics inline so
-      operators don't have to dig through code to figure out why a value
-      they set in env "doesn't show up" — once a row is overridden in
-      the UI, env is shadowed until the row is cleared. The "已覆盖"
-      badge per row is the per-key signal; this block is the global key.
-      Hand-rolled panel rather than t-alert because the default alert
-      slot rendering hid most of the body text in TDesign's layout.
-    -->
-    <div class="priority-hint">
-      <div class="priority-hint-header">
-        <t-icon name="info-circle-filled" class="priority-hint-icon" />
-        <span class="priority-hint-title">
-          {{ t('system.globalSettings.priorityHint.title') }}
-        </span>
-      </div>
-      <ul class="priority-hint-list">
-        <li>{{ t('system.globalSettings.priorityHint.tier1') }}</li>
-        <li>{{ t('system.globalSettings.priorityHint.tier2') }}</li>
-        <li>{{ t('system.globalSettings.priorityHint.tier3') }}</li>
-      </ul>
-    </div>
-
     <div v-if="loading && settings.length === 0" class="loading-state">
       <t-loading :text="t('system.globalSettings.loading')" />
     </div>
@@ -87,7 +64,77 @@
       <span>{{ t('system.globalSettings.empty') }}</span>
     </div>
 
-    <div v-else class="settings-group">
+    <template v-else>
+      <div class="settings-overview">
+        <div class="auto-save-note">
+          <t-icon name="check-circle" />
+          <span>{{ t('system.globalSettings.autoSaveHint') }}</span>
+        </div>
+        <div class="settings-overview-tags" aria-live="polite">
+          <t-tag theme="success" variant="light" size="small">
+            {{ t('system.globalSettings.summary.overridden', { count: overriddenCount }) }}
+          </t-tag>
+          <t-tag theme="warning" variant="light" size="small">
+            {{ t('system.globalSettings.summary.restart', { count: restartRequiredCount }) }}
+          </t-tag>
+        </div>
+      </div>
+
+      <!-- Resolver details matter, but are secondary to finding the setting
+           itself. Keep them one click away instead of occupying the first
+           viewport on every visit. Native details/summary also gives us a
+           keyboard-accessible disclosure without extra state. -->
+      <details class="config-source-details">
+        <summary>
+          <span class="config-source-summary">
+            <t-icon name="info-circle" />
+            {{ t('system.globalSettings.priorityHint.disclosure') }}
+          </span>
+          <t-icon name="chevron-down" class="config-source-chevron" />
+        </summary>
+        <ul class="priority-hint-list">
+          <li>{{ t('system.globalSettings.priorityHint.tier1') }}</li>
+          <li>{{ t('system.globalSettings.priorityHint.tier2') }}</li>
+          <li>{{ t('system.globalSettings.priorityHint.tier3') }}</li>
+        </ul>
+      </details>
+
+      <t-tabs v-model="activeSettingsSection" class="settings-section-tabs">
+        <t-tab-panel value="access" :label="sectionTabLabel('access')" />
+        <t-tab-panel value="tenant" :label="sectionTabLabel('tenant')" />
+        <t-tab-panel value="runtime" :label="sectionTabLabel('runtime')" />
+        <t-tab-panel value="security" :label="sectionTabLabel('security')" />
+        <t-tab-panel
+          v-if="hasUnknownSettings"
+          value="other"
+          :label="sectionTabLabel('other')"
+        />
+      </t-tabs>
+
+      <section class="settings-section-panel" :aria-labelledby="`settings-section-${activeSettingsSection}`">
+        <div class="settings-section-intro">
+          <div>
+            <h3 :id="`settings-section-${activeSettingsSection}`">{{ activeSectionTitle }}</h3>
+            <p>{{ activeSectionDescription }}</p>
+          </div>
+          <t-tag v-if="activeSettingsSection === 'runtime'" theme="warning" variant="light" size="small">
+            {{ t('system.globalSettings.sections.runtime.restartHint') }}
+          </t-tag>
+        </div>
+
+        <div
+          v-if="activeSettingsSection === 'runtime'"
+          class="runtime-table-header"
+          aria-hidden="true"
+        >
+          <span>{{ t('system.globalSettings.runtimeTable.setting') }}</span>
+          <span>{{ t('system.globalSettings.runtimeTable.value') }}</span>
+        </div>
+
+        <div
+          class="settings-group"
+          :class="{ 'settings-group--runtime': activeSettingsSection === 'runtime' }"
+        >
       <!--
         System-admins management. Visually identical to SSRF whitelist
         (a tag-input with one entry per email). NOT a system_setting
@@ -98,11 +145,14 @@
         tags (they can't revoke themselves anyway, and showing a tag
         that can't be removed is worse than not showing it).
       -->
-      <div class="setting-row">
+          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--admin">
         <div class="setting-info">
-          <label class="setting-label">
+              <div class="setting-label">
             <span>{{ t('system.globalSettings.admins.label') }}</span>
-          </label>
+                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
+                  {{ t('system.globalSettings.badgeHighRisk') }}
+                </t-tag>
+              </div>
           <p class="desc">{{ t('system.globalSettings.admins.description') }}</p>
         </div>
         <div class="setting-control">
@@ -123,6 +173,7 @@
                 <t-tag-input
                   v-model="adminEmails"
                   :placeholder="t('system.globalSettings.admins.placeholder')"
+                      :aria-label="t('system.globalSettings.admins.label')"
                   :disabled="adminBusy"
                   class="setting-input setting-input--wide"
                   clearable
@@ -130,25 +181,21 @@
                 />
               </div>
             </t-popconfirm>
-            <t-loading v-if="adminBusy" size="small" class="setting-saving" />
+                <div v-if="adminBusy" class="setting-save-state" role="status">
+                  <t-loading size="small" />
+                  <span>{{ t('system.globalSettings.saving') }}</span>
+                </div>
           </div>
         </div>
       </div>
 
-      <!--
-        Flat list — no category grouping. The registry is small enough
-        (single digits) that section headers add visual noise without
-        helping discovery; if it grows past ~10 keys we'll bring back
-        grouping with a real visual treatment instead of a tiny caps
-        label.
-      -->
       <div
-        v-for="item in settings"
+            v-for="item in activeSectionSettings"
         :key="item.key"
         class="setting-row"
       >
         <div class="setting-info">
-          <label class="setting-label">
+              <div class="setting-label">
             <span>{{ keyLabel(item.key) }}</span>
             <t-tag
               v-if="item.requires_restart"
@@ -165,6 +212,13 @@
               class="setting-badge"
             >{{ t('system.globalSettings.badgeSecret') }}</t-tag>
             <t-tag
+                  v-if="isHighImpactKey(item.key)"
+                  theme="danger"
+                  variant="light"
+                  size="small"
+                  class="setting-badge"
+                >{{ t('system.globalSettings.badgeHighRisk') }}</t-tag>
+                <t-tag
               v-if="hasOverride(item)"
               theme="success"
               variant="light"
@@ -172,7 +226,7 @@
               class="setting-badge"
               :title="t('system.globalSettings.badgeOverrideTooltip')"
             >{{ t('system.globalSettings.badgeOverride') }}</t-tag>
-          </label>
+              </div>
           <p v-if="settingDescription(item)" class="desc">{{ settingDescription(item) }}</p>
           <div v-if="modifiedMeta(item)" class="setting-meta">
             {{ t('system.globalSettings.modifiedAt', { value: modifiedMeta(item) }) }}
@@ -207,6 +261,7 @@
               <t-select
                 v-model="editValues[item.key]"
                 :options="enumOptions(item)"
+                    :aria-label="keyLabel(item.key)"
                 :disabled="savingKey === item.key"
                 class="setting-input"
                 @change="onHighRiskSelectChange(item)"
@@ -217,6 +272,7 @@
             v-else-if="hasEnum(item)"
             v-model="editValues[item.key]"
             :options="enumOptions(item)"
+                :aria-label="keyLabel(item.key)"
             :disabled="savingKey === item.key"
             class="setting-input"
             @change="onChange(item)"
@@ -224,6 +280,7 @@
           <t-switch
             v-else-if="item.value_type === 'bool'"
             v-model="editValues[item.key]"
+                :aria-label="keyLabel(item.key)"
             :disabled="savingKey === item.key"
             @change="onChange(item)"
           />
@@ -231,6 +288,7 @@
             v-else-if="item.value_type === 'int'"
             v-model="editValues[item.key]"
             :placeholder="placeholderFor(item)"
+                :aria-label="keyLabel(item.key)"
             :disabled="savingKey === item.key"
             theme="normal"
             :step="1"
@@ -256,6 +314,7 @@
                 :key="`ssrf-tag-${ssrfTagInputKey()}`"
                 :model-value="ssrfWhitelistModelValue()"
                 :placeholder="emptyListPlaceholder"
+                    :aria-label="keyLabel(item.key)"
                 :disabled="savingKey === item.key"
                 class="setting-input setting-input--wide"
                 clearable
@@ -267,6 +326,7 @@
             v-else
             v-model="editValues[item.key]"
             :placeholder="placeholderFor(item)"
+                :aria-label="keyLabel(item.key)"
             :disabled="savingKey === item.key"
             class="setting-input"
             clearable
@@ -278,11 +338,18 @@
             a PUT is in flight; the controls stay disabled (see
             :disabled bindings above) so concurrent edits can't race.
           -->
-          <t-loading
-            v-if="savingKey === item.key"
-            size="small"
-            class="setting-saving"
-          />
+              <div v-if="savingKey === item.key" class="setting-save-state" role="status">
+                <t-loading size="small" />
+                <span>{{ t('system.globalSettings.saving') }}</span>
+              </div>
+              <div
+                v-else-if="savedKey === item.key"
+                class="setting-save-state setting-save-state--success"
+                role="status"
+              >
+                <t-icon name="check-circle-filled" />
+                <span>{{ t('system.globalSettings.saved') }}</span>
+              </div>
           </div>
 
           <!--
@@ -350,7 +417,10 @@
           </div>
         </div>
       </div>
-    </div>
+        </div>
+      </section>
+      <div class="sr-only" role="status" aria-live="polite">{{ saveAnnouncement }}</div>
+    </template>
 
     <!-- Platform audit-log drawer. Lazy-loaded on first open; closing
          and reopening doesn't re-fetch (refresh is explicit via the
@@ -542,8 +612,18 @@ const HIGH_RISK_KEYS = new Set<string>([
   'auth.registration_mode',
 ])
 
+const HIGH_IMPACT_KEYS = new Set<string>([
+  'auth.registration_mode',
+  'tenant.auto_create_api_key',
+  'ssrf.whitelist',
+])
+
 function isHighRiskKey(key: string): boolean {
   return HIGH_RISK_KEYS.has(key)
+}
+
+function isHighImpactKey(key: string): boolean {
+  return HIGH_IMPACT_KEYS.has(key)
 }
 
 type PopconfirmBtn = { content: string; theme?: 'primary' | 'danger' | 'warning' }
@@ -614,6 +694,86 @@ const emptyListPlaceholder = computed(() => t('system.globalSettings.tagInputPla
 const settings = ref<SystemSettingItem[]>([])
 const loading = ref(false)
 const savingKey = ref<string | null>(null)
+const savedKey = ref<string | null>(null)
+const saveAnnouncement = ref('')
+let savedKeyTimer: ReturnType<typeof setTimeout> | null = null
+
+type SettingsSection = 'access' | 'tenant' | 'runtime' | 'security' | 'other'
+
+// Product-oriented order, rather than the registry's alphabetical key order.
+// Unknown/out-of-band rows remain visible in a conditional "Other" tab so the
+// backend's diagnostic contract is preserved when a deployment contains an
+// unexpected key.
+const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly string[]> = {
+  access: [
+    'auth.registration_mode',
+    'auth.default_tenant_mode',
+    'tenant.self_service_creation_enabled',
+    'tenant.max_owned_per_user',
+  ],
+  tenant: [
+    'tenant.default_storage_quota_gb',
+    'tenant.auto_create_api_key',
+  ],
+  runtime: [
+    'asynq.core_concurrency',
+    'asynq.enrichment_concurrency',
+    'asynq.postprocess_concurrency',
+    'asynq.maintenance_concurrency',
+    'asynq.shared_concurrency',
+    'asynq.wiki_concurrency',
+    'model.max_concurrency',
+  ],
+  security: ['ssrf.whitelist'],
+}
+
+const activeSettingsSection = ref<SettingsSection>('access')
+const knownSettingKeys = new Set(Object.values(SETTINGS_SECTION_KEYS).flat())
+const settingsByKey = computed(() => new Map(settings.value.map((item) => [item.key, item])))
+const unknownSettings = computed(() => settings.value.filter((item) => !knownSettingKeys.has(item.key)))
+const hasUnknownSettings = computed(() => unknownSettings.value.length > 0)
+
+watch(hasUnknownSettings, (hasUnknown) => {
+  if (!hasUnknown && activeSettingsSection.value === 'other') {
+    activeSettingsSection.value = 'access'
+  }
+})
+
+const activeSectionSettings = computed(() => {
+  if (activeSettingsSection.value === 'other') return unknownSettings.value
+  return SETTINGS_SECTION_KEYS[activeSettingsSection.value]
+    .map((key) => settingsByKey.value.get(key))
+    .filter((item): item is SystemSettingItem => Boolean(item))
+})
+
+const activeSectionTitle = computed(() =>
+  t(`system.globalSettings.sections.${activeSettingsSection.value}.title`),
+)
+const activeSectionDescription = computed(() =>
+  t(`system.globalSettings.sections.${activeSettingsSection.value}.description`),
+)
+
+const overriddenCount = computed(() => settings.value.filter(hasOverride).length)
+const restartRequiredCount = computed(() => settings.value.filter((item) => item.requires_restart).length)
+
+function sectionTabLabel(section: SettingsSection): string {
+  const count = section === 'other'
+    ? unknownSettings.value.length
+    : SETTINGS_SECTION_KEYS[section].filter((key) => settingsByKey.value.has(key)).length + (section === 'access' ? 1 : 0)
+  return t(`system.globalSettings.sections.${section}.tab`, { count })
+}
+
+function markSettingSaved(item: SystemSettingItem) {
+  savedKey.value = item.key
+  saveAnnouncement.value = t('system.globalSettings.saveAnnouncement', {
+    label: keyLabel(item.key),
+  })
+  if (savedKeyTimer) clearTimeout(savedKeyTimer)
+  savedKeyTimer = setTimeout(() => {
+    if (savedKey.value === item.key) savedKey.value = null
+    savedKeyTimer = null
+  }, 2000)
+}
 
 // Admin management state. We keep two parallel structures:
 //   - adminEmails: the v-model bound to the t-tag-input (excludes
@@ -942,6 +1102,7 @@ function bulkActionConfirmBody(item: SystemSettingItem): string {
 
 async function runBulkAction(item: SystemSettingItem) {
   if (!hasBulkAction(item)) return
+  savedKey.value = null
   savingKey.value = item.key
   try {
     const result = await applyDefaultStorageQuotaToAllTenants()
@@ -951,8 +1112,10 @@ async function runBulkAction(item: SystemSettingItem) {
         gb: result.quota_gb,
       }),
     )
+    markSettingSaved(item)
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.bulkApply.failed')
+    saveAnnouncement.value = msg
     MessagePlugin.error(msg)
   } finally {
     savingKey.value = null
@@ -966,13 +1129,16 @@ async function runBulkAction(item: SystemSettingItem) {
 // settings array and re-running it keeps the modified-by enrichment
 // consistent for every row in the table.
 async function resetSetting(item: SystemSettingItem) {
+  savedKey.value = null
   savingKey.value = item.key
   try {
     await resetSystemSetting(item.key)
     await loadSettings()
+    markSettingSaved(item)
     MessagePlugin.success(t('system.globalSettings.reset.success'))
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.reset.failed')
+    saveAnnouncement.value = msg
     MessagePlugin.error(msg)
   } finally {
     savingKey.value = null
@@ -981,6 +1147,7 @@ async function resetSetting(item: SystemSettingItem) {
 
 async function persistSetting(item: SystemSettingItem) {
   const newValue = editValues[item.key]
+  savedKey.value = null
   savingKey.value = item.key
   try {
     const updated = await updateSystemSetting(item.key, newValue)
@@ -993,9 +1160,11 @@ async function persistSetting(item: SystemSettingItem) {
     editValues[item.key] = Array.isArray(updated.value)
       ? [...(updated.value as unknown[])]
       : updated.value
+    markSettingSaved(updated)
     MessagePlugin.success(t('system.globalSettings.messages.saveSuccess'))
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.messages.saveFailed')
+    saveAnnouncement.value = msg
     MessagePlugin.error(msg)
     // Roll the input back to the canonical value on failure. Without
     // this an invalid edit (e.g. SSRF whitelist with a malformed CIDR
@@ -1119,10 +1288,12 @@ async function onAdminsChange(next: string[]) {
     }
     await loadAdmins()
     if (applied > 0) {
+      saveAnnouncement.value = t('system.globalSettings.admins.saveSuccess')
       MessagePlugin.success(t('system.globalSettings.admins.saveSuccess'))
     }
   } catch (err: any) {
     const msg = err?.message || t('system.globalSettings.admins.saveFailed')
+    saveAnnouncement.value = msg
     MessagePlugin.error(msg)
     await loadAdmins()
   } finally {
@@ -1481,7 +1652,10 @@ watch(
   { flush: 'post' },
 )
 
-onUnmounted(() => detachAuditInfiniteScroll())
+onUnmounted(() => {
+  detachAuditInfiniteScroll()
+  if (savedKeyTimer) clearTimeout(savedKeyTimer)
+})
 </script>
 
 <style lang="less" scoped>
@@ -1829,35 +2003,182 @@ onUnmounted(() => detachAuditInfiniteScroll())
   }
 }
 
-.priority-hint {
-  margin-bottom: 24px;
-  padding: 14px 16px;
-  border-radius: 6px;
-  background: var(--td-bg-color-container-hover);
-  border-left: 3px solid var(--td-brand-color);
+.settings-overview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  min-height: 24px;
 }
 
-.priority-hint-header {
+.auto-save-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+
+  .t-icon {
+    color: var(--td-success-color);
+  }
+}
+
+.settings-overview-tags {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
 }
 
-.priority-hint-icon {
-  color: var(--td-brand-color);
-  font-size: 16px;
+.config-source-details {
+  margin-bottom: 18px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-container);
+
+  summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 38px;
+    padding: 0 12px;
+    cursor: pointer;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
+    list-style: none;
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color-focus);
+      outline-offset: 2px;
+    }
+  }
+
+  &[open] {
+    background: var(--td-bg-color-secondarycontainer);
+
+    .config-source-chevron {
+      transform: rotate(180deg);
+    }
+  }
 }
 
-.priority-hint-title {
-  font-size: 14px;
+.config-source-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-weight: 500;
-  color: var(--td-text-color-primary);
+
+  .t-icon {
+    color: var(--td-brand-color);
+  }
+}
+
+.config-source-chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.settings-section-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 0 18px;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 0 var(--td-component-stroke);
+
+  &:deep(.t-tabs__nav-item) {
+    font-weight: 500;
+  }
+}
+
+.settings-section-panel {
+  min-width: 0;
+}
+
+.settings-section-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
+
+  p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.runtime-table-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 24px;
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+
+  span:last-child {
+    text-align: right;
+  }
+}
+
+.settings-group--runtime {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
+
+  .setting-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 24px;
+    padding: 14px 16px;
+  }
+
+  .setting-info {
+    max-width: none;
+    padding-right: 0;
+  }
+
+  .setting-label {
+    font-size: 14px;
+  }
+
+  .desc {
+    max-width: 620px;
+    font-size: 12px;
+  }
+
+  .setting-control {
+    min-width: 0;
+  }
+
+  .setting-input {
+    width: 210px;
+  }
 }
 
 .priority-hint-list {
-  margin: 4px 0 0;
-  padding-left: 22px;
+  margin: 0;
+  padding: 0 36px 12px 34px;
   font-size: 13px;
   line-height: 1.65;
   color: var(--td-text-color-primary);
@@ -1866,6 +2187,32 @@ onUnmounted(() => detachAuditInfiniteScroll())
   li + li {
     margin-top: 4px;
   }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.setting-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  min-width: 52px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.setting-save-state--success {
+  color: var(--td-success-color);
 }
 
 .setting-reset-btn {
@@ -1993,9 +2340,39 @@ onUnmounted(() => detachAuditInfiniteScroll())
 }
 
 @media (max-width: 860px) {
+  .settings-overview,
+  .settings-section-intro {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .runtime-table-header {
+    display: none;
+  }
+
+  .settings-group--runtime {
+    border-radius: 8px;
+
+    .setting-row {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .setting-input {
+      width: 100%;
+    }
+  }
+
   .setting-row {
     flex-direction: column;
     gap: 12px;
+  }
+
+  .setting-info {
+    width: 100%;
+    max-width: none;
+    padding-right: 0;
   }
 
   .setting-control {

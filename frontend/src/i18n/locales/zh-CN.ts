@@ -2473,17 +2473,59 @@ export default {
       description: "平台级运行时配置，保存后立即对所有租户生效。仅系统管理员可见可改。",
       loading: "加载中...",
       empty: "暂无可配置的系统设置",
+      autoSaveHint: "修改后自动保存",
+      saving: "保存中",
+      saved: "已保存",
+      saveAnnouncement: "{label} 已保存",
       badgeRequiresRestart: "需重启",
       badgeSecret: "敏感",
+      badgeHighRisk: "高风险",
       badgeOverride: "已覆盖",
       badgeOverrideTooltip: "该值已由管理员保存到数据库，覆盖了环境变量与默认值",
       modifiedAt: "上次修改：{value}",
       tagInputPlaceholder: "回车添加条目，例：example.com / *.foo.com / 10.0.0.0/8",
       priorityHint: {
         title: "关于优先级",
+        disclosure: "配置来源与优先级",
         tier1: "在此页面保存过的项（带「已覆盖」徽章）— 始终以这里的值为准，环境变量会被忽略。",
         tier2: "未在此处保存过的项 — 如果环境变量里有就用环境变量，否则用程序内置默认值。",
         tier3: "若想让某项重新由环境变量控制，点击该行的「重置」按钮即可清除当前 UI 设置。",
+      },
+      summary: {
+        overridden: "已覆盖 {count}",
+        restart: "需重启 {count}",
+      },
+      sections: {
+        access: {
+          tab: "账户与访问 {count}",
+          title: "账户与访问",
+          description: "管理系统管理员、公开注册与用户创建空间的规则。",
+        },
+        tenant: {
+          tab: "租户默认值 {count}",
+          title: "租户默认值",
+          description: "设置新租户的初始配额与兼容性行为，不会自动改写已有租户。",
+        },
+        runtime: {
+          tab: "运行与并发 {count}",
+          title: "运行与并发",
+          description: "配置后台任务池与模型服务的并发容量。",
+          restartHint: "Worker 配置需重启生效",
+        },
+        security: {
+          tab: "网络安全 {count}",
+          title: "网络安全",
+          description: "管理可绕过 SSRF 防护的受信主机、IP 与网段。",
+        },
+        other: {
+          tab: "其他 {count}",
+          title: "其他配置",
+          description: "当前部署中未归入标准分组的配置项。",
+        },
+      },
+      runtimeTable: {
+        setting: "配置项与用途",
+        value: "当前值",
       },
       runtime: {
         title: "任务队列运行时",
@@ -2596,6 +2638,7 @@ export default {
           max_owned_per_user: "每用户最大租户数",
           self_service_creation_enabled: "允许用户自助创建空间",
           default_storage_quota_gb: "新租户默认存储配额 (GB)",
+          auto_create_api_key: "创建租户时自动生成 API Key",
         },
         asynq: {
           core_concurrency: "核心解析保底并发数",
@@ -2634,6 +2677,9 @@ export default {
             "新建租户时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
             "仅在创建时读取，修改后只对之后新建的租户生效，不会回写已存在的租户。" +
             "0 或负数表示使用内置默认值 10GB。",
+          auto_create_api_key:
+            "为新租户自动生成 full_access API Key，并在创建响应中返回明文 token。" +
+            "仅用于兼容依赖旧行为的集成；默认关闭，建议通过 API Key 管理显式创建。",
         },
         asynq: {
           core_concurrency: "文档解析与手工重解析的每实例保底并发，可额外借用共享弹性池；修改后需重启。",

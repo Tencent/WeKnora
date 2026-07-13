@@ -3485,17 +3485,59 @@ export default {
       description: 'Platform-wide runtime configuration. Saves take effect immediately for every tenant. Visible and editable by system administrators only.',
       loading: 'Loading...',
       empty: 'No configurable system settings available',
+      autoSaveHint: 'Changes save automatically',
+      saving: 'Saving',
+      saved: 'Saved',
+      saveAnnouncement: '{label} saved',
       badgeRequiresRestart: 'Restart required',
       badgeSecret: 'Secret',
+      badgeHighRisk: 'High risk',
       badgeOverride: 'Overridden',
       badgeOverrideTooltip: 'This value has been saved to the database by an administrator, overriding the environment variable and built-in default.',
       modifiedAt: 'Last modified: {value}',
       tagInputPlaceholder: 'Press Enter to add an entry, e.g. example.com / *.foo.com / 10.0.0.0/8',
       priorityHint: {
         title: 'About priority',
+        disclosure: 'Configuration source and priority',
         tier1: 'Items saved on this page (marked "Overridden") always win — the environment variable is ignored for them.',
         tier2: 'Items not saved here fall back to the environment variable, or to the built-in default if no env var is set.',
         tier3: 'To put an item back under environment-variable control, click the "Reset" button on its row.',
+      },
+      summary: {
+        overridden: '{count} overridden',
+        restart: '{count} require restart',
+      },
+      sections: {
+        access: {
+          tab: 'Accounts & access {count}',
+          title: 'Accounts & access',
+          description: 'Manage system administrators, public registration, and workspace-creation rules.',
+        },
+        tenant: {
+          tab: 'Tenant defaults {count}',
+          title: 'Tenant defaults',
+          description: 'Set initial quotas and compatibility behavior for new tenants without rewriting existing tenants.',
+        },
+        runtime: {
+          tab: 'Runtime & concurrency {count}',
+          title: 'Runtime & concurrency',
+          description: 'Configure concurrency capacity for background worker pools and model services.',
+          restartHint: 'Worker settings require restart',
+        },
+        security: {
+          tab: 'Network security {count}',
+          title: 'Network security',
+          description: 'Manage trusted hosts, IPs, and networks that may bypass SSRF protection.',
+        },
+        other: {
+          tab: 'Other {count}',
+          title: 'Other settings',
+          description: 'Settings in this deployment that are not part of a standard product group.',
+        },
+      },
+      runtimeTable: {
+        setting: 'Setting and purpose',
+        value: 'Current value',
       },
       runtime: {
         title: "Task Queue Runtime",
@@ -3608,6 +3650,7 @@ export default {
           max_owned_per_user: 'Max tenants owned per user',
           self_service_creation_enabled: 'Allow self-service workspace creation',
           default_storage_quota_gb: 'Default storage quota for new tenants (GB)',
+          auto_create_api_key: 'Automatically create an API key for new tenants',
         },
         asynq: {
           core_concurrency: 'Guaranteed core parse concurrency',
@@ -3639,6 +3682,8 @@ export default {
             'Whether non-superusers may create workspaces themselves. When disabled, regular users can only join existing workspaces by invitation; cross-tenant superusers remain exempt. Takes effect immediately.',
           default_storage_quota_gb:
             'Default storage quota (GB) assigned when a new tenant is created, covering vectors, originals, text, indexes, and related data. Read only at creation time — changes apply to newly created tenants only and do not retroactively update existing tenants. 0 or a negative value uses the built-in default of 10 GB.',
+          auto_create_api_key:
+            'Automatically creates a full_access API key for a new tenant and returns its plaintext token in the create response. Use only for integrations that depend on the legacy behavior; it is disabled by default and explicit API-key creation is recommended.',
         },
         asynq: {
           core_concurrency: 'Guaranteed per-process concurrency for document and manual parsing. Core may also borrow the shared elastic pool. Minimum 1; requires a service restart.',

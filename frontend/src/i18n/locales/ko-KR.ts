@@ -2470,17 +2470,59 @@ export default {
       description: "플랫폼 전역 런타임 설정입니다. 저장하면 모든 테넌트에 즉시 적용됩니다. 시스템 관리자만 보고 수정할 수 있습니다.",
       loading: "로딩 중...",
       empty: "설정 가능한 시스템 항목이 없습니다",
+      autoSaveHint: "변경 내용은 자동으로 저장됩니다",
+      saving: "저장 중",
+      saved: "저장됨",
+      saveAnnouncement: "{label} 저장됨",
       badgeRequiresRestart: "재시작 필요",
       badgeSecret: "민감",
+      badgeHighRisk: "고위험",
       badgeOverride: "재정의됨",
       badgeOverrideTooltip: "이 값은 관리자가 DB에 저장하여 환경 변수 및 기본값을 덮어썼습니다.",
       modifiedAt: "마지막 수정: {value}",
       tagInputPlaceholder: "엔터로 항목 추가. 예: example.com / *.foo.com / 10.0.0.0/8",
       priorityHint: {
         title: "우선순위 안내",
+        disclosure: "설정 소스 및 우선순위",
         tier1: "이 페이지에서 저장한 항목(\"재정의됨\" 배지가 붙은 항목)은 항상 우선 적용되며, 환경 변수는 무시됩니다.",
         tier2: "여기서 저장하지 않은 항목은 환경 변수를 따르며, 환경 변수도 없으면 내장 기본값을 사용합니다.",
         tier3: "특정 항목을 다시 환경 변수 기반으로 되돌리려면 해당 행의 \"초기화\" 버튼을 누르세요.",
+      },
+      summary: {
+        overridden: "재정의 {count}개",
+        restart: "재시작 필요 {count}개",
+      },
+      sections: {
+        access: {
+          tab: "계정 및 액세스 {count}",
+          title: "계정 및 액세스",
+          description: "시스템 관리자, 공개 가입, 공간 생성 규칙을 관리합니다.",
+        },
+        tenant: {
+          tab: "테넌트 기본값 {count}",
+          title: "테넌트 기본값",
+          description: "기존 테넌트를 변경하지 않고 신규 테넌트의 초기 할당량과 호환 동작을 설정합니다.",
+        },
+        runtime: {
+          tab: "런타임 및 동시성 {count}",
+          title: "런타임 및 동시성",
+          description: "백그라운드 워커 풀과 모델 서비스의 동시 처리 용량을 설정합니다.",
+          restartHint: "워커 설정은 재시작 후 적용",
+        },
+        security: {
+          tab: "네트워크 보안 {count}",
+          title: "네트워크 보안",
+          description: "SSRF 보호를 우회할 수 있는 신뢰 호스트, IP, 네트워크를 관리합니다.",
+        },
+        other: {
+          tab: "기타 {count}",
+          title: "기타 설정",
+          description: "표준 제품 그룹에 포함되지 않은 현재 배포의 설정입니다.",
+        },
+      },
+      runtimeTable: {
+        setting: "설정 및 용도",
+        value: "현재 값",
       },
       runtime: {
         title: "작업 큐 런타임",
@@ -2593,6 +2635,7 @@ export default {
           max_owned_per_user: "사용자당 최대 테넌트 수",
           self_service_creation_enabled: "사용자 공간 직접 생성 허용",
           default_storage_quota_gb: "신규 테넌트 기본 저장 용량 (GB)",
+          auto_create_api_key: "신규 테넌트 API Key 자동 생성",
         },
         asynq: {
           core_concurrency: "핵심 파싱 보장 동시성",
@@ -2624,6 +2667,8 @@ export default {
             "비슈퍼유저가 공간을 직접 만들 수 있는지 설정합니다. 비활성화하면 일반 사용자는 초대로만 기존 공간에 참여할 수 있으며, 크로스 테넌트 슈퍼유저는 계속 만들 수 있습니다.",
           default_storage_quota_gb:
             "신규 테넌트 생성 시 기본으로 할당되는 저장 용량(GB)으로, 벡터·원본·텍스트·인덱스 등을 포함합니다. 생성 시에만 읽으며, 변경은 이후 생성되는 테넌트에만 적용되고 기존 테넌트에는 소급되지 않습니다. 0 또는 음수는 내장 기본값 10GB를 사용합니다.",
+          auto_create_api_key:
+            "신규 테넌트에 full_access API Key를 자동 생성하고 생성 응답에 평문 token을 반환합니다. 기존 동작에 의존하는 연동에만 사용하세요. 기본값은 비활성화입니다.",
         },
         asynq: {
           core_concurrency: "문서 및 수동 파싱의 프로세스별 보장 동시성입니다. 공유 탄력 풀도 사용할 수 있습니다. 최소 1, 서비스 재시작이 필요합니다.",
