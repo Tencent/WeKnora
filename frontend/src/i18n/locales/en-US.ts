@@ -1944,10 +1944,10 @@ export default {
     registerNow: 'Register Now',
     loginHint: 'Sign in to continue, or create an account below if this is your first time.',
     firstTime: 'New to WeKnora?',
-    registerSuccess: 'Registration successful! The system has created an exclusive tenant for you, please login',
+    registerSuccess: 'Registration successful. Please sign in',
     registerFailed: 'Registration failed',
     subtitle: 'RAG Q&A, ReAct Agent and Wiki — an LLM-powered enterprise knowledge framework',
-    registerSubtitle: 'The system will create an exclusive tenant for you after registration',
+    registerSubtitle: 'Create your account and start using WeKnora',
     emailPlaceholder: 'Enter email address',
     passwordPlaceholder: 'Enter password (8-32 characters, including letters and numbers)',
     confirmPasswordPlaceholder: 'Enter password again',
@@ -1968,7 +1968,21 @@ export default {
     loginError: 'Login error, please check email or password',
     loginErrorRetry: 'Login error, please try again later',
     registerError: 'Registration error, please try again later',
-    forgotPasswordNotAvailable: 'Password recovery function is temporarily unavailable, please contact administrator'
+    forgotPasswordNotAvailable: 'Password recovery function is temporarily unavailable, please contact administrator',
+    workspaceOnboarding: {
+      title: 'Choose your workspace',
+      description: 'Your account does not belong to a workspace yet. Create one or accept an invitation from an administrator.',
+      create: 'Create workspace',
+      invitations: 'View invitations',
+      help: 'If no invitation is available, ask a system administrator to add you to an existing workspace.',
+      loadingPolicy: 'Checking the available workspace options…',
+      policyLoadFailed: 'Workspace permissions could not be loaded. Check your connection and try again.',
+      retry: 'Reload',
+      inviteOnlyTitle: 'Waiting for a workspace invitation',
+      inviteOnlyDescription: 'Personal workspace creation is disabled. View and accept an invitation from a workspace administrator.',
+      inviteOnlyNotice: 'This account can only join an existing workspace by invitation',
+      inviteOnlyHelp: 'No invitation yet? Send your registered email address to a workspace administrator and ask them to invite you.',
+    }
   },
   authStore: {
     errors: {
@@ -3316,6 +3330,7 @@ export default {
       cancel: 'Cancel',
       success: 'Workspace created successfully',
       failed: 'Failed to create workspace',
+      disabled: 'This system only allows joining workspaces by invitation. You cannot create one yourself.',
     },
     details: {
       idLabel: 'Tenant ID',
@@ -3575,12 +3590,14 @@ export default {
       keyLabels: {
         auth: {
           registration_mode: 'Self-service registration mode',
+          default_tenant_mode: 'Default workspace provisioning',
         },
         ssrf: {
           whitelist: 'SSRF protection allowlist',
         },
         tenant: {
           max_owned_per_user: 'Max tenants owned per user',
+          self_service_creation_enabled: 'Allow self-service workspace creation',
           default_storage_quota_gb: 'Default storage quota for new tenants (GB)',
         },
         asynq: {
@@ -3595,6 +3612,8 @@ export default {
         auth: {
           registration_mode:
             'Self-service registration mode. self_serve = anyone can register an account; invite_only = public registration is disabled and only Owners/Admins can invite. Takes effect immediately after saving, but use self_serve with care (the public internet will send spam sign-ups).',
+          default_tenant_mode:
+            'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.',
         },
         ssrf: {
           whitelist:
@@ -3603,6 +3622,8 @@ export default {
         tenant: {
           max_owned_per_user:
             'Maximum number of tenants a non-superuser may own via self-service creation. Read on every tenant creation and takes effect immediately after saving. 0 uses the built-in default of 10; a negative value disables the cap entirely (not recommended on public deployments).',
+          self_service_creation_enabled:
+            'Whether non-superusers may create workspaces themselves. When disabled, regular users can only join existing workspaces by invitation; cross-tenant superusers remain exempt. Takes effect immediately.',
           default_storage_quota_gb:
             'Default storage quota (GB) assigned when a new tenant is created, covering vectors, originals, text, indexes, and related data. Read only at creation time — changes apply to newly created tenants only and do not retroactively update existing tenants. 0 or a negative value uses the built-in default of 10 GB.',
         },
@@ -3622,6 +3643,10 @@ export default {
           registration_mode: {
             self_serve: 'Self-service (anyone can register)',
             invite_only: 'Invite only (public registration disabled)',
+          },
+          default_tenant_mode: {
+            create_personal: 'Create personal workspace',
+            tenantless: 'Do not create a workspace',
           },
         },
       },

@@ -490,6 +490,19 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 		return
 	}
 
+	// A tenantless account adopts the first accepted invitation as its
+	// default tenant. Membership remains the authorization source; TenantID
+	// only supplies the login/navigation default.
+	if user, userErr := h.userService.GetUserByID(ctx, caller); userErr == nil && user != nil && user.TenantID == 0 {
+		user.TenantID = member.TenantID
+		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
+			logger.Errorf(ctx, "AcceptMyInvitation failed to set default tenant: user=%s tenant=%d err=%v",
+				caller, member.TenantID, updateErr)
+			c.Error(apperrors.NewInternalServerError("invitation accepted but default tenant update failed").WithDetails(updateErr.Error()))
+			return
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{

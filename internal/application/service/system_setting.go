@@ -135,6 +135,15 @@ var registry = map[string]settingSpec{
 		Description: "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
 			"仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
 	},
+	"auth.default_tenant_mode": {
+		Type:     "string",
+		EnvName:  "WEKNORA_AUTH_DEFAULT_TENANT_MODE",
+		Default:  "create_personal",
+		Enum:     []string{"create_personal", "tenantless"},
+		Category: "auth",
+		Description: "公开注册成功后的默认租户策略。create_personal = 自动创建个人租户并设为 Owner；" +
+			"tenantless = 仅创建用户，等待接受邀请或主动创建租户。修改后只影响新注册用户。",
+	},
 	// tenant.max_owned_per_user caps how many tenants a single non-superuser
 	// can create (and Own) via self-service POST /tenants. Read on every
 	// request — UI edits take effect immediately, no restart required. The
@@ -149,6 +158,14 @@ var registry = map[string]settingSpec{
 		Category: "tenant",
 		Description: "每个非超管用户通过自助创建可拥有的最大租户数。每次创建租户时实时读取，" +
 			"修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。",
+	},
+	"tenant.self_service_creation_enabled": {
+		Type:     "bool",
+		EnvName:  "WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED",
+		Default:  true,
+		Category: "tenant",
+		Description: "是否允许非超管用户主动创建租户。关闭后，普通用户只能通过邀请加入已有租户；" +
+			"跨租户超管仍可创建。修改后立即生效。",
 	},
 	// tenant.default_storage_quota_gb is the default storage quota (in GB)
 	// applied to a newly-created tenant when the caller doesn't specify

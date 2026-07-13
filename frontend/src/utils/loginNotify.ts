@@ -24,8 +24,8 @@ interface LoginResponseLike {
   // Password-login response uses `active_tenant`; the OIDC callback
   // response uses `tenant` (legacy backward-compat name on the Go side).
   // Accept either so callers don't have to normalise.
-  active_tenant?: { id?: number | string; name?: string }
-  tenant?: { id?: number | string; name?: string }
+  active_tenant?: { id?: number | string; name?: string } | null
+  tenant?: { id?: number | string; name?: string } | null
   memberships?: Array<{ tenant_id?: number | string; role?: string }>
 }
 

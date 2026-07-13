@@ -24,9 +24,9 @@ type fakeMemberService struct {
 		TenantID uint64
 		Role     types.TenantRole
 	}
-	failGet     error
-	failHasAny  error
-	failAdd     error
+	failGet    error
+	failHasAny error
+	failAdd    error
 	// 阻止 auto-promote 把 hasAny 翻面：默认 AddMember 成功也会写入 members map。
 }
 
@@ -102,7 +102,14 @@ func (f *fakeMemberService) GetMembership(
 }
 
 func (f *fakeMemberService) ListByUser(ctx context.Context, userID string) ([]*types.TenantMember, error) {
-	return nil, nil
+	var out []*types.TenantMember
+	for _, member := range f.members {
+		if member.UserID == userID && member.Status == types.TenantMemberStatusActive {
+			copy := *member
+			out = append(out, &copy)
+		}
+	}
+	return out, nil
 }
 func (f *fakeMemberService) ListByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error) {
 	return nil, nil

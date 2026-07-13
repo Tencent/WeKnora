@@ -53,9 +53,8 @@
           </div>
         </div>
 
-        <!-- 自助创建新工作区入口：任意已登录用户可点击，后端会把当前用户
-             写成新租户的 Owner（见 internal/handler/tenant.go CreateTenant）。 -->
-        <div class="tenant-create-action" @click="openCreateDialog">
+        <!-- 自助创建入口与 /auth/me 返回的后端能力保持一致。 -->
+        <div v-if="authStore.canCreateTenant" class="tenant-create-action" @click="openCreateDialog">
           <t-icon name="add" class="tenant-create-icon" />
           <span class="tenant-create-label">{{ $t('tenant.create.action') }}</span>
         </div>
@@ -276,6 +275,10 @@ const createDialogVisible = ref(false)
 
 const openCreateDialog = () => {
   closeDropdown()
+  if (!authStore.canCreateTenant) {
+    MessagePlugin.info(t('tenant.create.disabled'))
+    return
+  }
   createDialogVisible.value = true
 }
 

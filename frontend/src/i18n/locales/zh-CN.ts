@@ -1801,10 +1801,10 @@ export default {
     registerNow: "立即注册",
     loginHint: "登录以继续使用；首次使用请在下方创建账户。",
     firstTime: "首次使用 WeKnora？",
-    registerSuccess: "注册成功！系统已为您创建专属空间，请登录",
+    registerSuccess: "注册成功，请登录",
     registerFailed: "注册失败",
     subtitle: "RAG 问答、ReAct 智能体与 Wiki 知识库，大模型驱动的企业级知识框架",
-    registerSubtitle: "注册后系统将为您创建专属空间",
+    registerSubtitle: "创建账户并开始使用 WeKnora",
     emailPlaceholder: "输入邮箱地址",
     passwordPlaceholder: "输入密码（8-32个字符，包含字母和数字）",
     confirmPasswordPlaceholder: "再次输入密码",
@@ -1826,6 +1826,20 @@ export default {
     loginErrorRetry: "登录错误，请稍后重试",
     registerError: "注册错误，请稍后重试",
     forgotPasswordNotAvailable: "密码找回功能暂不可用，请联系管理员",
+    workspaceOnboarding: {
+      title: "选择你的工作空间",
+      description: "你的账户尚未加入任何空间。你可以创建一个新空间，或接受管理员发来的邀请。",
+      create: "创建空间",
+      invitations: "查看邀请",
+      help: "如果这里没有可用邀请，请联系系统管理员将你加入现有空间。",
+      loadingPolicy: "正在确认可用的空间加入方式…",
+      policyLoadFailed: "暂时无法获取空间权限，请检查网络后重试。",
+      retry: "重新加载",
+      inviteOnlyTitle: "等待加入工作空间",
+      inviteOnlyDescription: "当前系统不开放个人创建空间。你可以查看并接受管理员发来的空间邀请。",
+      inviteOnlyNotice: "此账户只能通过邀请加入已有空间",
+      inviteOnlyHelp: "还没有邀请？请把你的注册邮箱提供给空间管理员，由管理员向你发送邀请。",
+    },
   },
   authStore: {
     errors: {
@@ -2304,6 +2318,7 @@ export default {
       cancel: "取消",
       success: "空间创建成功",
       failed: "空间创建失败",
+      disabled: "当前系统只允许通过邀请加入空间，不能自行创建空间。",
     },
     details: {
       idLabel: "空间 ID",
@@ -2563,12 +2578,14 @@ export default {
       keyLabels: {
         auth: {
           registration_mode: "自助注册模式",
+          default_tenant_mode: "注册默认空间策略",
         },
         ssrf: {
           whitelist: "SSRF 防护白名单",
         },
         tenant: {
           max_owned_per_user: "每用户最大租户数",
+          self_service_creation_enabled: "允许用户自助创建空间",
           default_storage_quota_gb: "新租户默认存储配额 (GB)",
         },
         asynq: {
@@ -2584,6 +2601,9 @@ export default {
           registration_mode:
             "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
             "仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
+          default_tenant_mode:
+            "公开注册后的空间初始化策略。create_personal 会自动创建个人空间并授予 Owner；" +
+            "tenantless 仅创建账户，用户需要接受邀请或主动创建空间。只影响之后注册的用户。",
         },
         ssrf: {
           whitelist:
@@ -2594,6 +2614,9 @@ export default {
           max_owned_per_user:
             "每个非超管用户通过自助创建可拥有的最大租户数。每次创建租户时实时读取，" +
             "修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。",
+          self_service_creation_enabled:
+            "是否允许非超管用户主动创建空间。关闭后，普通用户只能通过邀请加入已有空间；" +
+            "跨租户超管仍可创建。修改后立即生效。",
           default_storage_quota_gb:
             "新建租户时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
             "仅在创建时读取，修改后只对之后新建的租户生效，不会回写已存在的租户。" +
@@ -2620,6 +2643,10 @@ export default {
           registration_mode: {
             self_serve: "自助注册（任何人可注册）",
             invite_only: "仅邀请（关闭公网注册）",
+          },
+          default_tenant_mode: {
+            create_personal: "自动创建个人空间",
+            tenantless: "不自动创建空间",
           },
         },
       },

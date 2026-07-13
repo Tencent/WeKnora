@@ -101,6 +101,31 @@ func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
 	return h.systemSettingSvc.GetString(ctx, "auth.registration_mode", "", def)
 }
 
+// resolveDefaultTenantMode returns the provisioning policy for ordinary
+// public password registrations. Invitation registration never uses this
+// value: the invitation itself supplies the target tenant.
+func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
+	def := config.AuthDefaultTenantModeCreatePersonal
+	if h.configInfo != nil && h.configInfo.Auth != nil {
+		if mode := strings.TrimSpace(h.configInfo.Auth.DefaultTenantMode); mode != "" {
+			def = mode
+		}
+	}
+	mode := def
+	if h.systemSettingSvc != nil {
+		mode = h.systemSettingSvc.GetString(
+			ctx,
+			"auth.default_tenant_mode",
+			"WEKNORA_AUTH_DEFAULT_TENANT_MODE",
+			def,
+		)
+	}
+	if mode == config.AuthDefaultTenantModeTenantless {
+		return types.TenantProvisioningTenantless
+	}
+	return types.TenantProvisioningCreatePersonal
+}
+
 // Register godoc
 // @Summary      用户注册
 // @Description  注册新用户账号
@@ -150,6 +175,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 	req.Username = secutils.SanitizeForLog(req.Username)
 	req.Email = secutils.SanitizeForLog(req.Email)
+	req.TenantProvisioning = h.resolveDefaultTenantMode(ctx)
 	// Call service to register user
 	user, err := h.userService.Register(ctx, &req)
 	if err != nil {
@@ -536,12 +562,18 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	// 同步返回当前用户的 memberships，让前端在页面刷新（仅命中 /auth/me）
 	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
+	canCreateTenant := user.CanAccessAllTenants ||
+		resolveTenantSelfServiceCreationEnabled(ctx, h.configInfo, h.systemSettingSvc)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"user":        userInfo,
-			"tenant":      dto.NewTenantResponse(ctx, tenant),
-			"memberships": memberships,
+			"user":            userInfo,
+			"tenant":          dto.NewTenantResponse(ctx, tenant),
+			"memberships":     memberships,
+			"tenant_required": tenant == nil,
+			"capabilities": gin.H{
+				"can_create_tenant": canCreateTenant,
+			},
 		},
 	})
 }

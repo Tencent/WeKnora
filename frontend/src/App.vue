@@ -52,7 +52,7 @@ const syncOIDCUserContext = async () => {
     throw new Error(currentUserResponse.message || 'Failed to get user information')
   }
 
-  const { user, tenant, memberships } = currentUserResponse.data
+  const { user, tenant, memberships, capabilities } = currentUserResponse.data
   authStore.setUser(userInfoFromApi(user, tenant?.id))
   if (tenant) {
     authStore.setTenant({
@@ -67,6 +67,8 @@ const syncOIDCUserContext = async () => {
       created_at: tenant.created_at || new Date().toISOString(),
       updated_at: tenant.updated_at || new Date().toISOString()
     })
+  } else {
+    authStore.setTenant(null)
   }
   // Refresh memberships so currentTenantRole reflects any role change
   // since the last login (e.g. an Owner demoted us to Viewer in a
@@ -74,6 +76,9 @@ const syncOIDCUserContext = async () => {
   // login-time snapshot and the UI silently lies about our authority.
   if (Array.isArray(memberships)) {
     authStore.setMemberships(memberships)
+  }
+  if (typeof capabilities?.can_create_tenant === 'boolean') {
+    authStore.setCanCreateTenant(capabilities.can_create_tenant)
   }
   // Same active-vs-home reconciliation as Login.vue: if the OIDC login
   // landed us in a non-home tenant (because the backend honoured a
@@ -101,7 +106,7 @@ const persistOIDCLoginResponse = async (response: any) => {
   await syncOIDCUserContext()
 
   await nextTick()
-  router.replace('/platform/knowledge-bases')
+  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }
 
 const handleGlobalOIDCCallback = async () => {

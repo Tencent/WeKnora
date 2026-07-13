@@ -52,6 +52,9 @@ export const useAuthStore = defineStore('auth', () => {
   // (vs SSE) is fine — the count is checked rarely and a 1-2 minute
   // staleness window is acceptable for an inbox indicator.
   const pendingInvitationCount = ref<number>(0)
+  // Authoritative deployment capability returned by /auth/me. Defaults to
+  // true for compatibility with older backends that do not return it yet.
+  const canCreateTenant = ref(true)
 
   // 计算属性
   const isLoggedIn = computed(() => {
@@ -199,10 +202,14 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  const setTenant = (tenantData: TenantInfo) => {
+  const setTenant = (tenantData: TenantInfo | null) => {
     tenant.value = tenantData
-    // 保存到localStorage
-    localStorage.setItem('weknora_tenant', JSON.stringify(tenantData))
+    if (tenantData) {
+      localStorage.setItem('weknora_tenant', JSON.stringify(tenantData))
+    } else {
+      localStorage.removeItem('weknora_tenant')
+      setSelectedTenant(null, null)
+    }
   }
 
   const setToken = (tokenValue: string) => {
@@ -303,6 +310,10 @@ export const useAuthStore = defineStore('auth', () => {
     pendingInvitationCount.value = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
   }
 
+  const setCanCreateTenant = (allowed: boolean) => {
+    canCreateTenant.value = allowed
+  }
+
   // fetchPendingInvitationCount hits the dedicated /me/invitations/
   // pending-count endpoint and updates the store. Errors are
   // swallowed — the badge degrades to its last-known value instead
@@ -351,11 +362,18 @@ export const useAuthStore = defineStore('auth', () => {
           created_at: tenantSnapshot.created_at || new Date().toISOString(),
           updated_at: tenantSnapshot.updated_at || new Date().toISOString(),
         })
+      } else {
+        setTenant(null)
       }
 
       const list = response.data?.memberships
       if (Array.isArray(list)) {
         setMemberships(list)
+      }
+
+      const createCapability = response.data?.capabilities?.can_create_tenant
+      if (typeof createCapability === 'boolean') {
+        setCanCreateTenant(createCapability)
       }
 
       return true
@@ -390,6 +408,7 @@ export const useAuthStore = defineStore('auth', () => {
     allTenants.value = []
     memberships.value = []
     pendingInvitationCount.value = 0
+    canCreateTenant.value = true
     clearSessionResourceCaches()
 
     // 清空localStorage
@@ -512,6 +531,7 @@ export const useAuthStore = defineStore('auth', () => {
     allTenants,
     memberships,
     pendingInvitationCount,
+    canCreateTenant,
 
     // 计算属性
     isLoggedIn,
@@ -537,6 +557,7 @@ export const useAuthStore = defineStore('auth', () => {
     setAllTenants,
     setMemberships,
     setPendingInvitationCount,
+    setCanCreateTenant,
     fetchPendingInvitationCount,
     refreshFromAuthMe,
     getSelectedTenant,

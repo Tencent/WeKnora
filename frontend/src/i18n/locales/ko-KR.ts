@@ -1794,10 +1794,10 @@ export default {
     registerNow: "지금 가입하기",
     loginHint: "로그인하여 계속하세요. 처음이시라면 아래에서 계정을 만드세요.",
     firstTime: "WeKnora가 처음이신가요?",
-    registerSuccess: "가입 성공! 시스템이 전용 테넌트를 생성했습니다. 로그인해주세요",
+    registerSuccess: "가입이 완료되었습니다. 로그인해주세요",
     registerFailed: "가입 실패",
     subtitle: "RAG Q&A, ReAct 에이전트, Wiki 지식베이스 — 대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크",
-    registerSubtitle: "가입 후 시스템이 전용 테넌트를 생성합니다",
+    registerSubtitle: "계정을 만들고 WeKnora를 시작하세요",
     emailPlaceholder: "이메일 주소 입력",
     passwordPlaceholder: "비밀번호 입력 (8-32자, 문자와 숫자 포함)",
     confirmPasswordPlaceholder: "비밀번호 다시 입력",
@@ -1820,6 +1820,20 @@ export default {
     registerError: "가입 오류, 나중에 다시 시도해주세요",
     forgotPasswordNotAvailable:
       "비밀번호 찾기 기능을 현재 사용할 수 없습니다. 관리자에게 문의해주세요",
+    workspaceOnboarding: {
+      title: "작업 공간 선택",
+      description: "아직 참여한 공간이 없습니다. 새 공간을 만들거나 관리자의 초대를 수락하세요.",
+      create: "공간 만들기",
+      invitations: "초대 보기",
+      help: "사용 가능한 초대가 없다면 시스템 관리자에게 기존 공간 추가를 요청하세요.",
+      loadingPolicy: "사용 가능한 공간 참여 방식을 확인하고 있습니다…",
+      policyLoadFailed: "공간 권한을 불러올 수 없습니다. 네트워크를 확인한 후 다시 시도하세요.",
+      retry: "다시 불러오기",
+      inviteOnlyTitle: "작업 공간 초대 대기",
+      inviteOnlyDescription: "개인 공간 만들기가 비활성화되어 있습니다. 관리자가 보낸 초대를 확인하고 수락하세요.",
+      inviteOnlyNotice: "이 계정은 초대를 통해서만 기존 공간에 참여할 수 있습니다",
+      inviteOnlyHelp: "초대가 없다면 등록 이메일을 공간 관리자에게 전달하고 초대를 요청하세요.",
+    },
   },
   authStore: {
     errors: {
@@ -2312,6 +2326,7 @@ export default {
       cancel: "취소",
       success: "워크스페이스가 생성되었습니다",
       failed: "워크스페이스 생성 실패",
+      disabled: "현재 시스템에서는 초대를 통해서만 공간에 참여할 수 있으며 직접 만들 수 없습니다.",
     },
     details: {
       idLabel: "테넌트 ID",
@@ -2560,12 +2575,14 @@ export default {
       keyLabels: {
         auth: {
           registration_mode: "셀프 가입 모드",
+          default_tenant_mode: "기본 공간 프로비저닝",
         },
         ssrf: {
           whitelist: "SSRF 보호 허용 목록",
         },
         tenant: {
           max_owned_per_user: "사용자당 최대 테넌트 수",
+          self_service_creation_enabled: "사용자 공간 직접 생성 허용",
           default_storage_quota_gb: "신규 테넌트 기본 저장 용량 (GB)",
         },
         asynq: {
@@ -2580,6 +2597,8 @@ export default {
         auth: {
           registration_mode:
             "셀프 가입 모드입니다. self_serve = 누구나 계정을 만들 수 있음; invite_only = 공개 가입을 끄고 Owner/Admin만 초대 가능. 저장 즉시 적용되며, self_serve는 스팸 가입이 들어올 수 있으니 신중히 사용하세요.",
+          default_tenant_mode:
+            "공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.",
         },
         ssrf: {
           whitelist:
@@ -2588,6 +2607,8 @@ export default {
         tenant: {
           max_owned_per_user:
             "슈퍼유저가 아닌 사용자가 셀프 서비스로 소유할 수 있는 최대 테넌트 수입니다. 테넌트 생성 시마다 읽으며 저장 즉시 적용됩니다. 0은 내장 기본값 10을 사용하고, 음수는 제한을 완전히 해제합니다(공개 배포에는 권장하지 않음).",
+          self_service_creation_enabled:
+            "비슈퍼유저가 공간을 직접 만들 수 있는지 설정합니다. 비활성화하면 일반 사용자는 초대로만 기존 공간에 참여할 수 있으며, 크로스 테넌트 슈퍼유저는 계속 만들 수 있습니다.",
           default_storage_quota_gb:
             "신규 테넌트 생성 시 기본으로 할당되는 저장 용량(GB)으로, 벡터·원본·텍스트·인덱스 등을 포함합니다. 생성 시에만 읽으며, 변경은 이후 생성되는 테넌트에만 적용되고 기존 테넌트에는 소급되지 않습니다. 0 또는 음수는 내장 기본값 10GB를 사용합니다.",
         },
@@ -2607,6 +2628,10 @@ export default {
           registration_mode: {
             self_serve: "셀프 가입 (누구나 가입 가능)",
             invite_only: "초대 전용 (공개 가입 비활성)",
+          },
+          default_tenant_mode: {
+            create_personal: "개인 공간 자동 생성",
+            tenantless: "공간을 자동 생성하지 않음",
           },
         },
       },

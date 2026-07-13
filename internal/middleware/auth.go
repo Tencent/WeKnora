@@ -77,6 +77,45 @@ func isNoAuthAPI(path string, method string) bool {
 	return false
 }
 
+// isTenantOptionalAPI lists authenticated identity-level operations that are
+// meaningful before a user belongs to any tenant. Every other authenticated
+// route remains tenant-scoped and returns TENANT_REQUIRED when the JWT and
+// request headers do not resolve a tenant.
+func isTenantOptionalAPI(path, method string) bool {
+	switch {
+	case path == "/api/v1/auth/me" && (method == http.MethodGet || method == http.MethodPut):
+		return true
+	case path == "/api/v1/auth/logout" && method == http.MethodPost:
+		return true
+	case path == "/api/v1/auth/change-password" && method == http.MethodPost:
+		return true
+	case path == "/api/v1/auth/validate" && method == http.MethodGet:
+		return true
+	case path == "/api/v1/auth/switch-tenant" && method == http.MethodPost:
+		return true
+	case path == "/api/v1/tenants" && method == http.MethodPost:
+		return true
+	case strings.HasPrefix(path, "/api/v1/me/invitations"):
+		return true
+	default:
+		return false
+	}
+}
+
+func attachTenantlessUserContext(c *gin.Context, user *types.User) {
+	principal := types.Principal{Type: types.PrincipalWebUser, ID: user.ID}
+	c.Set(types.UserContextKey.String(), user)
+	c.Set(types.UserIDContextKey.String(), user.ID)
+	c.Set(types.SystemAdminContextKey.String(), user.IsSystemAdmin)
+	c.Set(types.PrincipalContextKey.String(), principal)
+	ctx := c.Request.Context()
+	ctx = context.WithValue(ctx, types.UserContextKey, user)
+	ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+	ctx = context.WithValue(ctx, types.SystemAdminContextKey, user.IsSystemAdmin)
+	ctx = types.WithPrincipal(ctx, principal)
+	c.Request = c.Request.WithContext(ctx)
+}
+
 // Auth 认证中间件
 func Auth(
 	tenantService interfaces.TenantService,
@@ -157,6 +196,25 @@ func Auth(
 					}
 				}
 
+				if targetTenantID == 0 {
+					targetTenantID = resolveFirstMembershipTarget(c.Request.Context(), user, memberService, tenantService)
+					crossTenantSwitch = targetTenantID != user.TenantID
+				}
+
+				if targetTenantID == 0 {
+					if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) {
+						attachTenantlessUserContext(c, user)
+						c.Next()
+						return
+					}
+					c.JSON(http.StatusConflict, gin.H{
+						"error": "Tenant required",
+						"code":  "TENANT_REQUIRED",
+					})
+					c.Abort()
+					return
+				}
+
 				// 获取租户信息（使用目标租户ID）
 				tenant, err := tenantService.GetTenantByID(c.Request.Context(), targetTenantID)
 				if err != nil {
@@ -227,6 +285,37 @@ func Auth(
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication"})
 		c.Abort()
 	}
+}
+
+// resolveFirstMembershipTarget lets a tenantless session immediately become
+// usable once an active membership exists (for example after accepting its
+// first invitation or being added directly by an administrator). The user
+// service persists the same earliest-membership choice on the next token
+// issuance; middleware keeps the current JWT usable until then.
+func resolveFirstMembershipTarget(
+	ctx context.Context,
+	user *types.User,
+	memberService interfaces.TenantMemberService,
+	tenantService interfaces.TenantService,
+) uint64 {
+	if user == nil || memberService == nil || tenantService == nil {
+		return 0
+	}
+	members, err := memberService.ListByUser(ctx, user.ID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to list memberships for tenantless user %s: %v", user.ID, err)
+		return 0
+	}
+	for _, member := range members {
+		if member == nil || member.TenantID == 0 || member.Status != types.TenantMemberStatusActive {
+			continue
+		}
+		tenant, err := tenantService.GetTenantByID(ctx, member.TenantID)
+		if err == nil && tenant != nil {
+			return member.TenantID
+		}
+	}
+	return 0
 }
 
 func authenticateAPIKeyRequest(

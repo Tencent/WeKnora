@@ -31,8 +31,8 @@ type TenantHandler struct {
 	memberService interfaces.TenantMemberService
 	kbService     interfaces.KnowledgeBaseService
 	config        *config.Config
-	// systemSettingSvc resolves runtime tunables for tenant limits
-	// (currently `tenant.max_owned_per_user`). Reading goes DB > ENV >
+	// systemSettingSvc resolves runtime tenant policies and limits.
+	// Reading goes DB > ENV >
 	// in-code default, so a SystemAdmin's UI override applies on the
 	// very next CreateTenant call.
 	systemSettingSvc interfaces.SystemSettingService
@@ -228,6 +228,17 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		return
 	}
 
+	// Deployment-level policy: ordinary users may be restricted to joining
+	// existing workspaces by invitation. This check is authoritative; the
+	// frontend capability only improves UX and cannot bypass it. Cross-tenant
+	// superusers retain the catalog-management create path.
+	if !caller.CanAccessAllTenants &&
+		!resolveTenantSelfServiceCreationEnabled(ctx, h.config, h.systemSettingSvc) {
+		logger.Warnf(ctx, "Self-service tenant creation denied by policy for user %s", caller.ID)
+		c.Error(errors.NewTenantCreationDisabledError())
+		return
+	}
+
 	var tenantData types.Tenant
 
 	if caller.CanAccessAllTenants {
@@ -399,6 +410,23 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 					return
 				}
 			}
+		}
+	}
+
+	// When a tenantless user creates their first workspace, make it their
+	// default login tenant. Roll the just-created resources back if this
+	// finalisation fails so the user is not left with an unreachable tenant.
+	if caller.TenantID == 0 {
+		caller.TenantID = createdTenant.ID
+		if err := h.userService.UpdateUser(ctx, caller); err != nil {
+			logger.Errorf(ctx, "Failed to set first tenant %d as default for user %s: %v",
+				createdTenant.ID, caller.ID, err)
+			if h.memberService != nil {
+				_ = h.memberService.RemoveMember(ctx, caller.ID, createdTenant.ID)
+			}
+			_ = h.service.DeleteTenant(ctx, createdTenant.ID)
+			c.Error(errors.NewInternalServerError("Failed to finalise default tenant").WithDetails(err.Error()))
+			return
 		}
 	}
 

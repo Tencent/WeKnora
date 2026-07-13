@@ -103,18 +103,29 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		return nil, errors.New("failed to process password")
 	}
 
-	// Create default tenant for the user
-	// Note: RetrieverEngines is left empty - system will use defaults from RETRIEVE_DRIVER env
-	tenant := &types.Tenant{
-		Name:        fmt.Sprintf("%s's Workspace", secutils.SanitizeForLog(req.Username)),
-		Description: "Default workspace",
-		Status:      "active",
+	provisioning := req.TenantProvisioning
+	if provisioning == "" {
+		provisioning = types.TenantProvisioningCreatePersonal
+	}
+	if !provisioning.IsValid() {
+		return nil, fmt.Errorf("invalid tenant provisioning mode %q", provisioning)
 	}
 
-	createdTenant, err := s.tenantService.CreateTenant(ctx, tenant)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create tenant")
-		return nil, errors.New("failed to create workspace")
+	var createdTenant *types.Tenant
+	if provisioning == types.TenantProvisioningCreatePersonal {
+		// Note: RetrieverEngines is left empty - system will use defaults
+		// from RETRIEVE_DRIVER env.
+		tenant := &types.Tenant{
+			Name:        fmt.Sprintf("%s's Workspace", secutils.SanitizeForLog(req.Username)),
+			Description: "Default workspace",
+			Status:      "active",
+		}
+
+		createdTenant, err = s.tenantService.CreateTenant(ctx, tenant)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to create tenant")
+			return nil, errors.New("failed to create workspace")
+		}
 	}
 
 	// Create user
@@ -123,15 +134,23 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		Username:     req.Username,
 		Email:        req.Email,
 		PasswordHash: string(hashedPassword),
-		TenantID:     createdTenant.ID,
+		TenantID:     0,
 		IsActive:     true,
 		CreatedAt:    time.Now(),
 		UpdatedAt:    time.Now(),
+	}
+	if createdTenant != nil {
+		user.TenantID = createdTenant.ID
 	}
 
 	err = s.userRepo.CreateUser(ctx, user)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create user: %v", err)
+		if createdTenant != nil {
+			if rollbackErr := s.tenantService.DeleteTenant(ctx, createdTenant.ID); rollbackErr != nil {
+				logger.Errorf(ctx, "Failed to roll back tenant %d after user creation failure: %v", createdTenant.ID, rollbackErr)
+			}
+		}
 		return nil, errors.New("failed to create user")
 	}
 
@@ -139,10 +158,13 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 	// the tenant their account just created. Failure here only logs — the
 	// user record exists and the auth middleware's orphan-tenant recovery
 	// path will recreate the membership on next login.
-	if s.memberService != nil {
+	if createdTenant != nil && s.memberService != nil {
 		if _, err := s.memberService.EnsureOwner(ctx, user.ID, createdTenant.ID); err != nil {
 			logger.Errorf(ctx, "Failed to create owner membership for user %s tenant %d: %v",
 				user.ID, createdTenant.ID, err)
+			_ = s.userRepo.DeleteUser(ctx, user.ID)
+			_ = s.tenantService.DeleteTenant(ctx, createdTenant.ID)
+			return nil, errors.New("failed to finalise workspace ownership")
 		}
 	}
 
@@ -206,12 +228,16 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 	}
 	logger.Info(ctx, "Tokens generated successfully")
 
-	// Get tenant information
-	tenant, err := s.tenantService.GetTenantByID(ctx, resolvedTenantID)
-	if err != nil {
-		logger.Warn(ctx, "Failed to get tenant info")
-	} else {
-		logger.Info(ctx, "Tenant information retrieved successfully")
+	// Get tenant information. A zero resolved ID is a valid tenantless
+	// identity, not a failed tenant lookup.
+	var tenant *types.Tenant
+	if resolvedTenantID > 0 {
+		tenant, err = s.tenantService.GetTenantByID(ctx, resolvedTenantID)
+		if err != nil {
+			logger.Warn(ctx, "Failed to get tenant info")
+		} else {
+			logger.Info(ctx, "Tenant information retrieved successfully")
+		}
 	}
 
 	memberships := s.buildMembershipsForUser(ctx, user, tenant)
@@ -625,7 +651,9 @@ func (s *userService) GenerateTokens(
 // freshly minted access token. The contract:
 //
 //  1. If the user has no LastActiveTenantID preference set (or it points
-//     at home), return home — the historical behaviour.
+//     at home), return home — the historical behaviour. A tenantless user
+//     with an active membership adopts their earliest membership instead;
+//     this repairs partial invitation/admin-assignment flows.
 //  2. Otherwise validate the preference: the tenant must still exist and
 //     the user must still have an active membership (or be a cross-tenant
 //     superuser). Validation failure logs a warning, best-effort clears
@@ -641,6 +669,9 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 	}
 	pref := user.Preferences.LastActiveTenantID
 	if pref == nil || *pref == 0 || *pref == user.TenantID {
+		if user.TenantID == 0 {
+			return s.resolveFirstMembershipTenant(ctx, user)
+		}
 		return user.TenantID
 	}
 	preferred := *pref
@@ -678,6 +709,46 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 	}
 
 	return preferred
+}
+
+// resolveFirstMembershipTenant makes a tenantless identity usable when an
+// active membership already exists (for example, an invitation was accepted
+// but persisting the default tenant failed). ListByUser is stably ordered by
+// join time, so the earliest valid membership is deterministic. Persisting it
+// as home is best-effort: even if the repair write fails, the freshly issued
+// token can still be scoped to the membership and the next login retries.
+func (s *userService) resolveFirstMembershipTenant(ctx context.Context, user *types.User) uint64 {
+	if user == nil || s.memberService == nil {
+		return 0
+	}
+	members, err := s.memberService.ListByUser(ctx, user.ID)
+	if err != nil {
+		logger.Warnf(ctx, "resolveLoginTenantID: failed to list memberships for tenantless user %s: %v", user.ID, err)
+		return 0
+	}
+	for _, member := range members {
+		if member == nil || member.TenantID == 0 || member.Status != types.TenantMemberStatusActive {
+			continue
+		}
+		if s.tenantService != nil {
+			if _, err := s.tenantService.GetTenantByID(ctx, member.TenantID); err != nil {
+				logger.Warnf(ctx, "resolveLoginTenantID: tenant %d for tenantless user %s is unavailable: %v",
+					member.TenantID, user.ID, err)
+				continue
+			}
+		}
+
+		user.TenantID = member.TenantID
+		if s.userRepo != nil {
+			if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+				logger.Warnf(ctx, "resolveLoginTenantID: failed to persist tenant %d for tenantless user %s: %v",
+					member.TenantID, user.ID, err)
+				user.TenantID = 0
+			}
+		}
+		return member.TenantID
+	}
+	return 0
 }
 
 // clearLastActiveTenantPreference is the best-effort cleanup half of
@@ -1261,10 +1332,17 @@ func (s *userService) provisionOIDCUser(ctx context.Context, info *types.OIDCUse
 		return nil, fmt.Errorf("failed to generate password for OIDC user: %w", err)
 	}
 
+	provisioning := types.TenantProvisioningCreatePersonal
+	if s.config != nil && s.config.OIDCAuth != nil &&
+		strings.TrimSpace(s.config.OIDCAuth.DefaultTenantMode) == config.AuthDefaultTenantModeTenantless {
+		provisioning = types.TenantProvisioningTenantless
+	}
+
 	user, err := s.Register(ctx, &types.RegisterRequest{
-		Username: username,
-		Email:    info.Email,
-		Password: randomPassword,
+		Username:           username,
+		Email:              info.Email,
+		Password:           randomPassword,
+		TenantProvisioning: provisioning,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to auto-provision OIDC user: %w", err)

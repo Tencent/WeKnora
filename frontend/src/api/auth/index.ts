@@ -34,7 +34,7 @@ export interface LoginResponse {
     storage_used: number
     created_at: string
     updated_at: string
-  }
+  } | null
   // active_tenant mirrors `tenant` for endpoints that distinguish home
   // tenant from current tenant (e.g. /auth/register-by-invite). Only
   // one of `tenant` / `active_tenant` is populated by any given endpoint.
@@ -48,7 +48,8 @@ export interface LoginResponse {
     storage_used?: number
     created_at?: string
     updated_at?: string
-  }
+  } | null
+  memberships?: MembershipInfo[]
   token?: string
   refresh_token?: string
 }
@@ -137,10 +138,11 @@ export function userInfoFromApi(
   u: any,
   fallbackTenantId?: string | number | null,
 ): UserInfo {
-  const tid =
+  const rawTenantId =
     u?.tenant_id !== undefined && u?.tenant_id !== null && u.tenant_id !== ''
       ? u.tenant_id
       : fallbackTenantId ?? ''
+  const tid = Number(rawTenantId) > 0 ? rawTenantId : ''
   return {
     id: u?.id || '',
     username: u?.username || '',
@@ -316,10 +318,14 @@ export interface MembershipInfo {
 /**
  * 获取当前用户信息
  */
-export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[] }; message?: string }> {
+export interface AuthCapabilities {
+  can_create_tenant: boolean
+}
+
+export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities }; message?: string }> {
   try {
     const response = await get('/api/v1/auth/me')
-    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[] }; message?: string }
+    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities }; message?: string }
   } catch (error: any) {
     return {
       success: false,

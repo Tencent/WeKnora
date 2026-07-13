@@ -284,9 +284,12 @@ export async function createTenant(
     const response = await post('/api/v1/tenants', payload)
     return response as unknown as { success: boolean; data?: TenantInfo; message?: string }
   } catch (error: any) {
+    const code = error?.error?.code ?? error?.code
     return {
       success: false,
-      message: error.message || t('error.tenant.createFailed'),
+      message: code === 2005
+        ? t('tenant.create.disabled')
+        : (error.message || t('error.tenant.createFailed')),
     }
   }
 }

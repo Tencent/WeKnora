@@ -185,11 +185,8 @@
             {{ $t('tenant.switcher.empty') }}
           </div>
         </div>
-        <!-- 自助创建新工作区入口：放在租户列表底部，所有能 hover 出这个
-             子菜单的用户都能看到（包括单租户用户）。后端 router 已对
-             POST /api/v1/tenants 去掉跨租户超管守卫，handler 内部会把
-             当前用户 EnsureOwner 成新租户的 Owner。 -->
-        <div class="tenant-submenu-create" @click="openCreateTenantDialog">
+        <!-- 自助创建入口与 /auth/me 返回的后端能力保持一致。 -->
+        <div v-if="authStore.canCreateTenant" class="tenant-submenu-create" @click="openCreateTenantDialog">
           <t-icon name="add" class="tenant-submenu-create-icon" />
           <span class="tenant-submenu-create-label">{{ $t('tenant.create.action') }}</span>
         </div>
@@ -344,6 +341,10 @@ const createTenantDialogVisible = ref(false)
 
 const openCreateTenantDialog = () => {
   closeAll()
+  if (!authStore.canCreateTenant) {
+    MessagePlugin.info(t('tenant.create.disabled'))
+    return
+  }
   createTenantDialogVisible.value = true
 }
 
@@ -568,6 +569,10 @@ const loadUserInfo = async () => {
       const membershipsSync = response.data.memberships
       if (Array.isArray(membershipsSync)) {
         authStore.setMemberships(membershipsSync)
+      }
+      const canCreateTenant = response.data.capabilities?.can_create_tenant
+      if (typeof canCreateTenant === 'boolean') {
+        authStore.setCanCreateTenant(canCreateTenant)
       }
     }
   } catch (error) {
