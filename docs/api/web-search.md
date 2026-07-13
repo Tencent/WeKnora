@@ -17,6 +17,8 @@
 | PUT    | `/web-search-providers/:id`           | 更新 Provider                       |
 | DELETE | `/web-search-providers/:id`           | 删除 Provider                       |
 | POST   | `/web-search-providers/:id/test`      | 使用已保存凭证测试连通性             |
+| PUT    | `/web-search-providers/:id/credentials`      | 设置 Provider 凭证字段       |
+| DELETE | `/web-search-providers/:id/credentials/:field` | 删除 Provider 凭证字段    |
 
 ## GET `/web-search/providers` - 获取网络搜索服务商类型列表
 
@@ -255,3 +257,62 @@ curl --location --request POST 'http://localhost:8080/api/v1/web-search-provider
 ```
 
 **响应**: 同 `POST /web-search-providers/test`。
+
+## PUT `/web-search-providers/:id/credentials` - 设置 Provider 凭证字段
+
+为已保存的 Provider 设置单个凭证字段。此接口仅更新指定字段，不影响其他已保存的凭证。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明        |
+| ---- | ------ | ----------- |
+| id   | string | Provider ID |
+
+**参数说明（请求体）**:
+
+| 字段  | 类型   | 必填 | 说明                   |
+| ----- | ------ | ---- | ---------------------- |
+| field | string | 是   | 凭证字段名（如 `api_key`） |
+| value | string | 是   | 凭证字段值              |
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/web-search-providers/wsp-001/credentials' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "field": "api_key",
+    "value": "AIza..."
+}'
+```
+
+**响应**:
+
+```json
+{ "success": true }
+```
+
+## DELETE `/web-search-providers/:id/credentials/:field` - 删除 Provider 凭证字段
+
+从已保存的 Provider 中删除指定凭证字段。
+
+**路径参数**:
+
+| 字段  | 类型   | 说明                   |
+| ----- | ------ | ---------------------- |
+| id    | string | Provider ID            |
+| field | string | 凭证字段名（如 `api_key`） |
+
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/web-search-providers/wsp-001/credentials/api_key' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**:
+
+```json
+{ "success": true }
+```

@@ -344,9 +344,20 @@ func consumeModelDebugChatStream(stream <-chan types.StreamResponse) (*modelDebu
 	return result, nil
 }
 
-// DebugModel executes a saved model through the same service constructors used
-// by production calls and returns the complete normalized response. Credentials
-// stay server-side; the request preview contains only non-secret fields.
+// DebugModel godoc
+// @Summary      调试测试模型
+// @Description  使用已保存的模型执行一次测试调用并返回响应（会发起真实 API 调用产生费用）
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "模型 ID"
+// @Param        body body      map[string]interface{}  false  "测试参数（可选 prompt）"
+// @Success      200  {object}  map[string]interface{}  "测试结果"
+// @Failure      400  {object}  errors.AppError         "模型不可达"
+// @Failure      404  {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/debug [post]
 func (h *ModelHandler) DebugModel(c *gin.Context) {
 	ctx := c.Request.Context()
 	started := time.Now()

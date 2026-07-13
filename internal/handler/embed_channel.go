@@ -124,6 +124,19 @@ func validateAllowedOrigins(origins []string) error {
 	return nil
 }
 
+// CreateEmbedChannel godoc
+// @Summary      创建 Embed 渠道
+// @Description  为指定智能体创建网页嵌入式聊天渠道
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string               true  "智能体 ID"
+// @Param        request  body      embedChannelRequest  true  "渠道配置"
+// @Success      200      {object}  map[string]interface{}  "创建的渠道"
+// @Failure      400      {object}  map[string]interface{}  "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agents/{id}/embed-channels [post]
 func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	agentID := secutils.SanitizeForLog(c.Param("id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -184,6 +197,16 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	})
 }
 
+// ListEmbedChannels godoc
+// @Summary      获取智能体的 Embed 渠道列表
+// @Description  返回指定智能体下所有 Embed 渠道
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        id  path      string  true  "智能体 ID"
+// @Success      200  {object}  map[string]interface{}  "渠道列表"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agents/{id}/embed-channels [get]
 func (h *EmbedChannelHandler) ListEmbedChannels(c *gin.Context) {
 	agentID := secutils.SanitizeForLog(c.Param("id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -197,6 +220,15 @@ func (h *EmbedChannelHandler) ListEmbedChannels(c *gin.Context) {
 
 // ListAllEmbedChannels lists every embed channel in the current tenant, across
 // agents, for sidebar session grouping. Publish tokens are never included.
+// ListAllEmbedChannels godoc
+// @Summary      获取租户下所有 Embed 渠道
+// @Description  返回当前租户下所有 Embed 渠道（跨智能体），不含 publish_token
+// @Tags         Embed 渠道
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "渠道列表"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /embed-channels [get]
 func (h *EmbedChannelHandler) ListAllEmbedChannels(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	rows, err := h.embedSvc.ListByTenant(c.Request.Context(), tenantID)
@@ -215,6 +247,19 @@ func embedChannelsResponse(rows []*types.EmbedChannel) []gin.H {
 	return data
 }
 
+// UpdateEmbedChannel godoc
+// @Summary      更新 Embed 渠道
+// @Description  更新指定 Embed 渠道的配置
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        channel_id  path      string               true  "渠道 ID"
+// @Param        request     body      embedChannelRequest  true  "更新字段"
+// @Success      200         {object}  map[string]interface{}  "更新后的渠道"
+// @Failure      400         {object}  map[string]interface{}  "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /embed-channels/{channel_id} [put]
 func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	channelID := secutils.SanitizeForLog(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -260,6 +305,17 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": embedChannelResponse(ch, "")})
 }
 
+// DeleteEmbedChannel godoc
+// @Summary      删除 Embed 渠道
+// @Description  删除指定的 Embed 渠道
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Success      200         {object}  map[string]interface{}  "success: true"
+// @Failure      404         {object}  map[string]interface{}  "渠道不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /embed-channels/{channel_id} [delete]
 func (h *EmbedChannelHandler) DeleteEmbedChannel(c *gin.Context) {
 	channelID := secutils.SanitizeForLog(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -270,6 +326,16 @@ func (h *EmbedChannelHandler) DeleteEmbedChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+// RotateEmbedToken godoc
+// @Summary      轮换 Embed Publish Token
+// @Description  为指定渠道生成新的 publish_token，旧 token 立即失效
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Success      200         {object}  map[string]interface{}  "新的 publish_token"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /embed-channels/{channel_id}/rotate-token [post]
 func (h *EmbedChannelHandler) RotateEmbedToken(c *gin.Context) {
 	channelID := secutils.SanitizeForLog(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -281,6 +347,17 @@ func (h *EmbedChannelHandler) RotateEmbedToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": embedChannelResponse(ch, token)})
 }
 
+// IssuePreviewSession godoc
+// @Summary      创建 Embed 预览会话
+// @Description  为管理端预览生成临时 session token
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Success      200         {object}  map[string]interface{}  "session_token, expires_in"
+// @Failure      403         {object}  map[string]interface{}  "渠道已禁用"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /embed-channels/{channel_id}/preview-session [post]
 func (h *EmbedChannelHandler) IssuePreviewSession(c *gin.Context) {
 	channelID := secutils.SanitizeForLog(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -302,6 +379,14 @@ func (h *EmbedChannelHandler) IssuePreviewSession(c *gin.Context) {
 	})
 }
 
+// ExchangeEmbedSession godoc
+// @Summary      交换 Embed 会话令牌
+// @Description  用 Publish Token 交换短时效的 Session Token（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path  string  true  "渠道 ID"
+// @Success      200         {object}  map[string]interface{}  "session_token, expires_in"
+// @Router       /embed/{channel_id}/exchange [post]
 func (h *EmbedChannelHandler) ExchangeEmbedSession(c *gin.Context) {
 	ctx := c.Request.Context()
 	ch, ok := middleware.EmbedChannelFromContext(ctx)
@@ -336,6 +421,14 @@ func (h *EmbedChannelHandler) ExchangeEmbedSession(c *gin.Context) {
 	})
 }
 
+// GetEmbedConfig godoc
+// @Summary      获取 Embed 组件配置
+// @Description  返回前端 Embed 组件初始化所需配置（主题色、欢迎消息等，EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path  string  true  "渠道 ID"
+// @Success      200  {object}  map[string]interface{}  "组件配置"
+// @Router       /embed/{channel_id}/config [get]
 func (h *EmbedChannelHandler) GetEmbedConfig(c *gin.Context) {
 	ch, ok := middleware.EmbedChannelFromContext(c.Request.Context())
 	if !ok {
@@ -345,6 +438,15 @@ func (h *EmbedChannelHandler) GetEmbedConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.embedSvc.PublicConfig(c.Request.Context(), ch)})
 }
 
+// GetEmbedChunk godoc
+// @Summary      获取 Embed 分块内容
+// @Description  获取指定分块的完整内容（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path  string  true  "渠道 ID"
+// @Param        chunk_id    path  string  true  "分块 ID"
+// @Success      200         {object}  map[string]interface{}  "分块内容"
+// @Router       /embed/{channel_id}/chunks/{chunk_id} [get]
 func (h *EmbedChannelHandler) GetEmbedChunk(c *gin.Context) {
 	ch, ok := middleware.EmbedChannelFromContext(c.Request.Context())
 	if !ok {
@@ -375,6 +477,14 @@ func (h *EmbedChannelHandler) GetEmbedChunk(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": chunk})
 }
 
+// GetEmbedSuggestedQuestions godoc
+// @Summary      获取 Embed 建议问题
+// @Description  返回嵌入组件展示的推荐问题列表（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path  string  true  "渠道 ID"
+// @Success      200         {object}  map[string]interface{}  "建议问题列表"
+// @Router       /embed/{channel_id}/suggested-questions [get]
 func (h *EmbedChannelHandler) GetEmbedSuggestedQuestions(c *gin.Context) {
 	ch, ok := middleware.EmbedChannelFromContext(c.Request.Context())
 	if !ok {
@@ -406,6 +516,15 @@ func (h *EmbedChannelHandler) GetEmbedSuggestedQuestions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"questions": questions}})
 }
 
+// CreateEmbedSession godoc
+// @Summary      创建 Embed 匿名会话
+// @Description  为嵌入组件创建匿名会话（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        channel_id  path  string  true  "渠道 ID"
+// @Success      200         {object}  map[string]interface{}  "session_id"
+// @Router       /embed/{channel_id}/sessions [post]
 func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 	ctx := c.Request.Context()
 	ch, ok := middleware.EmbedChannelFromContext(ctx)
@@ -440,14 +559,43 @@ func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"success": true, "data": gin.H{"id": created.ID, "sig": sig}})
 }
 
+// EmbedKnowledgeChat godoc
+// @Summary      Embed 知识库问答
+// @Description  基于知识库的 SSE 流式问答（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Param        session_id  path      string  true  "会话 ID"
+// @Success      200         {object}  map[string]interface{}  "SSE 流式响应"
+// @Router       /embed/{channel_id}/knowledge-chat/{session_id} [post]
 func (h *EmbedChannelHandler) EmbedKnowledgeChat(c *gin.Context) {
 	h.delegateEmbedChat(c, false)
 }
 
+// EmbedAgentChat godoc
+// @Summary      Embed Agent 问答
+// @Description  基于 Agent 的 SSE 流式智能问答（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Param        session_id  path      string  true  "会话 ID"
+// @Success      200         {object}  map[string]interface{}  "SSE 流式响应"
+// @Router       /embed/{channel_id}/agent-chat/{session_id} [post]
 func (h *EmbedChannelHandler) EmbedAgentChat(c *gin.Context) {
 	h.delegateEmbedChat(c, true)
 }
 
+// EmbedLoadMessages godoc
+// @Summary      加载 Embed 历史消息
+// @Description  获取嵌入会话的历史消息列表（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path  string  true  "渠道 ID"
+// @Param        session_id  path  string  true  "会话 ID"
+// @Success      200         {object}  map[string]interface{}  "消息列表"
+// @Router       /embed/{channel_id}/messages/{session_id}/load [get]
 func (h *EmbedChannelHandler) EmbedLoadMessages(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -455,6 +603,15 @@ func (h *EmbedChannelHandler) EmbedLoadMessages(c *gin.Context) {
 	h.messageHandler.LoadMessages(c)
 }
 
+// EmbedStopSession godoc
+// @Summary      停止 Embed 会话生成
+// @Description  停止嵌入会话中正在进行的 SSE 流式生成（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path  string  true  "渠道 ID"
+// @Param        session_id  path  string  true  "会话 ID"
+// @Success      200         {object}  map[string]interface{}  "success: true"
+// @Router       /embed/{channel_id}/sessions/{session_id}/stop [post]
 func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -462,6 +619,17 @@ func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 	h.sessionHandler.StopSession(c)
 }
 
+// EmbedResolveMCPOAuth godoc
+// @Summary      处理 Embed MCP OAuth 决议
+// @Description  在嵌入会话中处理 MCP OAuth 授权决议（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Param        session_id  path      string  true  "会话 ID"
+// @Param        pending_id  path      string  true  "待处理决议 ID"
+// @Success      200         {object}  map[string]interface{}  "处理结果"
+// @Router       /embed/{channel_id}/sessions/{session_id}/mcp-oauth-resolutions/{pending_id} [post]
 func (h *EmbedChannelHandler) EmbedResolveMCPOAuth(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -473,6 +641,16 @@ func (h *EmbedChannelHandler) EmbedResolveMCPOAuth(c *gin.Context) {
 	h.mcpOAuthHandler.ResolveMCPOAuth(c)
 }
 
+// EmbedCancelMCPOAuth godoc
+// @Summary      取消 Embed MCP OAuth 决议
+// @Description  取消嵌入会话中的 MCP OAuth 授权决议（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Param        session_id  path      string  true  "会话 ID"
+// @Param        pending_id  path      string  true  "待处理决议 ID"
+// @Success      200         {object}  map[string]interface{}  "取消成功"
+// @Router       /embed/{channel_id}/sessions/{session_id}/mcp-oauth-resolutions/{pending_id}/cancel [post]
 func (h *EmbedChannelHandler) EmbedCancelMCPOAuth(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -484,6 +662,17 @@ func (h *EmbedChannelHandler) EmbedCancelMCPOAuth(c *gin.Context) {
 	h.mcpOAuthHandler.CancelMCPOAuth(c)
 }
 
+// EmbedMCPOAuthAuthorizeURL godoc
+// @Summary      获取 Embed MCP OAuth 授权 URL
+// @Description  在嵌入会话中获取 MCP 服务的 OAuth 授权链接（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Param        session_id  path      string  true  "会话 ID"
+// @Param        id          path      string  true  "MCP 服务 ID"
+// @Success      200         {object}  map[string]interface{}  "authorize_url"
+// @Router       /embed/{channel_id}/sessions/{session_id}/mcp-services/{id}/oauth/authorize-url [post]
 func (h *EmbedChannelHandler) EmbedMCPOAuthAuthorizeURL(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -495,6 +684,16 @@ func (h *EmbedChannelHandler) EmbedMCPOAuthAuthorizeURL(c *gin.Context) {
 	h.mcpOAuthHandler.AuthorizeURL(c)
 }
 
+// EmbedMCPOAuthStatus godoc
+// @Summary      检查 Embed MCP OAuth 状态
+// @Description  在嵌入会话中检查 MCP 服务的 OAuth 授权状态（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Param        session_id  path      string  true  "会话 ID"
+// @Param        id          path      string  true  "MCP 服务 ID"
+// @Success      200         {object}  map[string]interface{}  "授权状态"
+// @Router       /embed/{channel_id}/sessions/{session_id}/mcp-services/{id}/oauth/status [get]
 func (h *EmbedChannelHandler) EmbedMCPOAuthStatus(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -506,6 +705,17 @@ func (h *EmbedChannelHandler) EmbedMCPOAuthStatus(c *gin.Context) {
 	h.mcpOAuthHandler.Status(c)
 }
 
+// EmbedResolveToolApproval godoc
+// @Summary      处理 Embed 工具调用审批
+// @Description  在嵌入会话中处理 Agent 工具调用的待审批请求（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Param        session_id  path      string  true  "会话 ID"
+// @Param        pending_id  path      string  true  "待审批 ID"
+// @Success      200         {object}  map[string]interface{}  "处理结果"
+// @Router       /embed/{channel_id}/sessions/{session_id}/tool-approvals/{pending_id} [post]
 func (h *EmbedChannelHandler) EmbedResolveToolApproval(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -525,6 +735,16 @@ type embedWebhookEventRequest struct {
 }
 
 // EmbedRelayWebhookEvent forwards a visitor chat event to the channel webhook URL.
+// EmbedRelayWebhookEvent godoc
+// @Summary      转发 Embed Webhook 事件
+// @Description  接收并转发外部 webhook 事件到嵌入会话（EmbedAuth 鉴权）
+// @Tags         Embed 渠道
+// @Accept       json
+// @Produce      json
+// @Param        channel_id  path  string  true  "渠道 ID"
+// @Param        session_id  path  string  true  "会话 ID"
+// @Success      200         {object}  map[string]interface{}  "处理结果"
+// @Router       /embed/{channel_id}/sessions/{session_id}/events [post]
 func (h *EmbedChannelHandler) EmbedRelayWebhookEvent(c *gin.Context) {
 	ch, ok := middleware.EmbedChannelFromContext(c.Request.Context())
 	if !ok {
@@ -689,6 +909,16 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 
 // GetEmbedChannel returns a single embed channel for management, including the
 // publish token so admins can copy deploy snippets at any time.
+// GetEmbedChannel godoc
+// @Summary      获取 Embed 渠道详情
+// @Description  获取指定 Embed 渠道的完整配置（含 publish_token）
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Success      200         {object}  map[string]interface{}  "渠道详情"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /embed-channels/{channel_id} [get]
 func (h *EmbedChannelHandler) GetEmbedChannel(c *gin.Context) {
 	channelID := strings.TrimSpace(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
@@ -704,6 +934,16 @@ func (h *EmbedChannelHandler) GetEmbedChannel(c *gin.Context) {
 }
 
 // GetEmbedChannelStats returns lightweight usage stats for an embed channel.
+// GetEmbedChannelStats godoc
+// @Summary      获取 Embed 渠道统计
+// @Description  返回指定 Embed 渠道的访问量和消息数等统计信息
+// @Tags         Embed 渠道
+// @Produce      json
+// @Param        channel_id  path      string  true  "渠道 ID"
+// @Success      200         {object}  map[string]interface{}  "统计数据"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /embed-channels/{channel_id}/stats [get]
 func (h *EmbedChannelHandler) GetEmbedChannelStats(c *gin.Context) {
 	channelID := strings.TrimSpace(c.Param("channel_id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())

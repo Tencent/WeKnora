@@ -4,14 +4,17 @@
 
 模型管理接口用于维护当前租户下可用的 LLM / Embedding / Rerank / VLLM / ASR 模型配置。
 
-| 方法   | 路径                | 描述                  |
-| ------ | ------------------- | --------------------- |
-| GET    | `/models/providers` | 获取模型服务商列表    |
-| POST   | `/models`           | 创建模型              |
-| GET    | `/models`           | 获取模型列表          |
-| GET    | `/models/:id`       | 获取模型详情          |
-| PUT    | `/models/:id`       | 更新模型              |
-| DELETE | `/models/:id`       | 删除模型              |
+| 方法   | 路径                           | 描述                  |
+| ------ | ------------------------------ | --------------------- |
+| GET    | `/models/providers`            | 获取模型服务商列表    |
+| POST   | `/models`                      | 创建模型              |
+| GET    | `/models`                      | 获取模型列表          |
+| POST   | `/models/:id/debug`            | 调试测试已保存模型    |
+| GET    | `/models/:id`                  | 获取模型详情          |
+| PUT    | `/models/:id`                  | 更新模型              |
+| DELETE | `/models/:id`                  | 删除模型              |
+| PUT    | `/models/:id/credentials`      | 设置模型凭证字段      |
+| DELETE | `/models/:id/credentials/:field` | 删除模型凭证字段    |
 
 ## 服务商支持 (Provider Support)
 
@@ -410,6 +413,111 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/models/8fdc464d-8
 ```
 
 404 表示模型不存在。
+
+---
+
+## POST `/models/:id/debug` - 调试测试模型
+
+使用一个简单的 prompt 测试已保存的模型是否可用。会发起真实 API 调用，产生费用。
+
+**路径参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| id   | string | 是 | 模型 ID |
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/models/dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3/debug' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: your_api_key'
+```
+
+**响应**（200 OK）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "latency_ms": 450,
+        "tokens_used": 15,
+        "response": "Hello! How can I help you today?"
+    }
+}
+```
+
+**错误**: 模型不可达 → 400；模型不存在 → 404。
+
+---
+
+## PUT `/models/:id/credentials` - 设置模型凭证字段
+
+按字段设置模型的 API 密钥等凭证信息。凭证字段不经过主 PUT 体传输，使用此专用端点保护敏感数据。
+
+**路径参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| id   | string | 是 | 模型 ID |
+
+**参数说明（请求体）**:
+
+| 字段 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| field | string | 是 | 字段名（如 `api_key`） |
+| value | string | 是 | 字段值 |
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/models/dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3/credentials' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: your_api_key' \
+--data '{
+    "field": "api_key",
+    "value": "sk-new-api-key"
+}'
+```
+
+**响应**（200 OK）:
+
+```json
+{
+    "success": true
+}
+```
+
+---
+
+## DELETE `/models/:id/credentials/:field` - 删除模型凭证字段
+
+删除指定模型的某个凭证字段。
+
+**路径参数**:
+
+| 字段 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| id   | string | 是 | 模型 ID |
+| field | string | 是 | 要删除的字段名 |
+
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/models/dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3/credentials/api_key' \
+--header 'X-API-Key: your_api_key'
+```
+
+**响应**（200 OK）:
+
+```json
+{
+    "success": true
+}
+```
+
+---
 
 ## 参数说明
 

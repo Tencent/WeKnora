@@ -50,16 +50,15 @@ type mcpCredentialsPutRequest struct {
 // new credential.
 //
 // Put godoc
-// @Summary      设置 MCP 服务凭据
+// @Summary      设置 MCP 服务凭证字段
 // @Description  为指定字段写入新凭据；省略的字段保留原值；空字符串视为 no-op（如需删除请用 DELETE）
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string                  true  "MCP 服务 ID"
-// @Param        request  body      map[string]interface{}  true  "{api_key?: string, token?: string}"
-// @Success      200      {object}  map[string]interface{}  "写入后的凭据状态"
+// @Param        request  body      map[string]interface{}  true  "{field, value}"
+// @Success      200      {object}  map[string]interface{}  "成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
-// @Failure      404      {object}  errors.AppError         "服务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services/{id}/credentials [put]
@@ -117,7 +116,7 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 // "token". Returns 204 on success (even if the field was already empty).
 //
 // DeleteField godoc
-// @Summary      移除 MCP 服务的单个凭据字段
+// @Summary      删除 MCP 服务凭证字段
 // @Description  删除指定字段的存储凭据；删除已为空的字段是幂等的
 // @Tags         MCP服务
 // @Produce      json

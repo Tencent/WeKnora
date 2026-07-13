@@ -14,9 +14,17 @@ MCP（Model Context Protocol）服务管理接口，提供 MCP 服务的 CRUD、
 | POST   | `/mcp-services/:id/test`                          | 测试 MCP 服务连通性                           |
 | GET    | `/mcp-services/:id/tools`                         | 获取 MCP 服务工具列表                         |
 | GET    | `/mcp-services/:id/resources`                     | 获取 MCP 服务资源列表                         |
-| GET    | `/mcp-services/:id/tool-approvals`                | 列出该服务下各工具的人工审批策略 |
-| PUT    | `/mcp-services/:id/tool-approvals/:tool_name`     | 设置/更新某工具的人工审批策略  |
-| POST   | `/agent/tool-approvals/:pending_id`               | 处理 Agent 工具调用待审批请求  |
+| PUT    | `/mcp-services/:id/credentials`                   | 设置 MCP 凭证字段                             |
+| DELETE | `/mcp-services/:id/credentials/:field`            | 删除 MCP 凭证字段                             |
+| POST   | `/mcp-services/:id/oauth/authorize-url`           | 获取 MCP 服务 OAuth 授权 URL                  |
+| GET    | `/mcp-services/:id/oauth/status`                  | 检查 MCP 服务 OAuth 令牌状态                  |
+| DELETE | `/mcp-services/:id/oauth/token`                   | 吊销 MCP 服务 OAuth 令牌                      |
+| GET    | `/mcp-oauth/callback`                             | MCP OAuth 提供商回调（无认证）                |
+| GET    | `/mcp-services/:id/tool-approvals`                | 列出该服务下各工具的人工审批策略              |
+| PUT    | `/mcp-services/:id/tool-approvals/:tool_name`     | 设置/更新某工具的人工审批策略                 |
+| POST   | `/agent/tool-approvals/:pending_id`               | 处理 Agent 工具调用待审批请求                 |
+| POST   | `/agent/mcp-oauth-resolutions/:pending_id`        | 处理对话内 MCP OAuth 授权决议                 |
+| POST   | `/agent/mcp-oauth-resolutions/:pending_id/cancel` | 取消 MCP OAuth 授权决议                       |
 
 ## POST `/mcp-services` - 创建 MCP 服务
 
@@ -420,6 +428,201 @@ curl --location 'http://localhost:8080/api/v1/mcp-services/mcp-00000001/resource
 }
 ```
 
+## PUT `/mcp-services/:id/credentials` - 设置 MCP 凭证字段
+
+为指定 MCP 服务设置单个凭证字段（如 API Key、Token 等）。可用于增量添加或更新凭证。
+
+**权限**：Admin 及以上。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明        |
+| ---- | ------ | ----------- |
+| id   | string | MCP 服务 ID |
+
+**请求体**:
+
+| 字段   | 类型   | 必填 | 说明                                    |
+| ------ | ------ | ---- | --------------------------------------- |
+| field  | string | 是   | 凭证字段名（如 `api_key`、`token` 等）  |
+| value  | string | 是   | 凭证字段值                              |
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/mcp-services/mcp-00000001/credentials' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "field": "api_key",
+    "value": "sk-new-api-key-xxxxx"
+}'
+```
+
+**响应**:
+
+```json
+{
+    "success": true
+}
+```
+
+## DELETE `/mcp-services/:id/credentials/:field` - 删除 MCP 凭证字段
+
+删除指定 MCP 服务的单个凭证字段。
+
+**权限**：Admin 及以上。
+
+**路径参数**:
+
+| 字段   | 类型   | 说明                                    |
+| ------ | ------ | --------------------------------------- |
+| id     | string | MCP 服务 ID                             |
+| field  | string | 凭证字段名（如 `api_key`、`token` 等）  |
+
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/mcp-services/mcp-00000001/credentials/api_key' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "success": true
+}
+```
+
+## POST `/mcp-services/:id/oauth/authorize-url` - 获取 MCP 服务 OAuth 授权 URL
+
+为指定 MCP 服务生成 OAuth 授权起始 URL，前端可将用户重定向到该地址以完成第三方授权流程。
+
+**权限**：Viewer 及以上。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明        |
+| ---- | ------ | ----------- |
+| id   | string | MCP 服务 ID |
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/mcp-services/mcp-00000001/oauth/authorize-url' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "authorize_url": "https://provider.example.com/oauth/authorize?client_id=xxx&redirect_uri=..."
+    },
+    "success": true
+}
+```
+
+## GET `/mcp-services/:id/oauth/status` - 检查 MCP 服务 OAuth 令牌状态
+
+查询指定 MCP 服务当前是否已持有有效的 OAuth 令牌。
+
+**权限**：Viewer 及以上。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明        |
+| ---- | ------ | ----------- |
+| id   | string | MCP 服务 ID |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/mcp-services/mcp-00000001/oauth/status' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "authorized": true
+    },
+    "success": true
+}
+```
+
+## DELETE `/mcp-services/:id/oauth/token` - 吊销 MCP 服务 OAuth 令牌
+
+吊销指定 MCP 服务当前持有的 OAuth 令牌。吊销后如需再次使用该服务，需重新走 OAuth 授权流程。
+
+**权限**：Viewer 及以上。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明        |
+| ---- | ------ | ----------- |
+| id   | string | MCP 服务 ID |
+
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/mcp-services/mcp-00000001/oauth/token' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "success": true
+}
+```
+
+## GET `/mcp-oauth/callback` - MCP OAuth 提供商回调
+
+MCP OAuth 授权流程中的回调端点，由第三方 OAuth 提供商在用户授权后通过浏览器重定向调用。使用一次性 state 参数完成身份关联与令牌交换。
+
+**认证**：无需认证（由第三方浏览器重定向触发，通过单次有效的 state 进行安全校验）。
+
+**查询参数**:
+
+| 字段   | 类型   | 必填 | 说明                            |
+| ------ | ------ | ---- | ------------------------------- |
+| code   | string | 是   | OAuth 提供商返回的授权码        |
+| state  | string | 是   | 单次有效的防 CSRF 状态令牌      |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/mcp-oauth/callback?code=abcd1234&state=st-xxxxx' \
+--header 'Content-Type: application/json'
+```
+
+**响应（成功时浏览器重定向到前端页面）**:
+
+```json
+{
+    "success": true,
+    "message": "OAuth authorization completed"
+}
+```
+
+**错误码说明**:
+
+| HTTP | 触发条件                                  |
+| ---- | ----------------------------------------- |
+| 400  | `code` 或 `state` 缺失                    |
+| 400  | `state` 无效、过期或已被使用              |
+| 500  | 令牌交换失败（提供商返回错误）            |
+
 ## GET `/mcp-services/:id/tool-approvals` - 列出工具人工审批策略
 
 返回该 MCP 服务下各工具持久化的 `require_approval` 标记。仅返回数据库中已显式配置过的工具记录；未出现在列表中的工具默认无需审批。
@@ -555,3 +758,94 @@ curl --location --request POST 'http://localhost:8080/api/v1/agent/tool-approval
 | 400  | `decision` 不是 `approve`/`reject`；或 `modified_args` 是 `null`/非对象；或租户/用户错配 |
 | 401  | 上下文缺失认证用户（中间件未注入 `user_id`）                                            |
 | 404  | `pending_id` 不存在或已完成（超时/取消已先一步消费）                                    |
+
+## POST `/agent/mcp-oauth-resolutions/:pending_id` - 处理对话内 MCP OAuth 授权决议
+
+当 Agent 在对话过程中需要用户授权 MCP 服务的 OAuth 访问时，会生成一条待处理的授权决议。前端调用此接口以批准或拒绝该授权请求。
+
+**权限**：Viewer 及以上。
+
+**路径参数**:
+
+| 字段        | 类型   | 说明                |
+| ----------- | ------ | ------------------- |
+| pending_id  | string | 待处理授权决议 ID   |
+
+**请求体**:
+
+| 字段     | 类型   | 必填 | 说明                                   |
+| -------- | ------ | ---- | -------------------------------------- |
+| decision | string | 是   | 决议结论，必须为 `approve` 或 `reject` |
+
+**请求（批准）**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/agent/mcp-oauth-resolutions/oauth-pending-abcdef123456' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "decision": "approve"
+}'
+```
+
+**请求（拒绝）**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/agent/mcp-oauth-resolutions/oauth-pending-abcdef123456' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "decision": "reject"
+}'
+```
+
+**响应**:
+
+```json
+{
+    "success": true
+}
+```
+
+**错误码说明**:
+
+| HTTP | 触发条件                                                     |
+| ---- | ------------------------------------------------------------ |
+| 400  | `decision` 不是 `approve` 或 `reject`                        |
+| 401  | 上下文缺失认证用户                                           |
+| 404  | `pending_id` 不存在或已完成（超时/取消已先一步消费）         |
+
+## POST `/agent/mcp-oauth-resolutions/:pending_id/cancel` - 取消 MCP OAuth 授权决议
+
+取消一个待处理的 MCP OAuth 授权决议。调用后 Agent 将收到取消信号并中止等待。
+
+**权限**：Viewer 及以上。
+
+**路径参数**:
+
+| 字段        | 类型   | 说明                |
+| ----------- | ------ | ------------------- |
+| pending_id  | string | 待处理授权决议 ID   |
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/agent/mcp-oauth-resolutions/oauth-pending-abcdef123456/cancel' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "success": true
+}
+```
+
+**错误码说明**:
+
+| HTTP | 触发条件                                                     |
+| ---- | ------------------------------------------------------------ |
+| 401  | 上下文缺失认证用户                                           |
+| 404  | `pending_id` 不存在或已完成（超时/取消已先一步消费）         |

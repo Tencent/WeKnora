@@ -89,5 +89,13 @@ WeKnora API 按功能分为以下几类：
 | Skills | 预装智能体技能 | [skill.md](./skill.md) |
 | 网络搜索 | 网络搜索服务商 | [web-search.md](./web-search.md) |
 | 向量存储 | 向量数据库连接管理 | [vector-store.md](./vector-store.md) |
-| IM 渠道 | 企业微信 / 飞书 / Slack 等 IM 平台对接，含渠道 CRUD 与回调 | [../IM集成开发文档.md](../IM集成开发文档.md) |
-| 数据源导入 | 飞书 / 企微 / Notion / Confluence 等外部数据源接入与同步 | [../数据源导入开发文档.md](../数据源导入开发文档.md) |
+| Wiki 页面 | Wiki 模式下的页面、文件夹、图谱、诊断管理 | [wiki-page.md](./wiki-page.md) |
+| 数据源管理 | 外部数据源连接器（飞书/Notion/语雀等），含同步与资源浏览 | [datasource.md](./datasource.md) |
+| Embed 渠道 | 网页嵌入式聊天组件的渠道管理与公开端点 | [embed.md](./embed.md) |
+| IM 渠道 | 企业微信 / 飞书 / Slack 等 IM 平台对接，含渠道 CRUD 与回调 | [im.md](./im.md) · [../IM集成开发文档.md](../IM集成开发文档.md) |
+| 用户收藏 | 用户个人知识库/智能体收藏管理 | [user-favorite.md](./user-favorite.md) |
+| 邀请管理 | 用户收到的租户邀请（接受/拒绝） | [invitation.md](./invitation.md) |
+| 系统管理员 | 平台级管理员权限、系统设置、跨租户操作 | [system-admin.md](./system-admin.md) |
+| 分块调试 | 分块预览调试（KB 编辑器调试面板） | [chunker-debug.md](./chunker-debug.md) |
+| WeKnoraCloud | WeKnoraCloud SaaS 凭证管理 | [weknoracloud.md](./weknoracloud.md) |
+| 文件服务 | 文件代理访问与签名 URL 预览 | [file-service.md](./file-service.md) |

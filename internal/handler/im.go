@@ -31,7 +31,20 @@ func NewIMHandler(imService *im.Service) *IMHandler {
 
 // ── Channel CRUD handlers ──
 
-// CreateIMChannel creates a new IM channel for an agent.
+// CreateIMChannel godoc
+// @Summary      创建 IM 渠道
+// @Description  为指定智能体创建新的 IM 渠道（企业微信/飞书/Slack/Telegram/钉钉/Mattermost/微信/QQ）
+// @Tags         IM 渠道
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "智能体 ID"
+// @Param        request  body      map[string]interface{}  true  "渠道配置"
+// @Success      200      {object}  map[string]interface{}  "创建的渠道"
+// @Failure      400      {object}  map[string]interface{}  "请求参数错误"
+// @Failure      409      {object}  map[string]interface{}  "重复绑定"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agents/{id}/im-channels [post]
 func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	agentID := c.Param("id")
 	if agentID == "" {
@@ -111,7 +124,17 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": channel})
 }
 
-// ListIMChannels lists all IM channels for an agent.
+// ListIMChannels godoc
+// @Summary      获取智能体的 IM 渠道列表
+// @Description  返回指定智能体下所有 IM 渠道的摘要信息（不含凭证）
+// @Tags         IM 渠道
+// @Produce      json
+// @Param        id  path      string  true  "智能体 ID"
+// @Success      200  {object}  map[string]interface{}  "渠道列表"
+// @Failure      400  {object}  map[string]interface{}  "缺少 agent_id"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agents/{id}/im-channels [get]
 func (h *IMHandler) ListIMChannels(c *gin.Context) {
 	agentID := c.Param("id")
 	if agentID == "" {
@@ -134,9 +157,15 @@ func (h *IMHandler) ListIMChannels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": im.SummarizeIMChannels(channels)})
 }
 
-// ListAllIMChannels lists every IM channel in the current tenant, across
-// agents, for the cross-agent overview page. Credentials are intentionally
-// NOT included in the response.
+// ListAllIMChannels godoc
+// @Summary      获取租户下所有 IM 渠道
+// @Description  返回当前租户下所有 IM 渠道（跨智能体概览），不含凭证敏感字段
+// @Tags         IM 渠道
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "渠道列表"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /im-channels [get]
 func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
 	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
 	if !ok {

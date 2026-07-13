@@ -17,7 +17,10 @@
 | POST   | `/initialization/embedding/test`                  | 测试嵌入模型               |
 | POST   | `/initialization/rerank/check`                    | 检查重排序模型             |
 | POST   | `/initialization/multimodal/test`                 | 测试多模态模型             |
+| POST   | `/initialization/asr/check`                       | 检查 ASR 语音识别模型      |
 | POST   | `/initialization/extract/text-relation`           | 提取文本关系               |
+| POST   | `/initialization/extract/fabri-tag`               | 提取 Fabric 标签           |
+| POST   | `/initialization/extract/fabri-text`              | 提取 Fabric 文本           |
 
 ## GET `/initialization/config/:kb_id` - 获取知识库初始化配置
 
@@ -258,6 +261,15 @@ curl --location 'http://localhost:8080/api/v1/initialization/ollama/download/tas
 }
 ```
 
+### 下载任务状态枚举
+
+| 状态 | 说明 |
+| ---- | ---- |
+| pending | 等待下载 |
+| downloading | 下载中 |
+| completed | 已完成 |
+| failed | 下载失败 |
+
 ## POST `/initialization/remote/check` - 检查远程模型 API
 
 **请求**:
@@ -395,6 +407,81 @@ curl --location 'http://localhost:8080/api/v1/initialization/extract/text-relati
                 "target": "知识管理平台",
                 "relation": "is_a"
             }
+        ]
+    },
+    "success": true
+}
+```
+
+## POST `/initialization/asr/check` - 检查 ASR 语音识别模型
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/initialization/asr/check' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "success": true
+}
+```
+
+## POST `/initialization/extract/fabri-tag` - 提取 Fabric 标签
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/initialization/extract/fabri-tag' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "text": "这是一件纯棉面料的男士衬衫，适合春秋季节穿着。"
+}'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "tags": [
+            {"label": "纯棉", "type": "材质"},
+            {"label": "男士", "type": "适用人群"},
+            {"label": "衬衫", "type": "品类"},
+            {"label": "春秋", "type": "季节"}
+        ]
+    },
+    "success": true
+}
+```
+
+## POST `/initialization/extract/fabri-text` - 提取 Fabric 文本
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/initialization/extract/fabri-text' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "text": "这款连衣裙采用100%桑蚕丝面料，手感柔软顺滑，适合夏季穿着。"
+}'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "entities": [
+            {"name": "连衣裙", "type": "品类"},
+            {"name": "桑蚕丝", "type": "材质"},
+            {"name": "夏季", "type": "季节"}
         ]
     },
     "success": true

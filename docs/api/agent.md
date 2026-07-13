@@ -27,15 +27,17 @@
 
 ## API 列表
 
-| 方法   | 路径                       | 描述                       |
-| ------ | -------------------------- | -------------------------- |
-| POST   | `/agents`                  | 创建智能体                 |
-| GET    | `/agents`                  | 获取智能体列表             |
-| GET    | `/agents/:id`              | 获取智能体详情             |
-| PUT    | `/agents/:id`              | 更新智能体                 |
-| DELETE | `/agents/:id`              | 删除智能体                 |
-| POST   | `/agents/:id/copy`         | 复制智能体                 |
-| GET    | `/agents/placeholders`     | 获取占位符定义             |
+| 方法   | 路径                            | 描述                       |
+| ------ | ------------------------------- | -------------------------- |
+| POST   | `/agents`                       | 创建智能体                 |
+| GET    | `/agents`                       | 获取智能体列表             |
+| GET    | `/agents/type-presets`          | 获取智能体类型预设         |
+| GET    | `/agents/placeholders`          | 获取占位符定义             |
+| GET    | `/agents/:id`                   | 获取智能体详情             |
+| PUT    | `/agents/:id`                   | 更新智能体                 |
+| DELETE | `/agents/:id`                   | 删除智能体                 |
+| POST   | `/agents/:id/copy`              | 复制智能体                 |
+| GET    | `/agents/:id/suggested-questions` | 获取推荐问题             |
 
 ---
 
@@ -399,6 +401,85 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
         "rewrite_prompt": [...],
         "fallback_prompt": [...]
     }
+}
+```
+
+---
+
+## GET `/agents/type-presets` - 获取智能体类型预设
+
+返回支持的智能体类型预设列表（如 `rag-qa`、`wiki-qa`、`hybrid`、`custom`），每种预设包含默认的配置模板。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/agents/type-presets' \
+--header 'X-API-Key: your_api_key'
+```
+
+**响应**（200 OK）:
+
+```json
+{
+    "success": true,
+    "data": [
+        {
+            "type": "rag-qa",
+            "name": "RAG 问答",
+            "description": "基于知识库检索增强生成的问答智能体",
+            "default_config": {}
+        },
+        {
+            "type": "wiki-qa",
+            "name": "Wiki 问答",
+            "description": "基于 Wiki 模式的问答智能体",
+            "default_config": {}
+        },
+        {
+            "type": "hybrid",
+            "name": "混合模式",
+            "description": "结合 RAG 和 Wiki 的混合问答智能体",
+            "default_config": {}
+        },
+        {
+            "type": "custom",
+            "name": "自定义",
+            "description": "完全自定义配置的智能体",
+            "default_config": {}
+        }
+    ]
+}
+```
+
+---
+
+## GET `/agents/:id/suggested-questions` - 获取推荐问题
+
+返回与指定智能体相关的推荐提问，通常显示在聊天界面作为引导。
+
+**路径参数**:
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `id` | string | 智能体 ID |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/agents/agent-00000001/suggested-questions' \
+--header 'X-API-Key: your_api_key'
+```
+
+**响应**（200 OK）:
+
+```json
+{
+    "success": true,
+    "data": [
+        "这个知识库包含哪些内容？",
+        "如何快速上手使用？",
+        "有哪些常见问题？"
+    ]
 }
 ```
 

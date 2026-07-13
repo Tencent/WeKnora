@@ -44,7 +44,8 @@
 
 | 方法   | 路径                                          | 描述                              |
 | ------ | --------------------------------------------- | --------------------------------- |
-| GET    | `/organizations/:id/search-users`             | 搜索可邀请的用户（仅管理员）       |
+| GET    | `/organizations/:id/search-tenants`           | 搜索可邀请的租户（仅管理员）       |
+| GET    | `/organizations/:id/search-users`             | [已弃用] 搜索可邀请的用户（仅管理员），请用 search-tenants |
 | POST   | `/organizations/:id/invite`                   | 直接添加用户为成员（仅管理员）     |
 | GET    | `/organizations/:id/members`                  | 获取成员列表                      |
 | PUT    | `/organizations/:id/members/:user_id`         | 更新成员角色                      |
@@ -84,6 +85,7 @@
 | ---- | ----------------------------- | --------------------------------------- |
 | GET  | `/shared-knowledge-bases`     | 获取所有共享给我的知识库（跨组织）        |
 | GET  | `/shared-agents`              | 获取所有共享给我的智能体（跨组织）        |
+| POST | `/shared-agents/disabled`     | 为当前租户禁用/启用某个共享智能体        |
 
 ---
 
@@ -511,11 +513,34 @@ curl --location --request POST 'http://localhost:8080/api/v1/organizations/org-0
 }
 ```
 
-### POST `/organizations/:id/invite-code` - 重新生成邀请码
+### POST `/organizations/:id/invite-code` - 生成/重新生成邀请码
 
-仅 owner / admin 可调用，会让旧邀请码失效。
+仅 owner / admin 可调用，会让旧邀请码失效。不传请求体时使用组织当前配置的有效期重新生成；传 `validity_days` 时可以指定本次邀请码的有效天数。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明    |
+| ---- | ------ | ------- |
+| id   | string | 组织 ID |
+
+**请求体**（可选）:
+
+| 字段          | 类型 | 必填 | 说明                                    |
+| ------------- | ---- | ---- | --------------------------------------- |
+| validity_days | int  | 否   | 有效天数：`0`=永久，`1` / `7` / `30`    |
 
 **请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/organizations/org-00000001/invite-code' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "validity_days": 7
+}'
+```
+
+不传 body 的用法（使用组织当前配置）：
 
 ```curl
 curl --location --request POST 'http://localhost:8080/api/v1/organizations/org-00000001/invite-code' \
@@ -535,9 +560,15 @@ curl --location --request POST 'http://localhost:8080/api/v1/organizations/org-0
 
 ## 成员管理
 
-### GET `/organizations/:id/search-users` - 搜索可邀请的用户
+### GET `/organizations/:id/search-tenants` - 搜索可邀请的租户
 
-仅 owner / admin 可调用。匹配用户名或邮箱，自动排除已在该组织内的用户。
+仅 owner / admin 可调用。搜索系统中所有租户，按用户名或邮箱模糊匹配，自动排除已在该组织内的成员。此端点取代已弃用的 `search-users`，推荐所有新集成使用。
+
+**路径参数**:
+
+| 字段 | 类型   | 说明    |
+| ---- | ------ | ------- |
+| id   | string | 组织 ID |
 
 **查询参数**:
 
@@ -549,7 +580,7 @@ curl --location --request POST 'http://localhost:8080/api/v1/organizations/org-0
 **请求**:
 
 ```curl
-curl --location 'http://localhost:8080/api/v1/organizations/org-00000001/search-users?q=zhang&limit=10' \
+curl --location 'http://localhost:8080/api/v1/organizations/org-00000001/search-tenants?q=zhang&limit=10' \
 --header 'X-API-Key: sk-xxxxx'
 ```
 
@@ -568,6 +599,28 @@ curl --location 'http://localhost:8080/api/v1/organizations/org-00000001/search-
     "success": true
 }
 ```
+
+### GET `/organizations/:id/search-users` - 搜索可邀请的用户 [已弃用]
+
+> **注意**: 此端点已弃用，请使用 [`GET /organizations/:id/search-tenants`](#get-organizationsidsearch-tenants---搜索可邀请的租户) 代替。
+
+仅 owner / admin 可调用。行为与 `search-tenants` 完全一致，匹配用户名或邮箱，自动排除已在该组织内的用户。
+
+**查询参数**:
+
+| 字段  | 类型   | 必填 | 说明                          |
+| ----- | ------ | ---- | ----------------------------- |
+| q     | string | 是   | 关键词（用户名或邮箱）         |
+| limit | int    | 否   | 返回数量上限，默认 10          |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/organizations/org-00000001/search-users?q=zhang&limit=10' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**: 结构与 `search-tenants` 完全一致，参见上方示例。
 
 ### POST `/organizations/:id/invite` - 直接邀请用户
 
@@ -1183,7 +1236,7 @@ curl --location 'http://localhost:8080/api/v1/shared-knowledge-bases' \
 
 ### GET `/shared-agents` - 获取共享给我的智能体（跨组织）
 
-返回当前用户通过所有组织共享获得的智能体列表，供"全部智能体"视图使用。`disabled_by_me: true` 表示当前租户已在对话下拉中隐藏该智能体。
+返回当前用户通过所有组织共享获得的智能体列表，供"全部智能体"视图使用。`disabled_by_me: true` 表示当前租户已在对话下拉中隐藏该智能体（可通过 `POST /shared-agents/disabled` 控制）。
 
 **请求**:
 
@@ -1214,6 +1267,37 @@ curl --location 'http://localhost:8080/api/v1/shared-agents' \
         }
     ],
     "total": 1,
+    "success": true
+}
+```
+
+### POST `/shared-agents/disabled` - 禁用/启用当前租户的共享智能体
+
+仅 admin 可调用。设置后，目标共享智能体将从当前租户的对话下拉列表中隐藏（或重新显示）。该操作仅影响当前租户，不影响其他租户对同一智能体的可见性。
+
+**请求体**:
+
+| 字段      | 类型   | 必填 | 说明                               |
+| --------- | ------ | ---- | ---------------------------------- |
+| agent_id  | string | 是   | 共享智能体 ID                      |
+| disabled  | bool   | 是   | `true`=禁用，`false`=启用          |
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/shared-agents/disabled' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "agent_id": "agent-00000001",
+    "disabled": true
+}'
+```
+
+**响应**:
+
+```json
+{
     "success": true
 }
 ```

@@ -4894,6 +4894,47 @@ definitions:
     required:
     - name
     type: object
+  internal_handler.embedChannelRequest:
+    properties:
+      agent_id:
+        type: string
+      allow_file_upload:
+        type: boolean
+      allow_memory:
+        type: boolean
+      allow_web_search:
+        type: boolean
+      allowed_origins:
+        items:
+          type: string
+        type: array
+      default_locale:
+        type: string
+      enabled:
+        type: boolean
+      header_title_mode:
+        type: string
+      name:
+        type: string
+      page_title:
+        type: string
+      primary_color:
+        type: string
+      rate_limit_per_day:
+        type: integer
+      rate_limit_per_minute:
+        type: integer
+      show_suggested_questions:
+        type: boolean
+      webhook_secret:
+        type: string
+      webhook_url:
+        type: string
+      welcome_message:
+        type: string
+      widget_position:
+        type: string
+    type: object
   internal_handler.invitationLookupRequest:
     properties:
       token:
@@ -4910,6 +4951,13 @@ definitions:
       tenant_id:
         type: integer
       tenant_name:
+        type: string
+    type: object
+  internal_handler.modelCredentialsPutRequest:
+    properties:
+      api_key:
+        type: string
+      app_secret:
         type: string
     type: object
   internal_handler.registerByInviteRequest:
@@ -5172,6 +5220,41 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /agent-chat/{session_id}:
+    post:
+      consumes:
+      - application/json
+      description: 基于Agent的智能问答，支持多轮对话和SSE流式响应
+      parameters:
+      - description: 会话ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 问答请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: 问答结果（SSE流）
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Agent问答
+      tags:
+      - 问答
   /agent/mcp-oauth-resolutions/{pending_id}:
     post:
       consumes:
@@ -5469,6 +5552,133 @@ paths:
       summary: 复制智能体
       tags:
       - 智能体
+  /agents/{id}/embed-channels:
+    get:
+      description: 返回指定智能体下所有 Embed 渠道
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 渠道列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取智能体的 Embed 渠道列表
+      tags:
+      - Embed 渠道
+    post:
+      consumes:
+      - application/json
+      description: 为指定智能体创建网页嵌入式聊天渠道
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 渠道配置
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.embedChannelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建的渠道
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 创建 Embed 渠道
+      tags:
+      - Embed 渠道
+  /agents/{id}/im-channels:
+    get:
+      description: 返回指定智能体下所有 IM 渠道的摘要信息（不含凭证）
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 渠道列表
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 缺少 agent_id
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取智能体的 IM 渠道列表
+      tags:
+      - IM 渠道
+    post:
+      consumes:
+      - application/json
+      description: 为指定智能体创建新的 IM 渠道（企业微信/飞书/Slack/Telegram/钉钉/Mattermost/微信/QQ）
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 渠道配置
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建的渠道
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: 重复绑定
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 创建 IM 渠道
+      tags:
+      - IM 渠道
   /agents/{id}/shares/{share_id}:
     delete:
       description: 从智能体的共享列表中移除指定共享关系
@@ -6434,6 +6644,71 @@ paths:
       summary: Update a data source
       tags:
       - DataSource
+  /datasource/{id}/credentials:
+    put:
+      consumes:
+      - application/json
+      description: 覆写数据源的全部凭证；必须提供非空 credentials map（如需清空请用 DELETE /credentials/credentials）
+      parameters:
+      - description: 数据源 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '{field, value}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 设置数据源凭证字段
+      tags:
+      - DataSource
+  /datasource/{id}/credentials/{field}:
+    delete:
+      description: 删除指定字段的存储凭证，仅支持 "credentials" 字段
+      parameters:
+      - description: 数据源 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 凭证字段名
+        in: path
+        name: field
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除数据源凭证字段
+      tags:
+      - DataSource
   /datasource/{id}/logs:
     get:
       description: Retrieve sync history for a data source
@@ -6709,6 +6984,576 @@ paths:
       summary: Test connection with raw credentials (no persistence)
       tags:
       - DataSource
+  /embed-channels:
+    get:
+      description: 返回当前租户下所有 Embed 渠道（跨智能体），不含 publish_token
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 渠道列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取租户下所有 Embed 渠道
+      tags:
+      - Embed 渠道
+  /embed-channels/{channel_id}:
+    delete:
+      description: 删除指定的 Embed 渠道
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 渠道不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除 Embed 渠道
+      tags:
+      - Embed 渠道
+    get:
+      description: 获取指定 Embed 渠道的完整配置（含 publish_token）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 渠道详情
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取 Embed 渠道详情
+      tags:
+      - Embed 渠道
+    put:
+      consumes:
+      - application/json
+      description: 更新指定 Embed 渠道的配置
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 更新字段
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.embedChannelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的渠道
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 更新 Embed 渠道
+      tags:
+      - Embed 渠道
+  /embed-channels/{channel_id}/preview-session:
+    post:
+      description: 为管理端预览生成临时 session token
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: session_token, expires_in
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 渠道已禁用
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 创建 Embed 预览会话
+      tags:
+      - Embed 渠道
+  /embed-channels/{channel_id}/rotate-token:
+    post:
+      description: 为指定渠道生成新的 publish_token，旧 token 立即失效
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 新的 publish_token
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 轮换 Embed Publish Token
+      tags:
+      - Embed 渠道
+  /embed-channels/{channel_id}/stats:
+    get:
+      description: 返回指定 Embed 渠道的访问量和消息数等统计信息
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统计数据
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取 Embed 渠道统计
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/agent-chat/{session_id}:
+    post:
+      consumes:
+      - application/json
+      description: 基于 Agent 的 SSE 流式智能问答（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: SSE 流式响应
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Embed Agent 问答
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/chunks/{chunk_id}:
+    get:
+      description: 获取指定分块的完整内容（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 分块 ID
+        in: path
+        name: chunk_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 分块内容
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取 Embed 分块内容
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/config:
+    get:
+      description: 返回前端 Embed 组件初始化所需配置（主题色、欢迎消息等，EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 组件配置
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取 Embed 组件配置
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/exchange:
+    post:
+      description: 用 Publish Token 交换短时效的 Session Token（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: session_token, expires_in
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 交换 Embed 会话令牌
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/knowledge-chat/{session_id}:
+    post:
+      consumes:
+      - application/json
+      description: 基于知识库的 SSE 流式问答（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: SSE 流式响应
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Embed 知识库问答
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/messages/{session_id}/load:
+    get:
+      description: 获取嵌入会话的历史消息列表（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 消息列表
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 加载 Embed 历史消息
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/sessions:
+    post:
+      consumes:
+      - application/json
+      description: 为嵌入组件创建匿名会话（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: session_id
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 创建 Embed 匿名会话
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/sessions/{session_id}/events:
+    post:
+      consumes:
+      - application/json
+      description: 接收并转发外部 webhook 事件到嵌入会话（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 处理结果
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 转发 Embed Webhook 事件
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/sessions/{session_id}/mcp-oauth-resolutions/{pending_id}:
+    post:
+      consumes:
+      - application/json
+      description: 在嵌入会话中处理 MCP OAuth 授权决议（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 待处理决议 ID
+        in: path
+        name: pending_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 处理结果
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 处理 Embed MCP OAuth 决议
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/sessions/{session_id}/mcp-oauth-resolutions/{pending_id}/cancel:
+    post:
+      description: 取消嵌入会话中的 MCP OAuth 授权决议（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 待处理决议 ID
+        in: path
+        name: pending_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 取消成功
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 取消 Embed MCP OAuth 决议
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/sessions/{session_id}/mcp-services/{id}/oauth/authorize-url:
+    post:
+      consumes:
+      - application/json
+      description: 在嵌入会话中获取 MCP 服务的 OAuth 授权链接（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: authorize_url
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取 Embed MCP OAuth 授权 URL
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/sessions/{session_id}/mcp-services/{id}/oauth/status:
+    get:
+      description: 在嵌入会话中检查 MCP 服务的 OAuth 授权状态（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 授权状态
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 检查 Embed MCP OAuth 状态
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/sessions/{session_id}/stop:
+    post:
+      description: 停止嵌入会话中正在进行的 SSE 流式生成（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 停止 Embed 会话生成
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/sessions/{session_id}/tool-approvals/{pending_id}:
+    post:
+      consumes:
+      - application/json
+      description: 在嵌入会话中处理 Agent 工具调用的待审批请求（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 待审批 ID
+        in: path
+        name: pending_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 处理结果
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 处理 Embed 工具调用审批
+      tags:
+      - Embed 渠道
+  /embed/{channel_id}/suggested-questions:
+    get:
+      description: 返回嵌入组件展示的推荐问题列表（EmbedAuth 鉴权）
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 建议问题列表
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取 Embed 建议问题
+      tags:
+      - Embed 渠道
   /evaluation/:
     get:
       consumes:
@@ -6796,6 +7641,23 @@ paths:
       summary: 获取FAQ导入进度
       tags:
       - FAQ管理
+  /im-channels:
+    get:
+      description: 返回当前租户下所有 IM 渠道（跨智能体概览），不含凭证敏感字段
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 渠道列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取租户下所有 IM 渠道
+      tags:
+      - IM 渠道
   /im-channels/{id}:
     delete:
       description: 删除指定 IM 渠道
@@ -8837,6 +9699,41 @@ paths:
       summary: 获取知识库复制进度
       tags:
       - 知识库
+  /knowledge-chat/{session_id}:
+    post:
+      consumes:
+      - application/json
+      description: 基于知识库的问答（使用LLM总结），支持SSE流式响应
+      parameters:
+      - description: 会话ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 问答请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: 问答结果（SSE流）
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 知识问答
+      tags:
+      - 问答
   /knowledge/{id}:
     delete:
       consumes:
@@ -10201,7 +11098,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: '{api_key?: string, token?: string}'
+      - description: '{field, value}'
         in: body
         name: request
         required: true
@@ -10212,7 +11109,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: 写入后的凭据状态
+          description: 成功
           schema:
             additionalProperties: true
             type: object
@@ -10220,14 +11117,10 @@ paths:
           description: 请求参数错误
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: 服务不存在
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 设置 MCP 服务凭据
+      summary: 设置 MCP 服务凭证字段
       tags:
       - MCP服务
   /mcp-services/{id}/credentials/{field}:
@@ -10260,7 +11153,7 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 移除 MCP 服务的单个凭据字段
+      summary: 删除 MCP 服务凭证字段
       tags:
       - MCP服务
   /mcp-services/{id}/oauth/authorize-url:
@@ -10836,6 +11729,112 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 更新模型
+      tags:
+      - 模型管理
+  /models/{id}/credentials:
+    put:
+      consumes:
+      - application/json
+      description: 按字段设置模型的 API 密钥等凭证（secret 不通过主 PUT 体传输）
+      parameters:
+      - description: 模型 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 凭证字段（api_key / app_secret）
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.modelCredentialsPutRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 设置模型凭证字段
+      tags:
+      - 模型管理
+  /models/{id}/credentials/{field}:
+    delete:
+      description: 删除指定模型的某个凭证字段
+      parameters:
+      - description: 模型 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 凭证字段名
+        in: path
+        name: field
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除模型凭证字段
+      tags:
+      - 模型管理
+  /models/{id}/debug:
+    post:
+      consumes:
+      - application/json
+      description: 使用已保存的模型执行一次测试调用并返回响应（会发起真实 API 调用产生费用）
+      parameters:
+      - description: 模型 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 测试参数（可选 prompt）
+        in: body
+        name: body
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 模型不可达
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 模型不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 调试测试模型
       tags:
       - 模型管理
   /models/providers:
@@ -11779,76 +12778,6 @@ paths:
       summary: 取消置顶会话
       tags:
       - 会话
-  /sessions/{session_id}/agent-qa:
-    post:
-      consumes:
-      - application/json
-      description: 基于Agent的智能问答，支持多轮对话和SSE流式响应
-      parameters:
-      - description: 会话ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 问答请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: 问答结果（SSE流）
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: Agent问答
-      tags:
-      - 问答
-  /sessions/{session_id}/knowledge-qa:
-    post:
-      consumes:
-      - application/json
-      description: 基于知识库的问答（使用LLM总结），支持SSE流式响应
-      parameters:
-      - description: 会话ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 问答请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.CreateKnowledgeQARequest'
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: 问答结果（SSE流）
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 知识问答
-      tags:
-      - 问答
   /sessions/{session_id}/pin:
     post:
       description: 将指定会话置顶（用户维度）
@@ -13664,6 +14593,76 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 更新网络搜索 Provider
+      tags:
+      - 网络搜索
+  /web-search-providers/{id}/credentials:
+    put:
+      consumes:
+      - application/json
+      description: 设置搜索 Provider 的凭证字段
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '{field, value}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 设置搜索 Provider 凭证字段
+      tags:
+      - 网络搜索
+  /web-search-providers/{id}/credentials/{field}:
+    delete:
+      consumes:
+      - application/json
+      description: 删除搜索 Provider 的凭证字段
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 凭证字段名
+        in: path
+        name: field
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除搜索 Provider 凭证字段
       tags:
       - 网络搜索
   /web-search-providers/{id}/test:

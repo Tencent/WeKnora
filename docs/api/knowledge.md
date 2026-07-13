@@ -26,6 +26,9 @@
 | POST   | `/knowledge/batch-delete`                  | 同一知识库内批量删除知识（异步任务）       |
 | POST   | `/knowledge/move`                          | 迁移知识到另一知识库（异步任务）           |
 | GET    | `/knowledge/move/progress/:task_id`        | 查询知识迁移任务进度                       |
+| GET    | `/knowledge/:id/stages`                    | 获取知识处理阶段/时间线                    |
+| GET    | `/knowledge/:id/spans`                     | 获取知识处理时间线（stages 别名）          |
+| POST   | `/knowledge/batch-reparse`                 | 批量重新解析多条知识                       |
 
 > **公共说明**：
 > - 路径中的 `:id`（知识库路径下）为**知识库 ID**，`/knowledge/:id` 中的 `:id` 为**知识 ID**。
@@ -904,3 +907,97 @@ curl --location 'http://localhost:8080/api/v1/knowledge/move/progress/kg_move_1_
 ```
 
 `status` 取值：`pending` / `processing` / `completed` / `failed`；`progress` 为 0-100 的整数百分比；`created_at` / `updated_at` 为 Unix 秒时间戳。
+
+---
+
+## GET `/knowledge/:id/stages` - 获取知识处理阶段
+
+返回知识处理的各阶段时间线（上传 → 解析 → 分块 → Embedding → 摘要 → 问题生成等）。
+
+**路径参数**:
+
+| 字段 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `id` | string | 知识 ID |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/stages' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**响应**（200 OK）:
+
+```json
+{
+    "success": true,
+    "data": [
+        {
+            "stage": "upload",
+            "status": "completed",
+            "started_at": "2025-08-12T11:52:36+08:00",
+            "finished_at": "2025-08-12T11:52:36+08:00"
+        },
+        {
+            "stage": "parse",
+            "status": "completed",
+            "started_at": "2025-08-12T11:52:37+08:00",
+            "finished_at": "2025-08-12T11:52:40+08:00"
+        },
+        {
+            "stage": "chunk",
+            "status": "completed",
+            "started_at": "2025-08-12T11:52:40+08:00",
+            "finished_at": "2025-08-12T11:52:42+08:00"
+        },
+        {
+            "stage": "embedding",
+            "status": "processing",
+            "started_at": "2025-08-12T11:52:43+08:00",
+            "finished_at": null
+        }
+    ]
+}
+```
+
+---
+
+## GET `/knowledge/:id/spans` - 获取知识处理时间线
+
+与 `/knowledge/:id/stages` 相同，返回知识处理的各阶段时间线（别名端点）。
+
+---
+
+## POST `/knowledge/batch-reparse` - 批量重新解析
+
+批量触发多条知识的重新解析（异步），常用在解析配置变更后需要重新索引多个文档的场景。
+
+**参数说明（请求体）**:
+
+| 字段 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| `ids` | string[] | 是 | 待重新解析的知识 ID 列表 |
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/knowledge/batch-reparse' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-xxxxx' \
+--data '{
+    "ids": [
+        "4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5",
+        "9c8af585-ae15-44ce-8f73-45ad18394651"
+    ]
+}'
+```
+
+**响应**（200 OK）:
+
+```json
+{
+    "success": true,
+    "message": "Batch reparse tasks submitted"
+}
+```

@@ -31,6 +31,19 @@ type modelCredentialsPutRequest struct {
 	AppSecret *string `json:"app_secret,omitempty"`
 }
 
+// Put godoc
+// @Summary      设置模型凭证字段
+// @Description  按字段设置模型的 API 密钥等凭证（secret 不通过主 PUT 体传输）
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "模型 ID"
+// @Param        request  body      modelCredentialsPutRequest  true  "凭证字段（api_key / app_secret）"
+// @Success      200      {object}  map[string]interface{}  "success: true"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/credentials [put]
 func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -80,6 +93,18 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// DeleteField godoc
+// @Summary      删除模型凭证字段
+// @Description  删除指定模型的某个凭证字段
+// @Tags         模型管理
+// @Produce      json
+// @Param        id     path      string  true  "模型 ID"
+// @Param        field  path      string  true  "凭证字段名"
+// @Success      200    {object}  map[string]interface{}  "success: true"
+// @Failure      400    {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/credentials/{field} [delete]
 func (h *ModelCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")

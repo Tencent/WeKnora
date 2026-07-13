@@ -264,3 +264,30 @@ curl --location 'http://localhost:8080/api/v1/messages/chat-history-stats' \
     "success": true
 }
 ```
+
+---
+
+## 枚举值
+
+### 匹配类型 (match_type)
+
+搜索响应中的 `match_type` 表示匹配方式：
+
+| 值 | 类型 | 说明 |
+| ---- | ---- | ---- |
+| `hybrid` | string | 混合搜索（向量 + 关键词） |
+| `vector` | string | 纯向量语义匹配 |
+| `keyword` | string | 纯关键词匹配（BM25） |
+| 0 | numeric | BM25 关键词匹配 |
+| 3 | numeric | 向量匹配 |
+| 4 | numeric | 混合匹配 |
+
+> 推荐使用字符串值（`hybrid`/`vector`/`keyword`），数字值为向后兼容保留。
+
+### 搜索模式 (mode)
+
+| 值 | 说明 |
+| ---- | ---- |
+| `hybrid` | 混合搜索（默认，向量 + 关键词） |
+| `keyword` | 仅关键词搜索 |
+| `vector` | 仅向量语义搜索 |

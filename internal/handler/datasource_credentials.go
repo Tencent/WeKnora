@@ -59,6 +59,21 @@ type dataSourceCredentialsPutRequest struct {
 	Credentials map[string]interface{} `json:"credentials" binding:"required"`
 }
 
+// Put writes (creates or replaces) the credentials map for a data source.
+//
+// Put godoc
+// @Summary      设置数据源凭证字段
+// @Description  覆写数据源的全部凭证；必须提供非空 credentials map（如需清空请用 DELETE /credentials/credentials）
+// @Tags         DataSource
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "数据源 ID"
+// @Param        request  body      map[string]interface{}  true  "{field, value}"
+// @Success      200      {object}  map[string]interface{}  "成功"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /datasource/{id}/credentials [put]
 func (h *DataSourceCredentialsHandler) Put(c *gin.Context) {
 	ds, ok := h.ownDataSource(c)
 	if !ok {
@@ -94,6 +109,21 @@ func (h *DataSourceCredentialsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// DeleteField removes the credentials field from a data source.
+// Recognized field: "credentials". Returns 204 on success (idempotent).
+//
+// DeleteField godoc
+// @Summary      删除数据源凭证字段
+// @Description  删除指定字段的存储凭证，仅支持 "credentials" 字段
+// @Tags         DataSource
+// @Produce      json
+// @Param        id     path      string  true  "数据源 ID"
+// @Param        field  path      string  true  "凭证字段名"
+// @Success      204
+// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /datasource/{id}/credentials/{field} [delete]
 func (h *DataSourceCredentialsHandler) DeleteField(c *gin.Context) {
 	ds, ok := h.ownDataSource(c)
 	if !ok {

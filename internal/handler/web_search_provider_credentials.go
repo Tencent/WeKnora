@@ -37,6 +37,19 @@ type webSearchCredentialsPutRequest struct {
 	APIKey *string `json:"api_key,omitempty"`
 }
 
+// Put godoc
+// @Summary      设置搜索 Provider 凭证字段
+// @Description  设置搜索 Provider 的凭证字段
+// @Tags         网络搜索
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                    true  "Provider ID"
+// @Param        request  body      map[string]interface{}    true  "{field, value}"
+// @Success      200      {object}  map[string]interface{}    "成功"
+// @Failure      400      {object}  errors.AppError           "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /web-search-providers/{id}/credentials [put]
 func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.tenantID(c)
@@ -79,6 +92,19 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// DeleteField godoc
+// @Summary      删除搜索 Provider 凭证字段
+// @Description  删除搜索 Provider 的凭证字段
+// @Tags         网络搜索
+// @Accept       json
+// @Produce      json
+// @Param        id     path      string                    true  "Provider ID"
+// @Param        field  path      string                    true  "凭证字段名"
+// @Success      204    {object}  map[string]interface{}    "删除成功"
+// @Failure      400    {object}  errors.AppError           "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /web-search-providers/{id}/credentials/{field} [delete]
 func (h *WebSearchProviderCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.tenantID(c)

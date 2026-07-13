@@ -20,6 +20,7 @@
 | DELETE | `/tenants/:id/api-keys/:key_id` | 吊销指定 API Key（Owner）                   |
 | GET    | `/tenants/:id/api-principal-config` | 获取 API Key 用户身份配置（Owner）          |
 | PUT    | `/tenants/:id/api-principal-config` | 更新 API Key 用户身份配置（Owner）          |
+| POST   | `/tenants/:id/api-principal-test-token` | 生成 API Principal 配置测试令牌（Owner） |
 | GET    | `/tenants`                 | 获取当前用户可见的租户列表                        |
 | GET    | `/tenants/kv/:key`         | 获取当前租户的 KV 配置（tenant 由认证上下文确定） |
 | PUT    | `/tenants/kv/:key`         | 更新当前租户的 KV 配置（tenant 由认证上下文确定） |
@@ -453,6 +454,36 @@ curl --location --request PUT 'http://localhost:8080/api/v1/tenants/10000/api-pr
 }'
 ```
 
+## POST `/tenants/:id/api-principal-test-token` - 生成 API Principal 配置测试令牌
+
+为指定租户的 API Principal 配置生成一个短期测试令牌，用于验证 `signed_token` 模式的配置是否生效。**需要 Owner 权限**。
+
+**路径参数**:
+
+| 字段 | 类型 | 说明    |
+| ---- | ---- | ------- |
+| id   | int  | 租户 ID |
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/tenants/10000/api-principal-test-token' \
+--header 'Authorization: Bearer <token>' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        "expires_at": "2025-08-12T20:37:28+08:00"
+    }
+}
+```
+
 ## GET `/tenants` - 获取租户列表
 
 返回当前认证上下文对应的租户（普通用户为单条；管理员仍只返回自身租户）。
@@ -607,3 +638,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/agent-con
 - `retrieval-config`: `embedding_top_k` / `rerank_top_k` ∈ `[0, 200]`；阈值范围同上。
 - `storage-engine-config`: `default_provider` 必须在 `STORAGE_ALLOW_LIST` 允许的列表内。
 - `chat-history-config`: 启用且设置了 `embedding_model_id` 而尚未关联知识库时，会自动创建一个隐藏知识库并将其 ID 写入配置。
+
+## `/me/invitations` 相关接口
+
+`/me/invitations/*` 接口（查看我的邀请列表、待处理邀请数、接受邀请、拒绝邀请）请参见 [invitation.md](./invitation.md)。
