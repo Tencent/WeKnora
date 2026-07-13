@@ -1,3 +1,9 @@
+---
+comet_change: knowledge-scope-foundation
+role: technical-design
+canonical_spec: openspec
+---
+
 # WeKnora 系统隔离与业务版本知识范围设计
 
 > 状态：已批准设计

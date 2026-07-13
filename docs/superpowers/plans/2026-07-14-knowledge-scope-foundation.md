@@ -1,3 +1,9 @@
+---
+change: knowledge-scope-foundation
+design-doc: docs/superpowers/specs/2026-07-14-system-version-knowledge-scope-design.md
+base-ref: 784a3888dd203cdd950d307a33735b3a9726c63c
+---
+
 # System Version Knowledge Scope Foundation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox...

@@ -1,0 +1,16 @@
+{
+  "change": "knowledge-scope-foundation",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "ce1053c2f66ff6e7115e0c9acb9f2fdd60d3870dabd69f668a6c97fe5bfa4a8a",
+  "files": [
+    { "path": "openspec/changes/knowledge-scope-foundation/proposal.md", "sha256": "745f454308af65cd3a98028204203bd982a058260bf86605566ff1c1e28095b6" },
+    { "path": "openspec/changes/knowledge-scope-foundation/design.md", "sha256": "87828f70e94c052561e57d0592139b9ba7cb226fec305253c833b54b3169a73f" },
+    { "path": "openspec/changes/knowledge-scope-foundation/tasks.md", "sha256": "c2e582b04f0791c38550861fa76975a08ec798b42fcfc775e9adf3f534d065c3" },
+    { "path": "openspec/changes/knowledge-scope-foundation/specs/knowledge-scope-catalog/spec.md", "sha256": "9e01cbcc825c5b78eab5f187095df644cd0b117e50e52aeb35c13efdee07920c" },
+    { "path": "openspec/changes/knowledge-scope-foundation/specs/scoped-knowledge-ingestion/spec.md", "sha256": "c353eeee2842e18a23da7aa46dbce92034654d403bbd263a0d543aea528167d2" },
+    { "path": "openspec/changes/knowledge-scope-foundation/specs/scoped-knowledge-retrieval/spec.md", "sha256": "c3ad67407e9d310f42fbf46ef980c22ef6a9e2aa9a7996cc916d683f4bc6e355" }
+  ]
+}
