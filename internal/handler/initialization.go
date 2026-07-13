@@ -404,6 +404,8 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			Relations:          relations,
 			CustomInstructions: strings.TrimSpace(req.NodeExtract.CustomInstructions),
 		}
+	} else if kb.ExtractConfig != nil {
+		kb.ExtractConfig.Enabled = false
 	} else {
 		kb.ExtractConfig = &types.ExtractConfig{Enabled: false}
 	}
@@ -433,6 +435,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
 	}
+	types.NormalizeKnowledgeBasePromptInstructions(kb)
 	if err := validateKnowledgeBasePromptInstructions(kb); err != nil {
 		c.Error(err)
 		return
@@ -1470,6 +1473,20 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	} else {
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
+	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" {
+		if config["multimodal"] == nil {
+			config["multimodal"] = map[string]interface{}{
+				"enabled": hasMultimodal,
+			}
+		}
+		multimodal := config["multimodal"].(map[string]interface{})
+		if kb.VLMConfig.DescriptionLanguage != "" {
+			multimodal["descriptionLanguage"] = kb.VLMConfig.DescriptionLanguage
+		}
+		if kb.VLMConfig.CustomInstructions != "" {
+			multimodal["customInstructions"] = kb.VLMConfig.CustomInstructions
+		}
+	}
 
 	// 如果没有Rerank模型，设置rerank为disabled
 	if config["rerank"] == nil {
@@ -1498,6 +1515,9 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 		if len(kb.ChunkingConfig.Languages) > 0 {
 			ds["languages"] = kb.ChunkingConfig.Languages
+		}
+		if kb.ChunkingConfig.TableMetadataInstructions != "" {
+			ds["tableMetadataInstructions"] = kb.ChunkingConfig.TableMetadataInstructions
 		}
 		config["documentSplitting"] = ds
 
@@ -1533,15 +1553,31 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	}
 
 	if kb.ExtractConfig != nil {
-		config["nodeExtract"] = map[string]interface{}{
+		nodeExtract := map[string]interface{}{
 			"enabled":   kb.ExtractConfig.Enabled,
 			"text":      kb.ExtractConfig.Text,
 			"tags":      kb.ExtractConfig.Tags,
 			"nodes":     kb.ExtractConfig.Nodes,
 			"relations": kb.ExtractConfig.Relations,
 		}
+		if kb.ExtractConfig.CustomInstructions != "" {
+			nodeExtract["customInstructions"] = kb.ExtractConfig.CustomInstructions
+		}
+		config["nodeExtract"] = nodeExtract
 	} else {
 		config["nodeExtract"] = map[string]interface{}{
+			"enabled": false,
+		}
+	}
+
+	if kb.QuestionGenerationConfig != nil {
+		config["questionGeneration"] = map[string]interface{}{
+			"enabled":            kb.QuestionGenerationConfig.Enabled,
+			"questionCount":      kb.QuestionGenerationConfig.QuestionCount,
+			"customInstructions": kb.QuestionGenerationConfig.CustomInstructions,
+		}
+	} else {
+		config["questionGeneration"] = map[string]interface{}{
 			"enabled": false,
 		}
 	}

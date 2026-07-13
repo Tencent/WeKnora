@@ -1457,6 +1457,10 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		questionCount = 10
 	}
 
+	processOverrides, _ := knowledge.ProcessOverrides()
+	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
+	customInstructions := questionGenCfg.CustomInstructions
+
 	// Collect image info for all text chunks so question generation can
 	// see caption / OCR text instead of bare image links.
 	textChunkIDs := make([]string, len(textChunks))
@@ -1490,10 +1494,6 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		}
 
 		llmCallAttempts++
-		customInstructions := ""
-		if kb.QuestionGenerationConfig != nil {
-			customInstructions = kb.QuestionGenerationConfig.CustomInstructions
-		}
 		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
 			knowledge.Title, questionCount, customInstructions)
 		if err != nil {
@@ -1758,6 +1758,10 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		questionCount = 10
 	}
 
+	processOverrides, _ := knowledge.ProcessOverrides()
+	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
+	customInstructions := questionGenCfg.CustomInstructions
+
 	// Fetch the batch chunks (in payload order) plus the two boundary
 	// neighbors so we can rebuild the same surrounding context the legacy
 	// loop used, all enriched with image OCR / caption info. A vanished
@@ -1820,10 +1824,6 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			continue
 		}
 
-		customInstructions := ""
-		if kb.QuestionGenerationConfig != nil {
-			customInstructions = kb.QuestionGenerationConfig.CustomInstructions
-		}
 		questions, gerr := s.generateQuestionsWithContext(
 			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
 			customInstructions)

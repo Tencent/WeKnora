@@ -626,7 +626,11 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	// 使用AI生成表格摘要和列描述
 	customInstructions := ""
 	if resources.knowledgeBase != nil {
-		customInstructions = resources.knowledgeBase.ChunkingConfig.TableMetadataInstructions
+		var processOverrides *types.KnowledgeProcessOverrides
+		if resources.knowledge != nil {
+			processOverrides, _ = resources.knowledge.ProcessOverrides()
+		}
+		customInstructions = ResolveProcessConfig(resources.knowledgeBase, processOverrides).ChunkingConfig.TableMetadataInstructions
 	}
 	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName,
 		schemaDesc, sampleDesc, customInstructions)

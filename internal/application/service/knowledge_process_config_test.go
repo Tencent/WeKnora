@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -225,6 +226,21 @@ func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testin
 	require.Equal(t, "read labels", eff.VLMConfig.CustomInstructions)
 	require.Equal(t, "customer questions", eff.QuestionGenerationConfig.CustomInstructions)
 	require.Equal(t, "contract entities", eff.ExtractConfig.CustomInstructions)
+}
+
+func TestValidateProcessOverrides_RejectsOversizedInstructions(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	overrides := &types.KnowledgeProcessOverrides{
+		VLMConfig: &types.VLMConfig{
+			CustomInstructions: strings.Repeat("x", types.MaxCustomPromptInstructionsLength+1),
+		},
+	}
+	err := ValidateProcessOverrides(context.Background(), kb, overrides, []string{"txt"})
+	require.Error(t, err)
+	var badReq *werrors.AppError
+	require.ErrorAs(t, err, &badReq)
 }
 
 func TestValidateProcessOverrides_NilOverrides(t *testing.T) {

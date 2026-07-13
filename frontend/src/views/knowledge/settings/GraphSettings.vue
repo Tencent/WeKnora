@@ -403,13 +403,12 @@ const handleConfigChange = () => {
 
 // 处理启用/禁用切换
 const handleEnabledChange = () => {
-  // 当关闭提取功能时，清空所有数据
+  // 当关闭提取功能时，清空示例数据，但保留自定义指令以便再次启用时恢复。
   if (!localGraphExtract.value.enabled) {
     localGraphExtract.value.text = ''
     localGraphExtract.value.tags = []
     localGraphExtract.value.nodes = []
     localGraphExtract.value.relations = []
-    localGraphExtract.value.customInstructions = ''
   }
   handleConfigChange()
 }

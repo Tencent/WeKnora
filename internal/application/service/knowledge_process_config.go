@@ -103,6 +103,10 @@ func ValidateProcessOverrides(
 		return werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
 	}
 
+	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {
+		return werrors.NewBadRequestError(err.Error())
+	}
+
 	return nil
 }
 

@@ -22,3 +22,22 @@ func TestAppendCustomPromptInstructions(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateKnowledgeBasePromptInstructions(t *testing.T) {
+	kb := &KnowledgeBase{
+		ChunkingConfig: ChunkingConfig{TableMetadataInstructions: strings.Repeat("a", MaxCustomPromptInstructionsLength+1)},
+	}
+	if err := ValidateKnowledgeBasePromptInstructions(kb); err == nil {
+		t.Fatal("expected length validation error")
+	}
+}
+
+func TestNormalizeKnowledgeBasePromptInstructions(t *testing.T) {
+	kb := &KnowledgeBase{
+		VLMConfig: VLMConfig{CustomInstructions: "  focus labels  "},
+	}
+	NormalizeKnowledgeBasePromptInstructions(kb)
+	if kb.VLMConfig.CustomInstructions != "focus labels" {
+		t.Fatalf("got %q", kb.VLMConfig.CustomInstructions)
+	}
+}

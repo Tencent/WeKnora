@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -362,6 +361,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	types.NormalizeKnowledgeBasePromptInstructions(&req)
 	if err := validateKnowledgeBasePromptInstructions(&req); err != nil {
 		c.Error(err)
 		return
@@ -1249,7 +1249,7 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		return nil
 	}
 	if !config.Enabled {
-		*config = types.ExtractConfig{Enabled: false}
+		config.Enabled = false
 		return nil
 	}
 	// Validate text field
@@ -1310,27 +1310,8 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 }
 
 func validateKnowledgeBasePromptInstructions(kb *types.KnowledgeBase) error {
-	if kb == nil {
-		return nil
-	}
-	fields := map[string]string{
-		"table metadata instructions": kb.ChunkingConfig.TableMetadataInstructions,
-		"image instructions":          kb.VLMConfig.CustomInstructions,
-	}
-	if kb.WikiConfig != nil {
-		fields["wiki content instructions"] = kb.WikiConfig.ContentInstructions
-		fields["wiki extraction instructions"] = kb.WikiConfig.ExtractionInstructions
-	}
-	if kb.QuestionGenerationConfig != nil {
-		fields["question generation instructions"] = kb.QuestionGenerationConfig.CustomInstructions
-	}
-	if kb.ExtractConfig != nil {
-		fields["graph extraction instructions"] = kb.ExtractConfig.CustomInstructions
-	}
-	for name, value := range fields {
-		if len([]rune(value)) > types.MaxCustomPromptInstructionsLength {
-			return apperrors.NewBadRequestError(fmt.Sprintf("%s exceeds %d characters", name, types.MaxCustomPromptInstructionsLength))
-		}
+	if err := types.ValidateKnowledgeBasePromptInstructions(kb); err != nil {
+		return apperrors.NewBadRequestError(err.Error())
 	}
 	return nil
 }
