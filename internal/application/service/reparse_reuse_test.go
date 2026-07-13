@@ -164,6 +164,44 @@ func TestPlanChunkDiffPreservesExistingIdentity(t *testing.T) {
 	}
 }
 
+func TestPlanChunkDiffPreservesDerivedChunksForReusedBase(t *testing.T) {
+	now := time.Now()
+	reusedBase := &types.Chunk{
+		ID: "base-reused", Content: "same", ContentHash: stableContentHash("same"), ChunkType: types.ChunkTypeText,
+	}
+	desiredBase := &types.Chunk{
+		ID: "base-reused", Content: "same", ContentHash: stableContentHash("same"), ChunkType: types.ChunkTypeText,
+	}
+	staleBase := &types.Chunk{ID: "base-stale", ChunkType: types.ChunkTypeText}
+	preservedDerived := &types.Chunk{
+		ID: "summary-preserved", ChunkType: types.ChunkTypeSummary, ParentChunkID: reusedBase.ID,
+	}
+	staleDerived := &types.Chunk{
+		ID: "ocr-stale", ChunkType: types.ChunkTypeImageOCR, ParentChunkID: staleBase.ID,
+	}
+	staleDescendant := &types.Chunk{
+		ID: "caption-stale", ChunkType: types.ChunkTypeImageCaption, ParentChunkID: staleDerived.ID,
+	}
+	orphanDerived := &types.Chunk{ID: "summary-orphan", ChunkType: types.ChunkTypeSummary}
+
+	plan := planChunkDiff(
+		[]*types.Chunk{reusedBase, staleBase, preservedDerived, staleDerived, staleDescendant, orphanDerived},
+		[]*types.Chunk{desiredBase},
+		now,
+	)
+
+	deleted := make(map[string]bool, len(plan.toDelete))
+	for _, chunk := range plan.toDelete {
+		deleted[chunk.ID] = true
+	}
+	if !deleted[staleBase.ID] || !deleted[staleDerived.ID] || !deleted[staleDescendant.ID] {
+		t.Fatalf("stale base descendants were not deleted: %#v", deleted)
+	}
+	if deleted[preservedDerived.ID] || deleted[orphanDerived.ID] {
+		t.Fatalf("reusable derived chunks were deleted: %#v", deleted)
+	}
+}
+
 func TestMaterializeWikiUpdatesUsesLiveState(t *testing.T) {
 	additions := []SlugUpdate{{Slug: "entity/cache", Type: types.WikiPageTypeEntity, DocTitle: "old"}}
 	pages := []types.WikiLogPageRef{{Slug: "entity/cache", Title: "Cache"}}

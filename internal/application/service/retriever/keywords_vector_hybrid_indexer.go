@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -108,10 +109,14 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 			if err != nil {
 				return err
 			}
+			if len(computed) != len(missingPositions) {
+				return fmt.Errorf(
+					"embedding batch result count mismatch: got %d want %d",
+					len(computed), len(missingPositions),
+				)
+			}
 			for i, pos := range missingPositions {
-				if i < len(computed) {
-					embeddings[pos] = computed[i]
-				}
+				embeddings[pos] = computed[i]
 			}
 		}
 

@@ -36,6 +36,7 @@ func (e *capturingEmbedder) BatchEmbedWithPool(
 
 type saveOnlyRepository struct {
 	interfaces.RetrieveEngineRepository
+	batchSaveCalls int
 }
 
 func (r *saveOnlyRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error {
@@ -47,7 +48,21 @@ func (r *saveOnlyRepository) BatchSave(
 	indexInfoList []*types.IndexInfo,
 	params map[string]any,
 ) error {
+	r.batchSaveCalls++
 	return nil
+}
+
+type shortBatchEmbedder struct {
+	capturingEmbedder
+}
+
+func (e *shortBatchEmbedder) BatchEmbedWithPool(
+	ctx context.Context,
+	model embedding.Embedder,
+	texts []string,
+) ([][]float32, error) {
+	e.batchTexts = append([]string(nil), texts...)
+	return [][]float32{{1}}, nil
 }
 
 func TestIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
@@ -104,6 +119,24 @@ func TestBatchIndexTruncatesOversizedEmbeddingInput(t *testing.T) {
 	}
 	if got := len([]rune(embedder.batchTexts[0])); got > safetyMaxChars {
 		t.Fatalf("embedding input length = %d, want <= %d", got, safetyMaxChars)
+	}
+}
+
+func TestBatchIndexRejectsShortEmbeddingResult(t *testing.T) {
+	ctx := context.Background()
+	embedder := &shortBatchEmbedder{}
+	repository := &saveOnlyRepository{}
+	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: repository}
+
+	err := service.BatchIndex(ctx, embedder, []*types.IndexInfo{
+		{Content: "first", SourceID: "source-1"},
+		{Content: "second", SourceID: "source-2"},
+	}, []types.RetrieverType{types.VectorRetrieverType})
+	if err == nil || !strings.Contains(err.Error(), "embedding batch result count mismatch: got 1 want 2") {
+		t.Fatalf("BatchIndex error = %v, want embedding count mismatch", err)
+	}
+	if repository.batchSaveCalls != 0 {
+		t.Fatalf("BatchSave called %d times after incomplete embedding result", repository.batchSaveCalls)
 	}
 }
 

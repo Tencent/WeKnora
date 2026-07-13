@@ -427,6 +427,15 @@ type chunkDiffPlan struct {
 	reused   map[string]bool
 }
 
+func isReparseBaseChunk(chunk *types.Chunk) bool {
+	if chunk == nil {
+		return false
+	}
+	return chunk.ChunkType == "" ||
+		chunk.ChunkType == types.ChunkTypeText ||
+		chunk.ChunkType == types.ChunkTypeParentText
+}
+
 func planChunkDiff(existing []*types.Chunk, desired []*types.Chunk, now time.Time) chunkDiffPlan {
 	existingByID := make(map[string]*types.Chunk, len(existing))
 	for _, chunk := range existing {
@@ -469,11 +478,37 @@ func planChunkDiff(existing []*types.Chunk, desired []*types.Chunk, now time.Tim
 		plan.toUpdate = append(plan.toUpdate, chunk)
 	}
 
+	// The desired set contains only the base chunks produced by the parser.
+	// Derived chunks are owned by downstream stages and must survive when their
+	// base chunk is reused. Start with stale base chunks, then cascade deletion
+	// through ParentChunkID so descendants of removed content are cleaned up.
+	deleteIDs := make(map[string]bool)
+	deleteQueue := make([]string, 0)
 	for _, old := range existing {
-		if old == nil || old.ID == "" {
+		if old == nil || old.ID == "" || desiredIDs[old.ID] || !isReparseBaseChunk(old) {
 			continue
 		}
-		if !desiredIDs[old.ID] {
+		deleteIDs[old.ID] = true
+		deleteQueue = append(deleteQueue, old.ID)
+	}
+	childrenByParent := make(map[string][]*types.Chunk)
+	for _, old := range existing {
+		if old == nil || old.ID == "" || desiredIDs[old.ID] || old.ParentChunkID == "" {
+			continue
+		}
+		childrenByParent[old.ParentChunkID] = append(childrenByParent[old.ParentChunkID], old)
+	}
+	for i := 0; i < len(deleteQueue); i++ {
+		for _, child := range childrenByParent[deleteQueue[i]] {
+			if deleteIDs[child.ID] {
+				continue
+			}
+			deleteIDs[child.ID] = true
+			deleteQueue = append(deleteQueue, child.ID)
+		}
+	}
+	for _, old := range existing {
+		if old != nil && deleteIDs[old.ID] {
 			plan.toDelete = append(plan.toDelete, old)
 		}
 	}
