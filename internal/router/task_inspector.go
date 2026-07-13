@@ -18,8 +18,8 @@ func NewAsynqInspector() *asynq.Inspector {
 }
 
 // asynqTaskInspector implements interfaces.TaskInspector backed by an
-// *asynq.Inspector. Scans the queues we actually use ("default",
-// "critical", "low") and matches tasks whose payload carries the given
+// *asynq.Inspector. Scans the queues we actually use and matches tasks
+// whose payload carries the given
 // knowledge_id. Best-effort: any scan/delete error is logged and
 // swallowed so the cancel API still returns success even when Redis is
 // flaky.
@@ -50,15 +50,13 @@ type knowledgeIDProbe struct {
 // MUST include every queue any cancelable task type can land in; the
 // multimodal queue is required here so cancelling a knowledge also purges
 // its (potentially hundreds of) pending image:multimodal tasks.
-var queuesScanned = []string{
-	types.QueueDefault,
-	types.QueueCritical,
-	types.QueueLow,
-	types.QueueMultimodal,
-	types.QueueGraph,
-	types.QueueQuestion,
-	types.QueueWiki,
-}
+var queuesScanned = func() []string {
+	queues := make([]string, 0, len(types.QueueDefinitions()))
+	for _, definition := range types.QueueDefinitions() {
+		queues = append(queues, definition.Name)
+	}
+	return queues
+}()
 
 // taskTypesForKnowledgeCancel lists every asynq task type that carries
 // a knowledge_id in its payload and should be cancelable. The set is
@@ -135,6 +133,54 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 		}
 	}
 	return false, nil
+}
+
+// QueueStats returns a depth snapshot for every queue this app enqueues
+// into. Read-only: it calls Inspector.GetQueueInfo per queue and maps
+// the result onto types.QueueStat, attaching static pool/weight metadata
+// from the central queue registry. A queue that has never received a task yields
+// ErrQueueNotFound from asynq; we still surface it as a zeroed row so the
+// dashboard shows the complete lane set even before a queue receives its
+// first task.
+func (a *asynqTaskInspector) QueueStats(
+	ctx context.Context,
+) ([]types.QueueStat, bool, error) {
+	if a == nil || a.inspector == nil {
+		return nil, false, nil
+	}
+	definitions := types.QueueDefinitions()
+	stats := make([]types.QueueStat, 0, len(definitions))
+	for _, definition := range definitions {
+		queue := definition.Name
+		stat := types.QueueStat{
+			Name:   queue,
+			Pool:   definition.Pool,
+			Weight: definition.Weight,
+		}
+		info, err := a.inspector.GetQueueInfo(queue)
+		if err != nil {
+			if !errors.Is(err, asynq.ErrQueueNotFound) {
+				logger.Warnf(ctx, "[TaskInspector] queue info queue=%s: %v", queue, err)
+			}
+			// Zeroed row: queue not created yet (or transient error).
+			stats = append(stats, stat)
+			continue
+		}
+		stat.Size = info.Size
+		stat.Pending = info.Pending
+		stat.Active = info.Active
+		stat.Scheduled = info.Scheduled
+		stat.Retry = info.Retry
+		stat.Archived = info.Archived
+		stat.Completed = info.Completed
+		stat.Processed = info.Processed
+		stat.Failed = info.Failed
+		stat.Paused = info.Paused
+		stat.LatencyMs = info.Latency.Milliseconds()
+		stat.MemoryUsageBytes = info.MemoryUsage
+		stats = append(stats, stat)
+	}
+	return stats, true, nil
 }
 
 // queueStateHasMatch pages through one (queue, state) list looking for a
@@ -334,4 +380,13 @@ func (noopTaskInspector) HasQueuedTasksForKnowledge(
 	ctx context.Context, knowledgeID string,
 ) (bool, error) {
 	return false, nil
+}
+
+// QueueStats reports "not supported" in Lite mode: there is no Redis /
+// asynq backend to inspect, so the runtime dashboard renders an
+// "unavailable in this deployment" state instead of an empty table.
+func (noopTaskInspector) QueueStats(
+	ctx context.Context,
+) ([]types.QueueStat, bool, error) {
+	return nil, false, nil
 }

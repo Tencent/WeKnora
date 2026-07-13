@@ -430,6 +430,7 @@ function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, blobUR
 export async function hydrateProtectedFileImages(
   root: ParentNode | null | undefined,
   embed?: { channelId: string; token: string },
+  kbId?: string,
 ): Promise<void> {
   if (!root || typeof window === 'undefined') {
     return;
@@ -466,9 +467,16 @@ export async function hydrateProtectedFileImages(
     img.dataset.authHydrated = '1';
 
     const isProviderScheme = isProviderFileURL(sourceURL);
+    // When a KB context is known, route through the KB-scoped proxy. It is
+    // authorized via RequireKBAccess (own / org-shared / agent-visible) and
+    // serves objects owned by the KB's source tenant — so images in a shared
+    // KB (local://<owner-tenant>/...) load for the borrowing tenant, which the
+    // tenant-scoped /files route rejects as a cross-tenant path.
     const fileProxyBase = embed
       ? `/api/v1/embed/${embed.channelId}/files`
-      : '/files';
+      : kbId
+        ? `/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/files`
+        : '/files';
     const requestURL = isProviderScheme
       ? `${fileProxyBase}?${new URLSearchParams({ file_path: sourceURL }).toString()}`
       : sourceURL;
@@ -476,6 +484,7 @@ export async function hydrateProtectedFileImages(
     const isProxyRequest =
       requestURL.includes('file_path=') &&
       (requestURL.startsWith('/files?') ||
+        /^\/api\/v1\/knowledge-bases\/[^/]+\/files\?/.test(requestURL) ||
         /^\/api\/v1\/embed\/[^/]+\/files\?/.test(requestURL));
     if (!isProxyRequest) {
       img.dataset.authHydrated = '0';

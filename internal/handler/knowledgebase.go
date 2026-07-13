@@ -361,6 +361,11 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	types.NormalizeKnowledgeBasePromptInstructions(&req)
+	if err := validateKnowledgeBasePromptInstructions(&req); err != nil {
+		c.Error(err)
+		return
+	}
 	provider := strings.ToLower(strings.TrimSpace(req.GetStorageProvider()))
 	if provider != "" && !isStorageProviderAllowed(provider) {
 		c.Error(apperrors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
@@ -853,6 +858,17 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if req.Config != nil {
+		probe := &types.KnowledgeBase{
+			ChunkingConfig:        req.Config.ChunkingConfig,
+			ImageProcessingConfig: req.Config.ImageProcessingConfig,
+			WikiConfig:            req.Config.WikiConfig,
+		}
+		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
+			c.Error(err)
+			return
+		}
+	}
 
 	logger.Infof(ctx, "Updating knowledge base, ID: %s, name: %s",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
@@ -1083,7 +1099,8 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 
 	// Enqueue KB clone task to Asynq
 	task := asynq.NewTask(types.TypeKBClone, payloadBytes,
-		asynq.TaskID(taskID), asynq.Queue("default"), asynq.MaxRetry(3))
+		asynq.TaskID(taskID), asynq.Queue(types.QueueMaintenance),
+		asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue KB clone task: %v", err)
@@ -1232,7 +1249,7 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		return nil
 	}
 	if !config.Enabled {
-		*config = types.ExtractConfig{Enabled: false}
+		config.Enabled = false
 		return nil
 	}
 	// Validate text field
@@ -1289,6 +1306,13 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		}
 	}
 
+	return nil
+}
+
+func validateKnowledgeBasePromptInstructions(kb *types.KnowledgeBase) error {
+	if err := types.ValidateKnowledgeBasePromptInstructions(kb); err != nil {
+		return apperrors.NewBadRequestError(err.Error())
+	}
 	return nil
 }
 

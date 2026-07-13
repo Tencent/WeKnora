@@ -70,7 +70,7 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 // isolated view.
 func (s *wikiIngestService) newWikiBatchContext(
 	kbID string,
-	granularity types.WikiExtractionGranularity,
+	wikiConfig *types.WikiConfig,
 ) *WikiBatchContext {
 	var (
 		fetchMu         sync.Mutex
@@ -165,6 +165,14 @@ func (s *wikiIngestService) newWikiBatchContext(
 		return out
 	}
 
+	granularity := types.WikiExtractionStandard
+	contentInstructions := ""
+	extractionInstructions := ""
+	if wikiConfig != nil {
+		granularity = wikiConfig.ExtractionGranularity.Normalize()
+		contentInstructions = wikiConfig.ContentInstructions
+		extractionInstructions = wikiConfig.ExtractionInstructions
+	}
 	return &WikiBatchContext{
 		SlugTitle: func(ctx context.Context, slug string) string {
 			m := resolveSlugs(ctx, []string{slug})
@@ -175,7 +183,9 @@ func (s *wikiIngestService) newWikiBatchContext(
 			m := resolveSummaries(ctx, []string{kid})
 			return m[kid]
 		},
-		ExtractionGranularity: granularity,
+		ExtractionGranularity:  granularity,
+		ContentInstructions:    contentInstructions,
+		ExtractionInstructions: extractionInstructions,
 	}
 }
 
@@ -387,12 +397,12 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// empty/unknown values fall back to Standard via Normalize(). Failures
 	// to load the KB (unlikely since we're already acting on it) also
 	// degrade gracefully to Standard.
-	granularity := types.WikiExtractionStandard
+	var wikiConfig *types.WikiConfig
 	if kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID); kbErr == nil && kb != nil && kb.WikiConfig != nil {
-		granularity = kb.WikiConfig.ExtractionGranularity.Normalize()
+		wikiConfig = kb.WikiConfig
 	}
 
-	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, granularity)
+	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, wikiConfig)
 
 	// 1. MAP PHASE (Parallel extraction and generation of updates)
 	var mapMu sync.Mutex
@@ -1025,11 +1035,7 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		logger.Warnf(ctx, "wiki finalize: no synthesis model for KB %s, skipping index rebuild", payload.KnowledgeBaseID)
 	}
 
-	granularity := types.WikiExtractionStandard
-	if kb.WikiConfig != nil {
-		granularity = kb.WikiConfig.ExtractionGranularity.Normalize()
-	}
-	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, granularity)
+	batchCtx := s.newWikiBatchContext(payload.KnowledgeBaseID, kb.WikiConfig)
 	lang := types.LanguageNameFromContext(ctx)
 
 	indexRebuilt := false
@@ -1037,7 +1043,8 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		chatModel, mErr := s.modelService.GetChatModel(ctx, synthesisModelID)
 		if mErr != nil {
 			logger.Warnf(ctx, "wiki finalize: get chat model failed: %v", mErr)
-		} else if err := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang); err != nil {
+		} else if err := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang,
+			batchCtx.ContentInstructions); err != nil {
 			logger.Warnf(ctx, "wiki finalize: rebuild index failed: %v", err)
 		} else {
 			indexRebuilt = true
@@ -1364,9 +1371,11 @@ func (s *wikiIngestService) mapOneDocument(
 	go func() {
 		defer wg.Done()
 		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
-			"Content":        content,
-			"Language":       lang,
-			"ExtractedSlugs": slugListing,
+			"Content":            content,
+			"Language":           lang,
+			"ExtractedSlugs":     slugListing,
+			"CustomInstructions": batchCtx.ContentInstructions,
+			"InstructionScope":   "wiki_content",
 		})
 		if summaryErr != nil {
 			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
@@ -1660,9 +1669,11 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	}
 
 	extractionJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
-		"Content":       content,
-		"Language":      lang,
-		"PreviousSlugs": prevSlugsText,
+		"Content":            content,
+		"Language":           lang,
+		"PreviousSlugs":      prevSlugsText,
+		"CustomInstructions": batchCtx.ExtractionInstructions,
+		"InstructionScope":   "wiki_extraction",
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("combined extraction failed: %w", err)
@@ -2027,6 +2038,8 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			"RemainingSourcesContent": remainingSourcesContent.String(),
 			"AvailableSlugs":          relatedSlugs.String(),
 			"Language":                language,
+			"CustomInstructions":      batchCtx.ContentInstructions,
+			"InstructionScope":        "wiki_content",
 		})
 
 		if err == nil && updatedContent != "" {

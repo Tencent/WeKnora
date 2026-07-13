@@ -163,11 +163,10 @@ const router = createRouter({
           component: () => import("../views/organization/OrganizationList.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
-        // Compatibility redirects for legacy /platform/system/* URLs.
-        // The whole system administration surface — global settings
-        // and the system-admin roster — now lives as a single section
-        // inside the standard Settings modal. We keep the routes
-        // around so old bookmarks / external links don't 404.
+        // Compatibility redirects for /platform/system/* URLs. System
+        // administration surfaces live as dedicated sections inside the
+        // standard Settings modal; keep stable URLs for bookmarks and
+        // external links.
         {
           path: "system",
           redirect: { path: "/platform/settings", query: { section: "system-global" } },
@@ -183,6 +182,12 @@ const router = createRouter({
           path: "system/admins",
           name: "systemAdmins",
           redirect: { path: "/platform/settings", query: { section: "system-global" } },
+          meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
+        },
+        {
+          path: "system/queues",
+          name: "systemQueues",
+          redirect: { path: "/platform/settings", query: { section: "runtime-queues" } },
           meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
         },
       ],

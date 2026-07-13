@@ -19,7 +19,7 @@
     "@vue-office/pptx": "^1.0.1",
     "axios": "^1.16.0",
     "docx-preview": "^0.3.7",
-    "dompurify": "^3.4.2",
+    "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.45",
     "marked": "^17.0.5",
@@ -49,7 +49,7 @@
     "less-loader": "^12.3.2",
     "npm-run-all2": "^8.0.4",
     "typescript": "~6.0.3",
-    "vite": "^7.2.2",
+    "vite": "^7.3.5",
     "vue-tsc": "^3.2.8"
   },
   "overrides": {

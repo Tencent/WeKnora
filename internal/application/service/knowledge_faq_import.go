@@ -196,8 +196,9 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		types.TypeFAQImport,
 		payloadBytes,
 		asynq.TaskID(asynqTaskID),
-		asynq.Queue("default"),
+		asynq.Queue(types.QueueMaintenance),
 		asynq.MaxRetry(maxRetry),
+		asynq.Timeout(2*time.Hour),
 	)
 	info, err := s.task.Enqueue(task)
 	if err != nil {

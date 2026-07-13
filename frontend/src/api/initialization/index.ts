@@ -109,6 +109,8 @@ export interface KBModelConfigRequest {
     vlm_config?: {
         enabled: boolean
         model_id?: string
+        description_language?: string
+        custom_instructions?: string
     }
     asr_config?: {
         enabled: boolean
@@ -134,6 +136,7 @@ export interface KBModelConfigRequest {
         tokenLimit?: number
         // Language hints for heuristic patterns. Empty array = auto-detect.
         languages?: string[]
+        tableMetadataInstructions?: string
     }
     multimodal: {
         enabled: boolean
@@ -146,10 +149,12 @@ export interface KBModelConfigRequest {
         tags: string[]
         nodes: Node[]
         relations: Relation[]
+        customInstructions?: string
     }
     questionGeneration?: {
         enabled: boolean
         questionCount: number
+        customInstructions?: string
     }
 }
 

@@ -178,6 +178,10 @@ type ChunkingConfig struct {
 	// Languages hints the heuristic patterns. Empty = auto-detect from content.
 	// Examples: ["de"], ["en", "zh"].
 	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty"`
+	// TableMetadataInstructions contains optional business guidance used when
+	// generating searchable summaries for CSV/Excel tables. The system-owned
+	// output contract remains fixed; these instructions only add domain context.
+	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
 }
 
 // ResolveParserEngine returns the engine name for the given file type
@@ -387,6 +391,12 @@ func (c *ImageProcessingConfig) Scan(value interface{}) error {
 type VLMConfig struct {
 	Enabled bool   `yaml:"enabled"  json:"enabled"`
 	ModelID string `yaml:"model_id" json:"model_id"`
+	// DescriptionLanguage controls the language used for generated image
+	// captions. Empty means follow the document/request language.
+	DescriptionLanguage string `yaml:"description_language,omitempty" json:"description_language,omitempty"`
+	// CustomInstructions adds KB-specific image interpretation guidance without
+	// replacing the system-owned OCR and Markdown output contract.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
 
 	// 兼容老版本
 	// Model Name
@@ -421,6 +431,9 @@ type QuestionGenerationConfig struct {
 	Enabled bool `yaml:"enabled"  json:"enabled"`
 	// Number of questions to generate per chunk (default: 3, max: 10)
 	QuestionCount int `yaml:"question_count" json:"question_count"`
+	// CustomInstructions describes the intended audience or question style.
+	// It is appended to the stable system question-generation template.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
 }
 
 // Value implements the driver.Valuer interface
@@ -493,6 +506,9 @@ type ExtractConfig struct {
 	Tags      []string         `yaml:"tags"      json:"tags,omitempty"`
 	Nodes     []*GraphNode     `yaml:"nodes"     json:"nodes,omitempty"`
 	Relations []*GraphRelation `yaml:"relations" json:"relations,omitempty"`
+	// CustomInstructions adds domain-specific extraction guidance while the
+	// system keeps ownership of the structured graph output protocol.
+	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert ExtractConfig to database value

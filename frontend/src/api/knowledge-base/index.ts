@@ -68,6 +68,8 @@ export function createKnowledgeBase(data: {
   vlm_config?: {
     enabled: boolean;
     model_id?: string;
+    description_language?: string;
+    custom_instructions?: string;
   };
   storage_provider_config?: { provider: string };
   storage_config?: any; // legacy, kept for backward compat (dual-write)
@@ -82,6 +84,8 @@ export function createKnowledgeBase(data: {
     synthesis_model_id?: string;
     max_pages_per_ingest?: number;
     extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
+    content_instructions?: string;
+    extraction_instructions?: string;
   };
   indexing_strategy?: {
     vector_enabled: boolean;
@@ -111,6 +115,8 @@ export function updateKnowledgeBase(id: string, data: {
       synthesis_model_id?: string;
       max_pages_per_ingest?: number;
       extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
+      content_instructions?: string;
+      extraction_instructions?: string;
     };
     indexing_strategy?: {
       vector_enabled: boolean;

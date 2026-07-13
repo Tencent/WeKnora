@@ -35,13 +35,13 @@ func (w *concurrencyChat) GetModelName() string { return w.inner.GetModelName() 
 func (w *concurrencyChat) GetModelID() string   { return w.inner.GetModelID() }
 
 func (w *concurrencyChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
+	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
 	return w.inner.Chat(ctx, messages, opts)
 }
 
 func (w *concurrencyChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
-	release := limiter.GateN(ctx, w.inner.GetModelID(), w.limit)
+	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	ch, err := w.inner.ChatStream(ctx, messages, opts)
 	if err != nil || ch == nil {
 		release()

@@ -47,8 +47,16 @@ const (
 		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
 		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
 		"</instructions>"
-	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image in Chinese"
 )
+
+func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
+	language := strings.TrimSpace(cfg.DescriptionLanguage)
+	if language == "" {
+		language = types.LanguageNameFromContext(ctx)
+	}
+	prompt := fmt.Sprintf("Provide a brief and concise description of the main content of the image in %s.", language)
+	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
+}
 
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
@@ -260,6 +268,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		} else {
 			imgOut["ocr_prompt"] = "default"
 		}
+		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 		cacheKey := imageMultimodalCacheKey(
 			payload.TenantID, imageHash, modelFingerprint, "ocr", sha256Hex(prompt), payload.ImageSourceType,
 		)
@@ -301,8 +310,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	if payload.EnableCaption {
+		prompt := buildVLMCaptionPrompt(ctx, vlmCfg)
 		cacheKey := imageMultimodalCacheKey(
-			payload.TenantID, imageHash, modelFingerprint, "caption", sha256Hex(vlmCaptionPrompt), payload.ImageSourceType,
+			payload.TenantID, imageHash, modelFingerprint, "caption", sha256Hex(prompt), payload.ImageSourceType,
 		)
 		var cached *types.ImageMultimodalCache
 		if s.imageCacheRepo != nil {
@@ -318,7 +328,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			imageInfo.Caption = cached.Caption
 		} else {
 			imgOut["caption_cache_hit"] = false
-			caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+			caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 			if capErr != nil {
 				logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 				imgOut["caption_error"] = capErr.Error()
@@ -745,7 +755,8 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 		return
 	}
 
-	task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
+		asynq.Queue(types.QueueDefault), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to enqueue post process task for %s: %v", payload.KnowledgeID, err)
 	} else {

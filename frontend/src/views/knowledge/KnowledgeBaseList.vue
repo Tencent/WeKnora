@@ -1559,8 +1559,8 @@ const isInitialized = (kb: KB) => {
   return true
 }
 
-const isWikiKb = (kb: { indexing_strategy?: { wiki_enabled?: boolean } } | null | undefined) =>
-  !!kb?.indexing_strategy?.wiki_enabled
+const isWikiKb = (kb: unknown) =>
+  !!(kb as { indexing_strategy?: { wiki_enabled?: boolean } } | null | undefined)?.indexing_strategy?.wiki_enabled
 
 // 计算是否有未初始化的知识库
 const hasUninitializedKbs = computed(() => {

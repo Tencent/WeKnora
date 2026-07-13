@@ -1090,6 +1090,12 @@ type WikiBatchContext struct {
 	// three valid values.
 	ExtractionGranularity types.WikiExtractionGranularity
 
+	// ContentInstructions and ExtractionInstructions are KB-scoped business
+	// guidance. Stable citation, merge, taxonomy and JSON rules remain in the
+	// system templates and cannot be replaced by these fields.
+	ContentInstructions    string
+	ExtractionInstructions string
+
 	// PlannedFolderID holds the per-slug wiki_folders.id assigned by the batch
 	// taxonomy planning pass (planBatchTaxonomy + folder resolution), keyed by
 	// page slug. Reduce applies it only to pages that aren't already filed
@@ -1852,7 +1858,9 @@ const indexIntroSummaryCap = 200
 //
 // The intro is written to both Content and Summary so legacy readers
 // that fall through to Summary stay in sync.
-func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat.Chat, payload WikiIngestPayload, changeDesc, lang string) error {
+func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat.Chat, payload WikiIngestPayload,
+	changeDesc, lang, customInstructions string,
+) error {
 	indexPage, _ := s.wikiService.GetIndex(ctx, payload.KnowledgeBaseID)
 	if indexPage == nil {
 		return nil
@@ -1906,8 +1914,10 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 			docSummaries.WriteString("(no documents yet)")
 		}
 		generatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroPrompt, map[string]string{
-			"DocumentSummaries": framing + docSummaries.String(),
-			"Language":          lang,
+			"DocumentSummaries":  framing + docSummaries.String(),
+			"Language":           lang,
+			"CustomInstructions": customInstructions,
+			"InstructionScope":   "wiki_content",
 		})
 		if genErr != nil {
 			intro = "# Wiki Index\n\nThis wiki contains knowledge extracted from uploaded documents.\n"
@@ -1922,10 +1932,12 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		// change-description block already encodes the "what just
 		// changed" signal the prompt is asking for.
 		updatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroUpdatePrompt, map[string]string{
-			"ExistingIntro":     existingIntro,
-			"ChangeDescription": changeDesc,
-			"DocumentSummaries": "",
-			"Language":          lang,
+			"ExistingIntro":      existingIntro,
+			"ChangeDescription":  changeDesc,
+			"DocumentSummaries":  "",
+			"Language":           lang,
+			"CustomInstructions": customInstructions,
+			"InstructionScope":   "wiki_content",
 		})
 		if genErr != nil {
 			intro = existingIntro // keep existing on error
@@ -2237,6 +2249,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 	}
 
 	prompt := buf.String()
+	prompt = types.AppendCustomPromptInstructions(prompt, data["CustomInstructions"], data["InstructionScope"])
 	thinking := false
 
 	var lastErr error
