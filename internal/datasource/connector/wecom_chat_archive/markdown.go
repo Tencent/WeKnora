@@ -12,7 +12,7 @@ import (
 )
 
 func normalizeMessage(msg ArchiveMessageEnvelope) normalizedMessage {
-	if strings.EqualFold(msg.Action, "revoke") {
+	if isRevokeMessage(msg) {
 		return normalizedMessage{Envelope: msg, Body: fmt.Sprintf("[消息已撤回, msgid=%s]", msg.MsgID)}
 	}
 	switch msg.MsgType {
@@ -26,6 +26,8 @@ func normalizeMessage(msg ArchiveMessageEnvelope) normalizedMessage {
 			body = fmt.Sprintf("[未支持 mixed 消息内容, msgid=%s]", msg.MsgID)
 		}
 		return normalizedMessage{Envelope: msg, Body: body}
+	case "conversion_error":
+		return normalizedMessage{Envelope: msg, Body: extractText(msg.Raw), Skipped: true, Error: extractText(msg.Raw)}
 	case "image", "voice", "video":
 		label := "未解析"
 		if msg.MsgType == "voice" {
@@ -90,7 +92,10 @@ func addToBucket(bucket *dayBucket, msg normalizedMessage) {
 	if msg.Skipped {
 		bucket.AttachmentCount++
 	}
-	if strings.EqualFold(msg.Envelope.Action, "revoke") {
+	if msg.Error != "" {
+		bucket.ConversionErrors++
+	}
+	if isRevokeMessage(msg.Envelope) {
 		bucket.RevokeCount++
 	}
 	addSender(bucket, msg.Envelope.From, true)
@@ -101,6 +106,11 @@ func addToBucket(bucket *dayBucket, msg normalizedMessage) {
 		bucket.ParticipantRooms[msg.Envelope.RoomID] = struct{}{}
 	}
 	bucket.Messages = append(bucket.Messages, msg)
+}
+
+func isRevokeMessage(msg ArchiveMessageEnvelope) bool {
+	return strings.EqualFold(msg.Action, "revoke") ||
+		(strings.EqualFold(msg.Action, "recall") && strings.EqualFold(msg.MsgType, "revoke"))
 }
 
 func addSender(bucket *dayBucket, sender Sender, isFrom bool) {

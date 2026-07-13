@@ -17,6 +17,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"unsafe"
 )
@@ -38,7 +39,21 @@ func (c *financeSDKClient) Validate(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	_, _, err := c.FetchMessages(ctx, 0, 1)
+	if err := c.init(); err != nil {
+		return err
+	}
+	data, err := c.getChatData(0, 1)
+	if err != nil {
+		return err
+	}
+	items, _, err := parseChatDataResponse(data)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	_, err = decryptEncryptKey(c.cfg.PrivateKey, items[0].EncryptRandomKey)
 	return err
 }
 
@@ -67,20 +82,43 @@ func (c *financeSDKClient) FetchMessages(ctx context.Context, startSeq uint64, l
 		}
 		encryptKey, err := decryptEncryptKey(c.cfg.PrivateKey, item.EncryptRandomKey)
 		if err != nil {
-			return nil, false, fmt.Errorf("wecom sdk decrypt key error for msgid %s: %w", item.MsgID, err)
+			messages = append(messages, conversionErrorMessage(item.Seq, item.MsgID, sdkConversionError{Seq: item.Seq, MsgID: item.MsgID, Err: sdkDecryptKeyError{Err: err}}))
+			continue
 		}
 		payload, err := decryptSDKData(encryptKey, item.EncryptChatMsg)
 		if err != nil {
-			return nil, false, fmt.Errorf("wecom sdk decrypt error for msgid %s: %w", item.MsgID, err)
+			messages = append(messages, conversionErrorMessage(item.Seq, item.MsgID, sdkConversionError{Seq: item.Seq, MsgID: item.MsgID, Err: fmt.Errorf("decrypt data: %w", err)}))
+			continue
 		}
 		msg, err := decodeDecryptedMessage(item.Seq, item.MsgID, payload)
 		if err != nil {
-			return nil, false, err
+			messages = append(messages, conversionErrorMessage(item.Seq, item.MsgID, sdkConversionError{Seq: item.Seq, MsgID: item.MsgID, Err: err}))
+			continue
 		}
 		messages = append(messages, msg)
 	}
+	if len(items) > 0 && allMessagesAreDecryptKeyErrors(messages) {
+		return nil, false, fmt.Errorf("wecom sdk decrypt key failed for all messages in batch")
+	}
 
 	return messages, len(items) >= limit, nil
+}
+
+func allMessagesAreDecryptKeyErrors(messages []ArchiveMessageEnvelope) bool {
+	if len(messages) == 0 {
+		return false
+	}
+	for _, msg := range messages {
+		var conversionErr sdkConversionError
+		if !errors.As(msg.ConversionError, &conversionErr) {
+			return false
+		}
+		var decryptKeyErr sdkDecryptKeyError
+		if !errors.As(conversionErr.Err, &decryptKeyErr) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *financeSDKClient) Close() error {

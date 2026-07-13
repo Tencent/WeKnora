@@ -103,7 +103,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		next.LastSeq = prev.LastSeq
 	}
 	cursorMap := map[string]interface{}{
-		"last_seq":       float64(next.LastSeq),
+		"last_seq":       fmt.Sprintf("%d", next.LastSeq),
 		"last_msg_time":  float64(next.LastMsgTime),
 		"last_sync_time": next.LastSyncTime,
 	}

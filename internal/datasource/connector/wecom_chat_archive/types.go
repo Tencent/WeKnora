@@ -3,6 +3,7 @@ package wecom_chat_archive
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +67,40 @@ type weComChatArchiveCursor struct {
 	DayBuckets   map[string]string `json:"day_buckets,omitempty"`
 }
 
+func (c *weComChatArchiveCursor) UnmarshalJSON(data []byte) error {
+	type cursorAlias weComChatArchiveCursor
+	var raw struct {
+		cursorAlias
+		LastSeq json.RawMessage `json:"last_seq"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*c = weComChatArchiveCursor(raw.cursorAlias)
+	if len(raw.LastSeq) == 0 || string(raw.LastSeq) == "null" {
+		return nil
+	}
+	var seqString string
+	if err := json.Unmarshal(raw.LastSeq, &seqString); err == nil {
+		seq, parseErr := strconv.ParseUint(seqString, 10, 64)
+		if parseErr != nil {
+			return parseErr
+		}
+		c.LastSeq = seq
+		return nil
+	}
+	var seqNumber json.Number
+	if err := json.Unmarshal(raw.LastSeq, &seqNumber); err != nil {
+		return err
+	}
+	seq, err := strconv.ParseUint(seqNumber.String(), 10, 64)
+	if err != nil {
+		return err
+	}
+	c.LastSeq = seq
+	return nil
+}
+
 type Sender struct {
 	UserID         string
 	ExternalUserID string
@@ -86,6 +121,7 @@ type ArchiveMessageEnvelope struct {
 	ToList           []Sender
 	MsgTime          time.Time
 	Raw              json.RawMessage
+	ConversionError  error
 }
 
 type normalizedMessage struct {

@@ -63,6 +63,26 @@ type sdkMixedItem struct {
 	Text *sdkTextMessage `json:"text"`
 }
 
+type sdkConversionError struct {
+	Seq   uint64
+	MsgID string
+	Err   error
+}
+
+type sdkDecryptKeyError struct {
+	Err error
+}
+
+func (e sdkDecryptKeyError) Error() string { return fmt.Sprintf("decrypt key: %v", e.Err) }
+
+func (e sdkDecryptKeyError) Unwrap() error { return e.Err }
+
+func (e sdkConversionError) Error() string {
+	return fmt.Sprintf("seq=%d msgid=%s: %v", e.Seq, e.MsgID, e.Err)
+}
+
+func (e sdkConversionError) Unwrap() error { return e.Err }
+
 func parseChatDataResponse(data []byte) ([]sdkChatData, bool, error) {
 	var response sdkChatDataResponse
 	if err := json.Unmarshal(data, &response); err != nil {
@@ -96,6 +116,20 @@ func decodeDecryptedMessage(seq uint64, msgID string, payload []byte) (ArchiveMe
 	}
 	msg.ConversationID, msg.ConversationType = sdkConversation(decrypted.From, decrypted.ToList, decrypted.RoomID)
 	return msg, nil
+}
+
+func conversionErrorMessage(seq uint64, msgID string, err error) ArchiveMessageEnvelope {
+	return ArchiveMessageEnvelope{
+		Seq:              seq,
+		MsgID:            msgID,
+		Action:           "conversion_error",
+		MsgType:          "conversion_error",
+		ConversationID:   fmt.Sprintf("conversion-error:%d", seq),
+		ConversationType: conversationTypeUnknown,
+		MsgTime:          time.Now().UTC(),
+		Raw:              []byte(fmt.Sprintf("[消息解析失败, seq=%d, msgid=%s, error=%s]", seq, msgID, err.Error())),
+		ConversionError:  err,
+	}
 }
 
 func classifySender(id string) Sender {

@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.26-bookworm AS builder
+FROM --platform=linux/amd64 golang:1.26-bookworm AS builder
 
 WORKDIR /app
 
@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/go/pkg/mod make build-prod
 RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Final stage
-FROM debian:12.12-slim
+FROM --platform=linux/amd64 debian:12.12-slim
 
 WORKDIR /app
 

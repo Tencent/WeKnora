@@ -3,6 +3,7 @@ package wecom_chat_archive
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -216,8 +217,26 @@ func TestFetchIncrementalStartsAfterCursorAndAdvancesSeq(t *testing.T) {
 	if next == nil || next.ConnectorCursor["last_seq"] == nil {
 		t.Fatalf("next cursor missing last_seq: %#v", next)
 	}
-	if got := uint64(next.ConnectorCursor["last_seq"].(float64)); got != 11 {
+	if got := next.ConnectorCursor["last_seq"]; got != "11" {
 		t.Fatalf("last_seq = %d, want 11", got)
+	}
+}
+
+func TestFetchIncrementalPreservesUint64CursorPrecision(t *testing.T) {
+	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+	largeSeq := uint64(1<<53 + 17)
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		return &fakeArchiveClient{messages: []ArchiveMessageEnvelope{
+			{Seq: largeSeq, MsgID: "large", MsgType: "text", ConversationID: "wr_xxx", ConversationType: conversationTypeRoom, From: Sender{UserID: "a"}, MsgTime: now, Raw: []byte("large")},
+		}}
+	}))
+	cursor := &types.SyncCursor{ConnectorCursor: map[string]interface{}{"last_seq": strconv.FormatUint(largeSeq-1, 10)}}
+	_, next, err := c.FetchIncremental(context.Background(), validConfig(), cursor)
+	if err != nil {
+		t.Fatalf("FetchIncremental error: %v", err)
+	}
+	if got := next.ConnectorCursor["last_seq"]; got != strconv.FormatUint(largeSeq, 10) {
+		t.Fatalf("last_seq = %v, want %d", got, largeSeq)
 	}
 }
 
@@ -237,7 +256,7 @@ func TestFetchIncrementalAdvancesCursorPastEmptyConversation(t *testing.T) {
 	if len(items) != 1 || !strings.Contains(string(items[0].Content), "keep") {
 		t.Fatalf("items = %#v", items)
 	}
-	if got := uint64(next.ConnectorCursor["last_seq"].(float64)); got != 12 {
+	if got := next.ConnectorCursor["last_seq"]; got != "12" {
 		t.Fatalf("last_seq = %d, want 12", got)
 	}
 }
@@ -257,7 +276,7 @@ func TestFetchIncrementalAdvancesCursorWhenOnlyEmptyConversations(t *testing.T) 
 	if len(items) != 0 {
 		t.Fatalf("items = %#v, want empty", items)
 	}
-	if got := uint64(next.ConnectorCursor["last_seq"].(float64)); got != 11 {
+	if got := next.ConnectorCursor["last_seq"]; got != "11" {
 		t.Fatalf("last_seq = %d, want 11", got)
 	}
 }
@@ -335,6 +354,23 @@ func TestNormalizeMessageRendersAttachmentsAndRevoke(t *testing.T) {
 	revoke := normalizeMessage(ArchiveMessageEnvelope{MsgID: "msg-2", Action: "revoke", MsgType: "text"})
 	if revoke.Body != "[消息已撤回, msgid=msg-2]" {
 		t.Fatalf("revoke body = %q", revoke.Body)
+	}
+	recallRevoke := normalizeMessage(ArchiveMessageEnvelope{MsgID: "msg-3", Action: "recall", MsgType: "revoke"})
+	if recallRevoke.Body != "[消息已撤回, msgid=msg-3]" {
+		t.Fatalf("recall revoke body = %q", recallRevoke.Body)
+	}
+}
+
+func TestNormalizeMessageRecordsConversionError(t *testing.T) {
+	msg := conversionErrorMessage(42, "bad-msg", errors.New("parse decrypted wecom message"))
+	normalized := normalizeMessage(msg)
+	if !normalized.Skipped || normalized.Error == "" || !strings.Contains(normalized.Body, "消息解析失败") {
+		t.Fatalf("normalized = %#v", normalized)
+	}
+	bucket := newDayBucket(msg)
+	addToBucket(bucket, normalized)
+	if bucket.ConversionErrors != 1 || bucket.LastSeq != 42 {
+		t.Fatalf("bucket errors=%d last_seq=%d", bucket.ConversionErrors, bucket.LastSeq)
 	}
 }
 
