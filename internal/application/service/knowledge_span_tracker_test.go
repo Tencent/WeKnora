@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -173,11 +174,21 @@ func TestFitSpanName(t *testing.T) {
 		t.Fatalf("short name should pass through, got %q", got)
 	}
 
+	// Regression: names in the 65–223 char window failed under VARCHAR(64)
+	// but must pass through unchanged at VARCHAR(255).
+	mid := "postprocess.wiki.page[concept/" + strings.Repeat("a", 100) + "]"
+	if got := fitSpanName(mid); got != mid {
+		t.Fatalf("mid-length wiki page name should pass through, got %q", got)
+	}
+
 	// Use a synthetic overlong wiki span name (> varchar(255)).
 	long := "postprocess.wiki.page[concept/" + strings.Repeat("a", 280) + "]"
 	got := fitSpanName(long)
-	if len(got) > maxSpanNameLen {
-		t.Fatalf("fitted name len=%d, want <= %d: %q", len(got), maxSpanNameLen, got)
+	if utf8.RuneCountInString(got) > maxSpanNameLen {
+		t.Fatalf("fitted name runes=%d, want <= %d: %q", utf8.RuneCountInString(got), maxSpanNameLen, got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("fitted name must be valid UTF-8: %q", got)
 	}
 	if got == long {
 		t.Fatalf("expected truncation, got unchanged %q", got)
@@ -189,6 +200,16 @@ func TestFitSpanName(t *testing.T) {
 	other := "postprocess.wiki.page[concept/" + strings.Repeat("b", 280) + "]"
 	if fitSpanName(other) == got {
 		t.Fatalf("different long names must not collapse to the same fitted name")
+	}
+
+	// CJK slugs must truncate on rune boundaries, not byte boundaries.
+	cjkLong := "postprocess.wiki.page[" + strings.Repeat("中", 260) + "]"
+	cjkGot := fitSpanName(cjkLong)
+	if utf8.RuneCountInString(cjkGot) > maxSpanNameLen {
+		t.Fatalf("CJK fitted name runes=%d, want <= %d", utf8.RuneCountInString(cjkGot), maxSpanNameLen)
+	}
+	if !utf8.ValidString(cjkGot) {
+		t.Fatalf("CJK fitted name must be valid UTF-8: %q", cjkGot)
 	}
 }
 
@@ -209,13 +230,34 @@ func TestSpanTracker_BeginSubSpan_LongWikiPageName(t *testing.T) {
 		"slug": "concept/" + strings.Repeat("x", 280),
 	})
 	require.NotNil(t, sub)
-	require.LessOrEqual(t, len(sub.Name), maxSpanNameLen)
+	require.LessOrEqual(t, utf8.RuneCountInString(sub.Name), maxSpanNameLen)
 
 	var count int64
 	require.NoError(t, db.Table("knowledge_processing_spans").
 		Where("knowledge_id = ? AND name = ?", "kid", sub.Name).
 		Count(&count).Error)
 	require.Equal(t, int64(1), count)
+}
+
+// TestSpanTracker_LookupSpanByName_FitsLongName verifies cross-process
+// callers can look up a wiki page subspan using the raw overlong name.
+func TestSpanTracker_LookupSpanByName_FitsLongName(t *testing.T) {
+	tracker, _ := setupSpanTrackerTest(t)
+	ctx := context.Background()
+
+	_, attempt, err := tracker.OpenAttempt(ctx, "kid", "")
+	require.NoError(t, err)
+	parent := tracker.BeginStage(ctx, "kid", attempt, types.StagePostProcess, nil)
+	require.NotNil(t, parent)
+
+	rawName := "postprocess.wiki.page[concept/" + strings.Repeat("y", 280) + "]"
+	created := tracker.BeginSubSpan(ctx, parent, rawName, types.SpanKindSubSpan, nil)
+	require.NotNil(t, created)
+
+	found := tracker.LookupSpanByName(ctx, "kid", attempt, rawName)
+	require.NotNil(t, found, "LookupSpanByName must normalize the raw name")
+	assert.Equal(t, created.SpanID, found.SpanID)
+	assert.Equal(t, created.Name, found.Name)
 }
 
 // TestSpanTracker_BeginSubSpan_HangsUnderParent confirms multimodal /
