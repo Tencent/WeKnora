@@ -1642,8 +1642,8 @@ func newKBScopedFileServeHandler(
 			return
 		}
 
-		if err := secutils.ValidateStoragePathTenant(filePath, ownerTenantID); err != nil {
-			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files denied path not owned by KB tenant: owner_tenant_id=%d file_path=%q err=%v",
+		if err := secutils.ValidateKBScopedStoragePath(filePath, ownerTenantID); err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files denied path not allowed for KB proxy: owner_tenant_id=%d file_path=%q err=%v",
 				ownerTenantID, filePath, err)
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
 			return

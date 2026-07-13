@@ -266,6 +266,35 @@ func TestKBScopedFilesRejectsPathNotOwnedByKBTenant(t *testing.T) {
 	}
 }
 
+// KB-scoped proxy is for embedded exports/ images only; raw knowledge uploads
+// must use /knowledge/:id/download even when the tenant matches.
+func TestKBScopedFilesRejectsNonExportsPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("STORAGE_TYPE", "local")
+
+	const ownerTenantID = uint64(10008)
+	engine := newKBScopedFilesTestEngine(
+		ownerTenantID,
+		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
+			t.Fatalf("GetTenantByID should not be called for non-exports path, got %d", id)
+			return nil, nil
+		}},
+		&stubFileService{getFile: func(_ context.Context, filePath string) (io.ReadCloser, error) {
+			t.Fatalf("GetFile should not be called for non-exports path, got %q", filePath)
+			return nil, nil
+		}},
+	)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/knowledge-bases/kb-1/files?file_path="+url.QueryEscape("local://10008/knowledge-id/123.pdf"), nil)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if got, want := recorder.Code, http.StatusForbidden; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+}
+
 func TestKBScopedFilesRequiresFilePath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

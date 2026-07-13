@@ -95,9 +95,16 @@ func VerifyFileURLSig(filePath string, tenantID uint64, expiresStr, sig string) 
 	return hmac.Equal([]byte(expected), []byte(sig))
 }
 
+// kbScopedExportsSegment is the only storage prefix served by the KB-scoped
+// file proxy. Embedded wiki/chunk images land under exports/; raw knowledge
+// uploads use {tenant}/{knowledgeID}/... and are served via
+// /knowledge/{id}/download instead.
+const kbScopedExportsSegment = "exports"
+
 // ValidateStoragePathTenant ensures the tenant segment embedded in a provider://
 // storage path matches the authenticated caller's tenant. Cross-tenant access
-// must use /api/v1/files/presigned with an HMAC bound to the resource owner.
+// for arbitrary tenant paths uses /api/v1/files/presigned with an HMAC bound to
+// the resource owner; KB-scoped shared rendering uses ValidateKBScopedStoragePath.
 func ValidateStoragePathTenant(filePath string, tenantID uint64) error {
 	pathTenant := ParseTenantIDFromStoragePath(filePath)
 	if pathTenant == 0 {
@@ -107,6 +114,46 @@ func ValidateStoragePathTenant(filePath string, tenantID uint64) error {
 		return fmt.Errorf("storage path tenant mismatch")
 	}
 	return nil
+}
+
+// ValidateKBScopedStoragePath is used by GET /knowledge-bases/:id/files. It
+// requires the path to belong to the KB owner tenant and to live under the
+// exports/ namespace used for embedded images (SaveBytes / multimodal output).
+// This prevents borrowers with shared-KB read access from using the proxy to
+// fetch arbitrary owner-tenant objects such as raw knowledge uploads.
+func ValidateKBScopedStoragePath(filePath string, tenantID uint64) error {
+	if err := ValidateStoragePathTenant(filePath, tenantID); err != nil {
+		return err
+	}
+	if !storagePathHasExportsScope(filePath, tenantID) {
+		return fmt.Errorf("storage path is outside KB-scoped exports namespace")
+	}
+	return nil
+}
+
+// storagePathHasExportsScope reports whether tenantID appears next to an
+// exports segment in either canonical layout:
+//   - {tenant}/exports/...  (local, minio, s3, most cloud backends)
+//   - exports/{tenant}/...  (OSS temp-bucket layout)
+func storagePathHasExportsScope(filePath string, tenantID uint64) bool {
+	_, rest, ok := strings.Cut(filePath, "://")
+	if !ok {
+		return false
+	}
+	tenantSeg := strconv.FormatUint(tenantID, 10)
+	parts := strings.Split(rest, "/")
+	for i, part := range parts {
+		if part != tenantSeg {
+			continue
+		}
+		if i+1 < len(parts) && parts[i+1] == kbScopedExportsSegment {
+			return true
+		}
+		if i > 0 && parts[i-1] == kbScopedExportsSegment {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseTenantIDFromStoragePath extracts the tenant ID from a provider:// storage path.
