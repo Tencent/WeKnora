@@ -318,9 +318,6 @@ type OIDCAuthConfig struct {
 	UserInfoEndpoint      string               `yaml:"user_info_endpoint"     json:"user_info_endpoint"`
 	Scopes                []string             `yaml:"scopes"                 json:"scopes"`
 	UserInfoMapping       *OIDCUserInfoMapping `yaml:"user_info_mapping"      json:"user_info_mapping"`
-	// DefaultTenantMode applies only when OIDC auto-provisions a new local
-	// user. Existing users keep their current home tenant/memberships.
-	DefaultTenantMode string `yaml:"default_tenant_mode"   json:"default_tenant_mode"`
 }
 
 // PromptTemplateI18n holds localized name and description for a prompt template.
@@ -627,11 +624,6 @@ func ValidateConfig(cfg *Config) error {
 			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
 			errs = append(errs, "oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and oidc_auth.token_endpoint are required when OIDC is enabled")
 		}
-		tenantMode := strings.TrimSpace(cfg.OIDCAuth.DefaultTenantMode)
-		if tenantMode != "" && tenantMode != AuthDefaultTenantModeCreatePersonal && tenantMode != AuthDefaultTenantModeTenantless {
-			errs = append(errs, fmt.Sprintf("oidc_auth.default_tenant_mode must be %q or %q, got %q",
-				AuthDefaultTenantModeCreatePersonal, AuthDefaultTenantModeTenantless, tenantMode))
-		}
 	}
 
 	if cfg.Auth != nil {
@@ -729,9 +721,6 @@ func applyOIDCEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_SCOPES")); value != "" {
 		cfg.OIDCAuth.Scopes = strings.Fields(strings.ReplaceAll(value, ",", " "))
 	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_DEFAULT_TENANT_MODE")); value != "" {
-		cfg.OIDCAuth.DefaultTenantMode = value
-	}
 	if value := strings.TrimSpace(os.Getenv("OIDC_USER_INFO_MAPPING_USER_NAME")); value != "" {
 		cfg.OIDCAuth.UserInfoMapping.Username = value
 	}
@@ -741,9 +730,6 @@ func applyOIDCEnvOverrides(cfg *Config) {
 
 	if cfg.OIDCAuth.ProviderDisplayName == "" {
 		cfg.OIDCAuth.ProviderDisplayName = "OIDC"
-	}
-	if strings.TrimSpace(cfg.OIDCAuth.DefaultTenantMode) == "" {
-		cfg.OIDCAuth.DefaultTenantMode = AuthDefaultTenantModeCreatePersonal
 	}
 	if len(cfg.OIDCAuth.Scopes) == 0 {
 		cfg.OIDCAuth.Scopes = []string{"openid", "profile", "email"}

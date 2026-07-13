@@ -314,10 +314,12 @@ GET /api/v1/auth/oidc/callback
 若 `state` 与 `code` 都合法，则调用：
 
 ```go
-LoginWithOIDC(ctx, code, decodedState.RedirectURI)
+LoginWithOIDC(ctx, code, decodedState.RedirectURI, h.resolveDefaultTenantMode(ctx))
 ```
 
 注意这里传入的是 **state 中保存的 redirect_uri**，而不是重新拼接的地址，这样保证了 code 交换时使用的 `redirect_uri` 和授权时完全一致。
+
+第四个参数是首次自动开户时的默认租户策略，由 `resolveDefaultTenantMode` 从 `auth.default_tenant_mode`（SystemSetting，DB > `WEKNORA_AUTH_DEFAULT_TENANT_MODE` > 配置文件）解析，与本地密码注册共用同一开关；OIDC 不再有独立的 `OIDC_AUTH_DEFAULT_TENANT_MODE`。
 
 ---
 

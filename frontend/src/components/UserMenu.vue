@@ -556,7 +556,8 @@ const loadUserInfo = async () => {
       // （同时污染 localStorage），系统管理入口在 hover 工作空间触发
       // refreshFromAuthMe 后才出现。新增字段请只改 userInfoFromApi。
       authStore.setUser(userInfoFromApi(user))
-      // 如果返回了租户信息，也更新租户信息
+      // 如果返回了租户信息，也更新租户信息；tenantless 用户（/auth/me
+      // 无 tenant）必须显式清空，否则会残留上一账号/上一会话的租户快照。
       if (response.data.tenant) {
         authStore.setTenant({
           id: String(response.data.tenant.id),
@@ -565,6 +566,8 @@ const loadUserInfo = async () => {
           created_at: response.data.tenant.created_at,
           updated_at: response.data.tenant.updated_at
         })
+      } else {
+        authStore.setTenant(null)
       }
       const membershipsSync = response.data.memberships
       if (Array.isArray(membershipsSync)) {

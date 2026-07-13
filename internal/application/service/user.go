@@ -419,8 +419,15 @@ func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI s
 	}, nil
 }
 
-// LoginWithOIDC exchanges code for tokens, loads user info, provisions user if needed, and returns local login tokens.
-func (s *userService) LoginWithOIDC(ctx context.Context, code, redirectURI string) (*types.OIDCCallbackResponse, error) {
+// LoginWithOIDC exchanges code for tokens, loads user info, provisions user if
+// needed, and returns local login tokens. provisioning is the default tenant
+// mode applied only when a brand-new local user is auto-created; it is resolved
+// by the caller from the shared auth.default_tenant_mode policy.
+func (s *userService) LoginWithOIDC(
+	ctx context.Context,
+	code, redirectURI string,
+	provisioning types.TenantProvisioningMode,
+) (*types.OIDCCallbackResponse, error) {
 	if strings.TrimSpace(code) == "" {
 		return nil, errors.New("code is required")
 	}
@@ -452,7 +459,7 @@ func (s *userService) LoginWithOIDC(ctx context.Context, code, redirectURI strin
 	}
 	isNewUser := false
 	if isUserLookupNotFound(err) || user == nil {
-		user, err = s.provisionOIDCUser(ctx, userInfo)
+		user, err = s.provisionOIDCUser(ctx, userInfo, provisioning)
 		if err != nil {
 			return nil, err
 		}
@@ -669,10 +676,7 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 	}
 	pref := user.Preferences.LastActiveTenantID
 	if pref == nil || *pref == 0 || *pref == user.TenantID {
-		if user.TenantID == 0 {
-			return s.resolveFirstMembershipTenant(ctx, user)
-		}
-		return user.TenantID
+		return s.homeOrFirstMembershipTenant(ctx, user)
 	}
 	preferred := *pref
 
@@ -684,7 +688,7 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 					"clearing preference and falling back to home: %v",
 				preferred, user.ID, err)
 			s.clearLastActiveTenantPreference(ctx, user)
-			return user.TenantID
+			return s.homeOrFirstMembershipTenant(ctx, user)
 		}
 	}
 
@@ -704,11 +708,28 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 					"clearing preference and falling back to home (err=%v)",
 				user.ID, preferred, err)
 			s.clearLastActiveTenantPreference(ctx, user)
-			return user.TenantID
+			return s.homeOrFirstMembershipTenant(ctx, user)
 		}
 	}
 
 	return preferred
+}
+
+// homeOrFirstMembershipTenant returns the user's home tenant, or — for a
+// tenantless identity (TenantID == 0) — the earliest active membership.
+// Shared by the happy path and the stale-preference fallbacks so a
+// tenantless session with a valid membership never gets a zero-tenant
+// token when a usable tenant is available (repairs partial
+// invitation/admin-assignment flows). resolveFirstMembershipTenant
+// best-effort persists the resolved tenant as the new home.
+func (s *userService) homeOrFirstMembershipTenant(ctx context.Context, user *types.User) uint64 {
+	if user == nil {
+		return 0
+	}
+	if user.TenantID == 0 {
+		return s.resolveFirstMembershipTenant(ctx, user)
+	}
+	return user.TenantID
 }
 
 // resolveFirstMembershipTenant makes a tenantless identity usable when an
@@ -1325,17 +1346,21 @@ func (s *userService) fetchOIDCUserInfo(ctx context.Context, endpoint, accessTok
 	return claims, nil
 }
 
-func (s *userService) provisionOIDCUser(ctx context.Context, info *types.OIDCUserInfo) (*types.User, error) {
+// provisionOIDCUser auto-creates a local account for a first-time OIDC
+// login. The provisioning mode is decided by the caller (the OIDC callback
+// handler resolves it from the same auth.default_tenant_mode system-setting
+// that governs public password registration) so both entry points share a
+// single deployment policy. An empty mode falls back to create_personal via
+// Register's own defaulting.
+func (s *userService) provisionOIDCUser(
+	ctx context.Context,
+	info *types.OIDCUserInfo,
+	provisioning types.TenantProvisioningMode,
+) (*types.User, error) {
 	username := s.generateOIDCUsername(ctx, info)
 	randomPassword, err := generateRandomString(32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate password for OIDC user: %w", err)
-	}
-
-	provisioning := types.TenantProvisioningCreatePersonal
-	if s.config != nil && s.config.OIDCAuth != nil &&
-		strings.TrimSpace(s.config.OIDCAuth.DefaultTenantMode) == config.AuthDefaultTenantModeTenantless {
-		provisioning = types.TenantProvisioningTenantless
 	}
 
 	user, err := s.Register(ctx, &types.RegisterRequest{

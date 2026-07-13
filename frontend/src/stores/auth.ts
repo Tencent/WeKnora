@@ -53,8 +53,11 @@ export const useAuthStore = defineStore('auth', () => {
   // staleness window is acceptable for an inbox indicator.
   const pendingInvitationCount = ref<number>(0)
   // Authoritative deployment capability returned by /auth/me. Defaults to
-  // true for compatibility with older backends that do not return it yet.
-  const canCreateTenant = ref(true)
+  // false (fail-closed): we hide the "create workspace" affordance until
+  // /auth/me confirms the deployment allows it, so an invitation-only
+  // deployment never briefly flashes a create action the backend would
+  // then reject with 403/2005.
+  const canCreateTenant = ref(false)
 
   // 计算属性
   const isLoggedIn = computed(() => {
@@ -408,7 +411,7 @@ export const useAuthStore = defineStore('auth', () => {
     allTenants.value = []
     memberships.value = []
     pendingInvitationCount.value = 0
-    canCreateTenant.value = true
+    canCreateTenant.value = false
     clearSessionResourceCaches()
 
     // 清空localStorage
