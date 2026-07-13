@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -31,7 +32,7 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     attempt         INTEGER     NOT NULL DEFAULT 1,
     span_id         VARCHAR(64) NOT NULL,
     parent_span_id  VARCHAR(64),
-    name            VARCHAR(64) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
     kind            VARCHAR(16) NOT NULL,
     status          VARCHAR(16) NOT NULL,
     input           TEXT,
@@ -164,6 +165,57 @@ func TestSpanTracker_LookupStage_FindsAcrossProcesses(t *testing.T) {
 	// A different stage must not be confused with multimodal.
 	other := tracker.LookupStage(ctx, "kid", attempt, types.StageEmbedding)
 	assert.Nil(t, other, "LookupStage(missing) must return nil")
+}
+
+func TestFitSpanName(t *testing.T) {
+	short := "postprocess.wiki.extract"
+	if got := fitSpanName(short); got != short {
+		t.Fatalf("short name should pass through, got %q", got)
+	}
+
+	// Use a synthetic overlong wiki span name (> varchar(255)).
+	long := "postprocess.wiki.page[concept/" + strings.Repeat("a", 280) + "]"
+	got := fitSpanName(long)
+	if len(got) > maxSpanNameLen {
+		t.Fatalf("fitted name len=%d, want <= %d: %q", len(got), maxSpanNameLen, got)
+	}
+	if got == long {
+		t.Fatalf("expected truncation, got unchanged %q", got)
+	}
+	if fitSpanName(long) != got {
+		t.Fatal("fitSpanName must be deterministic")
+	}
+
+	other := "postprocess.wiki.page[concept/" + strings.Repeat("b", 280) + "]"
+	if fitSpanName(other) == got {
+		t.Fatalf("different long names must not collapse to the same fitted name")
+	}
+}
+
+// TestSpanTracker_BeginSubSpan_LongWikiPageName verifies wiki ingest's
+// postprocess.wiki.page[<slug>] subspans persist even when the slug pushes
+// the name past varchar(255).
+func TestSpanTracker_BeginSubSpan_LongWikiPageName(t *testing.T) {
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := context.Background()
+
+	_, attempt, err := tracker.OpenAttempt(ctx, "kid", "")
+	require.NoError(t, err)
+	parent := tracker.BeginStage(ctx, "kid", attempt, types.StagePostProcess, nil)
+	require.NotNil(t, parent)
+
+	rawName := "postprocess.wiki.page[concept/" + strings.Repeat("x", 280) + "]"
+	sub := tracker.BeginSubSpan(ctx, parent, rawName, types.SpanKindSubSpan, types.JSONMap{
+		"slug": "concept/" + strings.Repeat("x", 280),
+	})
+	require.NotNil(t, sub)
+	require.LessOrEqual(t, len(sub.Name), maxSpanNameLen)
+
+	var count int64
+	require.NoError(t, db.Table("knowledge_processing_spans").
+		Where("knowledge_id = ? AND name = ?", "kid", sub.Name).
+		Count(&count).Error)
+	require.Equal(t, int64(1), count)
 }
 
 // TestSpanTracker_BeginSubSpan_HangsUnderParent confirms multimodal /

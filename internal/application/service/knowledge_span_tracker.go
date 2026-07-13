@@ -26,6 +26,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,26 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// maxSpanNameLen matches knowledge_processing_spans.name (varchar(255)).
+const maxSpanNameLen = 255
+
+// fitSpanName ensures a span name fits the DB column. Wiki ingest builds
+// names like postprocess.wiki.page[<slug>] which can exceed 64 chars when
+// the slug is a long romanized entity name; when truncated an 8-hex hash
+// suffix keeps concurrent subspans distinct.
+func fitSpanName(name string) string {
+	if len(name) <= maxSpanNameLen {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	suffix := fmt.Sprintf("~%x", sum[:4])
+	keep := maxSpanNameLen - len(suffix)
+	if keep < 1 {
+		return suffix[:maxSpanNameLen]
+	}
+	return name[:keep] + suffix
+}
 
 // Span is the in-memory handle the pipeline holds while a stage / subspan
 // is executing. It carries enough context for End/Fail/Skip to write back
@@ -373,6 +395,7 @@ func (t *spanTracker) BeginSubSpan(ctx context.Context, parent *Span, name, kind
 	if parent == nil || name == "" {
 		return nil
 	}
+	name = fitSpanName(name)
 	if kind != types.SpanKindGeneration && kind != types.SpanKindSubSpan {
 		kind = types.SpanKindSubSpan
 	}

@@ -86,7 +86,7 @@ type KnowledgeProcessingSpan struct {
 	Attempt      int        `gorm:"column:attempt"                   json:"attempt"`
 	SpanID       string     `gorm:"column:span_id;size:64"           json:"span_id"`
 	ParentSpanID string     `gorm:"column:parent_span_id;size:64"    json:"parent_span_id,omitempty"`
-	Name         string     `gorm:"column:name;size:64"              json:"name"`
+	Name         string     `gorm:"column:name;size:255"             json:"name"`
 	Kind         string     `gorm:"column:kind;size:16"              json:"kind"`
 	Status       string     `gorm:"column:status;size:16"            json:"status"`
 	Input        JSONMap    `gorm:"column:input;type:jsonb"          json:"input,omitempty"`
