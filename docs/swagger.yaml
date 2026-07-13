@@ -109,6 +109,7 @@ definitions:
     - 2002
     - 2003
     - 2004
+    - 2005
     - 2100
     - 2101
     - 2102
@@ -133,6 +134,7 @@ definitions:
     - ErrTenantInactive
     - ErrTenantNameRequired
     - ErrTenantInvalidStatus
+    - ErrTenantCreationDisabled
     - ErrAgentMissingThinkingModel
     - ErrAgentMissingAllowedTools
     - ErrAgentInvalidMaxIterations
@@ -204,6 +206,19 @@ definitions:
         type: string
       tier:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
+    type: object
+  github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat:
+    properties:
+      active:
+        type: integer
+      limit:
+        type: integer
+      model_id:
+        type: string
+      name:
+        type: string
+      waiting:
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.APIPrincipalMode:
     enum:
@@ -278,6 +293,7 @@ definitions:
     - system.setting_changed
     - system.admin_promoted
     - system.admin_revoked
+    - system.user_password_reset
     type: string
     x-enum-varnames:
     - AuditActionMemberAdded
@@ -299,6 +315,7 @@ definitions:
     - AuditActionSystemSettingChanged
     - AuditActionSystemAdminPromoted
     - AuditActionSystemAdminRevoked
+    - AuditActionSystemUserPasswordReset
   github_com_Tencent_WeKnora_internal_types.AuditLog:
     properties:
       action:
@@ -418,6 +435,12 @@ definitions:
           the historical recursive splitter; "auto" lets a profiler pick between
           heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
           "recursive" pin the tier explicitly.
+        type: string
+      table_metadata_instructions:
+        description: |-
+          TableMetadataInstructions contains optional business guidance used when
+          generating searchable summaries for CSV/Excel tables. The system-owned
+          output contract remains fixed; these instructions only add domain context.
         type: string
       token_limit:
         description: |-
@@ -872,6 +895,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.ExtractConfig:
     properties:
+      custom_instructions:
+        description: |-
+          CustomInstructions adds domain-specific extraction guidance while the
+          system keeps ownership of the structured graph output protocol.
+        type: string
       enabled:
         type: boolean
       nodes:
@@ -2407,11 +2435,58 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig:
     properties:
+      custom_instructions:
+        description: |-
+          CustomInstructions describes the intended audience or question style.
+          It is appended to the stable system question-generation template.
+        type: string
       enabled:
         type: boolean
       question_count:
         description: 'Number of questions to generate per chunk (default: 3, max:
           10)'
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.QueueStat:
+    properties:
+      active:
+        type: integer
+      archived:
+        type: integer
+      completed:
+        type: integer
+      failed:
+        type: integer
+      latency_ms:
+        description: LatencyMs is the age of the oldest pending task, in milliseconds.
+        type: integer
+      memory_usage_bytes:
+        description: MemoryUsageBytes is the approximate Redis memory the queue occupies.
+        type: integer
+      name:
+        type: string
+      paused:
+        description: Paused reports whether the queue is paused (tasks not consumed).
+        type: boolean
+      pending:
+        type: integer
+      pool:
+        description: Pool is the independent worker pool that drains this queue.
+        type: string
+      processed:
+        description: Processed / Failed are today's counters (reset daily).
+        type: integer
+      retry:
+        type: integer
+      scheduled:
+        type: integer
+      size:
+        description: |-
+          Size is the total number of tasks in the queue (pending + active +
+          scheduled + retry + aggregating + archived).
+        type: integer
+      weight:
+        description: Weight is the queue's scheduling weight inside its pool.
         type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.RegisterRequest:
@@ -3345,6 +3420,16 @@ definitions:
       base_url:
         description: Base URL
         type: string
+      custom_instructions:
+        description: |-
+          CustomInstructions adds KB-specific image interpretation guidance without
+          replacing the system-owned OCR and Markdown output contract.
+        type: string
+      description_language:
+        description: |-
+          DescriptionLanguage controls the language used for generated image
+          captions. Empty means follow the document/request language.
+        type: string
       enabled:
         type: boolean
       interface_type:
@@ -3484,12 +3569,22 @@ definitions:
     - WebSearchProviderTypeKeenable
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
+      content_instructions:
+        description: |-
+          ContentInstructions controls tone, structure and emphasis for generated
+          summary/entity/index prose. Citation and merge rules remain system-owned.
+        type: string
       extraction_granularity:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity'
         description: |-
           ExtractionGranularity controls how many candidate slugs Pass 0 extracts
           per document. Empty / unknown value is treated as WikiExtractionStandard.
+      extraction_instructions:
+        description: |-
+          ExtractionInstructions tells candidate extraction which domain concepts
+          to emphasize without replacing the stable JSON/citation protocol.
+        type: string
       ingest_batch_size:
         description: |-
           IngestBatchSize controls how many pending ops a single batch claims and
@@ -4344,6 +4439,8 @@ definitions:
               Without that distinction, users could set strategy="auto" once
               but never reset it back to legacy / unset.
             type: string
+          tableMetadataInstructions:
+            type: string
           tokenLimit:
             type: integer
         type: object
@@ -4361,6 +4458,8 @@ definitions:
       nodeExtract:
         description: 知识图谱配置
         properties:
+          customInstructions:
+            type: string
           enabled:
             type: boolean
           nodes:
@@ -4381,6 +4480,8 @@ definitions:
       questionGeneration:
         description: 问题生成配置
         properties:
+          customInstructions:
+            type: string
           enabled:
             type: boolean
           questionCount:
@@ -4615,12 +4716,75 @@ definitions:
     required:
     - modelName
     type: object
+  internal_handler.ResetUserPasswordRequest:
+    properties:
+      email:
+        type: string
+      new_password:
+        type: string
+    required:
+    - email
+    - new_password
+    type: object
   internal_handler.RevokeSystemAdminRequest:
     properties:
       user_id:
         type: string
     required:
     - user_id
+    type: object
+  internal_handler.RuntimeQueuesResponse:
+    properties:
+      available:
+        type: boolean
+      model_limiter_available:
+        type: boolean
+      models:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat'
+        type: array
+      parse_concurrency:
+        description: compatibility alias for upstream_concurrency
+        type: integer
+      pools:
+        items:
+          $ref: '#/definitions/internal_handler.RuntimeWorkerPool'
+        type: array
+      queues:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QueueStat'
+        type: array
+      timestamp:
+        type: integer
+      upstream_concurrency:
+        type: integer
+      wiki_concurrency:
+        description: compatibility field
+        type: integer
+    type: object
+  internal_handler.RuntimeWorkerPool:
+    description: Return every row in the system_settings table (system-scope, not
+      tenant-scope). SystemAdmin only.
+    properties:
+      active:
+        description: live workers assigned to this pool
+        type: integer
+      cluster_capacity:
+        description: sum of live server concurrency
+        type: integer
+      concurrency:
+        description: configured per instance
+        type: integer
+      instances:
+        description: live asynq server heartbeats
+        type: integer
+      name:
+        type: string
+      queue_count:
+        type: integer
+      utilization:
+        description: Active / ClusterCapacity
+        type: number
     type: object
   internal_handler.SearchMessagesRequest:
     properties:
@@ -12261,28 +12425,19 @@ paths:
       summary: Revoke system administrator privileges from a user
       tags:
       - System Admin
-  /system/admin/settings:
+  /system/admin/runtime/queues:
     get:
-      description: |-
-        Return every row in the system_settings table (system-scope,
-        not tenant-scope). SystemAdmin only.
+      description: 返回各 asynq 队列的实时深度（pending/active/scheduled/retry 等）与 worker 并发配置，仅系统管理员可见
       produces:
       - application/json
       responses:
         "200":
-          description: list of settings
+          description: OK
           schema:
-            items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting'
-            type: array
-        "403":
-          description: 'Forbidden: not a system admin'
-          schema:
-            additionalProperties: true
-            type: object
-      summary: List all system settings
+            $ref: '#/definitions/internal_handler.RuntimeQueuesResponse'
+      summary: 获取解析任务队列运行时状态
       tags:
-      - System Admin
+      - 系统管理
   /system/admin/settings/{key}:
     delete:
       description: |-
@@ -12408,6 +12563,46 @@ paths:
             additionalProperties: true
             type: object
       summary: Apply the default storage quota to every existing tenant
+      tags:
+      - System Admin
+  /system/admin/users/reset-password:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Replace another user's local password and revoke all of their existing sessions (SystemAdmin only).
+        A system administrator cannot reset their own password through this endpoint; self-service password change still requires the old password.
+      parameters:
+      - description: Password reset request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ResetUserPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Password reset successfully
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request, weak password, or self reset
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 'Forbidden: not a system admin'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: User not found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Reset another user's password
       tags:
       - System Admin
   /system/docreader/reconnect:

@@ -320,6 +320,21 @@ export async function listSystemAdmins(
   return response as unknown as ListSystemAdminsResponse
 }
 
+export interface ResetUserPasswordRequest {
+  email: string
+  new_password: string
+}
+
+/**
+ * Replace another user's password and revoke all of their active sessions.
+ * The backend route is restricted to SystemAdmin callers and rejects attempts
+ * to reset the caller's own password.
+ */
+export async function resetUserPassword(req: ResetUserPasswordRequest): Promise<{ message: string }> {
+  const response = await post('/api/v1/system/admin/users/reset-password', req)
+  return response as unknown as { message: string }
+}
+
 // ---- System Settings (P1) ----
 
 /**

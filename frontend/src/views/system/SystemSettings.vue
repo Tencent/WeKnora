@@ -189,6 +189,24 @@
         </div>
       </div>
 
+          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--password-reset">
+            <div class="setting-info">
+              <div class="setting-label">
+                <span>{{ t('system.globalSettings.passwordReset.label') }}</span>
+                <t-tag theme="danger" variant="light" size="small" class="setting-badge">
+                  {{ t('system.globalSettings.badgeHighRisk') }}
+                </t-tag>
+              </div>
+              <p class="desc">{{ t('system.globalSettings.passwordReset.description') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-button theme="primary" variant="outline" @click="openPasswordResetDialog">
+                <template #icon><t-icon name="lock-on" /></template>
+                {{ t('system.globalSettings.passwordReset.action') }}
+              </t-button>
+            </div>
+          </div>
+
       <div
             v-for="item in activeSectionSettings"
         :key="item.key"
@@ -422,6 +440,68 @@
       <div class="sr-only" role="status" aria-live="polite">{{ saveAnnouncement }}</div>
     </template>
 
+    <t-dialog
+      v-model:visible="passwordResetVisible"
+      :header="t('system.globalSettings.passwordReset.dialogTitle')"
+      width="460px"
+      :confirm-btn="{
+        content: t('system.globalSettings.passwordReset.confirmBtn'),
+        theme: 'danger',
+        loading: passwordResetSubmitting,
+      }"
+      :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
+      :close-on-overlay-click="!passwordResetSubmitting"
+      :close-btn="!passwordResetSubmitting"
+      @confirm="submitPasswordReset"
+      @close="resetPasswordResetForm"
+    >
+      <t-alert
+        theme="warning"
+        :message="t('system.globalSettings.passwordReset.warning')"
+        class="password-reset-warning"
+      />
+      <t-form
+        ref="passwordResetFormRef"
+        :data="passwordResetForm"
+        :rules="passwordResetRules"
+        label-align="top"
+      >
+        <t-form-item :label="t('system.globalSettings.passwordReset.emailLabel')" name="email">
+          <t-input
+            v-model="passwordResetForm.email"
+            type="email"
+            clearable
+            autocomplete="off"
+            :disabled="passwordResetSubmitting"
+            :placeholder="t('system.globalSettings.passwordReset.emailPlaceholder')"
+          />
+        </t-form-item>
+        <t-form-item :label="t('system.globalSettings.passwordReset.newPasswordLabel')" name="newPassword">
+          <t-input
+            v-model="passwordResetForm.newPassword"
+            type="password"
+            autocomplete="new-password"
+            :disabled="passwordResetSubmitting"
+            :placeholder="t('system.globalSettings.passwordReset.newPasswordPlaceholder')"
+          >
+            <template #prefix-icon><t-icon name="lock-on" /></template>
+          </t-input>
+        </t-form-item>
+        <t-form-item :label="t('system.globalSettings.passwordReset.confirmPasswordLabel')" name="confirmPassword">
+          <t-input
+            v-model="passwordResetForm.confirmPassword"
+            type="password"
+            autocomplete="new-password"
+            :disabled="passwordResetSubmitting"
+            :placeholder="t('system.globalSettings.passwordReset.confirmPasswordPlaceholder')"
+            @enter="submitPasswordReset"
+          >
+            <template #prefix-icon><t-icon name="lock-on" /></template>
+          </t-input>
+        </t-form-item>
+      </t-form>
+    </t-dialog>
+
     <!-- Platform audit-log drawer. Lazy-loaded on first open; closing
          and reopening doesn't re-fetch (refresh is explicit via the
          button inside the drawer). Backend route is SystemAdmin-gated,
@@ -568,6 +648,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
 import {
   listSystemSettings,
   updateSystemSetting,
@@ -576,6 +657,7 @@ import {
   listSystemAdmins,
   promoteUserToSystemAdmin,
   revokeSystemAdmin,
+  resetUserPassword,
   listSystemAuditLog,
   type SystemSettingItem,
   type AuditLog,
@@ -759,7 +841,7 @@ const restartRequiredCount = computed(() => settings.value.filter((item) => item
 function sectionTabLabel(section: SettingsSection): string {
   const count = section === 'other'
     ? unknownSettings.value.length
-    : SETTINGS_SECTION_KEYS[section].filter((key) => settingsByKey.value.has(key)).length + (section === 'access' ? 1 : 0)
+    : SETTINGS_SECTION_KEYS[section].filter((key) => settingsByKey.value.has(key)).length + (section === 'access' ? 2 : 0)
   return t(`system.globalSettings.sections.${section}.tab`, { count })
 }
 
@@ -787,6 +869,73 @@ function markSettingSaved(item: SystemSettingItem) {
 const adminEmails = ref<string[]>([])
 const adminEmailToId = ref<Record<string, string>>({})
 const adminBusy = ref(false)
+
+const passwordResetVisible = ref(false)
+const passwordResetSubmitting = ref(false)
+const passwordResetFormRef = ref<FormInstanceFunctions>()
+const passwordResetForm = reactive({
+  email: '',
+  newPassword: '',
+  confirmPassword: '',
+})
+const passwordResetRules: Record<string, FormRule[]> = {
+  email: [
+    { required: true, message: t('system.globalSettings.passwordReset.validation.emailRequired'), trigger: 'blur' },
+    { email: true, message: t('system.globalSettings.passwordReset.validation.emailInvalid'), trigger: 'blur' },
+  ],
+  newPassword: [
+    { required: true, message: t('system.globalSettings.passwordReset.validation.passwordRequired'), trigger: 'blur' },
+    { min: 8, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
+    { max: 32, message: t('system.globalSettings.passwordReset.validation.passwordLength'), trigger: 'blur' },
+    { pattern: /[a-zA-Z]/, message: t('system.globalSettings.passwordReset.validation.passwordLetter'), trigger: 'blur' },
+    { pattern: /\d/, message: t('system.globalSettings.passwordReset.validation.passwordNumber'), trigger: 'blur' },
+  ],
+  confirmPassword: [
+    { required: true, message: t('system.globalSettings.passwordReset.validation.confirmRequired'), trigger: 'blur' },
+    {
+      validator: (value: string) => value === passwordResetForm.newPassword,
+      message: t('system.globalSettings.passwordReset.validation.passwordMismatch'),
+      trigger: 'blur',
+    },
+  ],
+}
+
+function resetPasswordResetForm() {
+  passwordResetForm.email = ''
+  passwordResetForm.newPassword = ''
+  passwordResetForm.confirmPassword = ''
+  passwordResetFormRef.value?.clearValidate?.()
+}
+
+async function openPasswordResetDialog() {
+  resetPasswordResetForm()
+  passwordResetVisible.value = true
+  await nextTick()
+  passwordResetFormRef.value?.clearValidate?.()
+}
+
+async function submitPasswordReset() {
+  if (passwordResetSubmitting.value) return
+  const valid = await passwordResetFormRef.value?.validate?.()
+  if (valid !== true) return
+
+  passwordResetSubmitting.value = true
+  try {
+    await resetUserPassword({
+      email: passwordResetForm.email.trim(),
+      new_password: passwordResetForm.newPassword,
+    })
+    saveAnnouncement.value = t('system.globalSettings.passwordReset.success')
+    MessagePlugin.success(t('system.globalSettings.passwordReset.success'))
+    passwordResetVisible.value = false
+  } catch (err: any) {
+    const msg = err?.message || t('system.globalSettings.passwordReset.failed')
+    saveAnnouncement.value = msg
+    MessagePlugin.error(msg)
+  } finally {
+    passwordResetSubmitting.value = false
+  }
+}
 
 // Guards ssrf.whitelist while an async confirm roundtrip is in flight.
 const listConfirmBusyKey = ref<string | null>(null)
@@ -1393,6 +1542,8 @@ function auditActionTheme(
     case 'system.admin_revoked':
     case 'system.setting_changed':
       return 'warning'
+    case 'system.user_password_reset':
+      return 'danger'
     case 'rbac.access_denied':
       return 'danger'
     default:
@@ -1459,7 +1610,11 @@ function auditTargetKey(row: AuditLog): string {
     if (details && typeof details.key === 'string' && details.key) return details.key
     return row.target_id || row.target_type || ''
   }
-  if (row.action === 'system.admin_promoted' || row.action === 'system.admin_revoked') {
+  if (
+    row.action === 'system.admin_promoted'
+    || row.action === 'system.admin_revoked'
+    || row.action === 'system.user_password_reset'
+  ) {
     if (!details) return row.target_user_id ? row.target_user_id.slice(0, 8) : ''
     const name = typeof details.target_username === 'string' ? details.target_username : ''
     const mail = typeof details.target_email === 'string' ? details.target_email : ''
@@ -2337,6 +2492,10 @@ onUnmounted(() => {
 
 .setting-input--wide {
   width: 320px;
+}
+
+.password-reset-warning {
+  margin-bottom: 18px;
 }
 
 @media (max-width: 860px) {
