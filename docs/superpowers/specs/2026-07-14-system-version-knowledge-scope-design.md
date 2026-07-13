@@ -146,6 +146,7 @@ ScopedKnowledgeSearch(resolvedScope).search(query)
 | 字段 | 说明 |
 |---|---|
 | `knowledge_base_id` | 主键，同时外键关联 `knowledge_bases.id` |
+| `tenant_id` | 所属租户；用于数据库级租户唯一约束和查询校验 |
 | `container_type` | `department_public` 或 `system` |
 | `system_id` | 系统容器必填，部门公共容器为空 |
 | `is_default_department` | 是否为租户默认部门公共知识库 |
@@ -153,8 +154,9 @@ ScopedKnowledgeSearch(resolvedScope).search(query)
 
 约束：
 
-- 同一租户最多一个默认部门公共知识库。
-- 同一租户内 `system_id` 唯一。
+- 同一租户最多一个默认部门公共知识库，使用 `tenant_id` 条件唯一索引保证。
+- 同一租户内 `system_id` 唯一，使用 `(tenant_id, system_id)` 唯一约束保证。
+- `tenant_id` 必须与关联知识库的租户一致。
 - 普通旧知识库可以没有 `scope_containers` 记录，并继续使用原有行为。
 
 ### 6.2 `system_versions`
@@ -162,6 +164,7 @@ ScopedKnowledgeSearch(resolvedScope).search(query)
 | 字段 | 说明 |
 |---|---|
 | `id` | UUID 主键 |
+| `tenant_id` | 所属租户；参与系统归属和组合外键校验 |
 | `system_id` | 所属系统 |
 | `version_key` | 系统内稳定版本标识 |
 | `display_name` | 显示名称 |
@@ -171,8 +174,9 @@ ScopedKnowledgeSearch(resolvedScope).search(query)
 
 约束：
 
-- 同一系统内 `version_key` 唯一。
-- 同一系统最多一个当前运行版本。
+- 同一租户的同一系统内 `version_key` 唯一。
+- 同一租户的同一系统最多一个当前运行版本。
+- `(tenant_id, system_id)` 必须引用同租户的系统容器。
 - 状态不限制写入。
 - 被文档引用的版本不能物理删除，只能修改状态。
 
@@ -181,6 +185,7 @@ ScopedKnowledgeSearch(resolvedScope).search(query)
 | 字段 | 说明 |
 |---|---|
 | `knowledge_id` | 主键，同时外键关联文档 |
+| `tenant_id` | 所属租户；用于读取时 fail-closed 校验和图谱属性继承 |
 | `scope_type` | 三种合法范围之一 |
 | `system_id` | 系统公共和系统版本范围必填 |
 | `version_id` | 系统版本范围必填 |
@@ -192,6 +197,7 @@ ScopedKnowledgeSearch(resolvedScope).search(query)
 - `department_public` 的系统、版本和项目字段必须为空。
 - `system_common` 必须有系统，版本和项目为空。
 - `system_version` 必须有系统和属于该系统的版本，项目可选。
+- `tenant_id` 必须与文档、系统容器和版本的租户一致。
 - 每份文档只有一个结构化范围。
 
 ### 6.4 标签保持独立
