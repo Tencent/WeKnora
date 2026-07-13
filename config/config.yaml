@@ -107,6 +107,26 @@ extract:
       Please randomly generate a text with freely chosen content, with a word count between [50-200].
 
 
+# Header forwarding configuration
+# Toggle with WEKNORA_HEADER_FORWARDING_ENABLED=true in .env
+# When enabled, matching incoming request headers are forwarded to
+# downstream model API calls (LLM, embedding, rerank, VLM) for use
+# cases like token metering, multi-tenant isolation, traceability.
+#
+# Two matching modes (both case-insensitive, OR logic):
+#   prefixes - match any header whose name starts with this string
+#   include  - match header by exact name
+header_forwarding:
+  prefixes:
+    # WeKnora's own convention: X-WeKnora-User-Id, X-WeKnora-Tenant-Id, etc.
+    - "X-WeKnora-"
+  # Exact header names to forward (case-insensitive). Use this for headers
+  # that don't follow a common prefix — e.g. from upstream gateways.
+  include: []
+  # Example:
+  # include:
+  #   - "X-WeKnora-Request-Id"
+
 # Tenant configuration
 tenant:
   # Enable cross-tenant access (can be enabled for intranet environments)
