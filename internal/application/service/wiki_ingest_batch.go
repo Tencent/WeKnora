@@ -1877,7 +1877,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 		}
 
-		existingContent := page.Content
+		// Older generated pages may still contain short chunk aliases such as
+		// [c003]. They are internal ingest metadata; keep the editor context
+		// clean so a subsequent update cannot copy them into rewritten prose.
+		existingContent := stripWikiInlineChunkCitations(page.Content)
 		if !exists || existingContent == "" {
 			existingContent = "(New page)"
 		}
