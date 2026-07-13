@@ -84,7 +84,7 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status", "kbId"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 const hasTimelineSpans = ref(false);
@@ -618,7 +618,7 @@ const runMarkdownPostRenderPipeline = async () => {
   if (!renderRoot) {
     return;
   }
-  await hydrateProtectedFileImages(renderRoot);
+  await hydrateProtectedFileImages(renderRoot, undefined, props.kbId);
   const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
   if (images) {
     images.forEach(async item => {

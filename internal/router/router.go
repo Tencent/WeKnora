@@ -213,6 +213,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		// KB-scoped image proxy: lets tenants render images embedded in
+		// org-shared / agent-visible KB content, which the tenant-scoped
+		// /files route cannot serve because it enforces same-tenant paths.
+		serveKBScopedFiles(v1, rbacGuards, params.TenantService, params.FileService)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
@@ -1567,6 +1571,142 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 	// attributed to a key's KB allow-list, so API keys are denied outright
 	// (embed routes use their own /embed/.../files handler).
 	r.GET("/files", middleware.DenyAPIKeyPrincipal(), newFileServeHandler(globalFileService))
+}
+
+// serveKBScopedFiles registers the KB-scoped file proxy used to render images
+// embedded in a knowledge base's content (chunks / wiki pages). Unlike the
+// tenant-scoped /files route — which enforces file_path.tenant == caller.tenant
+// and therefore cannot serve objects owned by another tenant — this route is
+// gated by RequireKBAccess. That guard resolves org-shared / agent-visible KBs
+// and rewrites the request context's tenant ID to the KB's *owner* (source)
+// tenant, so images stored under the owner tenant (local://<owner>/exports/...)
+// become reachable by tenants that legitimately share the KB, while still
+// enforcing that the requested path belongs to that owner tenant.
+//
+// Route:
+//   - GET /api/v1/knowledge-bases/:id/files?file_path=<provider://...>
+func serveKBScopedFiles(
+	r *gin.RouterGroup,
+	g *rbacGuards,
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+) {
+	logger.Infof(context.Background(), "[Router] Serving KB-scoped files from /knowledge-bases/:id/files")
+	// API keys are denied outright (as on /files): a signed URL's tenant/KB
+	// scope cannot authorize serving an arbitrary file_path under the owner
+	// tenant, and this route deliberately crosses the caller's own tenant.
+	r.GET("/knowledge-bases/:id/files",
+		middleware.DenyAPIKeyPrincipal(),
+		g.Viewer(),
+		g.KBAccessRead("id"),
+		newKBScopedFileServeHandler(tenantService, globalFileService),
+	)
+}
+
+// newKBScopedFileServeHandler builds the handler backing serveKBScopedFiles.
+// The effective (owner) tenant is taken from the request context, which
+// RequireKBAccess has already rewritten to the KB's source tenant. The owner
+// tenant's storage config is loaded via TenantService so the file is fetched
+// from the backend that actually holds it — the caller's own storage config is
+// irrelevant here.
+func newKBScopedFileServeHandler(
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+) gin.HandlerFunc {
+	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
+	if baseDir == "" {
+		baseDir = "/data/files"
+	}
+	absDir, _ := filepath.Abs(baseDir)
+
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		filePath := strings.TrimSpace(c.Query("file_path"))
+		if filePath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
+			return
+		}
+		if strings.Contains(filePath, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
+			return
+		}
+
+		// RequireKBAccess rewrote the request context tenant ID to the KB's
+		// owner (source) tenant for shared KBs; for own KBs it equals the
+		// caller's tenant. Either way it is the tenant that owns this KB's
+		// storage objects, so the requested path must belong to it.
+		ownerTenantID, ok := types.TenantIDFromContext(ctx)
+		if !ok || ownerTenantID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+			return
+		}
+
+		if err := secutils.ValidateStoragePathTenant(filePath, ownerTenantID); err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files denied path not owned by KB tenant: owner_tenant_id=%d file_path=%q err=%v",
+				ownerTenantID, filePath, err)
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+			return
+		}
+
+		tenant, err := tenantService.GetTenantByID(ctx, ownerTenantID)
+		if err != nil || tenant == nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files owner tenant lookup failed: owner_tenant_id=%d err=%v",
+				ownerTenantID, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		provider := types.ParseProviderScheme(filePath)
+
+		var (
+			fileSvc          interfaces.FileService
+			resolvedProvider string
+		)
+		if tenant.StorageEngineConfig != nil {
+			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		} else {
+			err = http.ErrMissingFile
+		}
+		if err != nil {
+			globalStorageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+			if globalStorageType == "" {
+				globalStorageType = "local"
+			}
+			if provider == globalStorageType && globalFileService != nil {
+				fileSvc = globalFileService
+				resolvedProvider = globalStorageType
+			} else {
+				logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files resolve file service failed: owner_tenant_id=%d provider=%s global_storage_type=%s err=%v",
+					ownerTenantID, provider, globalStorageType, err)
+				c.Status(http.StatusBadRequest)
+				return
+			}
+		}
+
+		reader, err := fileSvc.GetFile(ctx, filePath)
+		if err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files get file failed: owner_tenant_id=%d provider=%s path=%q err=%v",
+				ownerTenantID, resolvedProvider, filePath, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+		defer reader.Close()
+
+		contentType, inline := secutils.SafeContentTypeByFilename(filePath)
+		c.Header("Content-Type", contentType)
+		c.Header("X-Content-Type-Options", "nosniff")
+		if !inline {
+			c.Header("Content-Disposition", "attachment")
+		}
+		// Cross-tenant shared content — keep it private so shared proxies /
+		// CDNs do not cache one tenant's view for another.
+		c.Header("Cache-Control", "private, max-age=86400")
+		c.Status(http.StatusOK)
+		if _, err := io.Copy(c.Writer, reader); err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files write response failed: %v", err)
+		}
+	}
 }
 
 // servePresignedFiles serves files via HMAC-signed URLs without requiring authentication.
