@@ -183,24 +183,50 @@ var registry = map[string]settingSpec{
 			"用于兼容旧版本「创建租户即下发默认 API Key」的行为（属于破坏性变更的回退开关）。" +
 			"每次创建租户时实时读取，修改后立即生效。默认 false（不自动创建，需通过 API Key 管理显式创建）。",
 	},
-	// asynq.concurrency is the total per-process upstream worker budget.
-	// It is divided deterministically across independent core, enrichment,
-	// and maintenance servers. Read once at startup; changing it requires a
-	// process restart. Mirrors WEKNORA_ASYNQ_CONCURRENCY (default 32).
-	"asynq.concurrency": {
+	"asynq.core_concurrency": {
 		Type:            "int",
-		EnvName:         "WEKNORA_ASYNQ_CONCURRENCY",
-		Default:         int64(types.DefaultUpstreamWorkerConcurrency),
+		EnvName:         "WEKNORA_ASYNQ_CORE_CONCURRENCY",
+		Default:         int64(types.DefaultCoreWorkerConcurrency),
 		Category:        "worker",
 		RequiresRestart: true,
-		Description: "上游任务的每实例 worker 总并发预算（不含 Wiki）。系统会按核心解析 1/2、" +
-			"内容富化 3/8、维护与同步为剩余容量，拆分为相互隔离的 worker 池。" +
-			"最小值为 3；修改后需重启服务进程方可生效。",
+		Description:     "文档解析、手工重解析等核心任务的每实例保底并发。可额外使用共享弹性池；修改后需重启。",
+	},
+	"asynq.postprocess_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY",
+		Default:         int64(types.DefaultPostProcessWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "解析完成后的轻量编排与富化扇出专用并发，避免被长时间文档解析阻塞；修改后需重启。",
+	},
+	"asynq.enrichment_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY",
+		Default:         int64(types.DefaultEnrichmentWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "摘要、图片、图谱和问题生成的每实例保底并发。可额外使用共享弹性池；修改后需重启。",
+	},
+	"asynq.maintenance_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY",
+		Default:         int64(types.DefaultMaintenanceWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "数据源同步、批处理、移动和删除清理的每实例保底并发，与用户面流水线硬隔离；修改后需重启。",
+	},
+	"asynq.shared_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_SHARED_CONCURRENCY",
+		Default:         int64(types.DefaultSharedWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "核心解析与内容富化共用的每实例弹性并发。空闲容量由有积压的一侧借用；修改后需重启。",
 	},
 	// asynq.wiki_concurrency is the size of the DEDICATED wiki worker pool,
-	// separate from asynq.concurrency. Read once when the wiki asynq server
+	// separate from the upstream pools. Read once when the wiki asynq server
 	// starts — changing it in the UI requires a process restart. Mirrors
-	// WEKNORA_WIKI_ASYNQ_CONCURRENCY (default 16).
+	// WEKNORA_WIKI_ASYNQ_CONCURRENCY (default 8).
 	"asynq.wiki_concurrency": {
 		Type:            "int",
 		EnvName:         "WEKNORA_WIKI_ASYNQ_CONCURRENCY",
@@ -669,6 +695,10 @@ func (s *systemSettingService) List(ctx context.Context) ([]*types.SystemSetting
 	for _, row := range rows {
 		byKey[row.Key] = row
 	}
+	// asynq.concurrency was the old fixed-ratio aggregate. Keeping an old DB
+	// row visible would suggest it still controls runtime capacity, so retire it
+	// explicitly while preserving all genuinely unknown rows for diagnostics.
+	delete(byKey, "asynq.concurrency")
 
 	keys := make([]string, 0, len(registry))
 	for key := range registry {
@@ -1228,17 +1258,15 @@ func encodeForType(declared string, rawValue any) (types.JSON, error) {
 //     400 body verbatim).
 func validateRegistryEntry(key string, rawValue any) error {
 	switch key {
-	case "asynq.concurrency", "asynq.wiki_concurrency":
+	case "asynq.core_concurrency", "asynq.postprocess_concurrency",
+		"asynq.enrichment_concurrency", "asynq.maintenance_concurrency",
+		"asynq.shared_concurrency", "asynq.wiki_concurrency":
 		n, err := coerceToPositiveInt64(rawValue)
 		if err != nil {
 			return err
 		}
-		minimum := int64(1)
-		if key == "asynq.concurrency" {
-			minimum = 3
-		}
-		if n < minimum {
-			return fmt.Errorf("concurrency must be at least %d", minimum)
+		if n < 1 {
+			return errors.New("concurrency must be at least 1")
 		}
 	case "ssrf.whitelist":
 		// Coerce into the same shape encodeForType produced. We don't

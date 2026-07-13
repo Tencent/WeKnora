@@ -761,8 +761,7 @@ function placeholderFor(item: SystemSettingItem): string {
 }
 
 function minimumFor(item: SystemSettingItem): number {
-  if (item.key === 'asynq.concurrency') return 3
-  if (item.key === 'asynq.wiki_concurrency') return 1
+  if (item.key.startsWith('asynq.') && item.key.endsWith('_concurrency')) return 1
   return 0
 }
 

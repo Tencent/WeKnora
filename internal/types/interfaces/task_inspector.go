@@ -57,4 +57,9 @@ type TaskInspector interface {
 	// surfaced as a zeroed row (so the full lane set stays visible) rather
 	// than failing the whole call.
 	QueueStats(ctx context.Context) (stats []types.QueueStat, supported bool, err error)
+
+	// WorkerServerStats returns live asynq server heartbeats across all
+	// replicas. The runtime dashboard uses them to aggregate actual cluster
+	// capacity and busy workers for each configured pool.
+	WorkerServerStats(ctx context.Context) (stats []types.WorkerServerStat, supported bool, err error)
 }

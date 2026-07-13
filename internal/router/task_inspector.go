@@ -183,6 +183,35 @@ func (a *asynqTaskInspector) QueueStats(
 	return stats, true, nil
 }
 
+func (a *asynqTaskInspector) WorkerServerStats(
+	ctx context.Context,
+) ([]types.WorkerServerStat, bool, error) {
+	if a == nil || a.inspector == nil {
+		return nil, false, nil
+	}
+	servers, err := a.inspector.Servers()
+	if err != nil {
+		return nil, true, err
+	}
+	stats := make([]types.WorkerServerStat, 0, len(servers))
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		queues := make(map[string]int, len(server.Queues))
+		for name, weight := range server.Queues {
+			queues[name] = weight
+		}
+		stats = append(stats, types.WorkerServerStat{
+			Concurrency: server.Concurrency,
+			Active:      len(server.ActiveWorkers),
+			Status:      server.Status,
+			Queues:      queues,
+		})
+	}
+	return stats, true, nil
+}
+
 // queueStateHasMatch pages through one (queue, state) list looking for a
 // task that references knowledgeID. Mirrors the delete* scanners but is
 // strictly read-only and returns early on the first hit. A backend error
@@ -388,5 +417,11 @@ func (noopTaskInspector) HasQueuedTasksForKnowledge(
 func (noopTaskInspector) QueueStats(
 	ctx context.Context,
 ) ([]types.QueueStat, bool, error) {
+	return nil, false, nil
+}
+
+func (noopTaskInspector) WorkerServerStats(
+	ctx context.Context,
+) ([]types.WorkerServerStat, bool, error) {
 	return nil, false, nil
 }

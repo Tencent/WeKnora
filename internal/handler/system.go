@@ -1385,13 +1385,16 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 // RuntimeQueuesResponse is the payload for the SystemAdmin runtime queue
 // dashboard. `available` is false in Lite mode (no Redis/asynq) so the
 // UI can render an "unavailable in this deployment" state instead of an
-// empty table. Pool concurrency is the configured per-process capacity
-// (resolved DB > ENV > default), not live busy-worker count or cluster-wide
-// capacity (see QueueStat.Active for currently running tasks).
+// empty table. Each pool reports configured per-process concurrency plus live
+// cluster capacity/active workers aggregated from asynq server heartbeats.
 type RuntimeWorkerPool struct {
-	Name        string `json:"name"`
-	Concurrency int    `json:"concurrency"`
-	QueueCount  int    `json:"queue_count"`
+	Name            string  `json:"name"`
+	Concurrency     int     `json:"concurrency"` // configured per instance
+	QueueCount      int     `json:"queue_count"`
+	Instances       int     `json:"instances"`        // live asynq server heartbeats
+	ClusterCapacity int     `json:"cluster_capacity"` // sum of live server concurrency
+	Active          int     `json:"active"`           // live workers assigned to this pool
+	Utilization     float64 `json:"utilization"`      // Active / ClusterCapacity
 }
 
 type RuntimeQueuesResponse struct {
@@ -1406,6 +1409,56 @@ type RuntimeQueuesResponse struct {
 	Timestamp             int64                      `json:"timestamp"`
 }
 
+func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.WorkerServerStat) {
+	queueConfigs := map[string]map[string]int{
+		types.WorkerPoolCore:        types.QueueWeightsForPool(types.WorkerPoolCore),
+		types.WorkerPoolPostProcess: types.QueueWeightsForPool(types.WorkerPoolPostProcess),
+		types.WorkerPoolEnrichment:  types.QueueWeightsForPool(types.WorkerPoolEnrichment),
+		types.WorkerPoolMaintenance: types.QueueWeightsForPool(types.WorkerPoolMaintenance),
+		types.WorkerPoolShared:      types.QueueWeightsForSharedPool(),
+		types.WorkerPoolWiki:        types.QueueWeightsForPool(types.WorkerPoolWiki),
+	}
+	indexes := make(map[string]int, len(pools))
+	for i := range pools {
+		indexes[pools[i].Name] = i
+	}
+	for _, server := range servers {
+		if server.Status != "active" {
+			continue
+		}
+		for poolName, expectedQueues := range queueConfigs {
+			if !sameQueueWeights(server.Queues, expectedQueues) {
+				continue
+			}
+			idx, ok := indexes[poolName]
+			if !ok {
+				break
+			}
+			pools[idx].Instances++
+			pools[idx].ClusterCapacity += server.Concurrency
+			pools[idx].Active += server.Active
+			break
+		}
+	}
+	for i := range pools {
+		if pools[i].ClusterCapacity > 0 {
+			pools[i].Utilization = float64(pools[i].Active) / float64(pools[i].ClusterCapacity)
+		}
+	}
+}
+
+func sameQueueWeights(left, right map[string]int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for name, weight := range left {
+		if right[name] != weight {
+			return false
+		}
+	}
+	return true
+}
+
 // GetRuntimeQueues godoc
 // @Summary      获取解析任务队列运行时状态
 // @Description  返回各 asynq 队列的实时深度（pending/active/scheduled/retry 等）与 worker 并发配置，仅系统管理员可见
@@ -1415,34 +1468,30 @@ type RuntimeQueuesResponse struct {
 // @Router       /system/admin/runtime/queues [get]
 func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
-	upstreamConcurrency := types.DefaultUpstreamWorkerConcurrency
-	wikiConcurrency := types.DefaultWikiWorkerConcurrency
+	var allocation types.WorkerPoolConcurrency
 	if h.systemSettingSvc != nil {
-		if configured := h.systemSettingSvc.GetInt(
-			ctx, "asynq.concurrency", "WEKNORA_ASYNQ_CONCURRENCY", types.DefaultUpstreamWorkerConcurrency,
-		); configured > 0 {
-			upstreamConcurrency = int(configured)
-		}
-		if configured := h.systemSettingSvc.GetInt(
-			ctx, "asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", types.DefaultWikiWorkerConcurrency,
-		); configured > 0 {
-			wikiConcurrency = int(configured)
-		}
+		allocation = types.ResolveWorkerPoolConcurrency(func(key, env string, fallback int) int {
+			configured := h.systemSettingSvc.GetInt(ctx, key, env, int64(fallback))
+			return int(configured)
+		})
+	} else {
+		allocation = types.DefaultWorkerPoolConcurrency()
 	}
-	allocation := types.AllocateWorkerPoolConcurrency(upstreamConcurrency)
 	queueCounts := make(map[string]int)
 	for _, definition := range types.QueueDefinitions() {
 		queueCounts[definition.Pool]++
 	}
 	resp := RuntimeQueuesResponse{
-		UpstreamConcurrency: allocation.Total,
-		ParseConcurrency:    allocation.Total,
-		WikiConcurrency:     wikiConcurrency,
+		UpstreamConcurrency: allocation.UpstreamTotal(),
+		ParseConcurrency:    allocation.UpstreamTotal(),
+		WikiConcurrency:     allocation.Wiki,
 		Pools: []RuntimeWorkerPool{
 			{Name: types.WorkerPoolCore, Concurrency: allocation.Core, QueueCount: queueCounts[types.WorkerPoolCore]},
+			{Name: types.WorkerPoolPostProcess, Concurrency: allocation.PostProcess, QueueCount: queueCounts[types.WorkerPoolPostProcess]},
 			{Name: types.WorkerPoolEnrichment, Concurrency: allocation.Enrichment, QueueCount: queueCounts[types.WorkerPoolEnrichment]},
 			{Name: types.WorkerPoolMaintenance, Concurrency: allocation.Maintenance, QueueCount: queueCounts[types.WorkerPoolMaintenance]},
-			{Name: types.WorkerPoolWiki, Concurrency: wikiConcurrency, QueueCount: queueCounts[types.WorkerPoolWiki]},
+			{Name: types.WorkerPoolShared, Concurrency: allocation.Shared, QueueCount: len(types.QueueWeightsForSharedPool())},
+			{Name: types.WorkerPoolWiki, Concurrency: allocation.Wiki, QueueCount: queueCounts[types.WorkerPoolWiki]},
 		},
 		Timestamp: time.Now().Unix(),
 	}
@@ -1455,6 +1504,12 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 		resp.Available = supported
 		if stats != nil {
 			resp.Queues = stats
+		}
+		serverStats, _, serverErr := h.taskInspector.WorkerServerStats(ctx)
+		if serverErr != nil {
+			logger.Errorf(ctx, "get worker server stats failed: %v", serverErr)
+		} else {
+			aggregateRuntimeWorkerPools(resp.Pools, serverStats)
 		}
 	}
 	// Always emit a non-nil array so the JSON serialises to `[]` rather

@@ -126,6 +126,12 @@ func (f fakeTaskInspector) QueueStats(
 	return nil, false, nil
 }
 
+func (f fakeTaskInspector) WorkerServerStats(
+	_ context.Context,
+) ([]types.WorkerServerStat, bool, error) {
+	return nil, false, nil
+}
+
 func newHousekeepingSvcForTest(db *gorm.DB) *HousekeepingService {
 	return newHousekeepingSvcWithInspector(db, fakeTaskInspector{})
 }

@@ -106,12 +106,19 @@
           <div v-for="pool in pools" :key="pool.name" class="rq-pool-card">
             <div class="rq-pool-topline">
               <span class="rq-pool-name">{{ poolLabel(pool.name) }}</span>
-              <strong class="rq-pool-value">{{ pool.concurrency }}</strong>
+              <strong class="rq-pool-value">
+                {{ pool.instances > 0 ? `${pool.active}/${pool.cluster_capacity}` : pool.concurrency }}
+              </strong>
             </div>
             <p class="rq-pool-desc">
               {{ poolDescription(pool.name) }}
               <span class="rq-pool-meta">
-                {{ t('system.globalSettings.runtime.queueCount', { value: pool.queue_count }) }}
+                {{ t('system.globalSettings.runtime.poolConfigured', { value: pool.concurrency }) }}
+                <template v-if="pool.instances > 0">
+                  · {{ t('system.globalSettings.runtime.poolInstances', { value: pool.instances }) }}
+                  · {{ t('system.globalSettings.runtime.poolUtilization', { value: poolUtilization(pool) }) }}
+                </template>
+                · {{ t('system.globalSettings.runtime.queueCount', { value: pool.queue_count }) }}
               </span>
             </p>
           </div>
@@ -308,6 +315,10 @@ function poolDescription(pool: string): string {
 
 function poolQueueCount(pool: string): number {
   return pools.value.find((item) => item.name === pool)?.queue_count ?? 0
+}
+
+function poolUtilization(pool: RuntimeWorkerPool): number {
+  return Math.round(Math.max(0, Math.min(1, pool.utilization || 0)) * 100)
 }
 
 function formatLatency(ms: number): string {

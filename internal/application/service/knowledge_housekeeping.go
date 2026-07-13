@@ -186,8 +186,9 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	if queueSkipped > 0 {
 		// Visibility into "stale span heartbeat but tasks still queued"
 		// — i.e. backpressure, not a stuck row. Persistent counts here
-		// mean the queue is the bottleneck (raise WEKNORA_ASYNQ_CONCURRENCY
-		// or document_process_timeout), not that housekeeping misfires.
+		// mean the queue is the bottleneck (raise the matching per-pool or
+		// shared asynq concurrency, or document_process_timeout), not that
+		// housekeeping misfires.
 		logger.Infof(ctx,
 			"[Housekeeping] %d candidate(s) skipped — tasks still queued (backpressure, not stuck)",
 			queueSkipped)

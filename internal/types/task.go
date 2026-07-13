@@ -5,15 +5,24 @@ package types
 // between pools instead of being only a weighted dequeue preference.
 const (
 	WorkerPoolCore        = "core"
+	WorkerPoolPostProcess = "postprocess"
 	WorkerPoolEnrichment  = "enrichment"
 	WorkerPoolMaintenance = "maintenance"
+	WorkerPoolShared      = "shared"
 	WorkerPoolWiki        = "wiki"
 
-	// DefaultUpstreamWorkerConcurrency is split across core, enrichment,
-	// and maintenance. Wiki stays separately configurable because its model
-	// workload has a different capacity profile.
-	DefaultUpstreamWorkerConcurrency = 32
-	DefaultWikiWorkerConcurrency     = 16
+	// Upstream defaults are explicit guarantees plus an elastic pool. The
+	// shared pool may consume core and enrichment queues, so idle capacity in
+	// either stage can be borrowed without sacrificing the dedicated minimums.
+	DefaultCoreWorkerConcurrency        = 8
+	DefaultPostProcessWorkerConcurrency = 2
+	DefaultEnrichmentWorkerConcurrency  = 12
+	DefaultMaintenanceWorkerConcurrency = 4
+	DefaultSharedWorkerConcurrency      = 6
+	DefaultWikiWorkerConcurrency        = 8
+	DefaultUpstreamWorkerConcurrency    = DefaultCoreWorkerConcurrency +
+		DefaultPostProcessWorkerConcurrency + DefaultEnrichmentWorkerConcurrency +
+		DefaultMaintenanceWorkerConcurrency + DefaultSharedWorkerConcurrency
 )
 
 // Asynq queue names. QueueMaintenance intentionally keeps the physical Redis
@@ -21,6 +30,7 @@ const (
 // rolling deployment. New code uses the business-semantic constant.
 const (
 	QueueDefault     = "default"
+	QueuePostProcess = "postprocess"
 	QueueSummary     = "summary"
 	QueueMultimodal  = "multimodal"
 	QueueGraph       = "graph"
@@ -35,22 +45,26 @@ const (
 // scheduling weights shown to operators from drifting from the actual server
 // configuration.
 type QueueDefinition struct {
-	Name      string
-	Pool      string
-	Weight    int
-	TaskTypes []string
+	Name         string
+	Pool         string
+	Weight       int
+	SharedWeight int
+	TaskTypes    []string
 }
 
 var queueDefinitions = []QueueDefinition{
-	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, TaskTypes: []string{
-		TypeDocumentProcess, TypeManualProcess, TypeKnowledgePostProcess,
+	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, SharedWeight: 3, TaskTypes: []string{
+		TypeDocumentProcess, TypeManualProcess,
 	}},
-	{Name: QueueSummary, Pool: WorkerPoolEnrichment, Weight: 2, TaskTypes: []string{
+	{Name: QueuePostProcess, Pool: WorkerPoolPostProcess, Weight: 1, TaskTypes: []string{
+		TypeKnowledgePostProcess,
+	}},
+	{Name: QueueSummary, Pool: WorkerPoolEnrichment, Weight: 2, SharedWeight: 2, TaskTypes: []string{
 		TypeSummaryGeneration, TypeDataTableSummary,
 	}},
-	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeImageMultimodal}},
-	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeChunkExtract}},
-	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, TaskTypes: []string{TypeQuestionGeneration}},
+	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeImageMultimodal}},
+	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeChunkExtract}},
+	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeQuestionGeneration}},
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
@@ -95,47 +109,69 @@ func QueueWeightsForPool(pool string) map[string]int {
 	return weights
 }
 
-// WorkerPoolConcurrency is the deterministic split of the total upstream
-// worker budget. Keeping this pure allocation function in types lets the
-// server constructors and the System Admin API report identical values.
-type WorkerPoolConcurrency struct {
-	Total       int
-	Core        int
-	Enrichment  int
-	Maintenance int
-}
-
-// AllocateWorkerPoolConcurrency reserves 1/2 of the upstream budget for the
-// latency-sensitive core pipeline, 3/8 for LLM/VLM enrichment, and the
-// remainder for sync/cleanup/batch work. A minimum total of three guarantees
-// every independent server has at least one worker.
-func AllocateWorkerPoolConcurrency(total int) WorkerPoolConcurrency {
-	if total < 3 {
-		total = 3
-	}
-	core := total / 2
-	enrichment := (total * 3) / 8
-	if core < 1 {
-		core = 1
-	}
-	if enrichment < 1 {
-		enrichment = 1
-	}
-	maintenance := total - core - enrichment
-	if maintenance < 1 {
-		maintenance = 1
-		if core >= enrichment && core > 1 {
-			core--
-		} else if enrichment > 1 {
-			enrichment--
+// QueueWeightsForSharedPool returns the core/enrichment queues eligible for
+// elastic capacity. Post-process and maintenance are deliberately excluded:
+// post-process needs a small latency guarantee, while long maintenance tasks
+// must not pin burst capacity intended for the user-facing pipeline.
+func QueueWeightsForSharedPool() map[string]int {
+	weights := make(map[string]int)
+	for _, definition := range queueDefinitions {
+		if definition.SharedWeight > 0 {
+			weights[definition.Name] = definition.SharedWeight
 		}
 	}
+	return weights
+}
+
+// WorkerPoolConcurrency contains the explicit per-instance pool capacities.
+// Unlike the old ratio allocator, each field is independently configurable.
+type WorkerPoolConcurrency struct {
+	Core        int
+	PostProcess int
+	Enrichment  int
+	Maintenance int
+	Shared      int
+	Wiki        int
+}
+
+func DefaultWorkerPoolConcurrency() WorkerPoolConcurrency {
 	return WorkerPoolConcurrency{
-		Total:       total,
-		Core:        core,
-		Enrichment:  enrichment,
-		Maintenance: maintenance,
+		Core:        DefaultCoreWorkerConcurrency,
+		PostProcess: DefaultPostProcessWorkerConcurrency,
+		Enrichment:  DefaultEnrichmentWorkerConcurrency,
+		Maintenance: DefaultMaintenanceWorkerConcurrency,
+		Shared:      DefaultSharedWorkerConcurrency,
+		Wiki:        DefaultWikiWorkerConcurrency,
 	}
+}
+
+// ResolveWorkerPoolConcurrency centralizes setting keys, environment names,
+// defaults, and invalid-value fallback for both server construction and the
+// runtime API. The callback lets this package stay independent of the system
+// setting service interface.
+func ResolveWorkerPoolConcurrency(read func(key, env string, fallback int) int) WorkerPoolConcurrency {
+	allocation := DefaultWorkerPoolConcurrency()
+	if read == nil {
+		return allocation
+	}
+	positive := func(key, env string, fallback int) int {
+		value := read(key, env, fallback)
+		if value < 1 {
+			return fallback
+		}
+		return value
+	}
+	allocation.Core = positive("asynq.core_concurrency", "WEKNORA_ASYNQ_CORE_CONCURRENCY", allocation.Core)
+	allocation.PostProcess = positive("asynq.postprocess_concurrency", "WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY", allocation.PostProcess)
+	allocation.Enrichment = positive("asynq.enrichment_concurrency", "WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY", allocation.Enrichment)
+	allocation.Maintenance = positive("asynq.maintenance_concurrency", "WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY", allocation.Maintenance)
+	allocation.Shared = positive("asynq.shared_concurrency", "WEKNORA_ASYNQ_SHARED_CONCURRENCY", allocation.Shared)
+	allocation.Wiki = positive("asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", allocation.Wiki)
+	return allocation
+}
+
+func (c WorkerPoolConcurrency) UpstreamTotal() int {
+	return c.Core + c.PostProcess + c.Enrichment + c.Maintenance + c.Shared
 }
 
 // QueueStat is a read-only depth snapshot of a single asynq queue, used
@@ -168,6 +204,17 @@ type QueueStat struct {
 	LatencyMs int64 `json:"latency_ms"`
 	// MemoryUsageBytes is the approximate Redis memory the queue occupies.
 	MemoryUsageBytes int64 `json:"memory_usage_bytes"`
+}
+
+// WorkerServerStat is one live asynq server heartbeat. Queue weights identify
+// which logical pool the server belongs to; the runtime handler aggregates
+// these records across replicas so configured per-instance capacity is not
+// confused with actual cluster capacity.
+type WorkerServerStat struct {
+	Concurrency int
+	Active      int
+	Status      string
+	Queues      map[string]int
 }
 
 const (

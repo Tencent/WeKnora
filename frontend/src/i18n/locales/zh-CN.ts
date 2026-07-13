@@ -2484,11 +2484,14 @@ export default {
         detailsTitle: "队列明细",
         detailsDescription: "各处理通道的实时负载与等待情况。",
         poolsTitle: "Worker 池",
-        poolsDescription: "核心解析、内容富化、维护同步和 Wiki 使用相互隔离的并发预算。",
-        perInstance: "并发数为单实例配置",
+        poolsDescription: "各阶段拥有保底容量，核心解析与内容富化还可借用共享弹性池。",
+        perInstance: "卡片主值为集群运行中/容量",
+        poolConfigured: "单实例配置 {value}",
+        poolInstances: "{value} 个实例",
+        poolUtilization: "利用率 {value}%",
         queueCount: "{value} 个队列",
         weight: "池内权重 {value}",
-        footnote: "Worker 并发数为单实例上限（修改后需重启）；权重只决定同一池内的调度份额；「运行中」为集群当前任务数。",
+        footnote: "卡片主值为集群运行中/实时容量；单实例配置修改后需重启。共享弹性池只消费核心解析和内容富化队列。",
         updatedAt: "更新于 {value}",
         errors: {
           generic: "获取队列状态失败",
@@ -2529,18 +2532,23 @@ export default {
         },
         pools: {
           core: "核心解析",
+          postprocess: "后处理编排",
           enrichment: "内容富化",
           maintenance: "维护与同步",
+          shared: "共享弹性",
           wiki: "Wiki 池",
         },
         poolDescriptions: {
-          core: "文档解析与后处理调度",
+          core: "文档解析与手工重解析的保底容量",
+          postprocess: "解析完成后的收尾与富化扇出",
           enrichment: "摘要、图片、图谱与问题生成",
           maintenance: "数据源同步、批处理与删除清理",
+          shared: "由核心解析与内容富化按积压借用",
           wiki: "Wiki 内容生成与全局收尾",
         },
         queueNames: {
           default: "默认（文档解析）",
+          postprocess: "后处理编排",
           summary: "摘要生成",
           sync: "数据源同步",
           low: "后台维护与批处理",
@@ -2550,7 +2558,8 @@ export default {
           wiki: "Wiki 同步",
         },
         queueDescriptions: {
-          default: "文档解析、手工更新与后处理调度",
+          default: "文档解析与手工更新",
+          postprocess: "解析完成后的状态收尾与富化任务扇出",
           summary: "文档摘要与表格摘要",
           sync: "手动与定时数据源同步",
           low: "FAQ 导入、复制移动、批量重解析与删除清理",
@@ -2572,7 +2581,11 @@ export default {
           default_storage_quota_gb: "新租户默认存储配额 (GB)",
         },
         asynq: {
-          concurrency: "上游 Worker 总并发预算",
+          core_concurrency: "核心解析保底并发数",
+          postprocess_concurrency: "后处理编排并发数",
+          enrichment_concurrency: "内容富化保底并发数",
+          maintenance_concurrency: "维护与同步并发数",
+          shared_concurrency: "共享弹性并发数",
           wiki_concurrency: "Wiki Worker 并发数",
         },
         model: {
@@ -2600,10 +2613,11 @@ export default {
             "0 或负数表示使用内置默认值 10GB。",
         },
         asynq: {
-          concurrency:
-            "每个服务实例用于上游后台任务的总并发预算（不含 Wiki）。系统按核心解析 1/2、" +
-            "内容富化 3/8、维护与同步为剩余容量，拆分成相互隔离的 Worker 池。" +
-            "最小值为 3；修改后需重启服务进程方可生效。",
+          core_concurrency: "文档解析与手工重解析的每实例保底并发，可额外借用共享弹性池；修改后需重启。",
+          postprocess_concurrency: "解析完成后的轻量收尾和富化扇出专用并发；修改后需重启。",
+          enrichment_concurrency: "摘要、图片、图谱与问题生成的每实例保底并发，可额外借用共享弹性池；修改后需重启。",
+          maintenance_concurrency: "数据源同步、批处理和清理任务的每实例并发，与用户面流水线硬隔离；修改后需重启。",
+          shared_concurrency: "核心解析与内容富化共同使用的每实例弹性并发，由有积压的一侧自动借用；修改后需重启。",
           wiki_concurrency:
             "每个服务实例的 Wiki 专用 Worker 并发数，与上游任务池相互隔离。" +
             "最小值为 1；修改后需重启服务进程方可生效。",

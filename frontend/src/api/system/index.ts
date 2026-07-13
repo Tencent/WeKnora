@@ -507,6 +507,10 @@ export interface RuntimeWorkerPool {
   name: string
   concurrency: number
   queue_count: number
+  instances: number
+  cluster_capacity: number
+  active: number
+  utilization: number
 }
 
 export interface ModelRuntimeStat {
@@ -520,9 +524,9 @@ export interface ModelRuntimeStat {
 /**
  * Runtime queue dashboard payload. `available` is false in Lite mode
  * (no Redis/asynq) — render an "unavailable in this deployment" state
- * rather than an empty table. Pool concurrency values are CONFIGURED
- * per-process capacity (effective on next restart), not live busy-worker
- * count or cluster-wide capacity.
+ * rather than an empty table. Each pool includes both configured per-process
+ * concurrency and live cluster capacity/active workers aggregated from asynq
+ * server heartbeats.
  */
 export interface RuntimeQueuesResponse {
   available: boolean

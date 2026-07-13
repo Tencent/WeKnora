@@ -79,7 +79,7 @@ const (
 	// wikiInflightPrefix keys the per-KB slot set: wiki:inflight:{kbID}.
 	wikiInflightPrefix = "wiki:inflight:"
 	// wikiInflightDefault is the fallback cap when WikiConfig.IngestMaxInflight
-	// is unset. 4 leaves headroom in a default 16-worker wiki pool for other
+	// is unset. 4 leaves half of the default 8-worker wiki pool for other
 	// KBs while still giving one KB solid parallelism.
 	wikiInflightDefault = 4
 	// wikiInflightTTL is how long a reserved slot survives without renewal.

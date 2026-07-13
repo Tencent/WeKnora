@@ -10,6 +10,7 @@ func TestQueueDefinitionsAreUniqueAndConsumable(t *testing.T) {
 
 	validPools := map[string]bool{
 		WorkerPoolCore:        true,
+		WorkerPoolPostProcess: true,
 		WorkerPoolEnrichment:  true,
 		WorkerPoolMaintenance: true,
 		WorkerPoolWiki:        true,
@@ -47,6 +48,13 @@ func TestQueueDefinitionsAreUniqueAndConsumable(t *testing.T) {
 			t.Fatalf("worker pool %q has no queues", pool)
 		}
 	}
+	shared := QueueWeightsForSharedPool()
+	if len(shared) == 0 || shared[QueueDefault] <= 0 || shared[QueueSummary] <= 0 {
+		t.Fatalf("shared pool must cover core and enrichment queues: %+v", shared)
+	}
+	if shared[QueuePostProcess] != 0 || shared[QueueMaintenance] != 0 {
+		t.Fatalf("shared pool must not consume post-process or maintenance: %+v", shared)
+	}
 }
 
 func TestQueueMaintenanceKeepsLegacyPhysicalName(t *testing.T) {
@@ -71,22 +79,31 @@ func TestEveryAsynqTaskTypeHasADeclaredQueue(t *testing.T) {
 	}
 }
 
-func TestAllocateWorkerPoolConcurrencyPreservesBudget(t *testing.T) {
-	for _, total := range []int{3, 4, 8, 32, 64} {
-		allocation := AllocateWorkerPoolConcurrency(total)
-		if allocation.Total != total {
-			t.Fatalf("total=%d: allocation reported total %d", total, allocation.Total)
-		}
-		if allocation.Core < 1 || allocation.Enrichment < 1 || allocation.Maintenance < 1 {
-			t.Fatalf("total=%d: every pool must receive capacity: %+v", total, allocation)
-		}
-		if allocation.Core+allocation.Enrichment+allocation.Maintenance != total {
-			t.Fatalf("total=%d: split does not preserve budget: %+v", total, allocation)
-		}
+func TestDefaultWorkerPoolConcurrencyIsExplicitBudget(t *testing.T) {
+	allocation := DefaultWorkerPoolConcurrency()
+	if allocation.UpstreamTotal() != DefaultUpstreamWorkerConcurrency {
+		t.Fatalf("upstream total = %d, want %d", allocation.UpstreamTotal(), DefaultUpstreamWorkerConcurrency)
 	}
+	if allocation.Core < 1 || allocation.PostProcess < 1 || allocation.Enrichment < 1 ||
+		allocation.Maintenance < 1 || allocation.Shared < 1 || allocation.Wiki < 1 {
+		t.Fatalf("every pool must have positive explicit capacity: %+v", allocation)
+	}
+}
 
-	minimum := AllocateWorkerPoolConcurrency(1)
-	if minimum.Total != 3 || minimum.Core+minimum.Enrichment+minimum.Maintenance != 3 {
-		t.Fatalf("undersized budget should clamp to three workers: %+v", minimum)
+func TestResolveWorkerPoolConcurrencyFallsBackPerPool(t *testing.T) {
+	allocation := ResolveWorkerPoolConcurrency(func(key, _ string, fallback int) int {
+		if key == "asynq.core_concurrency" {
+			return 15
+		}
+		if key == "asynq.shared_concurrency" {
+			return 0
+		}
+		return fallback
+	})
+	if allocation.Core != 15 {
+		t.Fatalf("core = %d, want override 15", allocation.Core)
+	}
+	if allocation.Shared != DefaultSharedWorkerConcurrency {
+		t.Fatalf("shared = %d, want fallback %d", allocation.Shared, DefaultSharedWorkerConcurrency)
 	}
 }

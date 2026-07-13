@@ -675,7 +675,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		payloadBytes, err := json.Marshal(postProcessPayload)
 		if err == nil {
 			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
-				asynq.Queue(types.QueueDefault), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
+				knowledgePostProcessTaskOptions()...)
 			if _, err := s.task.Enqueue(task); err != nil {
 				logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
 			} else {

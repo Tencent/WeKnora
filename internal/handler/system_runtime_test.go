@@ -15,10 +15,18 @@ type runtimeTestSettings struct{}
 
 func (runtimeTestSettings) GetInt(_ context.Context, key, _ string, def int64) int64 {
 	switch key {
-	case "asynq.concurrency":
-		return 32
+	case "asynq.core_concurrency":
+		return 8
+	case "asynq.postprocess_concurrency":
+		return 2
+	case "asynq.enrichment_concurrency":
+		return 12
+	case "asynq.maintenance_concurrency":
+		return 4
+	case "asynq.shared_concurrency":
+		return 6
 	case "asynq.wiki_concurrency":
-		return 16
+		return 8
 	default:
 		return def
 	}
@@ -55,6 +63,17 @@ func (runtimeTestInspector) HasQueuedTasksForKnowledge(context.Context, string) 
 func (runtimeTestInspector) QueueStats(context.Context) ([]types.QueueStat, bool, error) {
 	return []types.QueueStat{}, true, nil
 }
+func (runtimeTestInspector) WorkerServerStats(context.Context) ([]types.WorkerServerStat, bool, error) {
+	return []types.WorkerServerStat{
+		{Concurrency: 8, Active: 4, Status: "active", Queues: types.QueueWeightsForPool(types.WorkerPoolCore)},
+		{Concurrency: 2, Active: 1, Status: "active", Queues: types.QueueWeightsForPool(types.WorkerPoolPostProcess)},
+		{Concurrency: 12, Active: 6, Status: "active", Queues: types.QueueWeightsForPool(types.WorkerPoolEnrichment)},
+		{Concurrency: 4, Active: 1, Status: "active", Queues: types.QueueWeightsForPool(types.WorkerPoolMaintenance)},
+		{Concurrency: 6, Active: 3, Status: "active", Queues: types.QueueWeightsForSharedPool()},
+		{Concurrency: 8, Active: 2, Status: "active", Queues: types.QueueWeightsForPool(types.WorkerPoolWiki)},
+		{Concurrency: 99, Active: 0, Status: "stopped", Queues: types.QueueWeightsForPool(types.WorkerPoolCore)},
+	}, true, nil
+}
 
 func TestGetRuntimeQueuesReportsIsolatedPoolCapacity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -85,10 +104,12 @@ func TestGetRuntimeQueuesReportsIsolatedPoolCapacity(t *testing.T) {
 		concurrency int
 		queueCount  int
 	}{
-		types.WorkerPoolCore:        {16, 1},
+		types.WorkerPoolCore:        {8, 1},
+		types.WorkerPoolPostProcess: {2, 1},
 		types.WorkerPoolEnrichment:  {12, 4},
 		types.WorkerPoolMaintenance: {4, 2},
-		types.WorkerPoolWiki:        {16, 1},
+		types.WorkerPoolShared:      {6, 5},
+		types.WorkerPoolWiki:        {8, 1},
 	}
 	if len(response.Pools) != len(want) {
 		t.Fatalf("pool count = %d, want %d", len(response.Pools), len(want))
@@ -101,6 +122,9 @@ func TestGetRuntimeQueuesReportsIsolatedPoolCapacity(t *testing.T) {
 		if pool.Concurrency != expected.concurrency || pool.QueueCount != expected.queueCount {
 			t.Fatalf("pool %q = %+v, want concurrency=%d queue_count=%d",
 				pool.Name, pool, expected.concurrency, expected.queueCount)
+		}
+		if pool.Instances != 1 || pool.ClusterCapacity != expected.concurrency {
+			t.Fatalf("pool %q live capacity = %+v", pool.Name, pool)
 		}
 	}
 }
