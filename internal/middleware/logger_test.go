@@ -39,6 +39,11 @@ func TestSanitizeBody(t *testing.T) {
 			want: `{"password":"***","token":"***"}`,
 		},
 		{
+			name: "snake_case new_password and old_password",
+			in:   `{"email":"alice@example.com","new_password":"FreshPass9","old_password":"OldPass9"}`,
+			want: `{"email":"alice@example.com","new_password":"***","old_password":"***"}`,
+		},
+		{
 			name: "extra whitespace around colon",
 			in:   `{"apiKey"  :   "leak"}`,
 			want: `{"apiKey":"***"}`,
