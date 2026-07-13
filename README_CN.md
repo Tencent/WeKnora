@@ -144,6 +144,7 @@
 | 能力 | 详情 |
 |------|------|
 | 部署 | 本地 / Docker / Kubernetes (Helm)，支持私有化离线部署 |
+| 数据库 | 默认 PostgreSQL / ParadeDB；全新部署可使用 MySQL 8.0.17+ 作为业务主库（必须配置外部检索后端） |
 | 界面 | Web UI / RESTful API / 命令行（`weknora`）/ Chrome Extension / 网站嵌入 Widget / 微信小程序 |
 | 权限控制 | 租户 RBAC 四级角色矩阵（Owner / Admin / Contributor / Viewer），按知识库的资源归属，每租户审计日志，invite-only 准入，自助创建工作区，跨租户超级管理员 |
 | 安全 | API Key 与 MCP / 数据源凭据 AES-256-GCM 静态加密、支持平滑密钥轮换；app ↔ docreader gRPC TLS + Token；防 SSRF HTTP 客户端；Agent 技能沙箱隔离 |

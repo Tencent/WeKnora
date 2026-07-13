@@ -39,5 +39,46 @@ if [ -d "$BUILTIN_DIR" ]; then
     chown -R appuser:appuser "$PRELOADED_DIR"
 fi
 
+# Wait for the configured primary database. Credentials are passed through
+# environment variables only, so they never appear in the command line or log.
+wait_for_database() {
+    local driver="${DB_DRIVER:-postgres}"
+    local host="${DB_HOST:-postgres}"
+    local port="${DB_PORT:-5432}"
+    local deadline=$((SECONDS + 60))
+
+    case "$driver" in
+        sqlite)
+            return 0
+            ;;
+        postgres|mysql)
+            ;;
+        *)
+            echo "Unsupported DB_DRIVER: $driver" >&2
+            return 1
+            ;;
+    esac
+
+    echo "Waiting for $driver database at $host:$port..."
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if [ "$driver" = "postgres" ]; then
+            if pg_isready -q -h "$host" -p "$port" -U "${DB_USER:-postgres}" -d "${DB_NAME:-WeKnora}"; then
+                echo "PostgreSQL database is ready."
+                return 0
+            fi
+        elif MYSQL_PWD="${DB_PASSWORD:-}" mysqladmin ping \
+            -h "$host" -P "$port" -u "${DB_USER:-root}" --silent >/dev/null 2>&1; then
+            echo "MySQL database is ready."
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "Timed out after 60 seconds waiting for $driver database at $host:$port" >&2
+    return 1
+}
+
+wait_for_database
+
 # ─── Drop privileges and exec the main process ───
 exec gosu appuser "$@"

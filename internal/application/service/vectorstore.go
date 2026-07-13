@@ -157,8 +157,8 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 //     delete are atomic with respect to other writers holding the store
 //     row lock. Default isolation is Read Committed; this is a write-lock
 //     relationship, not a "shared snapshot" relationship.
-//  2. PostgreSQL: take a row-level X-lock on the vector_stores row via
-//     SELECT … FOR UPDATE so concurrent KB-create requests reading the
+//  2. PostgreSQL/MySQL: take a row-level X-lock on the vector_stores row
+//     via SELECT … FOR UPDATE so concurrent KB-create requests reading the
 //     same store row block until our transaction completes. SQLite
 //     serializes writes via WAL + max-open-conns=1, so the lock hint is
 //     skipped and we rely on the transaction boundary alone.
@@ -189,10 +189,10 @@ func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, i
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// tx inherits ctx from WithContext above; no need to re-attach.
 
-		// 1. Lock the store row (PG row-level X-lock; skipped on SQLite).
+		// 1. Lock the store row (PG/MySQL row-level X-lock; skipped on SQLite).
 		var store types.VectorStore
 		q := tx.Where("id = ? AND tenant_id = ?", id, tenantID)
-		if s.isPostgres(tx) {
+		if s.supportsRowLock(tx) {
 			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := q.First(&store).Error; err != nil {
@@ -247,11 +247,13 @@ func (s *vectorStoreService) unregisterSafely(ctx context.Context, storeID strin
 	}
 }
 
-// isPostgres reports whether the active GORM dialector is PostgreSQL.
-// Used to gate dialect-specific clauses (e.g., SELECT FOR UPDATE) that
-// SQLite would either ignore (recent versions) or fail to compile on.
-func (s *vectorStoreService) isPostgres(db *gorm.DB) bool {
-	return db != nil && db.Dialector != nil && db.Dialector.Name() == "postgres"
+// supportsRowLock reports whether SELECT FOR UPDATE is supported.
+func (s *vectorStoreService) supportsRowLock(db *gorm.DB) bool {
+	if db == nil || db.Dialector == nil {
+		return false
+	}
+	name := db.Dialector.Name()
+	return name == "postgres" || name == "mysql"
 }
 
 // SaveDetectedVersion updates the connection_config.version for a stored vector store.

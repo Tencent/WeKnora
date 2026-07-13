@@ -317,5 +317,31 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 
 0.6.3 在 Agent 选择器引入**模型就绪校验**：绑定的 LLM / Embedding / Rerank / VLM 缺失或配置无效时会阻断对话并给出修复指引。可在模型卡片打开 **调试抽屉** 先测试连通性；确认 KB 与 Agent 引用的模型均存在且可用。
 
+## 28. 如何使用 MySQL 作为主数据库？
+
+在 `.env` 中设置 `DB_DRIVER=mysql`，并将 `DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_NAME` 指向 MySQL 8.0.17 或更高版本。`DB_DRIVER` 选择业务主数据库，`RETRIEVE_DRIVER` 选择检索后端，两者职责不同。开发模式可使用：
+
+```bash
+make dev-start DEV_ARGS=--qdrant
+make dev-app
+make dev-frontend
+```
+
+MySQL 只作为主业务数据库，不提供 PostgreSQL / ParadeDB 的 pgvector 检索能力。因此 `DB_DRIVER=mysql` 不能搭配 `RETRIEVE_DRIVER=postgres`，需要使用 Qdrant、Milvus、Weaviate、Doris、Tencent VectorDB、Elasticsearch 或 OpenSearch 等外部检索后端。只支持全新 MySQL 部署，不提供 PostgreSQL 到 MySQL 的数据迁移工具。
+
+生产 Compose 示例（官方组合使用 MySQL 8.4 LTS + Qdrant）：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mysql.yml --profile qdrant up -d
+```
+
+部署后可通过 MySQL 查询迁移状态：
+
+```sql
+SELECT version, dirty FROM schema_migrations;
+```
+
+新 MySQL 数据库应显示版本 `65` 且 `dirty=0`。
+
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

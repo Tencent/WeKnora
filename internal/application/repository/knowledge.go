@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,29 @@ func escapeLikeKeyword(keyword string) string {
 	keyword = strings.ReplaceAll(keyword, "%", `\%`)
 	keyword = strings.ReplaceAll(keyword, "_", `\_`)
 	return keyword
+}
+
+func jsonObjectMemberPath(key string) string {
+	if isSimpleJSONPathMember(key) {
+		return "$." + key
+	}
+	return "$." + strconv.Quote(key)
+}
+
+func isSimpleJSONPathMember(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		isDigit := c >= '0' && c <= '9'
+		if isLetter || c == '_' || (i > 0 && isDigit) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // omitFieldsOnUpdate defines fields to omit when updating knowledge.
@@ -491,7 +515,6 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 // Only returns documents from document-type knowledge bases (excludes FAQ)
 // Returns (results, hasMore, error)
 // FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
-// Uses Postgres jsonb operator: metadata->>'key' = 'value'.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,
 	tenantID uint64,
@@ -500,10 +523,18 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
-		First(&knowledge).Error
+	query := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID)
+	jsonPath := jsonObjectMemberPath(key)
+	switch r.db.Dialector.Name() {
+	case "postgres":
+		query = query.Where("metadata->>? = ?", key, value)
+	case "mysql":
+		query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, ?)) = ?", jsonPath, value)
+	default:
+		query = query.Where("json_extract(metadata, ?) = ?", jsonPath, value)
+	}
+	err := query.First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

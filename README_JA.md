@@ -144,6 +144,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 | 機能 | 詳細 |
 |------|------|
 | デプロイ | ローカル / Docker / Kubernetes (Helm)、プライベート化・オフラインデプロイ対応 |
+| データベース | デフォルトは PostgreSQL / ParadeDB。新規環境では MySQL 8.0.17+ を業務 DB として利用可能（外部検索バックエンドが必要） |
 | UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / ウェブ埋め込み Widget / WeChat ミニプログラム |
 | 可観測性 | Langfuse（唯一のトレーシングバックエンド）で ReAct ループ・トークン消費・ツール呼び出し・パイプライン追跡；Langfuse 風のドキュメント解析トレースタイムラインを内蔵し、ステージごとの進捗を表示 |
 | タスク管理 | MQ 非同期タスク、バージョンアップ時の DB 自動マイグレーション |
