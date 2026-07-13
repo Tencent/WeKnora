@@ -406,13 +406,16 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	// 知识库路由组。Scoped API key 需要 retrieve 能力读取（限 KB 范围）；KB 内容写入
 	// 由 RegisterKnowledgeRoutes/FAQ/Tag/Wiki 等子路由的 ingest 能力控制；
 	// KB 自身的元数据/生命周期管理需要 full access 或 manage_kbs。创建/拷贝
-	// KB 没有单个目标 KB 可约束，继续不对 scoped API key 开放。
+	// KB 没有单个目标 KB 可约束，因此不对 scoped key 开放（capability 无法
+	// 把它约束到某个 KB 上）；但 full-access key 是租户级全权，与它已能
+	// 更新/删除/管理 KB 对齐，允许其创建 KB，消除"能删不能建"的不一致。
 	kbgrp := r.Group("/knowledge-bases")
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))
 	kbManagement := kb.With(apiKeyManageKnowledgeBases(apiKeyFullAccess()))
 	{
-		// 创建知识库 — Contributor+ for JWT callers; API keys may not create KBs.
-		kbgrp.POST("", g.Contributor(), handler.CreateKnowledgeBase)
+		// 创建知识库 — Contributor+ for JWT callers; full-access API keys may
+		// create KBs (scoped keys stay default-deny: no KB to bound against).
+		kb.With(apiKeyFullAccess()).POST("", g.Contributor(), handler.CreateKnowledgeBase)
 		// 获取知识库列表 — Viewer+ for JWT callers; retrieve-capable API keys pass via the gate.
 		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
 		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限
@@ -1189,8 +1192,9 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// 分享 KB 到组织 = 让组织里所有人能读这个 KB；这跟"修改 KB 元信息"
 	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己租户里
 	// 也不能私自把 KB 暴露出去。
-	// KB share management is JWT-only; not declared for API keys.
-	kbShares := r.Group("/knowledge-bases/:id/shares")
+	// 分享管理不通过 capability 授予（manage_spaces 也不含）；仅 full-access
+	// key（租户级全权）可管理分享，scoped key 保持 default-deny。
+	kbShares := g.apiKeyGroup(r.Group("/knowledge-bases/:id/shares"), apiKeyFullAccess())
 	{
 		// Share knowledge base
 		kbShares.POST("", g.OwnedKBOrAdmin(), orgHandler.ShareKnowledgeBase)
@@ -1205,12 +1209,13 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// Agent sharing routes — same rationale as KB shares: 分享/取消分享
 	// 跟修改 agent 同等敏感，挂 OwnedAgentOrAdmin。
 	//
-	// GET 同样走 OwnedAgentOrAdmin：service.ListSharesByAgent 没有 owner
-	// 校验（与 ListSharesByKnowledgeBase 不对称），如果路由层只挂 Viewer
-	// 任何同租户成员都能枚举他人 agent 的分享去向——这里把 owner 校验
-	// 兜底到路由层，匹配 POST/DELETE 的矩阵。
-	// Agent share management is JWT-only; not declared for API keys.
-	agentShares := r.Group("/agents/:id/shares")
+	// GET 走 OwnedAgentOrAdmin 作为 JWT 侧的 owner 校验；service 层
+	// ListSharesByAgent 现在也强制 tenant 归属（与 ListSharesByKnowledgeBase
+	// 对齐），这样 full-access API key（会短路路由 guard）也无法跨租户
+	// 枚举他人 agent 的分享。
+	// 同 KB 分享：分享管理不通过 capability 授予；仅 full-access key
+	// （租户级全权）可管理 agent 分享，scoped key 保持 default-deny。
+	agentShares := g.apiKeyGroup(r.Group("/agents/:id/shares"), apiKeyFullAccess())
 	{
 		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
 		agentShares.GET("", g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
