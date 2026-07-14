@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -347,4 +348,33 @@ func TestMergeParserEngineOverrides(t *testing.T) {
 		"k2": "v2",
 		"k3": "v3",
 	}, merged)
+}
+
+func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
+	t.Parallel()
+
+	base := chunker.SplitterConfig{
+		ChunkSize:    1000,
+		ChunkOverlap: 100,
+		Separators:   []string{"\n\n", "\n"},
+		Strategy:     chunker.StrategyAuto,
+	}
+	cc := types.ChunkingConfig{
+		EnableParentChild: true,
+		ParentChunkSize:   4096,
+		ChildChunkSize:    512,
+	}
+
+	parent, child := buildParentChildConfigs(cc, base)
+
+	require.Equal(t, chunker.StrategyAuto, parent.Strategy,
+		"parent splitting must honour the configured strategy; empty resolves to the legacy tier")
+	require.Equal(t, chunker.StrategyAuto, child.Strategy,
+		"child splitting must honour the configured strategy; empty resolves to the legacy tier")
+	require.Equal(t, 4096, parent.ChunkSize)
+	require.Equal(t, 512, child.ChunkSize)
+	require.Equal(t, base.ChunkOverlap, parent.ChunkOverlap)
+	require.Equal(t, 512/5, child.ChunkOverlap)
+	require.Equal(t, base.Separators, parent.Separators)
+	require.Equal(t, base.Separators, child.Separators)
 }

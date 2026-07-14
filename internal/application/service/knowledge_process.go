@@ -226,7 +226,11 @@ func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterCo
 }
 
 // buildParentChildConfigs derives parent and child SplitterConfig from ChunkingConfig.
-// The base config (already validated with defaults) is used for separators.
+// The base config (already validated with defaults) is used for separators and
+// the splitting strategy. Strategy must be propagated: an empty Strategy resolves
+// to the legacy tier (see resolveChainWithProfile), which never runs the heading
+// splitter, so parent-child chunks would silently lose heading alignment and
+// ContextHeader breadcrumbs regardless of the configured strategy.
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
 	parentSize := cc.ParentChunkSize
 	if parentSize <= 0 {
@@ -240,11 +244,13 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 		ChunkSize:    parentSize,
 		ChunkOverlap: base.ChunkOverlap, // reuse configured overlap for parents
 		Separators:   base.Separators,
+		Strategy:     base.Strategy,
 	}
 	child = chunker.SplitterConfig{
 		ChunkSize:    childSize,
 		ChunkOverlap: childSize / 5, // ~20% overlap for child chunks
 		Separators:   base.Separators,
+		Strategy:     base.Strategy,
 	}
 	return
 }
