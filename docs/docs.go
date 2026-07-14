@@ -10674,6 +10674,111 @@ const docTemplate = `{
                 }
             }
         },
+        "/sessions/{session_id}/messages/{message_id}/suggestions": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "获取回答后推荐问题",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "助手消息 ID",
+                        "name": "message_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "对已完成的助手消息异步生成或重新生成推荐问题；相同配置快照会复用持久化结果",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "确保生成回答后推荐问题",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "助手消息 ID",
+                        "name": "message_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "生成选项",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.EnsureMessageSuggestionsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/sessions/{session_id}/pin": {
             "post": {
                 "security": [
@@ -10770,6 +10875,49 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}/suggestion-events": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "记录曝光、点击或关闭事件",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "上报推荐问题事件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "事件",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SuggestionEventRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     }
                 }
             }
@@ -14481,6 +14629,14 @@ const docTemplate = `{
                     "description": "Dedicated chat model ID for the query-understanding (rewrite + intent) step.\nWhen empty, the main conversation ModelID is used as a fallback.",
                     "type": "string"
                 },
+                "question_suggestions": {
+                    "description": "===== Conversation Question Suggestions =====\nQuestionSuggestions owns both the static/knowledge-backed prompts shown\nbefore the first user turn and the contextual follow-up questions shown\nafter a completed assistant answer.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig"
+                        }
+                    ]
+                },
                 "rerank_model_id": {
                     "description": "ReRank model ID for retrieval",
                     "type": "string"
@@ -14519,13 +14675,6 @@ const docTemplate = `{
                 "skills_selection_mode": {
                     "description": "===== Skills Settings (only for smart-reasoning mode) =====\nSkills selection mode: \"all\" = all preloaded skills, \"selected\" = specific skills, \"none\" = no skills",
                     "type": "string"
-                },
-                "suggested_prompts": {
-                    "description": "===== Suggested Prompts =====\n推荐问题列表，用于在前端对话面板展示快捷提问",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "supported_file_types": {
                     "description": "===== File Type Restriction Settings =====\nSupported file types for this agent (e.g., [\"csv\", \"xlsx\", \"xls\"])\nEmpty means all file types are supported\nWhen set, only files with matching extensions can be used with this agent",
@@ -14918,6 +15067,47 @@ const docTemplate = `{
                 },
                 "vector_threshold": {
                     "type": "number"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.FollowUpSuggestionConfig": {
+            "type": "object",
+            "properties": {
+                "additional_instruction": {
+                    "type": "string"
+                },
+                "allow_regenerate": {
+                    "type": "boolean"
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "knowledge_fallback": {
+                    "type": "boolean"
+                },
+                "max_context_turns": {
+                    "type": "integer"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "suppress_on_fallback": {
+                    "type": "boolean"
+                },
+                "suppress_when_answer_asks_question": {
+                    "type": "boolean"
                 }
             }
         },
@@ -16123,6 +16313,10 @@ const docTemplate = `{
                     "description": "Agent total execution duration in milliseconds (from query start to answer start)",
                     "type": "integer"
                 },
+                "agent_id": {
+                    "description": "AgentID is the agent used for this individual assistant turn. Unlike the\nsession's last_request_state it remains stable when users switch agents.",
+                    "type": "string"
+                },
                 "agent_steps": {
                     "description": "Agent execution steps (only for assistant messages generated by agent)\nThis contains the detailed reasoning process and tool calls made by the agent\nStored for user history display, but NOT included in LLM context to avoid redundancy",
                     "type": "array",
@@ -16193,6 +16387,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem"
                     }
+                },
+                "model_id": {
+                    "description": "ModelID is the requested/effective chat model binding captured for this\nturn. It is useful for reproducibility and suggestion generation.",
+                    "type": "string"
                 },
                 "request_id": {
                     "description": "Request identifier for tracking API requests",
@@ -16781,6 +16979,17 @@ const docTemplate = `{
                 "question_count": {
                     "description": "Number of questions to generate per chunk (default: 3, max: 10)",
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig": {
+            "type": "object",
+            "properties": {
+                "follow_ups": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FollowUpSuggestionConfig"
+                },
+                "starters": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig"
                 }
             }
         },
@@ -17424,6 +17633,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mode": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.StorageConfig": {
             "type": "object",
             "properties": {
@@ -17533,6 +17762,17 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.SuggestionAttribution": {
+            "type": "object",
+            "properties": {
+                "question_id": {
+                    "type": "string"
+                },
+                "suggestion_set_id": {
+                    "type": "string"
                 }
             }
         },
@@ -19060,6 +19300,14 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.EnsureMessageSuggestionsRequest": {
+            "type": "object",
+            "properties": {
+                "regenerate": {
+                    "type": "boolean"
+                }
+            }
+        },
         "internal_handler.EvaluationRequest": {
             "type": "object",
             "properties": {
@@ -20015,6 +20263,24 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.SuggestionEventRequest": {
+            "type": "object",
+            "required": [
+                "event_type",
+                "suggestion_set_id"
+            ],
+            "properties": {
+                "event_type": {
+                    "type": "string"
+                },
+                "question_id": {
+                    "type": "string"
+                },
+                "suggestion_set_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.TestProviderRequest": {
             "type": "object",
             "required": [
@@ -20532,6 +20798,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "suggestion_attribution": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SuggestionAttribution"
                 },
                 "summary_model_id": {
                     "description": "Optional summary model ID for this request (overrides session default)",

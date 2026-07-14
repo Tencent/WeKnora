@@ -35,6 +35,8 @@ export function useEmbedChatSession(options: {
   hostContext?: Ref<Record<string, unknown>>
   onMessagesChange?: (has: boolean) => void
   onSessionTitle?: (title: string) => void
+  onTurnComplete?: (message: Record<string, unknown>) => void
+  onMessagesLoaded?: (messages: Record<string, unknown>[]) => void
 }) {
   const { t } = useI18n()
   const { onChunk, error, startStream, stopStream } = useStream()
@@ -59,6 +61,7 @@ export function useEmbedChatSession(options: {
   const hasMoreHistory = ref(true)
   const created_at = ref('')
   const fullContent = ref('')
+  let pendingSuggestionAttribution: { suggestion_set_id: string; question_id: string } | null = null
   const scrollContainer = ref<HTMLElement | null>(null)
   const userHasScrolledUp = ref(false)
   const SCROLL_BOTTOM_THRESHOLD = 80
@@ -130,6 +133,8 @@ export function useEmbedChatSession(options: {
     isAgentStreamSession,
     scrollToBottom,
     onReplyComplete: notifyEmbedReceived,
+    onTurnComplete: options.onTurnComplete,
+    onAfterMsgList: () => options.onMessagesLoaded?.(messagesList),
     onError: embedToast,
     isFirstEnter,
     scrollContainer,
@@ -298,6 +303,8 @@ export function useEmbedChatSession(options: {
       ? `/api/v1/embed/${options.channelId}/agent-chat`
       : `/api/v1/embed/${options.channelId}/knowledge-chat`
 
+    const suggestionAttribution = pendingSuggestionAttribution
+    pendingSuggestionAttribution = null
     await startStream({
       session_id: options.sessionId.value,
       knowledge_base_ids: options.kbIds,
@@ -312,6 +319,7 @@ export function useEmbedChatSession(options: {
       images: imageAttachments.length > 0 ? imageAttachments : undefined,
       attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
       query: outboundQuery,
+      suggestion_attribution: suggestionAttribution || undefined,
       method: 'POST',
       url: endpoint,
       embed_token: options.token,
@@ -391,5 +399,8 @@ export function useEmbedChatSession(options: {
     onClickScrollToBottom,
     sendMsg,
     handleStopGeneration,
+    setSuggestionAttribution: (suggestionSetId: string, questionId: string) => {
+      pendingSuggestionAttribution = { suggestion_set_id: suggestionSetId, question_id: questionId }
+    },
   }
 }

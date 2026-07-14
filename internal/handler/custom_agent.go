@@ -93,6 +93,11 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		Avatar:      req.Avatar,
 		Config:      req.Config,
 	}
+	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 
 	logger.Infof(ctx, "Creating custom agent, name: %s, agent_mode: %s",
 		secutils.SanitizeForLog(req.Name), req.Config.AgentMode)
@@ -331,6 +336,11 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		Description: req.Description,
 		Avatar:      req.Avatar,
 		Config:      req.Config,
+	}
+	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
 	}
 
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s",

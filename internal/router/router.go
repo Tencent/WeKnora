@@ -60,6 +60,7 @@ type RouterParams struct {
 	ChunkHandler                 *handler.ChunkHandler
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
+	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
 	EvaluationHandler            *handler.EvaluationHandler
@@ -221,7 +222,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
-		RegisterSessionRoutes(v1, params.SessionHandler, rbacGuards)
+		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
@@ -505,7 +506,12 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 // the message routes above. A future refactor can introduce
 // per-session ownership in the middleware layer the same way KB/agent
 // routes do today.
-func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
+func RegisterSessionRoutes(
+	r *gin.RouterGroup,
+	handler *session.Handler,
+	suggestionHandler *handler.MessageSuggestionHandler,
+	g *rbacGuards,
+) {
 	// Sessions are per-user chat state, not knowledge-base content. The
 	// chat capability lets a scoped key run the full conversation flow
 	// (create/manage its own sessions) without full tenant access.
@@ -528,6 +534,13 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbac
 		sessions.DELETE("/:id/pin", handler.UnpinSession)
 		// 继续接收活跃流
 		sessions.GET("/continue-stream/:session_id", handler.ContinueStream)
+		if suggestionHandler != nil {
+			// Gin requires wildcard names to be identical within the same HTTP-method
+			// radix tree. Existing GET session routes use :id, so keep that name here.
+			sessions.GET("/:id/messages/:message_id/suggestions", suggestionHandler.Get)
+			sessions.POST("/:session_id/messages/:message_id/suggestions", suggestionHandler.Ensure)
+			sessions.POST("/:session_id/suggestion-events", suggestionHandler.RecordEvent)
+		}
 	}
 }
 
@@ -1256,6 +1269,9 @@ func RegisterEmbedPublicRoutes(
 		embed.POST("/agent-chat/:session_id", embedHandler.EmbedAgentChat)
 		embed.GET("/messages/:session_id/load", embedHandler.EmbedLoadMessages)
 		embed.POST("/sessions/:session_id/stop", embedHandler.EmbedStopSession)
+		embed.GET("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedGetMessageSuggestions)
+		embed.POST("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedEnsureMessageSuggestions)
+		embed.POST("/sessions/:session_id/suggestion-events", embedHandler.EmbedRecordSuggestionEvent)
 		embed.POST("/sessions/:session_id/events", embedHandler.EmbedRelayWebhookEvent)
 		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id", embedHandler.EmbedResolveMCPOAuth)
 		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id/cancel", embedHandler.EmbedCancelMCPOAuth)

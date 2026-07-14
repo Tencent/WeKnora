@@ -3,6 +3,8 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -245,9 +247,134 @@ type CustomAgentConfig struct {
 	// under config/prompt_templates/intent_prompts.yaml.
 	IntentPrompts map[string]string `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
 
-	// ===== Suggested Prompts =====
-	// 推荐问题列表，用于在前端对话面板展示快捷提问
-	SuggestedPrompts []string `yaml:"suggested_prompts" json:"suggested_prompts,omitempty"`
+	// ===== Conversation Question Suggestions =====
+	// QuestionSuggestions owns both the static/knowledge-backed prompts shown
+	// before the first user turn and the contextual follow-up questions shown
+	// after a completed assistant answer.
+	QuestionSuggestions *QuestionSuggestionConfig `yaml:"question_suggestions,omitempty" json:"question_suggestions,omitempty"`
+}
+
+const (
+	SuggestionModeCurated   = "curated"
+	SuggestionModeKnowledge = "knowledge"
+	SuggestionModeGenerated = "generated"
+	SuggestionModeHybrid    = "hybrid"
+
+	SuggestionCategoryClarify = "clarify"
+	SuggestionCategoryDeepen  = "deepen"
+	SuggestionCategoryAction  = "action"
+)
+
+// QuestionSuggestionConfig is the agent-owned configuration for question
+// suggestions. Channel settings may suppress rendering, but never override
+// this content/generation policy.
+type QuestionSuggestionConfig struct {
+	Starters  StarterSuggestionConfig  `yaml:"starters" json:"starters"`
+	FollowUps FollowUpSuggestionConfig `yaml:"follow_ups" json:"follow_ups"`
+}
+
+// StarterSuggestionConfig controls prompts shown before the first user turn.
+type StarterSuggestionConfig struct {
+	Enabled bool     `yaml:"enabled" json:"enabled"`
+	Mode    string   `yaml:"mode" json:"mode"`
+	Items   []string `yaml:"items" json:"items"`
+	Count   int      `yaml:"count" json:"count"`
+}
+
+// FollowUpSuggestionConfig controls contextual questions generated after a
+// completed assistant answer.
+type FollowUpSuggestionConfig struct {
+	Enabled                        bool     `yaml:"enabled" json:"enabled"`
+	Mode                           string   `yaml:"mode" json:"mode"`
+	Count                          int      `yaml:"count" json:"count"`
+	ModelID                        string   `yaml:"model_id,omitempty" json:"model_id,omitempty"`
+	AdditionalInstruction          string   `yaml:"additional_instruction,omitempty" json:"additional_instruction,omitempty"`
+	Categories                     []string `yaml:"categories,omitempty" json:"categories,omitempty"`
+	MaxContextTurns                int      `yaml:"max_context_turns" json:"max_context_turns"`
+	SuppressOnFallback             bool     `yaml:"suppress_on_fallback" json:"suppress_on_fallback"`
+	SuppressWhenAnswerAsksQuestion bool     `yaml:"suppress_when_answer_asks_question" json:"suppress_when_answer_asks_question"`
+	KnowledgeFallback              bool     `yaml:"knowledge_fallback" json:"knowledge_fallback"`
+	AllowRegenerate                bool     `yaml:"allow_regenerate" json:"allow_regenerate"`
+}
+
+// EnsureDefaults normalizes suggestion configuration without overriding
+// explicit enable/disable choices.
+func (c *QuestionSuggestionConfig) EnsureDefaults() {
+	if c.Starters.Mode == "" {
+		c.Starters.Mode = SuggestionModeHybrid
+	}
+	if c.Starters.Count <= 0 {
+		c.Starters.Count = 6
+	}
+	if c.Starters.Items == nil {
+		c.Starters.Items = []string{}
+	}
+	if c.FollowUps.Mode == "" {
+		c.FollowUps.Mode = SuggestionModeHybrid
+	}
+	if c.FollowUps.Count <= 0 {
+		c.FollowUps.Count = 3
+	}
+	if c.FollowUps.MaxContextTurns <= 0 {
+		c.FollowUps.MaxContextTurns = 2
+	}
+	if len(c.FollowUps.Categories) == 0 {
+		c.FollowUps.Categories = []string{
+			SuggestionCategoryClarify,
+			SuggestionCategoryDeepen,
+			SuggestionCategoryAction,
+		}
+	}
+}
+
+// Validate rejects invalid agent-authored suggestion settings before they are
+// persisted or used to incur a model call.
+func (c *QuestionSuggestionConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if c.Starters.Count < 1 || c.Starters.Count > 8 {
+		return fmt.Errorf("starter suggestion count must be between 1 and 8")
+	}
+	if c.FollowUps.Count < 1 || c.FollowUps.Count > 5 {
+		return fmt.Errorf("follow-up suggestion count must be between 1 and 5")
+	}
+	if c.FollowUps.MaxContextTurns < 1 || c.FollowUps.MaxContextTurns > 5 {
+		return fmt.Errorf("follow-up max_context_turns must be between 1 and 5")
+	}
+	if !oneOf(c.Starters.Mode, SuggestionModeCurated, SuggestionModeKnowledge, SuggestionModeHybrid) {
+		return fmt.Errorf("invalid starter suggestion mode %q", c.Starters.Mode)
+	}
+	if !oneOf(c.FollowUps.Mode, SuggestionModeGenerated, SuggestionModeKnowledge, SuggestionModeHybrid) {
+		return fmt.Errorf("invalid follow-up suggestion mode %q", c.FollowUps.Mode)
+	}
+	for i, item := range c.Starters.Items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			return fmt.Errorf("starter suggestion %d cannot be empty", i+1)
+		}
+		if len([]rune(trimmed)) > 200 {
+			return fmt.Errorf("starter suggestion %d exceeds 200 characters", i+1)
+		}
+	}
+	if len([]rune(strings.TrimSpace(c.FollowUps.AdditionalInstruction))) > 2000 {
+		return fmt.Errorf("follow-up additional_instruction exceeds 2000 characters")
+	}
+	for _, category := range c.FollowUps.Categories {
+		if !oneOf(category, SuggestionCategoryClarify, SuggestionCategoryDeepen, SuggestionCategoryAction) {
+			return fmt.Errorf("invalid follow-up suggestion category %q", category)
+		}
+	}
+	return nil
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // Value implements driver.Valuer interface for CustomAgentConfig
@@ -281,6 +408,32 @@ func (CustomAgent) TableName() string {
 func (a *CustomAgent) EnsureDefaults() {
 	if a == nil {
 		return
+	}
+	if a.Config.QuestionSuggestions == nil {
+		a.Config.QuestionSuggestions = &QuestionSuggestionConfig{
+			Starters: StarterSuggestionConfig{
+				Enabled: true,
+				Mode:    SuggestionModeHybrid,
+				Items:   []string{},
+				Count:   6,
+			},
+			FollowUps: FollowUpSuggestionConfig{
+				Enabled:                        false,
+				Mode:                           SuggestionModeHybrid,
+				Count:                          3,
+				MaxContextTurns:                2,
+				SuppressOnFallback:             true,
+				SuppressWhenAnswerAsksQuestion: true,
+				KnowledgeFallback:              true,
+				Categories: []string{
+					SuggestionCategoryClarify,
+					SuggestionCategoryDeepen,
+					SuggestionCategoryAction,
+				},
+			},
+		}
+	} else {
+		a.Config.QuestionSuggestions.EnsureDefaults()
 	}
 	if a.Config.Temperature < 0 {
 		a.Config.Temperature = 0.7

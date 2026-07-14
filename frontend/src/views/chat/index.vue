@@ -84,6 +84,14 @@
                         <botmsg :content="session.content" :session="session" :session-id="session_id"
                             :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
+                        <FollowUpSuggestions v-if="!session.suggestionsDismissed"
+                            :suggestion-set="session.suggestionSet"
+                            :loading="session.suggestionLoading"
+                            :allow-regenerate="session.suggestionSet?.allow_regenerate"
+                            @select="(item) => handleFollowUpSelect(session, item)"
+                            @regenerate="loadFollowUpSuggestions(session, true, true)"
+                            @impression="(set) => recordSuggestionEvent(session, set, 'impression')"
+                            @dismiss="(set) => dismissSuggestions(session, set)" />
                     </div>
                 </div>
                 <div v-if="showGlobalTypingIndicator"
@@ -134,6 +142,12 @@ import { useChatStreamHandler } from '@/composables/useChatStreamHandler';
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
+import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
+import {
+    ensureMessageSuggestions,
+    getMessageSuggestions,
+    recordMessageSuggestionEvent,
+} from '@/api/message-suggestion';
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 
 const referencesDrawer = provideChatReferencesDrawer();
@@ -252,6 +266,7 @@ const suggestedQuestions = ref([]);
 const suggestedQuestionsLoading = ref(false);
 let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
+let pendingSuggestionAttribution = null;
 
 const cancelSuggestedQuestionsFetch = () => {
     suggestedQuestionsFetchId++;
@@ -307,6 +322,54 @@ const handleSuggestedQuestionClick = (question) => {
     } else {
         sendMsg(question);
     }
+};
+
+const resolveAssistantMessageId = (message) => message?.id || message?.assistant_message_id;
+
+const loadFollowUpSuggestions = async (message, ensure = false, regenerate = false) => {
+    const messageId = resolveAssistantMessageId(message);
+    const targetSessionId = session_id.value;
+    if (!messageId || !targetSessionId || message.suggestionsDismissed) return;
+    message.suggestionLoading = true;
+    try {
+        let response = ensure
+            ? await ensureMessageSuggestions(targetSessionId, messageId, regenerate)
+            : await getMessageSuggestions(targetSessionId, messageId);
+        let set = response?.data;
+        for (let attempt = 0; set?.status === 'generating' && attempt < 120; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            if (session_id.value !== targetSessionId || message.suggestionsDismissed) return;
+            response = await getMessageSuggestions(targetSessionId, messageId);
+            set = response?.data;
+        }
+        message.suggestionSet = set?.status === 'ready' ? set : null;
+    } catch (error) {
+        if (ensure) console.warn('[FollowUpSuggestions] Failed to generate:', error);
+        message.suggestionSet = null;
+    } finally {
+        message.suggestionLoading = false;
+        nextTick(() => scrollToBottom());
+    }
+};
+
+const recordSuggestionEvent = (message, set, eventType, questionId = '') => {
+    if (!set?.id) return;
+    void recordMessageSuggestionEvent(session_id.value, set.id, eventType, questionId).catch(() => undefined);
+};
+
+const handleFollowUpSelect = (message, item) => {
+    recordSuggestionEvent(message, message.suggestionSet, 'click', item.id);
+    pendingSuggestionAttribution = {
+        suggestion_set_id: message.suggestionSet.id,
+        question_id: item.id,
+    };
+    if (inputFieldRef.value?.triggerSend) inputFieldRef.value.triggerSend(item.text);
+    else sendMsg(item.text);
+};
+
+const dismissSuggestions = (message, set) => {
+    message.suggestionsDismissed = true;
+    recordSuggestionEvent(message, set, 'dismiss');
 };
 
 // 防抖包装，切换知识库/文件时300ms内不重复请求
@@ -466,6 +529,11 @@ const {
     scrollContainer,
     debug: import.meta.env.DEV,
     onAfterMsgList: async () => {
+        for (const message of messagesList) {
+            if (message.role === 'assistant' && message.is_completed && message.suggestionSet === undefined) {
+                void loadFollowUpSuggestions(message, false);
+            }
+        }
         const lastMessage = messagesList[messagesList.length - 1];
         if (lastMessage && !lastMessage.is_completed) {
             isReplying.value = true;
@@ -506,6 +574,9 @@ const {
     onAgentChunkBound: (message) => {
         attachStreamDebugToMessage(message);
         pendingStreamDebug.value = null;
+    },
+    onTurnComplete: (message) => {
+        void loadFollowUpSuggestions(message, true);
     },
 });
 
@@ -668,6 +739,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const requestMcpServiceIds = agentEnabled ? mcpServiceIds : [];
     const requestSkillNames = agentEnabled ? skillNames : [];
 
+    const suggestionAttribution = pendingSuggestionAttribution;
+    pendingSuggestionAttribution = null;
     await startStream({
         session_id: session_id.value,
         knowledge_base_ids: kbIds,
@@ -684,6 +757,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
         query: value,
+        suggestion_attribution: suggestionAttribution || undefined,
         method: 'POST',
         url: endpoint,
     });

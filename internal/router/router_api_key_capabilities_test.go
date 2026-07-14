@@ -16,7 +16,7 @@ func TestConversationRoutesDeclareChatCapability(t *testing.T) {
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
-	RegisterSessionRoutes(v1, &sessionhandler.Handler{}, g)
+	RegisterSessionRoutes(v1, &sessionhandler.Handler{}, &handler.MessageSuggestionHandler{}, g)
 	RegisterChatRoutes(v1, &sessionhandler.Handler{}, g)
 	RegisterMessageRoutes(v1, &handler.MessageHandler{}, g)
 
@@ -25,6 +25,9 @@ func TestConversationRoutesDeclareChatCapability(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPost, "/api/v1/sessions"},
+		{http.MethodGet, "/api/v1/sessions/:id/messages/:message_id/suggestions"},
+		{http.MethodPost, "/api/v1/sessions/:session_id/messages/:message_id/suggestions"},
+		{http.MethodPost, "/api/v1/sessions/:session_id/suggestion-events"},
 		{http.MethodPost, "/api/v1/knowledge-chat/:session_id"},
 		{http.MethodPost, "/api/v1/agent-chat/:session_id"},
 		{http.MethodGet, "/api/v1/messages/:session_id/load"},

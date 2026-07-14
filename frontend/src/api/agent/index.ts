@@ -8,6 +8,28 @@ import { get, post, put, del } from "../../utils/request";
 // 'custom'       : 完全自定义（不应用预设）
 export type AgentType = 'rag-qa' | 'wiki-qa' | 'hybrid-rag-wiki' | 'data-analysis' | 'custom';
 
+export interface QuestionSuggestionConfig {
+  starters: {
+    enabled: boolean;
+    mode: 'curated' | 'knowledge' | 'hybrid';
+    items: string[];
+    count: number;
+  };
+  follow_ups: {
+    enabled: boolean;
+    mode: 'generated' | 'knowledge' | 'hybrid';
+    count: number;
+    model_id?: string;
+    additional_instruction?: string;
+    categories: Array<'clarify' | 'deepen' | 'action'>;
+    max_context_turns: number;
+    suppress_on_fallback: boolean;
+    suppress_when_answer_asks_question: boolean;
+    knowledge_fallback: boolean;
+    allow_regenerate: boolean;
+  };
+}
+
 export interface CustomAgentConfig {
   // ===== 基础设置 =====
   agent_mode?: 'quick-answer' | 'smart-reasoning';  // 运行模式：quick-answer=RAG模式, smart-reasoning=ReAct Agent模式
@@ -92,7 +114,7 @@ export interface CustomAgentConfig {
 
   // ===== 已废弃字段（保留兼容）=====
   welcome_message?: string;
-  suggested_prompts?: string[];
+  question_suggestions?: QuestionSuggestionConfig;
 }
 
 // 智能体

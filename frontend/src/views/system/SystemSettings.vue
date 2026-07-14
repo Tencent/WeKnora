@@ -439,7 +439,6 @@
       </section>
       <div class="sr-only" role="status" aria-live="polite">{{ saveAnnouncement }}</div>
     </template>
-
     <t-dialog
       v-model:visible="passwordResetVisible"
       :header="t('system.globalSettings.passwordReset.dialogTitle')"
