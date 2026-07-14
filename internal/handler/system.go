@@ -1605,11 +1605,11 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 }
 
 type RuntimeTasksResponse struct {
-	Available bool                    `json:"available"`
-	Tasks     []types.RuntimeTaskInfo `json:"tasks"`
-	Page      int                     `json:"page"`
-	PageSize  int                     `json:"page_size"`
-	HasMore   bool                    `json:"has_more"`
+	Available  bool                    `json:"available"`
+	Tasks      []types.RuntimeTaskInfo `json:"tasks"`
+	PageSize   int                     `json:"page_size"`
+	HasMore    bool                    `json:"has_more"`
+	NextCursor string                  `json:"next_cursor,omitempty"`
 }
 
 func isKnownRuntimeQueue(name string) bool {
@@ -1621,19 +1621,15 @@ func isKnownRuntimeQueue(name string) bool {
 	return false
 }
 
-func runtimeTaskPage(c *gin.Context) (int, int) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+func runtimeTaskPageSize(c *gin.Context) int {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	if page < 1 {
-		page = 1
-	}
 	if pageSize < 1 {
 		pageSize = 20
 	}
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	return page, pageSize
+	return pageSize
 }
 
 func (h *SystemHandler) listRuntimeTasks(c *gin.Context, state types.RuntimeTaskState) {
@@ -1646,32 +1642,46 @@ func (h *SystemHandler) listRuntimeTasks(c *gin.Context, state types.RuntimeTask
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task state"})
 		return
 	}
-	page, pageSize := runtimeTaskPage(c)
+	pageSize := runtimeTaskPageSize(c)
+	cursor := c.Query("cursor")
 	inspector, ok := h.taskInspector.(interfaces.RuntimeTaskInspector)
 	if !ok {
 		c.JSON(http.StatusOK, RuntimeTasksResponse{
 			Available: false,
 			Tasks:     []types.RuntimeTaskInfo{},
-			Page:      page,
 			PageSize:  pageSize,
 		})
 		return
 	}
-	tasks, supported, err := inspector.ListRuntimeTasks(c.Request.Context(), queue, state, page, pageSize)
+	page, supported, err := inspector.ListRuntimeTasks(c.Request.Context(), queue, state, cursor, pageSize)
 	if err != nil {
+		if errors.Is(err, types.ErrInvalidRuntimeTaskCursor) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Invalid task list cursor",
+				"code":  "runtime_task_cursor_invalid",
+			})
+			return
+		}
+		if errors.Is(err, types.ErrExpiredRuntimeTaskCursor) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "Task list changed; refresh from the beginning",
+				"code":  "runtime_task_cursor_expired",
+			})
+			return
+		}
 		logger.Errorf(c.Request.Context(), "list runtime queue tasks queue=%s state=%s: %v", queue, state, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list queue tasks"})
 		return
 	}
-	if tasks == nil {
-		tasks = []types.RuntimeTaskInfo{}
+	if page.Tasks == nil {
+		page.Tasks = []types.RuntimeTaskInfo{}
 	}
 	c.JSON(http.StatusOK, RuntimeTasksResponse{
-		Available: supported,
-		Tasks:     tasks,
-		Page:      page,
-		PageSize:  pageSize,
-		HasMore:   len(tasks) == pageSize,
+		Available:  supported,
+		Tasks:      page.Tasks,
+		PageSize:   pageSize,
+		HasMore:    page.HasMore,
+		NextCursor: page.NextCursor,
 	})
 }
 
@@ -1682,7 +1692,7 @@ func (h *SystemHandler) listRuntimeTasks(c *gin.Context, state types.RuntimeTask
 // @Produce      json
 // @Param        queue path string true "Queue name"
 // @Param        state query string true "Task state" Enums(pending,active,scheduled,retry,archived,completed)
-// @Param        page query int false "Page" default(1)
+// @Param        cursor query string false "Opaque continuation cursor"
 // @Param        page_size query int false "Page size" default(20)
 // @Success      200 {object} RuntimeTasksResponse
 // @Router       /system/admin/runtime/queues/{queue}/tasks [get]

@@ -73,8 +73,9 @@ type RuntimeTaskInspector interface {
 		ctx context.Context,
 		queue string,
 		state types.RuntimeTaskState,
-		page, pageSize int,
-	) (tasks []types.RuntimeTaskInfo, supported bool, err error)
+		cursor string,
+		pageSize int,
+	) (page types.RuntimeTaskPage, supported bool, err error)
 	GetRuntimeTask(ctx context.Context, queue, taskID string) (task *types.RuntimeTaskInfo, supported bool, err error)
 	RunRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)
 	DeleteRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)

@@ -11349,10 +11349,9 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "Page",
-                        "name": "page",
+                        "type": "string",
+                        "description": "Opaque continuation cursor",
+                        "name": "cursor",
                         "in": "query"
                     },
                     {
@@ -20385,8 +20384,8 @@ const docTemplate = `{
                 "has_more": {
                     "type": "boolean"
                 },
-                "page": {
-                    "type": "integer"
+                "next_cursor": {
+                    "type": "string"
                 },
                 "page_size": {
                     "type": "integer"

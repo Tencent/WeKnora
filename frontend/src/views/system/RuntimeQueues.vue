@@ -489,6 +489,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { mergeRuntimeTaskPage } from './runtimeTaskPagination'
 import {
   getRuntimeTasks,
   getRuntimeQueues,
@@ -522,7 +523,7 @@ const tasks = ref<RuntimeTask[]>([])
 const tasksLoading = ref(false)
 const tasksLoadingMore = ref(false)
 const tasksError = ref('')
-const tasksPage = ref(1)
+const tasksCursor = ref('')
 const tasksHasMore = ref(false)
 const tasksSentinelRef = ref<HTMLElement | null>(null)
 const taskActionID = ref('')
@@ -753,9 +754,10 @@ async function fetchRuntimeTasks(reset: boolean) {
 
   const requestedState = taskState.value
   const requestID = ++tasksRequestID
-  const page = reset ? 1 : tasksPage.value + 1
+  const cursor = reset ? '' : tasksCursor.value
   if (reset) {
-    tasksPage.value = 1
+    tasksCursor.value = ''
+    tasksHasMore.value = false
     tasks.value = []
     tasksLoading.value = true
   } else {
@@ -763,17 +765,22 @@ async function fetchRuntimeTasks(reset: boolean) {
   }
   tasksError.value = ''
   try {
-    const response = await getRuntimeTasks(queue, requestedState, page, TASK_PAGE_SIZE)
+    const response = await getRuntimeTasks(queue, requestedState, cursor, TASK_PAGE_SIZE)
     if (requestID !== tasksRequestID || taskQueue.value?.name !== queue || taskState.value !== requestedState) return
     if (!response.available) {
       tasksError.value = t('system.globalSettings.runtime.tasks.unavailable')
       return
     }
-    tasks.value = reset ? response.tasks : [...tasks.value, ...response.tasks]
-    tasksPage.value = page
-    tasksHasMore.value = response.has_more
+    tasks.value = reset ? response.tasks : mergeRuntimeTaskPage(tasks.value, response.tasks)
+    tasksCursor.value = response.next_cursor || ''
+    tasksHasMore.value = response.has_more && Boolean(response.next_cursor)
   } catch (err: any) {
     if (requestID !== tasksRequestID) return
+    if (!reset && err?.code === 'runtime_task_cursor_expired') {
+      tasksLoadingMore.value = false
+      await fetchRuntimeTasks(true)
+      return
+    }
     tasksError.value = err?.message || t('system.globalSettings.runtime.tasks.loadError')
   } finally {
     if (requestID !== tasksRequestID) return

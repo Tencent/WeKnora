@@ -79,13 +79,18 @@ func (runtimeTestInspector) WorkerServerStats(context.Context) ([]types.WorkerSe
 
 type runtimeTaskTestInspector struct {
 	runtimeTestInspector
-	tasks           []types.RuntimeTaskInfo
-	retriedTask     string
-	deletedTask     string
-	forceDeleted    string
-	cancelKnowledge string
-	cancelDeleted   int
-	mutatedQueue    string
+	tasks               []types.RuntimeTaskInfo
+	retriedTask         string
+	deletedTask         string
+	forceDeleted        string
+	cancelKnowledge     string
+	cancelDeleted       int
+	mutatedQueue        string
+	nextCursor          string
+	hasMore             bool
+	inputCursor         string
+	inputPageSize       int
+	listErr             error
 	forceDeleteErr      error
 	getRuntimeErr       error
 	getRuntimeErrFrom   int
@@ -120,8 +125,13 @@ func (r *runtimeKnowledgeCancelTest) CancelKnowledgeParse(
 }
 
 func (r *runtimeTaskTestInspector) ListRuntimeTasks(
-	_ context.Context, _ string, state types.RuntimeTaskState, _, _ int,
-) ([]types.RuntimeTaskInfo, bool, error) {
+	_ context.Context, _ string, state types.RuntimeTaskState, cursor string, pageSize int,
+) (types.RuntimeTaskPage, bool, error) {
+	r.inputCursor = cursor
+	r.inputPageSize = pageSize
+	if r.listErr != nil {
+		return types.RuntimeTaskPage{}, true, r.listErr
+	}
 	for i := range r.tasks {
 		if r.tasks[i].State == "" {
 			r.tasks[i].State = state
@@ -133,7 +143,9 @@ func (r *runtimeTaskTestInspector) ListRuntimeTasks(
 			}
 		}
 	}
-	return r.tasks, true, nil
+	return types.RuntimeTaskPage{
+		Tasks: r.tasks, NextCursor: r.nextCursor, HasMore: r.hasMore,
+	}, true, nil
 }
 
 func (r *runtimeTaskTestInspector) GetRuntimeTask(
@@ -293,6 +305,65 @@ func TestListRuntimeTasksReturnsSafeTaskDetails(t *testing.T) {
 	}
 	if response.Tasks[0].KnowledgeID != "knowledge-1" || response.Tasks[0].LastError != "model unavailable" {
 		t.Fatalf("task details missing: %+v", response.Tasks[0])
+	}
+}
+
+func TestListRuntimeTasksReturnsAndForwardsCursor(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inspector := &runtimeTaskTestInspector{
+		tasks:      []types.RuntimeTaskInfo{{ID: "task-1"}},
+		nextCursor: "next-page", hasMore: true,
+	}
+	handler := &SystemHandler{taskInspector: inspector}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "queue", Value: types.QueueDefault}}
+	ctx.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/system/admin/runtime/queues/default/tasks?state=archived&cursor=previous-page&page_size=25",
+		nil,
+	)
+
+	handler.ListRuntimeTasks(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response RuntimeTasksResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if inspector.inputCursor != "previous-page" || inspector.inputPageSize != 25 {
+		t.Fatalf("cursor request not forwarded: cursor=%q size=%d", inspector.inputCursor, inspector.inputPageSize)
+	}
+	if !response.HasMore || response.NextCursor != "next-page" {
+		t.Fatalf("cursor response missing: %+v", response)
+	}
+}
+
+func TestListRuntimeTasksReportsExpiredCursorForFrontendRefresh(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &SystemHandler{taskInspector: &runtimeTaskTestInspector{
+		listErr: types.ErrExpiredRuntimeTaskCursor,
+	}}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "queue", Value: types.QueueDefault}}
+	ctx.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/system/admin/runtime/queues/default/tasks?state=pending&cursor=expired",
+		nil,
+	)
+
+	handler.ListRuntimeTasks(ctx)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response["code"] != "runtime_task_cursor_expired" {
+		t.Fatalf("unexpected error response: %+v", response)
 	}
 }
 

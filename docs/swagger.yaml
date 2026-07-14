@@ -4932,8 +4932,8 @@ definitions:
         type: boolean
       has_more:
         type: boolean
-      page:
-        type: integer
+      next_cursor:
+        type: string
       page_size:
         type: integer
       tasks:
@@ -12743,11 +12743,10 @@ paths:
         name: state
         required: true
         type: string
-      - default: 1
-        description: Page
+      - description: Opaque continuation cursor
         in: query
-        name: page
-        type: integer
+        name: cursor
+        type: string
       - default: 20
         description: Page size
         in: query

@@ -1,6 +1,19 @@
 package types
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	// ErrInvalidRuntimeTaskCursor means the client supplied a cursor that was
+	// malformed or belonged to another queue/state view.
+	ErrInvalidRuntimeTaskCursor = errors.New("invalid runtime task cursor")
+	// ErrExpiredRuntimeTaskCursor means every task anchor retained in the
+	// cursor has left the selected live state. The caller should refresh from
+	// the first page rather than falling back to offset pagination.
+	ErrExpiredRuntimeTaskCursor = errors.New("expired runtime task cursor")
+)
 
 // RuntimeTaskState is the stable operator-facing task lifecycle. It mirrors
 // the durable states exposed by asynq while keeping the HTTP API independent
@@ -67,6 +80,14 @@ type RuntimeTaskInfo struct {
 	DataSourceID    string              `json:"data_source_id,omitempty"`
 	SyncLogID       string              `json:"sync_log_id,omitempty"`
 	KnowledgeCount  int                 `json:"knowledge_count,omitempty"`
+}
+
+// RuntimeTaskPage is one stable slice of the operator task list. NextCursor
+// is opaque to HTTP clients and remains tied to the selected queue/state.
+type RuntimeTaskPage struct {
+	Tasks      []RuntimeTaskInfo
+	NextCursor string
+	HasMore    bool
 }
 
 func (t RuntimeTaskInfo) Allows(action RuntimeTaskAction) bool {

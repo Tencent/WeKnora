@@ -2591,7 +2591,7 @@ export default {
         },
         tasks: {
           title: "任务明细 · {queue}",
-          description: "查看各状态任务及其安全管理动作。可用动作由后端根据任务当前状态和业务语义返回。",
+          description: "查看各状态任务及其安全管理动作。定时、重试任务按最近执行时间优先，其余状态按时间倒序。",
           listTitle: "{state}任务",
           openAria: "查看{queue}中 {count} 个{state}任务",
           unavailable: "当前部署不支持查看任务明细",

@@ -591,9 +591,9 @@ export interface RuntimeTask {
 export interface RuntimeTasksResponse {
   available: boolean
   tasks: RuntimeTask[]
-  page: number
   page_size: number
   has_more: boolean
+  next_cursor?: string
 }
 
 /**
@@ -610,11 +610,11 @@ export async function getRuntimeQueues(): Promise<RuntimeQueuesResponse> {
 export async function getRuntimeTasks(
   queue: string,
   state: RuntimeTaskState,
-  page = 1,
+  cursor = '',
   pageSize = 20,
 ): Promise<RuntimeTasksResponse> {
   return get(`/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/tasks`, {
-    params: { state, page, page_size: pageSize },
+    params: { state, ...(cursor ? { cursor } : {}), page_size: pageSize },
   })
 }
 

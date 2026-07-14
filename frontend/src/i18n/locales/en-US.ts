@@ -3603,7 +3603,7 @@ export default {
         },
         tasks: {
           title: "Task details · {queue}",
-          description: "Inspect every task state and use only the actions the backend marks safe for the current task.",
+          description: "Inspect every task state. Scheduled and retry tasks show the next run first; other states show the newest tasks first.",
           listTitle: "{state} tasks",
           openAria: "View {count} {state} tasks in {queue}",
           unavailable: "Task details are unavailable in this deployment",

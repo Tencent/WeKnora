@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,12 +12,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 )
 
 // NewAsynqInspector constructs an *asynq.Inspector pointed at the same
 // Redis used by the asynq client. Only registered in asynq mode.
-func NewAsynqInspector() *asynq.Inspector {
-	return asynq.NewInspector(getAsynqRedisClientOpt())
+func NewAsynqInspector(redisClient *redis.Client) *asynq.Inspector {
+	return asynq.NewInspectorFromRedisClient(redisClient)
 }
 
 // asynqTaskInspector implements interfaces.TaskInspector backed by an
@@ -27,16 +29,17 @@ func NewAsynqInspector() *asynq.Inspector {
 // flaky.
 type asynqTaskInspector struct {
 	inspector *asynq.Inspector
+	redis     redis.UniversalClient
 }
 
 // NewAsynqTaskInspector returns a TaskInspector wrapping the given
 // *asynq.Inspector. nil-safe: a nil inspector degrades to a no-op so
 // the cancel path remains usable when the inspector failed to init.
-func NewAsynqTaskInspector(inspector *asynq.Inspector) interfaces.TaskInspector {
-	if inspector == nil {
+func NewAsynqTaskInspector(inspector *asynq.Inspector, redisClient *redis.Client) interfaces.TaskInspector {
+	if inspector == nil || redisClient == nil {
 		return noopTaskInspector{}
 	}
-	return &asynqTaskInspector{inspector: inspector}
+	return &asynqTaskInspector{inspector: inspector, redis: redisClient}
 }
 
 // knowledgeIDProbe is the minimal payload shape we need to filter
@@ -346,23 +349,176 @@ func (a *asynqTaskInspector) activeWorkerMetadata() map[string]runtimeWorkerMeta
 	return result
 }
 
-// ListRuntimeTasks returns one task state page. Only allow-listed routing
-// metadata is projected from the payload so the dashboard never exposes raw
-// document content, signed URLs, or connector secrets.
+const (
+	runtimeTaskCursorVersion    = 1
+	runtimeTaskCursorMaxAnchors = 32
+	runtimeTaskCursorMaxBytes   = 16 * 1024
+)
+
+type runtimeTaskCursor struct {
+	Version int                    `json:"v"`
+	Queue   string                 `json:"q"`
+	State   types.RuntimeTaskState `json:"s"`
+	Anchors []string               `json:"a"`
+}
+
+type runtimeTaskStorageOrder int
+
+const (
+	runtimeTaskListNewestFirst runtimeTaskStorageOrder = iota
+	runtimeTaskZSetEarliestFirst
+	runtimeTaskZSetNewestFirst
+)
+
+func runtimeTaskStorage(state types.RuntimeTaskState) (suffix string, order runtimeTaskStorageOrder) {
+	switch state {
+	case types.RuntimeTaskPending, types.RuntimeTaskActive:
+		// Asynq LPUSHes newly enqueued/started tasks, so index zero is the
+		// newest task in these live-state lists.
+		return string(state), runtimeTaskListNewestFirst
+	case types.RuntimeTaskScheduled, types.RuntimeTaskRetry:
+		// Sorted-set scores are NextProcessAt. Earliest-first keeps the next
+		// operational action visible instead of hiding it below later work.
+		return string(state), runtimeTaskZSetEarliestFirst
+	case types.RuntimeTaskArchived, types.RuntimeTaskCompleted:
+		// Archived scores are LastFailedAt; completed scores are expiry time.
+		// Reverse score order presents the newest failures and the newest
+		// retained completion records first.
+		return string(state), runtimeTaskZSetNewestFirst
+	default:
+		return "", runtimeTaskListNewestFirst
+	}
+}
+
+func runtimeTaskStateKey(queue string, state types.RuntimeTaskState) (string, runtimeTaskStorageOrder) {
+	suffix, order := runtimeTaskStorage(state)
+	// Asynq's public Inspector only supports offset pages and does not expose
+	// sort direction or continuation cursors. Keep the v0.26 queue-key schema
+	// isolated here and covered by cursor-order integration tests.
+	return "asynq:{" + queue + "}:" + suffix, order
+}
+
+func decodeRuntimeTaskCursor(raw, queue string, state types.RuntimeTaskState) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	if len(raw) > runtimeTaskCursorMaxBytes {
+		return nil, types.ErrInvalidRuntimeTaskCursor
+	}
+	data, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, types.ErrInvalidRuntimeTaskCursor
+	}
+	var cursor runtimeTaskCursor
+	if err = json.Unmarshal(data, &cursor); err != nil ||
+		cursor.Version != runtimeTaskCursorVersion || cursor.Queue != queue || cursor.State != state ||
+		len(cursor.Anchors) == 0 || len(cursor.Anchors) > runtimeTaskCursorMaxAnchors {
+		return nil, types.ErrInvalidRuntimeTaskCursor
+	}
+	for _, anchor := range cursor.Anchors {
+		if anchor == "" {
+			return nil, types.ErrInvalidRuntimeTaskCursor
+		}
+	}
+	return cursor.Anchors, nil
+}
+
+func encodeRuntimeTaskCursor(queue string, state types.RuntimeTaskState, anchors []string) (string, error) {
+	if len(anchors) > runtimeTaskCursorMaxAnchors {
+		anchors = anchors[len(anchors)-runtimeTaskCursorMaxAnchors:]
+	}
+	data, err := json.Marshal(runtimeTaskCursor{
+		Version: runtimeTaskCursorVersion,
+		Queue:   queue,
+		State:   state,
+		Anchors: anchors,
+	})
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+// runtimeTaskAnchorOffset finds the newest surviving anchor. Retaining a
+// small window of anchors lets pagination continue when the last item from a
+// previous live-state page finishes, retries, or is deleted between requests.
+func (a *asynqTaskInspector) runtimeTaskAnchorOffset(
+	ctx context.Context,
+	key string,
+	order runtimeTaskStorageOrder,
+	anchors []string,
+) (int64, error) {
+	if len(anchors) == 0 {
+		return 0, nil
+	}
+	pipe := a.redis.Pipeline()
+	ranks := make([]*redis.IntCmd, 0, len(anchors))
+	for i := len(anchors) - 1; i >= 0; i-- {
+		switch order {
+		case runtimeTaskListNewestFirst:
+			ranks = append(ranks, pipe.LPos(ctx, key, anchors[i], redis.LPosArgs{}))
+		case runtimeTaskZSetEarliestFirst:
+			ranks = append(ranks, pipe.ZRank(ctx, key, anchors[i]))
+		case runtimeTaskZSetNewestFirst:
+			ranks = append(ranks, pipe.ZRevRank(ctx, key, anchors[i]))
+		}
+	}
+	_, err := pipe.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return 0, err
+	}
+	for _, rank := range ranks {
+		if rank.Err() == nil {
+			return rank.Val() + 1, nil
+		}
+		if !errors.Is(rank.Err(), redis.Nil) {
+			return 0, rank.Err()
+		}
+	}
+	return 0, types.ErrExpiredRuntimeTaskCursor
+}
+
+func (a *asynqTaskInspector) listRuntimeTaskIDs(
+	ctx context.Context,
+	queue string,
+	state types.RuntimeTaskState,
+	anchors []string,
+	limit int,
+) ([]string, error) {
+	key, order := runtimeTaskStateKey(queue, state)
+	start, err := a.runtimeTaskAnchorOffset(ctx, key, order, anchors)
+	if err != nil {
+		return nil, err
+	}
+	stop := start + int64(limit) - 1
+	switch order {
+	case runtimeTaskListNewestFirst:
+		return a.redis.LRange(ctx, key, start, stop).Result()
+	case runtimeTaskZSetEarliestFirst:
+		return a.redis.ZRange(ctx, key, start, stop).Result()
+	case runtimeTaskZSetNewestFirst:
+		return a.redis.ZRevRange(ctx, key, start, stop).Result()
+	default:
+		return nil, fmt.Errorf("unsupported runtime task storage order %d", order)
+	}
+}
+
+// ListRuntimeTasks returns one cursor page in state-appropriate time order:
+// newest first for pending/active/archived/completed, and next-to-run first
+// for scheduled/retry. Only allow-listed routing metadata is projected from
+// payloads so the dashboard never exposes document content or secrets.
 func (a *asynqTaskInspector) ListRuntimeTasks(
 	ctx context.Context,
 	queue string,
 	state types.RuntimeTaskState,
-	page, pageSize int,
-) ([]types.RuntimeTaskInfo, bool, error) {
-	if a == nil || a.inspector == nil {
-		return nil, false, nil
+	cursor string,
+	pageSize int,
+) (types.RuntimeTaskPage, bool, error) {
+	if a == nil || a.inspector == nil || a.redis == nil {
+		return types.RuntimeTaskPage{}, false, nil
 	}
 	if !state.Valid() {
-		return nil, true, fmt.Errorf("unsupported runtime task state %q", state)
-	}
-	if page < 1 {
-		page = 1
+		return types.RuntimeTaskPage{}, true, fmt.Errorf("unsupported runtime task state %q", state)
 	}
 	if pageSize < 1 {
 		pageSize = 20
@@ -370,46 +526,76 @@ func (a *asynqTaskInspector) ListRuntimeTasks(
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	opts := []asynq.ListOption{asynq.Page(page), asynq.PageSize(pageSize)}
-	var tasks []*asynq.TaskInfo
-	var err error
-	switch state {
-	case types.RuntimeTaskPending:
-		tasks, err = a.inspector.ListPendingTasks(queue, opts...)
-	case types.RuntimeTaskActive:
-		tasks, err = a.inspector.ListActiveTasks(queue, opts...)
-	case types.RuntimeTaskScheduled:
-		tasks, err = a.inspector.ListScheduledTasks(queue, opts...)
-	case types.RuntimeTaskRetry:
-		tasks, err = a.inspector.ListRetryTasks(queue, opts...)
-	case types.RuntimeTaskArchived:
-		tasks, err = a.inspector.ListArchivedTasks(queue, opts...)
-	case types.RuntimeTaskCompleted:
-		tasks, err = a.inspector.ListCompletedTasks(queue, opts...)
-	}
-	if errors.Is(err, asynq.ErrQueueNotFound) {
-		return []types.RuntimeTaskInfo{}, true, nil
-	}
+	anchors, err := decodeRuntimeTaskCursor(cursor, queue, state)
 	if err != nil {
-		return nil, true, err
+		return types.RuntimeTaskPage{}, true, err
 	}
 	workers := map[string]runtimeWorkerMetadata{}
 	if state == types.RuntimeTaskActive {
 		workers = a.activeWorkerMetadata()
 	}
-	result := make([]types.RuntimeTaskInfo, 0, len(tasks))
-	for _, task := range tasks {
-		if task == nil {
-			continue
+	result := make([]types.RuntimeTaskInfo, 0, pageSize)
+	hasMore := false
+
+	for len(result) < pageSize {
+		// The extra ID proves there is another raw item without consuming it
+		// into this page's continuation cursor.
+		batchLimit := pageSize - len(result) + 1
+		ids, listErr := a.listRuntimeTaskIDs(ctx, queue, state, anchors, batchLimit)
+		if listErr != nil {
+			if errors.Is(listErr, types.ErrExpiredRuntimeTaskCursor) && cursor == "" {
+				return types.RuntimeTaskPage{Tasks: result}, true, nil
+			}
+			return types.RuntimeTaskPage{}, true, listErr
 		}
-		info, projectErr := projectRuntimeTask(task, workers[task.Queue+"\x00"+task.ID])
-		if projectErr != nil {
-			logger.Warnf(ctx, "[TaskInspector] project runtime task queue=%s id=%s: %v", queue, task.ID, projectErr)
-			continue
+		if len(ids) == 0 {
+			break
 		}
-		result = append(result, info)
+		for i, id := range ids {
+			if len(result) == pageSize {
+				hasMore = true
+				break
+			}
+			anchors = append(anchors, id)
+			if len(anchors) > runtimeTaskCursorMaxAnchors {
+				anchors = anchors[len(anchors)-runtimeTaskCursorMaxAnchors:]
+			}
+			task, getErr := a.inspector.GetTaskInfo(queue, id)
+			if errors.Is(getErr, asynq.ErrTaskNotFound) || errors.Is(getErr, asynq.ErrQueueNotFound) {
+				continue
+			}
+			if getErr != nil {
+				return types.RuntimeTaskPage{}, true, getErr
+			}
+			info, projectErr := projectRuntimeTask(task, workers[task.Queue+"\x00"+task.ID])
+			if projectErr != nil {
+				logger.Warnf(ctx, "[TaskInspector] project runtime task queue=%s id=%s: %v", queue, task.ID, projectErr)
+				continue
+			}
+			if info.State != state {
+				continue
+			}
+			result = append(result, info)
+			if len(result) == pageSize {
+				// A full raw batch may have contained stale IDs that were
+				// skipped above. In that case the last returned item can also be
+				// the last fetched ID even though older Redis entries still exist.
+				hasMore = i < len(ids)-1 || len(ids) == batchLimit
+			}
+		}
+		if hasMore || len(ids) < batchLimit {
+			break
+		}
 	}
-	return result, true, nil
+
+	page := types.RuntimeTaskPage{Tasks: result, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = encodeRuntimeTaskCursor(queue, state, anchors)
+		if err != nil {
+			return types.RuntimeTaskPage{}, true, err
+		}
+	}
+	return page, true, nil
 }
 
 func (a *asynqTaskInspector) GetRuntimeTask(
