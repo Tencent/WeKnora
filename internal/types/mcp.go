@@ -43,6 +43,22 @@ type MCPService struct {
 // MCPHeaders represents HTTP headers as a map
 type MCPHeaders map[string]string
 
+// MCPAuthType enumerates the authentication strategies for an MCP service.
+type MCPAuthType string
+
+const (
+	// MCPAuthNone means no authentication (or only static custom headers).
+	MCPAuthNone MCPAuthType = ""
+	// MCPAuthAPIKey injects a static API key header (X-API-Key).
+	MCPAuthAPIKey MCPAuthType = "api_key"
+	// MCPAuthBearer injects a static Authorization: Bearer <token> header.
+	MCPAuthBearer MCPAuthType = "bearer"
+	// MCPAuthOAuth performs the MCP OAuth2 authorization-code flow
+	// (discovery + dynamic client registration + PKCE) per user. Tokens are
+	// stored per (tenant, user, service) in mcp_oauth_tokens.
+	MCPAuthOAuth MCPAuthType = "oauth"
+)
+
 // MCPAuthConfig represents authentication configuration for MCP service.
 //
 // Secret fields (APIKey, Token) are persisted in this struct but are NEVER
@@ -50,10 +66,36 @@ type MCPHeaders map[string]string
 // dto.MCPServiceResponse which omits them by construction. Credential
 // mutations happen through the dedicated /credentials subresource handled
 // by MCPCredentialsHandler.
+//
+// OAuth note: the OAuth strategy stores no secret in this struct. The
+// per-user access/refresh tokens live in mcp_oauth_tokens and the
+// dynamically registered client lives in mcp_oauth_clients. The fields here
+// (Scopes, AuthServerMetadataURL) are non-secret OAuth configuration.
 type MCPAuthConfig struct {
-	APIKey        string            `json:"api_key,omitempty"`
+	// AuthType selects the authentication strategy. Empty ("") is treated as
+	// none for backward compatibility with rows that pre-date this field.
+	AuthType MCPAuthType `json:"auth_type,omitempty"`
+	APIKey   string      `json:"api_key,omitempty"`
+	// APIKeyHeader is the header name that carries APIKey when AuthType is
+	// api_key. Empty defaults to "X-API-Key". This is non-secret structural
+	// config (the secret is APIKey), so it is not encrypted and is safe to echo
+	// back in responses. It lets services that expect the key in a different
+	// header (e.g. the raw token directly in "Authorization") work without
+	// resorting to plaintext custom headers.
+	APIKeyHeader  string            `json:"api_key_header,omitempty"`
 	Token         string            `json:"token,omitempty"`
 	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+	// Scopes are the OAuth scopes requested during authorization. Optional.
+	Scopes []string `json:"scopes,omitempty"`
+	// AuthServerMetadataURL optionally pins the OAuth authorization server
+	// metadata URL. When empty, the server is discovered automatically from
+	// the MCP URL (RFC 9728 / RFC 8414).
+	AuthServerMetadataURL string `json:"auth_server_metadata_url,omitempty"`
+}
+
+// IsOAuth reports whether this service uses the OAuth strategy.
+func (c *MCPAuthConfig) IsOAuth() bool {
+	return c != nil && c.AuthType == MCPAuthOAuth
 }
 
 // MCPAdvancedConfig represents advanced configuration for MCP service
@@ -111,10 +153,16 @@ type MCPResource struct {
 
 // MCPTestResult represents the result of testing an MCP service connection
 type MCPTestResult struct {
-	Success   bool           `json:"success"`
-	Message   string         `json:"message,omitempty"`
-	Tools     []*MCPTool     `json:"tools,omitempty"`
-	Resources []*MCPResource `json:"resources,omitempty"`
+	Success     bool   `json:"success"`
+	Message     string `json:"message,omitempty"`
+	Description string `json:"description,omitempty"`
+	// OAuthRequired is true when the connection failed because the server
+	// requires OAuth authorization (RFC 9728), even though the service was not
+	// configured for OAuth. The UI uses it to guide the user to switch the auth
+	// strategy to OAuth.
+	OAuthRequired bool           `json:"oauth_required,omitempty"`
+	Tools         []*MCPTool     `json:"tools,omitempty"`
+	Resources     []*MCPResource `json:"resources,omitempty"`
 }
 
 // BeforeCreate is a GORM hook that runs before creating a new MCP service
@@ -282,4 +330,3 @@ func GetDefaultAdvancedConfig() *MCPAdvancedConfig {
 // compile-time invariant of the DTO instead of a runtime call that handlers
 // must remember to make. Builtin-service field stripping is also implemented
 // there.
-

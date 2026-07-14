@@ -40,20 +40,44 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 		return err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return err
+	}
 	return client.Ping(ctx)
+}
+
+// ResolveResourceAncestors has nothing to do for Notion: ListResources already
+// returns the full tree with parent links, so any pre-existing selection is
+// already present and revealed by the picker without on-demand loading.
+func (c *Connector) ResolveResourceAncestors(
+	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
+) ([]string, error) {
+	return []string{}, nil
 }
 
 // ListResources lists all accessible Notion pages and databases as selectable resources.
 // Returns all objects with parent-child relationships populated, allowing the frontend
 // to render a tree view. Root objects have empty ParentID.
-func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceConfig) ([]types.Resource, error) {
+func (c *Connector) ListResources(
+	ctx context.Context, config *types.DataSourceConfig, parentID string,
+) ([]types.Resource, error) {
+	// Notion returns the full hierarchy (with parent_id populated) in a single
+	// call, so children are already delivered with the root listing. Lazy-load
+	// requests for a specific parent therefore have nothing extra to return.
+	if parentID != "" {
+		return []types.Resource{}, nil
+	}
+
 	notionCfg, err := parseNotionConfig(config)
 	if err != nil {
 		return nil, err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, err
+	}
 	pages, err := client.SearchPages(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("search notion pages: %w", err)
@@ -113,7 +137,10 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, err
+	}
 	visited := c.excludedSetFromListResources(ctx, config, resourceIDs)
 	var allItems []types.FetchedItem
 
@@ -149,7 +176,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		return nil, nil, fmt.Errorf("no resource IDs configured")
 	}
 
-	client := newClient(notionCfg.APIKey, extractBaseURL(config))
+	client, err := newClient(notionCfg.APIKey, extractBaseURL(config))
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// Parse previous cursor
 	var prevCursor notionCursor
@@ -903,7 +933,7 @@ func computeExcludedSet(visibleIDs []string, parentOf map[string]string, selecte
 // and computes the deselected set. Used by FetchAll where no other code path
 // already has the page list in hand.
 func (c *Connector) excludedSetFromListResources(ctx context.Context, config *types.DataSourceConfig, selectedIDs []string) map[string]bool {
-	visible, err := c.ListResources(ctx, config)
+	visible, err := c.ListResources(ctx, config, "")
 	if err != nil {
 		logger.Warnf(ctx, "[Notion] failed to list visible resources for exclusion: %v", err)
 		return map[string]bool{}

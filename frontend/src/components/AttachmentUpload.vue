@@ -31,7 +31,7 @@ const fileInputRef = ref<HTMLInputElement>();
 // Supported file types (matching backend)
 const SUPPORTED_TYPES = [
   // Documents
-  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.epub', '.mhtml',
   // Text
   '.txt', '.md', '.csv', '.json', '.xml', '.html',
   // Audio
@@ -116,6 +116,7 @@ const getFileIcon = (fileName: string): string => {
   if (['doc', 'docx'].includes(ext || '')) return 'file-word';
   if (['xls', 'xlsx'].includes(ext || '')) return 'file-excel';
   if (['ppt', 'pptx'].includes(ext || '')) return 'file-powerpoint';
+  if (['epub', 'mhtml'].includes(ext || '')) return 'file';
   if (['txt', 'md'].includes(ext || '')) return 'file';
   if (['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac'].includes(ext || '')) return 'sound';
   return 'file';

@@ -15,7 +15,7 @@ type ToolExecContext struct {
 	AssistantMessageID string
 	RequestID          string
 	ToolCallID         string
-	UserID             string // owner of the originating session; used by HITL gates for authorization (issue #1173)
+	UserID             string // principal storage ID of the originating session; used by HITL gates for authorization (issue #1173)
 	EventBus           *event.EventBus
 	// ApprovalCtx is the parent ctx WITHOUT defaultToolExecTimeout; used when the tool
 	// must wait for human approval that may exceed normal tool exec timeout (issue #1173).

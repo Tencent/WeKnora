@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -18,8 +20,8 @@ func NewAsynqInspector() *asynq.Inspector {
 }
 
 // asynqTaskInspector implements interfaces.TaskInspector backed by an
-// *asynq.Inspector. Scans the queues we actually use ("default",
-// "critical", "low") and matches tasks whose payload carries the given
+// *asynq.Inspector. Scans the queues we actually use and matches tasks
+// whose payload carries the given
 // knowledge_id. Best-effort: any scan/delete error is logged and
 // swallowed so the cancel API still returns success even when Redis is
 // flaky.
@@ -45,19 +47,35 @@ type knowledgeIDProbe struct {
 	KnowledgeID string `json:"knowledge_id,omitempty"`
 }
 
+type runtimeTaskPayloadProbe struct {
+	TenantID        uint64   `json:"tenant_id,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
+	KBID            string   `json:"kb_id,omitempty"`
+	KnowledgeID     string   `json:"knowledge_id,omitempty"`
+	TaskID          string   `json:"task_id,omitempty"`
+	SourceID        string   `json:"source_id,omitempty"`
+	TargetID        string   `json:"target_id,omitempty"`
+	SourceKBID      string   `json:"source_kb_id,omitempty"`
+	TargetKBID      string   `json:"target_kb_id,omitempty"`
+	DataSourceID    string   `json:"data_source_id,omitempty"`
+	SyncLogID       string   `json:"sync_log_id,omitempty"`
+	KnowledgeIDs    []string `json:"knowledge_ids,omitempty"`
+	EnqueuedAt      int64    `json:"enqueued_at,omitempty"`
+	CreatedAt       int64    `json:"created_at,omitempty"`
+}
+
 // queuesScanned is the fixed set of queue names this codebase enqueues
 // into. Kept tight on purpose — we never scan user-defined queues.
 // MUST include every queue any cancelable task type can land in; the
 // multimodal queue is required here so cancelling a knowledge also purges
 // its (potentially hundreds of) pending image:multimodal tasks.
-var queuesScanned = []string{
-	types.QueueDefault,
-	types.QueueCritical,
-	types.QueueLow,
-	types.QueueMultimodal,
-	types.QueueGraph,
-	types.QueueQuestion,
-}
+var queuesScanned = func() []string {
+	queues := make([]string, 0, len(types.QueueDefinitions()))
+	for _, definition := range types.QueueDefinitions() {
+		queues = append(queues, definition.Name)
+	}
+	return queues
+}()
 
 // taskTypesForKnowledgeCancel lists every asynq task type that carries
 // a knowledge_id in its payload and should be cancelable. The set is
@@ -134,6 +152,351 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 		}
 	}
 	return false, nil
+}
+
+// QueueStats returns a depth snapshot for every queue this app enqueues
+// into. Read-only: it calls Inspector.GetQueueInfo per queue and maps
+// the result onto types.QueueStat, attaching static pool/weight metadata
+// from the central queue registry. A queue that has never received a task yields
+// ErrQueueNotFound from asynq; we still surface it as a zeroed row so the
+// dashboard shows the complete lane set even before a queue receives its
+// first task.
+func (a *asynqTaskInspector) QueueStats(
+	ctx context.Context,
+) ([]types.QueueStat, bool, error) {
+	if a == nil || a.inspector == nil {
+		return nil, false, nil
+	}
+	definitions := types.QueueDefinitions()
+	stats := make([]types.QueueStat, 0, len(definitions))
+	for _, definition := range definitions {
+		queue := definition.Name
+		stat := types.QueueStat{
+			Name:   queue,
+			Pool:   definition.Pool,
+			Weight: definition.Weight,
+		}
+		info, err := a.inspector.GetQueueInfo(queue)
+		if err != nil {
+			if !errors.Is(err, asynq.ErrQueueNotFound) {
+				logger.Warnf(ctx, "[TaskInspector] queue info queue=%s: %v", queue, err)
+			}
+			// Zeroed row: queue not created yet (or transient error).
+			stats = append(stats, stat)
+			continue
+		}
+		stat.Size = info.Size
+		stat.Pending = info.Pending
+		stat.Active = info.Active
+		stat.Scheduled = info.Scheduled
+		stat.Retry = info.Retry
+		stat.Archived = info.Archived
+		stat.Completed = info.Completed
+		stat.Processed = info.Processed
+		stat.Failed = info.Failed
+		stat.Paused = info.Paused
+		stat.LatencyMs = info.Latency.Milliseconds()
+		stat.MemoryUsageBytes = info.MemoryUsage
+		stats = append(stats, stat)
+	}
+	return stats, true, nil
+}
+
+type runtimeWorkerMetadata struct {
+	started time.Time
+	worker  string
+}
+
+func runtimeTaskState(state asynq.TaskState) (types.RuntimeTaskState, error) {
+	switch state {
+	case asynq.TaskStatePending:
+		return types.RuntimeTaskPending, nil
+	case asynq.TaskStateActive:
+		return types.RuntimeTaskActive, nil
+	case asynq.TaskStateScheduled:
+		return types.RuntimeTaskScheduled, nil
+	case asynq.TaskStateRetry:
+		return types.RuntimeTaskRetry, nil
+	case asynq.TaskStateArchived:
+		return types.RuntimeTaskArchived, nil
+	case asynq.TaskStateCompleted:
+		return types.RuntimeTaskCompleted, nil
+	default:
+		return "", fmt.Errorf("unsupported runtime task state %v", state)
+	}
+}
+
+func runtimeTaskTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	copy := value
+	return &copy
+}
+
+func runtimePayloadTime(value int64) *time.Time {
+	if value <= 0 {
+		return nil
+	}
+	// Payload timestamps in this repository are seconds today. Accept the
+	// common higher-precision Unix forms as well for connector-originated jobs.
+	var parsed time.Time
+	if value > 100_000_000_000_000_000 {
+		parsed = time.Unix(0, value)
+	} else if value > 100_000_000_000_000 {
+		parsed = time.UnixMicro(value)
+	} else if value > 10_000_000_000 {
+		parsed = time.UnixMilli(value)
+	} else {
+		parsed = time.Unix(value, 0)
+	}
+	return &parsed
+}
+
+func runtimeTaskActions(info types.RuntimeTaskInfo) []types.RuntimeTaskAction {
+	actions := make([]types.RuntimeTaskAction, 0, 3)
+	if _, cancellable := taskTypesForKnowledgeCancel[info.Type]; cancellable &&
+		info.TenantID > 0 && info.KnowledgeID != "" {
+		switch info.State {
+		case types.RuntimeTaskPending, types.RuntimeTaskActive,
+			types.RuntimeTaskScheduled, types.RuntimeTaskRetry:
+			actions = append(actions, types.RuntimeTaskActionCancel)
+		}
+	}
+	switch info.State {
+	case types.RuntimeTaskScheduled, types.RuntimeTaskRetry:
+		actions = append(actions, types.RuntimeTaskActionRunNow)
+	case types.RuntimeTaskArchived:
+		actions = append(actions, types.RuntimeTaskActionRunNow, types.RuntimeTaskActionDelete)
+	}
+	return actions
+}
+
+func projectRuntimeTask(task *asynq.TaskInfo, worker runtimeWorkerMetadata) (types.RuntimeTaskInfo, error) {
+	state, err := runtimeTaskState(task.State)
+	if err != nil {
+		return types.RuntimeTaskInfo{}, err
+	}
+	probe := runtimeTaskPayloadProbe{}
+	_ = json.Unmarshal(task.Payload, &probe)
+	kbID := probe.KnowledgeBaseID
+	if kbID == "" {
+		kbID = probe.KBID
+	}
+	enqueuedAt := probe.EnqueuedAt
+	if enqueuedAt == 0 {
+		enqueuedAt = probe.CreatedAt
+	}
+	info := types.RuntimeTaskInfo{
+		ID:              task.ID,
+		Queue:           task.Queue,
+		Type:            task.Type,
+		State:           state,
+		LastError:       task.LastErr,
+		LastFailedAt:    runtimeTaskTime(task.LastFailedAt),
+		NextProcessAt:   runtimeTaskTime(task.NextProcessAt),
+		StartedAt:       runtimeTaskTime(worker.started),
+		CompletedAt:     runtimeTaskTime(task.CompletedAt),
+		Deadline:        runtimeTaskTime(task.Deadline),
+		EnqueuedAt:      runtimePayloadTime(enqueuedAt),
+		Retried:         task.Retried,
+		MaxRetry:        task.MaxRetry,
+		IsOrphaned:      task.IsOrphaned,
+		Worker:          worker.worker,
+		TenantID:        probe.TenantID,
+		KnowledgeBaseID: kbID,
+		KnowledgeID:     probe.KnowledgeID,
+		TaskID:          probe.TaskID,
+		SourceID:        probe.SourceID,
+		TargetID:        probe.TargetID,
+		SourceKBID:      probe.SourceKBID,
+		TargetKBID:      probe.TargetKBID,
+		DataSourceID:    probe.DataSourceID,
+		SyncLogID:       probe.SyncLogID,
+		KnowledgeCount:  len(probe.KnowledgeIDs),
+	}
+	info.AllowedActions = runtimeTaskActions(info)
+	return info, nil
+}
+
+func (a *asynqTaskInspector) activeWorkerMetadata() map[string]runtimeWorkerMetadata {
+	result := make(map[string]runtimeWorkerMetadata)
+	servers, err := a.inspector.Servers()
+	if err != nil {
+		return result
+	}
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		workerName := server.Host
+		if server.PID > 0 {
+			workerName = fmt.Sprintf("%s:%d", server.Host, server.PID)
+		}
+		for _, worker := range server.ActiveWorkers {
+			if worker == nil {
+				continue
+			}
+			result[worker.Queue+"\x00"+worker.TaskID] = runtimeWorkerMetadata{
+				started: worker.Started,
+				worker:  workerName,
+			}
+		}
+	}
+	return result
+}
+
+// ListRuntimeTasks returns one task state page. Only allow-listed routing
+// metadata is projected from the payload so the dashboard never exposes raw
+// document content, signed URLs, or connector secrets.
+func (a *asynqTaskInspector) ListRuntimeTasks(
+	ctx context.Context,
+	queue string,
+	state types.RuntimeTaskState,
+	page, pageSize int,
+) ([]types.RuntimeTaskInfo, bool, error) {
+	if a == nil || a.inspector == nil {
+		return nil, false, nil
+	}
+	if !state.Valid() {
+		return nil, true, fmt.Errorf("unsupported runtime task state %q", state)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	opts := []asynq.ListOption{asynq.Page(page), asynq.PageSize(pageSize)}
+	var tasks []*asynq.TaskInfo
+	var err error
+	switch state {
+	case types.RuntimeTaskPending:
+		tasks, err = a.inspector.ListPendingTasks(queue, opts...)
+	case types.RuntimeTaskActive:
+		tasks, err = a.inspector.ListActiveTasks(queue, opts...)
+	case types.RuntimeTaskScheduled:
+		tasks, err = a.inspector.ListScheduledTasks(queue, opts...)
+	case types.RuntimeTaskRetry:
+		tasks, err = a.inspector.ListRetryTasks(queue, opts...)
+	case types.RuntimeTaskArchived:
+		tasks, err = a.inspector.ListArchivedTasks(queue, opts...)
+	case types.RuntimeTaskCompleted:
+		tasks, err = a.inspector.ListCompletedTasks(queue, opts...)
+	}
+	if errors.Is(err, asynq.ErrQueueNotFound) {
+		return []types.RuntimeTaskInfo{}, true, nil
+	}
+	if err != nil {
+		return nil, true, err
+	}
+	workers := map[string]runtimeWorkerMetadata{}
+	if state == types.RuntimeTaskActive {
+		workers = a.activeWorkerMetadata()
+	}
+	result := make([]types.RuntimeTaskInfo, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		info, projectErr := projectRuntimeTask(task, workers[task.Queue+"\x00"+task.ID])
+		if projectErr != nil {
+			logger.Warnf(ctx, "[TaskInspector] project runtime task queue=%s id=%s: %v", queue, task.ID, projectErr)
+			continue
+		}
+		result = append(result, info)
+	}
+	return result, true, nil
+}
+
+func (a *asynqTaskInspector) GetRuntimeTask(
+	ctx context.Context, queue, taskID string,
+) (*types.RuntimeTaskInfo, bool, error) {
+	if a == nil || a.inspector == nil {
+		return nil, false, nil
+	}
+	task, err := a.inspector.GetTaskInfo(queue, taskID)
+	if err != nil {
+		return nil, true, err
+	}
+	workers := map[string]runtimeWorkerMetadata{}
+	if task.State == asynq.TaskStateActive {
+		workers = a.activeWorkerMetadata()
+	}
+	info, err := projectRuntimeTask(task, workers[task.Queue+"\x00"+task.ID])
+	if err != nil {
+		return nil, true, err
+	}
+	return &info, true, nil
+}
+
+// RunRuntimeTask moves a scheduled, retry, or archived task to pending. Asynq
+// deliberately preserves the retry counter.
+func (a *asynqTaskInspector) RunRuntimeTask(ctx context.Context, queue, taskID string) (bool, error) {
+	if a == nil || a.inspector == nil {
+		return false, nil
+	}
+	task, _, err := a.GetRuntimeTask(ctx, queue, taskID)
+	if err != nil {
+		return true, err
+	}
+	if task == nil || !task.Allows(types.RuntimeTaskActionRunNow) {
+		return true, fmt.Errorf("task %s in queue %s cannot run now", taskID, queue)
+	}
+	return true, a.inspector.RunTask(queue, taskID)
+}
+
+func (a *asynqTaskInspector) DeleteRuntimeTask(ctx context.Context, queue, taskID string) (bool, error) {
+	if a == nil || a.inspector == nil {
+		return false, nil
+	}
+	task, _, err := a.GetRuntimeTask(ctx, queue, taskID)
+	if err != nil {
+		return true, err
+	}
+	if task == nil || !task.Allows(types.RuntimeTaskActionDelete) {
+		return true, fmt.Errorf("task %s in queue %s cannot be deleted", taskID, queue)
+	}
+	return true, a.inspector.DeleteTask(queue, taskID)
+}
+
+func (a *asynqTaskInspector) ForceDeleteRuntimeTask(ctx context.Context, queue, taskID string) (bool, error) {
+	if a == nil || a.inspector == nil {
+		return false, nil
+	}
+	return true, a.inspector.DeleteTask(queue, taskID)
+}
+
+func (a *asynqTaskInspector) WorkerServerStats(
+	ctx context.Context,
+) ([]types.WorkerServerStat, bool, error) {
+	if a == nil || a.inspector == nil {
+		return nil, false, nil
+	}
+	servers, err := a.inspector.Servers()
+	if err != nil {
+		return nil, true, err
+	}
+	stats := make([]types.WorkerServerStat, 0, len(servers))
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		queues := make(map[string]int, len(server.Queues))
+		for name, weight := range server.Queues {
+			queues[name] = weight
+		}
+		stats = append(stats, types.WorkerServerStat{
+			Concurrency: server.Concurrency,
+			Active:      len(server.ActiveWorkers),
+			Status:      server.Status,
+			Queues:      queues,
+		})
+	}
+	return stats, true, nil
 }
 
 // queueStateHasMatch pages through one (queue, state) list looking for a
@@ -333,4 +696,19 @@ func (noopTaskInspector) HasQueuedTasksForKnowledge(
 	ctx context.Context, knowledgeID string,
 ) (bool, error) {
 	return false, nil
+}
+
+// QueueStats reports "not supported" in Lite mode: there is no Redis /
+// asynq backend to inspect, so the runtime dashboard renders an
+// "unavailable in this deployment" state instead of an empty table.
+func (noopTaskInspector) QueueStats(
+	ctx context.Context,
+) ([]types.QueueStat, bool, error) {
+	return nil, false, nil
+}
+
+func (noopTaskInspector) WorkerServerStats(
+	ctx context.Context,
+) ([]types.WorkerServerStat, bool, error) {
+	return nil, false, nil
 }

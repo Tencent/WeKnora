@@ -111,7 +111,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    dto.NewWebSearchProviderResponse(provider),
+		"data":    dto.NewWebSearchProviderResponse(ctx, provider),
 	})
 }
 
@@ -134,7 +134,7 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewWebSearchProviderResponses(providers),
+		"data":    dto.NewWebSearchProviderResponses(ctx, providers),
 	})
 }
 
@@ -169,7 +169,7 @@ func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewWebSearchProviderResponse(provider),
+		"data":    dto.NewWebSearchProviderResponse(ctx, provider),
 	})
 }
 
@@ -263,7 +263,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 	// Re-fetch to get the full stored state
 	updated, _ := h.repo.GetByID(ctx, tenantID, id)
 	if updated != nil {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(updated)})
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(ctx, updated)})
 	} else {
 		c.JSON(http.StatusOK, gin.H{"success": true})
 	}
@@ -422,8 +422,9 @@ func (h *WebSearchProviderHandler) doTestSearch(ctx context.Context, providerTyp
 		return err
 	}
 	if len(results) == 0 {
-		logger.Warnf(ctx, "[WebSearch][Test] search returned 0 results — API key or configuration may be invalid")
-		return fmt.Errorf("search returned 0 results, please verify your API key and configuration")
+		err := infra_web_search.EmptyTestResultsError(providerType, searchProvider)
+		logger.Warnf(ctx, "[WebSearch][Test] %v", err)
+		return err
 	}
 	logger.Infof(ctx, "[WebSearch][Test] succeeded: type=%s, results=%d", providerType, len(results))
 	return nil

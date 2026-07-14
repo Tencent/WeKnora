@@ -773,8 +773,9 @@ type ReplyMessage struct {
 │ · EventBus 订阅    │
 │ · 300ms 批量刷新   │
 │ · 工具事件展示     │
-│ · SendStreamChunk  │
-│ · EndStream        │
+│ · UpdateStreamContent │
+│ · FinalizeStream      │
+│ · EndStream           │
 └────────────────────┘
             │
             ▼
@@ -833,10 +834,14 @@ type Adapter interface {
 ```go
 type StreamSender interface {
     StartStream(ctx context.Context, incoming *IncomingMessage) (streamID string, err error)
-    SendStreamChunk(ctx context.Context, incoming *IncomingMessage, streamID string, content string) error
+    UpdateStreamContent(ctx context.Context, incoming *IncomingMessage, streamID string, fullContent string) error
+    FinalizeStream(ctx context.Context, incoming *IncomingMessage, streamID string, finalContent string) error
     EndStream(ctx context.Context, incoming *IncomingMessage, streamID string) error
 }
 ```
+
+- `UpdateStreamContent`：流式过程中用**当前可见全文**替换消息（replace 语义，非增量追加）
+- `FinalizeStream`：结束前最后一次替换，通常为折叠思考/工具进度后的最终展示（多为纯答案）
 
 实现此接口后，Service 会自动路由到流式模式。渠道配置 `output_mode: "full"` 可强制关闭。
 
@@ -949,14 +954,17 @@ StartStream:
   1. POST /cardkit/v1/cards              → 创建卡片实体 (streaming_mode: true)
   2. POST /im/v1/messages                → 发送卡片消息到聊天
 
-SendStreamChunk:
+UpdateStreamContent:
   3. PUT /cardkit/v1/cards/{id}/elements/{eid}/content  → 更新元素内容 (累积全文)
 
+FinalizeStream:
+  4. PUT /cardkit/v1/cards/{id}/elements/{eid}/content  → 最终可见内容（通常为纯答案）
+
 EndStream:
-  4. PATCH /cardkit/v1/cards/{id}/settings  → 设置 streaming_mode: false
+  5. PATCH /cardkit/v1/cards/{id}/settings  → 设置 streaming_mode: false
 ```
 
-每次 `SendStreamChunk` 发送的是**累积全文**而非增量，由 `feishuStreamState` 跟踪完整内容和严格递增的 `sequence` 序号。
+每次 `UpdateStreamContent` / `FinalizeStream` 发送的是**累积全文**而非增量，由 `feishuStreamState` 跟踪完整内容和严格递增的 `sequence` 序号。
 
 **Think 块处理：** 流式输出中的 `<think>...</think>` 块会被转换为飞书 Markdown 引用块格式：
 
@@ -1017,14 +1025,17 @@ Slack 的流式输出基于消息更新 (chat.update) 实现：
 StartStream:
   1. POST /chat.postMessage              → 发送初始消息，获取 ts (timestamp)
 
-SendStreamChunk:
+UpdateStreamContent:
   2. POST /chat.update                   → 根据 ts 更新消息内容 (累积全文)
 
+FinalizeStream:
+  3. POST /chat.update                   → 最终可见内容替换
+
 EndStream:
-  3. 无需特殊操作
+  4. 无需特殊操作
 ```
 
-每次 `SendStreamChunk` 发送的是**累积全文**而非增量。
+每次 `UpdateStreamContent` / `FinalizeStream` 发送的是**累积全文**而非增量。
 
 #### 源码文件
 
@@ -1079,14 +1090,17 @@ Telegram 的流式输出基于消息编辑 (editMessageText) 实现：
 StartStream:
   1. POST sendMessage               → 发送初始 "正在思考..." 消息，获取 message_id
 
-SendStreamChunk:
-  2. POST editMessageText            → 根据 message_id 更新消息内容（累积全文）
+UpdateStreamContent:
+  2. POST editMessageText            → 根据 message_id 更新消息内容（累积全文，纯文本）
+
+FinalizeStream:
+  3. POST editMessageText            → 最终可见内容替换（与流式阶段相同，纯文本）
 
 EndStream:
-  3. POST editMessageText            → 最终更新，启用 Markdown 解析
+  4. 清理流状态
 ```
 
-每次 `SendStreamChunk` 发送的是**累积全文**而非增量，最小编辑间隔 500ms（避免触发 Telegram 速率限制）。
+每次 `UpdateStreamContent` / `FinalizeStream` 发送的是**累积全文**而非增量，最小编辑间隔 500ms（避免触发 Telegram 速率限制）。中间态与终态均使用纯文本，避免 Markdown 解析失败。
 
 **Think 块处理：** 流式输出中的 `<think>...</think>` 块会被转换为 Telegram 引用块格式：
 
@@ -1156,14 +1170,17 @@ LongConnClient ══Stream══▶ 钉钉 Stream 服务
 StartStream:
   1. POST /v1.0/card/instances/createAndDeliver  → 创建并投递 AI 卡片
 
-SendStreamChunk:
+UpdateStreamContent:
   2. PUT /v1.0/card/streaming                     → 流式更新卡片内容（累积全文）
 
+FinalizeStream:
+  3. PUT /v1.0/card/streaming                     → 最终可见内容替换
+
 EndStream:
-  3. PUT /v1.0/card/streaming (isFinalize=true)   → 标记流式结束
+  4. PUT /v1.0/card/streaming (isFinalize=true)   → 标记流式结束
 ```
 
-每次 `SendStreamChunk` 发送的是**累积全文**（`isFull: true`），最小更新间隔 500ms。
+每次 `UpdateStreamContent` / `FinalizeStream` 发送的是**累积全文**（`isFull: true`），最小更新间隔 500ms。
 
 **无卡片模板时的降级策略：** 未配置 `card_template_id` 时，流式内容在内存中累积，`EndStream` 时一次性通过 `sessionWebhook` 或 OpenAPI 发送完整回复。
 
@@ -1216,11 +1233,14 @@ Mattermost 服务器 ──HTTP POST──▶ /api/v1/im/callback/{channel_id}
 StartStream:
   1. POST /api/v4/posts                    → 创建占位帖（如「正在思考...」），得到 post id
 
-SendStreamChunk:
+UpdateStreamContent:
   2. PUT /api/v4/posts/{post_id}/patch     → Patch message 字段（累积全文）
 
+FinalizeStream:
+  3. PUT /api/v4/posts/{post_id}/patch     → 最终可见内容替换
+
 EndStream:
-  3. 最后一次 Patch，与 SendStreamChunk 相同逻辑
+  4. 清理流状态
 ```
 
 流式刷新间隔由 Service 侧 `streamFlushInterval`（300ms）批量合并，以降低编辑频率、减轻 API 压力。

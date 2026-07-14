@@ -192,8 +192,11 @@ func TestOssEnsureBucket_CreateFails(t *testing.T) {
 		t.Fatalf("newOSSClient() error: %v", err)
 	}
 
-	// Should fail with invalid credentials
-	err = ossEnsureBucket(client, "test-bucket")
+	// Use a bucket that does not exist so IsBucketExist returns false and the
+	// create path is exercised; with invalid credentials PutBucket then fails.
+	// A common name like "test-bucket" already exists globally on OSS, which
+	// would short-circuit at IsBucketExist and make this assertion flaky.
+	err = ossEnsureBucket(client, "weknora-nonexistent-bucket-create-fails-12345")
 	if err == nil {
 		t.Error("ossEnsureBucket with invalid credentials should return an error")
 	}

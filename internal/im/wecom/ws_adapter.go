@@ -60,8 +60,16 @@ func (a *WSAdapter) StartStream(ctx context.Context, incoming *im.IncomingMessag
 	return a.client.StartStream(ctx, incoming)
 }
 
+func (a *WSAdapter) UpdateStreamContent(ctx context.Context, incoming *im.IncomingMessage, streamID string, fullContent string) error {
+	return a.client.UpdateStreamContent(ctx, incoming, streamID, fullContent)
+}
+
+func (a *WSAdapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+	return a.client.FinalizeStream(ctx, incoming, streamID, finalContent)
+}
+
 func (a *WSAdapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
-	return a.client.SendStreamChunk(ctx, incoming, streamID, content)
+	return a.client.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
 func (a *WSAdapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {

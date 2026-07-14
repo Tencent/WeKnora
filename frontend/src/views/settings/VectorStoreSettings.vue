@@ -12,18 +12,15 @@
 
     <template v-else>
       <div class="settings-group">
-        <div class="section-subheader">
-          <h3>{{ t('vectorStoreSettings.storesTitle') }}</h3>
-          <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
-            <template #icon><add-icon /></template>
-            {{ t('vectorStoreSettings.addStore') }}
-          </t-button>
-        </div>
+        <h3 class="list-section-title">{{ t('vectorStoreSettings.storesTitle') }}</h3>
 
         <!-- 与其它 settings 列表同形：左侧 engine 徽章 + 标题 + env pill + 副标题 + 测试动作。
              env 来源是只读的 (engine_type / connection_config 由 .env 写入），所以没有更多菜单；
              user 来源沿用三点菜单的编辑 / 删除入口；测试结果作为卡片底部的彩色条出现。 -->
-        <div v-if="stores.length > 0" class="store-grid">
+        <div v-if="stores.length === 0 && !authStore.hasRole('admin')" class="empty-stores">
+          <t-empty :description="t('vectorStoreSettings.emptyDesc')" />
+        </div>
+        <div v-else class="store-grid">
           <div
             v-for="store in [...envStores, ...userStores]"
             :key="store.id"
@@ -93,11 +90,17 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Empty State -->
-        <div v-else class="empty-stores">
-          <p>{{ t('vectorStoreSettings.emptyDesc') }}</p>
+          <button
+            v-if="authStore.hasRole('admin')"
+            type="button"
+            class="store-card store-card--add"
+            @click="openAddDialog"
+          >
+            <span class="store-card--add__icon" aria-hidden="true">
+              <add-icon />
+            </span>
+            <span class="store-card--add__label">{{ t('vectorStoreSettings.addStore') }}</span>
+          </button>
         </div>
       </div>
     </template>
@@ -785,24 +788,22 @@ onMounted(async () => {
   flex-direction: column;
 }
 
-.section-subheader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-
-  h3 {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-  }
+.list-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 16px 0;
 }
 
 .store-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  .store-card--add {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 // 与 Parser / Storage / Model 等同形：徽章 + 三段式。env 来源走 secondaryContainer
@@ -838,6 +839,51 @@ onMounted(async () => {
   &--env:not(.store-card--clickable):hover {
     border-color: var(--td-component-stroke);
     box-shadow: none;
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    font: inherit;
+    text-align: center;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
   }
 }
 
@@ -1032,12 +1078,14 @@ onMounted(async () => {
 
 
 .empty-stores {
-  padding: 48px 32px;
+  padding: 64px 0;
   text-align: center;
-  color: var(--td-text-color-placeholder);
-  border: 1px dashed var(--td-component-stroke);
-  border-radius: 8px;
-  font-size: 14px;
+
+  :deep(.t-empty__description) {
+    font-size: 14px;
+    color: var(--td-text-color-placeholder);
+    margin-bottom: 16px;
+  }
 }
 
 // ---- 抽屉内容 — 与 ModelEditorDialog 同款约定 ----

@@ -21,16 +21,17 @@ const (
 
 // VolcengineEmbedder implements text vectorization using Volcengine Ark multimodal embedding API
 type VolcengineEmbedder struct {
-	apiKey               string
-	baseURL              string
-	modelName            string
-	truncatePromptTokens int
-	dimensions           int
-	modelID              string
-	httpClient           *http.Client
-	timeout              time.Duration
-	maxRetries           int
-	customHeaders        map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	truncatePromptTokens      int
+	dimensions                int
+	modelID                   string
+	httpClient                *http.Client
+	timeout                   time.Duration
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
@@ -39,10 +40,15 @@ func (e *VolcengineEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+func (e *VolcengineEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
+}
+
 // VolcengineEmbedRequest represents a Volcengine Ark multimodal embedding request
 type VolcengineEmbedRequest struct {
-	Model string                   `json:"model"`
-	Input []VolcengineInputContent `json:"input"`
+	Model      string                   `json:"model"`
+	Input      []VolcengineInputContent `json:"input"`
+	Dimensions int                      `json:"dimensions,omitempty"`
 }
 
 // VolcengineInputContent represents a single input item for Volcengine
@@ -112,15 +118,15 @@ func NewVolcengineEmbedder(apiKey, baseURL, modelName string,
 
 	timeout := 60 * time.Second
 
-	client := &http.Client{
-		Timeout: timeout,
+	if err := validateEmbeddingBaseURL(baseURL); err != nil {
+		return nil, err
 	}
 
 	return &VolcengineEmbedder{
 		apiKey:               apiKey,
 		baseURL:              baseURL,
 		modelName:            modelName,
-		httpClient:           client,
+		httpClient:           newEmbeddingHTTPClient(timeout),
 		truncatePromptTokens: truncatePromptTokens,
 		EmbedderPooler:       pooler,
 		dimensions:           dimensions,
@@ -202,6 +208,9 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 			Model: e.modelName,
 			Input: input,
 		}
+		if e.supportsDimensionsParam() {
+			reqBody.Dimensions = e.dimensions
+		}
 
 		jsonData, err := json.Marshal(reqBody)
 		if err != nil {
@@ -248,6 +257,10 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 // GetModelName returns the model name
 func (e *VolcengineEmbedder) GetModelName() string {
 	return e.modelName
+}
+
+func (e *VolcengineEmbedder) supportsDimensionsParam() bool {
+	return e.supportsDimensionOverride && e.dimensions > 0
 }
 
 // GetDimensions returns the vector dimensions

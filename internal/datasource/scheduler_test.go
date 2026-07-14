@@ -53,6 +53,10 @@ func (r *fakeDataSourceRepo) Update(_ context.Context, ds *types.DataSource) err
 	return nil
 }
 
+func (r *fakeDataSourceRepo) UpdateSyncState(ctx context.Context, ds *types.DataSource) error {
+	return r.Update(ctx, ds)
+}
+
 func (r *fakeDataSourceRepo) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -117,6 +121,10 @@ func (r *fakeSyncLogRepo) Update(_ context.Context, log *types.SyncLog) error {
 	return nil
 }
 
+func (r *fakeSyncLogRepo) UpdateResult(ctx context.Context, log *types.SyncLog) error {
+	return r.Update(ctx, log)
+}
+
 func (r *fakeSyncLogRepo) CancelPendingByDataSource(_ context.Context, dsID string) error {
 	return nil
 }
@@ -138,11 +146,19 @@ func (r *fakeSyncLogRepo) HasRunningSync(_ context.Context, dsID string) (bool, 
 
 // fakeTaskEnqueuer counts how many tasks are enqueued.
 type fakeTaskEnqueuer struct {
-	count atomic.Int64
+	count     atomic.Int64
+	lastQueue atomic.Value
 }
 
 func (e *fakeTaskEnqueuer) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	e.count.Add(1)
+	for _, opt := range opts {
+		if opt.Type() == asynq.QueueOpt {
+			if queue, ok := opt.Value().(string); ok {
+				e.lastQueue.Store(queue)
+			}
+		}
+	}
 	return &asynq.TaskInfo{ID: "task-fake"}, nil
 }
 
@@ -201,6 +217,9 @@ func TestScheduler_CronFires(t *testing.T) {
 
 	if enqueuer.count.Load() == 0 {
 		t.Error("expected at least 1 enqueue, got 0")
+	}
+	if queue, _ := enqueuer.lastQueue.Load().(string); queue != types.QueueSync {
+		t.Errorf("scheduled sync queue = %q, want %q", queue, types.QueueSync)
 	}
 }
 

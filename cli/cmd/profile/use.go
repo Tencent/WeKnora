@@ -2,7 +2,6 @@ package profilecmd
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -99,7 +98,7 @@ func notFoundError(name string, cfg *config.Config) error {
 		}
 	}
 	keys := profileKeys(cfg.Profiles)
-	candidate := closestMatch(name, keys)
+	candidate := cmdutil.SuggestOne(name, keys)
 	var hint string
 	if candidate != "" && candidate != name {
 		hint = fmt.Sprintf("did you mean: %q?", candidate)
@@ -119,54 +118,4 @@ func profileKeys(m map[string]config.Profile) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-// closestMatch returns the candidate with min levenshtein distance ≤ 2,
-// or "" if none qualifies. Ties broken by lexicographic order so the hint
-// is deterministic across map-iteration orderings (Go randomizes range over
-// map; without this, did-you-mean output is flaky for equally-close
-// candidates).
-func closestMatch(target string, candidates []string) string {
-	sorted := append([]string(nil), candidates...)
-	sort.Strings(sorted)
-	best := ""
-	bestD := 3
-	for _, c := range sorted {
-		d := levenshtein(target, c)
-		if d < bestD {
-			bestD = d
-			best = c
-		}
-	}
-	if bestD > 2 {
-		return ""
-	}
-	return best
-}
-
-func levenshtein(a, b string) int {
-	la, lb := len(a), len(b)
-	if la == 0 {
-		return lb
-	}
-	if lb == 0 {
-		return la
-	}
-	prev := make([]int, lb+1)
-	curr := make([]int, lb+1)
-	for j := 0; j <= lb; j++ {
-		prev[j] = j
-	}
-	for i := 1; i <= la; i++ {
-		curr[0] = i
-		for j := 1; j <= lb; j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			curr[j] = min(curr[j-1]+1, prev[j]+1, prev[j-1]+cost)
-		}
-		prev, curr = curr, prev
-	}
-	return prev[lb]
 }

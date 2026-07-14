@@ -60,3 +60,16 @@ func (r *customAgentRepository) UpdateAgent(ctx context.Context, agent *types.Cu
 func (r *customAgentRepository) DeleteAgent(ctx context.Context, id string, tenantID uint64) error {
 	return r.db.WithContext(ctx).Where("id = ? AND tenant_id = ?", id, tenantID).Delete(&types.CustomAgent{}).Error
 }
+
+// CountByModelID counts active agents whose config references modelID.
+func (r *customAgentRepository) CountByModelID(
+	ctx context.Context, tenantID uint64, modelID string,
+) (int64, error) {
+	var count int64
+	query := r.db.WithContext(ctx).
+		Model(&types.CustomAgent{}).
+		Where("tenant_id = ?", tenantID)
+	query = scopeCustomAgentsByModelID(query, modelID)
+	err := query.Count(&count).Error
+	return count, err
+}

@@ -16,12 +16,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // isValidFileType checks if a file type is supported
 func isValidFileType(filename string) bool {
 	switch strings.ToLower(getFileType(filename)) {
-	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt", "json",
+	case "pdf", "txt", "docx", "doc", "epub", "mhtml", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt", "json",
 		"mp3", "wav", "m4a", "flac", "ogg":
 		return true
 	default:
@@ -336,7 +337,10 @@ func IsVideoType(fileType string) bool {
 // the function resolves the value from Content-Disposition / URL path and writes it back.
 // It does NOT perform SSRF validation — callers are responsible for that.
 func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, payloadFileType *string) ([]byte, error) {
-	httpClient := &http.Client{Timeout: 60 * time.Second}
+	httpClient := secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+		Timeout:      60 * time.Second,
+		MaxRedirects: 10,
+	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request for file URL: %w", err)

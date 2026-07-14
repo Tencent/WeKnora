@@ -321,3 +321,42 @@ body B.`
 		}
 	}
 }
+
+// TestSplitByHeadings_DeepSubHeadingInLargeSection covers issue #1674: when a
+// shallow heading level repeats and therefore becomes the dominant split
+// backbone, a long section split into sub-chunks must still carry the deep
+// `###`/`####` heading that defines a sub-chunk's meaning, not just the
+// section-level header. The marker line sits far below its deep heading, in a
+// later sub-chunk that has no heading of its own.
+func TestSplitByHeadings_DeepSubHeadingInLargeSection(t *testing.T) {
+	filler := strings.Repeat("clause body sentence that pads the section out. ", 20)
+	doc := "# Standard XYZ\n" +
+		"## Preface\n" + filler + "\n\n" +
+		"## 5 Classification\n" + filler + "\n\n" +
+		"### 5.9 Grade Nine\n" + filler + "\n\n" +
+		"#### 5.9.2 Clause Series\n" + filler + "\n\n" +
+		"the item users search for is MARKER_ITEM_23 graded here.\n\n" +
+		"## Appendix A\n" + filler + "\n\n" +
+		"## Appendix B\n" + filler + "\n\n" +
+		"## Appendix C\n" + filler
+
+	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 0, Separators: []string{". "}}
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
+
+	var marker *Chunk
+	for i := range chunks {
+		if strings.Contains(chunks[i].Content, "MARKER_ITEM_23") {
+			marker = &chunks[i]
+			break
+		}
+	}
+	if marker == nil {
+		t.Fatal("no chunk contains the marker line")
+	}
+	if !strings.Contains(marker.ContextHeader, "#### 5.9.2 Clause Series") {
+		t.Errorf("marker chunk lost its deep sub-heading in the breadcrumb:\nContextHeader=%q", marker.ContextHeader)
+	}
+	if !strings.Contains(marker.ContextHeader, "## 5 Classification") {
+		t.Errorf("marker chunk lost its section heading in the breadcrumb:\nContextHeader=%q", marker.ContextHeader)
+	}
+}

@@ -136,8 +136,11 @@ Server-side ingestion knobs:
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "Ingest a remote URL into the resolved knowledge base. KB resolved via --kb flag, WEKNORA_KB_ID env, or project link. Emits the created Knowledge object with its id.",
-		RequiredFlags: []string{"<url> (positional)"},
-		Output:        "envelope.data is the created Knowledge object with id, knowledge_base_id, source, parse_status",
+		RequiredFlags: []string{"<url> (positional)", "--kb (or WEKNORA_KB_ID / project link)"},
+		Examples: []string{
+			`weknora doc fetch https://example.com/whitepaper.pdf --kb kb_eng`,
+		},
+		Output: "envelope.data is the created Knowledge object with id, knowledge_base_id, source, parse_status",
 	})
 	return cmd
 }

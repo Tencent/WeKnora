@@ -57,6 +57,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					VectorThreshold:       chatManage.VectorThreshold,
 					KeywordThreshold:      expKwTh,
 					MatchCount:            expTopK,
+					TagIDs:                t.TagIDs,
 					DisableVectorMatch:    false,
 					DisableKeywordsMatch:  false,
 					SkipContextEnrichment: true, // Pipeline handles context assembly in merge stage

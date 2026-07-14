@@ -116,6 +116,11 @@ type KnowledgeBaseService interface {
 	//   - Possible errors such as not existing, insufficient permissions, etc.
 	CopyKnowledgeBase(ctx context.Context, src string, dst string) (*types.KnowledgeBase, *types.KnowledgeBase, error)
 
+	// DuplicateKnowledgeBase creates a new settings-only knowledge base duplicate.
+	// It does not copy knowledge entries, chunks, FAQ rows, wiki pages, indexes,
+	// data sources, shares, pins, or task state. A new UUID is always generated.
+	DuplicateKnowledgeBase(ctx context.Context, src string) (*types.KnowledgeBase, error)
+
 	// GetRepository gets the knowledge base repository
 	// Parameters:
 	//   - ctx: Context with authentication and request information
@@ -216,6 +221,10 @@ type KnowledgeBaseRepository interface {
 	// scope on KnowledgeBase; implementations MUST NOT add an explicit
 	// `deleted_at IS NULL` predicate (avoids divergence with the auto-scope).
 	CountByVectorStoreID(ctx context.Context, db *gorm.DB, tenantID uint64, storeID string) (int64, error)
+
+	// CountByModelID counts active KBs in the tenant that reference the given
+	// model ID in any model-binding field (embedding, summary, VLM, ASR, etc.).
+	CountByModelID(ctx context.Context, tenantID uint64, modelID string) (int64, error)
 	// SetUserKBPin inserts or removes a row in user_kb_pins for the given
 	// (tenant, user, kb) triple. Returns the resulting pinned_at (nil when
 	// pinned=false) and an error. The tenant_id is captured to support

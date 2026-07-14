@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/redis/go-redis/v9"
 )
@@ -22,10 +23,11 @@ func NewRedisStreamManager(redisAddr, redisUsername, redisPassword string,
 	redisDB int, prefix string, ttl time.Duration,
 ) (*RedisStreamManager, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr:     redisAddr,
-		Username: redisUsername,
-		Password: redisPassword,
-		DB:       redisDB,
+		Addr:      redisAddr,
+		Username:  redisUsername,
+		Password:  redisPassword,
+		DB:        redisDB,
+		TLSConfig: common.RedisTLSConfig(),
 	})
 
 	// Verify connection

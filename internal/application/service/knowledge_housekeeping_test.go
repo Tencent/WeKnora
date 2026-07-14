@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     attempt         INTEGER     NOT NULL DEFAULT 1,
     span_id         VARCHAR(64) NOT NULL,
     parent_span_id  VARCHAR(64),
-    name            VARCHAR(64) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
     kind            VARCHAR(16) NOT NULL,
     status          VARCHAR(16) NOT NULL,
     input           TEXT,
@@ -118,6 +118,18 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 		return false, f.err
 	}
 	return f.queued[knowledgeID], nil
+}
+
+func (f fakeTaskInspector) QueueStats(
+	_ context.Context,
+) ([]types.QueueStat, bool, error) {
+	return nil, false, nil
+}
+
+func (f fakeTaskInspector) WorkerServerStats(
+	_ context.Context,
+) ([]types.WorkerServerStat, bool, error) {
+	return nil, false, nil
 }
 
 func newHousekeepingSvcForTest(db *gorm.DB) *HousekeepingService {

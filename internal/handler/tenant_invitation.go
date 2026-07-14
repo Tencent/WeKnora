@@ -219,13 +219,18 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 	}
 
 	usersByID := h.hydrateUsers(c, rows)
+	showShareLinks := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleOwner)
 	resp := make([]types.TenantInvitationResponse, 0, len(rows))
 	for _, inv := range rows {
 		// Within the tenant view we don't bother hydrating tenant name
 		// (the caller already knows the tenant). Pass an empty map.
-		// Use ...WithLink so management UI can re-display invite_url
-		// for pending share-link rows (re-copy without revoking).
-		resp = append(resp, h.projectInvitationWithLink(inv, usersByID, nil))
+		// Share-link URLs embed the registration token — only Owners may
+		// re-copy them; other roles see metadata without invite_url.
+		if showShareLinks {
+			resp = append(resp, h.projectInvitationWithLink(inv, usersByID, nil))
+		} else {
+			resp = append(resp, projectInvitation(inv, usersByID, nil))
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -483,6 +488,19 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 			c.Error(apperrors.NewInternalServerError("failed to accept invitation").WithDetails(err.Error()))
 		}
 		return
+	}
+
+	// A tenantless account adopts the first accepted invitation as its
+	// default tenant. Membership remains the authorization source; TenantID
+	// only supplies the login/navigation default.
+	if user, userErr := h.userService.GetUserByID(ctx, caller); userErr == nil && user != nil && user.TenantID == 0 {
+		user.TenantID = member.TenantID
+		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
+			logger.Errorf(ctx, "AcceptMyInvitation failed to set default tenant: user=%s tenant=%d err=%v",
+				caller, member.TenantID, updateErr)
+			c.Error(apperrors.NewInternalServerError("invitation accepted but default tenant update failed").WithDetails(updateErr.Error()))
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

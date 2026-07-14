@@ -31,21 +31,12 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	})
 
 	// Build messages with all context
-	language := types.LanguageNameFromContext(ctx)
-	systemPrompt := BuildSystemPromptWithOptions(
-		e.knowledgeBasesInfo,
-		e.config.WebSearchEnabled,
-		e.selectedDocs,
-		&BuildSystemPromptOptions{
-			Language: language,
-			Config:   e.appConfig,
-		},
-		e.systemPromptTemplate,
-	)
+	systemPrompt := e.buildSystemPrompt(ctx)
+	userTurn := e.RenderUserTurnContent(sessionID, query)
 
 	messages := []chat.Message{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: query},
+		{Role: "user", Content: userTurn},
 	}
 
 	// Add all tool call results as context
@@ -72,7 +63,7 @@ User question: %s
 
 Requirements:
 1. Answer based on the actually retrieved content
-2. Clearly cite information sources (chunk_id, document name)
+2. Cite sources by document title or name; never expose chunk_id, knowledge_id, tool names, or other internal identifiers
 3. Organize the answer in a structured format
 4. If information is insufficient, honestly state so
 5. IMPORTANT: Respond in the same language as the user's question

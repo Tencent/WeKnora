@@ -1,0 +1,31 @@
+// Shared surface tokens for datasource list cards and drawer pickers.
+
+.ds-surface-card() {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.ds-surface-card--interactive() {
+  .ds-surface-card();
+
+  &:hover:not(.disabled):not(:disabled),
+  &:focus-visible {
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    outline: none;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+}
+
+// Light inset panel for grouped lists — no outer stroke.
+.ds-inset-panel() {
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+  overflow: hidden;
+}

@@ -144,6 +144,17 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				mu.Unlock()
 				return
 			}
+			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, chunk.KnowledgeID, chunk.KnowledgeBaseID, t.knowledgeService)
+			if scopeErr != nil || !allowed {
+				mu.Lock()
+				if scopeErr != nil {
+					results["faq:"+id] = &docInfo{err: fmt.Errorf("failed to validate FAQ scope: %v", scopeErr)}
+				} else {
+					results["faq:"+id] = &docInfo{err: fmt.Errorf("FAQ entry %s is not within the current @mention scope", id)}
+				}
+				mu.Unlock()
+				return
+			}
 			var meta *types.FAQChunkMetadata
 			if chunk.ChunkType == types.ChunkTypeFAQ {
 				meta, _ = chunk.FAQMetadata()
@@ -175,6 +186,17 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				mu.Lock()
 				results[id] = &docInfo{
 					err: fmt.Errorf("knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
+				}
+				mu.Unlock()
+				return
+			}
+			allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, knowledge.ID, knowledge.KnowledgeBaseID, t.knowledgeService)
+			if scopeErr != nil || !allowed {
+				mu.Lock()
+				if scopeErr != nil {
+					results[id] = &docInfo{err: fmt.Errorf("failed to validate document scope: %v", scopeErr)}
+				} else {
+					results[id] = &docInfo{err: fmt.Errorf("document %s is not within the current @mention scope", knowledge.ID)}
 				}
 				mu.Unlock()
 				return

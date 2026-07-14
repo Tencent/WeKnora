@@ -24,7 +24,7 @@ import (
 // Local in-memory only — fine for typical deployments since both
 // endpoints handle low absolute volumes; if/when WeKnora horizontally
 // scales the auth surface, swap to the Redis-backed limiter in
-// internal/im/ratelimit.go (kept lowercase / package-private today).
+// internal/ratelimit (shared with IM + embed surfaces).
 
 // publicAuthRateLimitWindow is the rolling window length per IP.
 const publicAuthRateLimitWindow = 60 * time.Second

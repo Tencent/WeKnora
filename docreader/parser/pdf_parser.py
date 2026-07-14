@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import statistics
+import threading
 
 from docreader.config import CONFIG
 from docreader.models.document import Document
@@ -29,6 +30,17 @@ from docreader.parser.base_parser import BaseParser
 from docreader.parser.concurrency import parser_worker_limit
 
 logger = logging.getLogger(__name__)
+
+# pdfium (the C library behind pypdfium2) is process-global and NOT
+# thread-safe: two gRPC worker threads parsing PDFs at the same time corrupt
+# its shared state and can deadlock the whole process indefinitely (observed
+# as requests stuck in "Parsing document with PDFParser" forever, taking down
+# all subsequent uploads too). Every pdfium touch — text extraction, page
+# rendering, image extraction — must be serialized behind this single global
+# lock. Concurrent PDF uploads are then processed one at a time instead of
+# hanging. Non-PDF parsers (docx, xlsx, ...) are unaffected and still run
+# concurrently across the gRPC thread pool.
+_PDFIUM_LOCK = threading.Lock()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -114,6 +126,13 @@ MIN_CHART_REGION_CHARS = _env_int("DOCREADER_PDF_MIN_CHART_REGION_CHARS", 18)
 MIN_CHART_REGION_AREA_RATIO = _env_float("DOCREADER_PDF_MIN_CHART_REGION_AREA", 0.015)
 MAX_CHART_REGION_AREA_RATIO = _env_float("DOCREADER_PDF_MAX_CHART_REGION_AREA", 0.42)
 MAX_FIGURE_HEIGHT_RATIO = _env_float("DOCREADER_PDF_MAX_FIGURE_HEIGHT_RATIO", 0.38)
+
+# --- Force scanned mode ------------------------------------------------------
+# When True, ALL PDF pages are rendered as images and routed through OCR/VLM,
+# bypassing the automatic text/scanned page classification. Useful for PDFs
+# with a low-quality or misleading text layer (web-print, scanned, image-heavy).
+# Can be overridden per-upload via parser_engine_overrides.pdf_force_scanned.
+FORCE_SCANNED_PDF = _env_bool("DOCREADER_PDF_FORCE_SCANNED", False)
 
 # pdfium / Adobe text layers often emit U+FFFE for missing hyphenation or ligatures.
 _PDF_ARTIFACT_RE = re.compile(r"[\u00ad\u200b-\u200f\ufeff\ufffe\uffff]")
@@ -1306,7 +1325,11 @@ class PDFScannedParser(BaseParser):
         )
 
         try:
-            with parser_worker_limit("pdf_render", CONFIG.pdf_render_max_workers):
+            # pdfium lock first, then the render worker limit — same order as
+            # PDFParser._route so the two never deadlock against each other.
+            with _PDFIUM_LOCK, parser_worker_limit(
+                "pdf_render", CONFIG.pdf_render_max_workers
+            ):
                 pdf = pdfium.PdfDocument(content)
                 try:
                     page_count = len(pdf)
@@ -1354,9 +1377,45 @@ class PDFParser(BaseParser):
 
     Hybrid documents interleave both in reading order. On any unexpected error
     the parser falls back to rendering all pages as images (safe last resort).
+
+    Force-scanned mode (``pdf_force_scanned=true`` override or
+    ``DOCREADER_PDF_FORCE_SCANNED=true`` env) skips classification and
+    renders every page as an image.
     """
 
+    def __init__(self, file_name: str = "", file_type=None, **kwargs):
+        # Capture per-upload override before BaseParser consumes kwargs.
+        raw = kwargs.pop("pdf_force_scanned", None)
+        super().__init__(file_name=file_name, file_type=file_type, **kwargs)
+        # Priority: per-upload override > global env > default (False).
+        if raw is not None:
+            self._force_scanned = str(raw).strip().lower() in {
+                "1", "true", "yes", "y", "on",
+            }
+        else:
+            self._force_scanned = FORCE_SCANNED_PDF
+
     def parse_into_text(self, content: bytes) -> Document:
+        # Force-scanned short-circuit: render every page as an image.
+        if self._force_scanned:
+            logger.info(
+                "PDFParser: force scanned mode enabled for %s",
+                self.file_name,
+            )
+            doc = PDFScannedParser(
+                file_name=self.file_name, file_type=self.file_type
+            ).parse_into_text(content)
+
+            # Align metadata fields with automatic scanned route
+            page_count = doc.metadata.get("page_count", 0)
+            doc.metadata.update({
+                "scanned_page_count": page_count,
+                "text_page_count": 0,
+                "embedded_image_count": 0,
+                "vector_figure_count": 0,
+            })
+            return doc
+
         try:
             return self._route(content)
         except Exception:
@@ -1370,6 +1429,14 @@ class PDFParser(BaseParser):
             ).parse_into_text(content)
 
     def _route(self, content: bytes) -> Document:
+        # Serialize all pdfium work: see _PDFIUM_LOCK. Holding it for the whole
+        # route (both the text pass and the render pass) is what prevents the
+        # concurrent-upload deadlock; the trailing markdown assembly is cheap
+        # pure-Python so keeping it inside the lock costs nothing meaningful.
+        with _PDFIUM_LOCK:
+            return self._route_locked(content)
+
+    def _route_locked(self, content: bytes) -> Document:
         import pypdfium2 as pdfium
         import pypdfium2.raw as pdfium_r
 

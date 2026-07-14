@@ -98,12 +98,20 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.
 func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) *gorm.DB {
-	if filter.TagID != "" {
-		query = query.Where("tag_id = ?", filter.TagID)
+	if len(filter.TagIDs) > 0 {
+		query = query.Where(
+			"knowledges.id IN (SELECT knowledge_id FROM knowledge_tag_relations WHERE tag_id IN (?))",
+			filter.TagIDs,
+		)
 	}
 	if filter.Keyword != "" {
-		escaped := escapeLikeKeyword(filter.Keyword)
-		query = query.Where("(file_name LIKE ? OR title LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+		// Case-insensitive (LOWER … LIKE LOWER) so keyword search matches
+		// regardless of the stored casing — consistent with the sibling
+		// LOWER() filters in this file and with the client-side `search kb`
+		// / `search sessions` filters. Plain LIKE is case-sensitive in
+		// Postgres, which surprised callers searching with lowercase.
+		escaped := strings.ToLower(escapeLikeKeyword(filter.Keyword))
+		query = query.Where("(LOWER(file_name) LIKE ? OR LOWER(title) LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
 	}
 	// FileType and Source share the same special-case routing onto `type` for
 	// the "manual" / "url" values, so callers can pick either control.
@@ -322,6 +330,26 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }
 
+// UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible
+// to normal queries and have not moved out of the transient deleting state.
+func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
+	ctx context.Context,
+	id string,
+	values map[string]interface{},
+) (bool, error) {
+	if len(values) == 0 {
+		return false, nil
+	}
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("id = ? AND parse_status = ?", id, types.ParseStatusDeleting).
+		Updates(values)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // FinalizeSubtask atomically decrements pending_subtasks_count and, when
 // the counter reaches zero while parse_status is still 'finalizing',
 // flips the row to 'completed' in the same statement so concurrent
@@ -507,10 +535,10 @@ func (r *knowledgeRepository) SearchKnowledge(
 		Where("knowledge_bases.type = ?", types.KnowledgeBaseTypeDocument).
 		Where("knowledges.deleted_at IS NULL")
 
-	// If keyword is provided, filter by file_name or title
+	// If keyword is provided, filter by file_name or title (case-insensitive).
 	if keyword != "" {
-		escaped := escapeLikeKeyword(keyword)
-		query = query.Where("(knowledges.file_name LIKE ? OR knowledges.title LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+		escaped := strings.ToLower(escapeLikeKeyword(keyword))
+		query = query.Where("(LOWER(knowledges.file_name) LIKE ? OR LOWER(knowledges.title) LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
 	}
 
 	// If fileTypes is provided, filter by file extension or type
@@ -601,9 +629,9 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 	keyword string,
 	offset, limit int,
 	fileTypes []string,
-) ([]*types.Knowledge, bool, error) {
+) ([]*types.Knowledge, bool, int64, error) {
 	if len(scopes) == 0 {
-		return nil, false, nil
+		return nil, false, 0, nil
 	}
 
 	type KnowledgeWithKBName struct {
@@ -628,8 +656,8 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 		Where("knowledges.deleted_at IS NULL")
 
 	if keyword != "" {
-		escaped := escapeLikeKeyword(keyword)
-		query = query.Where("(knowledges.file_name LIKE ? OR knowledges.title LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+		escaped := strings.ToLower(escapeLikeKeyword(keyword))
+		query = query.Where("(LOWER(knowledges.file_name) LIKE ? OR LOWER(knowledges.title) LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
 	}
 
 	if len(fileTypes) > 0 {
@@ -686,13 +714,18 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 		}
 	}
 
+	var total int64
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, false, 0, err
+	}
+
 	var results []KnowledgeWithKBName
 	err := query.Order("knowledges.created_at DESC").
 		Offset(offset).
 		Limit(limit + 1).
 		Scan(&results).Error
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 
 	hasMore := len(results) > limit
@@ -706,18 +739,25 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 		k.KnowledgeBaseName = r.KnowledgeBaseName
 		knowledges[i] = &k
 	}
-	return knowledges, hasMore, nil
+	return knowledges, hasMore, total, nil
 }
 
-// ListIDsByTagID returns all knowledge IDs that have the specified tag ID
-func (r *knowledgeRepository) ListIDsByTagID(
+// ListIDsByTagIDs returns all knowledge IDs that have any of the specified tag IDs (OR semantics)
+func (r *knowledgeRepository) ListIDsByTagIDs(
 	ctx context.Context,
 	tenantID uint64,
-	kbID, tagID string,
+	kbID string,
+	tagIDs []string,
 ) ([]string, error) {
+	if len(tagIDs) == 0 {
+		return nil, nil
+	}
 	var ids []string
 	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ?", tenantID, kbID, tagID).
-		Pluck("id", &ids).Error
+		Joins("JOIN knowledge_tag_relations ktr ON knowledges.id = ktr.knowledge_id").
+		Where("knowledges.tenant_id = ? AND knowledges.knowledge_base_id = ? AND ktr.tag_id IN (?)",
+			tenantID, kbID, tagIDs).
+		Distinct("knowledges.id").
+		Pluck("knowledges.id", &ids).Error
 	return ids, err
 }

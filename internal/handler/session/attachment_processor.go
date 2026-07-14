@@ -288,7 +288,7 @@ func isValidFileType(fileName string) bool {
 
 	supportedTypes := []string{
 		// documents
-		"docx", "doc", "pdf", "ppt", "pptx",
+		"docx", "doc", "pdf", "ppt", "pptx", "epub", "mhtml",
 		// spreadsheets
 		"xlsx", "xls",
 		// text / markup

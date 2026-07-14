@@ -125,3 +125,20 @@ func TestParseThinkingOverride(t *testing.T) {
 	assert.Nil(t, parseThinkingOverride(map[string]string{}))
 	assert.Nil(t, parseThinkingOverride(map[string]string{ExtraConfigThinkingControl: ""}))
 }
+
+func TestEffectiveThinkingControl(t *testing.T) {
+	assert.Equal(t, "enable_thinking", EffectiveThinkingControl(&ChatConfig{
+		Provider:  "aliyun",
+		ModelName: "qwen3-32b",
+	}))
+	assert.Equal(t, "chat_template_kwargs", EffectiveThinkingControl(&ChatConfig{
+		Provider:    "generic",
+		ModelName:   "qwen3",
+		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "chat_template_kwargs"},
+	}))
+	assert.Equal(t, "none", EffectiveThinkingControl(&ChatConfig{
+		Provider:    "generic",
+		ModelName:   "qwen3",
+		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "none"},
+	}))
+}

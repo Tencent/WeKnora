@@ -28,8 +28,9 @@ const defaultSearxngTimeout = 12 * time.Second
 // validated with utils.ValidateURLForSSRF; private/loopback hosts must be added
 // to the SSRF_WHITELIST environment variable.
 type SearxngProvider struct {
-	client  *http.Client
-	baseURL string
+	client           *http.Client
+	baseURL          string
+	lastUnresponsive [][]string
 }
 
 // ValidateSearxngBaseURL validates a SearXNG instance URL: must be a non-empty,
@@ -76,6 +77,15 @@ func NewSearxngProvider(params types.WebSearchProviderParameters) (interfaces.We
 
 // Name returns the provider name.
 func (p *SearxngProvider) Name() string { return "searxng" }
+
+// EmptyResultDiagnostics explains why the most recent search returned no
+// usable results. Used by the settings "test connection" flow.
+func (p *SearxngProvider) EmptyResultDiagnostics() string {
+	if detail := formatUnresponsiveEngines(p.lastUnresponsive); detail != "" {
+		return detail + "; check that upstream search engines can reach the internet"
+	}
+	return "verify the instance URL is reachable and JSON format is enabled in settings.yml"
+}
 
 // Search performs a metasearch query against the configured SearXNG instance.
 // SearXNG must have `search.formats: [json]` enabled in settings.yml.
@@ -124,8 +134,10 @@ func (p *SearxngProvider) Search(
 
 	var data searxngResponse
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		p.lastUnresponsive = nil
 		return nil, fmt.Errorf("failed to decode SearXNG response (ensure JSON format is enabled in settings.yml): %w", err)
 	}
+	p.lastUnresponsive = data.UnresponsiveEngines
 
 	results := make([]*types.WebSearchResult, 0, maxResults)
 	for _, r := range data.Results {

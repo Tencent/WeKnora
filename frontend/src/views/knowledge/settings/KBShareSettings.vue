@@ -309,11 +309,11 @@ watch(() => props.kbId, async (newKbId) => {
 <style scoped lang="less">
 .section-content {
   .section-header {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
 
   .section-title {
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
     font-family: var(--app-font-family);
     font-size: 20px;
     font-weight: 600;

@@ -116,6 +116,19 @@ const (
 	// reader can distinguish a real revoke from a noop attempt.
 	// TenantID=0 because the change is system-scope.
 	AuditActionSystemAdminRevoked AuditAction = "system.admin_revoked"
+
+	// AuditActionSystemUserPasswordReset fires when a SystemAdmin replaces
+	// another user's local password. Details identify the target and record
+	// session revocation, but never contain the old or new password.
+	AuditActionSystemUserPasswordReset AuditAction = "system.user_password_reset"
+
+	// Runtime queue mutations are privileged SystemAdmin actions. Retrying an
+	// archived task can repeat its original side effects; deleting one removes
+	// the Redis failure record. Both must leave a platform audit trail.
+	AuditActionSystemQueueTaskRetried   AuditAction = "system.queue_task_retried"
+	AuditActionSystemQueueTaskDeleted   AuditAction = "system.queue_task_deleted"
+	AuditActionSystemQueueTaskRunNow    AuditAction = "system.queue_task_run_now"
+	AuditActionSystemQueueTaskCancelled AuditAction = "system.queue_task_cancelled"
 )
 
 // AuditOutcome distinguishes successful mutations from middleware-level

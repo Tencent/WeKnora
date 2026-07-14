@@ -4,11 +4,11 @@
       <div v-for="(step, index) in data.steps" :key="step.id || index" class="step-item" :class="`status-${step.status}`">
         <div class="step-checkbox" :class="{ 'checked': step.status === 'completed', 'in-progress': step.status === 'in_progress' }">
           <svg v-if="step.status === 'completed'" width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="2" width="12" height="12" rx="2" fill="#07C05F"/>
-            <path d="M5 8L7 10L11 6" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="2" y="2" width="12" height="12" rx="2" fill="currentColor" />
+            <path d="M5 8L7 10L11 6" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="2" width="12" height="12" rx="2" stroke="#d1d5db" stroke-width="1.5" fill="none"/>
+            <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5" fill="none" />
           </svg>
         </div>
         <span class="step-description" :class="{ 'completed': step.status === 'completed' }">
@@ -79,21 +79,17 @@ const props = defineProps<Props>();
   display: flex;
   align-items: center;
   justify-content: center;
-  
+  color: var(--td-text-color-placeholder);
+
   &.checked {
-    svg {
-      rect {
-        fill: var(--td-brand-color);
-      }
-    }
+    color: var(--embed-primary, var(--td-brand-color));
   }
-  
+
   &.in-progress {
-    svg {
-      rect {
-        stroke: var(--td-brand-color);
-        stroke-width: 2;
-      }
+    color: var(--embed-primary, var(--td-brand-color));
+
+    svg rect {
+      stroke-width: 2;
     }
   }
 }

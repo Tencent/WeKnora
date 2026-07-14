@@ -98,6 +98,8 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		"PreviousSlugs":       prevSlugsText,
 		"Granularity":         string(granularity),
 		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
+		"CustomInstructions":  batchCtx.ExtractionInstructions,
+		"InstructionScope":    "wiki_extraction",
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
@@ -279,6 +281,7 @@ func (s *wikiIngestService) classifyChunkCitations(
 	candidatesXML string,
 	chunks []*types.Chunk,
 	lang string,
+	batchCtx *WikiBatchContext,
 ) (map[string][]string, []newSlugFromCitation, int) {
 	batches := splitChunksIntoCitationBatches(chunks)
 	if len(batches) == 0 || strings.TrimSpace(candidatesXML) == "" {

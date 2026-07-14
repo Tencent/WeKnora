@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/assets"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -110,9 +111,10 @@ type KBModelConfigRequest struct {
 		// from "field present with empty/zero value" (clear / disable).
 		// Without that distinction, users could set strategy="auto" once
 		// but never reset it back to legacy / unset.
-		Strategy   *string   `json:"strategy,omitempty"`
-		TokenLimit *int      `json:"tokenLimit,omitempty"`
-		Languages  *[]string `json:"languages,omitempty"`
+		Strategy                  *string   `json:"strategy,omitempty"`
+		TokenLimit                *int      `json:"tokenLimit,omitempty"`
+		Languages                 *[]string `json:"languages,omitempty"`
+		TableMetadataInstructions *string   `json:"tableMetadataInstructions,omitempty"`
 	} `json:"documentSplitting"`
 
 	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
@@ -125,17 +127,19 @@ type KBModelConfigRequest struct {
 
 	// 知识图谱配置
 	NodeExtract struct {
-		Enabled   bool                  `json:"enabled"`
-		Text      string                `json:"text"`
-		Tags      []string              `json:"tags"`
-		Nodes     []types.GraphNode     `json:"nodes"`
-		Relations []types.GraphRelation `json:"relations"`
+		Enabled            bool                  `json:"enabled"`
+		Text               string                `json:"text"`
+		Tags               []string              `json:"tags"`
+		Nodes              []types.GraphNode     `json:"nodes"`
+		Relations          []types.GraphRelation `json:"relations"`
+		CustomInstructions string                `json:"customInstructions"`
 	} `json:"nodeExtract"`
 
 	// 问题生成配置
 	QuestionGeneration struct {
-		Enabled       bool `json:"enabled"`
-		QuestionCount int  `json:"questionCount"`
+		Enabled            bool   `json:"enabled"`
+		QuestionCount      int    `json:"questionCount"`
+		CustomInstructions string `json:"customInstructions"`
 	} `json:"questionGeneration"`
 }
 
@@ -343,12 +347,19 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if req.DocumentSplitting.Languages != nil {
 		kb.ChunkingConfig.Languages = *req.DocumentSplitting.Languages
 	}
+	if req.DocumentSplitting.TableMetadataInstructions != nil {
+		kb.ChunkingConfig.TableMetadataInstructions = strings.TrimSpace(*req.DocumentSplitting.TableMetadataInstructions)
+	}
 
 	// 更新多模态配置
 	if req.Multimodal.Enabled {
 		// VLM model already set above
 	} else {
 		kb.VLMConfig.ModelID = ""
+	}
+	if req.VLMConfig != nil {
+		kb.VLMConfig.DescriptionLanguage = strings.TrimSpace(req.VLMConfig.DescriptionLanguage)
+		kb.VLMConfig.CustomInstructions = strings.TrimSpace(req.VLMConfig.CustomInstructions)
 	}
 
 	// 存储引擎：仅写入 provider 到新字段，参数从租户全局 StorageEngineConfig 读取
@@ -386,12 +397,15 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		}
 
 		kb.ExtractConfig = &types.ExtractConfig{
-			Enabled:   req.NodeExtract.Enabled,
-			Text:      req.NodeExtract.Text,
-			Tags:      req.NodeExtract.Tags,
-			Nodes:     nodes,
-			Relations: relations,
+			Enabled:            req.NodeExtract.Enabled,
+			Text:               req.NodeExtract.Text,
+			Tags:               req.NodeExtract.Tags,
+			Nodes:              nodes,
+			Relations:          relations,
+			CustomInstructions: strings.TrimSpace(req.NodeExtract.CustomInstructions),
 		}
+	} else if kb.ExtractConfig != nil {
+		kb.ExtractConfig.Enabled = false
 	} else {
 		kb.ExtractConfig = &types.ExtractConfig{Enabled: false}
 	}
@@ -411,11 +425,20 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			questionCount = 10
 		}
 		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
-			Enabled:       true,
-			QuestionCount: questionCount,
+			Enabled:            true,
+			QuestionCount:      questionCount,
+			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
 	} else {
-		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{Enabled: false}
+		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
+			Enabled:            false,
+			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
+		}
+	}
+	types.NormalizeKnowledgeBasePromptInstructions(kb)
+	if err := validateKnowledgeBasePromptInstructions(kb); err != nil {
+		c.Error(err)
+		return
 	}
 
 	// 保存更新后的知识库
@@ -1377,18 +1400,17 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	config := map[string]interface{}{
 		"hasFiles": hasFiles,
 	}
+	includeIntegrationDetail := dto.CanViewIntegrationSecrets(ctx)
 
 	// 按类型分组模型
 	for _, model := range models {
 		if model == nil {
 			continue
 		}
-		// Hide sensitive information for builtin models
+		// Hide sensitive information for builtin models and viewers.
 		baseURL := model.Parameters.BaseURL
-		apiKey := model.Parameters.APIKey
-		if model.IsBuiltin {
+		if model.IsBuiltin || !includeIntegrationDetail {
 			baseURL = ""
-			apiKey = ""
 		}
 
 		switch model.Type {
@@ -1397,22 +1419,28 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 				"source":    string(model.Source),
 				"modelName": model.Name,
 				"baseUrl":   baseURL,
-				"apiKey":    apiKey,
+				"credentials": map[string]bool{
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
+				},
 			}
 		case types.ModelTypeEmbedding:
 			config["embedding"] = map[string]interface{}{
 				"source":    string(model.Source),
 				"modelName": model.Name,
 				"baseUrl":   baseURL,
-				"apiKey":    apiKey,
 				"dimension": model.Parameters.EmbeddingParameters.Dimension,
+				"credentials": map[string]bool{
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
+				},
 			}
 		case types.ModelTypeRerank:
 			config["rerank"] = map[string]interface{}{
 				"enabled":   true,
 				"modelName": model.Name,
 				"baseUrl":   baseURL,
-				"apiKey":    apiKey,
+				"credentials": map[string]bool{
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
+				},
 			}
 		case types.ModelTypeVLLM:
 			if config["multimodal"] == nil {
@@ -1424,9 +1452,11 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			multimodal["vlm"] = map[string]interface{}{
 				"modelName":     model.Name,
 				"baseUrl":       baseURL,
-				"apiKey":        apiKey,
 				"interfaceType": model.Parameters.InterfaceType,
 				"modelId":       model.ID,
+				"credentials": map[string]bool{
+					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
+				},
 			}
 		}
 	}
@@ -1443,6 +1473,20 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	} else {
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
+	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" {
+		if config["multimodal"] == nil {
+			config["multimodal"] = map[string]interface{}{
+				"enabled": hasMultimodal,
+			}
+		}
+		multimodal := config["multimodal"].(map[string]interface{})
+		if kb.VLMConfig.DescriptionLanguage != "" {
+			multimodal["descriptionLanguage"] = kb.VLMConfig.DescriptionLanguage
+		}
+		if kb.VLMConfig.CustomInstructions != "" {
+			multimodal["customInstructions"] = kb.VLMConfig.CustomInstructions
+		}
+	}
 
 	// 如果没有Rerank模型，设置rerank为disabled
 	if config["rerank"] == nil {
@@ -1450,7 +1494,9 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			"enabled":   false,
 			"modelName": "",
 			"baseUrl":   "",
-			"apiKey":    "",
+			"credentials": map[string]bool{
+				"apiKey": false,
+			},
 		}
 	}
 
@@ -1470,6 +1516,9 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		if len(kb.ChunkingConfig.Languages) > 0 {
 			ds["languages"] = kb.ChunkingConfig.Languages
 		}
+		if kb.ChunkingConfig.TableMetadataInstructions != "" {
+			ds["tableMetadataInstructions"] = kb.ChunkingConfig.TableMetadataInstructions
+		}
 		config["documentSplitting"] = ds
 
 		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
@@ -1485,12 +1534,14 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			switch effectiveProvider {
 			case "cos":
 				multimodal["cos"] = map[string]interface{}{
-					"secretId":   kb.StorageConfig.SecretID,
-					"secretKey":  kb.StorageConfig.SecretKey,
 					"region":     kb.StorageConfig.Region,
 					"bucketName": kb.StorageConfig.BucketName,
 					"appId":      kb.StorageConfig.AppID,
 					"pathPrefix": kb.StorageConfig.PathPrefix,
+					"credentials": map[string]bool{
+						"secretId":  kb.StorageConfig.SecretID != "",
+						"secretKey": kb.StorageConfig.SecretKey != "",
+					},
 				}
 			case "minio":
 				multimodal["minio"] = map[string]interface{}{
@@ -1502,15 +1553,31 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	}
 
 	if kb.ExtractConfig != nil {
-		config["nodeExtract"] = map[string]interface{}{
+		nodeExtract := map[string]interface{}{
 			"enabled":   kb.ExtractConfig.Enabled,
 			"text":      kb.ExtractConfig.Text,
 			"tags":      kb.ExtractConfig.Tags,
 			"nodes":     kb.ExtractConfig.Nodes,
 			"relations": kb.ExtractConfig.Relations,
 		}
+		if kb.ExtractConfig.CustomInstructions != "" {
+			nodeExtract["customInstructions"] = kb.ExtractConfig.CustomInstructions
+		}
+		config["nodeExtract"] = nodeExtract
 	} else {
 		config["nodeExtract"] = map[string]interface{}{
+			"enabled": false,
+		}
+	}
+
+	if kb.QuestionGenerationConfig != nil {
+		config["questionGeneration"] = map[string]interface{}{
+			"enabled":            kb.QuestionGenerationConfig.Enabled,
+			"questionCount":      kb.QuestionGenerationConfig.QuestionCount,
+			"customInstructions": kb.QuestionGenerationConfig.CustomInstructions,
+		}
+	} else {
+		config["questionGeneration"] = map[string]interface{}{
 			"enabled": false,
 		}
 	}
@@ -1529,15 +1596,16 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 // 所有 provider/model 通用字段都在这里集中声明；若未来新增字段（比如现在的
 // custom_headers），只需改一处，生产路径和测试路径会同时生效。
 type ModelTestRequest struct {
-	Source        string            `json:"source"` // 为空时按需默认为 "remote"
-	ModelName     string            `json:"modelName" binding:"required"`
-	BaseURL       string            `json:"baseUrl"`
-	APIKey        string            `json:"apiKey"`
-	Provider      string            `json:"provider"`
-	InterfaceType string            `json:"interfaceType,omitempty"`
-	Dimension     int               `json:"dimension,omitempty"`
-	CustomHeaders map[string]string `json:"customHeaders,omitempty"`
-	ExtraConfig   map[string]string `json:"extraConfig,omitempty"`
+	Source                    string            `json:"source"` // 为空时按需默认为 "remote"
+	ModelName                 string            `json:"modelName" binding:"required"`
+	BaseURL                   string            `json:"baseUrl"`
+	APIKey                    string            `json:"apiKey"`
+	Provider                  string            `json:"provider"`
+	InterfaceType             string            `json:"interfaceType,omitempty"`
+	Dimension                 int               `json:"dimension,omitempty"`
+	SupportsDimensionOverride bool              `json:"supportsDimensionOverride,omitempty"`
+	CustomHeaders             map[string]string `json:"customHeaders,omitempty"`
+	ExtraConfig               map[string]string `json:"extraConfig,omitempty"`
 	// AppSecret 用于 LKEAP Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。
 	AppSecret string `json:"appSecret,omitempty"`
 	// ModelID, when set, instructs the handler to substitute any missing
@@ -1620,8 +1688,9 @@ func (h *InitializationHandler) buildTestModel(
 			ExtraConfig:   req.ExtraConfig,
 			CustomHeaders: req.CustomHeaders,
 			EmbeddingParameters: types.EmbeddingParameters{
-				Dimension:            req.Dimension,
-				TruncatePromptTokens: 256,
+				Dimension:                 req.Dimension,
+				TruncatePromptTokens:      256,
+				SupportsDimensionOverride: req.SupportsDimensionOverride,
 			},
 		},
 	}

@@ -99,9 +99,12 @@ func renderIndexOverviewForAgent(resp *types.WikiIndexResponse) string {
 //     When non-empty, a wiki page is only surfaced if its SourceRefs
 //     intersect this set. Used to honour user-level @mentions that pin the
 //     search to specific documents inside a KB.
+//   - TagIDs: OPTIONAL whitelist of document tags. When non-empty, a wiki page
+//     is only surfaced if at least one of its SourceRefs belongs to any tag.
 type WikiScope struct {
 	KnowledgeBaseID string
 	KnowledgeIDs    []string
+	TagIDs          []string
 }
 
 // NewWikiScopesFromKBIDs is a convenience constructor for callers that only
@@ -232,15 +235,50 @@ func pageIntersectsKnowledgeIDs(page *types.WikiPage, allowed map[string]bool) b
 	return false
 }
 
-type wikiReadPageTool struct {
-	BaseTool
-	wikiService interfaces.WikiPageService
-	scopes      []WikiScope
-	seenLinks   map[string]bool
-	mu          sync.Mutex
+func pagePassesWikiScope(
+	ctx context.Context,
+	page *types.WikiPage,
+	scope WikiScope,
+	fetchTags knowledgeTagsFetcher,
+) (bool, error) {
+	if allowed, has := scopeKnowledgeFilter(scope); has {
+		if !pageIntersectsKnowledgeIDs(page, allowed) {
+			return false, nil
+		}
+	}
+
+	tagIDs := dedupNonEmptyStrings(scope.TagIDs)
+	if len(tagIDs) == 0 {
+		return true, nil
+	}
+	if isStructuralPage(page) {
+		return true, nil
+	}
+	sourceKnowledgeIDs := extractSourceKnowledgeIDs(page)
+	if len(sourceKnowledgeIDs) == 0 {
+		return true, nil
+	}
+	matches, err := knowledgeIDsMatchingAnyTag(ctx, sourceKnowledgeIDs, tagIDs, fetchTags)
+	if err != nil {
+		return false, err
+	}
+	return len(matches) > 0, nil
 }
 
-func NewWikiReadPageTool(wikiService interfaces.WikiPageService, scopes []WikiScope) types.Tool {
+type wikiReadPageTool struct {
+	BaseTool
+	wikiService      interfaces.WikiPageService
+	knowledgeService interfaces.KnowledgeService
+	scopes           []WikiScope
+	seenLinks        map[string]bool
+	mu               sync.Mutex
+}
+
+func NewWikiReadPageTool(
+	wikiService interfaces.WikiPageService,
+	knowledgeService interfaces.KnowledgeService,
+	scopes []WikiScope,
+) types.Tool {
 	return &wikiReadPageTool{
 		BaseTool: NewBaseTool(
 			ToolWikiReadPage,
@@ -263,9 +301,10 @@ When the same slug exists in multiple knowledge bases, all matching pages are re
   "required": ["slugs"]
 }`),
 		),
-		wikiService: wikiService,
-		scopes:      scopes,
-		seenLinks:   make(map[string]bool),
+		wikiService:      wikiService,
+		knowledgeService: knowledgeService,
+		scopes:           scopes,
+		seenLinks:        make(map[string]bool),
 	}
 }
 
@@ -419,6 +458,10 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 	// Track slugs that were found in the raw lookup but filtered out by a
 	// knowledge_ids whitelist, so we can surface a clearer error.
 	filteredOut := make(map[string][]string) // slug -> list of KB IDs where filtered
+	var fetchTags knowledgeTagsFetcher
+	if t.knowledgeService != nil {
+		fetchTags = t.knowledgeService.GetKnowledgeTags
+	}
 	for _, slug := range slugsToFetch {
 		var hits []struct {
 			page *types.WikiPage
@@ -438,13 +481,16 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 				actualKBID = page.KnowledgeBaseID
 			}
 
-			// Apply server-enforced knowledge-ID scope (silent; never exposed
-			// to the model as a tool argument).
-			if allowed, has := scopeKnowledgeFilter(sc); has {
-				if !pageIntersectsKnowledgeIDs(page, allowed) {
-					filteredOut[slug] = append(filteredOut[slug], actualKBID)
-					continue
-				}
+			// Apply server-enforced source-document / tag scope (silent; never
+			// exposed to the model as a tool argument).
+			passesScope, scopeErr := pagePassesWikiScope(ctx, page, sc, fetchTags)
+			if scopeErr != nil {
+				errs = append(errs, fmt.Sprintf("Failed to validate wiki scope for '%s' in KB %s: %v", slug, actualKBID, scopeErr))
+				continue
+			}
+			if !passesScope {
+				filteredOut[slug] = append(filteredOut[slug], actualKBID)
+				continue
 			}
 
 			hits = append(hits, struct {
@@ -513,13 +559,18 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 type wikiSearchTool struct {
 	BaseTool
-	wikiService interfaces.WikiPageService
-	scopes      []WikiScope
-	seenSlugs   map[string]bool
-	mu          sync.Mutex
+	wikiService      interfaces.WikiPageService
+	knowledgeService interfaces.KnowledgeService
+	scopes           []WikiScope
+	seenSlugs        map[string]bool
+	mu               sync.Mutex
 }
 
-func NewWikiSearchTool(wikiService interfaces.WikiPageService, scopes []WikiScope) types.Tool {
+func NewWikiSearchTool(
+	wikiService interfaces.WikiPageService,
+	knowledgeService interfaces.KnowledgeService,
+	scopes []WikiScope,
+) types.Tool {
 	return &wikiSearchTool{
 		BaseTool: NewBaseTool(
 			ToolWikiSearch,
@@ -553,9 +604,10 @@ Use this to find relevant wiki pages when you don't know the exact slug.`,
   "required": ["queries"]
 }`),
 		),
-		wikiService: wikiService,
-		scopes:      scopes,
-		seenSlugs:   make(map[string]bool),
+		wikiService:      wikiService,
+		knowledgeService: knowledgeService,
+		scopes:           scopes,
+		seenSlugs:        make(map[string]bool),
 	}
 }
 
@@ -607,6 +659,10 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		page *types.WikiPage
 		kbID string
 	}
+	var fetchTags knowledgeTagsFetcher
+	if t.knowledgeService != nil {
+		fetchTags = t.knowledgeService.GetKnowledgeTags
+	}
 
 	for _, query := range queriesToRun {
 		var allHits []searchHit
@@ -616,8 +672,6 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			if kbID == "" {
 				continue
 			}
-			allowed, hasFilter := scopeKnowledgeFilter(sc)
-
 			pages, err := t.wikiService.SearchPages(ctx, kbID, query, params.Limit)
 			if err != nil {
 				continue
@@ -626,7 +680,8 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 				if p == nil {
 					continue
 				}
-				if hasFilter && !pageIntersectsKnowledgeIDs(p, allowed) {
+				passesScope, scopeErr := pagePassesWikiScope(ctx, p, sc, fetchTags)
+				if scopeErr != nil || !passesScope {
 					filteredCount++
 					continue
 				}

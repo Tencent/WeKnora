@@ -161,7 +161,7 @@ services:
 
 ### 方式二：直接 SQL 插入
 
-支持的 provider：`generic`（自定义）、`openai`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`deepseek`、`minimax`、`mimo`、`siliconflow`、`jina`、`openrouter`、`gemini`、`modelscope`、`moonshot`、`qianfan`、`qiniu`、`longcat`、`gpustack`
+支持的 provider：`generic`（自定义）、`openai`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`deepseek`、`minimax`、`mimo`、`siliconflow`、`jina`、`openrouter`、`requesty`、`gemini`、`modelscope`、`moonshot`、`qianfan`、`qiniu`、`longcat`、`gpustack`
 
 ```sql
 -- 示例：LLM 内置模型

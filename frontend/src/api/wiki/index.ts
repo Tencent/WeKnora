@@ -20,6 +20,11 @@ export interface WikiPage {
   content: string;
   summary: string;
   aliases: string[];
+  parent_slug?: string;
+  category_path?: string[];
+  wiki_path?: string;
+  depth?: number;
+  sort_order?: number;
   source_refs: string[];
   in_links: string[];
   out_links: string[];
@@ -35,6 +40,29 @@ export interface WikiPageListResponse {
   page: number;
   page_size: number;
   total_pages: number;
+}
+
+export interface WikiFolder {
+  id: string;
+  tenant_id: number;
+  knowledge_base_id: string;
+  parent_id: string;
+  name: string;
+  path: string;
+  depth: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WikiFolderNode extends WikiFolder {
+  page_count: number;
+  has_children: boolean;
+}
+
+export interface WikiFolderListResponse {
+  parent_id: string;
+  folders: WikiFolderNode[];
 }
 
 export interface WikiGraphMeta {
@@ -82,6 +110,8 @@ export function listWikiPages(kbId: string, params?: {
   page_type?: string;
   status?: string;
   query?: string;
+  category_path?: string;
+  category_depth?: number;
   page?: number;
   page_size?: number;
   sort_by?: string;
@@ -97,6 +127,46 @@ export function listWikiPages(kbId: string, params?: {
   }
   const qs = query.toString();
   return get(`/api/v1/knowledgebase/${kbId}/wiki/pages${qs ? '?' + qs : ''}`);
+}
+
+// listWikiFolders returns the direct child folders of parentId ("" = root),
+// each enriched with a recursive page_count and a has_children flag so the tree
+// can render expand affordances and empty folders without a second request.
+// pageTypes scopes the view to a sidebar tab: only folders whose subtree holds
+// a page of those types (or are entirely empty) come back, and page_count is
+// counted within those types.
+export function listWikiFolders(kbId: string, parentId = '', pageTypes = '') {
+  const query = new URLSearchParams();
+  if (parentId) query.set('parent_id', parentId);
+  if (pageTypes) query.set('page_types', pageTypes);
+  const qs = query.toString();
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/folders${qs ? '?' + qs : ''}`);
+}
+
+// createWikiFolder creates a new empty folder under parentId ("" = root).
+export function createWikiFolder(kbId: string, parentId: string, name: string) {
+  return post(`/api/v1/knowledgebase/${kbId}/wiki/folders`, { parent_id: parentId, name });
+}
+
+// updateWikiFolder renames and/or reparents a folder. Pass move_parent: true
+// (and parent_id) to reparent; omit it for a pure rename.
+export function updateWikiFolder(
+  kbId: string,
+  folderId: string,
+  data: { name?: string; parent_id?: string; move_parent?: boolean },
+) {
+  return put(`/api/v1/knowledgebase/${kbId}/wiki/folders/${folderId}`, data);
+}
+
+// deleteWikiFolder removes an empty folder (no pages, no sub-folders).
+export function deleteWikiFolder(kbId: string, folderId: string) {
+  return del(`/api/v1/knowledgebase/${kbId}/wiki/folders/${folderId}`);
+}
+
+// moveWikiPage relocates a page into folderId ("" = root). The slug is sent in
+// the body because wiki slugs are hierarchical.
+export function moveWikiPage(kbId: string, slug: string, folderId: string) {
+  return put(`/api/v1/knowledgebase/${kbId}/wiki/move-page`, { slug, folder_id: folderId });
 }
 
 export function createWikiPage(kbId: string, data: Partial<WikiPage>) {
@@ -119,6 +189,11 @@ export interface WikiIndexEntryDTO {
   slug: string;
   title: string;
   summary: string;
+  parent_slug?: string;
+  category_path?: string[];
+  wiki_path?: string;
+  depth?: number;
+  sort_order?: number;
 }
 
 export interface WikiIndexGroup {

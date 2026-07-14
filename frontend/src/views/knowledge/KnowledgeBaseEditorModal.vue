@@ -17,17 +17,20 @@
                 <h2 class="sidebar-title">{{ mode === 'create' ? $t('knowledgeEditor.titleCreate') : $t('knowledgeEditor.titleEdit') }}</h2>
               </div>
               <div class="settings-nav" data-guide="kb-editor-sidebar">
-                <div 
-                  v-for="(item, index) in navItems" 
-                  :key="index"
-                  :class="['nav-item', { 'active': currentSection === item.key }]"
-                  :data-guide="`kb-editor-nav-${item.key}`"
-                  @click="currentSection = item.key"
-                >
-                  <t-icon :name="item.icon" class="nav-icon" />
-                  <span class="nav-label">{{ item.label }}</span>
-                  <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
-                </div>
+                <template v-for="group in navGroups" :key="group.key">
+                  <div class="nav-group-title">{{ group.label }}</div>
+                  <div
+                    v-for="(item, index) in group.items"
+                    :key="index"
+                    :class="['nav-item', { 'active': currentSection === item.key }]"
+                    :data-guide="`kb-editor-nav-${item.key}`"
+                    @click="currentSection = item.key"
+                  >
+                    <t-icon :name="item.icon" class="nav-icon" />
+                    <span class="nav-label">{{ item.label }}</span>
+                    <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
+                  </div>
+                </template>
               </div>
             </div>
 
@@ -130,6 +133,28 @@
                           </t-radio-button>
                         </t-radio-group>
                         <p class="form-tip granularity-hint">{{ granularityHint }}</p>
+                      </div>
+
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.contentInstructionsLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.contentInstructionsTip') }}</p>
+                        <t-textarea
+                          v-model="formData.wikiConfig.contentInstructions"
+                          :placeholder="$t('knowledgeEditor.wiki.contentInstructionsPlaceholder')"
+                          :maxlength="4000"
+                          :autosize="{ minRows: 3, maxRows: 8 }"
+                        />
+                      </div>
+
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionInstructionsLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.extractionInstructionsTip') }}</p>
+                        <t-textarea
+                          v-model="formData.wikiConfig.extractionInstructions"
+                          :placeholder="$t('knowledgeEditor.wiki.extractionInstructionsPlaceholder')"
+                          :maxlength="4000"
+                          :autosize="{ minRows: 3, maxRows: 8 }"
+                        />
                       </div>
 
                       <div class="form-item" data-guide="kb-create-name">
@@ -286,6 +311,34 @@
                           />
                         </div>
                       </div>
+
+                      <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+                        <div class="setting-info">
+                          <label>{{ $t('knowledgeEditor.advanced.multimodal.descriptionLanguageLabel') }}</label>
+                          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.descriptionLanguageDescription') }}</p>
+                        </div>
+                        <div class="setting-control">
+                          <t-select v-model="formData.multimodalConfig.descriptionLanguage" clearable
+                            :placeholder="$t('knowledgeEditor.advanced.multimodal.descriptionLanguageAuto')">
+                            <t-option value="Chinese" :label="$t('language.zhCN')" />
+                            <t-option value="English" :label="$t('language.enUS')" />
+                            <t-option value="Korean" :label="$t('language.koKR')" />
+                            <t-option value="Russian" :label="$t('language.ruRU')" />
+                          </t-select>
+                        </div>
+                      </div>
+
+                      <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical">
+                        <div class="setting-info">
+                          <label>{{ $t('knowledgeEditor.advanced.multimodal.customInstructionsLabel') }}</label>
+                          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.customInstructionsDescription') }}</p>
+                        </div>
+                        <div class="setting-control setting-control-full">
+                          <t-textarea v-model="formData.multimodalConfig.customInstructions"
+                            :placeholder="$t('knowledgeEditor.advanced.multimodal.customInstructionsPlaceholder')"
+                            :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -353,7 +406,9 @@
                     :question-generation="formData.questionGenerationConfig"
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
                     :all-models="allModels"
+                    :table-metadata-instructions="formData.chunkingConfig.tableMetadataInstructions"
                     @update:question-generation="handleQuestionGenerationUpdate"
+                    @update:table-metadata-instructions="(value: string) => { if (formData) formData.chunkingConfig.tableMetadataInstructions = value }"
                   />
                 </div>
 
@@ -549,6 +604,35 @@ const navItems = computed(() => {
   return items
 })
 
+// 左侧导航分组（与 AgentEditorModal 对齐）
+const navGroups = computed(() => {
+  const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
+  const pickItems = (keys: string[]) =>
+    keys.map((key) => itemMap.get(key)).filter(Boolean) as typeof navItems.value
+  return [
+    {
+      key: 'basic',
+      label: t('knowledgeEditor.navGroups.basic'),
+      items: pickItems(['basic', 'models', 'vectorStore', 'faq']),
+    },
+    {
+      key: 'processing',
+      label: t('knowledgeEditor.navGroups.processing'),
+      items: pickItems(['parser', 'chunking', 'multimodal', 'asr', 'graph', 'advanced']),
+    },
+    {
+      key: 'data',
+      label: t('knowledgeEditor.navGroups.data'),
+      items: pickItems(['storage', 'datasource']),
+    },
+    {
+      key: 'integration',
+      label: t('knowledgeEditor.navGroups.integration'),
+      items: pickItems(['share']),
+    },
+  ].filter((group) => group.items.length > 0)
+})
+
 // 模型配置引用
 const modelConfigRef = ref<InstanceType<typeof KBModelConfig>>()
 const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
@@ -624,12 +708,15 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       // New KBs default to the adaptive auto-strategy. User can change in the UI.
       strategy: 'auto' as string,
       tokenLimit: 0,
-      languages: [] as string[]
+      languages: [] as string[],
+      tableMetadataInstructions: ''
     },
     storageProvider: '' as string,
     multimodalConfig: {
       enabled: false,
-      vllmModelId: ''
+      vllmModelId: '',
+      descriptionLanguage: '',
+      customInstructions: ''
     },
     asrConfig: {
       enabled: false,
@@ -648,16 +735,20 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
         node1: string
         node2: string
         type: string
-      }>
+      }>,
+      customInstructions: ''
     },
     questionGenerationConfig: {
       enabled: true,
-      questionCount: 3
+      questionCount: 3,
+      customInstructions: ''
     },
     wikiConfig: {
       synthesisModelId: '',
       maxPagesPerIngest: 0,
       extractionGranularity: 'standard' as 'focused' | 'standard' | 'exhaustive',
+      contentInstructions: '',
+      extractionInstructions: '',
     },
     indexingStrategy: {
       vectorEnabled: true,
@@ -738,12 +829,15 @@ const loadKBData = async () => {
         // The user has to actively pick a value to opt in to the new tiers.
         strategy: kb.chunking_config?.strategy || '',
         tokenLimit: kb.chunking_config?.token_limit || 0,
-        languages: kb.chunking_config?.languages || []
+        languages: kb.chunking_config?.languages || [],
+        tableMetadataInstructions: kb.chunking_config?.table_metadata_instructions || ''
       },
       storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
         enabled: !!kb.vlm_config?.enabled,
-        vllmModelId: kb.vlm_config?.model_id || ''
+        vllmModelId: kb.vlm_config?.model_id || '',
+        descriptionLanguage: kb.vlm_config?.description_language || '',
+        customInstructions: kb.vlm_config?.custom_instructions || ''
       },
       asrConfig: {
         enabled: !!kb.asr_config?.enabled,
@@ -758,11 +852,13 @@ const loadKBData = async () => {
           name: node.name,
           attributes: node.attributes || []
         })),
-        relations: kb.extract_config?.relations || []
+        relations: kb.extract_config?.relations || [],
+        customInstructions: kb.extract_config?.custom_instructions || ''
       },
       questionGenerationConfig: {
         enabled: kb.question_generation_config?.enabled || false,
-        questionCount: kb.question_generation_config?.question_count || 3
+        questionCount: kb.question_generation_config?.question_count || 3,
+        customInstructions: kb.question_generation_config?.custom_instructions || ''
       },
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
@@ -773,6 +869,8 @@ const loadKBData = async () => {
             ? kb.wiki_config.extraction_granularity
             : 'standard'
         ) as 'focused' | 'standard' | 'exhaustive',
+        contentInstructions: kb.wiki_config?.content_instructions || '',
+        extractionInstructions: kb.wiki_config?.extraction_instructions || '',
       },
       indexingStrategy: {
         vectorEnabled: kb.indexing_strategy?.vector_enabled ?? true,
@@ -1035,6 +1133,7 @@ const buildSubmitData = () => {
       strategy: formData.value.chunkingConfig.strategy ?? '',
       token_limit: formData.value.chunkingConfig.tokenLimit ?? 0,
       languages: formData.value.chunkingConfig.languages ?? [],
+      table_metadata_instructions: formData.value.chunkingConfig.tableMetadataInstructions || '',
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
@@ -1057,7 +1156,9 @@ const buildSubmitData = () => {
     enabled: formData.value.multimodalConfig.enabled,
     model_id: formData.value.multimodalConfig.enabled
       ? (formData.value.multimodalConfig.vllmModelId || '')
-      : ''
+      : '',
+    description_language: formData.value.multimodalConfig.descriptionLanguage || '',
+    custom_instructions: formData.value.multimodalConfig.customInstructions || ''
   }
 
   // 添加ASR语音识别配置
@@ -1086,7 +1187,14 @@ const buildSubmitData = () => {
   if (formData.value.questionGenerationConfig?.enabled) {
     data.question_generation_config = {
       enabled: true,
-      question_count: formData.value.questionGenerationConfig.questionCount || 3
+      question_count: formData.value.questionGenerationConfig.questionCount || 3,
+      custom_instructions: formData.value.questionGenerationConfig.customInstructions || ''
+    }
+  } else {
+    data.question_generation_config = {
+      enabled: false,
+      question_count: 3,
+      custom_instructions: formData.value.questionGenerationConfig?.customInstructions || ''
     }
   }
 
@@ -1104,6 +1212,8 @@ const buildSubmitData = () => {
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
+      content_instructions: formData.value.wikiConfig?.contentInstructions || '',
+      extraction_instructions: formData.value.wikiConfig?.extractionInstructions || '',
     }
   }
 
@@ -1125,7 +1235,8 @@ const buildSubmitData = () => {
       text: formData.value.nodeExtractConfig.text || '',
       tags: formData.value.nodeExtractConfig.tags || [],
       nodes: formData.value.nodeExtractConfig.nodes || [],
-      relations: formData.value.nodeExtractConfig.relations || []
+      relations: formData.value.nodeExtractConfig.relations || [],
+      custom_instructions: formData.value.nodeExtractConfig.customInstructions || ''
     }
   }
 
@@ -1201,6 +1312,8 @@ const doSubmit = async () => {
           synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
+          content_instructions: formData.value.wikiConfig.contentInstructions || '',
+          extraction_instructions: formData.value.wikiConfig.extractionInstructions || '',
         }
       }
       if (formData.value.type !== 'faq') {
@@ -1236,7 +1349,8 @@ const doSubmit = async () => {
           // payload to let users reset back to defaults.
           strategy: formData.value?.chunkingConfig.strategy ?? '',
           tokenLimit: formData.value?.chunkingConfig.tokenLimit ?? 0,
-          languages: formData.value?.chunkingConfig.languages ?? []
+          languages: formData.value?.chunkingConfig.languages ?? [],
+          tableMetadataInstructions: formData.value?.chunkingConfig.tableMetadataInstructions ?? ''
         },
         multimodal: {
           enabled: !!data.vlm_config?.enabled
@@ -1247,11 +1361,13 @@ const doSubmit = async () => {
           text: data.extract_config?.text || '',
           tags: data.extract_config?.tags || [],
           nodes: data.extract_config?.nodes || [],
-          relations: data.extract_config?.relations || []
+          relations: data.extract_config?.relations || [],
+          customInstructions: data.extract_config?.custom_instructions || ''
         },
         questionGeneration: {
           enabled: data.question_generation_config?.enabled || false,
-          questionCount: data.question_generation_config?.question_count || 3
+          questionCount: data.question_generation_config?.question_count || 3,
+          customInstructions: data.question_generation_config?.custom_instructions || ''
         }
       }
 
@@ -1442,68 +1558,89 @@ watch(
 .settings-container {
   display: flex;
   height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
+/* 左侧导航：与 AgentEditorModal 对齐 */
 .settings-sidebar {
-  width: 200px;
-  background: var(--td-bg-color-settings-modal);
+  width: 208px;
+  background-color: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .sidebar-header {
-  padding: 24px 20px;
+  padding: 16px 14px 12px;
   border-bottom: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
 }
 
 .sidebar-title {
   margin: 0;
-  font-family: var(--app-font-family);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
 
 .settings-nav {
   flex: 1;
-  padding: 12px 8px;
+  padding: 8px 8px 12px;
   overflow-y: auto;
+  min-height: 0;
+}
+
+.nav-group-title {
+  padding: 6px 14px 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  .settings-nav > &:first-child {
+    padding-top: 2px;
+  }
+
+  .settings-nav > &:not(:first-child) {
+    padding-top: 8px;
+  }
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  margin-bottom: 4px;
+  padding: 6px 12px;
+  margin-bottom: 2px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-family: var(--app-font-family);
   font-size: 14px;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-primary);
+  user-select: none;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover);
+    background-color: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
+    background-color: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
     font-weight: 500;
   }
 }
 
 .nav-icon {
-  margin-right: 8px;
-  font-size: 18px;
+  margin-right: 9px;
+  font-size: 16px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: inherit;
 }
 
 .nav-label {
@@ -1511,24 +1648,16 @@ watch(
 }
 
 .nav-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  font-size: 11px;
-  font-weight: 600;
-  background: var(--td-bg-color-component);
-  color: var(--td-text-color-secondary);
-  line-height: 1;
   flex-shrink: 0;
-}
-
-.nav-item.active .nav-badge {
-  background: var(--td-brand-color);
-  color: #fff;
+  margin-left: 2px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  text-align: center;
 }
 
 .settings-content {
@@ -1554,11 +1683,11 @@ watch(
 
 .section-content {
   .section-header {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
 
   .section-title {
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
     font-family: var(--app-font-family);
     font-size: 20px;
     font-weight: 600;
@@ -1781,13 +1910,13 @@ watch(
   width: 100%;
 
   .section-header {
-    margin-bottom: 32px;
+    margin-bottom: 20px;
 
     h2 {
       font-size: 20px;
       font-weight: 600;
       color: var(--td-text-color-primary);
-      margin: 0 0 8px 0;
+      margin: 0 0 6px 0;
     }
 
     .section-description {
@@ -1807,7 +1936,7 @@ watch(
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: 20px 0;
+    padding: 16px 0;
     border-bottom: 1px solid var(--td-component-stroke);
 
     &:last-child {
@@ -1851,4 +1980,3 @@ watch(
   }
 }
 </style>
-

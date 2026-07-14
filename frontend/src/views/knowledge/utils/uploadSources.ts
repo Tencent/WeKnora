@@ -31,11 +31,15 @@ export function filterUploadFiles(
   options: FilterUploadFilesOptions = {},
 ): FilterUploadFilesResult {
   const list = Array.from(files)
-  const dynamicTypes = options.supportedFileTypes
+  const dynamicTypesRaw = options.supportedFileTypes
     ? options.supportedFileTypes instanceof Set
       ? options.supportedFileTypes
       : new Set(options.supportedFileTypes)
     : undefined
+  // An empty set means the parser-engine list hasn't loaded yet (race with the
+  // async fetch on mount). Treat it as "unknown" and fall back to the default
+  // whitelist instead of rejecting every file as unsupported.
+  const dynamicTypes = dynamicTypesRaw && dynamicTypesRaw.size > 0 ? dynamicTypesRaw : undefined
 
   const validFiles: File[] = []
   let skippedCount = 0

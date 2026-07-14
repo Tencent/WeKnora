@@ -1,10 +1,12 @@
 package logger
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
 )
 
@@ -15,6 +17,22 @@ func newEntry(level logrus.Level, msg string, data logrus.Fields) *logrus.Entry 
 	e.Message = msg
 	e.Data = data
 	return e
+}
+
+func TestAnsiStripWriter(t *testing.T) {
+	var buf strings.Builder
+	w := &ansiStripWriter{w: &buf}
+	in := []byte("\x1b[32mINFO\x1b[0m hello \x1b[31mERROR\x1b[0m")
+	n, err := w.Write(in)
+	if err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	if n != len(in) {
+		t.Fatalf("Write n = %d, want %d", n, len(in))
+	}
+	if got := buf.String(); got != "INFO hello ERROR" {
+		t.Fatalf("stripped output = %q, want %q", got, "INFO hello ERROR")
+	}
 }
 
 func TestFormat_DefaultModeUnchanged(t *testing.T) {
@@ -162,5 +180,35 @@ func TestLevelColorFor(t *testing.T) {
 		if got := levelColorFor(lvl); got != want {
 			t.Errorf("levelColorFor(%v) = %q, want %q", lvl, got, want)
 		}
+	}
+}
+
+func TestCloneContextPreservesPrincipal(t *testing.T) {
+	t.Parallel()
+
+	ctx := types.WithPrincipal(context.Background(), types.EmbedSessionPrincipal(10000, "ch1", "sess1"))
+	cloned := CloneContext(ctx)
+
+	if got := types.SessionOwnerIDFromContext(cloned); got != "embed_session:10000:ch1:sess1" {
+		t.Fatalf("SessionOwnerIDFromContext(cloned) = %q", got)
+	}
+}
+
+func TestCloneContextPreservesTenantAPIKeyScope(t *testing.T) {
+	t.Parallel()
+
+	want := types.TenantAPIKeyScope{
+		KeyID:            7,
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+	}
+	ctx := types.WithTenantAPIKeyScope(context.Background(), want)
+	cloned := CloneContext(ctx)
+
+	got, ok := types.TenantAPIKeyScopeFromContext(cloned)
+	if !ok {
+		t.Fatal("TenantAPIKeyScopeFromContext(cloned) = false, want true")
+	}
+	if got.KeyID != want.KeyID || !got.AllowsKnowledgeBase("kb-1") || got.AllowsKnowledgeBase("kb-2") {
+		t.Fatalf("cloned scope = %#v, want key_id=7 scoped to kb-1", got)
 	}
 }

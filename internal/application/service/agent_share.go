@@ -23,9 +23,13 @@ var (
 	ErrAgentNotConfigured      = errors.New("agent is not fully configured (missing required chat model, or rerank model when the knowledge_search tool is enabled)")
 )
 
-// agentRequiresRerankModel returns true when the agent's configured tools
-// will actually invoke the reranker at runtime. This mirrors the runtime
-// check in session_agent_qa.go: only `knowledge_search` uses the reranker.
+// agentRequiresRerankModel returns true when the agent's configured scope and
+// tools will actually invoke the reranker at runtime. An agent whose knowledge
+// base scope is explicitly disabled cannot run knowledge_search, so it does not
+// need a rerank model even if that tool remains in AllowedTools.
+//
+// This mirrors the runtime check in session_agent_qa.go: only
+// `knowledge_search` with an enabled knowledge-base scope uses the reranker.
 // Wiki-first agents (wiki_search / wiki_read_page / …) never call it and
 // therefore don't need a rerank model configured, even when knowledge bases
 // are attached.
@@ -35,6 +39,9 @@ var (
 // that case as requiring the reranker.
 func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 	if agent == nil {
+		return false
+	}
+	if agent.Config.KBSelectionMode == "none" {
 		return false
 	}
 	allowed := agent.Config.AllowedTools
@@ -181,8 +188,23 @@ func (s *agentShareService) RemoveShare(ctx context.Context, shareID string, use
 	return ErrAgentSharePermission
 }
 
-// ListSharesByAgent lists all shares for an agent
-func (s *agentShareService) ListSharesByAgent(ctx context.Context, agentID string) ([]*types.AgentShare, error) {
+// ListSharesByAgent lists all shares for an agent owned by tenantID.
+//
+// Ownership is enforced here (not only at the route layer): the caller must
+// own the agent, mirroring ListSharesByKnowledgeBase. This is the sole guard
+// for API-key principals, whose route-level OwnedAgentOrAdmin check
+// short-circuits — without this, a full-access key could enumerate any
+// tenant's agent shares by ID (cross-tenant IDOR).
+func (s *agentShareService) ListSharesByAgent(
+	ctx context.Context, agentID string, tenantID uint64,
+) ([]*types.AgentShare, error) {
+	agent, err := s.agentRepo.GetAgentByID(ctx, agentID, tenantID)
+	if err != nil || agent == nil {
+		return nil, ErrAgentNotFoundForShare
+	}
+	if agent.TenantID != tenantID {
+		return nil, ErrNotAgentOwner
+	}
 	return s.shareRepo.ListByAgent(ctx, agentID)
 }
 

@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
+import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
+import DocumentActionMenu from './DocumentActionMenu.vue';
 
 interface Tag {
   id: string;
@@ -15,7 +17,7 @@ interface KnowledgeItem {
   file_type?: string;
   file_size?: number | string;
   type?: string;
-  tag_id?: string | number;
+  tags?: Tag[];
   parse_status?: string;
   summary_status?: string;
   updated_at?: string;
@@ -29,18 +31,42 @@ const props = defineProps<{
   items: KnowledgeItem[];
   selectedIds: Set<string>;
   canEdit: boolean;
+  canMutateKnowledge: boolean;
+  traceVisibleIds: Record<string, boolean>;
   tagList: Tag[];
   loading?: boolean;
+  // Move sub-flow state
+  moveMenuMode: 'normal' | 'targets' | 'confirm';
+  moveTargetKbs: any[];
+  moveTargetsLoading: boolean;
+  moveSelectedTargetName: string;
+  moveMode: 'reuse_vectors' | 'reparse';
+  moveSubmitting: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'open', item: KnowledgeItem): void;
   (e: 'toggle-row', id: string, checked: boolean, shiftKey: boolean): void;
   (e: 'toggle-all', checked: boolean): void;
-  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem): void;
+  (e: 'action', action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
+  (e: 'probe-trace', item: KnowledgeItem): void;
+  (e: 'tag-edit', item: KnowledgeItem): void;
+  // Move sub-flow emits
+  (e: 'move-select-target', kb: any): void;
+  (e: 'move-back'): void;
+  (e: 'move-confirm'): void;
+  (e: 'update:moveMode', mode: 'reuse_vectors' | 'reparse'): void;
+  (e: 'reset-move-state'): void;
 }>();
 
 const { t } = useI18n();
+
+const {
+  setupTagChipsObserver,
+  getTagLimit,
+  hasTagOverflow,
+  getOverflowCount,
+} = useTagChipsOverflow('listTagItemId');
 
 const tagMap = computed(() => {
   const map: Record<string, Tag> = {};
@@ -150,6 +176,13 @@ const onRowCheckboxChange = (item: KnowledgeItem, checked: boolean, ctx?: { e?: 
 const moreOpen = ref<string | null>(null);
 const onMoreVisible = (id: string, visible: boolean) => {
   moreOpen.value = visible ? id : null;
+  if (visible) {
+    const it = props.items.find(i => i.id === id);
+    if (it) emit('probe-trace', it);
+  } else {
+    // Reset move state when popup closes naturally
+    emit('reset-move-state');
+  }
 };
 
 // 吸顶检测：哨兵离开视口说明 header 已吸附在滚动容器顶部
@@ -171,17 +204,11 @@ onBeforeUnmount(() => {
   stickyObserver = null;
 });
 
-// Cancellable parse statuses mirror the backend CancelKnowledgeParse
-// gate: pending / processing / finalizing all surface the stop entry,
-// while completed / failed / cancelled / deleting hide it.
-const CANCELABLE_PARSE_STATUSES = new Set(['pending', 'processing', 'finalizing']);
-const canCancelParse = (item: KnowledgeItem) =>
-  CANCELABLE_PARSE_STATUSES.has(String(item.parse_status ?? ''));
-
-const isParseInFlight = (item: KnowledgeItem) => canCancelParse(item);
-
-const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem) => {
-  moreOpen.value = null;
+const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem) => {
+  // Don't close popup for move — it triggers the move sub-flow
+  if (action !== 'move') {
+    moreOpen.value = null;
+  }
   item.isMore = false;
   emit('action', action, item);
 };
@@ -193,15 +220,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     <div ref="stickySentinel" class="doc-list-sticky-sentinel" aria-hidden="true"></div>
     <div class="doc-list-header" :class="{ 'is-stuck': headerStuck }" role="row">
       <div class="cell cell-check" role="columnheader" @click.stop>
-        <t-checkbox
-          class="doc-list-check"
-          size="small"
-          :checked="allSelected"
-          :indeterminate="someSelected"
-          :disabled="!items.length"
-          :title="t('knowledgeBase.selectAll')"
-          @change="onHeaderCheckboxChange"
-        />
+        <t-checkbox class="doc-list-check" size="small" :checked="allSelected" :indeterminate="someSelected"
+          :disabled="!items.length" :title="t('knowledgeBase.selectAll')" @change="onHeaderCheckboxChange" />
       </div>
       <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
       <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
@@ -213,23 +233,12 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     </div>
 
     <div class="doc-list-body">
-      <div
-        v-for="item in items"
-        :key="item.id"
-        class="doc-list-row"
-        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }"
-        :data-select-id="item.id"
-        role="row"
-        @click="emit('open', item)"
-      >
+      <div v-for="item in items" :key="item.id" class="doc-list-row"
+        :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
+        role="row" @click="emit('open', item)">
         <div class="cell cell-check" @click.stop>
-          <t-checkbox
-            class="doc-list-check"
-            size="small"
-            :checked="selectedIds.has(item.id)"
-            :title="item.file_name"
-            @change="(c, ctx) => onRowCheckboxChange(item, c, ctx)"
-          />
+          <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
+            @change="(c: boolean, ctx?: { e?: Event }) => onRowCheckboxChange(item, c, ctx)" />
         </div>
 
         <div class="cell cell-name">
@@ -238,20 +247,35 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
           </span>
           <div class="row-file-text">
             <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
-            <span
-              v-if="item.description"
-              class="row-file-desc"
-              :title="item.description"
-            >{{ item.description }}</span>
+            <span v-if="item.description" class="row-file-desc" :title="item.description">{{ item.description }}</span>
           </div>
         </div>
 
 
         <div class="cell cell-tag">
-          <t-tag v-if="getTagName(item.tag_id)" size="small" variant="light-outline" class="row-tag">
-            {{ getTagName(item.tag_id) }}
-          </t-tag>
-          <span v-else class="row-muted">--</span>
+          <template v-if="item.tags && item.tags.length > 0">
+            <t-tooltip v-if="hasTagOverflow(item.id, (item.tags || []).length)"
+              :content="(item.tags || []).map((t: any) => t.name).join(', ')" placement="top">
+              <div class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
+                :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
+                <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
+                  variant="light-outline" class="row-tag">
+                  {{ tag.name }}
+                </t-tag>
+                <span class="row-tag-overflow">+{{ getOverflowCount(item.id, (item.tags || []).length) }}</span>
+              </div>
+            </t-tooltip>
+            <div v-else class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
+              :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
+              <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
+                variant="light-outline" class="row-tag">
+                {{ tag.name }}
+              </t-tag>
+            </div>
+          </template>
+          <span v-else class="row-tag-chips is-clickable" @click.stop="canEdit && emit('tag-edit', item)">
+            <span class="row-tag-add">+ {{ t('knowledgeBase.tagLabel') }}</span>
+          </span>
         </div>
 
         <div class="cell cell-source">
@@ -265,18 +289,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
         <div class="cell cell-status">
           <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
-            <t-tag
-              v-if="statusByRow.get(item.id)!.label !== '--'"
-              size="small"
-              :theme="statusByRow.get(item.id)!.theme"
-              variant="light-outline"
-              class="row-status-tag"
-            >
+            <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
+              variant="light-outline" class="row-status-tag">
               <template v-if="statusByRow.get(item.id)!.icon" #icon>
-                <t-icon
-                  :name="statusByRow.get(item.id)!.icon!"
-                  :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }"
-                />
+                <t-icon :name="statusByRow.get(item.id)!.icon!"
+                  :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }" />
               </template>
               {{ statusByRow.get(item.id)!.label }}
             </t-tag>
@@ -289,78 +306,86 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
         </div>
 
         <div class="cell cell-actions" v-if="canEdit" @click.stop>
-          <t-popup
-            placement="bottom-right"
-            trigger="click"
-            destroy-on-close
-            :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)"
-          >
-            <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button" :aria-label="t('knowledgeBase.columnActions')">
+          <t-popup placement="bottom-right" trigger="click" destroy-on-close overlay-class-name="card-more"
+            :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)">
+            <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button"
+              :aria-label="t('knowledgeBase.columnActions')">
               <t-icon name="more" size="16px" />
             </button>
             <template #content>
-              <div class="row-menu">
-                <div
-                  v-if="item.type === 'manual'"
-                  class="row-menu-item"
-                  @click.stop="handleAction('edit', item)"
-                >
-                  <t-icon class="icon" name="edit" />
-                  <span>{{ t('knowledgeBase.editDocument') }}</span>
+              <!-- Normal menu -->
+              <div v-if="moveMenuMode === 'normal'" class="card-menu">
+                <DocumentActionMenu
+                  :item="item"
+                  :can-mutate-knowledge="canMutateKnowledge"
+                  :trace-visible="!!traceVisibleIds[item.id] || (item.parse_status === 'pending' || item.parse_status === 'processing' || item.parse_status === 'finalizing')"
+                  @edit="handleAction('edit', item)"
+                  @view-trace="handleAction('view-trace', item)"
+                  @reparse="handleAction('reparse', item)"
+                  @cancel-parse="handleAction('cancel-parse', item)"
+                  @move="handleAction('move', item)"
+                  @batch-manage="handleAction('batch-manage', item)"
+                  @delete="handleAction('delete', item)"
+                />
+              </div>
+
+              <!-- Move: target KB list -->
+              <div v-else-if="moveMenuMode === 'targets'" class="card-menu move-menu">
+                <div class="move-menu-header" @click.stop="emit('move-back')">
+                  <t-icon name="chevron-left" size="16px" />
+                  <span>{{ $t('knowledgeBase.moveToKnowledgeBase') }}</span>
                 </div>
-                <div
-                  v-if="isParseInFlight(item)"
-                  class="row-menu-item"
-                  @click.stop="handleAction('reparse', item)"
-                >
-                  <t-icon class="icon" name="refresh" />
-                  <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                <div v-if="moveTargetsLoading" class="move-menu-loading">
+                  <t-loading size="small" />
                 </div>
-                <t-popconfirm
-                  v-else
-                  theme="warning"
-                  :content="t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || '' })"
-                  :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
-                  :cancel-btn="{ content: t('common.cancel') }"
-                  placement="left"
-                  @confirm="handleAction('reparse', item)"
-                >
-                  <div class="row-menu-item" @click.stop>
-                    <t-icon class="icon" name="refresh" />
-                    <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
-                  </div>
-                </t-popconfirm>
-                <t-popconfirm
-                  v-if="canCancelParse(item)"
-                  theme="warning"
-                  :content="t('knowledgeBase.cancelParseConfirmBody', { title: item.file_name || item.id })"
-                  :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
-                  :cancel-btn="{ content: t('common.cancel') }"
-                  placement="left"
-                  @confirm="handleAction('cancel-parse', item)"
-                >
-                  <div class="row-menu-item danger" @click.stop>
-                    <t-icon class="icon" name="close-circle" />
-                    <span>{{ t('knowledgeBase.cancelParse') }}</span>
-                  </div>
-                </t-popconfirm>
-                <div class="row-menu-item" @click.stop="handleAction('move', item)">
-                  <t-icon class="icon" name="swap" />
-                  <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                <div v-else-if="moveTargetKbs.length === 0" class="move-menu-empty">
+                  {{ $t('knowledgeBase.moveNoTargets') }}
                 </div>
-                <t-popconfirm
-                  theme="warning"
-                  :content="t('knowledgeBase.confirmDeleteDocument', { fileName: item.file_name || '' })"
-                  :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
-                  :cancel-btn="{ content: t('common.cancel') }"
-                  placement="left"
-                  @confirm="handleAction('delete', item)"
-                >
-                  <div class="row-menu-item danger" @click.stop>
-                    <t-icon class="icon" name="delete" />
-                    <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                <template v-else>
+                  <div v-for="kb in moveTargetKbs" :key="kb.id" class="card-menu-item"
+                    @click.stop="emit('move-select-target', kb)">
+                    <t-icon class="icon" name="root-list" />
+                    <span class="move-target-name">{{ kb.name }}</span>
+                    <span v-if="kb.knowledge_count !== undefined" class="move-target-count">{{ kb.knowledge_count }}</span>
                   </div>
-                </t-popconfirm>
+                </template>
+              </div>
+
+              <!-- Move: confirm with mode selection -->
+              <div v-else-if="moveMenuMode === 'confirm'" class="card-menu move-menu">
+                <div class="move-menu-header" @click.stop="emit('move-back')">
+                  <t-icon name="chevron-left" size="16px" />
+                  <span>{{ $t('knowledgeBase.moveConfirmTitle') }}</span>
+                </div>
+                <div class="move-confirm-body">
+                  <div class="move-target-info">
+                    <t-icon name="arrow-right" size="14px" />
+                    <span>{{ moveSelectedTargetName }}</span>
+                  </div>
+                  <div class="move-mode-item" :class="{ active: moveMode === 'reuse_vectors' }"
+                    @click.stop="emit('update:moveMode', 'reuse_vectors')">
+                    <t-radio :checked="moveMode === 'reuse_vectors'" />
+                    <div class="move-mode-text">
+                      <span class="move-mode-label">{{ $t('knowledgeBase.moveModeReuseVectors') }}</span>
+                      <span class="move-mode-desc">{{ $t('knowledgeBase.moveModeReuseVectorsDesc') }}</span>
+                    </div>
+                  </div>
+                  <div class="move-mode-item" :class="{ active: moveMode === 'reparse' }"
+                    @click.stop="emit('update:moveMode', 'reparse')">
+                    <t-radio :checked="moveMode === 'reparse'" />
+                    <div class="move-mode-text">
+                      <span class="move-mode-label">{{ $t('knowledgeBase.moveModeReparse') }}</span>
+                      <span class="move-mode-desc">{{ $t('knowledgeBase.moveModeReparseDesc') }}</span>
+                    </div>
+                  </div>
+                  <div class="move-confirm-actions">
+                    <t-button size="small" variant="outline" @click.stop="emit('move-back')">{{
+                      $t('common.cancel') }}</t-button>
+                    <t-button size="small" theme="primary" :loading="moveSubmitting"
+                      @click.stop="emit('move-confirm')">{{
+                        $t('knowledgeBase.moveConfirm') }}</t-button>
+                  </div>
+                </div>
               </div>
             </template>
           </t-popup>
@@ -376,6 +401,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
     opacity: 0;
     transform: translateY(6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -399,14 +425,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 .doc-list-row {
   display: grid;
   grid-template-columns:
-    44px                       // checkbox
-    minmax(260px, 2.6fr)       // name
-    minmax(100px, 0.9fr)       // tag
-    minmax(96px, 0.8fr)        // source
-    96px                       // size
-    minmax(96px, 0.7fr)        // status
-    140px                      // updated_at
-    48px;                      // actions
+    44px // checkbox
+    minmax(260px, 2.6fr) // name
+    minmax(100px, 0.9fr) // tag
+    minmax(96px, 0.8fr) // source
+    96px // size
+    minmax(96px, 0.7fr) // status
+    140px // updated_at
+    48px; // actions
   align-items: center;
   column-gap: 0;
   padding: 0 16px;
@@ -478,8 +504,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   align-items: center;
   min-width: 0;
   padding: 0 8px;
-  &:first-child { padding-left: 0; }
-  &:last-child { padding-right: 0; }
+
+  &:first-child {
+    padding-left: 0;
+  }
+
+  &:last-child {
+    padding-right: 0;
+  }
 }
 
 .cell-check {
@@ -589,11 +621,64 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 
 .row-tag {
   max-width: 100%;
+
   :deep(.t-tag__text) {
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 120px;
     display: inline-block;
+  }
+}
+
+.row-tag-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+
+  &.is-clickable {
+    cursor: pointer;
+  }
+}
+
+.row-tag-overflow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid var(--td-component-stroke);
+  color: var(--td-text-color-placeholder);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
+.row-tag-add {
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 999px;
+  padding: 0 6px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+    border-style: solid;
   }
 }
 
@@ -611,11 +696,15 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
 .row-status-tag :deep(.t-icon) {
   margin-right: 2px;
 }
+
 .icon-spin {
   animation: doc-list-spin 0.9s linear infinite;
 }
+
 @keyframes doc-list-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .row-more-btn {
@@ -644,76 +733,4 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   }
 }
 
-.row-menu {
-  display: flex;
-  flex-direction: column;
-  min-width: 140px;
-  gap: 2px;
-  padding: 4px 6px;
-}
-
-.row-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  font-size: 14px;
-  line-height: 20px;
-  color: var(--td-text-color-primary);
-  cursor: pointer;
-  border-radius: 6px;
-  transition: background-color 0.15s cubic-bezier(0.2, 0, 0, 1), transform 0.12s ease;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &:active {
-    background: var(--td-bg-color-container-active);
-    transform: scale(0.98);
-  }
-
-  .icon {
-    font-size: 16px;
-    color: var(--td-text-color-secondary);
-    transition: color 0.15s ease;
-  }
-
-  &:hover .icon {
-    color: var(--td-text-color-primary);
-  }
-
-  &.danger {
-    color: var(--td-error-color-6);
-    margin-top: 4px;
-    position: relative;
-
-    &::before {
-      content: '';
-      position: absolute;
-      top: -3px;
-      left: 8px;
-      right: 8px;
-      height: 1px;
-      background: var(--td-component-stroke);
-    }
-
-    .icon {
-      color: var(--td-error-color-6);
-    }
-
-    &:hover {
-      background: var(--td-error-color-1);
-      color: var(--td-error-color-6);
-
-      .icon {
-        color: var(--td-error-color-6);
-      }
-    }
-
-    &:active {
-      background: var(--td-error-color-2);
-    }
-  }
-}
 </style>

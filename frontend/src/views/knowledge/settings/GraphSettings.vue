@@ -42,6 +42,22 @@
         </div>
       </div>
 
+      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+        <div class="setting-info">
+          <label>{{ t('graphSettings.customInstructionsLabel') }}</label>
+          <p class="desc">{{ t('graphSettings.customInstructionsDescription') }}</p>
+        </div>
+        <div class="setting-control full-width">
+          <t-textarea
+            v-model="localGraphExtract.customInstructions"
+            :placeholder="t('graphSettings.customInstructionsPlaceholder')"
+            :maxlength="4000"
+            :autosize="{ minRows: 3, maxRows: 8 }"
+            @change="handleConfigChange"
+          />
+        </div>
+      </div>
+
       <!-- 关系类型配置 -->
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
@@ -304,7 +320,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed, withDefaults } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
@@ -325,6 +341,7 @@ interface GraphExtractConfig {
   tags: string[]
   nodes: Node[]
   relations: Relation[]
+  customInstructions?: string
 }
 
 interface Props {
@@ -352,7 +369,8 @@ const modelStatus = computed(() => ({
 const localGraphExtract = ref<GraphExtractConfig>({
   ...props.graphExtract,
   nodes: props.graphExtract.nodes || [],
-  relations: props.graphExtract.relations || []
+  relations: props.graphExtract.relations || [],
+  customInstructions: props.graphExtract.customInstructions || ''
 })
 
 // 加载状态
@@ -373,7 +391,8 @@ watch(() => props.graphExtract, (newVal) => {
   localGraphExtract.value = {
     ...newVal,
     nodes: newVal.nodes || [],
-    relations: newVal.relations || []
+    relations: newVal.relations || [],
+    customInstructions: newVal.customInstructions || ''
   }
 }, { deep: true })
 
@@ -384,7 +403,7 @@ const handleConfigChange = () => {
 
 // 处理启用/禁用切换
 const handleEnabledChange = () => {
-  // 当关闭提取功能时，清空所有数据
+  // 当关闭提取功能时，清空示例数据，但保留自定义指令以便再次启用时恢复。
   if (!localGraphExtract.value.enabled) {
     localGraphExtract.value.text = ''
     localGraphExtract.value.tags = []
@@ -588,13 +607,13 @@ onMounted(async () => {
 }
 
 .section-header {
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 
   h2 {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
   }
 
   .section-description {
@@ -615,7 +634,7 @@ onMounted(async () => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 20px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {

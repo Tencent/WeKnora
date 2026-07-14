@@ -5,18 +5,15 @@
       <p class="section-description">{{ t('webSearchSettings.description') }}</p>
     </div>
 
-    <div class="settings-toolbar">
-      <h3>{{ t('webSearchSettings.providersTitle') }}</h3>
-      <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
-        <template #icon><add-icon /></template>
-        {{ t('webSearchSettings.addProvider') }}
-      </t-button>
-    </div>
+    <h3 class="list-section-title">{{ t('webSearchSettings.providersTitle') }}</h3>
 
     <!-- Provider List —— 与 ModelSettings 的卡片同形：左侧标识徽章 + 标题 / 副标题 / proxy URL 三段式。
          不复用 SettingCard 的原因和 Models 一样：每页有微妙不同的右上侧栏需求（这里没有控件，
          Mcp 有开关），SettingCard 仍服务于其它消费者。 -->
-    <div v-if="providerEntities.length > 0" class="provider-grid">
+    <div v-if="providerEntities.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+      <t-empty :description="t('webSearchSettings.noProvidersDesc')" />
+    </div>
+    <div v-else class="provider-grid">
       <div
         v-for="entity in providerEntities"
         :key="entity.id"
@@ -76,16 +73,17 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Empty State -->
-    <div v-else class="empty-state">
-      <t-empty :description="t('webSearchSettings.noProvidersDesc')">
-        <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
-          <template #icon><add-icon /></template>
-          {{ t('webSearchSettings.addProvider') }}
-        </t-button>
-      </t-empty>
+      <button
+        v-if="authStore.hasRole('admin')"
+        type="button"
+        class="provider-card provider-card--add"
+        @click="openAddDialog"
+      >
+        <span class="provider-card--add__icon" aria-hidden="true">
+          <add-icon />
+        </span>
+        <span class="provider-card--add__label">{{ t('webSearchSettings.addProvider') }}</span>
+      </button>
     </div>
 
     <!-- Add/Edit Drawer — 与 ModelEditorDialog / Parser / Storage 抽屉同款风格 -->
@@ -208,7 +206,7 @@
 
         <!-- Section 2 — 连接配置（base url / api key / engine id），仅当任意字段需要时渲染 -->
         <section
-          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url"
+          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url"
           class="setting-drawer__section"
         >
           <h4 class="setting-drawer__section-title">{{ t('webSearchSettings.credentialsSection', '连接配置') }}</h4>
@@ -226,8 +224,12 @@
             子资源调用），不与本表单 submit 耦合；Create 模式下用 plain
             password input + lock prefix-icon，与 ModelEditorDialog 一致。
           -->
-          <div v-if="selectedProviderType?.requires_api_key" class="form-item">
-            <label class="form-label required">{{ t('webSearchSettings.apiKeyLabel') }}</label>
+          <div v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key" class="form-item">
+            <label class="form-label" :class="{ required: selectedProviderType?.requires_api_key }">
+              {{ selectedProviderType?.supports_optional_api_key && !selectedProviderType?.requires_api_key
+                ? t('webSearchSettings.apiKeyOptionalLabel', 'API Key（可选）')
+                : t('webSearchSettings.apiKeyLabel') }}
+            </label>
             <CredentialResource
               v-if="editingProvider?.id"
               :api="credentialApi"
@@ -676,24 +678,22 @@ onMounted(async () => {
   }
 }
 
-.settings-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-
-  h3 {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-  }
+.list-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 16px 0;
 }
 
 .provider-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  .provider-card--add {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 // 卡片视觉与 ModelSettings 的 model-card 同构（徽章 + 标题 / 副标题 / url 三段式）。
@@ -721,6 +721,51 @@ onMounted(async () => {
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
       outline-offset: 2px;
+    }
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    font: inherit;
+    text-align: center;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
     }
   }
 }
@@ -805,6 +850,10 @@ onMounted(async () => {
 .provider-card--ollama .provider-card__badge {
   background: rgba(70, 70, 70, 0.12);
   color: #464646;
+}
+.provider-card--keenable .provider-card__badge {
+  background: rgba(20, 158, 130, 0.12);
+  color: #149E82;
 }
 
 .provider-card__body {
@@ -1079,5 +1128,9 @@ onMounted(async () => {
 .websearch-drawer--ollama .setting-drawer__header-icon {
   background: rgba(70, 70, 70, 0.12);
   color: #464646;
+}
+.websearch-drawer--keenable .setting-drawer__header-icon {
+  background: rgba(20, 158, 130, 0.12);
+  color: #149E82;
 }
 </style>

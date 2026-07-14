@@ -62,6 +62,10 @@ refresh semantic. Rotate the key in the server UI instead.`,
 			}
 			name := cfg.CurrentProfile
 			if name == "" {
+				if active, kind := cmdutil.EnvCredential(); active {
+					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+						"authenticated via "+kind+" (stateless env credential): there is no stored JWT to refresh — env credentials are supplied fresh each call, so no refresh is needed")
+				}
 				return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
 					"no active profile configured; run `weknora auth login` to set one up")
 			}
@@ -99,6 +103,10 @@ refresh semantic. Rotate the key in the server UI instead.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor: "Renew the JWT access token for the active profile (override with the global --profile) using the stored refresh token. API-key profiles are rejected.",
 		Output:  "envelope.data has profile name that was refreshed",
+		Examples: []string{
+			"weknora auth refresh",
+			"weknora --profile staging auth refresh",
+		},
 	})
 	return cmd
 }
@@ -117,6 +125,10 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, fopts *cmdutil.Format
 	}
 	name := cfg.CurrentProfile
 	if name == "" {
+		if active, kind := cmdutil.EnvCredential(); active {
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				"authenticated via "+kind+" (stateless env credential): there is no stored JWT to refresh — env credentials are supplied fresh each call, so no refresh is needed")
+		}
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
 			"no active profile configured; run `weknora auth login` to set one up")
 	}

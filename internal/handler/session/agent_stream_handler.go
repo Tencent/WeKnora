@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -109,6 +110,8 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentComplete, h.handleComplete)
 	h.eventBus.On(event.EventToolApprovalRequired, h.handleToolApprovalRequired)
 	h.eventBus.On(event.EventToolApprovalResolved, h.handleToolApprovalResolved)
+	h.eventBus.On(event.EventMCPOAuthRequired, h.handleMCPOAuthRequired)
+	h.eventBus.On(event.EventMCPOAuthResolved, h.handleMCPOAuthResolved)
 }
 
 // handleThought handles agent thought events
@@ -227,10 +230,10 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 
 	// Send SSE response (both success and failure)
 	responseType := types.ResponseTypeToolResult
-	content := data.Output
+	content := agenttools.StreamContentForToolResult(data.ToolName, data.Success, data.Error, data.Data)
 	if !data.Success {
 		responseType = types.ResponseTypeError
-		if data.Error != "" {
+		if content == "" && data.Error != "" {
 			content = data.Error
 		}
 	}
@@ -239,17 +242,19 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	metadata := map[string]interface{}{
 		"tool_name":    data.ToolName,
 		"success":      data.Success,
-		"output":       data.Output,
 		"error":        data.Error,
 		"duration_ms":  durationMs,
 		"tool_call_id": data.ToolCallID,
 	}
 
-	// Merge tool result data (contains display_type, formatted results, etc.)
-	if data.Data != nil {
-		for k, v := range data.Data {
-			metadata[k] = v
-		}
+	clientData := agenttools.SanitizeToolResultForClient(data.ToolName, &types.ToolResult{
+		Success: data.Success,
+		Output:  data.Output,
+		Error:   data.Error,
+		Data:    data.Data,
+	})
+	for k, v := range clientData {
+		metadata[k] = v
 	}
 
 	// Append event to stream
@@ -317,6 +322,49 @@ func (h *AgentStreamHandler) handleToolApprovalResolved(ctx context.Context, evt
 		Data:      meta,
 	}); err != nil {
 		logger.GetLogger(h.ctx).Error("Append tool approval resolved event failed", "error", err)
+	}
+	return nil
+}
+
+// handleMCPOAuthRequired forwards an in-conversation "authorize this MCP
+// service" prompt to the SSE stream so the UI can render an Authorize card.
+func (h *AgentStreamHandler) handleMCPOAuthRequired(ctx context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.MCPOAuthRequiredData)
+	if !ok {
+		return nil
+	}
+	meta := toolApprovalDataToMap(data)
+	meta["pending_id"] = data.PendingID
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      types.ResponseTypeMCPOAuthRequired,
+		Content:   "MCP service requires OAuth authorization",
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      meta,
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append mcp oauth required event failed", "error", err)
+	}
+	return nil
+}
+
+// handleMCPOAuthResolved forwards the outcome of an in-conversation OAuth prompt.
+func (h *AgentStreamHandler) handleMCPOAuthResolved(ctx context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.MCPOAuthResolvedData)
+	if !ok {
+		return nil
+	}
+	meta := toolApprovalDataToMap(data)
+	meta["pending_id"] = data.PendingID
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      types.ResponseTypeMCPOAuthResolved,
+		Content:   "MCP OAuth authorization resolved",
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      meta,
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append mcp oauth resolved event failed", "error", err)
 	}
 	return nil
 }
@@ -573,7 +621,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// Update agent steps if provided
 		if data.AgentSteps != nil {
 			if steps, ok := data.AgentSteps.([]types.AgentStep); ok {
-				h.assistantMessage.AgentSteps = steps
+				h.assistantMessage.AgentSteps = agenttools.SanitizeAgentStepsForStorage(steps)
 			}
 		}
 	}

@@ -19,6 +19,11 @@ import (
 // EnvStoreIDPrefix is the prefix for virtual env store IDs.
 const EnvStoreIDPrefix = "__env_"
 
+const (
+	envTencentVectorDBReplicaNumber     = "TENCENT_VECTORDB_REPLICA_NUMBER"
+	defaultTencentVectorDBReplicaNumber = 1
+)
+
 // IsEnvStoreID checks if the given ID is an env store virtual ID.
 func IsEnvStoreID(id string) bool {
 	return strings.HasPrefix(id, EnvStoreIDPrefix)
@@ -248,7 +253,7 @@ type IndexConfig struct {
 	ShardNumber       int `yaml:"shard_number" json:"shard_number,omitempty"`               // Qdrant: number of shards per collection
 	ReplicationFactor int `yaml:"replication_factor" json:"replication_factor,omitempty"`   // Qdrant, Weaviate: number of replicas
 	ShardsNum         int `yaml:"shards_num" json:"shards_num,omitempty"`                   // Milvus: number of shards per collection (CreateCollection)
-	ReplicaNumber     int `yaml:"replica_number" json:"replica_number,omitempty"`           // Milvus: in-memory replica count (LoadCollection)
+	ReplicaNumber     int `yaml:"replica_number" json:"replica_number,omitempty"`           // Milvus LoadCollection / Tencent VectorDB CreateCollection replicas
 	DesiredShardCount int `yaml:"desired_shard_count" json:"desired_shard_count,omitempty"` // Weaviate: number of shards per collection
 	BucketsNum        int `yaml:"buckets_num" json:"buckets_num,omitempty"`                 // Doris: number of buckets per table (DISTRIBUTED BY HASH ... BUCKETS N)
 	ReplicationNum    int `yaml:"replication_num" json:"replication_num,omitempty"`         // Doris: replication_num PROPERTIES
@@ -370,9 +375,9 @@ func (c *IndexConfig) GetShardsNum(def int) int {
 	return def
 }
 
-// GetReplicaNumber returns the configured replica_number (Milvus in-memory replicas), or def if unset/zero.
-// Milvus replicas are set at LoadCollection time, not CreateCollection.
-// They control how many query nodes hold the data in memory for read HA/throughput.
+// GetReplicaNumber returns the configured replica_number, or def if unset/zero.
+// Milvus applies it at LoadCollection time; Tencent VectorDB applies it at
+// CreateCollection time. It controls read HA/throughput replicas.
 func (c *IndexConfig) GetReplicaNumber(def int) int {
 	if c != nil && c.ReplicaNumber > 0 {
 		return c.ReplicaNumber
@@ -610,6 +615,21 @@ type VectorStoreTypeInfo struct {
 	IndexFields      []VectorStoreFieldInfo `json:"index_fields,omitempty"`
 }
 
+func resolveTencentVectorDBReplicaNumber(lookup EnvLookupFunc) int {
+	if lookup == nil {
+		lookup = os.Getenv
+	}
+	raw := strings.TrimSpace(lookup(envTencentVectorDBReplicaNumber))
+	if raw == "" {
+		return defaultTencentVectorDBReplicaNumber
+	}
+	replicas, err := strconv.Atoi(raw)
+	if err != nil || replicas < 0 {
+		return defaultTencentVectorDBReplicaNumber
+	}
+	return replicas
+}
+
 // VectorStoreFieldInfo describes a single configuration field exposed
 // by /api/v1/vector-stores/types for the registration UI. The optional
 // validation hints (`Immutable`, `Min`, `Max`, `Enum`) are used by both
@@ -644,6 +664,8 @@ type VectorStoreFieldInfo struct {
 
 // GetVectorStoreTypes returns metadata for all supported engine types.
 func GetVectorStoreTypes() []VectorStoreTypeInfo {
+	tencentVectorDBReplicaNumber := resolveTencentVectorDBReplicaNumber(os.Getenv)
+
 	return []VectorStoreTypeInfo{
 		{
 			Type:        "elasticsearch",
@@ -704,7 +726,7 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			IndexFields: []VectorStoreFieldInfo{
 				{Name: "collection_name", Type: "string", Required: false, Description: "Collection Name", Default: "weknora_embeddings"},
 				{Name: "shards_num", Type: "number", Required: false, Description: "Shards", Default: 1},
-				{Name: "replica_number", Type: "number", Required: false, Description: "Replicas", Default: 1},
+				{Name: "replica_number", Type: "number", Required: false, Description: "Replicas", Default: tencentVectorDBReplicaNumber},
 			},
 		},
 		{

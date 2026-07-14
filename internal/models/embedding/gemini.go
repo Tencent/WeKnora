@@ -19,16 +19,17 @@ const geminiEmbeddingBaseURL = "https://generativelanguage.googleapis.com/v1beta
 // GeminiEmbedder implements text vectorization using the native Gemini
 // embedContent / batchEmbedContents REST API.
 type GeminiEmbedder struct {
-	apiKey               string
-	baseURL              string
-	modelName            string
-	truncatePromptTokens int
-	dimensions           int
-	modelID              string
-	httpClient           *http.Client
-	timeout              time.Duration
-	maxRetries           int
-	customHeaders        map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	truncatePromptTokens      int
+	dimensions                int
+	modelID                   string
+	httpClient                *http.Client
+	timeout                   time.Duration
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
@@ -78,6 +79,11 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 	}
 
 	timeout := 60 * time.Second
+
+	if err := validateEmbeddingBaseURL(baseURL); err != nil {
+		return nil, err
+	}
+
 	return &GeminiEmbedder{
 		apiKey:               apiKey,
 		baseURL:              baseURL,
@@ -85,7 +91,7 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 		truncatePromptTokens: truncatePromptTokens,
 		dimensions:           dimensions,
 		modelID:              modelID,
-		httpClient:           &http.Client{Timeout: timeout},
+		httpClient:           newEmbeddingHTTPClient(timeout),
 		timeout:              timeout,
 		maxRetries:           3,
 		EmbedderPooler:       pooler,
@@ -94,6 +100,10 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 
 func (e *GeminiEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
+}
+
+func (e *GeminiEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
 }
 
 func (e *GeminiEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -114,13 +124,16 @@ func (e *GeminiEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 
 	requests := make([]geminiEmbedRequest, 0, len(texts))
 	for _, text := range texts {
-		requests = append(requests, geminiEmbedRequest{
+		req := geminiEmbedRequest{
 			Model: "models/" + e.modelName,
 			Content: geminiContent{Parts: []geminiPart{
 				{Text: text},
 			}},
-			OutputDimensionality: e.dimensions,
-		})
+		}
+		if e.supportsDimensionOverride && e.dimensions > 0 {
+			req.OutputDimensionality = e.dimensions
+		}
+		requests = append(requests, req)
 	}
 
 	jsonData, err := json.Marshal(geminiBatchEmbedRequest{Requests: requests})

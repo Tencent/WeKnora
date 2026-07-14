@@ -274,7 +274,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 			return nil
 		}
 		// Get all knowledge IDs under this tag
-		knowledgeIDs, err := s.knowledgeRepo.ListIDsByTagID(ctx, tenantID, kb.ID, tag.ID)
+		knowledgeIDs, err := s.knowledgeRepo.ListIDsByTagIDs(ctx, tenantID, kb.ID, []string{tag.ID})
 		if err != nil {
 			logger.Errorf(ctx, "Failed to list knowledge IDs by tag ID %s: %v", tag.ID, err)
 			return werrors.NewInternalServerError("获取标签下的文档失败")
@@ -293,7 +293,8 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 			logger.Errorf(ctx, "Failed to marshal knowledge list delete payload: %v", err)
 			return werrors.NewInternalServerError("删除标签下的文档失败")
 		}
-		task := asynq.NewTask(types.TypeKnowledgeListDelete, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
+		task := asynq.NewTask(types.TypeKnowledgeListDelete, payloadBytes,
+			asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
@@ -370,7 +371,8 @@ func (s *knowledgeTagService) enqueueIndexDeleteTask(ctx context.Context,
 		return
 	}
 
-	task := asynq.NewTask(types.TypeIndexDelete, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(10))
+	task := asynq.NewTask(types.TypeIndexDelete, payloadBytes,
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(10), asynq.Timeout(time.Hour))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue index delete task: %v", err)

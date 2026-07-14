@@ -3,7 +3,8 @@ import { useI18n } from 'vue-i18n';
 
 defineProps<{
   count: number;
-  loading?: boolean;
+  deleteLoading?: boolean;
+  reparseLoading?: boolean;
   // When true the bar stays visible even with 0 selections, so users can exit
   // batch mode from here without selecting anything first.
   visible?: boolean;
@@ -12,6 +13,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'delete'): void;
+  (e: 'reparse'): void;
 }>();
 
 const { t } = useI18n();
@@ -19,42 +21,31 @@ const { t } = useI18n();
 
 <template>
   <transition name="batch-bar-fade">
-    <div
-      v-if="visible || count > 0"
-      class="doc-batch-bar"
-      role="region"
-      :aria-label="t('knowledgeBase.selectedCount', { count })"
-    >
+    <div v-if="visible || count > 0" class="doc-batch-bar" role="region"
+      :aria-label="t('knowledgeBase.selectedCount', { count })">
       <div class="batch-bar-inner">
         <div class="batch-bar-left">
           <span class="batch-bar-count">{{ t('knowledgeBase.selectedCount', { count }) }}</span>
-          <t-button
-            variant="text"
-            theme="default"
-            size="small"
-            class="batch-bar-clear"
-            @click="emit('cancel')"
-          >
+          <t-button variant="text" theme="default" size="small" class="batch-bar-clear" @click="emit('cancel')">
             {{ t('knowledgeBase.clearSelection') }}
           </t-button>
         </div>
         <div class="batch-bar-actions">
-          <t-popconfirm
-            theme="warning"
-            :content="t('knowledgeBase.confirmBatchDeleteDocument', { count })"
+          <t-popconfirm theme="warning" :content="t('knowledgeBase.confirmBatchReparseDocument', { count })"
+            :confirm-btn="{ content: t('knowledgeBase.confirmBatchReparse'), theme: 'warning' }"
+            :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('reparse')">
+            <t-button theme="default" variant="outline" size="small"
+              :disabled="count === 0 || deleteLoading || reparseLoading" :loading="reparseLoading" @click.stop>
+              <template #icon><t-icon name="refresh" size="14px" /></template>
+              {{ t('knowledgeBase.rebuildDocument') }}
+            </t-button>
+          </t-popconfirm>
+
+          <t-popconfirm theme="warning" :content="t('knowledgeBase.confirmBatchDeleteDocument', { count })"
             :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
-            :cancel-btn="{ content: t('common.cancel') }"
-            placement="top"
-            @confirm="emit('delete')"
-          >
-            <t-button
-              theme="danger"
-              variant="outline"
-              size="small"
-              :disabled="count === 0"
-              :loading="loading"
-              @click.stop
-            >
+            :cancel-btn="{ content: t('common.cancel') }" placement="top" @confirm="emit('delete')">
+            <t-button theme="danger" variant="outline" size="small"
+              :disabled="count === 0 || deleteLoading || reparseLoading" :loading="deleteLoading" @click.stop>
               <template #icon><t-icon name="delete" size="14px" /></template>
               {{ t('knowledgeBase.batchDelete') }}
             </t-button>

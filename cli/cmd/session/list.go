@@ -57,6 +57,12 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate static input before building the client so a bad
+			// --page-size/--limit returns input.invalid_argument (exit 5), not
+			// an auth error (exit 3).
+			if err := validateListOpts(opts); err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -65,19 +71,22 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (1..10000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Since, "since", "", "Only show sessions updated within `duration` (e.g. 7d, 24h, 30m)")
 	cmdutil.AddFormatFlag(cmd, sessionListFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:  "List chat sessions for the active profile. Results come with meta.count; use --limit to cap, --all-pages to walk every server page, --since to filter by recency (e.g. 7d).",
 		Examples: []string{"weknora session list --format json", "weknora session list --all-pages --since 7d --format json"},
-		Output:   "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the total returned",
+		Output:   "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the returned count; meta.total_count is the server-side total before --since filtering; meta.has_more=true when --limit truncated",
 	})
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
+// validateListOpts checks --page-size / --limit. Called from RunE before the
+// client is built (so a bad value surfaces as exit 5, not an auth error) and at
+// runList's top for direct callers; idempotent.
+func validateListOpts(opts *ListOptions) error {
 	if opts.PageSize < 1 || opts.PageSize > maxPageSize {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -90,6 +99,13 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
 		}
 	}
+	return nil
+}
+
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
+	if err := validateListOpts(opts); err != nil {
+		return err
+	}
 	var since time.Duration
 	if opts.Since != "" {
 		d, err := parseSinceDuration(opts.Since)
@@ -100,6 +116,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	var items []sdk.Session
+	var serverTotal int
 	if opts.AllPages {
 		accum := make([]sdk.Session, 0)
 		for page := 1; ; page++ {
@@ -107,6 +124,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			if err != nil {
 				return cmdutil.WrapHTTP(err, "list sessions")
 			}
+			serverTotal = total
 			accum = append(accum, chunk...)
 			if opts.Limit > 0 && len(accum) >= opts.Limit {
 				accum = accum[:opts.Limit]
@@ -118,10 +136,11 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		}
 		items = accum
 	} else {
-		chunk, _, err := svc.GetSessionsByTenant(ctx, 1, opts.PageSize)
+		chunk, total, err := svc.GetSessionsByTenant(ctx, 1, opts.PageSize)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list sessions")
 		}
+		serverTotal = total
 		items = chunk
 	}
 	if items == nil {
@@ -149,7 +168,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	if fopts.WantsJSON() {
-		meta := &output.Meta{Count: len(items), HasMore: truncated}
+		meta := &output.Meta{Count: output.IntPtr(len(items)), HasMore: truncated, TotalCount: output.IntPtr(serverTotal)}
 		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 

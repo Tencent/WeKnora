@@ -196,8 +196,9 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		types.TypeFAQImport,
 		payloadBytes,
 		asynq.TaskID(asynqTaskID),
-		asynq.Queue("default"),
+		asynq.Queue(types.QueueMaintenance),
 		asynq.MaxRetry(maxRetry),
+		asynq.Timeout(2*time.Hour),
 	)
 	info, err := s.task.Enqueue(task)
 	if err != nil {
@@ -1059,6 +1060,10 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	}
 
 	totalDuration := time.Since(totalStartTime)
+	var avgPerEntry time.Duration
+	if actualProcessed > 0 {
+		avgPerEntry = totalDuration / time.Duration(actualProcessed)
+	}
 	logger.Infof(
 		ctx,
 		"FAQ import task %s: all batches completed, processed: %d entries (skipped: %d) in %v, avg: %v per entry",
@@ -1066,7 +1071,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		actualProcessed,
 		skippedCount,
 		totalDuration,
-		totalDuration/time.Duration(actualProcessed),
+		avgPerEntry,
 	)
 
 	return nil
@@ -1417,8 +1422,12 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 		return err
 	}
 	batchIndexDuration := time.Since(batchIndexStartTime)
+	var avgPerEntry time.Duration
+	if len(indexInfo) > 0 {
+		avgPerEntry = batchIndexDuration / time.Duration(len(indexInfo))
+	}
 	logger.Debugf(ctx, "indexFAQChunks: batch indexed %d index info entries in %v (avg: %v per entry)",
-		len(indexInfo), batchIndexDuration, batchIndexDuration/time.Duration(len(indexInfo)))
+		len(indexInfo), batchIndexDuration, avgPerEntry)
 
 	if adjustStorage && size > 0 {
 		adjustStartTime := time.Now()

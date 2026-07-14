@@ -64,3 +64,16 @@ type TagReferenceCounts struct {
 	KnowledgeCount int64
 	ChunkCount     int64
 }
+
+// KnowledgeTagRelation represents a many-to-many association between
+// a document knowledge entry and a tag in the knowledge_tag_relations table.
+type KnowledgeTagRelation struct {
+	KnowledgeID string    `gorm:"type:varchar(36);primaryKey"`
+	TagID       string    `gorm:"type:varchar(36);primaryKey"`
+	CreatedAt   time.Time `gorm:"autoCreateTime"`
+}
+
+// TableName overrides the default table name.
+func (KnowledgeTagRelation) TableName() string {
+	return "knowledge_tag_relations"
+}

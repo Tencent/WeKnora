@@ -262,7 +262,7 @@ func TestRunMultiDelete_ConfirmBatch_NonTTY_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t) // non-TTY
 	svc := &fakeDeleteSvc{}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "delete", "document", 2, "doc.delete", "")
+	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "delete", "document", 2, "doc.delete", nil)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -274,7 +274,7 @@ func TestRunMultiDelete_ConfirmBatch_TTY_UserAborts(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "delete", "document", 3, "doc.delete", "")
+	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "delete", "document", 3, "doc.delete", nil)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

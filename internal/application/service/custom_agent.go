@@ -30,6 +30,8 @@ type customAgentService struct {
 	kbService      interfaces.KnowledgeBaseService
 	kbShareService interfaces.KBShareService
 	wikiPageRepo   interfaces.WikiPageRepository
+	tagRepo        interfaces.KnowledgeTagRepository
+	knowledgeRepo  interfaces.KnowledgeRepository
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -39,6 +41,8 @@ func NewCustomAgentService(
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
 	wikiPageRepo interfaces.WikiPageRepository,
+	tagRepo interfaces.KnowledgeTagRepository,
+	knowledgeRepo interfaces.KnowledgeRepository,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:           repo,
@@ -46,6 +50,8 @@ func NewCustomAgentService(
 		kbService:      kbService,
 		kbShareService: kbShareService,
 		wikiPageRepo:   wikiPageRepo,
+		tagRepo:        tagRepo,
+		knowledgeRepo:  knowledgeRepo,
 	}
 }
 
@@ -91,6 +97,9 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 
 	// Set defaults
 	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Creating custom agent, ID: %s, tenant ID: %d, name: %s, agent_mode: %s",
 		agent.ID, agent.TenantID, agent.Name, agent.Config.AgentMode)
@@ -126,6 +135,7 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 		agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
 		if err == nil {
 			// Found in database, return with customized config
+			agent.EnsureDefaults()
 			return agent, nil
 		}
 		// Not in database, return default built-in agent from registry (i18n-aware)
@@ -146,6 +156,7 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 		return nil, err
 	}
 
+	agent.EnsureDefaults()
 	return agent, nil
 }
 
@@ -162,6 +173,7 @@ func (s *customAgentService) GetAgentByIDAndTenant(ctx context.Context, id strin
 		}
 		return nil, err
 	}
+	agent.EnsureDefaults()
 	return agent, nil
 }
 
@@ -184,6 +196,7 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 	// Track which built-in agents exist in database
 	builtinInDB := make(map[string]bool)
 	for _, agent := range allAgents {
+		agent.EnsureDefaults()
 		if types.IsBuiltinAgentID(agent.ID) {
 			builtinInDB[agent.ID] = true
 		}
@@ -267,6 +280,9 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 	// Ensure defaults
 	existingAgent.EnsureDefaults()
+	if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s", agent.ID, agent.Name)
 
@@ -300,6 +316,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		existingAgent.Config = agent.Config
 		existingAgent.UpdatedAt = time.Now()
 		existingAgent.EnsureDefaults()
+		if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
+			return nil, err
+		}
 
 		logger.Infof(ctx, "Updating built-in agent config, ID: %s", agent.ID)
 
@@ -327,6 +346,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		UpdatedAt:   time.Now(),
 	}
 	newAgent.EnsureDefaults()
+	if err := newAgent.Config.QuestionSuggestions.Validate(); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Creating built-in agent config record, ID: %s, tenant ID: %d", agent.ID, tenantID)
 
@@ -449,10 +471,41 @@ func (s *customAgentService) GetSuggestedQuestions(
 	agentID string,
 	kbIDs []string,
 	knowledgeIDs []string,
+	tagIDs []string,
 	limit int,
+) ([]types.SuggestedQuestion, error) {
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, true)
+}
+
+func (s *customAgentService) GetKnowledgeSuggestedQuestions(
+	ctx context.Context,
+	agentID string,
+	kbIDs []string,
+	knowledgeIDs []string,
+	tagIDs []string,
+	limit int,
+) ([]types.SuggestedQuestion, error) {
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, false)
+}
+
+func (s *customAgentService) getSuggestedQuestions(
+	ctx context.Context,
+	agentID string,
+	kbIDs []string,
+	knowledgeIDs []string,
+	tagIDs []string,
+	limit int,
+	includeCurated bool,
 ) ([]types.SuggestedQuestion, error) {
 	if limit <= 0 {
 		limit = 6
+	}
+
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+		return nil, err
+	}
+	if err := types.AuthorizeTenantAPIKeyOptionalTagIDs(ctx, tagIDs); err != nil {
+		return nil, err
 	}
 
 	// Get tenant ID from context
@@ -469,16 +522,44 @@ func (s *customAgentService) GetSuggestedQuestions(
 
 	var result []types.SuggestedQuestion
 
-	// 1. Add agent config suggested_prompts first (highest priority)
-	if len(agent.Config.SuggestedPrompts) > 0 {
-		for _, prompt := range agent.Config.SuggestedPrompts {
-			if strings.TrimSpace(prompt) == "" {
-				continue
+	if includeCurated {
+		suggestionConfig := agent.Config.QuestionSuggestions
+		if suggestionConfig == nil || !suggestionConfig.Starters.Enabled {
+			return []types.SuggestedQuestion{}, nil
+		}
+		if limit > suggestionConfig.Starters.Count {
+			limit = suggestionConfig.Starters.Count
+		}
+		// Add curated agent prompts first (highest priority).
+		if suggestionConfig.Starters.Mode == types.SuggestionModeCurated ||
+			suggestionConfig.Starters.Mode == types.SuggestionModeHybrid {
+			for _, prompt := range suggestionConfig.Starters.Items {
+				if strings.TrimSpace(prompt) == "" {
+					continue
+				}
+				result = append(result, types.SuggestedQuestion{
+					Question: prompt,
+					Source:   "agent_config",
+				})
 			}
-			result = append(result, types.SuggestedQuestion{
-				Question: prompt,
-				Source:   "agent_config",
+		}
+		if suggestionConfig.Starters.Mode == types.SuggestionModeCurated {
+			return s.truncateQuestions(result, limit), nil
+		}
+	}
+
+	if len(tagIDs) > 0 {
+		resolved, err := s.resolveKnowledgeIDsFromTags(ctx, tenantID, tagIDs)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"agent_id": agentID,
+				"tag_ids":  tagIDs,
 			})
+			return s.truncateQuestions(result, limit), nil
+		}
+		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolved)
+		if len(knowledgeIDs) == 0 {
+			return s.truncateQuestions(result, limit), nil
 		}
 	}
 
@@ -518,6 +599,12 @@ func (s *customAgentService) GetSuggestedQuestions(
 			effectiveKBIDs = agent.Config.KnowledgeBases
 		}
 	}
+
+	filteredKBIDs, err := types.FilterKnowledgeBasesForTenantAPIKeyScope(ctx, kbIDs, effectiveKBIDs)
+	if err != nil {
+		return nil, err
+	}
+	effectiveKBIDs = filteredKBIDs
 
 	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 {
 		return s.truncateQuestions(result, limit), nil
@@ -691,6 +778,74 @@ func (s *customAgentService) GetSuggestedQuestions(
 	}
 
 	return s.truncateQuestions(result, limit), nil
+}
+
+func (s *customAgentService) resolveKnowledgeIDsFromTags(
+	ctx context.Context,
+	tenantID uint64,
+	tagIDs []string,
+) ([]string, error) {
+	if len(tagIDs) == 0 || s.tagRepo == nil || s.knowledgeRepo == nil {
+		return nil, nil
+	}
+	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, tagIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(tags) == 0 {
+		return nil, nil
+	}
+	byKB := make(map[string][]string)
+	for _, tag := range tags {
+		byKB[tag.KnowledgeBaseID] = append(byKB[tag.KnowledgeBaseID], tag.ID)
+	}
+	return mergeKnowledgeIDsFromTagGroups(ctx, s.knowledgeRepo, tenantID, byKB)
+}
+
+func mergeKnowledgeIDsFromTagGroups(
+	ctx context.Context,
+	knowledgeRepo interfaces.KnowledgeRepository,
+	tenantID uint64,
+	byKB map[string][]string,
+) ([]string, error) {
+	seen := make(map[string]bool)
+	var out []string
+	for kbID, ids := range byKB {
+		kids, err := knowledgeRepo.ListIDsByTagIDs(ctx, tenantID, kbID, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, kid := range kids {
+			if !seen[kid] {
+				seen[kid] = true
+				out = append(out, kid)
+			}
+		}
+	}
+	return out, nil
+}
+
+func mergeUniqueStrings(base, extra []string) []string {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := make(map[string]bool, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, s := range base {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, s := range extra {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // truncateQuestions truncates the question list to the specified limit

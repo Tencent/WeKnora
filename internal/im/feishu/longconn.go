@@ -53,6 +53,19 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 	return c.wsClient.Start(ctx)
 }
 
+// Close tears down the WebSocket long connection.
+//
+// This is the only reliable way to stop a Feishu long connection: the SDK's
+// Start blocks on a bare select{} and neither Start, pingLoop, nor
+// receiveMessageLoop observe the passed context, so cancelling ctx alone leaves
+// the underlying socket alive and the SDK auto-reconnecting. Client.Close()
+// (added in oapi-sdk-go v3.9.7) flips autoReconnect off and calls disconnect,
+// which actually closes the socket. Callers should still cancel the start ctx
+// as a belt-and-braces fallback for the start goroutine.
+func (c *LongConnClient) Close() {
+	c.wsClient.Close()
+}
+
 // feishuLoggerAdapter bridges the Feishu SDK logger to our unified logger,
 // replacing raw SDK connection messages with a consistent format.
 type feishuLoggerAdapter struct {
@@ -84,10 +97,22 @@ func (l *feishuLoggerAdapter) Error(ctx context.Context, args ...interface{}) {
 // Supports text and file messages. Returns nil for unsupported types.
 func convertEvent(event *larkim.P2MessageReceiveV1) *im.IncomingMessage {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
+		logger.Warnf(context.Background(), "[Feishu][RX] event dropped: nil event/event/message")
 		return nil
 	}
 
 	msg := event.Event.Message
+
+	// Debug: log every raw receive event so we can see exactly what Feishu
+	// delivers (or doesn't). This is the single chokepoint for all message
+	// types — adding it here catches text/file/image/post uniformly.
+	logger.Infof(context.Background(),
+		"[Feishu][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content=%q",
+		ptrStr(msg.MessageType), ptrStr(msg.ChatType), ptrStr(msg.ChatId),
+		ptrStr(msg.MessageId), ptrStr(msg.RootId), ptrStr(msg.ParentId),
+		ptrStr(msg.ThreadId), ptrStr(msg.Content),
+	)
+
 	if msg.MessageType == nil {
 		return nil
 	}
@@ -290,4 +315,13 @@ func convertPostEvent(msg *larkim.EventMessage, openID, chatID string, chatType 
 		Content:     content,
 		MessageID:   messageID,
 	}
+}
+
+// ptrStr safely dereferences a *string for logging; returns "" for nil so the
+// log line stays readable instead of printing <nil>.
+func ptrStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

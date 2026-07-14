@@ -33,6 +33,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `siliconflow`  | 硅基流动 SiliconFlow         | Chat, Embedding, Rerank, VLLM   |
 | `jina`         | Jina                         | Embedding, Rerank               |
 | `openrouter`   | OpenRouter                   | Chat, VLLM                      |
+| `requesty`     | Requesty                     | Chat, Embedding, VLLM           |
 | `gemini`       | Google Gemini                | Chat                            |
 | `modelscope`   | 魔搭 ModelScope              | Chat, Embedding, VLLM           |
 | `moonshot`     | 月之暗面 Moonshot            | Chat, VLLM                      |

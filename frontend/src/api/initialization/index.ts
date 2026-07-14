@@ -3,26 +3,42 @@ import i18n from '@/i18n'
 
 const t = (key: string) => i18n.global.t(key)
 
+// GET /initialization/config/:kbId exposes credential presence, not values.
+export interface ModelCredentialStatus {
+    apiKey?: boolean;
+}
+
+export interface COSCredentialStatus {
+    secretId?: boolean;
+    secretKey?: boolean;
+}
+
 // 初始化配置数据类型
 export interface InitializationConfig {
     llm: {
         source: string;
         modelName: string;
         baseUrl?: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
         apiKey?: string;
+        credentials?: ModelCredentialStatus;
     };
     embedding: {
         source: string;
         modelName: string;
         baseUrl?: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
         apiKey?: string;
         dimension?: number; // 添加embedding维度字段
+        credentials?: ModelCredentialStatus;
     };
     rerank: {
         modelName: string;
         baseUrl: string;
+        /** @deprecated Use credentials.apiKey from GET responses */
         apiKey?: string;
         enabled: boolean;
+        credentials?: ModelCredentialStatus;
     };
     multimodal: {
         enabled: boolean;
@@ -30,16 +46,21 @@ export interface InitializationConfig {
         vlm?: {
             modelName: string;
             baseUrl: string;
+            /** @deprecated Use credentials.apiKey from GET responses */
             apiKey?: string;
             interfaceType?: string; // "ollama" or "openai"
+            credentials?: ModelCredentialStatus;
         };
         cos?: {
-            secretId: string;
-            secretKey: string;
             region: string;
             bucketName: string;
             appId: string;
             pathPrefix?: string;
+            /** @deprecated Use credentials from GET responses */
+            secretId?: string;
+            /** @deprecated Use credentials from GET responses */
+            secretKey?: string;
+            credentials?: COSCredentialStatus;
         };
         minio?: {
             bucketName: string;
@@ -88,6 +109,8 @@ export interface KBModelConfigRequest {
     vlm_config?: {
         enabled: boolean
         model_id?: string
+        description_language?: string
+        custom_instructions?: string
     }
     asr_config?: {
         enabled: boolean
@@ -113,6 +136,7 @@ export interface KBModelConfigRequest {
         tokenLimit?: number
         // Language hints for heuristic patterns. Empty array = auto-detect.
         languages?: string[]
+        tableMetadataInstructions?: string
     }
     multimodal: {
         enabled: boolean
@@ -125,10 +149,12 @@ export interface KBModelConfigRequest {
         tags: string[]
         nodes: Node[]
         relations: Relation[]
+        customInstructions?: string
     }
     questionGeneration?: {
         enabled: boolean
         questionCount: number
+        customInstructions?: string
     }
 }
 
@@ -312,6 +338,7 @@ export function testEmbeddingModel(modelConfig: {
     baseUrl?: string;
     apiKey?: string;
     dimension?: number;
+    supportsDimensionOverride?: boolean;
     provider?: string;
     modelId?: string;
 } & BaseModelTestPayload): Promise<{ available: boolean; message?: string; dimension?: number }> {

@@ -158,6 +158,12 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		logger.Infof(ctx, "Knowledge %s has no embedding model, skipping vector store cleanup", knowledge.ID)
 	}
 
+	// Clean wiki pages before deleting chunks so cleanup can still identify
+	// which chunk_refs belonged to this source document.
+	if kb != nil && kb.IsWikiEnabled() {
+		s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
+	}
+
 	// Delete all chunks associated with this knowledge
 	wg.Go(func() error {
 		if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
@@ -193,18 +199,11 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		return nil
 	})
 
-	// Clean up wiki pages that reference this knowledge. Pass the full
-	// knowledge object so cleanup can source title/summary from the row
-	// itself rather than reaching into possibly-not-yet-written wiki pages.
-	if kb != nil && kb.IsWikiEnabled() {
-		wg.Go(func() error {
-			s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
-			return nil
-		})
-	}
-
 	if err = wg.Wait(); err != nil {
 		return err
+	}
+	if err := s.repo.DeleteKnowledgeTagRelations(ctx, id); err != nil {
+		logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", id, err)
 	}
 	// Delete the knowledge entry itself from the database
 	if err := s.repo.DeleteKnowledge(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id); err != nil {
@@ -272,6 +271,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 		logger.Warnf(ctx, "wiki cleanup: failed to list pages by source ref %s: %v", knowledgeID, err)
 		pages = nil
 	}
+	sourceChunkRefs := s.wikiChunkRefsForKnowledge(ctx, knowledge)
 
 	// Prefer the on-disk summary if the summary page already exists (it's
 	// richer than the raw user-provided description). Leave docSummary
@@ -300,6 +300,7 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 			}
 		} else {
 			page.SourceRefs = remaining
+			page.ChunkRefs = removeChunkRefs(page.ChunkRefs, sourceChunkRefs)
 			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
 				logger.Warnf(ctx, "wiki cleanup: failed to update source refs for page %s: %v", page.Slug, err)
 			} else {
@@ -333,6 +334,25 @@ func (s *knowledgeService) cleanupWikiOnKnowledgeDelete(ctx context.Context, kno
 	})
 	logger.Infof(ctx, "wiki cleanup: enqueued retract task for knowledge %s (%d known slugs: %v)",
 		knowledgeID, len(allAffectedSlugs), allAffectedSlugs)
+}
+
+func (s *knowledgeService) wikiChunkRefsForKnowledge(ctx context.Context, knowledge *types.Knowledge) map[string]bool {
+	if knowledge == nil || s.chunkRepo == nil {
+		return nil
+	}
+	chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID)
+	if err != nil {
+		logger.Warnf(ctx, "wiki cleanup: failed to list chunks for knowledge %s: %v", knowledge.ID, err)
+		return nil
+	}
+	refs := make(map[string]bool, len(chunks))
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.ID == "" {
+			continue
+		}
+		refs[chunk.ID] = true
+	}
+	return refs
 }
 
 // markKnowledgeDeletedForWiki writes a short-TTL tombstone so any wiki_ingest
@@ -405,6 +425,20 @@ func removeSourceRef(refs types.StringArray, knowledgeID string) types.StringArr
 	prefix := knowledgeID + "|"
 	for _, ref := range refs {
 		if ref == knowledgeID || strings.HasPrefix(ref, prefix) {
+			continue
+		}
+		result = append(result, ref)
+	}
+	return result
+}
+
+func removeChunkRefs(refs types.StringArray, removed map[string]bool) types.StringArray {
+	if len(refs) == 0 || len(removed) == 0 {
+		return refs
+	}
+	result := make(types.StringArray, 0, len(refs))
+	for _, ref := range refs {
+		if removed[ref] {
 			continue
 		}
 		result = append(result, ref)
@@ -526,7 +560,16 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		return nil
 	})
 
-	// 3. Delete all chunks associated with this knowledge
+	// 3. Clean wiki pages before deleting chunks so cleanup can still identify
+	// which chunk_refs belonged to each source document.
+	for _, knowledge := range knowledgeList {
+		kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+		if kb != nil && kb.IsWikiEnabled() {
+			s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
+		}
+	}
+
+	// 4. Delete all chunks associated with this knowledge
 	wg.Go(func() error {
 		if err := s.chunkService.DeleteByKnowledgeList(ctx, ids); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete chunks failed")
@@ -535,7 +578,7 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		return nil
 	})
 
-	// 4. Delete the physical file and extracted images if they exist
+	// 5. Delete the physical file and extracted images if they exist
 	wg.Go(func() error {
 		storageAdjust := int64(0)
 		for _, knowledge := range knowledgeList {
@@ -579,25 +622,15 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		return nil
 	})
 
-	// Clean up wiki pages that reference deleted knowledge. cleanup needs
-	// the full knowledge object (Title / Description) so the retract prompt
-	// can describe the vanished document even when wiki pages haven't been
-	// ingested yet — which is common in the batch-delete-shortly-after-upload
-	// flow.
-	wg.Go(func() error {
-		for _, knowledge := range knowledgeList {
-			kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
-			if kb != nil && kb.IsWikiEnabled() {
-				s.cleanupWikiOnKnowledgeDelete(ctx, knowledge)
-			}
-		}
-		return nil
-	})
-
 	if err = wg.Wait(); err != nil {
 		return err
 	}
-	// 5. Delete the knowledge entry itself from the database
+	for _, knowledgeID := range ids {
+		if err := s.repo.DeleteKnowledgeTagRelations(ctx, knowledgeID); err != nil {
+			logger.Warnf(ctx, "Failed to delete tag relations for knowledge %s: %v", knowledgeID, err)
+		}
+	}
+	// 6. Delete the knowledge entry itself from the database
 	if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids); err != nil {
 		return err
 	}

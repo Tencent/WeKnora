@@ -90,8 +90,6 @@ type Tenant struct {
 	Name string `yaml:"name"                json:"name"`
 	// Description
 	Description string `yaml:"description"         json:"description"`
-	// API key
-	APIKey string `yaml:"api_key"             json:"api_key"`
 	// Status
 	Status string `yaml:"status"              json:"status"              gorm:"default:'active'"`
 	// Retriever engines
@@ -116,6 +114,8 @@ type Tenant struct {
 	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:jsonb"`
 	// Retrieval config: global search/retrieval parameters shared by knowledge search and message search
 	RetrievalConfig *RetrievalConfig `yaml:"retrieval_config" json:"retrieval_config" gorm:"type:jsonb"`
+	// API principal config: controls how X-API-Key requests map to terminal principals.
+	APIPrincipalConfig *APIPrincipalConfig `yaml:"api_principal_config" json:"-" gorm:"type:jsonb"`
 	// Creation time
 	CreatedAt time.Time `yaml:"created_at"          json:"created_at"`
 	// Last updated time
@@ -142,31 +142,6 @@ func (t *Tenant) BeforeCreate(tx *gorm.DB) error {
 	if t.RetrieverEngines.Engines == nil {
 		t.RetrieverEngines.Engines = []RetrieverEngineParams{}
 	}
-	return nil
-}
-
-// BeforeSave encrypts APIKey before persisting to database.
-// Uses tx.Statement.SetColumn to avoid polluting the in-memory struct.
-func (t *Tenant) BeforeSave(tx *gorm.DB) error {
-	if key := utils.GetAESKey(); key != nil && t.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(t.APIKey, key); err == nil {
-			tx.Statement.SetColumn("api_key", encrypted)
-		}
-	}
-	return nil
-}
-
-// AfterFind decrypts APIKey after loading from database.
-// Legacy plaintext (without enc:v1: prefix) is returned as-is. When the value
-// is encrypted but SYSTEM_AES_KEY is missing/rotated and the data cannot be
-// decrypted, the error is propagated so the read fails loudly instead of
-// returning ciphertext to callers.
-func (t *Tenant) AfterFind(tx *gorm.DB) error {
-	decrypted, err := utils.DecryptStoredSecret(t.APIKey)
-	if err != nil {
-		return fmt.Errorf("decrypt tenants.api_key (id=%d): %w", t.ID, err)
-	}
-	t.APIKey = decrypted
 	return nil
 }
 
@@ -213,6 +188,63 @@ type CredentialsConfig struct {
 type WeKnoraCloudCredentials struct {
 	AppID     string `json:"app_id"`
 	AppSecret string `json:"app_secret"`
+}
+
+type APIPrincipalMode string
+
+const (
+	APIPrincipalModeTenant      APIPrincipalMode = "tenant"
+	APIPrincipalModeDirect      APIPrincipalMode = "direct_header"
+	APIPrincipalModeSignedToken APIPrincipalMode = "signed_token"
+)
+
+// APIPrincipalConfig controls how tenant API-key requests map to terminal
+// principals. Direct header mode is low-assurance and should only be used for
+// trusted server-to-server calls; signed-token mode verifies the user claim.
+type APIPrincipalConfig struct {
+	Mode                  APIPrincipalMode `json:"mode"`
+	DirectHeaderName      string           `json:"direct_header_name,omitempty"`
+	SignedTokenHeaderName string           `json:"signed_token_header_name,omitempty"`
+	// RequireDirectHeader, when true in direct_header mode, rejects API-key
+	// requests that omit the configured user-id header instead of falling
+	// back to the tenant-level principal.
+	RequireDirectHeader bool   `json:"require_direct_header,omitempty"`
+	HMACSecret          string `json:"hmac_secret,omitempty"`
+}
+
+func (c *APIPrincipalConfig) Value() (driver.Value, error) {
+	if c == nil {
+		return nil, nil
+	}
+	cp := *c
+	if cp.HMACSecret != "" {
+		if key := utils.GetAESKey(); key != nil {
+			if encrypted, err := utils.EncryptAESGCM(cp.HMACSecret, key); err == nil {
+				cp.HMACSecret = encrypted
+			}
+		}
+	}
+	return json.Marshal(&cp)
+}
+
+func (c *APIPrincipalConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	if err := json.Unmarshal(b, c); err != nil {
+		return err
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(c.HMACSecret); ok {
+		c.HMACSecret = plain
+	} else {
+		log.Printf("[crypto] tenant api_principal_config.hmac_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.HMACSecret = ""
+	}
+	return nil
 }
 
 // GetWeKnoraCloud returns the WeKnoraCloud credentials, or nil if not configured.

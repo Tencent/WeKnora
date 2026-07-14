@@ -172,6 +172,43 @@ func TestList_Limit_CapsResults(t *testing.T) {
 	}
 }
 
+// TestList_Truncation_SignalsHasMoreAndTotal pins that a client-side --limit
+// truncation tells the agent it did NOT get everything: has_more=true and
+// total_count=full set. Regression: kb list silently dropped items past
+// --limit with no completeness signal, so an agent listing to find a KB by
+// name could miss KBs beyond position 30 and never know.
+func TestList_Truncation_SignalsHasMoreAndTotal(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListSvc{items: makeKBs(20)}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	if err := runList(context.Background(), &ListOptions{Limit: 5}, fopts, svc); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	if !strings.Contains(out.String(), `"has_more":true`) {
+		t.Errorf("truncated list must set has_more:true; got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), `"total_count":20`) {
+		t.Errorf("truncated list must report total_count:20; got:\n%s", out.String())
+	}
+}
+
+// TestList_NoTruncation_OmitsHasMore pins that when --limit does NOT truncate,
+// has_more is absent (omitempty) so the agent reads "complete".
+func TestList_NoTruncation_OmitsHasMore(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListSvc{items: makeKBs(3)}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	if err := runList(context.Background(), &ListOptions{Limit: 30}, fopts, svc); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	if strings.Contains(out.String(), `"has_more"`) {
+		t.Errorf("non-truncated list must omit has_more; got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), `"total_count":3`) {
+		t.Errorf("list must report total_count:3; got:\n%s", out.String())
+	}
+}
+
 func TestList_Limit_Zero_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: makeKBs(7)}

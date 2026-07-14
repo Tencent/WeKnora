@@ -24,10 +24,14 @@ type History struct {
 
 // MentionedItem represents a mentioned knowledge base or file
 type MentionedItem struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Type   string `json:"type"`    // "kb" for knowledge base, "file" for file
-	KBType string `json:"kb_type"` // "document" or "faq" (only for kb type)
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill"
+	KBType    string `json:"kb_type"`    // "document" or "faq" (only for kb type)
+	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag mentions
+	KBName    string `json:"kb_name"`    // Display name for parent KB
+	ServiceID string `json:"service_id"` // Parent MCP service for MCP tool mentions
+	SkillName string `json:"skill_name"` // Preloaded agent skill name
 }
 
 // MessageImage represents an image attached to a chat message
@@ -211,7 +215,19 @@ type Message struct {
 	// Empty for non-retrieval intents or assistant messages.
 	RenderedContent string `json:"-" gorm:"type:text;column:rendered_content;default:''"`
 	// Channel indicates the source channel of this message (e.g., "web", "api", "im")
-	Channel string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"` 
+	Channel string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"`
+	// AgentID is the agent used for this individual assistant turn. Unlike the
+	// session's last_request_state it remains stable when users switch agents.
+	AgentID string `json:"agent_id,omitempty" gorm:"type:varchar(36);default:'';index"`
+	// AgentTenantID is the effective/source tenant used to resolve a shared
+	// agent's models and knowledge. It is intentionally not exposed in JSON.
+	AgentTenantID uint64 `json:"-" gorm:"column:agent_tenant_id;default:0"`
+	// ModelID is the requested/effective chat model binding captured for this
+	// turn. It is useful for reproducibility and suggestion generation.
+	ModelID string `json:"model_id,omitempty" gorm:"type:varchar(64);default:''"`
+	// ExecutionContext stores the non-secret per-turn scope required to safely
+	// generate contextual follow-up questions after the main stream completes.
+	ExecutionContext MessageExecutionContext `json:"-" gorm:"type:jsonb;column:execution_context"`
 	// KnowledgeID links this message to a Knowledge entry in the chat history knowledge base
 	// Used for vector search indexing: when set, the message content has been indexed as a Knowledge passage
 	KnowledgeID string `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`
@@ -221,6 +237,43 @@ type Message struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete timestamp
 	DeletedAt gorm.DeletedAt `json:"deleted_at"            gorm:"index"`
+}
+
+// MessageExecutionContext is a message-level snapshot of the non-secret
+// request state used by derived experiences such as follow-up suggestions.
+type MessageExecutionContext struct {
+	AgentConfigHash       string                    `json:"agent_config_hash,omitempty"`
+	QuestionSuggestions   *QuestionSuggestionConfig `json:"question_suggestions,omitempty"`
+	KnowledgeBaseIDs      []string                  `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs          []string                  `json:"knowledge_ids,omitempty"`
+	TagIDs                []string                  `json:"tag_ids,omitempty"`
+	MCPServiceIDs         []string                  `json:"mcp_service_ids,omitempty"`
+	SkillNames            []string                  `json:"skill_names,omitempty"`
+	WebSearchEnabled      bool                      `json:"web_search_enabled"`
+	Locale                string                    `json:"locale,omitempty"`
+	SuggestionAttribution *SuggestionAttribution    `json:"suggestion_attribution,omitempty"`
+}
+
+func (c MessageExecutionContext) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+func (c *MessageExecutionContext) Scan(value interface{}) error {
+	if value == nil {
+		*c = MessageExecutionContext{}
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		*c = MessageExecutionContext{}
+		return nil
+	}
+	return json.Unmarshal(b, c)
 }
 
 // AgentSteps represents a collection of agent execution steps

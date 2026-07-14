@@ -386,7 +386,7 @@ func (p *PluginSearch) searchByTargets(
 			var fullKBIDs []string
 			var knowledgeTargets []*types.SearchTarget
 			for _, t := range targets {
-				if t.Type == types.SearchTargetTypeKnowledgeBase {
+				if t.Type == types.SearchTargetTypeKnowledgeBase && len(t.TagIDs) == 0 {
 					fullKBIDs = append(fullKBIDs, t.KnowledgeBaseID)
 				} else {
 					knowledgeTargets = append(knowledgeTargets, t)
@@ -469,7 +469,7 @@ func (p *PluginSearch) searchSingleTarget(
 ) {
 	searchKnowledgeIDs := t.KnowledgeIDs
 
-	if t.Type == types.SearchTargetTypeKnowledge {
+	if t.Type == types.SearchTargetTypeKnowledge && !t.DisableDirectLoad {
 		directResults, skippedIDs := p.tryDirectChunkLoading(ctx, chatManage.TenantID, t.KnowledgeIDs)
 
 		if len(directResults) > 0 {
@@ -502,6 +502,7 @@ func (p *PluginSearch) searchSingleTarget(
 		VectorThreshold:       chatManage.VectorThreshold,
 		KeywordThreshold:      chatManage.KeywordThreshold,
 		MatchCount:            chatManage.EmbeddingTopK,
+		TagIDs:                t.TagIDs,
 		SkipContextEnrichment: true,
 	}
 	if t.Type == types.SearchTargetTypeKnowledge {

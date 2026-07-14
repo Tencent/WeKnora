@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -23,6 +25,8 @@ var ErrModelNotFound = errors.New("model not found")
 // modelService implements the model service interface
 type modelService struct {
 	repo          interfaces.ModelRepository
+	kbRepo        interfaces.KnowledgeBaseRepository
+	agentRepo     interfaces.CustomAgentRepository
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
@@ -30,12 +34,16 @@ type modelService struct {
 
 // NewModelService creates a new model service instance
 func NewModelService(repo interfaces.ModelRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
+	agentRepo interfaces.CustomAgentRepository,
 	ollamaService *ollama.OllamaService,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
 ) interfaces.ModelService {
 	return &modelService{
 		repo:          repo,
+		kbRepo:        kbRepo,
+		agentRepo:     agentRepo,
 		ollamaService: ollamaService,
 		pooler:        pooler,
 		tenantService: tenantService,
@@ -341,9 +349,31 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 		})
 		return err
 	}
-	if existingModel != nil && existingModel.IsBuiltin {
+	if existingModel == nil {
+		return ErrModelNotFound
+	}
+	if existingModel.IsBuiltin {
 		logger.Warnf(ctx, "Attempted to delete builtin model: %s", id)
-		return errors.New("builtin models cannot be deleted")
+		return apperrors.NewBadRequestError("builtin models cannot be deleted")
+	}
+
+	kbCount, err := s.kbRepo.CountByModelID(ctx, tenantID, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id": id,
+		})
+		return err
+	}
+	agentCount, err := s.agentRepo.CountByModelID(ctx, tenantID, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id": id,
+		})
+		return err
+	}
+	if kbCount > 0 || agentCount > 0 {
+		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d", id, kbCount, agentCount)
+		return apperrors.NewBadRequestError(formatModelInUseMessage(kbCount, agentCount))
 	}
 
 	// Delete model from repository
@@ -581,4 +611,27 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 	}
 
 	return sttModel, nil
+}
+
+func formatModelInUseMessage(kbCount, agentCount int64) string {
+	switch {
+	case kbCount > 0 && agentCount > 0:
+		return fmt.Sprintf(
+			"model is used by %d knowledge base(s) and %d agent(s); "+
+				"reconfigure or remove those references before deleting",
+			kbCount, agentCount,
+		)
+	case kbCount > 0:
+		return fmt.Sprintf(
+			"model is used by %d knowledge base(s); "+
+				"reconfigure or remove those references before deleting",
+			kbCount,
+		)
+	default:
+		return fmt.Sprintf(
+			"model is used by %d agent(s); "+
+				"reconfigure or remove those references before deleting",
+			agentCount,
+		)
+	}
 }

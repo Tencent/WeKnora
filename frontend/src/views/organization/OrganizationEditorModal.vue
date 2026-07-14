@@ -516,11 +516,12 @@ watch(() => props.mode, () => {
   color: var(--td-text-color-secondary);
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer);
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
+    background: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
     font-weight: 500;
   }

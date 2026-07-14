@@ -16,8 +16,10 @@ import (
 type MentionedItem struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
-	Type   string `json:"type"`    // "kb" for knowledge base, "file" for file
+	Type   string `json:"type"`    // "kb", "file", "tag", "mcp", or "skill"
 	KBType string `json:"kb_type"` // "document" or "faq" (only for kb type)
+	KBID   string `json:"kb_id"`   // Parent knowledge base for file/tag mentions
+	KBName string `json:"kb_name"` // Display name for parent KB
 }
 
 // AgentQARequest agent Q&A request payload.
@@ -47,6 +49,7 @@ const (
 	AgentResponseTypeAnswer     AgentResponseType = "answer"
 	AgentResponseTypeReflection AgentResponseType = "reflection"
 	AgentResponseTypeError      AgentResponseType = "error"
+	AgentResponseTypeComplete   AgentResponseType = "complete"
 )
 
 // AgentStreamResponse agent streaming response
@@ -85,7 +88,7 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	}
 
 	path := fmt.Sprintf("/api/v1/agent-chat/%s", sessionID)
-	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
+	resp, err := c.doRequestStream(ctx, http.MethodPost, path, request, nil)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -93,7 +96,7 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
+		return newAPIError(resp.StatusCode, body)
 	}
 
 	// Process SSE stream
@@ -103,6 +106,11 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 // processAgentSSEStream processes the SSE stream and invokes callback for each event
 func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCallback) error {
 	scanner := bufio.NewScanner(reader)
+	// Default 64KiB per-line cap truncates large SSE data lines (the
+	// references event bundles chunk contents that can reach hundreds of
+	// KiB). Raise the cap so those lines parse instead of erroring with
+	// "bufio.Scanner: token too long".
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	var dataBuffer string
 
 	for scanner.Scan() {
@@ -118,6 +126,13 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 
 				if err := callback(&streamResponse); err != nil {
 					return err
+				}
+				// A terminal error frame is the stream's final outcome even if a
+				// buggy/proxied server leaves the HTTP connection open and never
+				// follows it with `complete` or EOF. Deliver it to the callback
+				// first, then terminate the SDK call with an error.
+				if streamResponse.ResponseType == AgentResponseTypeError && streamResponse.Done {
+					return NewSSEStreamError(streamResponse.Content)
 				}
 				dataBuffer = ""
 			}

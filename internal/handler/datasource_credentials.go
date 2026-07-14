@@ -83,8 +83,8 @@ func (h *DataSourceCredentialsHandler) Put(c *gin.Context) {
 		return
 	}
 	configured := false
-	if parsed, err := updated.ParseConfig(); err == nil && parsed != nil && parsed.HasCredentials() {
-		configured = true
+	if parsed, err := updated.ParseConfig(); err == nil && parsed != nil {
+		configured = parsed.HasConfiguredCredentials(updated.Type)
 	}
 	resp := dto.CredentialsResponse{
 		Fields: map[string]dto.CredentialFieldMetadata{

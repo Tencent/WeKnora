@@ -81,13 +81,16 @@ func NewAliyunReranker(config *RerankerConfig) (*AliyunReranker, error) {
 	if url := config.BaseURL; url != "" {
 		baseURL = url
 	}
+	if err := validateRerankBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 
 	return &AliyunReranker{
 		modelName: config.ModelName,
 		modelID:   config.ModelID,
 		apiKey:    apiKey,
 		baseURL:   baseURL,
-		client:    &http.Client{},
+		client:    newRerankHTTPClient(0),
 	}, nil
 }
 

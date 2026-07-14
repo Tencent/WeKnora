@@ -109,6 +109,7 @@ definitions:
     - 2002
     - 2003
     - 2004
+    - 2005
     - 2100
     - 2101
     - 2102
@@ -133,6 +134,7 @@ definitions:
     - ErrTenantInactive
     - ErrTenantNameRequired
     - ErrTenantInvalidStatus
+    - ErrTenantCreationDisabled
     - ErrAgentMissingThinkingModel
     - ErrAgentMissingAllowedTools
     - ErrAgentInvalidMaxIterations
@@ -205,6 +207,29 @@ definitions:
       tier:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
     type: object
+  github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat:
+    properties:
+      active:
+        type: integer
+      limit:
+        type: integer
+      model_id:
+        type: string
+      name:
+        type: string
+      waiting:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.APIPrincipalMode:
+    enum:
+    - tenant
+    - direct_header
+    - signed_token
+    type: string
+    x-enum-varnames:
+    - APIPrincipalModeTenant
+    - APIPrincipalModeDirect
+    - APIPrincipalModeSignedToken
   github_com_Tencent_WeKnora_internal_types.ASRConfig:
     properties:
       enabled:
@@ -268,6 +293,11 @@ definitions:
     - system.setting_changed
     - system.admin_promoted
     - system.admin_revoked
+    - system.user_password_reset
+    - system.queue_task_retried
+    - system.queue_task_deleted
+    - system.queue_task_run_now
+    - system.queue_task_cancelled
     type: string
     x-enum-varnames:
     - AuditActionMemberAdded
@@ -289,6 +319,11 @@ definitions:
     - AuditActionSystemSettingChanged
     - AuditActionSystemAdminPromoted
     - AuditActionSystemAdminRevoked
+    - AuditActionSystemUserPasswordReset
+    - AuditActionSystemQueueTaskRetried
+    - AuditActionSystemQueueTaskDeleted
+    - AuditActionSystemQueueTaskRunNow
+    - AuditActionSystemQueueTaskCancelled
   github_com_Tencent_WeKnora_internal_types.AuditLog:
     properties:
       action:
@@ -408,6 +443,12 @@ definitions:
           the historical recursive splitter; "auto" lets a profiler pick between
           heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
           "recursive" pin the tier explicitly.
+        type: string
+      table_metadata_instructions:
+        description: |-
+          TableMetadataInstructions contains optional business guidance used when
+          generating searchable summaries for CSV/Excel tables. The system-owned
+          output contract remains fixed; these instructions only add domain context.
         type: string
       token_limit:
         description: |-
@@ -650,6 +691,11 @@ definitions:
           ===== Agent Mode Settings =====
           Maximum iterations for ReAct loop (only for agent type)
         type: integer
+      mcp_auth_wait_timeout:
+        description: |-
+          MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth
+          authorization before skipping. <=0 uses the gate's configured timeout.
+        type: integer
       mcp_selection_mode:
         description: 'MCP service selection mode: "all" = all enabled MCP services,
           "selected" = specific services, "none" = no MCP'
@@ -675,6 +721,14 @@ definitions:
           Dedicated chat model ID for the query-understanding (rewrite + intent) step.
           When empty, the main conversation ModelID is used as a fallback.
         type: string
+      question_suggestions:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig'
+        description: |-
+          ===== Conversation Question Suggestions =====
+          QuestionSuggestions owns both the static/knowledge-backed prompts shown
+          before the first user turn and the contextual follow-up questions shown
+          after a completed assistant answer.
       rerank_model_id:
         description: ReRank model ID for retrieval
         type: string
@@ -709,13 +763,6 @@ definitions:
           ===== Skills Settings (only for smart-reasoning mode) =====
           Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills
         type: string
-      suggested_prompts:
-        description: |-
-          ===== Suggested Prompts =====
-          推荐问题列表，用于在前端对话面板展示快捷提问
-        items:
-          type: string
-        type: array
       supported_file_types:
         description: |-
           ===== File Type Restriction Settings =====
@@ -850,11 +897,18 @@ definitions:
     properties:
       dimension:
         type: integer
+      supports_dimension_override:
+        type: boolean
       truncate_prompt_tokens:
         type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.ExtractConfig:
     properties:
+      custom_instructions:
+        description: |-
+          CustomInstructions adds domain-specific extraction guidance while the
+          system keeps ownership of the structured graph output protocol.
+        type: string
       enabled:
         type: boolean
       nodes:
@@ -1000,6 +1054,33 @@ definitions:
     required:
     - query_text
     type: object
+  github_com_Tencent_WeKnora_internal_types.FollowUpSuggestionConfig:
+    properties:
+      additional_instruction:
+        type: string
+      allow_regenerate:
+        type: boolean
+      categories:
+        items:
+          type: string
+        type: array
+      count:
+        type: integer
+      enabled:
+        type: boolean
+      knowledge_fallback:
+        type: boolean
+      max_context_turns:
+        type: integer
+      mode:
+        type: string
+      model_id:
+        type: string
+      suppress_on_fallback:
+        type: boolean
+      suppress_when_answer_asks_question:
+        type: boolean
+    type: object
   github_com_Tencent_WeKnora_internal_types.GraphNode:
     properties:
       attributes:
@@ -1069,7 +1150,7 @@ definitions:
         description: ES, OpenSearch
         type: integer
       replica_number:
-        description: 'Milvus: in-memory replica count (LoadCollection)'
+        description: Milvus LoadCollection / Tencent VectorDB CreateCollection replicas
         type: integer
       replication_factor:
         description: 'Qdrant, Weaviate: number of replicas'
@@ -1255,9 +1336,12 @@ definitions:
       summary_status:
         description: Summary status for async summary generation
         type: string
-      tag_id:
-        description: Optional tag ID for categorization within a knowledge base
-        type: string
+      tags:
+        description: Tags holds the tags associated with this knowledge (populated
+          on query, not persisted directly).
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag'
+        type: array
       tenant_id:
         description: Tenant ID
         type: integer
@@ -1527,6 +1611,14 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig'
       graph_enabled:
         type: boolean
+      parser_engine_overrides:
+        additionalProperties:
+          type: string
+        description: |-
+          ParserEngineOverrides passes key-value configuration to docreader parsers
+          (e.g. pdf_force_scanned=true). Merged with tenant-level overrides in the
+          parse pipeline; per-upload values take priority on conflict.
+        type: object
       parser_engine_rules:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
@@ -1535,6 +1627,36 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
       vlm_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeTag:
+    properties:
+      color:
+        description: Optional display color
+        type: string
+      created_at:
+        description: Creation time
+        type: string
+      id:
+        description: Unique identifier of the tag (UUID)
+        type: string
+      knowledge_base_id:
+        description: Knowledge base ID that this tag belongs to
+        type: string
+      name:
+        description: Tag name, unique within the same knowledge base
+        type: string
+      seq_id:
+        description: SeqID is an auto-increment integer ID for external API usage
+        type: integer
+      sort_order:
+        description: Sort order within the same knowledge base
+        type: integer
+      tenant_id:
+        description: Tenant ID
+        type: integer
+      updated_at:
+        description: Last updated time
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ListMembersResponse:
     properties:
@@ -1631,13 +1753,51 @@ definitions:
     properties:
       api_key:
         type: string
+      api_key_header:
+        description: |-
+          APIKeyHeader is the header name that carries APIKey when AuthType is
+          api_key. Empty defaults to "X-API-Key". This is non-secret structural
+          config (the secret is APIKey), so it is not encrypted and is safe to echo
+          back in responses. It lets services that expect the key in a different
+          header (e.g. the raw token directly in "Authorization") work without
+          resorting to plaintext custom headers.
+        type: string
+      auth_server_metadata_url:
+        description: |-
+          AuthServerMetadataURL optionally pins the OAuth authorization server
+          metadata URL. When empty, the server is discovered automatically from
+          the MCP URL (RFC 9728 / RFC 8414).
+        type: string
+      auth_type:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType'
+        description: |-
+          AuthType selects the authentication strategy. Empty ("") is treated as
+          none for backward compatibility with rows that pre-date this field.
       custom_headers:
         additionalProperties:
           type: string
         type: object
+      scopes:
+        description: Scopes are the OAuth scopes requested during authorization. Optional.
+        items:
+          type: string
+        type: array
       token:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.MCPAuthType:
+    enum:
+    - ""
+    - api_key
+    - bearer
+    - oauth
+    type: string
+    x-enum-varnames:
+    - MCPAuthNone
+    - MCPAuthAPIKey
+    - MCPAuthBearer
+    - MCPAuthOAuth
   github_com_Tencent_WeKnora_internal_types.MCPEnvVars:
     additionalProperties:
       type: string
@@ -1726,8 +1886,10 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides'
       status:
         type: string
-      tag_id:
-        type: string
+      tag_ids:
+        items:
+          type: string
+        type: array
       title:
         type: string
     type: object
@@ -1785,13 +1947,25 @@ definitions:
     properties:
       id:
         type: string
+      kb_id:
+        description: Parent knowledge base for file/tag mentions
+        type: string
+      kb_name:
+        description: Display name for parent KB
+        type: string
       kb_type:
         description: '"document" or "faq" (only for kb type)'
         type: string
       name:
         type: string
+      service_id:
+        description: Parent MCP service for MCP tool mentions
+        type: string
+      skill_name:
+        description: Preloaded agent skill name
+        type: string
       type:
-        description: '"kb" for knowledge base, "file" for file'
+        description: '"kb", "file", "tag", "mcp", "skill"'
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.Message:
@@ -1800,6 +1974,11 @@ definitions:
         description: Agent total execution duration in milliseconds (from query start
           to answer start)
         type: integer
+      agent_id:
+        description: |-
+          AgentID is the agent used for this individual assistant turn. Unlike the
+          session's last_request_state it remains stable when users switch agents.
+        type: string
       agent_steps:
         description: |-
           Agent execution steps (only for assistant messages generated by agent)
@@ -1859,6 +2038,11 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem'
         type: array
+      model_id:
+        description: |-
+          ModelID is the requested/effective chat model binding captured for this
+          turn. It is useful for reproducibility and suggestion generation.
+        type: string
       request_id:
         description: Request identifier for tracking API requests
         type: string
@@ -1951,6 +2135,14 @@ definitions:
         type: object
       interface_type:
         type: string
+      max_concurrency:
+        description: |-
+          MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /
+          enrichment) calls to THIS specific model, keyed by model ID and shared
+          across all replicas. 0 (the default) means "fall back to the
+          process-wide model.max_concurrency". Interactive user-facing calls are
+          never gated. Only chat / vlm / embedding honour this (see limiter.Gate).
+        type: integer
       parameter_size:
         description: Ollama model parameter size (e.g., "7B", "13B", "70B")
         type: string
@@ -1977,6 +2169,7 @@ definitions:
     - siliconflow
     - jina
     - openrouter
+    - requesty
     - nvidia
     - novita
     - azure_openai
@@ -1996,6 +2189,7 @@ definitions:
       ModelSourceOpenAI: OpenAI model
       ModelSourceOpenRouter: OpenRouter model
       ModelSourceRemote: Remote model
+      ModelSourceRequesty: Requesty model
       ModelSourceSiliconFlow: SiliconFlow model
       ModelSourceVolcengine: Volcengine model
       ModelSourceZhipu: Zhipu model
@@ -2014,6 +2208,7 @@ definitions:
     - SiliconFlow model
     - Jina AI model
     - OpenRouter model
+    - Requesty model
     - NVIDIA model
     - Novita AI model
     - Azure OpenAI model
@@ -2032,6 +2227,7 @@ definitions:
     - ModelSourceSiliconFlow
     - ModelSourceJina
     - ModelSourceOpenRouter
+    - ModelSourceRequesty
     - ModelSourceNvidia
     - ModelSourceNovita
     - ModelSourceAzureOpenAI
@@ -2285,11 +2481,65 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig:
     properties:
+      custom_instructions:
+        description: |-
+          CustomInstructions describes the intended audience or question style.
+          It is appended to the stable system question-generation template.
+        type: string
       enabled:
         type: boolean
       question_count:
         description: 'Number of questions to generate per chunk (default: 3, max:
           10)'
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig:
+    properties:
+      follow_ups:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FollowUpSuggestionConfig'
+      starters:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig'
+    type: object
+  github_com_Tencent_WeKnora_internal_types.QueueStat:
+    properties:
+      active:
+        type: integer
+      archived:
+        type: integer
+      completed:
+        type: integer
+      failed:
+        type: integer
+      latency_ms:
+        description: LatencyMs is the age of the oldest pending task, in milliseconds.
+        type: integer
+      memory_usage_bytes:
+        description: MemoryUsageBytes is the approximate Redis memory the queue occupies.
+        type: integer
+      name:
+        type: string
+      paused:
+        description: Paused reports whether the queue is paused (tasks not consumed).
+        type: boolean
+      pending:
+        type: integer
+      pool:
+        description: Pool is the independent worker pool that drains this queue.
+        type: string
+      processed:
+        description: Processed / Failed are today's counters (reset daily).
+        type: integer
+      retry:
+        type: integer
+      scheduled:
+        type: integer
+      size:
+        description: |-
+          Size is the total number of tasks in the queue (pending + active +
+          scheduled + retry + aggregating + archived).
+        type: integer
+      weight:
+        description: Weight is the queue's scheduling weight inside its pool.
         type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.RegisterRequest:
@@ -2497,6 +2747,91 @@ definitions:
         description: 'Optional: role to assign when approving; overrides applicant''s
           requested role'
     type: object
+  github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction:
+    enum:
+    - cancel
+    - run_now
+    - delete
+    type: string
+    x-enum-varnames:
+    - RuntimeTaskActionCancel
+    - RuntimeTaskActionRunNow
+    - RuntimeTaskActionDelete
+  github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo:
+    properties:
+      allowed_actions:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction'
+        type: array
+      completed_at:
+        type: string
+      data_source_id:
+        type: string
+      deadline:
+        type: string
+      enqueued_at:
+        type: string
+      id:
+        type: string
+      is_orphaned:
+        type: boolean
+      knowledge_base_id:
+        type: string
+      knowledge_count:
+        type: integer
+      knowledge_id:
+        type: string
+      last_error:
+        type: string
+      last_failed_at:
+        type: string
+      max_retry:
+        type: integer
+      next_process_at:
+        type: string
+      queue:
+        type: string
+      retried:
+        type: integer
+      source_id:
+        type: string
+      source_kb_id:
+        type: string
+      started_at:
+        type: string
+      state:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState'
+      sync_log_id:
+        type: string
+      target_id:
+        type: string
+      target_kb_id:
+        type: string
+      task_id:
+        type: string
+      tenant_id:
+        type: integer
+      type:
+        type: string
+      worker:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.RuntimeTaskState:
+    enum:
+    - pending
+    - active
+    - scheduled
+    - retry
+    - archived
+    - completed
+    type: string
+    x-enum-varnames:
+    - RuntimeTaskPending
+    - RuntimeTaskActive
+    - RuntimeTaskScheduled
+    - RuntimeTaskRetry
+    - RuntimeTaskArchived
+    - RuntimeTaskCompleted
   github_com_Tencent_WeKnora_internal_types.S3EngineConfig:
     properties:
       access_key:
@@ -2682,8 +3017,8 @@ definitions:
         type: string
       user_id:
         description: |-
-          UserID is the owner of the session. Empty for legacy rows (visible at
-          tenant level) and for IM-created sessions that do not map to a WeKnora user.
+          UserID is the owner scope for this session. WeKnora user UUIDs, API
+          external-user principals, and embed visitor principals all use this column.
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.SessionLastRequestState:
@@ -2700,8 +3035,24 @@ definitions:
         items:
           type: string
         type: array
+      mcp_service_ids:
+        items:
+          type: string
+        type: array
+      mentioned_items:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem'
+        type: array
       model_id:
         type: string
+      skill_names:
+        items:
+          type: string
+        type: array
+      tag_ids:
+        items:
+          type: string
+        type: array
       web_search_enabled:
         type: boolean
     type: object
@@ -2714,6 +3065,19 @@ definitions:
     required:
     - organization_id
     - permission
+    type: object
+  github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig:
+    properties:
+      count:
+        type: integer
+      enabled:
+        type: boolean
+      items:
+        items:
+          type: string
+        type: array
+      mode:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.StorageConfig:
     properties:
@@ -2792,6 +3156,13 @@ definitions:
           default viewer'
     required:
     - invite_code
+    type: object
+  github_com_Tencent_WeKnora_internal_types.SuggestionAttribution:
+    properties:
+      question_id:
+        type: string
+      suggestion_set_id:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.SyncLog:
     properties:
@@ -2923,9 +3294,6 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.Tenant:
     properties:
-      api_key:
-        description: API key
-        type: string
       business:
         description: Business
         type: string
@@ -3210,6 +3578,16 @@ definitions:
       base_url:
         description: Base URL
         type: string
+      custom_instructions:
+        description: |-
+          CustomInstructions adds KB-specific image interpretation guidance without
+          replacing the system-owned OCR and Markdown output contract.
+        type: string
+      description_language:
+        description: |-
+          DescriptionLanguage controls the language used for generated image
+          captions. Empty means follow the document/request language.
+        type: string
       enabled:
         type: boolean
       interface_type:
@@ -3336,6 +3714,7 @@ definitions:
     - ollama
     - baidu
     - searxng
+    - keenable
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBing
@@ -3345,35 +3724,57 @@ definitions:
     - WebSearchProviderTypeOllama
     - WebSearchProviderTypeBaidu
     - WebSearchProviderTypeSearxng
+    - WebSearchProviderTypeKeenable
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
+      content_instructions:
+        description: |-
+          ContentInstructions controls tone, structure and emphasis for generated
+          summary/entity/index prose. Citation and merge rules remain system-owned.
+        type: string
       extraction_granularity:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity'
         description: |-
           ExtractionGranularity controls how many candidate slugs Pass 0 extracts
           per document. Empty / unknown value is treated as WikiExtractionStandard.
+      extraction_instructions:
+        description: |-
+          ExtractionInstructions tells candidate extraction which domain concepts
+          to emphasize without replacing the stable JSON/citation protocol.
+        type: string
       ingest_batch_size:
         description: |-
-          IngestBatchSize controls how many pending ops a single batch
-          processes before scheduling a follow-up. 0 falls back to the
-          hard-coded default (5). Operators on large KBs (4w+ docs) can
-          raise this to 10–20 to amortize the lock-acquire / index-rebuild
-          overhead across more documents per round.
+          IngestBatchSize controls how many pending ops a single batch claims and
+          processes before scheduling a follow-up. 0 falls back to the hard-coded
+          default (5). Larger batches amortize per-batch setup and let more docs
+          share the batch-internal Map/Reduce fan-out; smaller batches spread a
+          KB's backlog across more concurrent batches (finer scheduling grain).
         type: integer
       ingest_map_parallel:
         description: |-
           IngestMapParallel sets the errgroup limit for the Map phase
-          (per-document extraction + summary + chunk citation). 0 falls
-          back to 10. Bound by the LLM provider's concurrency limit and
-          the worker's outbound HTTP pool.
+          (per-document extraction + summary + chunk citation) WITHIN one batch.
+          0 falls back to 10. Bound by the LLM provider's concurrency limit and
+          the worker's outbound HTTP pool. Remember it multiplies with the number
+          of concurrent batches (IngestMaxInflight).
+        type: integer
+      ingest_max_inflight:
+        description: |-
+          IngestMaxInflight caps how many ingest batches for THIS KB may run
+          concurrently in the shared wiki worker pool (standard/Redis mode
+          only). 0 falls back to the hard-coded default (4). Since Phase 3
+          removed the exclusive per-KB lock, one KB's backlog could otherwise
+          monopolize the whole pool during a bulk import and starve other KBs;
+          this knob trades a single KB's peak throughput for cross-KB fairness.
+          Set it >= the wiki pool size to effectively disable the cap.
         type: integer
       ingest_reduce_parallel:
         description: |-
           IngestReduceParallel sets the errgroup limit for the Reduce phase
-          (per-slug page write). 0 falls back to 10. Bound by the same
-          LLM concurrency / HTTP pool considerations as the Map phase,
-          plus DB connection pool size.
+          (per-slug page write) WITHIN one batch. 0 falls back to 10. Bound by the
+          same LLM concurrency / HTTP pool considerations as the Map phase, plus
+          DB connection pool size. Same multiplier caveat as IngestMapParallel.
         type: integer
       max_pages_per_ingest:
         description: MaxPagesPerIngest limits pages created/updated per ingest operation
@@ -3394,6 +3795,85 @@ definitions:
     - WikiExtractionFocused
     - WikiExtractionStandard
     - WikiExtractionExhaustive
+  github_com_Tencent_WeKnora_internal_types.WikiFolder:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      depth:
+        type: integer
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      name:
+        type: string
+      parent_id:
+        type: string
+      path:
+        type: string
+      sort_order:
+        type: integer
+      tenant_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiFolderCreateRequest:
+    properties:
+      name:
+        type: string
+      parent_id:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiFolderListResponse:
+    properties:
+      folders:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderNode'
+        type: array
+      parent_id:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiFolderNode:
+    properties:
+      created_at:
+        type: string
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      depth:
+        type: integer
+      has_children:
+        type: boolean
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      name:
+        type: string
+      page_count:
+        type: integer
+      parent_id:
+        type: string
+      path:
+        type: string
+      sort_order:
+        type: integer
+      tenant_id:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest:
+    properties:
+      move_parent:
+        type: boolean
+      name:
+        type: string
+      parent_id:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.WikiGraphData:
     properties:
       edges:
@@ -3450,11 +3930,23 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiIndexEntry:
     properties:
+      category_path:
+        items:
+          type: string
+        type: array
+      depth:
+        type: integer
+      parent_slug:
+        type: string
       slug:
         type: string
+      sort_order:
+        type: integer
       summary:
         type: string
       title:
+        type: string
+      wiki_path:
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiIndexGroup:
@@ -3549,6 +4041,14 @@ definitions:
         items:
           type: string
         type: array
+      category_path:
+        description: |-
+          CategoryPath is the directory breadcrumb that groups this page in the
+          wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. Derived cache of the
+          folder chain identified by FolderID.
+        items:
+          type: string
+        type: array
       chunk_refs:
         description: |-
           ChunkRefs records the specific source-document chunks this page was
@@ -3571,6 +4071,17 @@ definitions:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
         description: Soft delete
+      depth:
+        description: Depth is len(CategoryPath), cached for filtering / display.
+        type: integer
+      folder_id:
+        description: |-
+          FolderID is the single source of truth for where this page sits in the
+          directory tree — a reference to wiki_folders.id ("" = wiki root). The
+          CategoryPath / WikiPath / Depth fields below are denormalized caches
+          recomputed from this folder's chain on every write so list/index/search
+          queries don't have to join wiki_folders.
+        type: string
       id:
         description: Unique identifier (UUID)
         type: string
@@ -3596,11 +4107,22 @@ definitions:
         description: 'Page type: summary, entity, concept, index, log, synthesis,
           comparison'
         type: string
+      parent_slug:
+        description: |-
+          ParentSlug optionally points at the wiki page that should act as this
+          page's semantic parent in the directory tree. The parent may be empty
+          when the page is grouped only by FolderID.
+        type: string
       slug:
         description: |-
           URL-friendly slug for addressing, e.g. "entity/acme-corp", "concept/rag"
           Unique within a knowledge base
         type: string
+      sort_order:
+        description: |-
+          SortOrder allows generated or manually edited pages to control sibling
+          ordering before falling back to title.
+        type: integer
       source_refs:
         description: |-
           References to source knowledge IDs that contributed to this page.
@@ -3633,6 +4155,11 @@ definitions:
           sync from background jobs) leave it untouched so it can be used as a
           real "the page was edited" signal.
         type: integer
+      wiki_path:
+        description: |-
+          WikiPath is a normalized, sortable path derived from page_type,
+          category_path, and title. It keeps large directory listings cheap to sort.
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiPageIssue:
     properties:
@@ -3677,6 +4204,15 @@ definitions:
         type: integer
       total_pages:
         type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageMoveRequest:
+    properties:
+      folder_id:
+        type: string
+      slug:
+        type: string
+    required:
+    - slug
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiStats:
     properties:
@@ -3800,6 +4336,11 @@ definitions:
         items:
           type: integer
         type: array
+    type: object
+  internal_handler.EnsureMessageSuggestionsRequest:
+    properties:
+      regenerate:
+        type: boolean
     type: object
   internal_handler.EvaluationRequest:
     properties:
@@ -4061,6 +4602,8 @@ definitions:
               Without that distinction, users could set strategy="auto" once
               but never reset it back to legacy / unset.
             type: string
+          tableMetadataInstructions:
+            type: string
           tokenLimit:
             type: integer
         type: object
@@ -4078,6 +4621,8 @@ definitions:
       nodeExtract:
         description: 知识图谱配置
         properties:
+          customInstructions:
+            type: string
           enabled:
             type: boolean
           nodes:
@@ -4098,6 +4643,8 @@ definitions:
       questionGeneration:
         description: 问题生成配置
         properties:
+          customInstructions:
+            type: string
           enabled:
             type: boolean
           questionCount:
@@ -4159,6 +4706,8 @@ definitions:
       source:
         description: 为空时按需默认为 "remote"
         type: string
+      supportsDimensionOverride:
+        type: boolean
     required:
     - modelName
     type: object
@@ -4325,8 +4874,20 @@ definitions:
       source:
         description: 为空时按需默认为 "remote"
         type: string
+      supportsDimensionOverride:
+        type: boolean
     required:
     - modelName
+    type: object
+  internal_handler.ResetUserPasswordRequest:
+    properties:
+      email:
+        type: string
+      new_password:
+        type: string
+    required:
+    - email
+    - new_password
     type: object
   internal_handler.RevokeSystemAdminRequest:
     properties:
@@ -4334,6 +4895,74 @@ definitions:
         type: string
     required:
     - user_id
+    type: object
+  internal_handler.RuntimeQueuesResponse:
+    properties:
+      available:
+        type: boolean
+      model_limiter_available:
+        type: boolean
+      models:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat'
+        type: array
+      parse_concurrency:
+        description: compatibility alias for upstream_concurrency
+        type: integer
+      pools:
+        items:
+          $ref: '#/definitions/internal_handler.RuntimeWorkerPool'
+        type: array
+      queues:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QueueStat'
+        type: array
+      timestamp:
+        type: integer
+      upstream_concurrency:
+        type: integer
+      wiki_concurrency:
+        description: compatibility field
+        type: integer
+    type: object
+  internal_handler.RuntimeTasksResponse:
+    properties:
+      available:
+        type: boolean
+      has_more:
+        type: boolean
+      page:
+        type: integer
+      page_size:
+        type: integer
+      tasks:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo'
+        type: array
+    type: object
+  internal_handler.RuntimeWorkerPool:
+    description: Return every row in the system_settings table (system-scope, not
+      tenant-scope). SystemAdmin only.
+    properties:
+      active:
+        description: live workers assigned to this pool
+        type: integer
+      cluster_capacity:
+        description: sum of live server concurrency
+        type: integer
+      concurrency:
+        description: configured per instance
+        type: integer
+      instances:
+        description: live asynq server heartbeats
+        type: integer
+      name:
+        type: string
+      queue_count:
+        type: integer
+      utilization:
+        description: Active / ClusterCapacity
+        type: number
     type: object
   internal_handler.SearchMessagesRequest:
     properties:
@@ -4396,6 +5025,18 @@ definitions:
       name:
         description: '"local", "minio", "cos", "tos", "s3", "oss", "ks3"'
         type: string
+    type: object
+  internal_handler.SuggestionEventRequest:
+    properties:
+      event_type:
+        type: string
+      question_id:
+        type: string
+      suggestion_set_id:
+        type: string
+    required:
+    - event_type
+    - suggestion_set_id
     type: object
   internal_handler.TestProviderRequest:
     properties:
@@ -4533,6 +5174,26 @@ definitions:
     required:
     - similar_questions
     type: object
+  internal_handler.apiPrincipalConfigRequest:
+    properties:
+      direct_header_name:
+        type: string
+      hmac_secret:
+        type: string
+      mode:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.APIPrincipalMode'
+      require_direct_header:
+        type: boolean
+      signed_token_header_name:
+        type: string
+    type: object
+  internal_handler.apiPrincipalTestTokenRequest:
+    properties:
+      expires_in_seconds:
+        type: integer
+      external_user_id:
+        type: string
+    type: object
   internal_handler.auditLogListResponse:
     properties:
       data:
@@ -4543,6 +5204,20 @@ definitions:
         type: integer
       success:
         type: boolean
+    type: object
+  internal_handler.batchReparseKnowledgeRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+      kb_id:
+        type: string
+      process_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides'
+    required:
+    - ids
+    - kb_id
     type: object
   internal_handler.createInvitationRequest:
     properties:
@@ -4611,6 +5286,13 @@ definitions:
     - password
     - token
     - username
+    type: object
+  internal_handler.resolveAncestorsRequest:
+    properties:
+      resource_ids:
+        items:
+          type: string
+        type: array
     type: object
   internal_handler.updateLastFAQImportResultDisplayStatusRequest:
     properties:
@@ -4703,6 +5385,11 @@ definitions:
         items:
           type: string
         type: array
+      mcp_service_ids:
+        description: Per-request MCP services selected via @mention
+        items:
+          type: string
+        type: array
       mentioned_items:
         description: '@mentioned knowledge bases and files'
         items:
@@ -4711,10 +5398,22 @@ definitions:
       query:
         description: Query text for knowledge base search
         type: string
+      skill_names:
+        description: Per-request Skills selected via @mention
+        items:
+          type: string
+        type: array
+      suggestion_attribution:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SuggestionAttribution'
       summary_model_id:
         description: Optional summary model ID for this request (overrides session
           default)
         type: string
+      tag_ids:
+        description: '@mentioned tag IDs (display/debug; scoped via MentionedItems)'
+        items:
+          type: string
+        type: array
       web_search_enabled:
         description: Whether web search is enabled for this request
         type: boolean
@@ -4756,13 +5455,25 @@ definitions:
     properties:
       id:
         type: string
+      kb_id:
+        description: Parent knowledge base for file/tag mentions
+        type: string
+      kb_name:
+        description: Display name for parent KB
+        type: string
       kb_type:
         description: '"document" or "faq" (only for kb type)'
         type: string
       name:
         type: string
+      service_id:
+        description: Parent MCP service for MCP tool mentions
+        type: string
+      skill_name:
+        description: Preloaded agent skill name
+        type: string
       type:
-        description: '"kb" for knowledge base, "file" for file'
+        description: '"kb", "file", "tag", "mcp", "skill"'
         type: string
     type: object
   internal_handler_session.SearchKnowledgeRequest:
@@ -4780,9 +5491,19 @@ definitions:
         items:
           type: string
         type: array
+      mentioned_items:
+        description: Optional scoped tag mentions
+        items:
+          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
+        type: array
       query:
         description: Query text to search for
         type: string
+      tag_ids:
+        description: Tag IDs for filtering within a single KB
+        items:
+          type: string
+        type: array
     required:
     - query
     type: object
@@ -4811,6 +5532,71 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /agent/mcp-oauth-resolutions/{pending_id}:
+    post:
+      consumes:
+      - application/json
+      description: 用户在对话中完成 OAuth 授权后调用，校验令牌存在后恢复被暂停的 Agent 工具调用
+      parameters:
+      - description: 待授权 ID
+        in: path
+        name: pending_id
+        required: true
+        type: string
+      - description: '{service_id: string}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 用户尚未完成授权
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 完成对话内 MCP OAuth 授权
+      tags:
+      - MCP服务
+  /agent/mcp-oauth-resolutions/{pending_id}/cancel:
+    post:
+      description: 用户主动跳过 OAuth 授权，解除 Agent 阻塞
+      parameters:
+      - description: 待授权 ID
+        in: path
+        name: pending_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 跳过对话内 MCP OAuth 授权
+      tags:
+      - MCP服务
   /agent/tool-approvals/{pending_id}:
     post:
       consumes:
@@ -6068,14 +6854,59 @@ paths:
       summary: Pause data source
       tags:
       - DataSource
-  /datasource/{id}/resources:
-    get:
-      description: List resources available for sync in the external system
+  /datasource/{id}/resource-ancestors:
+    post:
+      consumes:
+      - application/json
+      description: Resolve the ancestor ExternalIDs that must be expanded to reveal
+        the given (possibly deeply nested) resources in a lazily-loaded picker. Used
+        to restore an existing selection when editing a data source.
       parameters:
       - description: Data source ID
         in: path
         name: id
         required: true
+        type: string
+      - description: Resource IDs to resolve
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.resolveAncestorsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              items:
+                type: string
+              type: array
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Resolve resource ancestors
+      tags:
+      - DataSource
+  /datasource/{id}/resources:
+    get:
+      description: List resources available for sync in the external system. Pass
+        parent_id to lazily load the direct children of a resource (used for large
+        hierarchical sources such as Feishu wiki).
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Parent resource ExternalID; empty lists the top level
+        in: query
+        name: parent_id
         type: string
       produces:
       - application/json
@@ -7156,6 +7987,34 @@ paths:
       summary: 更新知识库
       tags:
       - 知识库
+  /knowledge-bases/{id}/duplicate:
+    post:
+      consumes:
+      - application/json
+      description: 创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态
+      parameters:
+      - description: 源知识库 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建后的知识库副本
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 创建知识库副本
+      tags:
+      - 知识库
   /knowledge-bases/{id}/faq/entries:
     delete:
       consumes:
@@ -7618,7 +8477,41 @@ paths:
     get:
       consumes:
       - application/json
-      description: 在知识库中执行向量和关键词混合搜索
+      description: 在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 搜索参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 搜索结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 混合搜索
+      tags:
+      - 知识库
+    post:
+      consumes:
+      - application/json
+      description: 在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
       parameters:
       - description: 知识库ID
         in: path
@@ -7700,9 +8593,9 @@ paths:
         in: query
         name: page_size
         type: integer
-      - description: 标签ID筛选
+      - description: 标签ID筛选，逗号分隔（OR语义）
         in: query
-        name: tag_id
+        name: tag_ids
         type: string
       - description: 关键词搜索
         in: query
@@ -7775,6 +8668,10 @@ paths:
         in: formData
         name: enable_multimodel
         type: boolean
+      - description: 分类ID列表，逗号分隔
+        in: formData
+        name: tag_ids
+        type: string
       - description: 处理配置JSON（KnowledgeProcessOverrides）
         in: formData
         name: process_config
@@ -7860,8 +8757,10 @@ paths:
               type: string
             file_type:
               type: string
-            tag_id:
-              type: string
+            tag_ids:
+              items:
+                type: string
+              type: array
             title:
               type: string
             url:
@@ -8604,6 +9503,40 @@ paths:
       summary: 批量删除知识
       tags:
       - 知识管理
+  /knowledge/batch-reparse:
+    post:
+      consumes:
+      - application/json
+      description: 按 ID 列表批量重新解析单个知识库下的多个知识条目
+      parameters:
+      - description: 批量重解析请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.batchReparseKnowledgeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 任务已提交
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 批量重新解析知识
+      tags:
+      - 知识管理
   /knowledge/image/{id}/{chunk_id}:
     put:
       consumes:
@@ -8741,8 +9674,9 @@ paths:
     get:
       consumes:
       - application/json
-      description: Search knowledge files by keyword. When agent_id is set (shared
-        agent), scope is the agent's configured knowledge bases.
+      description: Search knowledge files by keyword. Pass recent=true without a keyword
+        to browse recent files. When agent_id is set (shared agent), scope is the
+        agent's configured knowledge bases.
       parameters:
       - description: Keyword to search
         in: query
@@ -8764,6 +9698,10 @@ paths:
         in: query
         name: agent_id
         type: string
+      - description: Return recent files when keyword is empty
+        in: query
+        name: recent
+        type: boolean
       produces:
       - application/json
       responses:
@@ -8832,6 +9770,149 @@ paths:
       security:
       - Bearer: []
       summary: Auto-fix wiki issues
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/folders:
+    get:
+      description: Retrieve the direct child folders of a parent folder (parent_id
+        empty = root level), each with its page count and a has-children flag for
+        the directory tree.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Parent folder id (empty = root)
+        in: query
+        name: parent_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: List wiki folders
+      tags:
+      - Wiki
+    post:
+      consumes:
+      - application/json
+      description: Create a new (initially empty) directory node under parent_id
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder data
+        in: body
+        name: folder
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Create a wiki folder
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/folders/{folder_id}:
+    delete:
+      description: Delete a folder that has no pages and no child folders
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete an empty wiki folder
+      tags:
+      - Wiki
+    put:
+      consumes:
+      - application/json
+      description: Rename and/or reparent a folder; the whole subtree's paths and
+        the affected pages' cached paths are recomputed
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Folder ID
+        in: path
+        name: folder_id
+        required: true
+        type: string
+      - description: Folder update
+        in: body
+        name: folder
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Rename or move a wiki folder
       tags:
       - Wiki
   /knowledgebase/{kb_id}/wiki/graph:
@@ -9041,6 +10122,40 @@ paths:
       summary: Get wiki operation log
       tags:
       - Wiki
+  /knowledgebase/{kb_id}/wiki/move-page:
+    put:
+      consumes:
+      - application/json
+      description: Relocate a page (identified by slug in the body) into a folder
+        (folder_id empty = root); the page's cached category path is recomputed
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Move target
+        in: body
+        name: move
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageMoveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Move a wiki page into a folder
+      tags:
+      - Wiki
   /knowledgebase/{kb_id}/wiki/pages:
     get:
       description: List wiki pages with optional filtering and pagination
@@ -9050,7 +10165,7 @@ paths:
         name: kb_id
         required: true
         type: string
-      - description: Filter by page type
+      - description: Filter by page type; comma-separated for multiple (e.g. entity,concept)
         in: query
         name: page_type
         type: string
@@ -9508,6 +10623,82 @@ paths:
       summary: 移除 MCP 服务的单个凭据字段
       tags:
       - MCP服务
+  /mcp-services/{id}/oauth/authorize-url:
+    post:
+      consumes:
+      - application/json
+      description: 对使用 OAuth 的 MCP 服务执行发现与动态客户端注册，返回浏览器应跳转的授权地址（当前用户维度）
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '{redirect_uri: string, frontend_redirect?: string}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{authorization_url: string}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 发起 MCP OAuth 授权
+      tags:
+      - MCP服务
+  /mcp-services/{id}/oauth/status:
+    get:
+      description: 返回当前用户对指定 MCP 服务是否已完成 OAuth 授权
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{authorized: bool}'
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 查询 MCP OAuth 授权状态
+      tags:
+      - MCP服务
+  /mcp-services/{id}/oauth/token:
+    delete:
+      description: 删除当前用户对指定 MCP 服务的 OAuth 令牌
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+      security:
+      - Bearer: []
+      summary: 撤销 MCP OAuth 授权
+      tags:
+      - MCP服务
   /mcp-services/{id}/resources:
     get:
       consumes:
@@ -9638,6 +10829,28 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 获取MCP服务工具列表
+      tags:
+      - MCP服务
+  /mcp-services/oauth/callback:
+    get:
+      description: 接收授权服务器回调并完成 code 交换，随后重定向回前端
+      parameters:
+      - description: 授权码
+        in: query
+        name: code
+        type: string
+      - description: 状态参数
+        in: query
+        name: state
+        type: string
+      - description: 授权错误码
+        in: query
+        name: error
+        type: string
+      responses:
+        "302":
+          description: Found
+      summary: MCP OAuth 回调
       tags:
       - MCP服务
   /me/invitations:
@@ -10996,6 +12209,72 @@ paths:
       summary: 知识问答
       tags:
       - 问答
+  /sessions/{session_id}/messages/{message_id}/suggestions:
+    get:
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 助手消息 ID
+        in: path
+        name: message_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取回答后推荐问题
+      tags:
+      - 会话
+    post:
+      consumes:
+      - application/json
+      description: 对已完成的助手消息异步生成或重新生成推荐问题；相同配置快照会复用持久化结果
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 助手消息 ID
+        in: path
+        name: message_id
+        required: true
+        type: string
+      - description: 生成选项
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/internal_handler.EnsureMessageSuggestionsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 确保生成回答后推荐问题
+      tags:
+      - 会话
   /sessions/{session_id}/pin:
     post:
       description: 将指定会话置顶（用户维度）
@@ -11058,6 +12337,32 @@ paths:
       summary: 停止生成
       tags:
       - 问答
+  /sessions/{session_id}/suggestion-events:
+    post:
+      consumes:
+      - application/json
+      description: 记录曝光、点击或关闭事件
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 事件
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.SuggestionEventRequest'
+      responses:
+        "204":
+          description: No Content
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 上报推荐问题事件
+      tags:
+      - 会话
   /sessions/{session_id}/title:
     post:
       consumes:
@@ -11404,26 +12709,91 @@ paths:
       summary: Revoke system administrator privileges from a user
       tags:
       - System Admin
-  /system/admin/settings:
+  /system/admin/runtime/queues:
     get:
-      description: |-
-        Return every row in the system_settings table (system-scope,
-        not tenant-scope). SystemAdmin only.
+      description: 返回各 asynq 队列的实时深度（pending/active/scheduled/retry 等）与 worker 并发配置，仅系统管理员可见
       produces:
       - application/json
       responses:
         "200":
-          description: list of settings
+          description: OK
           schema:
-            items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting'
-            type: array
-        "403":
-          description: 'Forbidden: not a system admin'
+            $ref: '#/definitions/internal_handler.RuntimeQueuesResponse'
+      summary: 获取解析任务队列运行时状态
+      tags:
+      - 系统管理
+  /system/admin/runtime/queues/{queue}/tasks:
+    get:
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue
+        required: true
+        type: string
+      - description: Task state
+        enum:
+        - pending
+        - active
+        - scheduled
+        - retry
+        - archived
+        - completed
+        in: query
+        name: state
+        required: true
+        type: string
+      - default: 1
+        description: Page
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Page size
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
           schema:
-            additionalProperties: true
+            $ref: '#/definitions/internal_handler.RuntimeTasksResponse'
+      summary: List runtime queue tasks by state
+      tags:
+      - System Admin
+  /system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action}:
+    post:
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Action
+        enum:
+        - cancel
+        - run_now
+        - delete
+        in: path
+        name: action
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
             type: object
-      summary: List all system settings
+      summary: Run a safe runtime task action
       tags:
       - System Admin
   /system/admin/settings/{key}:
@@ -11551,6 +12921,46 @@ paths:
             additionalProperties: true
             type: object
       summary: Apply the default storage quota to every existing tenant
+      tags:
+      - System Admin
+  /system/admin/users/reset-password:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Replace another user's local password and revoke all of their existing sessions (SystemAdmin only).
+        A system administrator cannot reset their own password through this endpoint; self-service password change still requires the old password.
+      parameters:
+      - description: Password reset request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ResetUserPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Password reset successfully
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request, weak password, or self reset
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 'Forbidden: not a system admin'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: User not found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Reset another user's password
       tags:
       - System Admin
   /system/docreader/reconnect:
@@ -11683,6 +13093,8 @@ paths:
         创建新的租户。任意已登录用户均可调用以建立自己的新工作区，
         调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样
         通过本接口创建任意租户。
+        当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）
+        开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。
       parameters:
       - description: 租户信息
         in: body
@@ -11694,7 +13106,7 @@ paths:
       - application/json
       responses:
         "201":
-          description: 创建的租户
+          description: 创建的租户（可选含 api_key）
           schema:
             additionalProperties: true
             type: object
@@ -11800,11 +13212,11 @@ paths:
       summary: 更新租户
       tags:
       - 租户管理
-  /tenants/{id}/api-key:
-    post:
+  /tenants/{id}/api-principal-config:
+    get:
       consumes:
       - application/json
-      description: 为指定租户生成一个新的 API Key，旧 Key 立即失效
+      description: 返回 X-API-Key 请求如何映射为终端 Principal 的配置（Owner）
       parameters:
       - description: 租户ID
         in: path
@@ -11815,7 +13227,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: 新生成的 API Key
+          description: API principal 配置
           schema:
             additionalProperties: true
             type: object
@@ -11829,7 +13241,82 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 重置租户 API Key
+      summary: 获取租户 API Key 用户身份配置
+      tags:
+      - 租户管理
+    put:
+      consumes:
+      - application/json
+      description: 配置 X-API-Key 请求如何映射为终端 Principal（Owner）
+      parameters:
+      - description: 租户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: API principal 配置
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.apiPrincipalConfigRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的配置
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 更新租户 API Key 用户身份配置
+      tags:
+      - 租户管理
+  /tenants/{id}/api-principal-test-token:
+    post:
+      consumes:
+      - application/json
+      description: 使用租户已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）
+      parameters:
+      - description: 租户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 测试 Token 参数
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.apiPrincipalTestTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 短期 JWT
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 生成 API Playground 测试 JWT
       tags:
       - 租户管理
   /tenants/{id}/audit-log:

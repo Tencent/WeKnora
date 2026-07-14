@@ -37,6 +37,11 @@ func TestAuditAction_DotNamespaceConvention(t *testing.T) {
 		AuditActionSystemSettingChanged,
 		AuditActionSystemAdminPromoted,
 		AuditActionSystemAdminRevoked,
+		AuditActionSystemUserPasswordReset,
+		AuditActionSystemQueueTaskRetried,
+		AuditActionSystemQueueTaskDeleted,
+		AuditActionSystemQueueTaskRunNow,
+		AuditActionSystemQueueTaskCancelled,
 	}
 	for _, a := range all {
 		s := string(a)
@@ -118,9 +123,14 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 	register("AuditActionSystemSettingChanged", AuditActionSystemSettingChanged)
 	register("AuditActionSystemAdminPromoted", AuditActionSystemAdminPromoted)
 	register("AuditActionSystemAdminRevoked", AuditActionSystemAdminRevoked)
+	register("AuditActionSystemUserPasswordReset", AuditActionSystemUserPasswordReset)
+	register("AuditActionSystemQueueTaskRetried", AuditActionSystemQueueTaskRetried)
+	register("AuditActionSystemQueueTaskDeleted", AuditActionSystemQueueTaskDeleted)
+	register("AuditActionSystemQueueTaskRunNow", AuditActionSystemQueueTaskRunNow)
+	register("AuditActionSystemQueueTaskCancelled", AuditActionSystemQueueTaskCancelled)
 }
 
-// TestAuditAction_SystemNamespacePrefix pins the three system.* actions
+// TestAuditAction_SystemNamespacePrefix pins the system.* actions
 // added in this PR to their shared area prefix. The prefix is the
 // contract by which the platform audit log endpoint
 // (GET /system/admin/audit-log) filters out per-tenant rbac.* rows —
@@ -131,6 +141,11 @@ func TestAuditAction_SystemNamespacePrefix(t *testing.T) {
 		AuditActionSystemSettingChanged,
 		AuditActionSystemAdminPromoted,
 		AuditActionSystemAdminRevoked,
+		AuditActionSystemUserPasswordReset,
+		AuditActionSystemQueueTaskRetried,
+		AuditActionSystemQueueTaskDeleted,
+		AuditActionSystemQueueTaskRunNow,
+		AuditActionSystemQueueTaskCancelled,
 	}
 	for _, a := range cases {
 		assert.True(t,
@@ -141,7 +156,7 @@ func TestAuditAction_SystemNamespacePrefix(t *testing.T) {
 }
 
 // TestAuditAction_SystemWireValues pins the exact wire strings for
-// the three system.* actions. Audit-log consumers (Langfuse exporters,
+// the system.* actions. Audit-log consumers (Langfuse exporters,
 // the new frontend platform audit drawer, future SIEM integrations)
 // match on these strings; changing them is a breaking change.
 func TestAuditAction_SystemWireValues(t *testing.T) {
@@ -152,6 +167,11 @@ func TestAuditAction_SystemWireValues(t *testing.T) {
 		{AuditActionSystemSettingChanged, "system.setting_changed"},
 		{AuditActionSystemAdminPromoted, "system.admin_promoted"},
 		{AuditActionSystemAdminRevoked, "system.admin_revoked"},
+		{AuditActionSystemUserPasswordReset, "system.user_password_reset"},
+		{AuditActionSystemQueueTaskRetried, "system.queue_task_retried"},
+		{AuditActionSystemQueueTaskDeleted, "system.queue_task_deleted"},
+		{AuditActionSystemQueueTaskRunNow, "system.queue_task_run_now"},
+		{AuditActionSystemQueueTaskCancelled, "system.queue_task_cancelled"},
 	}
 	for _, c := range cases {
 		assert.Equal(t, c.wire, string(c.constant))

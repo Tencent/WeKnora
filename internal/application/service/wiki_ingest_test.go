@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -19,8 +22,8 @@ func TestSlugify(t *testing.T) {
 		{"Special!@#Chars", "specialchars"},
 		{"CamelCase", "camelcase"},
 		{"", ""},
-		{"a/b/c", "a/b/c"},            // preserve slashes for hierarchical slugs
-		{"中文标题", "中文标题"},          // preserve CJK
+		{"a/b/c", "a/b/c"},               // preserve slashes for hierarchical slugs
+		{"中文标题", "中文标题"},                 // preserve CJK
 		{"Mix 中英文 Test", "mix-中英文-test"}, // mixed
 	}
 
@@ -201,3 +204,154 @@ func TestHasSufficientTextContent(t *testing.T) {
 		})
 	}
 }
+
+func TestMaskImageURLs(t *testing.T) {
+	const urlA = "minio://kb/10000/exports/4135-aaaa-bbbb-cccc/page_1.jpg"
+	const urlB = "local://kb/10000/exports/9999-dddd-eeee-ffff/page_2.png"
+
+	t.Run("single markdown image round trips exact URL", func(t *testing.T) {
+		input := "Intro ![alt text](" + urlA + ") outro"
+		masked, urlMap := maskImageURLs(input)
+
+		if masked != "Intro ![alt text](wkimg:0001) outro" {
+			t.Fatalf("masked = %q", masked)
+		}
+		if got := urlMap["wkimg:0001"]; got != urlA {
+			t.Fatalf("urlMap[wkimg:0001] = %q, want %q", got, urlA)
+		}
+		if got := unmaskImageURLs(masked, urlMap); got != input {
+			t.Fatalf("unmaskImageURLs() = %q, want %q", got, input)
+		}
+	})
+
+	t.Run("enriched image attribute and original markdown share token", func(t *testing.T) {
+		input := `<image url="` + urlA + `">
+<image_original>![page](` + urlA + `)</image_original>
+<image_caption>caption text</image_caption>
+</image>`
+		masked, urlMap := maskImageURLs(input)
+
+		if len(urlMap) != 1 {
+			t.Fatalf("len(urlMap) = %d, want 1", len(urlMap))
+		}
+		if strings.Count(masked, "wkimg:0001") != 2 {
+			t.Fatalf("masked should contain the same placeholder twice: %q", masked)
+		}
+		if strings.Contains(masked, urlA) {
+			t.Fatalf("masked still contains real URL: %q", masked)
+		}
+		if got := unmaskImageURLs(masked, urlMap); got != input {
+			t.Fatalf("unmaskImageURLs() = %q, want %q", got, input)
+		}
+	})
+
+	t.Run("same URL repeated and distinct URLs map correctly", func(t *testing.T) {
+		input := "![a](" + urlA + ")\n![again](" + urlA + ")\n![b](" + urlB + ")"
+		masked, urlMap := maskImageURLs(input)
+
+		if strings.Count(masked, "wkimg:0001") != 2 {
+			t.Fatalf("same URL should reuse wkimg:0001: %q", masked)
+		}
+		if strings.Count(masked, "wkimg:0002") != 1 {
+			t.Fatalf("second URL should use wkimg:0002: %q", masked)
+		}
+		if got := unmaskImageURLs(masked, urlMap); got != input {
+			t.Fatalf("unmaskImageURLs() = %q, want %q", got, input)
+		}
+	})
+
+	t.Run("caption is preserved even when it resembles a placeholder", func(t *testing.T) {
+		input := "![wkimg:0001](" + urlA + ")"
+		masked, urlMap := maskImageURLs(input)
+		got := unmaskImageURLs(masked, urlMap)
+
+		if got != input {
+			t.Fatalf("unmaskImageURLs() = %q, want %q", got, input)
+		}
+	})
+
+	t.Run("non image text is unchanged", func(t *testing.T) {
+		input := "slug: entity/example\nlanguage: zh"
+		masked, urlMap := maskImageURLs(input)
+
+		if masked != input {
+			t.Fatalf("maskImageURLs() = %q, want %q", masked, input)
+		}
+		if len(urlMap) != 0 {
+			t.Fatalf("len(urlMap) = %d, want 0", len(urlMap))
+		}
+	})
+}
+
+func TestUnmaskImageURLsDropsUnknownPlaceholders(t *testing.T) {
+	urlMap := map[string]string{"wkimg:0001": "minio://kb/exports/real.jpg"}
+	input := `{"details":"keep ![ok](wkimg:0001) drop ![bad](wkimg:001) and wkimg:9999"}`
+	got := unmaskImageURLs(input, urlMap)
+
+	if !strings.Contains(got, "![ok](minio://kb/exports/real.jpg)") {
+		t.Fatalf("known placeholder was not restored: %q", got)
+	}
+	if strings.Contains(got, "wkimg:") || strings.Contains(got, "![bad]") {
+		t.Fatalf("unknown placeholders should be dropped: %q", got)
+	}
+}
+
+func TestGenerateWithTemplateMasksImageURLsBeforeLLM(t *testing.T) {
+	const realURL = "minio://kb/10000/exports/4135-aaaa-bbbb-cccc/page_1.jpg"
+	model := &templateCaptureChatModel{
+		response: `{"details":"Model kept ![caption](wkimg:0001)"}`,
+	}
+	service := &wikiIngestService{}
+
+	got, err := service.generateWithTemplate(
+		context.Background(),
+		model,
+		`Content={{.Content}} Existing={{.ExistingContent}}`,
+		map[string]string{
+			"Content":         "new ![alt](" + realURL + ")",
+			"ExistingContent": "old ![same](" + realURL + ")",
+		},
+	)
+	if err != nil {
+		t.Fatalf("generateWithTemplate() error = %v", err)
+	}
+	if strings.Contains(model.prompt, realURL) {
+		t.Fatalf("LLM prompt contains real URL: %q", model.prompt)
+	}
+	if strings.Count(model.prompt, "wkimg:0001") != 2 {
+		t.Fatalf("same URL across fields should share wkimg:0001: %q", model.prompt)
+	}
+	if strings.Contains(got, "wkimg:") {
+		t.Fatalf("returned content still contains placeholder: %q", got)
+	}
+	if !strings.Contains(got, realURL) {
+		t.Fatalf("returned content does not contain restored real URL: %q", got)
+	}
+}
+
+type templateCaptureChatModel struct {
+	prompt   string
+	response string
+}
+
+func (m *templateCaptureChatModel) Chat(
+	_ context.Context,
+	messages []chat.Message,
+	_ *chat.ChatOptions,
+) (*types.ChatResponse, error) {
+	if len(messages) > 0 {
+		m.prompt = messages[0].Content
+	}
+	return &types.ChatResponse{Content: m.response}, nil
+}
+
+func (m *templateCaptureChatModel) ChatStream(
+	context.Context,
+	[]chat.Message,
+	*chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	return nil, nil
+}
+
+func (m *templateCaptureChatModel) GetModelName() string { return "capture" }
+func (m *templateCaptureChatModel) GetModelID() string   { return "capture" }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -18,8 +19,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
+	modellimiter "github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -29,6 +32,10 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
+
+type runtimeKnowledgeCanceller interface {
+	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+}
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
@@ -42,6 +49,15 @@ type SystemHandler struct {
 	// tests that wire a partial container still compile. In production
 	// the dig graph always provides one.
 	auditSvc interfaces.AuditLogService
+	// taskInspector backs the SystemAdmin runtime queue dashboard. Always
+	// provided by the container (asynq-backed in Redis mode, a no-op in
+	// Lite mode), so GetRuntimeQueues can distinguish "no queues in this
+	// deployment" from "queues are empty".
+	taskInspector interfaces.TaskInspector
+	// knowledgeSvc supplies the domain-level cancellation path used by the
+	// runtime task console. It updates business state and tracing before queue
+	// records are removed, unlike a raw Redis deletion.
+	knowledgeSvc runtimeKnowledgeCanceller
 }
 
 // NewSystemHandler creates a new system handler
@@ -52,6 +68,8 @@ func NewSystemHandler(cfg *config.Config,
 	userSvc interfaces.UserService,
 	systemSettingSvc interfaces.SystemSettingService,
 	auditSvc interfaces.AuditLogService,
+	taskInspector interfaces.TaskInspector,
+	knowledgeSvc interfaces.KnowledgeService,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:              cfg,
@@ -61,6 +79,8 @@ func NewSystemHandler(cfg *config.Config,
 		userSvc:          userSvc,
 		systemSettingSvc: systemSettingSvc,
 		auditSvc:         auditSvc,
+		taskInspector:    taskInspector,
+		knowledgeSvc:     knowledgeSvc,
 	}
 }
 
@@ -326,15 +346,22 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 1, "msg": "请求体格式错误"})
 		return
 	}
-	overrides := body.ToOverridesMap()
+	var existing *types.ParserEngineConfig
+	var tenant *types.Tenant
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
+		if t, ok := v.(*types.Tenant); ok && t != nil {
+			tenant = t
+			existing = t.ParserEngineConfig
+		}
+	}
+	merged := types.MergeParserEngineConfigForUpdate(&body, existing)
+	overrides := merged.ToOverridesMap()
+	if tenant != nil {
+		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+			if overrides == nil {
+				overrides = make(map[string]string)
 			}
+			overrides["weknoracloud_app_id"] = creds.AppID
 		}
 	}
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
@@ -627,14 +654,35 @@ func sanitizeStorageCheckError(err error) string {
 	}
 }
 
+// storageEndpointHost extracts the hostname from a storage endpoint string.
+// Endpoints may be bare host:port, hostnames, or full URLs with a scheme
+// (e.g. "http://127.0.0.1:9000" for S3-compatible stores).
+func storageEndpointHost(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	if strings.Contains(endpoint, "://") {
+		if u, err := url.Parse(endpoint); err == nil {
+			if h := u.Hostname(); h != "" {
+				return h
+			}
+		}
+	}
+	if host, _, err := net.SplitHostPort(endpoint); err == nil {
+		return host
+	}
+	return endpoint
+}
+
 // isBlockedStorageEndpoint checks whether a storage endpoint resolves to a dangerous
 // address (cloud metadata, loopback, link-local). Unlike the stricter isSSRFSafeURL,
 // this allows private IPs since MinIO is commonly deployed on internal networks.
 // It also respects the SSRF_WHITELIST environment variable for whitelisted hosts.
 func isBlockedStorageEndpoint(endpoint string) (bool, string) {
-	host, _, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		host = endpoint
+	host := storageEndpointHost(endpoint)
+	if host == "" {
+		return true, "无效的地址"
 	}
 
 	// Check SSRF whitelist first – whitelisted hosts bypass the block check.
@@ -1325,6 +1373,72 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 	})
 }
 
+// ResetUserPasswordRequest defines the system-administrator password-reset
+// payload. Email is intentionally the only user-facing identifier: the UI is
+// an operator tool and emails are easier to verify than UUIDs. The password is
+// never written to logs or audit details.
+type ResetUserPasswordRequest struct {
+	Email       string `json:"email" binding:"required,email"`
+	NewPassword string `json:"new_password" binding:"required"`
+}
+
+// ResetUserPassword godoc
+// @Summary      Reset another user's password
+// @Description  Replace another user's local password and revoke all of their existing sessions (SystemAdmin only).
+// @Description  A system administrator cannot reset their own password through this endpoint; self-service password change still requires the old password.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body ResetUserPasswordRequest true "Password reset request"
+// @Success      200  {object}  map[string]interface{}  "Password reset successfully"
+// @Failure      400  {object}  map[string]interface{}  "Invalid request, weak password, or self reset"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Failure      404  {object}  map[string]interface{}  "User not found"
+// @Router       /system/admin/users/reset-password [post]
+func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req ResetUserPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid password reset request"})
+		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	if err := service.ValidatePasswordPolicy(req.NewPassword); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userSvc.GetUserByEmail(ctx, req.Email)
+	if err != nil || user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	callerID, _ := types.UserIDFromContext(ctx)
+	if callerID == user.ID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot reset your own password here"})
+		return
+	}
+
+	if err := h.userSvc.AdminResetPassword(ctx, user.ID, req.NewPassword); err != nil {
+		if errors.Is(err, service.ErrPasswordPolicy) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		logger.Errorf(ctx, "Failed to reset password for user %s: %v", user.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset user password"})
+		return
+	}
+
+	logger.Infof(ctx, "Password reset by system administrator for user ID: %s", user.ID)
+	h.emitAdminAudit(ctx, types.AuditActionSystemUserPasswordReset, user, map[string]any{
+		"target_email":     user.Email,
+		"target_username":  user.Username,
+		"sessions_revoked": true,
+	})
+	c.JSON(http.StatusOK, gin.H{"message": "Password reset successfully"})
+}
+
 // ============================================================================
 // System Settings (P1)
 // ----------------------------------------------------------------------------
@@ -1345,6 +1459,415 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 // @Success      200 {array} types.SystemSetting "list of settings"
 // @Failure      403 {object} map[string]interface{} "Forbidden: not a system admin"
 // @Router       /system/admin/settings [get]
+// RuntimeQueuesResponse is the payload for the SystemAdmin runtime queue
+// dashboard. `available` is false in Lite mode (no Redis/asynq) so the
+// UI can render an "unavailable in this deployment" state instead of an
+// empty table. Each pool reports configured per-process concurrency plus live
+// cluster capacity/active workers aggregated from asynq server heartbeats.
+type RuntimeWorkerPool struct {
+	Name            string  `json:"name"`
+	Concurrency     int     `json:"concurrency"` // configured per instance
+	QueueCount      int     `json:"queue_count"`
+	Instances       int     `json:"instances"`        // live asynq server heartbeats
+	ClusterCapacity int     `json:"cluster_capacity"` // sum of live server concurrency
+	Active          int     `json:"active"`           // live workers assigned to this pool
+	Utilization     float64 `json:"utilization"`      // Active / ClusterCapacity
+}
+
+type RuntimeQueuesResponse struct {
+	Available             bool                       `json:"available"`
+	UpstreamConcurrency   int                        `json:"upstream_concurrency"`
+	ParseConcurrency      int                        `json:"parse_concurrency"` // compatibility alias for upstream_concurrency
+	WikiConcurrency       int                        `json:"wiki_concurrency"`  // compatibility field
+	Pools                 []RuntimeWorkerPool        `json:"pools"`
+	Queues                []types.QueueStat          `json:"queues"`
+	ModelLimiterAvailable bool                       `json:"model_limiter_available"`
+	Models                []modellimiter.RuntimeStat `json:"models"`
+	Timestamp             int64                      `json:"timestamp"`
+}
+
+func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.WorkerServerStat) {
+	queueConfigs := map[string]map[string]int{
+		types.WorkerPoolCore:        types.QueueWeightsForPool(types.WorkerPoolCore),
+		types.WorkerPoolPostProcess: types.QueueWeightsForPool(types.WorkerPoolPostProcess),
+		types.WorkerPoolEnrichment:  types.QueueWeightsForPool(types.WorkerPoolEnrichment),
+		types.WorkerPoolMaintenance: types.QueueWeightsForPool(types.WorkerPoolMaintenance),
+		types.WorkerPoolShared:      types.QueueWeightsForSharedPool(),
+		types.WorkerPoolWiki:        types.QueueWeightsForPool(types.WorkerPoolWiki),
+	}
+	indexes := make(map[string]int, len(pools))
+	for i := range pools {
+		indexes[pools[i].Name] = i
+	}
+	for _, server := range servers {
+		if server.Status != "active" {
+			continue
+		}
+		for poolName, expectedQueues := range queueConfigs {
+			if !sameQueueWeights(server.Queues, expectedQueues) {
+				continue
+			}
+			idx, ok := indexes[poolName]
+			if !ok {
+				break
+			}
+			pools[idx].Instances++
+			pools[idx].ClusterCapacity += server.Concurrency
+			pools[idx].Active += server.Active
+			break
+		}
+	}
+	for i := range pools {
+		if pools[i].ClusterCapacity > 0 {
+			pools[i].Utilization = float64(pools[i].Active) / float64(pools[i].ClusterCapacity)
+		}
+	}
+}
+
+func sameQueueWeights(left, right map[string]int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for name, weight := range left {
+		if right[name] != weight {
+			return false
+		}
+	}
+	return true
+}
+
+// GetRuntimeQueues godoc
+// @Summary      获取解析任务队列运行时状态
+// @Description  返回各 asynq 队列的实时深度（pending/active/scheduled/retry 等）与 worker 并发配置，仅系统管理员可见
+// @Tags         系统管理
+// @Produce      json
+// @Success      200  {object}  RuntimeQueuesResponse
+// @Router       /system/admin/runtime/queues [get]
+func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+	var allocation types.WorkerPoolConcurrency
+	if h.systemSettingSvc != nil {
+		allocation = types.ResolveWorkerPoolConcurrency(func(key, env string, fallback int) int {
+			configured := h.systemSettingSvc.GetInt(ctx, key, env, int64(fallback))
+			return int(configured)
+		})
+	} else {
+		allocation = types.DefaultWorkerPoolConcurrency()
+	}
+	queueCounts := make(map[string]int)
+	for _, definition := range types.QueueDefinitions() {
+		queueCounts[definition.Pool]++
+	}
+	resp := RuntimeQueuesResponse{
+		UpstreamConcurrency: allocation.UpstreamTotal(),
+		ParseConcurrency:    allocation.UpstreamTotal(),
+		WikiConcurrency:     allocation.Wiki,
+		Pools: []RuntimeWorkerPool{
+			{Name: types.WorkerPoolCore, Concurrency: allocation.Core, QueueCount: queueCounts[types.WorkerPoolCore]},
+			{Name: types.WorkerPoolPostProcess, Concurrency: allocation.PostProcess, QueueCount: queueCounts[types.WorkerPoolPostProcess]},
+			{Name: types.WorkerPoolEnrichment, Concurrency: allocation.Enrichment, QueueCount: queueCounts[types.WorkerPoolEnrichment]},
+			{Name: types.WorkerPoolMaintenance, Concurrency: allocation.Maintenance, QueueCount: queueCounts[types.WorkerPoolMaintenance]},
+			{Name: types.WorkerPoolShared, Concurrency: allocation.Shared, QueueCount: len(types.QueueWeightsForSharedPool())},
+			{Name: types.WorkerPoolWiki, Concurrency: allocation.Wiki, QueueCount: queueCounts[types.WorkerPoolWiki]},
+		},
+		Timestamp: time.Now().Unix(),
+	}
+
+	if h.taskInspector != nil {
+		stats, supported, err := h.taskInspector.QueueStats(ctx)
+		if err != nil {
+			logger.Errorf(ctx, "get queue stats failed: %v", err)
+		}
+		resp.Available = supported
+		if stats != nil {
+			resp.Queues = stats
+		}
+		serverStats, _, serverErr := h.taskInspector.WorkerServerStats(ctx)
+		if serverErr != nil {
+			logger.Errorf(ctx, "get worker server stats failed: %v", serverErr)
+		} else {
+			aggregateRuntimeWorkerPools(resp.Pools, serverStats)
+		}
+	}
+	// Always emit a non-nil array so the JSON serialises to `[]` rather
+	// than `null`, keeping the frontend iteration simple.
+	if resp.Queues == nil {
+		resp.Queues = []types.QueueStat{}
+	}
+	modelStats, modelSupported, modelErr := modellimiter.RuntimeStats(ctx)
+	if modelErr != nil {
+		logger.Errorf(ctx, "get model concurrency stats failed: %v", modelErr)
+	}
+	resp.ModelLimiterAvailable = modelSupported
+	resp.Models = modelStats
+
+	c.JSON(http.StatusOK, resp)
+}
+
+type RuntimeTasksResponse struct {
+	Available bool                    `json:"available"`
+	Tasks     []types.RuntimeTaskInfo `json:"tasks"`
+	Page      int                     `json:"page"`
+	PageSize  int                     `json:"page_size"`
+	HasMore   bool                    `json:"has_more"`
+}
+
+func isKnownRuntimeQueue(name string) bool {
+	for _, definition := range types.QueueDefinitions() {
+		if definition.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeTaskPage(c *gin.Context) (int, int) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+func (h *SystemHandler) listRuntimeTasks(c *gin.Context, state types.RuntimeTaskState) {
+	queue := c.Param("queue")
+	if !isKnownRuntimeQueue(queue) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task queue"})
+		return
+	}
+	if !state.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task state"})
+		return
+	}
+	page, pageSize := runtimeTaskPage(c)
+	inspector, ok := h.taskInspector.(interfaces.RuntimeTaskInspector)
+	if !ok {
+		c.JSON(http.StatusOK, RuntimeTasksResponse{
+			Available: false,
+			Tasks:     []types.RuntimeTaskInfo{},
+			Page:      page,
+			PageSize:  pageSize,
+		})
+		return
+	}
+	tasks, supported, err := inspector.ListRuntimeTasks(c.Request.Context(), queue, state, page, pageSize)
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "list runtime queue tasks queue=%s state=%s: %v", queue, state, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list queue tasks"})
+		return
+	}
+	if tasks == nil {
+		tasks = []types.RuntimeTaskInfo{}
+	}
+	c.JSON(http.StatusOK, RuntimeTasksResponse{
+		Available: supported,
+		Tasks:     tasks,
+		Page:      page,
+		PageSize:  pageSize,
+		HasMore:   len(tasks) == pageSize,
+	})
+}
+
+// ListRuntimeTasks returns one live task-state page for the unified operator
+// drawer. Raw task payloads are never included.
+// @Summary      List runtime queue tasks by state
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Param        state query string true "Task state" Enums(pending,active,scheduled,retry,archived,completed)
+// @Param        page query int false "Page" default(1)
+// @Param        page_size query int false "Page size" default(20)
+// @Success      200 {object} RuntimeTasksResponse
+// @Router       /system/admin/runtime/queues/{queue}/tasks [get]
+func (h *SystemHandler) ListRuntimeTasks(c *gin.Context) {
+	h.listRuntimeTasks(c, types.RuntimeTaskState(c.Query("state")))
+}
+
+func (h *SystemHandler) emitQueueTaskAudit(
+	ctx context.Context,
+	action types.AuditAction,
+	queue, taskID string,
+	extra map[string]string,
+) {
+	if h.auditSvc == nil {
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	detailMap := map[string]string{"queue": queue, "task_id": taskID}
+	for key, value := range extra {
+		detailMap[key] = value
+	}
+	details, _ := json.Marshal(detailMap)
+	targetType := "queue_task"
+	targetID := taskID
+	if targetID == "" {
+		targetType = "task_queue"
+		targetID = queue
+	}
+	_ = h.auditSvc.Log(ctx, &types.AuditLog{
+		TenantID:    0,
+		ActorUserID: actorID,
+		ActorRole:   "system_admin",
+		Action:      action,
+		TargetType:  targetType,
+		TargetID:    targetID,
+		Outcome:     types.AuditOutcomeSuccess,
+		Details:     types.JSON(details),
+	})
+}
+
+func runtimeTaskParams(c *gin.Context) (string, string, bool) {
+	queue := c.Param("queue")
+	taskID := c.Param("task_id")
+	if !isKnownRuntimeQueue(queue) || taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid queue or task ID"})
+		return "", "", false
+	}
+	return queue, taskID, true
+}
+
+func (h *SystemHandler) mutateRuntimeTask(c *gin.Context, action types.RuntimeTaskAction) {
+	queue, taskID, ok := runtimeTaskParams(c)
+	if !ok {
+		return
+	}
+	inspector, supported := h.taskInspector.(interfaces.RuntimeTaskInspector)
+	if !supported {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	task, available, err := inspector.GetRuntimeTask(c.Request.Context(), queue, taskID)
+	if !available {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	if err != nil || task == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available"})
+		return
+	}
+	if !task.Allows(action) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Action is not allowed for the current task state"})
+		return
+	}
+
+	var auditAction types.AuditAction
+	auditDetails := map[string]string{
+		"task_type":  task.Type,
+		"from_state": string(task.State),
+		"action":     string(action),
+	}
+	switch action {
+	case types.RuntimeTaskActionCancel:
+		if h.knowledgeSvc == nil || task.TenantID == 0 || task.KnowledgeID == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Business cancellation is unavailable"})
+			return
+		}
+		cancelCtx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, task.TenantID)
+		if _, err = h.knowledgeSvc.CancelKnowledgeParse(cancelCtx, task.KnowledgeID); err != nil {
+			if isKnowledgeGone(err) {
+				if h.purgeOrphanRuntimeTask(c.Request.Context(), inspector, queue, taskID, task.KnowledgeID) {
+					logger.Warnf(c.Request.Context(),
+						"cancel runtime queue task queue=%s task=%s: knowledge gone, purged queue record",
+						queue, taskID)
+					auditDetails["orphan_purge"] = "true"
+					auditAction = types.AuditActionSystemQueueTaskCancelled
+					break
+				}
+			}
+			logger.Errorf(c.Request.Context(), "cancel runtime queue task queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task can no longer be cancelled"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskCancelled
+	case types.RuntimeTaskActionRunNow:
+		available, err = inspector.RunRuntimeTask(c.Request.Context(), queue, taskID)
+		if !available {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+			return
+		}
+		if err != nil {
+			logger.Errorf(c.Request.Context(), "run queue task now queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available to run"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskRunNow
+	case types.RuntimeTaskActionDelete:
+		available, err = inspector.DeleteRuntimeTask(c.Request.Context(), queue, taskID)
+		if !available {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+			return
+		}
+		if err != nil {
+			logger.Errorf(c.Request.Context(), "delete queue task queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available for deletion"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskDeleted
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task action"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), auditAction, queue, taskID, auditDetails)
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func isKnowledgeGone(err error) bool {
+	if errors.Is(err, repository.ErrKnowledgeNotFound) {
+		return true
+	}
+	var appErr *apperrors.AppError
+	return errors.As(err, &appErr) && appErr.Code == apperrors.ErrNotFound
+}
+
+// purgeOrphanRuntimeTask removes queue records for a task whose knowledge row
+// is already gone. CancelTasksForKnowledge sweeps sibling tasks best-effort;
+// success is reported only once the requested task ID is gone.
+func (h *SystemHandler) purgeOrphanRuntimeTask(
+	ctx context.Context,
+	inspector interfaces.RuntimeTaskInspector,
+	queue, taskID, knowledgeID string,
+) bool {
+	if h.taskInspector != nil && knowledgeID != "" {
+		if _, _, err := h.taskInspector.CancelTasksForKnowledge(ctx, knowledgeID); err != nil {
+			logger.Warnf(ctx, "purge orphan tasks for knowledge %s: %v", knowledgeID, err)
+		}
+	}
+	supported, err := inspector.ForceDeleteRuntimeTask(ctx, queue, taskID)
+	if !supported {
+		return false
+	}
+	if err == nil {
+		return true
+	}
+	// The knowledge-wide sweep may have already removed this task ID.
+	if _, available, getErr := inspector.GetRuntimeTask(ctx, queue, taskID); available && getErr != nil {
+		return true
+	}
+	logger.Warnf(ctx, "force delete orphan task queue=%s task=%s: %v", queue, taskID, err)
+	return false
+}
+
+// MutateRuntimeTask executes a backend-advertised action after re-reading the
+// current task state to close click/race windows.
+// @Summary      Run a safe runtime task action
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Param        task_id path string true "Task ID"
+// @Param        action path string true "Action" Enums(cancel,run_now,delete)
+// @Success      200 {object} map[string]bool
+// @Router       /system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action} [post]
+func (h *SystemHandler) MutateRuntimeTask(c *gin.Context) {
+	h.mutateRuntimeTask(c, types.RuntimeTaskAction(c.Param("action")))
+}
+
 func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 	rows, err := h.systemSettingSvc.List(ctx)

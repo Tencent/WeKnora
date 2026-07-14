@@ -1356,8 +1356,21 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 func (h *OrganizationHandler) ListAgentShares(c *gin.Context) {
 	ctx := c.Request.Context()
 	agentID := c.Param("id")
-	shares, err := h.agentShareService.ListSharesByAgent(ctx, agentID)
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	shares, err := h.agentShareService.ListSharesByAgent(ctx, agentID, tenantID)
 	if err != nil {
+		if errors.Is(err, service.ErrAgentNotFoundForShare) {
+			c.Error(apperrors.NewNotFoundError("Agent not found"))
+			return
+		}
+		if errors.Is(err, service.ErrNotAgentOwner) {
+			c.Error(apperrors.NewForbiddenError("Only the agent owner can list its shares"))
+			return
+		}
 		logger.Errorf(ctx, "Failed to list agent shares: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
 		return
@@ -1870,6 +1883,8 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	// 1) Match users by query and group by TenantID. We over-fetch so the
 	//    de-duplication after filtering "already a member" tenants still
 	//    leaves us with enough candidates to fill `limit`.
+	//    User PII (email/username) is intentionally omitted from results:
+	//    org admins only need tenant identity to send an invite.
 	users, err := h.userService.SearchUsers(ctx, query, limit*3+20)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to search users: %v", err)
@@ -1902,11 +1917,7 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		seen[u.TenantID] = &entry{
 			idx: len(seen),
 			candidate: types.TenantInviteCandidate{
-				TenantID:                u.TenantID,
-				RepresentativeUserID:    u.ID,
-				RepresentativeUsername:  u.Username,
-				RepresentativeEmail:     u.Email,
-				RepresentativeAvatar:    u.Avatar,
+				TenantID: u.TenantID,
 			},
 		}
 	}

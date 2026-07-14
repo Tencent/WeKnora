@@ -162,6 +162,8 @@ const fileTypeGroups = computed(() => {
   const officeExts = ['docx', 'doc'].filter(e => ft.has(e))
   const pptExts = ['pptx', 'ppt'].filter(e => ft.has(e))
   const excelExts = ['xlsx', 'xls'].filter(e => ft.has(e))
+  const ebookExts = ['epub'].filter(e => ft.has(e))
+  const webArchiveExts = ['mhtml'].filter(e => ft.has(e))
   const csvExts = ['csv'].filter(e => ft.has(e))
   const mdExts = ['md', 'markdown'].filter(e => ft.has(e))
   const txtExts = ['txt'].filter(e => ft.has(e))
@@ -174,6 +176,8 @@ const fileTypeGroups = computed(() => {
   if (officeExts.length) groups.push({ key: 'office', label: t('kbSettings.parser.fileTypeWord'), icon: 'file-word', extensions: officeExts })
   if (pptExts.length) groups.push({ key: 'ppt', label: t('kbSettings.parser.fileTypePpt'), icon: 'file-powerpoint', extensions: pptExts })
   if (excelExts.length) groups.push({ key: 'excel', label: t('kbSettings.parser.fileTypeExcel'), icon: 'file-excel', extensions: excelExts })
+  if (ebookExts.length) groups.push({ key: 'ebook', label: t('kbSettings.parser.fileTypeEbook'), icon: 'file', extensions: ebookExts })
+  if (webArchiveExts.length) groups.push({ key: 'webarchive', label: t('kbSettings.parser.fileTypeWebArchive'), icon: 'file', extensions: webArchiveExts })
   if (csvExts.length) groups.push({ key: 'csv', label: t('kbSettings.parser.fileTypeCsv'), icon: 'file-excel', extensions: csvExts })
   if (mdExts.length) groups.push({ key: 'markdown', label: 'Markdown', icon: 'file-code', extensions: mdExts })
   if (txtExts.length) groups.push({ key: 'text', label: t('kbSettings.parser.fileTypeText'), icon: 'file', extensions: txtExts })
@@ -307,13 +311,13 @@ watch(() => props.parserEngineRules, (v) => {
 }
 
 .section-header {
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 
   h2 {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
   }
 
   .section-description {
@@ -346,7 +350,7 @@ watch(() => props.parserEngineRules, (v) => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 20px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {

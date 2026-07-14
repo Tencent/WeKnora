@@ -102,6 +102,13 @@ const (
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
 	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay
 	ResponseTypeToolApprovalResolved ResponseType = "tool_approval_resolved"
+	// MCPOAuthRequired: an OAuth-enabled MCP service was invoked but the user
+	// has not authorized it — UI must surface an "Authorize" prompt and the
+	// agent pauses until authorization completes (or the wait times out).
+	ResponseTypeMCPOAuthRequired ResponseType = "mcp_oauth_required"
+	// MCPOAuthResolved: authorization completed / timed out / canceled;
+	// informational for UI replay.
+	ResponseTypeMCPOAuthResolved ResponseType = "mcp_oauth_resolved"
 )
 
 // StreamResponse stream response

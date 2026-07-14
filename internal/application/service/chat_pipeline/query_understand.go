@@ -6,14 +6,11 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
-	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/google/uuid"
 )
 
 // PluginQueryUnderstand performs query rewriting and intent classification.
@@ -115,23 +112,8 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 		maxTokens = 500
 	}
 
-	// --- Emit progress event for image analysis ---
-	var toolCallID string
-	if useImages && chatManage.EventBus != nil {
-		toolCallID = uuid.New().String()
-		chatManage.EventBus.Emit(ctx, types.Event{
-			Type:      types.EventType(event.EventAgentToolCall),
-			SessionID: chatManage.SessionID,
-			Data: event.AgentToolCallData{
-				ToolCallID: toolCallID,
-				ToolName:   "image_analysis",
-			},
-		})
-	}
-
 	// --- Call model ---
 	thinking := false
-	vlmStart := time.Now()
 	response, err := rewriteModel.Chat(ctx, []chat.Message{
 		{Role: "system", Content: systemContent},
 		userMsg,
@@ -141,39 +123,11 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 		Thinking:            &thinking,
 	})
 	if err != nil {
-		if toolCallID != "" && chatManage.EventBus != nil {
-			chatManage.EventBus.Emit(ctx, types.Event{
-				Type:      types.EventType(event.EventAgentToolResult),
-				SessionID: chatManage.SessionID,
-				Data: event.AgentToolResultData{
-					ToolCallID: toolCallID,
-					ToolName:   "image_analysis",
-					Output:     "图片分析失败",
-					Success:    false,
-					Duration:   time.Since(vlmStart).Milliseconds(),
-				},
-			})
-		}
 		pipelineError(ctx, "QueryUnderstand", "model_call", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"error":      err.Error(),
 		})
 		return next()
-	}
-
-	// --- Emit completion event for image analysis ---
-	if toolCallID != "" && chatManage.EventBus != nil {
-		chatManage.EventBus.Emit(ctx, types.Event{
-			Type:      types.EventType(event.EventAgentToolResult),
-			SessionID: chatManage.SessionID,
-			Data: event.AgentToolResultData{
-				ToolCallID: toolCallID,
-				ToolName:   "image_analysis",
-				Output:     "已分析图片内容",
-				Success:    true,
-				Duration:   time.Since(vlmStart).Milliseconds(),
-			},
-		})
 	}
 
 	// --- Parse structured output ---

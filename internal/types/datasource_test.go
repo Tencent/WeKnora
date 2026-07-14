@@ -116,3 +116,28 @@ func TestDataSource_ParseConfig_MissingKeyDegradesGracefully(t *testing.T) {
 	assert.False(t, parsed.HasCredentials() && parsed.Credentials["token"] != "",
 		"HasCredentials should not report a usable credential when decrypt failed")
 }
+
+func TestDataSourceConfig_HasConfiguredCredentials_RSS(t *testing.T) {
+	feedOnly := DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"feed_urls": "https://example.com/feed.xml",
+		},
+	}
+	assert.False(t, feedOnly.HasConfiguredCredentials(ConnectorTypeRSS))
+	assert.True(t, feedOnly.HasCredentials())
+
+	withAuth := DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"feed_urls":    "https://example.com/feed.xml",
+			"auth_headers": "Authorization: Bearer x",
+		},
+	}
+	assert.True(t, withAuth.HasConfiguredCredentials(ConnectorTypeRSS))
+
+	t.Run("strip feed_urls", func(t *testing.T) {
+		cfg := feedOnly
+		cfg.StripNonSecretCredentials(ConnectorTypeRSS)
+		assert.Nil(t, cfg.Credentials)
+		assert.False(t, cfg.HasCredentials())
+	})
+}

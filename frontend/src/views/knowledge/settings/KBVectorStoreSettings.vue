@@ -5,14 +5,14 @@
       <p class="section-description">{{ $t('kbSettings.vectorStore.description') }}</p>
     </div>
 
-    <!-- CREATE mode: dropdown -->
-    <div v-if="props.mode === 'create'" class="settings-group">
-      <div v-if="loading" class="loading-inline">
-        <t-loading size="small" />
-        <span>{{ $t('kbSettings.vectorStore.loading') }}</span>
-      </div>
+    <div v-if="props.mode === 'create' && loading" class="loading-inline">
+      <t-loading size="small" />
+      <span>{{ $t('kbSettings.vectorStore.loading') }}</span>
+    </div>
 
-      <div v-else class="setting-row">
+    <!-- CREATE mode: dropdown -->
+    <div v-else-if="props.mode === 'create'" class="settings-group">
+      <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('kbSettings.vectorStore.engineLabel') }}</label>
           <p class="desc">{{ $t('kbSettings.vectorStore.engineDesc') }}</p>
@@ -23,7 +23,7 @@
             size="medium"
             :placeholder="$t('kbSettings.vectorStore.systemDefault')"
             :clearable="true"
-            style="width: 100%; min-width: 240px;"
+            style="width: 100%; min-width: 220px;"
             @change="handleChange"
           >
             <t-option :value="''" :label="$t('kbSettings.vectorStore.systemDefault')">
@@ -177,92 +177,110 @@ onMounted(async () => {
 })
 </script>
 
-<style scoped>
+<style lang="less" scoped>
 .kb-vector-store-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  width: 100%;
 }
 
-.section-header h2 {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0 0 4px;
-}
+.section-header {
+  margin-bottom: 20px;
 
-.section-description {
-  color: var(--td-text-color-secondary, #4e5969);
-  font-size: 13px;
-  margin: 0;
-}
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+    margin: 0 0 6px 0;
+  }
 
-.settings-group {
-  background: var(--td-bg-color-container, #fff);
-  border: 1px solid var(--td-component-stroke, #dcdcdc);
-  border-radius: 6px;
-  padding: 16px;
-}
-
-.setting-row {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-}
-
-.setting-info {
-  flex: 0 0 220px;
-}
-
-.setting-info label {
-  font-weight: 500;
-  display: block;
-  margin-bottom: 4px;
-}
-
-.setting-info .desc {
-  font-size: 12px;
-  color: var(--td-text-color-secondary, #4e5969);
-  margin: 0;
-}
-
-.setting-control {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.option-hint {
-  font-size: 12px;
-  color: var(--td-text-color-secondary, #4e5969);
-  margin: 0;
-}
-
-.change-warning {
-  color: var(--td-error-color, #d54941);
-}
-
-.go-settings {
-  font-size: 12px;
-  color: var(--td-brand-color, #0052d9);
-  text-decoration: none;
-}
-
-.go-settings:hover {
-  text-decoration: underline;
-}
-
-.select-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  .section-description {
+    font-size: 14px;
+    color: var(--td-text-color-secondary);
+    margin: 0;
+    line-height: 1.5;
+  }
 }
 
 .loading-inline {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 16px 0;
   font-size: 13px;
-  color: var(--td-text-color-secondary, #4e5969);
+  color: var(--td-text-color-secondary);
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.setting-info {
+  flex: 0 0 40%;
+  max-width: 40%;
+  padding-right: 24px;
+
+  label {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .desc {
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+    margin: 0;
+    line-height: 1.5;
+  }
+}
+
+.setting-control {
+  flex: 0 0 55%;
+  max-width: 55%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.select-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.option-hint {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  margin: 0;
+  line-height: 1.4;
+
+  &.change-warning {
+    color: var(--td-warning-color);
+  }
+}
+
+.go-settings {
+  font-size: 13px;
+  color: var(--td-brand-color, #0052d9);
+  margin-top: 8px;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 </style>

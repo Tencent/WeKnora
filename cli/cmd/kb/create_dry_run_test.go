@@ -93,7 +93,7 @@ func TestKBCreate_DryRun_RejectsInvalidStorageProvider(t *testing.T) {
 	err := root.Execute()
 	require.Error(t, err, "dry-run must reject invalid --storage-provider")
 
-	// runCreate emits a FlagError (exit 2) for this — make sure dry-run preserves
-	// that exact mapping.
-	assert.Equal(t, 2, cmdutil.ExitCode(err), "FlagError must map to exit 2")
+	// The enum check returns input.invalid_argument (exit 5) — make sure the
+	// dry-run path preserves that exact mapping (same as the live path).
+	assert.Equal(t, 5, cmdutil.ExitCode(err), "invalid --storage-provider must map to exit 5")
 }

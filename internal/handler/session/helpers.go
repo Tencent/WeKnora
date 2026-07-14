@@ -62,11 +62,118 @@ func convertMentionedItems(items []MentionedItemRequest) types.MentionedItems {
 	result := make(types.MentionedItems, len(items))
 	for i, item := range items {
 		result[i] = types.MentionedItem{
-			ID:     item.ID,
-			Name:   item.Name,
-			Type:   item.Type,
-			KBType: item.KBType,
+			ID:        item.ID,
+			Name:      item.Name,
+			Type:      item.Type,
+			KBType:    item.KBType,
+			KBID:      item.KBID,
+			KBName:    item.KBName,
+			ServiceID: item.ServiceID,
+			SkillName: item.SkillName,
 		}
+	}
+	return result
+}
+
+func tagScopesFromMentionedItems(items []MentionedItemRequest) []types.TagScope {
+	byKB := make(map[string][]string)
+	seen := make(map[string]map[string]bool)
+	for _, item := range items {
+		if item.Type != "tag" || item.ID == "" || item.KBID == "" {
+			continue
+		}
+		if seen[item.KBID] == nil {
+			seen[item.KBID] = make(map[string]bool)
+		}
+		if seen[item.KBID][item.ID] {
+			continue
+		}
+		seen[item.KBID][item.ID] = true
+		byKB[item.KBID] = append(byKB[item.KBID], item.ID)
+	}
+	scopes := make([]types.TagScope, 0, len(byKB))
+	for kbID, tagIDs := range byKB {
+		scopes = append(scopes, types.TagScope{KnowledgeBaseID: kbID, TagIDs: tagIDs})
+	}
+	return scopes
+}
+
+// orphanTagIDsForScope returns tag IDs from the request that are not already
+// covered by scoped mentions.
+func orphanTagIDsForScope(tagIDs []string, scopes []types.TagScope) []string {
+	if len(tagIDs) == 0 {
+		return nil
+	}
+	covered := make(map[string]bool)
+	for _, scope := range scopes {
+		for _, id := range scope.TagIDs {
+			covered[id] = true
+		}
+	}
+	orphan := make([]string, 0, len(tagIDs))
+	for _, id := range tagIDs {
+		if id != "" && !covered[id] {
+			orphan = append(orphan, id)
+		}
+	}
+	return orphan
+}
+
+// validateUnscopedTagIDs rejects bare tag_ids that cannot be attached to a KB.
+func validateUnscopedTagIDs(orphan []string, kbIDs []string) error {
+	if len(orphan) == 0 {
+		return nil
+	}
+	if len(kbIDs) == 1 {
+		return nil
+	}
+	return fmt.Errorf("tag_ids must be scoped via mentioned_items or exactly one knowledge_base_id")
+}
+
+// mergeTagScopesFromRequestIDs supplements tag scopes built from mentioned_items
+// with bare tag_ids when the client did not send kb_id on each tag mention.
+// Orphan tag IDs are attached to the sole knowledge_base_id when unambiguous.
+func mergeTagScopesFromRequestIDs(scopes []types.TagScope, tagIDs, kbIDs []string) []types.TagScope {
+	orphan := orphanTagIDsForScope(tagIDs, scopes)
+	if len(orphan) == 0 {
+		return scopes
+	}
+	if len(kbIDs) != 1 {
+		return scopes
+	}
+	kbID := kbIDs[0]
+	for i, scope := range scopes {
+		if scope.KnowledgeBaseID == kbID {
+			merged := append(append([]string(nil), scope.TagIDs...), orphan...)
+			scopes[i].TagIDs = dedupRequestStrings(merged)
+			return scopes
+		}
+	}
+	return append(scopes, types.TagScope{KnowledgeBaseID: kbID, TagIDs: dedupRequestStrings(orphan)})
+}
+
+func mentionedIDsByType(items []MentionedItemRequest, itemType string) []string {
+	seen := make(map[string]bool)
+	result := make([]string, 0)
+	for _, item := range items {
+		if item.Type != itemType || item.ID == "" || seen[item.ID] {
+			continue
+		}
+		seen[item.ID] = true
+		result = append(result, item.ID)
+	}
+	return result
+}
+
+func dedupRequestStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
 	}
 	return result
 }
@@ -102,6 +209,9 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 	// Special handling for references event
 	if evt.Type == types.ResponseTypeReferences {
 		refsData := evt.Data["references"]
+		if refsData == nil {
+			return response
+		}
 		if refs, ok := refsData.(types.References); ok {
 			response.KnowledgeReferences = refs
 		} else if refs, ok := refsData.([]*types.SearchResult); ok {
@@ -167,18 +277,19 @@ func createAgentQueryEvent(sessionID, assistantMessageID string) interfaces.Stre
 }
 
 // createUserMessage creates a user message and returns the created message.
-func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems, images types.MessageImages, attachments types.MessageAttachments, channel string) (*types.Message, error) {
+func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems, images types.MessageImages, attachments types.MessageAttachments, channel string, attribution *types.SuggestionAttribution) (*types.Message, error) {
 	return h.messageService.CreateMessage(ctx, &types.Message{
-		SessionID:      sessionID,
-		Role:           "user",
-		Content:        query,
-		RequestID:      requestID,
-		CreatedAt:      time.Now(),
-		IsCompleted:    true,
-		MentionedItems: mentionedItems,
-		Images:         images,
-		Attachments:    attachments,
-		Channel:        channel,
+		SessionID:        sessionID,
+		Role:             "user",
+		Content:          query,
+		RequestID:        requestID,
+		CreatedAt:        time.Now(),
+		IsCompleted:      true,
+		MentionedItems:   mentionedItems,
+		Images:           images,
+		Attachments:      attachments,
+		Channel:          channel,
+		ExecutionContext: types.MessageExecutionContext{SuggestionAttribution: attribution},
 	})
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -23,7 +24,19 @@ var appLogger = logrus.New()
 var (
 	loggerMu      sync.Mutex
 	activeLogFile io.WriteCloser
+	ansiEscapeRE  = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 )
+
+// ansiStripWriter removes ANSI color/style sequences so file logs stay plain text
+// while stdout can still render colors in a terminal.
+type ansiStripWriter struct {
+	w io.Writer
+}
+
+func (s *ansiStripWriter) Write(p []byte) (int, error) {
+	_, err := s.w.Write(ansiEscapeRE.ReplaceAll(p, nil))
+	return len(p), err
+}
 
 // LogLevel 日志级别类型
 type LogLevel string
@@ -241,7 +254,7 @@ func ConfigureFromEnv() {
 			fmt.Fprintf(os.Stderr, "logger: failed to open log file %s: %v\n", logPath, err)
 		} else {
 			activeLogFile = file
-			writer = io.MultiWriter(os.Stdout, file)
+			writer = io.MultiWriter(os.Stdout, &ansiStripWriter{w: file})
 		}
 	}
 
@@ -499,18 +512,21 @@ func CloneContext(ctx context.Context) context.Context {
 		types.TenantInfoContextKey,
 		types.UserIDContextKey,
 		types.UserContextKey,
+		types.PrincipalContextKey,
+		types.TenantAPIKeyScopeContextKey,
 		// TenantRoleContextKey: the caller's resolved role in the
 		// active tenant (PR 2 #1303). Must be propagated for the same
 		// reason as TenantIDContextKey — any handler that does
 		// `ctx := logger.CloneContext(c.Request.Context())` and then
-		// reads role via TenantRoleFromContext (e.g. session/qa.go's
-		// "viewer cannot run runnable_by_viewer=false agent" gate)
-		// would otherwise see the type-zero TenantRole and fall back
+		// reads role via TenantRoleFromContext would otherwise see the
+		// type-zero TenantRole and fall back
 		// to Viewer, blocking even Owners.
 		types.TenantRoleContextKey,
+		types.SystemAdminContextKey,
 		types.LanguageContextKey,
 		types.SessionTenantIDContextKey,
 		types.EmbedQueryContextKey,
+		types.EmbedVisitorContextKey,
 		// Keep the Langfuse trace alive across CloneContext boundaries so
 		// LLM/Embedder/Reranker/VLM/ASR wrappers attach their generations
 		// to the same trace opened by GinMiddleware, instead of each call

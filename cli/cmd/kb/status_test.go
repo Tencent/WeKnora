@@ -26,11 +26,12 @@ func (f *fakeStatusSvc) GetKnowledgeBase(_ context.Context, id string) (*sdk.Kno
 
 func TestRunStatus_ShallowFields(t *testing.T) {
 	svc := &fakeStatusSvc{kb: &sdk.KnowledgeBase{
-		ID:              "kb_x",
-		KnowledgeCount:  42,
-		ChunkCount:      100,
-		IsProcessing:    true,
-		ProcessingCount: 3,
+		ID:               "kb_x",
+		KnowledgeCount:   42,
+		ChunkCount:       100,
+		IsProcessing:     true,
+		ProcessingCount:  3,
+		EmbeddingModelID: "emb_1",
 	}}
 	res, err := runStatus(context.Background(), svc, "kb_x")
 	if err != nil {
@@ -41,6 +42,22 @@ func TestRunStatus_ShallowFields(t *testing.T) {
 	}
 	if res.KnowledgeCount != 42 || res.ChunkCount != 100 || res.ProcessingCount != 3 || !res.IsProcessing {
 		t.Errorf("got %+v", res)
+	}
+	if !res.RetrievalReady {
+		t.Error("RetrievalReady=false, want true when an embedding model is bound")
+	}
+}
+
+// A KB with no embedding model can never retrieve — the health probe must say
+// so (retrieval_ready=false), not report a silent all-green status.
+func TestRunStatus_RetrievalNotReadyWithoutEmbeddingModel(t *testing.T) {
+	svc := &fakeStatusSvc{kb: &sdk.KnowledgeBase{ID: "kb_x", KnowledgeCount: 1}}
+	res, err := runStatus(context.Background(), svc, "kb_x")
+	if err != nil {
+		t.Fatalf("runStatus: %v", err)
+	}
+	if res.RetrievalReady {
+		t.Error("RetrievalReady=true, want false when no embedding model is bound")
 	}
 }
 

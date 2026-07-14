@@ -18,6 +18,7 @@ const (
 	PlatformDingtalk   Platform = "dingtalk"
 	PlatformMattermost Platform = "mattermost"
 	PlatformWeChat     Platform = "wechat"
+	PlatformQQBot      Platform = "qqbot"
 )
 
 // SessionMode determines how IM sessions are resolved.
@@ -146,8 +147,12 @@ type StreamSender interface {
 	// Returns a platform-specific stream ID for subsequent chunk/end calls.
 	StartStream(ctx context.Context, incoming *IncomingMessage) (string, error)
 
-	// SendStreamChunk appends a content chunk to an ongoing stream.
-	SendStreamChunk(ctx context.Context, incoming *IncomingMessage, streamID string, content string) error
+	// UpdateStreamContent replaces the user-visible stream text with fullContent so far.
+	// Platforms with replace semantics (WeCom, Telegram edit, etc.) show this as the entire message.
+	UpdateStreamContent(ctx context.Context, incoming *IncomingMessage, streamID string, fullContent string) error
+
+	// FinalizeStream performs the final replace with answer-only content (thinking/tools stripped).
+	FinalizeStream(ctx context.Context, incoming *IncomingMessage, streamID string, finalContent string) error
 
 	// EndStream finalizes a streaming reply.
 	EndStream(ctx context.Context, incoming *IncomingMessage, streamID string) error

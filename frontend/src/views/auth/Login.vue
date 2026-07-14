@@ -192,7 +192,7 @@
 
               <t-form-item :label="$t('auth.password')" name="password">
                 <t-input v-model="formData.password" :placeholder="$t('auth.passwordPlaceholder')" type="password"
-                  size="large" :disabled="loading" @enter="handleLogin" />
+                  autocomplete="current-password" size="large" :disabled="loading" @enter="handleLogin" />
               </t-form-item>
 
               <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
@@ -280,12 +280,12 @@
 
               <t-form-item :label="$t('auth.password')" name="password">
                 <t-input v-model="registerData.password" :placeholder="$t('auth.passwordPlaceholder')" type="password"
-                  size="large" :disabled="loading" />
+                  autocomplete="new-password" size="large" :disabled="loading" />
               </t-form-item>
 
               <t-form-item :label="$t('auth.confirmPassword')" name="confirmPassword">
                 <t-input v-model="registerData.confirmPassword" :placeholder="$t('auth.confirmPasswordPlaceholder')"
-                  type="password" size="large" :disabled="loading" @enter="handleRegister" />
+                  type="password" autocomplete="new-password" size="large" :disabled="loading" @enter="handleRegister" />
               </t-form-item>
 
               <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
@@ -538,26 +538,29 @@ const persistLoginResponse = async (response: any) => {
   // identical — `active_tenant` is the tenant whose ID is encoded in the
   // JWT, defaulting to the user's home tenant on a fresh login.
   const activeTenant = response.active_tenant || response.tenant
-  if (response.user && activeTenant && response.token) {
+  if (response.user && response.token) {
     // user.tenant_id must be the user's HOME tenant (the immutable row
     // on the users table); useHomeTenant() and the home-badge logic both
     // assume so. The ACTIVE tenant (which can differ from home when the
     // server honoured a remembered last-active-tenant preference) is
     // expressed separately via setSelectedTenant below.
-    const homeTenantIdRaw = response.user.tenant_id ?? activeTenant.id
+    const homeTenantIdRaw = response.user.tenant_id ?? activeTenant?.id ?? ''
     authStore.setUser(userInfoFromApi(response.user, homeTenantIdRaw))
     authStore.setToken(response.token)
     if (response.refresh_token) {
       authStore.setRefreshToken(response.refresh_token)
     }
-    authStore.setTenant({
-      id: String(activeTenant.id) || '',
-      name: activeTenant.name || '',
-      api_key: activeTenant.api_key || '',
-      owner_id: response.user.id || '',
-      created_at: activeTenant.created_at || new Date().toISOString(),
-      updated_at: activeTenant.updated_at || new Date().toISOString()
-    })
+    if (activeTenant) {
+      authStore.setTenant({
+        id: String(activeTenant.id) || '',
+        name: activeTenant.name || '',
+        owner_id: response.user.id || '',
+        created_at: activeTenant.created_at || new Date().toISOString(),
+        updated_at: activeTenant.updated_at || new Date().toISOString()
+      })
+    } else {
+      authStore.setTenant(null)
+    }
     if (Array.isArray(response.memberships)) {
       authStore.setMemberships(response.memberships)
     }
@@ -566,17 +569,21 @@ const persistLoginResponse = async (response: any) => {
     // subsequent requests carry X-Tenant-ID and the UI stays consistent.
     // Otherwise clear any stale override left in localStorage by a
     // previous session for a different account.
-    const activeIdNum = Number(activeTenant.id)
+    const activeIdNum = Number(activeTenant?.id)
     const homeIdNum = Number(homeTenantIdRaw)
     if (Number.isFinite(activeIdNum) && Number.isFinite(homeIdNum) && activeIdNum !== homeIdNum) {
-      authStore.setSelectedTenant(activeIdNum, activeTenant.name || null)
+      authStore.setSelectedTenant(activeIdNum, activeTenant?.name || null)
     } else {
       authStore.setSelectedTenant(null, null)
     }
   }
 
+  // Pull runtime capabilities (including whether ordinary users may create
+  // workspaces) before entering the main UI so create actions never flash
+  // briefly when the deployment is invitation-only.
+  await authStore.refreshFromAuthMe()
   await nextTick()
-  router.replace('/platform/knowledge-bases')
+  router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }
 
 const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`

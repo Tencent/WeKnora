@@ -226,7 +226,11 @@ func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterCo
 }
 
 // buildParentChildConfigs derives parent and child SplitterConfig from ChunkingConfig.
-// The base config (already validated with defaults) is used for separators.
+// The base config (already validated with defaults) is used for separators and
+// the splitting strategy. Strategy must be propagated: an empty Strategy resolves
+// to the legacy tier (see resolveChainWithProfile), which never runs the heading
+// splitter, so parent-child chunks would silently lose heading alignment and
+// ContextHeader breadcrumbs regardless of the configured strategy.
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
 	parentSize := cc.ParentChunkSize
 	if parentSize <= 0 {
@@ -240,11 +244,13 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 		ChunkSize:    parentSize,
 		ChunkOverlap: base.ChunkOverlap, // reuse configured overlap for parents
 		Separators:   base.Separators,
+		Strategy:     base.Strategy,
 	}
 	child = chunker.SplitterConfig{
 		ChunkSize:    childSize,
 		ChunkOverlap: childSize / 5, // ~20% overlap for child chunks
 		Separators:   base.Separators,
+		Strategy:     base.Strategy,
 	}
 	return
 }
@@ -674,7 +680,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		langfuse.InjectTracing(ctx, &postProcessPayload)
 		payloadBytes, err := json.Marshal(postProcessPayload)
 		if err == nil {
-			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
+				knowledgePostProcessTaskOptions()...)
 			if _, err := s.task.Enqueue(task); err != nil {
 				logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
 			} else {
@@ -1456,6 +1463,10 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		questionCount = 10
 	}
 
+	processOverrides, _ := knowledge.ProcessOverrides()
+	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
+	customInstructions := questionGenCfg.CustomInstructions
+
 	// Collect image info for all text chunks so question generation can
 	// see caption / OCR text instead of bare image links.
 	textChunkIDs := make([]string, len(textChunks))
@@ -1489,7 +1500,8 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		}
 
 		llmCallAttempts++
-		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent, knowledge.Title, questionCount)
+		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
+			knowledge.Title, questionCount, customInstructions)
 		if err != nil {
 			llmCallFailed++
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
@@ -1752,6 +1764,10 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		questionCount = 10
 	}
 
+	processOverrides, _ := knowledge.ProcessOverrides()
+	questionGenCfg := ResolveProcessConfig(kb, processOverrides).QuestionGenerationConfig
+	customInstructions := questionGenCfg.CustomInstructions
+
 	// Fetch the batch chunks (in payload order) plus the two boundary
 	// neighbors so we can rebuild the same surrounding context the legacy
 	// loop used, all enriched with image OCR / caption info. A vanished
@@ -1815,7 +1831,8 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 
 		questions, gerr := s.generateQuestionsWithContext(
-			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount)
+			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
+			customInstructions)
 		if gerr != nil {
 			llmCallFailed++
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, gerr)
@@ -1877,6 +1894,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 // generateQuestionsWithContext generates questions for a chunk with surrounding context
 func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	chatModel chat.Chat, content, prevContent, nextContent, docName string, questionCount int,
+	customInstructions string,
 ) ([]string, error) {
 	if content == "" || questionCount <= 0 {
 		return nil, nil
@@ -1908,6 +1926,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		"doc_name":       docName,
 		"language":       langName,
 	})
+	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "question_generation")
 
 	thinking := false
 	response, err := chatModel.Chat(ctx, []chat.Message{
@@ -2246,7 +2265,7 @@ func (s *knowledgeService) ReparseKnowledge(
 //   - Any in-flight worker reads the new status at its next checkpoint and
 //     bails (see processChunks / ProcessDocument / downstream handlers).
 //   - The asynq inspector (if available) dequeues pending / scheduled / retry
-//     tasks for this knowledge_id across the default / critical / low queues
+//     tasks for this knowledge_id across all queues used by the pipeline
 //     and signals active workers to stop. Lite mode (no Redis) skips the
 //     dequeue step — the checkpoint-based abort is the only stop signal there.
 //   - Idempotent: re-calling on an already-cancelled row is a no-op.
@@ -3099,7 +3118,12 @@ func (s *knowledgeService) convert(
 	s.beginStage(ctx, knowledge.ID, types.StageDocReader, docInput)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
-	overrides := s.getParserEngineOverridesFromContext(ctx)
+	tenantOverrides := s.getParserEngineOverridesFromContext(ctx)
+	var uploadOverrides map[string]string
+	if processOverrides, err := knowledge.ProcessOverrides(); err == nil && processOverrides != nil {
+		uploadOverrides = processOverrides.ParserEngineOverrides
+	}
+	mergedOverrides := MergeParserEngineOverrides(tenantOverrides, uploadOverrides)
 
 	if isURL {
 		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {
@@ -3122,7 +3146,7 @@ func (s *knowledgeService) convert(
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
 
-	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
+	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, mergedOverrides)
 	if reader == nil {
 		logger.Errorf(ctx, "[convert] no doc reader for kb=%s knowledge=%s fileType=%s engine=%q isURL=%v",
 			kb.ID, knowledge.ID, fileType, parserEngine, isURL)
@@ -3140,7 +3164,7 @@ func (s *knowledgeService) convert(
 		Title:                 knowledge.Title,
 		ParserEngine:          parserEngine,
 		RequestID:             payload.RequestId,
-		ParserEngineOverrides: overrides,
+		ParserEngineOverrides: mergedOverrides,
 	}
 
 	if !isURL {
@@ -3364,11 +3388,47 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			continue
 		}
 
-		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes, asynq.Queue(types.QueueMultimodal))
+		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes,
+			asynq.Queue(types.QueueMultimodal), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 		if _, err := s.task.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
 		} else {
 			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
 		}
 	}
+}
+
+// ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.
+func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *asynq.Task) error {
+	var payload types.KnowledgeListReparsePayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		logger.Errorf(ctx, "Failed to unmarshal knowledge list reparse payload: %v", err)
+		return err
+	}
+
+	logger.Infof(ctx, "Processing knowledge list reparse task for %d knowledge items", len(payload.KnowledgeIDs))
+
+	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
+		return err
+	}
+
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+
+	var failed int
+	for _, id := range payload.KnowledgeIDs {
+		if _, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig); err != nil {
+			logger.Errorf(ctx, "Failed to reparse knowledge %s: %v", id, err)
+			failed++
+		}
+	}
+
+	if failed > 0 {
+		logger.Warnf(ctx, "Knowledge list reparse completed with %d failures out of %d", failed, len(payload.KnowledgeIDs))
+	}
+	logger.Infof(ctx, "Knowledge list reparse task finished: %d submitted, %d failed",
+		len(payload.KnowledgeIDs)-failed, failed)
+	return nil
 }

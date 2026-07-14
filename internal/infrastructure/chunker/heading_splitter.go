@@ -70,6 +70,7 @@ func splitByHeadingsImpl(text string, cfg SplitterConfig, profile *DocProfile) [
 		// We intentionally do this after observing the section header so
 		// the breadcrumb reflects the section-leading heading.
 		breadcrumb := hierarchy.BreadcrumbWithHashes()
+		sectionStart := *hierarchy
 		observeSubHeadings(runes[b.runeStart:endRune], primaryLevel, hierarchy)
 
 		sectionRunes := runes[b.runeStart:endRune]
@@ -97,14 +98,17 @@ func splitByHeadingsImpl(text string, cfg SplitterConfig, profile *DocProfile) [
 		}
 
 		// Section too large: defer to the legacy splitter for inner
-		// segmentation. Sub-chunks inherit the same breadcrumb via
-		// ContextHeader. We do NOT shrink the inner ChunkSize budget here
+		// segmentation. We do NOT shrink the inner ChunkSize budget here
 		// because the breadcrumb no longer counts against Content size.
+		// Each sub-chunk gets a breadcrumb reflecting the deepest heading
+		// active at its start, so deep `###`/`####` sub-headings inside a
+		// long section aren't collapsed to the section-level header.
+		subBreadcrumbs := sectionBreadcrumbs(sectionRunes, primaryLevel, sectionStart)
 		subChunks := SplitText(sectionContent, cfg)
 		for _, sub := range subChunks {
 			out = append(out, Chunk{
 				Content:       sub.Content,
-				ContextHeader: breadcrumb,
+				ContextHeader: breadcrumbAtOffset(subBreadcrumbs, sub.Start, breadcrumb),
 				Seq:           seq,
 				Start:         b.runeStart + sub.Start,
 				End:           b.runeStart + sub.End,
@@ -274,4 +278,65 @@ func observeSubHeadings(runes []rune, primaryLevel int, h *HeadingHierarchy) {
 			h.Observe(line)
 		}
 	}
+}
+
+// sectionBreadcrumb pairs a rune offset within a section with the breadcrumb
+// in effect from that offset onward.
+type sectionBreadcrumb struct {
+	runeStart  int
+	breadcrumb string
+}
+
+// sectionBreadcrumbs walks a section's deeper sub-headings (level >
+// primaryLevel) and records, for each, the rune offset where it takes effect
+// and the resulting breadcrumb. seed is the hierarchy state at the section's
+// start (already including the section heading and its ancestors). The
+// returned slice is ordered by runeStart and always begins with the seed
+// breadcrumb at offset 0, so a sub-chunk sitting far below a deep heading
+// still resolves to that heading's path rather than the section header.
+func sectionBreadcrumbs(sectionRunes []rune, primaryLevel int, seed HeadingHierarchy) []sectionBreadcrumb {
+	h := seed
+	result := []sectionBreadcrumb{{runeStart: 0, breadcrumb: h.BreadcrumbWithHashes()}}
+	pos := 0
+	inFence := false
+	lines := strings.Split(string(sectionRunes), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			pos += utf8.RuneCountInString(line)
+			if i < len(lines)-1 {
+				pos++
+			}
+			continue
+		}
+		if !inFence {
+			if m := MarkdownHeadingPattern.FindStringSubmatch(line); m != nil && len(m[1]) > primaryLevel {
+				h.Observe(line)
+				result = append(result, sectionBreadcrumb{
+					runeStart:  pos,
+					breadcrumb: h.BreadcrumbWithHashes(),
+				})
+			}
+		}
+		pos += utf8.RuneCountInString(line)
+		if i < len(lines)-1 {
+			pos++
+		}
+	}
+	return result
+}
+
+// breadcrumbAtOffset returns the breadcrumb in effect at the given rune offset
+// — the last entry whose runeStart <= offset. fallback covers the (unreachable
+// in practice) empty-slice case.
+func breadcrumbAtOffset(bcs []sectionBreadcrumb, offset int, fallback string) string {
+	bc := fallback
+	for _, e := range bcs {
+		if e.runeStart > offset {
+			break
+		}
+		bc = e.breadcrumb
+	}
+	return bc
 }

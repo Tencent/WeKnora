@@ -4,7 +4,6 @@ CREATE TABLE IF NOT EXISTS tenants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    api_key VARCHAR(256) NOT NULL,
     retriever_engines TEXT NOT NULL DEFAULT '[]',
     status VARCHAR(50) DEFAULT 'active',
     business VARCHAR(255) NOT NULL,
@@ -24,7 +23,6 @@ CREATE TABLE IF NOT EXISTS tenants (
     deleted_at DATETIME
 );
 
-CREATE INDEX IF NOT EXISTS idx_tenants_api_key ON tenants(api_key);
 CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
 
 CREATE TABLE IF NOT EXISTS models (
@@ -140,7 +138,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     agent_config TEXT DEFAULT NULL,
     context_config TEXT DEFAULT NULL,
     agent_id VARCHAR(36),
-    user_id VARCHAR(36),
+    user_id VARCHAR(512),
     is_pinned BOOLEAN NOT NULL DEFAULT 0,
     pinned_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -168,6 +166,10 @@ CREATE TABLE IF NOT EXISTS messages (
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     is_fallback BOOLEAN NOT NULL DEFAULT 0,
     channel VARCHAR(50) NOT NULL DEFAULT '',
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    execution_context TEXT NOT NULL DEFAULT '{}',
     agent_duration_ms INTEGER DEFAULT 0,
     knowledge_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -177,6 +179,56 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_knowledge_id ON messages(knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_messages_agent_id ON messages(agent_id);
+
+CREATE TABLE IF NOT EXISTS message_suggestion_sets (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    assistant_message_id VARCHAR(36) NOT NULL,
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    placement VARCHAR(32) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    locale VARCHAR(16) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL,
+    allow_regenerate BOOLEAN NOT NULL DEFAULT 0,
+    suppression_reason VARCHAR(64) NOT NULL DEFAULT '',
+    questions TEXT NOT NULL DEFAULT '[]',
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until DATETIME,
+    generated_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_suggestion_sets_cache_key
+    ON message_suggestion_sets(tenant_id, assistant_message_id, placement, config_hash, locale);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_sets_session
+    ON message_suggestion_sets(tenant_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_sets_status
+    ON message_suggestion_sets(status, lease_until);
+
+CREATE TABLE IF NOT EXISTS message_suggestion_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    suggestion_set_id VARCHAR(36) NOT NULL,
+    question_id VARCHAR(64) NOT NULL DEFAULT '',
+    event_type VARCHAR(32) NOT NULL,
+    actor_id VARCHAR(512) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (suggestion_set_id) REFERENCES message_suggestion_sets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_set
+    ON message_suggestion_events(suggestion_set_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_session
+    ON message_suggestion_events(tenant_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_type
+    ON message_suggestion_events(event_type, created_at);
 
 CREATE TABLE IF NOT EXISTS chunks (
     id VARCHAR(36) PRIMARY KEY,
@@ -417,6 +469,39 @@ CREATE TABLE IF NOT EXISTS mcp_tool_approvals (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_tool_approvals_tenant_svc_tool ON mcp_tool_approvals(tenant_id, service_id, tool_name);
 CREATE INDEX IF NOT EXISTS idx_mcp_tool_approvals_service_id ON mcp_tool_approvals(service_id);
 
+CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    service_id VARCHAR(36) NOT NULL,
+    client_id VARCHAR(512) NOT NULL,
+    client_secret TEXT,
+    redirect_uri VARCHAR(1024),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_oauth_clients_tenant_svc ON mcp_oauth_clients(tenant_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_clients_service_id ON mcp_oauth_clients(service_id);
+
+CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    service_id VARCHAR(36) NOT NULL,
+    access_token TEXT,
+    refresh_token TEXT,
+    token_type VARCHAR(32),
+    expires_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_tenant_user_svc ON mcp_oauth_tokens(tenant_id, user_id, service_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_service_id ON mcp_oauth_tokens(service_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_user_id ON mcp_oauth_tokens(user_id);
+
 CREATE TABLE IF NOT EXISTS custom_agents (
     id VARCHAR(36) NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -598,6 +683,39 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_im_channels_bot_identity
     ON im_channels (bot_identity)
     WHERE deleted_at IS NULL AND bot_identity != '';
 
+CREATE TABLE IF NOT EXISTS embed_channels (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    agent_id VARCHAR(36) NOT NULL DEFAULT 'builtin-quick-answer',
+    name VARCHAR(255) NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    publish_token VARCHAR(64) NOT NULL DEFAULT '',
+    allowed_origins TEXT NOT NULL DEFAULT '[]',
+    welcome_message TEXT NOT NULL DEFAULT '',
+    rate_limit_per_minute INTEGER NOT NULL DEFAULT 30,
+    rate_limit_per_day INTEGER NOT NULL DEFAULT 10000,
+    primary_color VARCHAR(32) NOT NULL DEFAULT '',
+    page_title VARCHAR(255) NOT NULL DEFAULT '',
+    header_title_mode VARCHAR(32) NOT NULL DEFAULT 'channel',
+    show_suggested_questions INTEGER NOT NULL DEFAULT 1,
+    widget_position VARCHAR(32) NOT NULL DEFAULT 'bottom-right',
+    allow_web_search INTEGER NOT NULL DEFAULT 0,
+    allow_memory INTEGER NOT NULL DEFAULT 0,
+    allow_file_upload INTEGER NOT NULL DEFAULT 0,
+    default_locale VARCHAR(16) NOT NULL DEFAULT '',
+    webhook_url VARCHAR(512) NOT NULL DEFAULT '',
+    webhook_secret VARCHAR(128) NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_embed_channels_tenant ON embed_channels (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_embed_channels_agent ON embed_channels (agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_embed_channels_publish_token
+    ON embed_channels (publish_token)
+    WHERE publish_token != '' AND deleted_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS data_sources (
     id VARCHAR(36) NOT NULL PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
@@ -685,3 +803,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_stores_name_tenant
 CREATE INDEX IF NOT EXISTS idx_vector_stores_tenant_id ON vector_stores(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_engine_type ON vector_stores(engine_type);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_deleted_at ON vector_stores(deleted_at);
+
+CREATE TABLE IF NOT EXISTS tenant_api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    api_key TEXT NOT NULL DEFAULT '',
+    full_access BOOLEAN NOT NULL DEFAULT 0,
+    knowledge_base_ids TEXT NOT NULL DEFAULT '[]',
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    last_used_at DATETIME,
+    expires_at DATETIME,
+    revoked_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_tenant ON tenant_api_keys(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_revoked_at ON tenant_api_keys(revoked_at);

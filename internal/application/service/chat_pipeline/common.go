@@ -53,6 +53,11 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
 	}
+	if opt.Thinking != nil {
+		pipelineInfo(ctx, "Stream", "thinking_option", map[string]interface{}{
+			"enabled": *opt.Thinking,
+		})
+	}
 
 	return chatModel, opt, nil
 }

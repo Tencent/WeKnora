@@ -57,7 +57,7 @@ func TestConnectorListResources(t *testing.T) {
 	defer ts.Close()
 
 	c := NewConnector()
-	resources, err := c.ListResources(context.Background(), makeNotionConfig(cfg, ts.URL, nil))
+	resources, err := c.ListResources(context.Background(), makeNotionConfig(cfg, ts.URL, nil), "")
 	if err != nil {
 		t.Fatalf("ListResources() error: %v", err)
 	}

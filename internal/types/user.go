@@ -19,6 +19,7 @@ import (
 //  1. Add a *T field below + JSON tag (snake_case, must match the front-end key).
 //  2. Extend the merge logic in service.UserService.UpdateUserPreferences.
 //  3. Surface the new knob in the frontend settings store.
+//
 // No DB DDL is required — preferences is a single jsonb column.
 type UserPreferences struct {
 	// EnableMemory mirrors the "开启记忆功能" switch in General Settings.
@@ -143,6 +144,9 @@ type OIDCAuthURLResponse struct {
 	ProviderDisplayName string `json:"provider_display_name,omitempty"`
 	AuthorizationURL    string `json:"authorization_url,omitempty"`
 	State               string `json:"state,omitempty"`
+	// Nonce is bound to an HttpOnly cookie on /auth/oidc/url and verified
+	// on callback; omitted from JSON so clients cannot replay it alone.
+	Nonce string `json:"-"`
 }
 
 type OIDCConfigResponse struct {
@@ -181,6 +185,27 @@ type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=2,max=50"`
 	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
+
+	// TenantProvisioning is server-controlled registration context. It is
+	// deliberately excluded from JSON so a public caller cannot choose its
+	// own tenancy semantics. Empty preserves the historical behaviour and is
+	// treated as create_personal by UserService.Register.
+	TenantProvisioning TenantProvisioningMode `json:"-"`
+}
+
+// TenantProvisioningMode controls what UserService.Register does after it
+// has validated the identity fields. Joining an existing tenant is
+// orchestrated by the invitation handler because the invitation token is the
+// authority for the target tenant and role.
+type TenantProvisioningMode string
+
+const (
+	TenantProvisioningCreatePersonal TenantProvisioningMode = "create_personal"
+	TenantProvisioningTenantless     TenantProvisioningMode = "tenantless"
+)
+
+func (m TenantProvisioningMode) IsValid() bool {
+	return m == TenantProvisioningCreatePersonal || m == TenantProvisioningTenantless
 }
 
 // LoginResponse represents a login response

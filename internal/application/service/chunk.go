@@ -5,6 +5,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -107,7 +108,9 @@ func (s *chunkService) GetChunkByID(ctx context.Context, id string) (*types.Chun
 func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error) {
 	chunk, err := s.chunkRepository.GetChunkByIDOnly(ctx, id)
 	if err != nil {
-		if err != nil && err.Error() == "chunk not found" {
+		// errors.Is (not string equality) so the sentinel survives wrapping.
+		// ErrChunkNotFound aliases the repo sentinel, so this matches directly.
+		if errors.Is(err, ErrChunkNotFound) {
 			return nil, ErrChunkNotFound
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": id})

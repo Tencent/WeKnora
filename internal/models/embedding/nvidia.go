@@ -16,15 +16,16 @@ import (
 
 // NvidiaEmbedder implements text vectorization functionality using NVIDIA API
 type NvidiaEmbedder struct {
-	apiKey        string
-	baseURL       string
-	modelName     string
-	dimensions    int
-	modelID       string
-	httpClient    *http.Client
-	timeout       time.Duration
-	maxRetries    int
-	customHeaders map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	dimensions                int
+	modelID                   string
+	httpClient                *http.Client
+	timeout                   time.Duration
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
@@ -33,11 +34,16 @@ func (e *NvidiaEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+func (e *NvidiaEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
+}
+
 // NvidiaEmbedRequest represents an NVIDIA embedding request
 type NvidiaEmbedRequest struct {
 	Model                string   `json:"model"`
 	Input                []string `json:"input"`
 	EncodingFormat       string   `json:"encoding_format,omitempty"`
+	Dimensions           int      `json:"dimensions,omitempty"`
 	TruncatePromptTokens int      `json:"truncate_prompt_tokens,omitempty"`
 	InputType            string   `json:"input_type,omitempty"`
 }
@@ -64,16 +70,15 @@ func NewNvidiaEmbedder(apiKey, baseURL, modelName string,
 
 	timeout := 60 * time.Second
 
-	// Create HTTP client
-	client := &http.Client{
-		Timeout: timeout,
+	if err := validateEmbeddingBaseURL(baseURL); err != nil {
+		return nil, err
 	}
 
 	return &NvidiaEmbedder{
 		apiKey:         apiKey,
 		baseURL:        baseURL,
 		modelName:      modelName,
-		httpClient:     client,
+		httpClient:     newEmbeddingHTTPClient(timeout),
 		EmbedderPooler: pooler,
 		dimensions:     dimensions,
 		modelID:        modelID,
@@ -146,6 +151,9 @@ func (e *NvidiaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		EncodingFormat: "float",
 		InputType:      "passage",
 	}
+	if e.supportsDimensionsParam() {
+		reqBody.Dimensions = e.dimensions
+	}
 	isQuery, _ := ctx.Value(types.EmbedQueryContextKey).(bool)
 	if isQuery {
 		reqBody.InputType = "query"
@@ -198,6 +206,10 @@ func (e *NvidiaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 // GetModelName returns the model name
 func (e *NvidiaEmbedder) GetModelName() string {
 	return e.modelName
+}
+
+func (e *NvidiaEmbedder) supportsDimensionsParam() bool {
+	return e.supportsDimensionOverride && e.dimensions > 0
 }
 
 // GetDimensions returns the vector dimensions

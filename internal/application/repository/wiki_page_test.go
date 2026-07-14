@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     status            VARCHAR(32) NOT NULL DEFAULT 'published',
     content           TEXT NOT NULL DEFAULT '',
     summary           TEXT NOT NULL DEFAULT '',
+    parent_slug       VARCHAR(255) NOT NULL DEFAULT '',
+    folder_id         VARCHAR(36) NOT NULL DEFAULT '',
+    category_path     TEXT DEFAULT '[]',
+    wiki_path         VARCHAR(1024) NOT NULL DEFAULT '',
+    depth             INTEGER NOT NULL DEFAULT 0,
+    sort_order        INTEGER NOT NULL DEFAULT 0,
     source_refs       TEXT DEFAULT '[]',
     chunk_refs        TEXT DEFAULT '[]',
     in_links          TEXT DEFAULT '[]',
@@ -42,11 +48,29 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
 );
 `
 
+// wikiFoldersTestDDL mirrors the production wiki_folders DDL for SQLite.
+const wikiFoldersTestDDL = `
+CREATE TABLE IF NOT EXISTS wiki_folders (
+    id                VARCHAR(36) PRIMARY KEY,
+    tenant_id         INTEGER NOT NULL DEFAULT 0,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_id         VARCHAR(36) NOT NULL DEFAULT '',
+    name              VARCHAR(255) NOT NULL,
+    path              VARCHAR(1024) NOT NULL DEFAULT '',
+    depth             INTEGER NOT NULL DEFAULT 0,
+    sort_order        INTEGER NOT NULL DEFAULT 0,
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at        DATETIME
+);
+`
+
 func setupWikiPagesTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(wikiPagesTestDDL).Error)
+	require.NoError(t, db.Exec(wikiFoldersTestDDL).Error)
 	return db
 }
 
@@ -68,10 +92,119 @@ func makeWikiPage(kbID, slug, pageType, status string) *types.WikiPage {
 		Status:          status,
 		Content:         "body of " + slug,
 		Summary:         "summary of " + slug,
+		WikiPath:        pageType + "/" + title,
 		Version:         1,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
+}
+
+func makeCategorizedWikiPage(kbID, slug, pageType, status string, categoryPath ...string) *types.WikiPage {
+	page := makeWikiPage(kbID, slug, pageType, status)
+	page.CategoryPath = types.StringArray(categoryPath)
+	if len(categoryPath) > 0 {
+		page.WikiPath = pageType + "/" + strings.Join(categoryPath, "/") + "/" + page.Title
+		page.Depth = len(categoryPath)
+	}
+	return page
+}
+
+// TestList_WikiPathSortReturnsCategorizedPagesFirst protects the sidebar's
+// IDE-like tree contract. Pagination happens in the repository, so the DB
+// must return pages with category_path before loose root pages; otherwise the
+// frontend cannot know about directories hiding on later pages.
+func TestList_WikiPathSortReturnsCategorizedPagesFirst(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	pages := []*types.WikiPage{
+		makeWikiPage("kb-a", "entity/000-root", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeCategorizedWikiPage("kb-a", "entity/999-child", types.WikiPageTypeEntity, types.WikiPageStatusPublished, "zzz-folder"),
+		makeWikiPage("kb-a", "entity/001-root", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+	}
+	for _, p := range pages {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	got, total, err := repo.List(ctx, &types.WikiPageListRequest{
+		KnowledgeBaseID: "kb-a",
+		PageType:        types.WikiPageTypeEntity,
+		Page:            1,
+		PageSize:        10,
+		SortBy:          "wiki_path",
+		SortOrder:       "asc",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	require.Len(t, got, 3)
+	assert.Equal(t, "entity/999-child", got[0].Slug)
+	assert.Equal(t, "entity/000-root", got[1].Slug)
+	assert.Equal(t, "entity/001-root", got[2].Slug)
+}
+
+// TestFolderTree_CRUDAndChildListing exercises the wiki_folders repository:
+// child listing ordered by sort_order/name, find-by-name, page counting under
+// a folder, and that ListDistinctCategoryPaths reflects the folder paths.
+func TestFolderTree_CRUDAndChildListing(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	mk := func(id, parentID, name, path string, depth int) *types.WikiFolder {
+		return &types.WikiFolder{
+			ID: id, TenantID: 1, KnowledgeBaseID: "kb-f",
+			ParentID: parentID, Name: name, Path: path, Depth: depth,
+			CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		}
+	}
+	ai := mk("f-ai", types.WikiFolderRootID, "AI", "AI", 1)
+	people := mk("f-people", types.WikiFolderRootID, "人物", "人物", 1)
+	llm := mk("f-llm", "f-ai", "LLM", "AI/LLM", 2)
+	for _, f := range []*types.WikiFolder{ai, people, llm} {
+		require.NoError(t, repo.CreateFolder(ctx, f))
+	}
+
+	// Root children: AI, 人物 (ordered by name within equal sort_order).
+	roots, err := repo.ListChildFolders(ctx, "kb-f", types.WikiFolderRootID)
+	require.NoError(t, err)
+	require.Len(t, roots, 2)
+
+	// Direct child of AI is LLM.
+	child, err := repo.GetChildFolderByName(ctx, "kb-f", "f-ai", "LLM")
+	require.NoError(t, err)
+	assert.Equal(t, "f-llm", child.ID)
+
+	// Missing child surfaces the typed not-found error.
+	_, err = repo.GetChildFolderByName(ctx, "kb-f", "f-ai", "Nope")
+	assert.ErrorIs(t, err, ErrWikiFolderNotFound)
+
+	// Pages filed into folders are counted (archived excluded).
+	pAI := makeCategorizedWikiPage("kb-f", "entity/a1", types.WikiPageTypeEntity, types.WikiPageStatusPublished, "AI")
+	pAI.FolderID = "f-ai"
+	pLLM := makeCategorizedWikiPage("kb-f", "entity/a2", types.WikiPageTypeEntity, types.WikiPageStatusPublished, "AI", "LLM")
+	pLLM.FolderID = "f-llm"
+	pArch := makeCategorizedWikiPage("kb-f", "entity/a3", types.WikiPageTypeEntity, types.WikiPageStatusArchived, "AI")
+	pArch.FolderID = "f-ai"
+	for _, p := range []*types.WikiPage{pAI, pLLM, pArch} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	aiCount, err := repo.CountPagesInFolder(ctx, "kb-f", "f-ai")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), aiCount, "archived page excluded; LLM page is under f-llm, not f-ai")
+
+	// ListDistinctCategoryPaths returns the folder paths split into segments.
+	paths, err := repo.ListDistinctCategoryPaths(ctx, "kb-f", 100)
+	require.NoError(t, err)
+	assert.Contains(t, paths, []string{"AI"})
+	assert.Contains(t, paths, []string{"AI", "LLM"})
+	assert.Contains(t, paths, []string{"人物"})
+
+	// Pages can be fetched by their folder ids for subtree recompute.
+	pages, err := repo.ListPagesByFolderIDs(ctx, "kb-f", []string{"f-ai", "f-llm"})
+	require.NoError(t, err)
+	assert.Len(t, pages, 3)
 }
 
 // TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived verifies

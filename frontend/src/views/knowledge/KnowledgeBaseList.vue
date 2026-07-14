@@ -200,7 +200,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <!-- The card menu always exists when the card is visible: pin
                      is now per-user and available to anyone who can see the KB
                      (backend route only requires KB read access). Settings /
@@ -215,6 +218,11 @@
                       <div class="popup-menu-item" @click.stop="handleTogglePinById(kb.id)">
                         <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                         <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                      </div>
+                      <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item"
+                        @click.stop="handleDuplicateById(kb.id)">
+                        <t-icon class="menu-icon" name="file-copy" />
+                        <span>{{ $t('knowledgeList.menu.duplicate') }}</span>
                       </div>
                       <template v-if="canManageKBCard(kb)">
                         <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
@@ -279,7 +287,7 @@
                     </t-tooltip>
                   </div>
                 </div>
-                <div v-if="!authStore.isLiteMode" class="bottom-right">
+                <div v-if="!authStore.isLiteMode && showKbOriginBadge(kb)" class="bottom-right">
                   <ResourceOriginBadge :variant="kbOriginVariant(kb)" :creator-name="kb.creator_name" />
                 </div>
               </div>
@@ -296,7 +304,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
                   <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetailFromAll(kb)"
                     :aria-label="$t('knowledgeList.menu.viewDetails')">
@@ -424,7 +435,10 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <span class="card-title" :title="kb.name">
+                  <KbWikiBadge v-if="isWikiKb(kb)" />
+                  <span class="card-title-text">{{ kb.name }}</span>
+                </span>
                 <!-- See the matching block in the "all" tab template for why
                      this is no longer gated by canManageKBCard. -->
                 <t-popup v-model="kb.showMore" overlayClassName="card-more-popup"
@@ -438,6 +452,10 @@
                       <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
                         <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                         <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                      </div>
+                      <div v-if="canDuplicateKBCard(kb)" class="popup-menu-item" @click.stop="handleDuplicate(kb)">
+                        <t-icon class="menu-icon" name="file-copy" />
+                        <span>{{ $t('knowledgeList.menu.duplicate') }}</span>
                       </div>
                       <template v-if="canManageKBCard(kb)">
                         <div class="popup-menu-item" @click.stop="handleSettings(kb)">
@@ -504,7 +522,7 @@
                     </t-tooltip>
                   </div>
                 </div>
-                <div v-if="!authStore.isLiteMode" class="bottom-right">
+                <div v-if="!authStore.isLiteMode && showKbOriginBadge(kb)" class="bottom-right">
                   <ResourceOriginBadge :variant="kbOriginVariant(kb)" :creator-name="kb.creator_name" />
                 </div>
               </div>
@@ -570,7 +588,10 @@
             }" @click="handleSharedKbClick(shared)">
               <!-- 卡片头部 -->
               <div class="card-header">
-                <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
+                <span class="card-title" :title="shared.knowledge_base.name">
+                  <KbWikiBadge v-if="isWikiKb(shared.knowledge_base)" />
+                  <span class="card-title-text">{{ shared.knowledge_base.name }}</span>
+                </span>
                 <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
                   <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
                     :aria-label="$t('knowledgeList.menu.viewDetails')">
@@ -603,15 +624,6 @@
                       </div>
                     </t-tooltip>
                   </div>
-                </div>
-                <div class="bottom-right">
-                  <t-tooltip :content="shared.org_name" placement="top">
-                    <div class="org-source">
-                      <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt=""
-                        aria-hidden="true" />
-                      <span>{{ shared.org_name }}</span>
-                    </div>
-                  </t-tooltip>
                 </div>
               </div>
             </div>
@@ -763,7 +775,6 @@
       </Transition>
     </Teleport>
 
-    <TenantModelsGuide :when="showTenantModelsGuide" />
     <ContextualGuide tour="kbList" :when="showKbListContextualGuide" />
   </div>
 </template>
@@ -772,7 +783,7 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { deleteKnowledgeBase, duplicateKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
@@ -781,11 +792,12 @@ import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
+import KbWikiBadge from './components/KbWikiBadge.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
+import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import ContextualGuide from '@/components/ContextualGuide.vue'
-import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
 import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useI18n } from 'vue-i18n'
@@ -832,6 +844,8 @@ interface KB {
   name: string;
   description?: string;
   updated_at?: string;
+  created_at?: string;
+  pinned_at?: string;
   embedding_model_id?: string;
   summary_model_id?: string;
   type?: 'document' | 'faq';
@@ -1178,12 +1192,8 @@ const showKbListEmpty = computed(() => {
   return false
 })
 
-const showTenantModelsGuide = computed(
-  () => modelsReadyLoaded.value && showKbListEmpty.value && !isReadyForDocumentKb.value,
-)
-
 const showKbListContextualGuide = computed(
-  () => showKbListEmpty.value && isReadyForDocumentKb.value && !uiStore.showKBEditorModal,
+  () => showKbListEmpty.value && !uiStore.showKBEditorModal,
 )
 
 interface UploadTaskState {
@@ -1347,6 +1357,10 @@ function canManageKBCard(kb: KB): boolean {
   return authStore.hasRole('admin')
 }
 
+function canDuplicateKBCard(kb: any): boolean {
+  return authStore.hasRole('contributor') && kb.isMine !== false
+}
+
 // isMyKb 仅用于卡片右下角徽章在「我创建」与「同租户其他成员创建」之间切换。
 // 与 canManageKBCard 不同：管理权限有 admin 兜底，徽章纯粹按创建者匹配。
 // creator_id 为空（PR 5 RBAC 迁移之前的老 KB）一律按 tenant 处理——避免把
@@ -1365,6 +1379,15 @@ function isMyKb(kb: { creator_id?: string }): boolean {
 //     resourceOrigin.tenant 文案（"本空间"），不会出现空标签。
 function kbOriginVariant(kb: { creator_id?: string }): 'mine' | 'creator' {
   return isMyKb(kb) ? 'mine' : 'creator'
+}
+
+function showKbOriginBadge(kb: { creator_id?: string; creator_name?: string }): boolean {
+  return shouldShowResourceOriginBadge({
+    section: kbSectionOf(kb),
+    variant: kbOriginVariant(kb),
+    creatorName: kb.creator_name,
+    showSectionHeaders: showShareGroupHeaders.value,
+  })
 }
 
 // 通过 ID 处理设置（用于全部 Tab 下的知识库）
@@ -1407,6 +1430,33 @@ const handleTogglePinById = async (id: string) => {
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
+  }
+}
+
+const handleDuplicate = async (kb: KB) => {
+  kb.showMore = false
+  await duplicateKB(kb.id)
+}
+
+const handleDuplicateById = async (id: string) => {
+  await duplicateKB(id)
+}
+
+const duplicateKB = async (id: string) => {
+  try {
+    const res: any = await duplicateKnowledgeBase(id)
+    if (res?.success) {
+      const newKbId = res.data?.target_id || res.data?.knowledge_base?.id
+      MessagePlugin.success(t('knowledgeList.messages.duplicateSuccess'))
+      await fetchList(true)
+      if (newKbId) {
+        triggerHighlightFlash(newKbId)
+      }
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeList.messages.duplicateFailed'))
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeList.messages.duplicateFailed'))
   }
 }
 
@@ -1508,6 +1558,9 @@ const isInitialized = (kb: KB) => {
   if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
   return true
 }
+
+const isWikiKb = (kb: unknown) =>
+  !!(kb as { indexing_strategy?: { wiki_enabled?: boolean } } | null | undefined)?.indexing_strategy?.wiki_enabled
 
 // 计算是否有未初始化的知识库
 const hasUninitializedKbs = computed(() => {
@@ -1640,13 +1693,11 @@ const goSettings = (id: string) => {
 
 // 创建知识库
 const handleCreateKnowledgeBase = () => {
-  if (!isReadyForDocumentKb.value) {
-    MessagePlugin.warning(t('contextualGuide.tenantModels.needModelsFirst'))
-    uiStore.openSettings('models')
-    return
-  }
   markContextualGuideDone('kbList')
-  uiStore.openCreateKB()
+  // 无模型时仍打开创建向导，并定位到模型配置页；用户可在向导内添加模型，无需先跳转系统设置
+  const initialSection =
+    modelsReadyLoaded.value && !isReadyForDocumentKb.value ? 'models' : undefined
+  uiStore.openCreateKB('document', initialSection)
 }
 
 // 知识库编辑器成功回调（创建或编辑成功）
@@ -1737,7 +1788,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 <style scoped lang="less">
 .kb-list-container {
-  margin: 0 16px 0 0;
+  margin: 0;
   height: 100%;
   box-sizing: border-box;
   flex: 1;
@@ -1751,7 +1802,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 20px 28px 0 28px;
+  padding: 20px 0 0 28px;
 }
 
 .header {
@@ -1759,6 +1810,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  padding-right: 28px;
 
   .header-title {
     display: flex;
@@ -1800,7 +1852,9 @@ const handleUploadFinishedEvent = (event: Event) => {
   overflow-x: hidden;
   // 顶部不留 padding，sticky 的分组标题 (top: 0) 才能贴到容器最顶；
   // 底部 padding 保留，避免最后一行卡片紧贴边。
-  padding: 0 0 8px;
+  padding: 0 28px 8px 0;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 
 .kb-list-main-loading {
@@ -2417,7 +2471,15 @@ const handleUploadFinishedEvent = (event: Event) => {
     text-overflow: ellipsis;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .card-title-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .card-more-btn {

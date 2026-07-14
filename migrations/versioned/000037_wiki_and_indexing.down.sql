@@ -6,6 +6,8 @@ ALTER TABLE knowledge_bases DROP COLUMN IF EXISTS indexing_strategy;
 
 DROP TABLE IF EXISTS wiki_page_issues;
 
+DROP TABLE IF EXISTS wiki_folders;
+
 DROP TABLE IF EXISTS wiki_pages;
 
 ALTER TABLE knowledge_bases DROP COLUMN IF EXISTS wiki_config;

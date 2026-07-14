@@ -45,7 +45,7 @@ func (e *builtinEngine) Description() string {
 	return "DocReader built-in parser engine"
 }
 func (e *builtinEngine) FileTypes(_ bool) []string {
-	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
+	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "epub", "mhtml", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
 }
 func (e *builtinEngine) CheckAvailable(docreaderConnected bool, _ map[string]string) (bool, string) {
 	if docreaderConnected {

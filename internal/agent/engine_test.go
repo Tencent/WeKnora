@@ -338,6 +338,29 @@ func TestExecuteLoop_NaturalStop_DoesNotDuplicateAnswer(t *testing.T) {
 	assert.GreaterOrEqual(t, doneCount, 1, "a Done marker must close the answer stream")
 }
 
+// TestExecuteLoop_EndTurnTerminates ensures Anthropic-style end_turn is treated
+// like OpenAI's stop when no tool calls are present. Otherwise the ReAct loop
+// keeps asking the model again and streams repeated answer chunks.
+func TestExecuteLoop_EndTurnTerminates(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{ResponseType: types.ResponseTypeAnswer, Content: "The answer.", Done: true, FinishReason: "end_turn"},
+			}},
+		},
+	}
+
+	engine := newTestEngine(t, mock)
+	state := &types.AgentState{}
+	_, err := engine.executeLoop(context.Background(), state, "test query",
+		emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	require.NoError(t, err)
+
+	assert.True(t, state.IsComplete)
+	assert.Equal(t, "The answer.", state.FinalAnswer)
+	assert.Equal(t, 1, mock.callCount, "end_turn must end the loop after the first model call")
+}
+
 func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *testing.T) {
 	mock := &mockChat{
 		responses: []mockResponse{

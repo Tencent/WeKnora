@@ -1,0 +1,391 @@
+package handler
+
+import (
+	stderrors "errors"
+	"net/http"
+	"strings"
+
+	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/gin-gonic/gin"
+)
+
+// MCPOAuthHandler exposes the per-user MCP OAuth2 authorization-code flow:
+// kicking off authorization (discovery + dynamic client registration + PKCE),
+// receiving the provider redirect, reporting authorization status, and
+// revoking a user's token.
+type MCPOAuthHandler struct {
+	oauth      *mcp.OAuthManager
+	mcpManager *mcp.MCPManager
+	svc        interfaces.MCPServiceService
+	gate       *approval.Gate
+}
+
+// NewMCPOAuthHandler constructs the handler.
+func NewMCPOAuthHandler(
+	oauth *mcp.OAuthManager,
+	mcpManager *mcp.MCPManager,
+	svc interfaces.MCPServiceService,
+	gate *approval.Gate,
+) *MCPOAuthHandler {
+	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate}
+}
+
+func mcpOAuthPrincipalsFromContext(ctx *gin.Context) (tokenPrincipal types.Principal, gateUserID string) {
+	raw, _ := types.PrincipalFromContext(ctx.Request.Context())
+	raw = raw.Normalize()
+	tokenPrincipal = types.MCPOAuthPrincipalFromContext(ctx.Request.Context())
+	if raw.Valid() {
+		gateUserID = raw.StorageID()
+	}
+	return tokenPrincipal, gateUserID
+}
+
+type mcpOAuthAuthorizeRequest struct {
+	// RedirectURI is the absolute backend callback URL registered with the
+	// authorization server (e.g. https://host/api/v1/mcp-services/oauth/callback).
+	RedirectURI string `json:"redirect_uri"`
+	// FrontendRedirect is where the callback bounces the browser when done
+	// (e.g. the MCP settings page). Optional; defaults to "/".
+	FrontendRedirect string `json:"frontend_redirect"`
+}
+
+// AuthorizeURL begins authorization and returns the URL the browser must open.
+//
+// AuthorizeURL godoc
+// @Summary      发起 MCP OAuth 授权
+// @Description  对使用 OAuth 的 MCP 服务执行发现与动态客户端注册，返回浏览器应跳转的授权地址（当前用户维度）
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                    true  "MCP 服务 ID"
+// @Param        request  body      map[string]interface{}    true  "{redirect_uri: string, frontend_redirect?: string}"
+// @Success      200      {object}  map[string]interface{}    "{authorization_url: string}"
+// @Failure      400      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /mcp-services/{id}/oauth/authorize-url [post]
+func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
+	ctx := c.Request.Context()
+	serviceID := c.Param("id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() {
+		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+
+	var req mcpOAuthAuthorizeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	req.RedirectURI = strings.TrimSpace(req.RedirectURI)
+	if req.RedirectURI == "" {
+		c.Error(errors.NewValidationError("redirect_uri is required"))
+		return
+	}
+	if req.FrontendRedirect == "" {
+		req.FrontendRedirect = "/"
+	}
+
+	service, err := h.svc.GetMCPServiceByID(ctx, tenantID, serviceID)
+	if err != nil || service == nil {
+		c.Error(errors.NewNotFoundError("MCP service not found"))
+		return
+	}
+	if !service.AuthConfig.IsOAuth() {
+		c.Error(errors.NewValidationError("MCP service is not configured to use OAuth"))
+		return
+	}
+
+	authURL, err := h.oauth.StartAuthorization(ctx, service, tenantID, principal, req.RedirectURI, req.FrontendRedirect)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"service_id": secutils.SanitizeForLog(serviceID),
+		})
+		c.Error(errors.NewInternalServerError("failed to start authorization: " + err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"authorization_url": authURL}})
+}
+
+// Callback receives the authorization-server redirect. It is registered as a
+// public (no-bearer) route; the opaque single-use `state` parameter
+// authenticates the request. On completion it redirects the browser back to
+// the frontend with the result encoded in the URL fragment.
+//
+// Callback godoc
+// @Summary      MCP OAuth 回调
+// @Description  接收授权服务器回调并完成 code 交换，随后重定向回前端
+// @Tags         MCP服务
+// @Param        code   query  string  false  "授权码"
+// @Param        state  query  string  false  "状态参数"
+// @Param        error  query  string  false  "授权错误码"
+// @Success      302
+// @Router       /mcp-services/oauth/callback [get]
+func (h *MCPOAuthHandler) Callback(c *gin.Context) {
+	ctx := c.Request.Context()
+	state := strings.TrimSpace(c.Query("state"))
+	code := strings.TrimSpace(c.Query("code"))
+	providerErr := strings.TrimSpace(c.Query("error"))
+
+	const fallbackRedirect = "/"
+
+	if providerErr != "" {
+		c.Redirect(http.StatusFound, fallbackRedirect+"#mcp_oauth_error="+urlQueryEscape(providerErr))
+		return
+	}
+	if state == "" || code == "" {
+		c.Redirect(http.StatusFound, fallbackRedirect+"#mcp_oauth_error="+urlQueryEscape("missing_code_or_state"))
+		return
+	}
+
+	frontendRedirect, err := h.oauth.CompleteAuthorization(ctx, state, code)
+	if frontendRedirect == "" {
+		frontendRedirect = fallbackRedirect
+	}
+	if err != nil {
+		logger.Errorf(ctx, "MCP OAuth callback failed: %v", err)
+		c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_error="+urlQueryEscape("authorization_failed"))
+		return
+	}
+	c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_result=success")
+}
+
+// Status reports whether the current user has authorized this service.
+//
+// Status godoc
+// @Summary      查询 MCP OAuth 授权状态
+// @Description  返回当前用户对指定 MCP 服务是否已完成 OAuth 授权
+// @Tags         MCP服务
+// @Produce      json
+// @Param        id   path      string                  true  "MCP 服务 ID"
+// @Success      200  {object}  map[string]interface{}  "{authorized: bool}"
+// @Security     Bearer
+// @Router       /mcp-services/{id}/oauth/status [get]
+func (h *MCPOAuthHandler) Status(c *gin.Context) {
+	ctx := c.Request.Context()
+	serviceID := c.Param("id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() {
+		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+
+	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, principal, serviceID)
+	if err != nil {
+		c.Error(errors.NewInternalServerError("failed to query authorization status: " + err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"authorized": authorized}})
+}
+
+// Revoke removes the current user's stored token and recycles connections.
+//
+// Revoke godoc
+// @Summary      撤销 MCP OAuth 授权
+// @Description  删除当前用户对指定 MCP 服务的 OAuth 令牌
+// @Tags         MCP服务
+// @Produce      json
+// @Param        id   path  string  true  "MCP 服务 ID"
+// @Success      204
+// @Security     Bearer
+// @Router       /mcp-services/{id}/oauth/token [delete]
+func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
+	ctx := c.Request.Context()
+	serviceID := c.Param("id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	principal, _ := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() {
+		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+
+	if err := h.oauth.Revoke(ctx, tenantID, principal, serviceID); err != nil {
+		c.Error(errors.NewInternalServerError("failed to revoke authorization: " + err.Error()))
+		return
+	}
+	// Recycle any cached connections so a subsequent call re-authorizes.
+	_ = h.mcpManager.CloseClient(serviceID)
+	c.Status(http.StatusNoContent)
+}
+
+type resolveMCPOAuthBody struct {
+	// ServiceID is the MCP service the pending prompt belongs to; used to
+	// verify the user actually holds a token before resuming the agent.
+	ServiceID string `json:"service_id" binding:"required"`
+	// Decision is "authorize" (default) or "cancel" when the user skips OAuth.
+	Decision string `json:"decision"`
+}
+
+// ResolveMCPOAuth resumes an agent run that paused on an in-conversation OAuth
+// prompt. The frontend calls this once the per-user authorization popup has
+// completed; the backend verifies a token now exists for (tenant, user,
+// service) before unblocking, so a premature/failed authorization does not
+// resume the tool into another failure.
+//
+// ResolveMCPOAuth godoc
+// @Summary      完成对话内 MCP OAuth 授权
+// @Description  用户在对话中完成 OAuth 授权后调用，校验令牌存在后恢复被暂停的 Agent 工具调用
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        pending_id  path  string                  true  "待授权 ID"
+// @Param        request     body  map[string]interface{}  true  "{service_id: string}"
+// @Success      200         {object}  map[string]interface{}
+// @Failure      400         {object}  errors.AppError
+// @Failure      409         {object}  errors.AppError  "用户尚未完成授权"
+// @Security     Bearer
+// @Router       /agent/mcp-oauth-resolutions/{pending_id} [post]
+func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
+	ctx := c.Request.Context()
+	pendingID := c.Param("pending_id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	principal, gateUserID := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || !principal.Valid() || gateUserID == "" {
+		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+	if h.gate == nil {
+		c.Error(errors.NewInternalServerError("OAuth gate is not configured"))
+		return
+	}
+
+	var body resolveMCPOAuthBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	serviceID := strings.TrimSpace(body.ServiceID)
+	if serviceID == "" {
+		c.Error(errors.NewValidationError("service_id is required"))
+		return
+	}
+
+	decision := strings.TrimSpace(strings.ToLower(body.Decision))
+	if decision == "" {
+		decision = "authorize"
+	}
+
+	switch decision {
+	case "cancel", "reject", "skip":
+		if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
+			Approved: false,
+			Reason:   "user canceled",
+		}); err != nil {
+			switch {
+			case stderrors.Is(err, approval.ErrPendingNotFound):
+				c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
+			case stderrors.Is(err, approval.ErrAlreadyResolved):
+				c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
+			case stderrors.Is(err, approval.ErrTenantMismatch):
+				c.Error(errors.NewBadRequestError("tenant mismatch"))
+			case stderrors.Is(err, approval.ErrUserMismatch):
+				c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
+			default:
+				logger.ErrorWithFields(ctx, err, map[string]interface{}{
+					"pending_id": secutils.SanitizeForLog(pendingID),
+				})
+				c.Error(errors.NewInternalServerError(err.Error()))
+			}
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true})
+		return
+	case "authorize":
+		// continue below
+	default:
+		c.Error(errors.NewBadRequestError("decision must be authorize or cancel"))
+		return
+	}
+
+	// Only resume once the user genuinely holds a token; otherwise the retry
+	// would just fail again with another authorization-required error.
+	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, principal, serviceID)
+	if err != nil {
+		c.Error(errors.NewInternalServerError("failed to verify authorization: " + err.Error()))
+		return
+	}
+	if !authorized {
+		c.Error(errors.NewConflictError("authorization not completed yet for this MCP service"))
+		return
+	}
+
+	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{Approved: true}); err != nil {
+		switch {
+		case stderrors.Is(err, approval.ErrPendingNotFound):
+			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
+		case stderrors.Is(err, approval.ErrAlreadyResolved):
+			c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
+		case stderrors.Is(err, approval.ErrTenantMismatch):
+			c.Error(errors.NewBadRequestError("tenant mismatch"))
+		case stderrors.Is(err, approval.ErrUserMismatch):
+			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
+		default:
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"pending_id": secutils.SanitizeForLog(pendingID),
+			})
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// CancelMCPOAuth lets the user skip an in-conversation OAuth prompt without
+// completing authorization. This unblocks the paused agent with a denial.
+//
+// CancelMCPOAuth godoc
+// @Summary      跳过对话内 MCP OAuth 授权
+// @Description  用户主动跳过 OAuth 授权，解除 Agent 阻塞
+// @Tags         MCP服务
+// @Produce      json
+// @Param        pending_id  path  string  true  "待授权 ID"
+// @Success      200         {object}  map[string]interface{}
+// @Failure      404         {object}  errors.AppError
+// @Security     Bearer
+// @Router       /agent/mcp-oauth-resolutions/{pending_id}/cancel [post]
+func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
+	ctx := c.Request.Context()
+	pendingID := c.Param("pending_id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	_, gateUserID := mcpOAuthPrincipalsFromContext(c)
+	if tenantID == 0 || strings.TrimSpace(gateUserID) == "" {
+		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+	if h.gate == nil {
+		c.Error(errors.NewInternalServerError("OAuth gate is not configured"))
+		return
+	}
+
+	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
+		Approved: false,
+		Reason:   "user canceled",
+	}); err != nil {
+		switch {
+		case stderrors.Is(err, approval.ErrPendingNotFound):
+			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
+		case stderrors.Is(err, approval.ErrAlreadyResolved):
+			c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
+		case stderrors.Is(err, approval.ErrTenantMismatch):
+			c.Error(errors.NewBadRequestError("tenant mismatch"))
+		case stderrors.Is(err, approval.ErrUserMismatch):
+			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
+		default:
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"pending_id": secutils.SanitizeForLog(pendingID),
+			})
+			c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}

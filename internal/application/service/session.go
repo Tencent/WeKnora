@@ -19,8 +19,7 @@ import (
 )
 
 func sessionUserIDFromContext(ctx context.Context) string {
-	userID, _ := types.UserIDFromContext(ctx)
-	return userID
+	return types.SessionOwnerIDFromContext(ctx)
 }
 
 // generateEventID generates a unique event ID with type suffix for better traceability
@@ -47,6 +46,7 @@ type sessionService struct {
 	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
 	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
 	memoryService         interfaces.MemoryService               // Service for memory operations
+	suggestionRepo        interfaces.MessageSuggestionRepository
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -64,6 +64,7 @@ func NewSessionService(cfg *config.Config,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
 	memoryService interfaces.MemoryService,
+	suggestionRepo interfaces.MessageSuggestionRepository,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -80,6 +81,7 @@ func NewSessionService(cfg *config.Config,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbShareService:        kbShareService,
 		memoryService:         memoryService,
+		suggestionRepo:        suggestionRepo,
 	}
 }
 
@@ -134,6 +136,32 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 	return session, nil
 }
 
+// GetSessionByID loads a session by tenant and id without user scoping.
+func (s *sessionService) GetSessionByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error) {
+	if id == "" {
+		return nil, stderrors.New("session id is required")
+	}
+	if tenantID == 0 {
+		return nil, stderrors.New("tenant id is required")
+	}
+	return s.sessionRepo.GetByID(ctx, tenantID, id)
+}
+
+// SetSessionOwnerID assigns sessions.user_id for the given session row.
+func (s *sessionService) SetSessionOwnerID(ctx context.Context, tenantID uint64, sessionID, ownerID string) error {
+	if sessionID == "" || ownerID == "" || tenantID == 0 {
+		return stderrors.New("tenant id, session id and owner id are required")
+	}
+	affected, err := s.sessionRepo.SetOwnerID(ctx, tenantID, sessionID, ownerID)
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return apperrors.ErrSessionNotFound
+	}
+	return nil
+}
+
 // GetSessionsByTenant retrieves all sessions for the current tenant
 func (s *sessionService) GetSessionsByTenant(ctx context.Context) ([]*types.Session, error) {
 	// Get tenant ID from context
@@ -186,7 +214,7 @@ func (s *sessionService) ListSessions(
 		query = &types.SessionListQuery{}
 	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
-	if uid, ok := types.UserIDFromContext(ctx); ok {
+	if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
 		query.UserID = uid
 	}
 
@@ -323,6 +351,11 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	if rows == 0 {
 		return apperrors.ErrSessionNotFound
 	}
+	if s.suggestionRepo != nil {
+		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
+			logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
+		}
+	}
 
 	return nil
 }
@@ -380,6 +413,13 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		})
 		return err
 	}
+	if s.suggestionRepo != nil {
+		for _, id := range visibleIDs {
+			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
+				logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
+			}
+		}
+	}
 
 	return nil
 }
@@ -421,6 +461,13 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 			"tenant_id": tenantID,
 		})
 		return err
+	}
+	if s.suggestionRepo != nil && sessions != nil {
+		for _, session := range sessions {
+			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, session.ID); err != nil {
+				logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", session.ID, err)
+			}
+		}
 	}
 
 	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)

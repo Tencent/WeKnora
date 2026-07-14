@@ -493,9 +493,27 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 
 ### 推荐问题设置
 
+`question_suggestions` 是智能体拥有的统一策略。网页嵌入等渠道只能关闭展示，不能覆盖内容或生成规则。
+
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `suggested_prompts` | []string | - | 推荐问题列表，用于在前端对话面板展示快捷提问 |
+| `question_suggestions.starters.enabled` | bool | true | 是否在首次提问前展示开场问题 |
+| `question_suggestions.starters.mode` | string | `hybrid` | `curated`、`knowledge` 或 `hybrid` |
+| `question_suggestions.starters.items` | []string | `[]` | 运营配置的开场问题 |
+| `question_suggestions.starters.count` | int | 6 | 展示数量，范围 1-8 |
+| `question_suggestions.follow_ups.enabled` | bool | false | 是否在每次完整回答后异步生成追问 |
+| `question_suggestions.follow_ups.mode` | string | `hybrid` | `generated`、`knowledge` 或 `hybrid` |
+| `question_suggestions.follow_ups.count` | int | 3 | 生成数量，范围 1-5 |
+| `question_suggestions.follow_ups.model_id` | string | - | 独立生成模型；为空使用本轮对话模型 |
+| `question_suggestions.follow_ups.categories` | []string | `clarify,deepen,action` | 允许的问题类型 |
+| `question_suggestions.follow_ups.max_context_turns` | int | 2 | 生成时使用的最近对话轮数，范围 1-5 |
+| `question_suggestions.follow_ups.additional_instruction` | string | - | 智能体作者的附加生成要求 |
+| `question_suggestions.follow_ups.suppress_on_fallback` | bool | true | 兜底回答后不展示 |
+| `question_suggestions.follow_ups.suppress_when_answer_asks_question` | bool | true | 回答本身以问题结尾时不展示 |
+| `question_suggestions.follow_ups.knowledge_fallback` | bool | true | 模型失败时使用知识库候选补位 |
+| `question_suggestions.follow_ups.allow_regenerate` | bool | false | 是否允许用户换一批 |
+
+旧 `suggested_prompts` 会在数据库迁移时一次性写入 `starters.items`，API 不再接受该字段。
 
 ### 高级设置
 

@@ -212,7 +212,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, withDefaults } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRightIcon } from 'tdesign-icons-vue-next'
 import KBChunkingDebug from './KBChunkingDebug.vue'
@@ -408,8 +408,8 @@ const emitUpdate = () => {
   top: -24px;
   z-index: 5;
   background: var(--td-bg-color-container);
-  padding: 24px 32px 16px 32px;
-  margin: -24px -32px 24px -32px;
+  padding: 24px 32px 12px 32px;
+  margin: -24px -32px 16px -32px;
   border-bottom: 1px solid var(--td-component-stroke);
 
   .section-header-text {
@@ -421,7 +421,7 @@ const emitUpdate = () => {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
   }
 
   .section-description {
@@ -442,7 +442,7 @@ const emitUpdate = () => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 20px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {

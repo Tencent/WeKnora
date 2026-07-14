@@ -19,6 +19,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -134,6 +135,15 @@ var registry = map[string]settingSpec{
 		Description: "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
 			"仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
 	},
+	"auth.default_tenant_mode": {
+		Type:     "string",
+		EnvName:  "WEKNORA_AUTH_DEFAULT_TENANT_MODE",
+		Default:  "create_personal",
+		Enum:     []string{"create_personal", "tenantless"},
+		Category: "auth",
+		Description: "公开注册成功后的默认租户策略。create_personal = 自动创建个人租户并设为 Owner；" +
+			"tenantless = 仅创建用户，等待接受邀请或主动创建租户。修改后只影响新注册用户。",
+	},
 	// tenant.max_owned_per_user caps how many tenants a single non-superuser
 	// can create (and Own) via self-service POST /tenants. Read on every
 	// request — UI edits take effect immediately, no restart required. The
@@ -148,6 +158,14 @@ var registry = map[string]settingSpec{
 		Category: "tenant",
 		Description: "每个非超管用户通过自助创建可拥有的最大租户数。每次创建租户时实时读取，" +
 			"修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。",
+	},
+	"tenant.self_service_creation_enabled": {
+		Type:     "bool",
+		EnvName:  "WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED",
+		Default:  true,
+		Category: "tenant",
+		Description: "是否允许非超管用户主动创建租户。关闭后，普通用户只能通过邀请加入已有租户；" +
+			"跨租户超管仍可创建。修改后立即生效。",
 	},
 	// tenant.default_storage_quota_gb is the default storage quota (in GB)
 	// applied to a newly-created tenant when the caller doesn't specify
@@ -165,19 +183,93 @@ var registry = map[string]settingSpec{
 			"仅在创建时读取，修改后只对之后新建的租户生效，不会回写已存在的租户。" +
 			"0 或负数表示使用内置默认值 10GB。",
 	},
-	// asynq.concurrency is the asynq worker pool size (parallel in-flight
-	// tasks). Read once when the asynq server starts — changing it in the
-	// UI requires a process restart to take effect. Mirrors
-	// WEKNORA_ASYNQ_CONCURRENCY (default 32).
-	"asynq.concurrency": {
+	// tenant.auto_create_api_key restores the legacy behaviour where creating
+	// a tenant also minted a full-access API key and returned its plaintext
+	// token in the create response. Newer versions stopped doing this (keys
+	// are created explicitly via tenant_api_keys), which is a breaking change
+	// for integrations that relied on the create response carrying a key.
+	// Deployments that need the old behaviour set this to true (or the
+	// WEKNORA_TENANT_AUTO_CREATE_API_KEY env var). Default false keeps the
+	// current, safer no-implicit-key behaviour. Read at create time only.
+	"tenant.auto_create_api_key": {
+		Type:     "bool",
+		EnvName:  "WEKNORA_TENANT_AUTO_CREATE_API_KEY",
+		Default:  false,
+		Category: "tenant",
+		Description: "创建租户时是否自动生成一个全量权限（full_access）的 API Key，并在创建接口的响应中返回其明文 token。" +
+			"用于兼容旧版本「创建租户即下发默认 API Key」的行为（属于破坏性变更的回退开关）。" +
+			"每次创建租户时实时读取，修改后立即生效。默认 false（不自动创建，需通过 API Key 管理显式创建）。",
+	},
+	"asynq.core_concurrency": {
 		Type:            "int",
-		EnvName:         "WEKNORA_ASYNQ_CONCURRENCY",
-		Default:         int64(32),
+		EnvName:         "WEKNORA_ASYNQ_CORE_CONCURRENCY",
+		Default:         int64(types.DefaultCoreWorkerConcurrency),
 		Category:        "worker",
 		RequiresRestart: true,
-		Description: "异步任务 worker 并发数（asynq 线程池大小）。" +
-			"文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
-			"修改后需重启服务进程方可生效。",
+		Description:     "文档解析、手工重解析等核心任务的每实例保底并发。可额外使用共享弹性池；修改后需重启。",
+	},
+	"asynq.postprocess_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY",
+		Default:         int64(types.DefaultPostProcessWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "解析完成后的轻量编排与富化扇出专用并发，避免被长时间文档解析阻塞；修改后需重启。",
+	},
+	"asynq.enrichment_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY",
+		Default:         int64(types.DefaultEnrichmentWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "摘要、图片、图谱和问题生成的每实例保底并发。可额外使用共享弹性池；修改后需重启。",
+	},
+	"asynq.maintenance_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY",
+		Default:         int64(types.DefaultMaintenanceWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "数据源同步、批处理、移动和删除清理的每实例保底并发，与用户面流水线硬隔离；修改后需重启。",
+	},
+	"asynq.shared_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_SHARED_CONCURRENCY",
+		Default:         int64(types.DefaultSharedWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description:     "核心解析与内容富化共用的每实例弹性并发。空闲容量由有积压的一侧借用；修改后需重启。",
+	},
+	// asynq.wiki_concurrency is the size of the DEDICATED wiki worker pool,
+	// separate from the upstream pools. Read once when the wiki asynq server
+	// starts — changing it in the UI requires a process restart. Mirrors
+	// WEKNORA_WIKI_ASYNQ_CONCURRENCY (default 8).
+	"asynq.wiki_concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_WIKI_ASYNQ_CONCURRENCY",
+		Default:         int64(types.DefaultWikiWorkerConcurrency),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description: "Wiki 生成专用池的 worker 并发数（与文档解析池相互隔离）。" +
+			"Wiki 生成以合成大模型调用为主，独立并发预算可避免上传高峰期被解析任务饿死，" +
+			"同时不会因 Wiki 洪峰拖慢用户面解析。修改后需重启服务进程方可生效。",
+	},
+	// model.max_concurrency is the DEFAULT per-model cap on concurrent
+	// background (ingestion/enrichment) LLM/embedding/VLM calls, keyed by
+	// model ID and shared across replicas. Read at every gated call via the
+	// limiter governor; a runtime bridge (applyModelMaxConcurrency) pushes UI
+	// edits into limiter.SetGlobalLimit so no restart is needed. Individual
+	// models may override this via their own max_concurrency parameter.
+	// Mirrors WEKNORA_MODEL_MAX_CONCURRENCY (default 32). 0/negative disables
+	// the default cap.
+	"model.max_concurrency": {
+		Type:     "int",
+		EnvName:  "WEKNORA_MODEL_MAX_CONCURRENCY",
+		Default:  int64(32),
+		Category: "worker",
+		Description: "后台任务（文档入库/富化）对单个模型的默认并发上限，按模型 ID 全副本共享。" +
+			"每次调用实时读取，修改后立即生效、无需重启。0 或负数表示关闭默认限制" +
+			"（各模型仍会尊重自身在模型管理里配置的上限）。仅影响后台任务，不影响交互式对话。",
 	},
 }
 
@@ -284,6 +376,7 @@ func (s *systemSettingService) preload(ctx context.Context) {
 	// the subsystem doesn't lag the cache by a full request cycle.
 	// Add new bridges here as more env vars get migrated.
 	s.applySSRFWhitelist(ctx)
+	s.applyModelMaxConcurrency(ctx)
 }
 
 // encodeDefault produces the JSONB encoding for a spec's built-in
@@ -375,6 +468,8 @@ func (s *systemSettingService) dispatchSideEffects(ctx context.Context, changedK
 	switch changedKey {
 	case "ssrf.whitelist":
 		s.applySSRFWhitelist(ctx)
+	case "model.max_concurrency":
+		s.applyModelMaxConcurrency(ctx)
 	}
 }
 
@@ -401,6 +496,21 @@ func (s *systemSettingService) applySSRFWhitelist(ctx context.Context) {
 	utils.SetSSRFWhitelistFromRaw(merged)
 	logger.Infof(ctx, "[system_settings] SSRF whitelist applied (%d primary entries, extra=%v)",
 		len(list), extra != "")
+}
+
+// applyModelMaxConcurrency resolves model.max_concurrency via the 3-tier
+// resolver and pushes it into the model concurrency governor so UI edits take
+// effect without a restart. Only the process-wide default limit is retuned;
+// the installed limiter backend (redis/local) stays intact. The default (8)
+// deliberately mirrors container.defaultModelMaxConcurrency so the value here
+// matches what the container installs at boot.
+//
+// Called at preload (initial sync), after Update (this replica's edit), and
+// after reload (peer's edit via pubsub).
+func (s *systemSettingService) applyModelMaxConcurrency(ctx context.Context) {
+	limit := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 32))
+	limiter.SetGlobalLimit(limit)
+	logger.Infof(ctx, "[system_settings] model.max_concurrency applied (limit=%d)", limit)
 }
 
 // publishChange fans the change out to peers. Best-effort: a Redis
@@ -602,6 +712,10 @@ func (s *systemSettingService) List(ctx context.Context) ([]*types.SystemSetting
 	for _, row := range rows {
 		byKey[row.Key] = row
 	}
+	// asynq.concurrency was the old fixed-ratio aggregate. Keeping an old DB
+	// row visible would suggest it still controls runtime capacity, so retire it
+	// explicitly while preserving all genuinely unknown rows for diagnostics.
+	delete(byKey, "asynq.concurrency")
 
 	keys := make([]string, 0, len(registry))
 	for key := range registry {
@@ -1161,13 +1275,15 @@ func encodeForType(declared string, rawValue any) (types.JSON, error) {
 //     400 body verbatim).
 func validateRegistryEntry(key string, rawValue any) error {
 	switch key {
-	case "asynq.concurrency":
+	case "asynq.core_concurrency", "asynq.postprocess_concurrency",
+		"asynq.enrichment_concurrency", "asynq.maintenance_concurrency",
+		"asynq.shared_concurrency", "asynq.wiki_concurrency":
 		n, err := coerceToPositiveInt64(rawValue)
 		if err != nil {
 			return err
 		}
-		if n <= 0 {
-			return errors.New("concurrency must be a positive integer")
+		if n < 1 {
+			return errors.New("concurrency must be at least 1")
 		}
 	case "ssrf.whitelist":
 		// Coerce into the same shape encodeForType produced. We don't

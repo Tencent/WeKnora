@@ -60,6 +60,13 @@ const (
 	EventToolApprovalRequired EventType = "tool_approval_required"
 	EventToolApprovalResolved EventType = "tool_approval_resolved"
 
+	// MCP OAuth in-conversation authorization prompt: emitted when an
+	// OAuth-enabled MCP service is invoked but the current user has not
+	// authorized it yet. The agent pauses until the user authorizes (or the
+	// wait times out / is canceled).
+	EventMCPOAuthRequired EventType = "mcp_oauth_required"
+	EventMCPOAuthResolved EventType = "mcp_oauth_resolved"
+
 	// Error events
 	EventError EventType = "error" // 错误事件
 

@@ -189,7 +189,12 @@ func KBIDFromChunkIDParam(param string, chunkService ChunkLookup) KBIDResolver {
 // from forcing every service to standardise on a single error type
 // before this refactor is useful.
 func isResourceNotFound(err error) bool {
+	// ErrChunkNotFound is defined in the repository layer and aliased by the
+	// service; match the canonical repo sentinel so this predicate depends
+	// only on the repository package (KB / Knowledge / Chunk are all here).
 	return stderrors.Is(err, apprepo.ErrKnowledgeBaseNotFound) ||
+		stderrors.Is(err, apprepo.ErrKnowledgeNotFound) ||
+		stderrors.Is(err, apprepo.ErrChunkNotFound) ||
 		stderrors.Is(err, ErrResourceNotFound)
 }
 
@@ -236,6 +241,11 @@ func RequireKBAccess(
 		}
 
 		ctx := c.Request.Context()
+		if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+			_ = c.Error(err)
+			c.Abort()
+			return
+		}
 
 		// Rollout window: enforcement off -> log the would-be check and
 		// pass through. We still resolve the KB (best-effort) so the

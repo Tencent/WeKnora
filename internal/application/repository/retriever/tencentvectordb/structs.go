@@ -10,8 +10,10 @@ import (
 const (
 	envTencentVectorDBDatabase   = "TENCENT_VECTORDB_DATABASE"
 	envTencentVectorDBCollection = "TENCENT_VECTORDB_COLLECTION"
+	envTencentVectorDBReplicaNum = "TENCENT_VECTORDB_REPLICA_NUMBER"
 	defaultDatabaseName          = "weknora"
 	defaultCollectionName        = "weknora_embeddings"
+	defaultReplicaNumber         = 1
 
 	fieldID              = "id"
 	fieldVector          = "vector"
@@ -30,6 +32,7 @@ type repository struct {
 	client             *tcvectordb.RpcClient
 	databaseName       string
 	collectionBaseName string
+	useDimensionSuffix bool
 	shardsNum          int
 	replicasNum        int
 	initialized        sync.Map
