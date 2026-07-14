@@ -899,6 +899,7 @@ export default {
     newChat: "새 대화",
     suggestedQuestions: "이렇게 물어보세요",
     followUpQuestions: "이어서 질문해 보세요",
+    followUpQuestionsLoading: "후속 질문 준비 중",
     suggestedQuestionsLoading: "추천 질문 로딩 중...",
     refreshSuggestedQuestions: "추천 질문 새로고침",
     inputPlaceholder: "메시지를 입력하세요...",

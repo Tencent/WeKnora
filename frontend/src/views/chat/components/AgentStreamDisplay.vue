@@ -289,7 +289,8 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
-              <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
+              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
+                class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -305,6 +306,13 @@
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
+                <transition name="follow-up-toolbar-loading">
+                  <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                    aria-live="polite">
+                    <t-icon name="lightbulb" />
+                    <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
+                  </span>
+                </transition>
               </div>
             </div>
 
@@ -750,6 +758,7 @@ const props = defineProps<{
   embedSessionSig?: string;
   embedVisitorId?: string;
   ragMode?: boolean;
+  followUpLoading?: boolean;
 }>();
 
 const embedAuthProps = computed(() => ({

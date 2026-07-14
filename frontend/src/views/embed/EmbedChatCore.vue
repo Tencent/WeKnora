@@ -199,7 +199,6 @@ const loadFollowUpSuggestions = async (
     message.suggestionSet = null
   } finally {
     message.suggestionLoading = false
-    scrollToBottom()
   }
 }
 

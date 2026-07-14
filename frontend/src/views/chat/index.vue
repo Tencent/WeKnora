@@ -83,7 +83,9 @@
                     <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
                         <botmsg :content="session.content" :session="session" :session-id="session_id"
                             :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
-                            :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
+                            :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
+                            :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)">
+                        </botmsg>
                         <FollowUpSuggestions v-if="!session.suggestionsDismissed"
                             :suggestion-set="session.suggestionSet"
                             :loading="session.suggestionLoading"
@@ -348,7 +350,6 @@ const loadFollowUpSuggestions = async (message, ensure = false, regenerate = fal
         message.suggestionSet = null;
     } finally {
         message.suggestionLoading = false;
-        nextTick(() => scrollToBottom());
     }
 };
 

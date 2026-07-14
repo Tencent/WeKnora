@@ -3085,6 +3085,7 @@ export default {
     newChat: 'New Chat',
     suggestedQuestions: 'You can ask me',
     followUpQuestions: 'Continue with a follow-up',
+    followUpQuestionsLoading: 'Preparing follow-ups',
     suggestedQuestionsLoading: 'Loading suggestions...',
     refreshSuggestedQuestions: 'Refresh suggestions',
     inputPlaceholder: 'Enter your message...',

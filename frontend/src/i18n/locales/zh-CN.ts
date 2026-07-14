@@ -897,6 +897,7 @@ export default {
     newChat: "新对话",
     suggestedQuestions: "你可以这样问我",
     followUpQuestions: "接下来可以继续问",
+    followUpQuestionsLoading: "整理后续问题",
     suggestedQuestionsLoading: "正在加载推荐问题...",
     refreshSuggestedQuestions: "换一批推荐问题",
     inputPlaceholder: "请输入您的消息...",

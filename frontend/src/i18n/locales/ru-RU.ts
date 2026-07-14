@@ -3769,6 +3769,7 @@ export default {
     newChat: 'Новый чат',
     suggestedQuestions: 'Вы можете спросить меня',
     followUpQuestions: 'Продолжите уточняющим вопросом',
+    followUpQuestionsLoading: 'Подготовка уточнений',
     suggestedQuestionsLoading: 'Загрузка предложений...',
     refreshSuggestedQuestions: 'Обновить предложения',
     inputPlaceholder: 'Введите ваше сообщение...',
