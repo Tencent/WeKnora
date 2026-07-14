@@ -4896,6 +4896,13 @@ export default {
     think: '思考',
     copy: '复制',
     addToKnowledgeBase: '添加到知识库',
+    artifactDrawer: {
+      buttonTitle: '下载本次生成的文件',
+      title: '生成的文件',
+      empty: '本次未生成可下载的文件',
+      download: '下载',
+      downloadFailed: '下载失败，请稍后重试',
+    },
     updatePlan: '更新计划',
     webSearchFound: '找到 <strong>{count}</strong> 个网络搜索结果',
     toolFallback: '工具',

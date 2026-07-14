@@ -28,9 +28,10 @@ type CubeSandbox struct {
 	client    *cubeClient
 	ephemeral bool // when true, Execute wraps every call in create+kill
 
-	mu       sync.Mutex
-	info     *SandboxInfo
-	lastUsed time.Time
+	mu          sync.Mutex
+	provisionMu sync.Mutex
+	info        *SandboxInfo
+	lastUsed    time.Time
 }
 
 // NewCubeSandbox creates an ephemeral CubeSandbox. Callers may share it
@@ -193,6 +194,12 @@ func (s *CubeSandbox) Cleanup(ctx context.Context) error {
 
 // ensureSandbox lazily provisions a MicroVM.
 func (s *CubeSandbox) ensureSandbox(ctx context.Context) (*SandboxInfo, error) {
+	// Serialize remote provisioning. SessionBoundManager already guarantees one
+	// CubeSandbox wrapper per session; this lock additionally prevents concurrent
+	// first attachment/shell/script operations from creating duplicate VMs.
+	s.provisionMu.Lock()
+	defer s.provisionMu.Unlock()
+
 	s.mu.Lock()
 	if s.info != nil {
 		info := s.info

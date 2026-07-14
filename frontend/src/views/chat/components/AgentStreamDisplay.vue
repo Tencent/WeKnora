@@ -315,6 +315,23 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
+                <!-- Skill artifact download: only shown when the persisted
+                     assistant message recorded any generated files. Agent
+                     mode is the primary path for skills, so this is where
+                     the button is most likely to appear. -->
+                <t-badge
+                  v-if="hasArtifacts"
+                  :count="artifactCount"
+                  :offset="[-4, 4]"
+                  shape="round"
+                  size="small"
+                >
+                  <t-button size="small" variant="outline" shape="round"
+                    @click.stop="openArtifactDrawer"
+                    :title="$t('agent.artifactDrawer.buttonTitle')">
+                    <t-icon name="download" />
+                  </t-button>
+                </t-badge>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -479,6 +496,13 @@
       </div>
     </template>
   </t-drawer>
+  <ChatArtifactsDrawer
+    v-if="hasArtifacts"
+    v-model:visible="showArtifactDrawer"
+    :session-id="sessionId"
+    :message-id="messageIdForArtifacts"
+    :artifacts="artifactList"
+  />
 </template>
 
 <script setup lang="ts">
@@ -492,6 +516,7 @@ import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
@@ -855,6 +880,29 @@ watch(
     });
   },
 );
+
+// -----------------------------------------------------------------------------
+// Skill artifact download drawer (Agent path)
+// -----------------------------------------------------------------------------
+// Same contract as botmsg.vue: only render the button when the persisted
+// assistant message actually recorded files, then let ChatArtifactsDrawer
+// resolve names/sizes/mtimes and stream downloads via the /artifacts
+// endpoint. Agent mode is the primary path for skills, so this button will
+// appear more often here than in the RAG path.
+const showArtifactDrawer = ref(false);
+const artifactList = computed(() => {
+  const list = ((props.session?.artifacts as any[]) || []);
+  return list.map((a, i) => ({ index: i, ...a }));
+});
+const hasArtifacts = computed(() => artifactList.value.length > 0);
+const artifactCount = computed(() => artifactList.value.length);
+const messageIdForArtifacts = computed(() =>
+  String(props.session?.id || props.session?.request_id || ''),
+);
+function openArtifactDrawer() {
+  if (!hasArtifacts.value) return;
+  showArtifactDrawer.value = true;
+}
 
 const {
   float: citationFloat,

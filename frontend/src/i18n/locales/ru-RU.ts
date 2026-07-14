@@ -4896,6 +4896,13 @@ export default {
     think: 'Размышление',
     copy: 'Копировать',
     addToKnowledgeBase: 'Добавить в базу знаний',
+    artifactDrawer: {
+      buttonTitle: 'Скачать файлы, сгенерированные в этом ответе',
+      title: 'Сгенерированные файлы',
+      empty: 'В этом раунде не создано файлов для скачивания.',
+      download: 'Скачать',
+      downloadFailed: 'Не удалось скачать, повторите попытку.',
+    },
     updatePlan: 'Обновить план',
     webSearchFound: 'Найдено <strong>{count}</strong> результатов веб‑поиска',
     toolFallback: 'Инструмент',

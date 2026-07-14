@@ -3,12 +3,66 @@ package skills
 import (
 	"context"
 	"fmt"
+	"os"
+	"path"
+	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// artifactOutputEnvVar is the name of the environment variable that WeKnora
+// injects into every skill script execution. The value points to the
+// convention-driven directory where the script should drop artifacts the user
+// will be able to download after the turn completes.
+//
+// The name is stable across releases; skills reference it via os.getenv(...)
+// so they never hard-code the path.
+const artifactOutputEnvVar = "WEKNORA_SKILL_OUTPUT_DIR"
+
+// sessionInputEnvVar points skill scripts at user-uploaded files restored into
+// the current session's Cube. Inputs are separate from generated artifacts.
+const sessionInputEnvVar = "WEKNORA_SESSION_INPUT_DIR"
+
+// artifactHistoryEnvVar is the name of the environment variable that points
+// to the root artifact output directory (/workspace/output). Skill scripts
+// can use this to self-discover artifacts from prior runs when they need to
+// chain without LLM mediation.
+const artifactHistoryEnvVar = "WEKNORA_SKILL_HISTORY_ROOT"
+
+// defaultArtifactOutputDir is used when neither the environment variable
+// (WEKNORA_SKILL_OUTPUT_DIR) nor the ExecuteConfig.Env has an override.
+// /workspace/output sits inside the base sandbox image's writable tree and
+// is guaranteed to survive across Execute calls for the same session (Cube
+// SessionBoundManager keeps the MicroVM alive between calls).
+const defaultArtifactOutputDir = "/workspace/output"
+
+// ArtifactOutputDir returns the absolute path (inside the sandbox) where
+// skill scripts should write artifacts for this turn. It is exported so
+// callers such as ArtifactCollector can list the same directory when
+// draining artifacts after Execute returns.
+//
+// Resolution order (first non-empty wins):
+//  1. WEKNORA_SKILL_OUTPUT_DIR from the host environment (ops override).
+//  2. defaultArtifactOutputDir.
+//
+// Callers are expected to treat the returned string as read-only: the path
+// is normalised (no trailing slash) so it can be joined safely.
+func ArtifactOutputDir() string {
+	if v := strings.TrimSpace(os.Getenv(artifactOutputEnvVar)); v != "" {
+		return path.Clean(v)
+	}
+	return defaultArtifactOutputDir
+}
+
+// SkillOutputDir returns the artifact output directory for skill executions.
+// All skills write to the same root directory (/workspace/output/) to enable
+// collaboration and file sharing between different skill executions.
+func (m *Manager) SkillOutputDir(sessionID, skillName string) string {
+	return ArtifactOutputDir()
+}
 
 // Manager manages skills lifecycle including discovery, loading, and script execution
 // It coordinates between the Loader (filesystem operations) and Sandbox (script execution)
@@ -207,11 +261,41 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 	// Prepare execution config
 	logger.Info(ctx, "[Tool][ExecuteScript]:Prepare execution config")
 	sessionID, _ := types.SessionIDFromContext(ctx)
+
+	// Compute the artifact output directory. All skills share the same root
+	// directory (/workspace/output/) to enable collaboration and file sharing
+	// between different skill executions in the same session.
+	// Skill scripts read the directory via WEKNORA_SKILL_OUTPUT_DIR; the
+	// root (for cross-run discovery) is available via WEKNORA_SKILL_HISTORY_ROOT.
+	outputDir := m.SkillOutputDir(sessionID, skillName)
+	env := map[string]string{
+		artifactOutputEnvVar:  outputDir,
+		artifactHistoryEnvVar: ArtifactOutputDir(),
+	}
+	if m.sandboxMgr.GetType() == sandbox.SandboxTypeCube {
+		env[sessionInputEnvVar] = sandbox.SessionInputRoot
+	}
+
+	// Best-effort pre-create the output directory inside the sandbox. When
+	// the underlying manager exposes EnsureSessionDir (Cube backend today),
+	// we call it so the script can write to $WEKNORA_SKILL_OUTPUT_DIR
+	// unconditionally without a mkdir -p prelude. Errors are logged but
+	// never fatal: script execution proceeds regardless, and the script is
+	// free to create the directory itself.
+	if ensurer, ok := m.sandboxMgr.(interface {
+		EnsureSessionDir(context.Context, string, string) error
+	}); ok && sessionID != "" {
+		if err := ensurer.EnsureSessionDir(ctx, sessionID, outputDir); err != nil {
+			logger.Warnf(ctx, "[Tool][ExecuteScript] pre-create output dir %s failed: %v", outputDir, err)
+		}
+	}
+
 	config := &sandbox.ExecuteConfig{
 		Script:    file.Path,
 		Args:      args,
 		WorkDir:   basePath,
 		Stdin:     stdin,
+		Env:       env,
 		SessionID: sessionID,
 	}
 

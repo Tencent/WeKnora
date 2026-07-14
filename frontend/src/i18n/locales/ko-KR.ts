@@ -4896,6 +4896,13 @@ export default {
     think: '사고',
     copy: '복사',
     addToKnowledgeBase: '지식베이스에 추가',
+    artifactDrawer: {
+      buttonTitle: '이 응답에서 생성된 파일 다운로드',
+      title: '생성된 파일',
+      empty: '이번 회차에서 다운로드 가능한 파일이 없습니다.',
+      download: '다운로드',
+      downloadFailed: '다운로드에 실패했습니다. 다시 시도해 주세요.',
+    },
     updatePlan: '계획 업데이트',
     webSearchFound: '<strong>{count}</strong>개의 웹 검색 결과 발견',
     toolFallback: '도구',

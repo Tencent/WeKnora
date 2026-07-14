@@ -474,6 +474,15 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		}
 	}()
 
+	// NOTE: Skill-generated artifact blobs are intentionally NOT purged here.
+	// Their lifecycle mirrors messages, which are soft-deleted (deleted_at
+	// timestamp) rather than physically removed. Hard-deleting the blobs on a
+	// soft session delete would (a) diverge from message semantics, (b) make
+	// any future "restore soft-deleted session" flow silently broken, and (c)
+	// leave 404s in the download endpoint if the message row is ever surfaced
+	// again. A dedicated GC job or explicit hard-delete API is the right
+	// place to reclaim storage — not this soft-delete path.
+
 	// Cleanup temporary KB stored in Redis for this session
 	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
@@ -548,6 +557,8 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 		}
+		// Artifact blobs are kept alongside soft-deleted messages — see
+		// DeleteSession for the rationale.
 	}
 
 	// Batch delete sessions from repository
@@ -603,6 +614,8 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
 			}
+			// Artifact blobs are kept alongside soft-deleted messages — see
+			// DeleteSession for the rationale.
 		}
 	}
 
@@ -654,6 +667,8 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 		logger.Warnf(ctx, "Failed to destroy sandbox for session %s: %v", sessionID, err)
 	}
 }
+
+
 
 // GenerateTitle generates a title for the current conversation content
 // modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
