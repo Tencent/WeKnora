@@ -131,8 +131,10 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// consume LLM compute via enrichment subtasks (summary/question/graph),
 	// and the same stall modes (subtask worker dies, retry budget exhausted
 	// without decrementing the counter) leave the row hanging just as
-	// visibly. Housekeeping promotes both states to 'failed' once the
-	// span heartbeat is older than the threshold.
+	// visibly. Housekeeping fails genuinely stuck work, but reconciles the
+	// narrower orphaned-finalizing case to completed when the latest attempt
+	// is already terminal and no queue or durable pending op still owns the
+	// remaining counter slots.
 	var candidates []types.Knowledge
 	if err := h.db.WithContext(ctx).
 		Where("parse_status IN ? AND updated_at < ?",
@@ -156,23 +158,47 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	stuck, queueSkipped := h.filterOutQueued(ctx, stuck)
 
 	if len(stuck) > 0 {
-		stuckIDs := make([]string, 0, len(stuck))
-		for _, k := range stuck {
-			stuckIDs = append(stuckIDs, k.ID)
+		completedIDs, failedIDs, pendingOpSkipped := h.splitRecoverableFinalizing(ctx, stuck)
+		if len(completedIDs) > 0 {
+			now := time.Now()
+			res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+				Where("id IN ? AND parse_status = ? AND pending_subtasks_count > 0",
+					completedIDs, types.ParseStatusFinalizing).
+				Updates(map[string]interface{}{
+					"parse_status":           types.ParseStatusCompleted,
+					"pending_subtasks_count": 0,
+					"processed_at":           now,
+					"updated_at":             now,
+				})
+			if res.Error != nil {
+				logger.Warnf(ctx, "[Housekeeping] finalizing reconciliation failed: %v", res.Error)
+			} else if res.RowsAffected > 0 {
+				logger.Infof(ctx, "[Housekeeping] reconciled %d orphaned finalizing knowledge rows to completed",
+					res.RowsAffected)
+				h.cancelOpenSpans(ctx, completedIDs, "TASK_ORPHANED", "finalizing reconciled by housekeeping")
+			}
 		}
-		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
-			Where("id IN ? AND parse_status IN ?", stuckIDs,
-				[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}).
-			Updates(map[string]interface{}{
-				"parse_status":           types.ParseStatusFailed,
-				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
-				"pending_subtasks_count": 0,
-			})
-		if res.Error != nil {
-			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed: %v", res.Error)
-		} else if res.RowsAffected > 0 {
-			logger.Infof(ctx, "[Housekeeping] recovered %d stuck knowledge rows (threshold=%s)",
-				res.RowsAffected, threshold)
+		if len(failedIDs) > 0 {
+			res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+				Where("id IN ? AND parse_status IN ?", failedIDs,
+					[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}).
+				Updates(map[string]interface{}{
+					"parse_status":           types.ParseStatusFailed,
+					"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
+					"pending_subtasks_count": 0,
+				})
+			if res.Error != nil {
+				logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed: %v", res.Error)
+			} else if res.RowsAffected > 0 {
+				logger.Infof(ctx, "[Housekeeping] recovered %d stuck knowledge rows (threshold=%s)",
+					res.RowsAffected, threshold)
+				h.cancelOpenSpans(ctx, failedIDs, "TASK_STUCK", "task stuck in processing > "+threshold.String()+", recovered by housekeeping")
+			}
+		}
+		if pendingOpSkipped > 0 {
+			logger.Infof(ctx,
+				"[Housekeeping] %d finalizing candidate(s) skipped — durable pending ops still exist",
+				pendingOpSkipped)
 		}
 	}
 	if spanSkipped > 0 {
@@ -206,6 +232,98 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		logger.Warnf(ctx, "[Housekeeping] summary sweep failed: %v", resSummary.Error)
 	} else if resSummary.RowsAffected > 0 {
 		logger.Infof(ctx, "[Housekeeping] recovered %d stuck summary rows", resSummary.RowsAffected)
+	}
+}
+
+func (h *HousekeepingService) splitRecoverableFinalizing(
+	ctx context.Context, candidates []types.Knowledge,
+) (completedIDs, failedIDs []string, pendingOpSkipped int) {
+	for _, k := range candidates {
+		if k.ParseStatus == types.ParseStatusFinalizing && k.PendingSubtasksCount > 0 {
+			if h.hasPendingOpsForKnowledge(ctx, k.ID) {
+				pendingOpSkipped++
+				continue
+			}
+			if h.latestAttemptTerminal(ctx, k.ID) {
+				completedIDs = append(completedIDs, k.ID)
+				continue
+			}
+		}
+		failedIDs = append(failedIDs, k.ID)
+	}
+	return completedIDs, failedIDs, pendingOpSkipped
+}
+
+func (h *HousekeepingService) hasPendingOpsForKnowledge(ctx context.Context, knowledgeID string) bool {
+	if knowledgeID == "" {
+		return false
+	}
+	if !h.db.Migrator().HasTable("task_pending_ops") {
+		return false
+	}
+	var n int64
+	if err := h.db.WithContext(ctx).
+		Table("task_pending_ops").
+		Where("dedup_key = ?", knowledgeID).
+		Count(&n).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] pending-op query failed for %s: %v", knowledgeID, err)
+		return true
+	}
+	return n > 0
+}
+
+func (h *HousekeepingService) latestAttemptTerminal(ctx context.Context, knowledgeID string) bool {
+	if knowledgeID == "" {
+		return false
+	}
+	var latest struct {
+		Attempt int `gorm:"column:attempt"`
+	}
+	if err := h.db.WithContext(ctx).
+		Table("knowledge_processing_spans").
+		Select("COALESCE(MAX(attempt), 0) AS attempt").
+		Where("knowledge_id = ?", knowledgeID).
+		Scan(&latest).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] latest attempt query failed for %s: %v", knowledgeID, err)
+		return false
+	}
+	if latest.Attempt <= 0 {
+		return false
+	}
+	var openCount int64
+	if err := h.db.WithContext(ctx).
+		Table("knowledge_processing_spans").
+		Where("knowledge_id = ? AND attempt = ? AND status IN ?",
+			knowledgeID, latest.Attempt,
+			[]string{types.SpanStatusPending, types.SpanStatusRunning}).
+		Count(&openCount).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] latest attempt open span query failed for %s attempt=%d: %v",
+			knowledgeID, latest.Attempt, err)
+		return false
+	}
+	return openCount == 0
+}
+
+func (h *HousekeepingService) cancelOpenSpans(ctx context.Context, knowledgeIDs []string, code, reason string) {
+	if len(knowledgeIDs) == 0 {
+		return
+	}
+	now := time.Now()
+	res := h.db.WithContext(ctx).
+		Table("knowledge_processing_spans").
+		Where("knowledge_id IN ? AND status IN ?", knowledgeIDs,
+			[]string{types.SpanStatusPending, types.SpanStatusRunning}).
+		Updates(map[string]interface{}{
+			"status":        types.SpanStatusCancelled,
+			"error_code":    code,
+			"error_message": reason,
+			"finished_at":   now,
+			"updated_at":    now,
+		})
+	if res.Error != nil {
+		logger.Warnf(ctx, "[Housekeeping] open span reconciliation failed: %v", res.Error)
+	} else if res.RowsAffected > 0 {
+		logger.Infof(ctx, "[Housekeeping] cancelled %d orphaned open span rows", res.RowsAffected)
 	}
 }
 
