@@ -222,6 +222,54 @@ func TestFetchIncrementalStartsAfterCursorAndAdvancesSeq(t *testing.T) {
 	}
 }
 
+func TestFetchIncrementalAggregatesGroupMessagesByRoomID(t *testing.T) {
+	msgTime := time.Date(2026, 7, 13, 9, 30, 0, 0, time.FixedZone("CST", 8*3600))
+	c := NewConnector(WithClientFactory(func(cfg *Config) ArchiveClient {
+		return &fakeArchiveClient{messages: []ArchiveMessageEnvelope{
+			{
+				Seq:              42,
+				MsgID:            "group-msg-1",
+				Action:           "send",
+				MsgType:          "text",
+				ConversationName: "客户项目群",
+				RoomID:           "wr_group_123",
+				From:             Sender{UserID: "zhangsan", Name: "张三", Type: senderTypeInternal},
+				ToList:           []Sender{{UserID: "lisi", Name: "李四", Type: senderTypeInternal}},
+				MsgTime:          msgTime,
+				Raw:              []byte(`{"text":{"content":"群聊问题"}}`),
+			},
+		}}
+	}))
+
+	items, _, err := c.FetchIncremental(context.Background(), validConfig(), nil)
+	if err != nil {
+		t.Fatalf("FetchIncremental error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.ExternalID != "wecom-chat:wr_group_123:2026-07-13" {
+		t.Fatalf("ExternalID = %q", item.ExternalID)
+	}
+	if item.Metadata["conversation_type"] != conversationTypeRoom {
+		t.Fatalf("conversation_type = %q", item.Metadata["conversation_type"])
+	}
+	if item.Metadata["conversation_id"] != "wr_group_123" {
+		t.Fatalf("conversation_id = %q", item.Metadata["conversation_id"])
+	}
+	if item.Metadata["participant_room_ids"] != "wr_group_123" {
+		t.Fatalf("participant_room_ids = %q", item.Metadata["participant_room_ids"])
+	}
+	content := string(item.Content)
+	if !strings.Contains(content, "# 企业微信会话：客户项目群 / 2026-07-13") {
+		t.Fatalf("content missing group title:\n%s", content)
+	}
+	if !strings.Contains(content, "群聊问题") {
+		t.Fatalf("content missing message body:\n%s", content)
+	}
+}
+
 func TestFetchIncrementalPreservesUint64CursorPrecision(t *testing.T) {
 	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
 	largeSeq := uint64(1<<53 + 17)

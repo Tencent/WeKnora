@@ -127,6 +127,7 @@ func (c *Connector) fetchAndAggregate(ctx context.Context, client ArchiveClient,
 			return nil, weComChatArchiveCursor{}, err
 		}
 		for _, msg := range messages {
+			msg = fillConversationFromRoomID(msg)
 			if msg.Seq > next.LastSeq {
 				next.LastSeq = msg.Seq
 			}
@@ -170,6 +171,19 @@ func (c *Connector) fetchAndAggregate(ctx context.Context, client ArchiveClient,
 		next.DayBuckets[key] = item.ExternalID
 	}
 	return items, next, nil
+}
+
+func fillConversationFromRoomID(msg ArchiveMessageEnvelope) ArchiveMessageEnvelope {
+	if msg.RoomID == "" {
+		return msg
+	}
+	if msg.ConversationID == "" {
+		msg.ConversationID = msg.RoomID
+	}
+	if msg.ConversationType == "" || msg.ConversationType == conversationTypeSingle {
+		msg.ConversationType = conversationTypeRoom
+	}
+	return msg
 }
 
 func parseCursor(cursor *types.SyncCursor) weComChatArchiveCursor {
