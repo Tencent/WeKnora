@@ -76,6 +76,7 @@ var startupEnvVars = []envVarSpec{
 	{name: "SYSTEM_AES_KEY", sensitive: true},
 	{name: "JWT_SECRET", sensitive: true},
 	// Runtime
+	{name: "APP_ROLE"},
 	{name: "GIN_MODE"},
 	{name: "AUTO_MIGRATE"},
 	// Database
