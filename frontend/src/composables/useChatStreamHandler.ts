@@ -813,6 +813,16 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         onTurnComplete?.(message)
         fullContent.value = ''
         currentAssistantMessageId.value = ''
+        // Hydrate skill-generated artifacts as soon as the SSE completion
+        // event arrives — without this the download button only appears
+        // after a page refresh (the assistant message row is fetched via
+        // getMessageList which does include the artifacts JSON column).
+        // botmsg.vue / AgentStreamDisplay.vue read `message.artifacts`
+        // reactively to decide whether to render the download button.
+        const streamedArtifacts = (dataPayload as any)?.artifacts
+        if (Array.isArray(streamedArtifacts) && streamedArtifacts.length) {
+          message.artifacts = streamedArtifacts
+        }
         if (message.agentEventStream) {
           ;(message.agentEventStream as ChatMessage[]).push({
             type: 'agent_complete',

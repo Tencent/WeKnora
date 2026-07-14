@@ -630,6 +630,72 @@ func (c *cubeClient) RunCommand(
 	return result, nil
 }
 
+// RunShell executes a raw shell one-liner via `/bin/bash -l -c <line>`
+// without applying argv-style quoting to the line itself. It is the wire
+// twin of RunCommand for the shell_exec tool: callers hand us a real shell
+// expression (pipes, redirects, `&&`, quoted arguments...) and we forward
+// it to bash verbatim so it parses and expands normally.
+//
+// Contrast with RunCommand which shell-quotes every argv element — that
+// path is correct for "python3 script.py <arg>" style calls but destroys
+// a genuine shell one-liner ("pip install foo") because the whole string
+// gets single-quoted and bash tries to exec it as a single binary named
+// "pip install foo" (=> "command not found").
+//
+// Semantics:
+//   - `line` MUST be a shell expression, not an argv element. Empty lines
+//     are rejected up-front.
+//   - `env` and `cwd` mirror RunCommand.
+//   - `stdin` is currently rejected because envd's process.Process/Start
+//     does not carry it inline and the tool contract does not need it.
+//     Callers wanting stdin should keep using RunCommand + wrapWithStdin.
+func (c *cubeClient) RunShell(
+	ctx context.Context,
+	info *SandboxInfo,
+	line string,
+	env map[string]string,
+	cwd string,
+) (*CommandResult, error) {
+	logger.Info(ctx, "[func (c *cubeClient) RunShell] : ")
+
+	if info == nil || info.ID == "" {
+		return nil, errors.New("cube api: sandbox info required for RunShell")
+	}
+	if strings.TrimSpace(line) == "" {
+		return nil, errors.New("cube api: line required for RunShell")
+	}
+
+	sb, err := c.sandboxFrom(ctx, info)
+	if err != nil {
+		return nil, err
+	}
+
+	envs := env
+	if envs == nil {
+		envs = map[string]string{}
+	}
+	stdinFlag := false
+	payload := envdProcessStartRequest{
+		Process: envdProcessConfig{
+			Cmd:  "/bin/bash",
+			Args: []string{"-l", "-c", line},
+			Envs: envs,
+			Cwd:  cwd,
+		},
+		Stdin: &stdinFlag,
+	}
+
+	logger.Info(ctx, "shell line : ", line)
+	result, err := c.startProcess(ctx, sb, payload)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return &CommandResult{Killed: true, ExitCode: -1}, ctxErr
+		}
+		return nil, fmt.Errorf("envd: /process.Process/Start: %w", err)
+	}
+	return result, nil
+}
+
 // startProcess sends a Connect-framed process.Process/Start request to envd
 // through the data-plane client and aggregates the streamed response. It is
 // the framing-correct replacement for the SDK's Commands().Run request path.

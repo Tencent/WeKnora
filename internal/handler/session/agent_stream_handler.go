@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -21,6 +23,7 @@ import (
 type AgentStreamHandler struct {
 	ctx                context.Context
 	sessionID          string
+	tenantID           uint64 // Tenant that owns this session; used when persisting skill artifacts.
 	assistantMessageID string
 	requestID          string
 	receivedAt         time.Time // Handler entry timestamp, used for TTFB logging
@@ -29,6 +32,11 @@ type AgentStreamHandler struct {
 	streamManager      interfaces.StreamManager
 
 	eventBus *event.EventBus
+
+	// artifactCollector drains skill-generated files from the session
+	// sandbox after the agent completes. Nil when the sandbox backend
+	// doesn't support artifact collection or WeKnora was built without it.
+	artifactCollector *service.ArtifactCollector
 
 	// State tracking
 	knowledgeRefs   []*types.SearchResult
@@ -76,20 +84,24 @@ func (h *AgentStreamHandler) composeFinalAnswer() string {
 func NewAgentStreamHandler(
 	ctx context.Context,
 	sessionID, assistantMessageID, requestID string,
+	tenantID uint64,
 	receivedAt time.Time,
 	assistantMessage *types.Message,
 	streamManager interfaces.StreamManager,
 	eventBus *event.EventBus,
+	artifactCollector *service.ArtifactCollector,
 ) *AgentStreamHandler {
 	return &AgentStreamHandler{
 		ctx:                ctx,
 		sessionID:          sessionID,
+		tenantID:           tenantID,
 		assistantMessageID: assistantMessageID,
 		requestID:          requestID,
 		receivedAt:         receivedAt,
 		assistantMessage:   assistantMessage,
 		streamManager:      streamManager,
 		eventBus:           eventBus,
+		artifactCollector:  artifactCollector,
 		knowledgeRefs:      make([]*types.SearchResult, 0),
 		eventStartTimes:    make(map[string]time.Time),
 	}
@@ -624,6 +636,32 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 				h.assistantMessage.AgentSteps = agenttools.SanitizeAgentStepsForStorage(steps)
 			}
 		}
+
+		// Drain skill-generated files from the sandbox into persistent
+		// storage. Best-effort: any failure is logged and the turn is
+		// persisted without artifacts. Collect is a no-op when either the
+		// collector wasn't wired in, no sandbox is bound, or no files were
+		// produced — those cases must not disturb the completion path.
+		if h.artifactCollector != nil {
+			artifacts, err := h.artifactCollector.Collect(
+				h.ctx,
+				h.sessionID,
+				h.tenantID,
+				skills.ArtifactOutputDir(),
+			)
+			if err != nil {
+				logger.GetLogger(h.ctx).Warnf(
+					"artifact collect failed session=%s message=%s: %v",
+					h.sessionID, h.assistantMessageID, err,
+				)
+			} else if len(artifacts) > 0 {
+				h.assistantMessage.Artifacts = artifacts
+				logger.GetLogger(h.ctx).Infof(
+					"artifact collect attached %d file(s) to message=%s session=%s",
+					len(artifacts), h.assistantMessageID, h.sessionID,
+				)
+			}
+		}
 	}
 
 	// Fallback: if no answer events were streamed but we have a final answer,
@@ -667,19 +705,49 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	}
 
 	// Send completion event to stream manager so SSE can detect completion
+	completeData := map[string]interface{}{
+		"total_steps":       data.TotalSteps,
+		"total_duration_ms": data.TotalDurationMs,
+	}
+	// Attach the freshly-collected artifacts so the frontend can render the
+	// download button without waiting for a page refresh. We strip the
+	// storage URL and any other server-only fields via publicArtifactViews
+	// — clients only ever download through /artifacts/:index which enforces
+	// tenant ownership.
+	if len(h.assistantMessage.Artifacts) > 0 {
+		completeData["artifacts"] = publicArtifactViews(h.assistantMessage.Artifacts)
+	}
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeComplete,
 		Content:   "",
 		Done:      true,
 		Timestamp: time.Now(),
-		Data: map[string]interface{}{
-			"total_steps":       data.TotalSteps,
-			"total_duration_ms": data.TotalDurationMs,
-		},
+		Data:      completeData,
 	}); err != nil {
 		logger.GetLogger(h.ctx).Errorf("Append complete event to stream failed: %v", err)
 	}
 
 	return nil
+}
+
+// publicArtifactViews returns a redacted view of the artifact list suitable
+// for direct serialization onto the SSE stream. The storage URL and any
+// other server-only fields are stripped; the frontend uses (index, name,
+// size, source_path, mod_time, created_at) to render the download drawer
+// and calls /artifacts/:index/download to fetch the bytes.
+func publicArtifactViews(list types.MessageArtifacts) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(list))
+	for i, a := range list {
+		out = append(out, map[string]interface{}{
+			"index":       i,
+			"file_name":   a.FileName,
+			"file_type":   a.FileType,
+			"file_size":   a.FileSize,
+			"source_path": a.SourcePath,
+			"mod_time":    a.ModTime,
+			"created_at":  a.CreatedAt,
+		})
+	}
+	return out
 }

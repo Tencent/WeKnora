@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS messages (
     agent_steps TEXT DEFAULT NULL,
     mentioned_items TEXT DEFAULT '[]',
     images TEXT DEFAULT '[]',
+    artifacts TEXT DEFAULT '[]',
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     is_fallback BOOLEAN NOT NULL DEFAULT 0,
     channel VARCHAR(50) NOT NULL DEFAULT '',

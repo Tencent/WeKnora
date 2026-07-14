@@ -930,6 +930,13 @@ export default {
     think: 'Thinking',
     copy: 'Copy',
     addToKnowledgeBase: 'Add to Knowledge Base',
+    artifactDrawer: {
+      buttonTitle: 'Download files generated in this reply',
+      title: 'Generated files',
+      empty: 'No downloadable files were generated this turn.',
+      download: 'Download',
+      downloadFailed: 'Download failed, please retry.',
+    },
     updatePlan: 'Update Plan',
     webSearchFound: 'Found <strong>{count}</strong> web search result(s)',
     argumentsLabel: 'Arguments',

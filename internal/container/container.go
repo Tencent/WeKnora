@@ -274,6 +274,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering session service...")
 	must(container.Provide(service.NewSessionService))
 
+	// ArtifactCollector drains skill-generated files from the sandbox on
+	// each agent turn (see spec at
+	// docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
+	// The factory returns nil when the sandbox backend does not support
+	// per-session file inspection; downstream code guards on nil.
+	must(container.Provide(service.NewArtifactCollectorFromSandboxManager))
+
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
 	if redisAvailable {
