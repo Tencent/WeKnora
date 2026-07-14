@@ -555,6 +555,28 @@ export interface RuntimeQueuesResponse {
   timestamp: number
 }
 
+export interface RuntimeFailedTask {
+  id: string
+  queue: string
+  type: string
+  last_error: string
+  last_failed_at: string
+  retried: number
+  max_retry: number
+  tenant_id?: number
+  knowledge_base_id?: string
+  knowledge_id?: string
+  task_id?: string
+}
+
+export interface RuntimeFailedTasksResponse {
+  available: boolean
+  tasks: RuntimeFailedTask[]
+  page: number
+  page_size: number
+  has_more: boolean
+}
+
 /**
  * Fetch the live asynq queue depths + worker-pool concurrency.
  * Backend: GET /api/v1/system/admin/runtime/queues (SystemAdmin only).
@@ -564,4 +586,26 @@ export interface RuntimeQueuesResponse {
 export async function getRuntimeQueues(): Promise<RuntimeQueuesResponse> {
   const response = await get('/api/v1/system/admin/runtime/queues')
   return response as unknown as RuntimeQueuesResponse
+}
+
+export async function getRuntimeFailedTasks(
+  queue: string,
+  page = 1,
+  pageSize = 20,
+): Promise<RuntimeFailedTasksResponse> {
+  return get(`/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/failed-tasks`, {
+    params: { page, page_size: pageSize },
+  })
+}
+
+export async function retryRuntimeFailedTask(queue: string, taskID: string): Promise<void> {
+  await post(
+    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/failed-tasks/${encodeURIComponent(taskID)}/retry`,
+  )
+}
+
+export async function deleteRuntimeFailedTask(queue: string, taskID: string): Promise<void> {
+  await del(
+    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/failed-tasks/${encodeURIComponent(taskID)}`,
+  )
 }

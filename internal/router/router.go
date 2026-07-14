@@ -904,6 +904,9 @@ func RegisterSystemAdminRoutes(
 		// SystemAdmin runtime dashboard. Returns available=false in Lite
 		// mode (no Redis) so the UI degrades gracefully.
 		adminRoutes.GET("/runtime/queues", handler.GetRuntimeQueues)
+		adminRoutes.GET("/runtime/queues/:queue/failed-tasks", handler.ListRuntimeFailedTasks)
+		adminRoutes.POST("/runtime/queues/:queue/failed-tasks/:task_id/retry", handler.RetryRuntimeFailedTask)
+		adminRoutes.DELETE("/runtime/queues/:queue/failed-tasks/:task_id", handler.DeleteRuntimeFailedTask)
 
 		// Bulk action — write the current default-quota setting onto
 		// every existing tenant. Lives under /tenants instead of

@@ -1593,6 +1593,167 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// RuntimeFailedTasksResponse is a page of tasks that exhausted automatic
+// retries. Available=false is used by Lite mode, where there is no durable
+// queue backend to inspect or mutate.
+type RuntimeFailedTasksResponse struct {
+	Available bool                   `json:"available"`
+	Tasks     []types.FailedTaskInfo `json:"tasks"`
+	Page      int                    `json:"page"`
+	PageSize  int                    `json:"page_size"`
+	HasMore   bool                   `json:"has_more"`
+}
+
+func isKnownRuntimeQueue(name string) bool {
+	for _, definition := range types.QueueDefinitions() {
+		if definition.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeFailedTaskPage(c *gin.Context) (int, int) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+// ListRuntimeFailedTasks godoc
+// @Summary      List tasks that stopped after exhausting automatic retries
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Success      200 {object} RuntimeFailedTasksResponse
+// @Router       /system/admin/runtime/queues/{queue}/failed-tasks [get]
+func (h *SystemHandler) ListRuntimeFailedTasks(c *gin.Context) {
+	queue := c.Param("queue")
+	if !isKnownRuntimeQueue(queue) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task queue"})
+		return
+	}
+	page, pageSize := runtimeFailedTaskPage(c)
+	inspector, ok := h.taskInspector.(interfaces.FailedTaskInspector)
+	if !ok {
+		c.JSON(http.StatusOK, RuntimeFailedTasksResponse{
+			Available: false,
+			Tasks:     []types.FailedTaskInfo{},
+			Page:      page,
+			PageSize:  pageSize,
+		})
+		return
+	}
+	tasks, supported, err := inspector.ListFailedTasks(c.Request.Context(), queue, page, pageSize)
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "list failed queue tasks queue=%s: %v", queue, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list stopped tasks"})
+		return
+	}
+	if tasks == nil {
+		tasks = []types.FailedTaskInfo{}
+	}
+	c.JSON(http.StatusOK, RuntimeFailedTasksResponse{
+		Available: supported,
+		Tasks:     tasks,
+		Page:      page,
+		PageSize:  pageSize,
+		HasMore:   len(tasks) == pageSize,
+	})
+}
+
+func (h *SystemHandler) emitQueueTaskAudit(
+	ctx context.Context,
+	action types.AuditAction,
+	queue, taskID string,
+) {
+	if h.auditSvc == nil {
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	details, _ := json.Marshal(map[string]string{"queue": queue, "task_id": taskID})
+	_ = h.auditSvc.Log(ctx, &types.AuditLog{
+		TenantID:    0,
+		ActorUserID: actorID,
+		ActorRole:   "system_admin",
+		Action:      action,
+		TargetType:  "queue_task",
+		TargetID:    taskID,
+		Outcome:     types.AuditOutcomeSuccess,
+		Details:     types.JSON(details),
+	})
+}
+
+func runtimeFailedTaskParams(c *gin.Context) (string, string, bool) {
+	queue := c.Param("queue")
+	taskID := c.Param("task_id")
+	if !isKnownRuntimeQueue(queue) || taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid queue or task ID"})
+		return "", "", false
+	}
+	return queue, taskID, true
+}
+
+// RetryRuntimeFailedTask schedules one stopped task for one immediate manual
+// run. It does not reset the automatic retry counter.
+func (h *SystemHandler) RetryRuntimeFailedTask(c *gin.Context) {
+	queue, taskID, ok := runtimeFailedTaskParams(c)
+	if !ok {
+		return
+	}
+	inspector, supported := h.taskInspector.(interfaces.FailedTaskInspector)
+	if !supported {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	available, err := inspector.RetryFailedTask(c.Request.Context(), queue, taskID)
+	if !available {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "retry failed queue task queue=%s task=%s: %v", queue, taskID, err)
+		c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available for retry"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueTaskRetried, queue, taskID)
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// DeleteRuntimeFailedTask removes one stopped task from the queue archive. It
+// does not rerun the task or change its related business object.
+func (h *SystemHandler) DeleteRuntimeFailedTask(c *gin.Context) {
+	queue, taskID, ok := runtimeFailedTaskParams(c)
+	if !ok {
+		return
+	}
+	inspector, supported := h.taskInspector.(interfaces.FailedTaskInspector)
+	if !supported {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	available, err := inspector.DeleteFailedTask(c.Request.Context(), queue, taskID)
+	if !available {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+		return
+	}
+	if err != nil {
+		logger.Errorf(c.Request.Context(), "delete failed queue task queue=%s task=%s: %v", queue, taskID, err)
+		c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available for deletion"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueTaskDeleted, queue, taskID)
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 	rows, err := h.systemSettingSvc.List(ctx)

@@ -1551,8 +1551,10 @@ function auditActionTheme(
       return 'success'
     case 'system.admin_revoked':
     case 'system.setting_changed':
+    case 'system.queue_task_retried':
       return 'warning'
     case 'system.user_password_reset':
+    case 'system.queue_task_deleted':
       return 'danger'
     case 'rbac.access_denied':
       return 'danger'
@@ -1630,6 +1632,11 @@ function auditTargetKey(row: AuditLog): string {
     const mail = typeof details.target_email === 'string' ? details.target_email : ''
     if (name && mail) return `${name} (${mail})`
     return name || mail || (row.target_user_id ? row.target_user_id.slice(0, 8) : '')
+  }
+  if (row.action === 'system.queue_task_retried' || row.action === 'system.queue_task_deleted') {
+    const queue = details && typeof details.queue === 'string' ? details.queue : ''
+    const taskID = details && typeof details.task_id === 'string' ? details.task_id : row.target_id
+    return queue && taskID ? `${queue}:${taskID}` : taskID || queue
   }
   if (row.target_user_id) return row.target_user_id.slice(0, 8)
   if (row.target_id) {

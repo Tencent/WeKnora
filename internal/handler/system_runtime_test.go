@@ -75,6 +75,36 @@ func (runtimeTestInspector) WorkerServerStats(context.Context) ([]types.WorkerSe
 	}, true, nil
 }
 
+type runtimeFailedTestInspector struct {
+	runtimeTestInspector
+	tasks        []types.FailedTaskInfo
+	retriedTask  string
+	deletedTask  string
+	mutatedQueue string
+}
+
+func (r *runtimeFailedTestInspector) ListFailedTasks(
+	context.Context, string, int, int,
+) ([]types.FailedTaskInfo, bool, error) {
+	return r.tasks, true, nil
+}
+
+func (r *runtimeFailedTestInspector) RetryFailedTask(
+	_ context.Context, queue, taskID string,
+) (bool, error) {
+	r.mutatedQueue = queue
+	r.retriedTask = taskID
+	return true, nil
+}
+
+func (r *runtimeFailedTestInspector) DeleteFailedTask(
+	_ context.Context, queue, taskID string,
+) (bool, error) {
+	r.mutatedQueue = queue
+	r.deletedTask = taskID
+	return true, nil
+}
+
 func TestGetRuntimeQueuesReportsIsolatedPoolCapacity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := &SystemHandler{
@@ -153,5 +183,83 @@ func TestGetRuntimeQueuesFallsBackFromInvalidHistoricalConcurrency(t *testing.T)
 		if pool.Concurrency < 1 {
 			t.Fatalf("pool %q reported non-positive concurrency: %+v", pool.Name, pool)
 		}
+	}
+}
+
+func TestListRuntimeFailedTasksReturnsSafeTaskDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inspector := &runtimeFailedTestInspector{tasks: []types.FailedTaskInfo{{
+		ID:              "task-1",
+		Queue:           types.QueueDefault,
+		Type:            types.TypeDocumentProcess,
+		LastError:       "model unavailable",
+		Retried:         5,
+		MaxRetry:        5,
+		KnowledgeBaseID: "kb-1",
+		KnowledgeID:     "knowledge-1",
+	}}}
+	handler := &SystemHandler{taskInspector: inspector}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "queue", Value: types.QueueDefault}}
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/runtime/queues/default/failed-tasks", nil)
+
+	handler.ListRuntimeFailedTasks(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response RuntimeFailedTasksResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Available || len(response.Tasks) != 1 {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	if response.Tasks[0].KnowledgeID != "knowledge-1" || response.Tasks[0].LastError != "model unavailable" {
+		t.Fatalf("task details missing: %+v", response.Tasks[0])
+	}
+}
+
+func TestRuntimeFailedTaskMutationsDelegateToInspector(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inspector := &runtimeFailedTestInspector{}
+	handler := &SystemHandler{taskInspector: inspector}
+
+	retryRecorder := httptest.NewRecorder()
+	retryCtx, _ := gin.CreateTestContext(retryRecorder)
+	retryCtx.Params = gin.Params{
+		{Key: "queue", Value: types.QueueDefault},
+		{Key: "task_id", Value: "task-1"},
+	}
+	retryCtx.Request = httptest.NewRequest(http.MethodPost, "/retry", nil)
+	handler.RetryRuntimeFailedTask(retryCtx)
+	if retryRecorder.Code != http.StatusOK || inspector.retriedTask != "task-1" {
+		t.Fatalf("retry failed: status=%d inspector=%+v", retryRecorder.Code, inspector)
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	deleteCtx, _ := gin.CreateTestContext(deleteRecorder)
+	deleteCtx.Params = gin.Params{
+		{Key: "queue", Value: types.QueueDefault},
+		{Key: "task_id", Value: "task-2"},
+	}
+	deleteCtx.Request = httptest.NewRequest(http.MethodDelete, "/task-2", nil)
+	handler.DeleteRuntimeFailedTask(deleteCtx)
+	if deleteRecorder.Code != http.StatusOK || inspector.deletedTask != "task-2" {
+		t.Fatalf("delete failed: status=%d inspector=%+v", deleteRecorder.Code, inspector)
+	}
+}
+
+func TestListRuntimeFailedTasksRejectsUnknownQueue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &SystemHandler{taskInspector: &runtimeFailedTestInspector{}}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "queue", Value: "unknown"}}
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/failed-tasks", nil)
+
+	handler.ListRuntimeFailedTasks(ctx)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
 	}
 }

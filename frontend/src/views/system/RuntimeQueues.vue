@@ -137,6 +137,15 @@
           </span>
         </div>
 
+        <t-alert v-if="totalArchived > 0" theme="warning" class="rq-failed-alert">
+          <template #message>
+            <div class="rq-failed-alert-copy">
+              <strong>{{ t('system.globalSettings.runtime.failedNotice.title', { count: totalArchived }) }}</strong>
+              <span>{{ t('system.globalSettings.runtime.failedNotice.description') }}</span>
+            </div>
+          </template>
+        </t-alert>
+
         <div v-if="queues.length === 0" class="rq-empty">
           <t-icon name="queue" size="28px" />
           <span>{{ t('system.globalSettings.runtime.empty') }}</span>
@@ -176,7 +185,18 @@
               <span class="rq-number" :class="{ 'rq-number--warning': row.retry > 0 }">{{ row.retry }}</span>
             </template>
             <template #archived="{ row }">
-              <span class="rq-number" :class="{ 'rq-number--danger': row.archived > 0 }">{{ row.archived }}</span>
+              <t-button
+                v-if="row.archived > 0"
+                variant="text"
+                theme="danger"
+                size="small"
+                class="rq-failed-count"
+                :aria-label="t('system.globalSettings.runtime.failedTasks.openAria', { queue: queueLabel(row.name), count: row.archived })"
+                @click="openFailedTasks(row)"
+              >
+                {{ row.archived }}<t-icon name="chevron-right" />
+              </t-button>
+              <span v-else class="rq-number">0</span>
             </template>
             <template #latency_ms="{ row }">
               <span class="rq-latency">{{ formatLatency(row.latency_ms) }}</span>
@@ -232,13 +252,129 @@
 
       <p class="rq-footnote">{{ t('system.globalSettings.runtime.footnote') }}</p>
     </template>
+
+    <t-drawer
+      v-model:visible="failedTasksVisible"
+      :header="t('system.globalSettings.runtime.failedTasks.title', { queue: failedTaskQueueLabel })"
+      drawer-class-name="rq-failed-drawer"
+      size="680px"
+      :footer="false"
+      :close-btn="true"
+      placement="right"
+      destroy-on-close
+    >
+      <div class="rq-failed-drawer-inner">
+        <t-alert theme="warning" class="rq-failed-drawer-guide">
+          <template #message>
+            <div class="rq-failed-guide-copy">
+              <strong>{{ t('system.globalSettings.runtime.failedTasks.guideTitle') }}</strong>
+              <span>{{ t('system.globalSettings.runtime.failedTasks.guideDescription') }}</span>
+            </div>
+          </template>
+        </t-alert>
+
+        <div class="rq-failed-toolbar">
+          <span>{{ t('system.globalSettings.runtime.failedTasks.description') }}</span>
+          <t-button variant="text" size="small" :loading="failedTasksLoading" @click="reloadFailedTasks">
+            <template #icon><t-icon name="refresh" /></template>
+            {{ t('system.globalSettings.runtime.refresh') }}
+          </t-button>
+        </div>
+
+        <div v-if="failedTasksLoading && failedTasks.length === 0" class="rq-failed-loading">
+          <t-loading size="small" />
+          <span>{{ t('system.globalSettings.runtime.loading') }}</span>
+        </div>
+        <t-alert v-else-if="failedTasksError" theme="error" :message="failedTasksError">
+          <template #operation>
+            <t-button size="small" @click="reloadFailedTasks">
+              {{ t('system.globalSettings.runtime.retry') }}
+            </t-button>
+          </template>
+        </t-alert>
+        <t-empty
+          v-else-if="failedTasks.length === 0"
+          :description="t('system.globalSettings.runtime.failedTasks.empty')"
+        />
+        <div v-else class="rq-failed-list">
+          <article v-for="task in failedTasks" :key="task.id" class="rq-failed-card">
+            <div class="rq-failed-card-head">
+              <div class="rq-failed-card-title">
+                <strong>{{ failedTaskTypeLabel(task.type) }}</strong>
+                <code>{{ task.type }}</code>
+              </div>
+              <time :datetime="task.last_failed_at">{{ formatFailedAt(task.last_failed_at) }}</time>
+            </div>
+            <div class="rq-failed-meta">
+              <span>{{ failedTaskTarget(task) }}</span>
+              <span>{{ t('system.globalSettings.runtime.failedTasks.attempts', { count: task.retried + 1 }) }}</span>
+            </div>
+            <div class="rq-failed-error">
+              <span>{{ t('system.globalSettings.runtime.failedTasks.lastError') }}</span>
+              <p>{{ task.last_error || t('system.globalSettings.runtime.failedTasks.noError') }}</p>
+            </div>
+            <div class="rq-failed-actions">
+              <t-popconfirm
+                theme="warning"
+                :content="t('system.globalSettings.runtime.failedTasks.retryConfirm')"
+                @confirm="retryFailedTask(task)"
+              >
+                <t-button
+                  size="small"
+                  :loading="failedTaskActionID === task.id && failedTaskAction === 'retry'"
+                  :disabled="Boolean(failedTaskActionID)"
+                >
+                  <template #icon><t-icon name="refresh" /></template>
+                  {{ t('system.globalSettings.runtime.failedTasks.retryOnce') }}
+                </t-button>
+              </t-popconfirm>
+              <t-popconfirm
+                theme="danger"
+                :content="t('system.globalSettings.runtime.failedTasks.deleteConfirm')"
+                @confirm="removeFailedTask(task)"
+              >
+                <t-button
+                  size="small"
+                  variant="text"
+                  theme="danger"
+                  :loading="failedTaskActionID === task.id && failedTaskAction === 'delete'"
+                  :disabled="Boolean(failedTaskActionID)"
+                >
+                  {{ t('system.globalSettings.runtime.failedTasks.deleteRecord') }}
+                </t-button>
+              </t-popconfirm>
+            </div>
+          </article>
+
+          <t-button
+            v-if="failedTasksHasMore"
+            variant="outline"
+            class="rq-failed-load-more"
+            :loading="failedTasksLoading"
+            @click="loadMoreFailedTasks"
+          >
+            {{ t('system.globalSettings.runtime.failedTasks.loadMore') }}
+          </t-button>
+        </div>
+      </div>
+    </t-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getRuntimeQueues, type QueueStat, type RuntimeWorkerPool, type ModelRuntimeStat } from '@/api/system'
+import { MessagePlugin } from 'tdesign-vue-next'
+import {
+  deleteRuntimeFailedTask,
+  getRuntimeFailedTasks,
+  getRuntimeQueues,
+  retryRuntimeFailedTask,
+  type ModelRuntimeStat,
+  type QueueStat,
+  type RuntimeFailedTask,
+  type RuntimeWorkerPool,
+} from '@/api/system'
 
 const { t, te, locale } = useI18n()
 
@@ -254,6 +390,37 @@ const loadedOnce = ref(false)
 const error = ref('')
 const autoRefresh = ref(true)
 const updatedAt = ref('')
+const failedTasksVisible = ref(false)
+const failedTaskQueue = ref<QueueStat | null>(null)
+const failedTasks = ref<RuntimeFailedTask[]>([])
+const failedTasksLoading = ref(false)
+const failedTasksError = ref('')
+const failedTasksPage = ref(1)
+const failedTasksHasMore = ref(false)
+const failedTaskActionID = ref('')
+const failedTaskAction = ref<'retry' | 'delete' | ''>('')
+
+const FAILED_TASK_PAGE_SIZE = 20
+const failedTaskTypeKeys: Record<string, string> = {
+  'document:process': 'documentProcess',
+  'manual:process': 'manualProcess',
+  'knowledge:post_process': 'postProcess',
+  'summary:generation': 'summary',
+  'datatable:summary': 'tableSummary',
+  'question:generation': 'question',
+  'image:multimodal': 'multimodal',
+  'chunk:extract': 'graph',
+  'datasource:sync': 'sync',
+  'faq:import': 'faqImport',
+  'knowledge:list_reparse': 'batchReparse',
+  'knowledge:list_delete': 'batchDelete',
+  'knowledge:move': 'move',
+  'index:delete': 'indexDelete',
+  'kb:clone': 'kbClone',
+  'kb:delete': 'kbDelete',
+  'wiki:ingest': 'wikiIngest',
+  'wiki:finalize': 'wikiFinalize',
+}
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -262,7 +429,7 @@ const columns = computed(() => [
   { colKey: 'active', title: t('system.globalSettings.runtime.columns.active'), width: 74, align: 'right' as const },
   { colKey: 'pending', title: t('system.globalSettings.runtime.columns.pending'), width: 84, align: 'right' as const },
   { colKey: 'retry', title: t('system.globalSettings.runtime.columns.retry'), width: 68, align: 'right' as const },
-  { colKey: 'archived', title: t('system.globalSettings.runtime.columns.archived'), width: 68, align: 'right' as const },
+  { colKey: 'archived', title: t('system.globalSettings.runtime.columns.archived'), width: 96, align: 'right' as const },
   { colKey: 'latency_ms', title: t('system.globalSettings.runtime.columns.latency'), width: 104, align: 'right' as const },
   { colKey: 'status', title: t('system.globalSettings.runtime.columns.status'), width: 96 },
 ])
@@ -289,6 +456,7 @@ const totalActive = computed(() => queues.value.reduce((s, q) => s + q.active, 0
 const totalPending = computed(() => queues.value.reduce((s, q) => s + q.pending, 0))
 const totalRetry = computed(() => queues.value.reduce((s, q) => s + q.retry, 0))
 const totalArchived = computed(() => queues.value.reduce((s, q) => s + q.archived, 0))
+const failedTaskQueueLabel = computed(() => failedTaskQueue.value ? queueLabel(failedTaskQueue.value.name) : '')
 
 // Friendly per-queue label lives in i18n; falls back to the raw queue
 // name so a queue added on the backend still renders before translations
@@ -301,6 +469,36 @@ function queueLabel(name: string): string {
 function queueDescription(name: string): string {
   const path = `system.globalSettings.runtime.queueDescriptions.${name}`
   return te(path) ? (t(path) as string) : name
+}
+
+function failedTaskTypeLabel(type: string): string {
+  const key = failedTaskTypeKeys[type]
+  if (!key) return type
+  const path = `system.globalSettings.runtime.failedTasks.taskTypes.${key}`
+  return te(path) ? (t(path) as string) : type
+}
+
+function failedTaskTarget(task: RuntimeFailedTask): string {
+  const parts: string[] = []
+  if (task.knowledge_base_id) {
+    parts.push(t('system.globalSettings.runtime.failedTasks.knowledgeBase', { id: task.knowledge_base_id }))
+  }
+  if (task.knowledge_id) {
+    parts.push(t('system.globalSettings.runtime.failedTasks.knowledge', { id: task.knowledge_id }))
+  }
+  if (task.task_id) {
+    parts.push(t('system.globalSettings.runtime.failedTasks.taskID', { id: task.task_id }))
+  }
+  if (parts.length === 0 && task.tenant_id) {
+    parts.push(t('system.globalSettings.runtime.failedTasks.tenant', { id: task.tenant_id }))
+  }
+  return parts.join(' · ') || t('system.globalSettings.runtime.failedTasks.unknownTarget')
+}
+
+function formatFailedAt(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString(locale.value, { hour12: false })
 }
 
 function poolLabel(pool: string): string {
@@ -335,8 +533,11 @@ function queueState(row: QueueStat): { label: string; tone: string } {
   if (row.paused) {
     return { label: t('system.globalSettings.runtime.status.paused'), tone: 'paused' }
   }
-  if (row.archived > 0 || row.retry > 0) {
-    return { label: t('system.globalSettings.runtime.status.attention'), tone: 'attention' }
+  if (row.archived > 0) {
+    return { label: t('system.globalSettings.runtime.status.actionRequired'), tone: 'danger' }
+  }
+  if (row.retry > 0) {
+    return { label: t('system.globalSettings.runtime.status.retrying'), tone: 'attention' }
   }
   if (row.active > 0) {
     return { label: t('system.globalSettings.runtime.status.working'), tone: 'working' }
@@ -345,6 +546,79 @@ function queueState(row: QueueStat): { label: string; tone: string } {
     return { label: t('system.globalSettings.runtime.status.waiting'), tone: 'waiting' }
   }
   return { label: t('system.globalSettings.runtime.status.idle'), tone: 'idle' }
+}
+
+async function fetchFailedTasks(reset: boolean) {
+  const queue = failedTaskQueue.value?.name
+  if (!queue) return
+  if (reset) {
+    failedTasksPage.value = 1
+    failedTasks.value = []
+  }
+  failedTasksLoading.value = true
+  failedTasksError.value = ''
+  try {
+    const response = await getRuntimeFailedTasks(queue, failedTasksPage.value, FAILED_TASK_PAGE_SIZE)
+    if (!response.available) {
+      failedTasksError.value = t('system.globalSettings.runtime.failedTasks.unavailable')
+      return
+    }
+    failedTasks.value = reset ? response.tasks : [...failedTasks.value, ...response.tasks]
+    failedTasksHasMore.value = response.has_more
+  } catch (err: any) {
+    failedTasksError.value = err?.message || t('system.globalSettings.runtime.failedTasks.loadError')
+  } finally {
+    failedTasksLoading.value = false
+  }
+}
+
+function openFailedTasks(row: QueueStat) {
+  failedTaskQueue.value = row
+  failedTasksVisible.value = true
+  fetchFailedTasks(true)
+}
+
+function reloadFailedTasks() {
+  return fetchFailedTasks(true)
+}
+
+function loadMoreFailedTasks() {
+  failedTasksPage.value += 1
+  return fetchFailedTasks(false)
+}
+
+async function retryFailedTask(task: RuntimeFailedTask) {
+  const queue = failedTaskQueue.value?.name
+  if (!queue) return
+  failedTaskActionID.value = task.id
+  failedTaskAction.value = 'retry'
+  try {
+    await retryRuntimeFailedTask(queue, task.id)
+    MessagePlugin.success(t('system.globalSettings.runtime.failedTasks.retrySuccess'))
+    await Promise.all([reloadFailedTasks(), load(false)])
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('system.globalSettings.runtime.failedTasks.retryError'))
+  } finally {
+    failedTaskActionID.value = ''
+    failedTaskAction.value = ''
+  }
+}
+
+async function removeFailedTask(task: RuntimeFailedTask) {
+  const queue = failedTaskQueue.value?.name
+  if (!queue) return
+  failedTaskActionID.value = task.id
+  failedTaskAction.value = 'delete'
+  try {
+    await deleteRuntimeFailedTask(queue, task.id)
+    MessagePlugin.success(t('system.globalSettings.runtime.failedTasks.deleteSuccess'))
+    await Promise.all([reloadFailedTasks(), load(false)])
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('system.globalSettings.runtime.failedTasks.deleteError'))
+  } finally {
+    failedTaskActionID.value = ''
+    failedTaskAction.value = ''
+  }
 }
 
 async function load(showSpinner: boolean) {
@@ -747,6 +1021,23 @@ onUnmounted(() => stopPolling())
   font-variant-numeric: tabular-nums;
 }
 
+.rq-failed-alert {
+  margin-bottom: 14px;
+}
+
+.rq-failed-alert-copy,
+.rq-failed-guide-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.55;
+
+  strong {
+    color: var(--td-text-color-primary);
+    font-weight: 600;
+  }
+}
+
 .rq-empty {
   display: flex;
   min-height: 180px;
@@ -804,6 +1095,20 @@ onUnmounted(() => stopPolling())
   font-weight: 600;
 }
 
+.rq-failed-count {
+  min-width: 0;
+  height: 28px;
+  padding: 0 2px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+
+  :deep(.t-button__text) {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+}
+
 .rq-backlog {
   display: flex;
   align-items: flex-end;
@@ -845,6 +1150,14 @@ onUnmounted(() => stopPolling())
   &--paused {
     color: var(--td-warning-color);
   }
+
+  &--danger {
+    color: var(--td-error-color);
+  }
+
+  &--danger i {
+    background: var(--td-error-color);
+  }
 }
 
 .data-table-shell.rq-table-shell {
@@ -880,6 +1193,129 @@ onUnmounted(() => stopPolling())
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.rq-failed-drawer-inner {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rq-failed-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.rq-failed-loading {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+}
+
+.rq-failed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rq-failed-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+}
+
+.rq-failed-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+
+  time {
+    flex-shrink: 0;
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.rq-failed-card-title {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+
+  strong {
+    color: var(--td-text-color-primary);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  code {
+    overflow: hidden;
+    color: var(--td-text-color-placeholder);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.rq-failed-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.rq-failed-error {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  > span {
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  p {
+    margin: 6px 0 0;
+    color: var(--td-text-color-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+}
+
+.rq-failed-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rq-failed-load-more {
+  align-self: center;
+  min-width: 120px;
 }
 
 @media (max-width: 860px) {
@@ -937,5 +1373,23 @@ onUnmounted(() => stopPolling())
       justify-self: start;
     }
   }
+
+  .rq-failed-toolbar,
+  .rq-failed-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .rq-failed-actions {
+    justify-content: flex-start;
+  }
+}
+</style>
+
+<style lang="less">
+.t-drawer.rq-failed-drawer.t-drawer--right .t-drawer__content-wrapper--right {
+  box-sizing: border-box;
+  width: min(680px, 100vw) !important;
+  max-width: 100vw;
 }
 </style>

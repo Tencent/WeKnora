@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -43,6 +44,14 @@ func NewAsynqTaskInspector(inspector *asynq.Inspector) interfaces.TaskInspector 
 // Question / Summary / Extract / Manual.
 type knowledgeIDProbe struct {
 	KnowledgeID string `json:"knowledge_id,omitempty"`
+}
+
+type failedTaskPayloadProbe struct {
+	TenantID        uint64 `json:"tenant_id,omitempty"`
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	KBID            string `json:"kb_id,omitempty"`
+	KnowledgeID     string `json:"knowledge_id,omitempty"`
+	TaskID          string `json:"task_id,omitempty"`
 }
 
 // queuesScanned is the fixed set of queue names this codebase enqueues
@@ -181,6 +190,101 @@ func (a *asynqTaskInspector) QueueStats(
 		stats = append(stats, stat)
 	}
 	return stats, true, nil
+}
+
+// ListFailedTasks returns archived tasks newest-first. Only routing metadata is
+// projected from the payload so the SystemAdmin dashboard never exposes raw
+// document content or connector secrets.
+func (a *asynqTaskInspector) ListFailedTasks(
+	ctx context.Context,
+	queue string,
+	page, pageSize int,
+) ([]types.FailedTaskInfo, bool, error) {
+	if a == nil || a.inspector == nil {
+		return nil, false, nil
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	tasks, err := a.inspector.ListArchivedTasks(queue, asynq.Page(page), asynq.PageSize(pageSize))
+	if errors.Is(err, asynq.ErrQueueNotFound) {
+		return []types.FailedTaskInfo{}, true, nil
+	}
+	if err != nil {
+		return nil, true, err
+	}
+	result := make([]types.FailedTaskInfo, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		probe := failedTaskPayloadProbe{}
+		_ = json.Unmarshal(task.Payload, &probe)
+		kbID := probe.KnowledgeBaseID
+		if kbID == "" {
+			kbID = probe.KBID
+		}
+		result = append(result, types.FailedTaskInfo{
+			ID:              task.ID,
+			Queue:           task.Queue,
+			Type:            task.Type,
+			LastError:       task.LastErr,
+			LastFailedAt:    task.LastFailedAt,
+			Retried:         task.Retried,
+			MaxRetry:        task.MaxRetry,
+			TenantID:        probe.TenantID,
+			KnowledgeBaseID: kbID,
+			KnowledgeID:     probe.KnowledgeID,
+			TaskID:          probe.TaskID,
+		})
+	}
+	return result, true, nil
+}
+
+// RetryFailedTask schedules one archived task for one immediate manual run.
+// Asynq deliberately preserves the retry counter, so a repeated failure is
+// archived again instead of silently starting a fresh automatic retry cycle.
+func (a *asynqTaskInspector) RetryFailedTask(
+	ctx context.Context,
+	queue, taskID string,
+) (bool, error) {
+	if a == nil || a.inspector == nil {
+		return false, nil
+	}
+	if err := a.ensureTaskArchived(queue, taskID); err != nil {
+		return true, err
+	}
+	return true, a.inspector.RunTask(queue, taskID)
+}
+
+func (a *asynqTaskInspector) DeleteFailedTask(
+	ctx context.Context,
+	queue, taskID string,
+) (bool, error) {
+	if a == nil || a.inspector == nil {
+		return false, nil
+	}
+	if err := a.ensureTaskArchived(queue, taskID); err != nil {
+		return true, err
+	}
+	return true, a.inspector.DeleteTask(queue, taskID)
+}
+
+func (a *asynqTaskInspector) ensureTaskArchived(queue, taskID string) error {
+	task, err := a.inspector.GetTaskInfo(queue, taskID)
+	if err != nil {
+		return err
+	}
+	if task.State != asynq.TaskStateArchived {
+		return fmt.Errorf("task %s in queue %s is no longer archived", taskID, queue)
+	}
+	return nil
 }
 
 func (a *asynqTaskInspector) WorkerServerStats(

@@ -63,3 +63,17 @@ type TaskInspector interface {
 	// capacity and busy workers for each configured pool.
 	WorkerServerStats(ctx context.Context) (stats []types.WorkerServerStat, supported bool, err error)
 }
+
+// FailedTaskInspector is the optional operator surface implemented by queue
+// backends that retain tasks after their automatic retry budget is exhausted.
+// It is separate from TaskInspector so Lite-mode and test implementations that
+// only support cancellation/metrics do not need to pretend failed tasks exist.
+type FailedTaskInspector interface {
+	ListFailedTasks(
+		ctx context.Context,
+		queue string,
+		page, pageSize int,
+	) (tasks []types.FailedTaskInfo, supported bool, err error)
+	RetryFailedTask(ctx context.Context, queue, taskID string) (supported bool, err error)
+	DeleteFailedTask(ctx context.Context, queue, taskID string) (supported bool, err error)
+}

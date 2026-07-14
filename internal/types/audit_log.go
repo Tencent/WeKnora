@@ -121,6 +121,12 @@ const (
 	// another user's local password. Details identify the target and record
 	// session revocation, but never contain the old or new password.
 	AuditActionSystemUserPasswordReset AuditAction = "system.user_password_reset"
+
+	// Runtime queue mutations are privileged SystemAdmin actions. Retrying an
+	// archived task can repeat its original side effects; deleting one removes
+	// the Redis failure record. Both must leave a platform audit trail.
+	AuditActionSystemQueueTaskRetried AuditAction = "system.queue_task_retried"
+	AuditActionSystemQueueTaskDeleted AuditAction = "system.queue_task_deleted"
 )
 
 // AuditOutcome distinguishes successful mutations from middleware-level
