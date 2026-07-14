@@ -19,6 +19,22 @@ func newEntry(level logrus.Level, msg string, data logrus.Fields) *logrus.Entry 
 	return e
 }
 
+func TestAnsiStripWriter(t *testing.T) {
+	var buf strings.Builder
+	w := &ansiStripWriter{w: &buf}
+	in := []byte("\x1b[32mINFO\x1b[0m hello \x1b[31mERROR\x1b[0m")
+	n, err := w.Write(in)
+	if err != nil {
+		t.Fatalf("Write error: %v", err)
+	}
+	if n != len(in) {
+		t.Fatalf("Write n = %d, want %d", n, len(in))
+	}
+	if got := buf.String(); got != "INFO hello ERROR" {
+		t.Fatalf("stripped output = %q, want %q", got, "INFO hello ERROR")
+	}
+}
+
 func TestFormat_DefaultModeUnchanged(t *testing.T) {
 	f := &CustomFormatter{} // no template, no color
 	entry := newEntry(logrus.InfoLevel, "hello", logrus.Fields{

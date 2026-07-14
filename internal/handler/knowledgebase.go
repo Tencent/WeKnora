@@ -361,6 +361,11 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	types.NormalizeKnowledgeBasePromptInstructions(&req)
+	if err := validateKnowledgeBasePromptInstructions(&req); err != nil {
+		c.Error(err)
+		return
+	}
 	provider := strings.ToLower(strings.TrimSpace(req.GetStorageProvider()))
 	if provider != "" && !isStorageProviderAllowed(provider) {
 		c.Error(apperrors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
@@ -467,7 +472,7 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
 			if err == nil && agent != nil {
 				if kb.TenantID != agent.TenantID {
-					logger.Warnf(ctx, "Shared agent tenant mismatch, KB %s tenant: %d, agent tenant: %d", id, kb.TenantID, agent.TenantID)
+					logger.Warnf(ctx, "Shared agent workspace mismatch, KB %s tenant: %d, agent tenant: %d", id, kb.TenantID, agent.TenantID)
 				} else {
 					mode := agent.Config.KBSelectionMode
 					if mode == "none" {
@@ -544,7 +549,7 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 
 // ListKnowledgeBases godoc
 // @Summary      获取知识库列表
-// @Description  获取当前租户的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）
+// @Description  获取当前空间的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
@@ -567,7 +572,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		_ = userIDVal
 		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 		if currentTenantID == 0 {
-			c.Error(apperrors.NewUnauthorizedError("tenant ID not found"))
+			c.Error(apperrors.NewUnauthorizedError("workspace ID not found"))
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
@@ -695,7 +700,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		}
 	}
 
-	// 批量回填 creator_name，让前端列表能区分「我创建」与「同租户其他成员创建」。
+	// 批量回填 creator_name，让前端列表能区分「我创建」与「同空间其他成员创建」。
 	// 仅在 list 接口里回填，详情 / 编辑场景不依赖这个字段；解析失败（用户已删除、
 	// CreatorID 为空的老数据）就让字段为空，前端按 fallback 渲染。
 	enrichKBCreatorNames(ctx, h.userService, kbs)
@@ -853,6 +858,17 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if req.Config != nil {
+		probe := &types.KnowledgeBase{
+			ChunkingConfig:        req.Config.ChunkingConfig,
+			ImageProcessingConfig: req.Config.ImageProcessingConfig,
+			WikiConfig:            req.Config.WikiConfig,
+		}
+		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
+			c.Error(err)
+			return
+		}
+	}
 
 	logger.Infof(ctx, "Updating knowledge base, ID: %s, name: %s",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
@@ -934,6 +950,13 @@ type CopyKnowledgeBaseResponse struct {
 	SourceID string `json:"source_id"`
 	TargetID string `json:"target_id"`
 	Message  string `json:"message"`
+}
+
+type DuplicateKnowledgeBaseResponse struct {
+	SourceID      string      `json:"source_id"`
+	TargetID      string      `json:"target_id"`
+	Message       string      `json:"message"`
+	KnowledgeBase interface{} `json:"knowledge_base"`
 }
 
 // CopyKnowledgeBase godoc
@@ -1076,7 +1099,8 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 
 	// Enqueue KB clone task to Asynq
 	task := asynq.NewTask(types.TypeKBClone, payloadBytes,
-		asynq.TaskID(taskID), asynq.Queue("default"), asynq.MaxRetry(3))
+		asynq.TaskID(taskID), asynq.Queue(types.QueueMaintenance),
+		asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue KB clone task: %v", err)
@@ -1110,6 +1134,72 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 			SourceID: req.SourceID,
 			TargetID: req.TargetID,
 			Message:  "Knowledge base copy task started",
+		},
+	})
+}
+
+// DuplicateKnowledgeBase godoc
+// @Summary      创建知识库副本
+// @Description  创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "源知识库 ID"
+// @Success      201      {object}  map[string]interface{}  "创建后的知识库副本"
+// @Failure      400      {object}  errors.AppError                 "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/duplicate [post]
+func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+	sourceID := c.Param("id")
+	if sourceID == "" {
+		c.Error(apperrors.NewBadRequestError("Knowledge base ID cannot be empty"))
+		return
+	}
+
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	sourceKB, err := h.service.GetKnowledgeBaseByID(ctx, sourceID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if sourceKB.TenantID != callerTenantID {
+		logger.Warnf(ctx,
+			"Knowledge base duplicate rejected: source belongs to another tenant, source_id: %s, caller_tenant: %d, kb_tenant: %d",
+			secutils.SanitizeForLog(sourceID), callerTenantID, sourceKB.TenantID)
+		c.Error(errors.NewForbiddenError("No permission to duplicate this knowledge base"))
+		return
+	}
+
+	targetKB, err := h.service.DuplicateKnowledgeBase(ctx, sourceID)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge base duplicate created, source: %s, target: %s",
+		secutils.SanitizeForLog(sourceID), secutils.SanitizeForLog(targetKB.ID))
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data": DuplicateKnowledgeBaseResponse{
+			SourceID:      sourceID,
+			TargetID:      targetKB.ID,
+			Message:       "Knowledge base duplicate created",
+			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), nil),
 		},
 	})
 }
@@ -1159,7 +1249,7 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		return nil
 	}
 	if !config.Enabled {
-		*config = types.ExtractConfig{Enabled: false}
+		config.Enabled = false
 		return nil
 	}
 	// Validate text field
@@ -1216,6 +1306,13 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		}
 	}
 
+	return nil
+}
+
+func validateKnowledgeBasePromptInstructions(kb *types.KnowledgeBase) error {
+	if err := types.ValidateKnowledgeBasePromptInstructions(kb); err != nil {
+		return apperrors.NewBadRequestError(err.Error())
+	}
 	return nil
 }
 

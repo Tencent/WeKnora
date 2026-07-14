@@ -97,6 +97,9 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 
 	// Set defaults
 	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Creating custom agent, ID: %s, tenant ID: %d, name: %s, agent_mode: %s",
 		agent.ID, agent.TenantID, agent.Name, agent.Config.AgentMode)
@@ -132,6 +135,7 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 		agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
 		if err == nil {
 			// Found in database, return with customized config
+			agent.EnsureDefaults()
 			return agent, nil
 		}
 		// Not in database, return default built-in agent from registry (i18n-aware)
@@ -152,6 +156,7 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 		return nil, err
 	}
 
+	agent.EnsureDefaults()
 	return agent, nil
 }
 
@@ -168,6 +173,7 @@ func (s *customAgentService) GetAgentByIDAndTenant(ctx context.Context, id strin
 		}
 		return nil, err
 	}
+	agent.EnsureDefaults()
 	return agent, nil
 }
 
@@ -190,6 +196,7 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 	// Track which built-in agents exist in database
 	builtinInDB := make(map[string]bool)
 	for _, agent := range allAgents {
+		agent.EnsureDefaults()
 		if types.IsBuiltinAgentID(agent.ID) {
 			builtinInDB[agent.ID] = true
 		}
@@ -273,6 +280,9 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 	// Ensure defaults
 	existingAgent.EnsureDefaults()
+	if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s", agent.ID, agent.Name)
 
@@ -306,6 +316,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		existingAgent.Config = agent.Config
 		existingAgent.UpdatedAt = time.Now()
 		existingAgent.EnsureDefaults()
+		if err := existingAgent.Config.QuestionSuggestions.Validate(); err != nil {
+			return nil, err
+		}
 
 		logger.Infof(ctx, "Updating built-in agent config, ID: %s", agent.ID)
 
@@ -333,6 +346,9 @@ func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *type
 		UpdatedAt:   time.Now(),
 	}
 	newAgent.EnsureDefaults()
+	if err := newAgent.Config.QuestionSuggestions.Validate(); err != nil {
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Creating built-in agent config record, ID: %s, tenant ID: %d", agent.ID, tenantID)
 
@@ -458,6 +474,29 @@ func (s *customAgentService) GetSuggestedQuestions(
 	tagIDs []string,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, true)
+}
+
+func (s *customAgentService) GetKnowledgeSuggestedQuestions(
+	ctx context.Context,
+	agentID string,
+	kbIDs []string,
+	knowledgeIDs []string,
+	tagIDs []string,
+	limit int,
+) ([]types.SuggestedQuestion, error) {
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, false)
+}
+
+func (s *customAgentService) getSuggestedQuestions(
+	ctx context.Context,
+	agentID string,
+	kbIDs []string,
+	knowledgeIDs []string,
+	tagIDs []string,
+	limit int,
+	includeCurated bool,
+) ([]types.SuggestedQuestion, error) {
 	if limit <= 0 {
 		limit = 6
 	}
@@ -483,16 +522,29 @@ func (s *customAgentService) GetSuggestedQuestions(
 
 	var result []types.SuggestedQuestion
 
-	// 1. Add agent config suggested_prompts first (highest priority)
-	if len(agent.Config.SuggestedPrompts) > 0 {
-		for _, prompt := range agent.Config.SuggestedPrompts {
-			if strings.TrimSpace(prompt) == "" {
-				continue
+	if includeCurated {
+		suggestionConfig := agent.Config.QuestionSuggestions
+		if suggestionConfig == nil || !suggestionConfig.Starters.Enabled {
+			return []types.SuggestedQuestion{}, nil
+		}
+		if limit > suggestionConfig.Starters.Count {
+			limit = suggestionConfig.Starters.Count
+		}
+		// Add curated agent prompts first (highest priority).
+		if suggestionConfig.Starters.Mode == types.SuggestionModeCurated ||
+			suggestionConfig.Starters.Mode == types.SuggestionModeHybrid {
+			for _, prompt := range suggestionConfig.Starters.Items {
+				if strings.TrimSpace(prompt) == "" {
+					continue
+				}
+				result = append(result, types.SuggestedQuestion{
+					Question: prompt,
+					Source:   "agent_config",
+				})
 			}
-			result = append(result, types.SuggestedQuestion{
-				Question: prompt,
-				Source:   "agent_config",
-			})
+		}
+		if suggestionConfig.Starters.Mode == types.SuggestionModeCurated {
+			return s.truncateQuestions(result, limit), nil
 		}
 	}
 

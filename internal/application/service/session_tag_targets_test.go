@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -168,4 +169,87 @@ func TestBuildSearchTargets_FAQTagScopeKeepsIndexTagFilter(t *testing.T) {
 	assert.Equal(t, "faq-kb", targets[0].KnowledgeBaseID)
 	assert.ElementsMatch(t, []string{"tag-a", "tag-b"}, targets[0].TagIDs)
 	assert.False(t, targets[0].DisableDirectLoad)
+}
+
+func TestBuildSearchTargets_FullKBWithTagScopeSkipsFullKBTarget(t *testing.T) {
+	svc := newTagTargetSessionService()
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		nil,
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
+	assert.NotEqual(t, types.SearchTargetTypeKnowledgeBase, targets[0].Type)
+}
+
+func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) {
+	svc := &sessionService{
+		knowledgeBaseService: &tagTargetKnowledgeBaseService{kbs: map[string]*types.KnowledgeBase{}},
+		knowledgeService: &tagTargetKnowledgeService{
+			knowledges: []*types.Knowledge{
+				{ID: "doc-1", TenantID: 100, KnowledgeBaseID: "doc-kb"},
+				{ID: "doc-3", TenantID: 100, KnowledgeBaseID: "doc-kb"},
+			},
+			tagIDs: map[string][]string{
+				"doc-1": {"tag-a"},
+				"doc-3": {"tag-a"},
+			},
+		},
+	}
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		nil,
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
+	assert.ElementsMatch(t, []string{"doc-1", "doc-3"}, targets[0].KnowledgeIDs)
+	assert.True(t, targets[0].DisableDirectLoad)
+}
+
+type tagTargetKnowledgeServiceWithError struct {
+	tagTargetKnowledgeService
+	listErr error
+}
+
+func (s *tagTargetKnowledgeServiceWithError) ListKnowledgeIDsByTagIDs(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagIDs []string,
+) ([]string, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.tagTargetKnowledgeService.ListKnowledgeIDsByTagIDs(ctx, tenantID, kbID, tagIDs)
+}
+
+func TestBuildSearchTargets_DocumentTagScopeResolutionError(t *testing.T) {
+	base := newTagTargetSessionService()
+	base.knowledgeService = &tagTargetKnowledgeServiceWithError{
+		tagTargetKnowledgeService: *base.knowledgeService.(*tagTargetKnowledgeService),
+		listErr:                   fmt.Errorf("database unavailable"),
+	}
+
+	_, err := base.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		nil,
+		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database unavailable")
 }

@@ -35,11 +35,11 @@ type auditLogListResponse struct {
 }
 
 // ListTenantAuditLog godoc
-// @Summary      获取租户审计日志
-// @Description  返回该租户最近的审计事件，按 id 倒序。游标分页：将上次响应的 next_cursor 作为下一次请求的 after_id。
+// @Summary      获取空间审计日志
+// @Description  返回该空间最近的审计事件，按 id 倒序。游标分页：将上次响应的 next_cursor 作为下一次请求的 after_id。
 // @Tags         审计日志
 // @Produce      json
-// @Param        id        path   string  true   "租户ID"
+// @Param        id        path   string  true   "空间ID"
 // @Param        after_id  query  int     false  "游标：返回 id 小于此值的记录（默认从最新开始）"
 // @Param        limit     query  int     false  "页大小，1-100，默认 50"
 // @Param        action    query  string  false  "按 action 精确过滤（如 rbac.member_added / rbac.access_denied）"

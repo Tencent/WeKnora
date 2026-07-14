@@ -116,7 +116,7 @@ func (s *weKnoraCloudService) CheckStatus(ctx context.Context) (*types.WeKnoraCl
 	return &types.WeKnoraCloudStatusResult{HasModels: true, NeedsReinit: false}, nil
 }
 
-// updateTenantCredentials 更新租户的 WeKnoraCloud 凭证
+// updateTenantCredentials 更新空间的 WeKnoraCloud 凭证
 func (s *weKnoraCloudService) updateTenantCredentials(ctx context.Context, tenantID uint64, appID, appSecret string) error {
 	if s.tenantRepo == nil {
 		return fmt.Errorf("tenant repository is required")

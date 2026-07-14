@@ -29,6 +29,11 @@ import {
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
 import {
+  isAgentWebSearchEnabled,
+  isAgentWebSearchReady,
+  isTenantWebSearchReady,
+} from '@/utils/agentWebSearch';
+import {
   getAgentNotReadyReasonKeys,
   resolveAgentNotReadySection,
   resolveAgentNotReadyHighlight,
@@ -178,7 +183,7 @@ const isCustomAgent = computed(() => {
 // 判断是否有智能体配置（包括内置智能体）
 const hasAgentConfig = computed(() => {
   const agent = selectedAgent.value;
-  // 共享智能体的 config 来自源租户，直接使用 agent.config，避免被本租户同 ID 的 builtin 覆盖
+  // 共享智能体的 config 来自源空间，直接使用 agent.config，避免被本空间同 ID 的 builtin 覆盖
   const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
   if (agent?.is_builtin && !sourceTenantId) {
     const builtinAgent = agents.value.find(a => a.id === agent.id);
@@ -258,20 +263,15 @@ watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId], async 
   }
 }, { immediate: true });
 
-// 智能体是否启用了网络搜索
-const agentWebSearchEnabled = computed(() => {
-  if (!hasAgentConfig.value) return null; // null 表示不受智能体控制
-  return currentAgentConfig.value?.web_search_enabled ?? true;
+// 智能体是否启用了网络搜索（仅显式开启才算支持）
+const isWebSearchEnabledByAgent = computed(() => {
+  if (!hasAgentConfig.value) return null;
+  return isAgentWebSearchEnabled(currentAgentConfig.value);
 });
 
-const agentWebSearchProviderId = computed(() => {
-  if (!hasAgentConfig.value) return '';
-  return currentAgentConfig.value?.web_search_provider_id || '';
-});
-
-// 网络搜索是否被智能体禁用（只读状态）- 只有明确设置为 false 时才禁用
+// 网络搜索是否被智能体禁用
 const isWebSearchDisabledByAgent = computed(() => {
-  return hasAgentConfig.value && agentWebSearchEnabled.value === false;
+  return hasAgentConfig.value && isWebSearchEnabledByAgent.value !== true;
 });
 
 // 知识库选择是否被智能体锁定
@@ -433,6 +433,15 @@ const isImageUploadEnabledByAgent = computed(() => {
   return currentAgentConfig.value?.image_upload_enabled === true;
 });
 
+// Input 工具栏：仅当智能体已启用且搜索引擎可用时才显示
+const showWebSearchButton = computed(() => {
+  if (!hasAgentConfig.value) {
+    return isTenantWebSearchReady(webSearchProviders.value);
+  }
+  return isAgentWebSearchReady(currentAgentConfig.value, webSearchProviders.value);
+});
+const showImageUploadButton = computed(() => isImageUploadEnabledByAgent.value);
+
 // 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
 const isModelLockedByAgent = computed(() => {
   return false;
@@ -499,7 +508,7 @@ const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
-// 已就绪的知识库（来自租户级缓存）
+// 已就绪的知识库（来自空间级缓存）
 const knowledgeBases = computed(() => chatResources.validKnowledgeBases);
 const fileList = ref<Array<{ id: string; name: string }>>([]);
 
@@ -791,12 +800,10 @@ watch(selectedFileIds, () => {
 }, { immediate: true });
 
 const isWebSearchConfigured = computed(() => {
-  const agentProviderId = agentWebSearchProviderId.value;
-  if (agentProviderId) {
-    return webSearchProviders.value.some(p => p.id === agentProviderId);
+  if (hasAgentConfig.value) {
+    return isAgentWebSearchReady(currentAgentConfig.value, webSearchProviders.value);
   }
-
-  return webSearchProviders.value.some(p => p.is_default);
+  return isTenantWebSearchReady(webSearchProviders.value);
 });
 
 const loadWebSearchConfig = async (force = false) => {
@@ -825,9 +832,9 @@ const loadAgents = async (force = false) => {
   }
 };
 
-// 默认选中的 builtin（builtin-quick-answer）也可能被当前租户管理员停用。
-// 列表加载完后做一次纠偏：若当前选中的是本租户停用的 agent（仅限「我的/builtin」，
-// 共享智能体由源租户决定，本地停用列表不适用），按 智能推理 → 快速问答 →
+// 默认选中的 builtin（builtin-quick-answer）也可能被当前空间管理员停用。
+// 列表加载完后做一次纠偏：若当前选中的是本空间停用的 agent（仅限「我的/builtin」，
+// 共享智能体由源空间决定，本地停用列表不适用），按 智能推理 → 快速问答 →
 // 第一个可用 的顺序兜底切换。全部都被停用时保持原选择不动（极端场景，UI 仍会
 // 在 enabledAgents 过滤后显示空，由用户在智能体页恢复任意一个）。
 const ensureSelectedAgentNotDisabled = () => {
@@ -856,7 +863,7 @@ const ensureSelectedAgentNotDisabled = () => {
   }
 }
 
-// 对话下拉中展示的「我的」智能体（排除当前租户已停用的）
+// 对话下拉中展示的「我的」智能体（排除当前空间已停用的）
 const enabledAgents = computed(() =>
   agents.value.filter(a => !disabledOwnAgentIds.value.includes(a.id))
 );
@@ -941,7 +948,7 @@ const ensureModelSelection = () => {
 
 // 智能体身份或其数据到位时，把对话模型同步到智能体配置的 model_id。
 // 修复场景：导航离开再返回时，initChatModelSelection 会用 localStorage 的 lastPick
-// 覆盖共享智能体绑定的源租户 model_id，UI 显示「未配置」——此时需要拉回 agent 模型。
+// 覆盖共享智能体绑定的源空间 model_id，UI 显示「未配置」——此时需要拉回 agent 模型。
 // 但若用户在本页手动改过模型（lastPick 与 agent 默认不同且当前选中即为 lastPick），
 // 则保留用户选择，避免 creatChat → chat 跳转后把模型 B 冲回智能体默认 A。
 watch(
@@ -1014,7 +1021,7 @@ const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
 });
 
-// 模型展示名：本租户列表中有则用名称；若为共享智能体且其 model_id 不在本租户列表中则显示“共享智能体配置的模型”
+// 模型展示名：本空间列表中有则用名称；若为共享智能体且其 model_id 不在本空间列表中则显示“共享智能体配置的模型”
 const selectedModelDisplayName = computed(() => {
   if (selectedModel.value) return modelDisplayName(selectedModel.value);
   if (!selectedModelId.value) return t('input.notConfigured');
@@ -1147,7 +1154,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     mentionOffset.value = 0;
   }
 
-  // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该租户下的知识库，否则使用本租户 + 共享给自己的
+  // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该空间下的知识库，否则使用本空间 + 共享给自己的
   let kbItems: any[] = [];
   let tagItems: MentionItem[] = [];
   let mcpItems: MentionItem[] = [];
@@ -1157,7 +1164,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
     const agentId = selectedAgentId.value;
     if (sourceTenantId && agentId) {
-      // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析租户）
+      // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析空间）
       try {
         const list = await chatResources.ensureAgentKnowledgeBases(agentId);
         const orgLabel = sharedAgentOrgName.value || '';
@@ -2215,6 +2222,14 @@ const handleGoToWebSearchSettings = () => {
   }
 };
 
+const handleGoToWebSearchConfig = () => {
+  if (hasAgentConfig.value && selectedAgent.value) {
+    handleGoToAgentSettings('websearch');
+    return;
+  }
+  handleGoToWebSearchSettings();
+};
+
 const handleGoToAgentSettings = (section?: string) => {
   const agent = selectedAgent.value;
   if (!agent) {
@@ -2343,7 +2358,7 @@ const toggleWebSearch = () => {
         href: '#',
         onClick: (e: Event) => {
           e.preventDefault();
-          handleGoToWebSearchSettings();
+          handleGoToWebSearchConfig();
         },
         style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
         onMouseenter: (e: Event) => {
@@ -2352,7 +2367,7 @@ const toggleWebSearch = () => {
         onMouseleave: (e: Event) => {
           (e.target as HTMLElement).style.textDecoration = 'none';
         }
-      }, t('input.goToSettings'))
+      }, t('input.goToAgentSettings'))
     ]);
     MessagePlugin.warning({
       content: () => messageContent,
@@ -2485,24 +2500,20 @@ defineExpose({
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
 
-          <!-- WebSearch 开关按钮 -->
-          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+          <!-- WebSearch 开关按钮（智能体未启用时不显示） -->
+          <t-tooltip v-if="showWebSearchButton" placement="top" theme="light"
+            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
-              <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
-                <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
-                <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings')
-                }}</a>
-              </div>
-              <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
+              <span v-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
                 $t('input.webSearch.toggleOn') }}</span>
               <div v-else class="tooltip-with-link">
                 <span>{{ $t('input.webSearch.notConfigured') }}</span>
-                <a href="#" @click.prevent="handleGoToWebSearchSettings">{{ $t('input.goToSettings') }}</a>
+                <a href="#" @click.prevent="handleGoToWebSearchConfig">{{ $t('input.goToAgentSettings') }}</a>
               </div>
             </template>
             <div class="control-btn websearch-btn" :class="{
               'active': isWebSearchEnabled && isWebSearchConfigured,
-              'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
+              'disabled': !isWebSearchConfigured
             }" @click.stop="toggleWebSearch">
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
                 class="control-icon websearch-icon" :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }">
@@ -2517,19 +2528,15 @@ defineExpose({
             </div>
           </t-tooltip>
 
-          <!-- 图片上传按钮 -->
-          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+          <!-- 图片上传按钮（智能体未启用时不显示） -->
+          <t-tooltip v-if="showImageUploadButton" placement="top" theme="light"
+            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
-              <div v-if="!isImageUploadEnabledByAgent" class="tooltip-with-link">
-                <span>{{ $t('input.imageUploadDisabledByAgent') }}</span>
-                <a href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
-              </div>
-              <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
+              <span>{{ $t('chat.imageUploadTooltip') }}</span>
             </template>
             <div class="control-btn image-upload-btn" :class="{
-              'active': uploadedImages.length > 0,
-              'disabled': !isImageUploadEnabledByAgent
-            }" @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()">
+              'active': uploadedImages.length > 0
+            }" @click.stop="triggerImageUpload()">
               <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor" class="control-icon">
                 <path
                   d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z" />

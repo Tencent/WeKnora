@@ -6,7 +6,7 @@ import { listModels, type ModelConfig } from '@/api/model'
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider'
 import { useOrganizationStore } from '@/stores/organization'
 
-/** 租户级资源缓存 TTL */
+/** 空间级资源缓存 TTL */
 const CACHE_TTL_MS = 60_000
 
 type ResourceKey = 'knowledgeBases' | 'agents' | 'models' | 'webSearchProviders'
@@ -174,7 +174,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     })
   }
 
-  /** 并行预取对话输入栏及列表页常用的租户级资源 */
+  /** 并行预取对话输入栏及列表页常用的空间级资源 */
   async function prefetchChatInput(force = false): Promise<void> {
     const orgStore = useOrganizationStore()
     await Promise.all([

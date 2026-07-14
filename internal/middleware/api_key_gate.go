@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var errTenantAPIKeyScopeForbidden = stderrors.New("tenant api key scope forbidden")
+var errTenantAPIKeyScopeForbidden = stderrors.New("workspace API key scope forbidden")
 
 // APIKeyRoutePolicy declares how an X-API-Key caller may use a single route.
 //

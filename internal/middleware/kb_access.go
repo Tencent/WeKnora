@@ -404,7 +404,7 @@ func resolveSharedAgentAccess(
 			return nil
 		}
 		if kb.TenantID != agent.TenantID {
-			logger.Warnf(ctx, "[kb_access] shared agent tenant mismatch: kb=%s kb.tenant=%d agent.tenant=%d",
+			logger.Warnf(ctx, "[kb_access] shared agent workspace mismatch: kb=%s kb.tenant=%d agent.tenant=%d",
 				kb.ID, kb.TenantID, agent.TenantID)
 			return nil
 		}

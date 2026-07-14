@@ -20,27 +20,45 @@ export const domPurifySecurityOptions = {
 
 /** Shared DOMPurify hooks: strip scripts/event attrs; noopener links; alt on images. */
 export const domPurifySecurityHooks = {
-  beforeSanitizeElements: (currentNode: Element) => {
-    if (currentNode.tagName === 'SCRIPT') {
-      currentNode.remove();
-      return null;
+  beforeSanitizeElements: (currentNode: Node) => {
+    if (!('tagName' in currentNode) || !('hasAttribute' in currentNode)) return;
+    const element = currentNode as Element;
+    if (element.tagName === 'SCRIPT') {
+      element.remove();
+      return;
     }
     domPurifyForbidAttr.forEach((attr) => {
-      if (currentNode.hasAttribute(attr)) {
-        currentNode.removeAttribute(attr);
+      if (element.hasAttribute(attr)) {
+        element.removeAttribute(attr);
       }
     });
   },
-  afterSanitizeElements: (currentNode: Element) => {
-    if (currentNode.tagName === 'A') {
-      const href = currentNode.getAttribute('href');
+  afterSanitizeElements: (currentNode: Node) => {
+    if (!('tagName' in currentNode) || !('getAttribute' in currentNode)) return;
+    const element = currentNode as Element;
+    if (element.tagName === 'A') {
+      const href = element.getAttribute('href');
       if (href && href.startsWith('http')) {
-        currentNode.setAttribute('rel', 'noopener noreferrer');
-        currentNode.setAttribute('target', '_blank');
+        element.setAttribute('rel', 'noopener noreferrer');
+        element.setAttribute('target', '_blank');
       }
     }
-    if (currentNode.tagName === 'IMG' && !currentNode.getAttribute('alt')) {
-      currentNode.setAttribute('alt', '');
+    if (element.tagName === 'IMG' && !element.getAttribute('alt')) {
+      element.setAttribute('alt', '');
+    }
+  },
+};
+
+/** Chat markdown links must never replace the conversation page. */
+export const markdownDomPurifySecurityHooks = {
+  ...domPurifySecurityHooks,
+  afterSanitizeElements: (currentNode: Node) => {
+    domPurifySecurityHooks.afterSanitizeElements(currentNode);
+    if (!('tagName' in currentNode) || !('getAttribute' in currentNode)) return;
+    const element = currentNode as Element;
+    if (element.tagName === 'A' && element.getAttribute('href')) {
+      element.setAttribute('rel', 'noopener noreferrer');
+      element.setAttribute('target', '_blank');
     }
   },
 };
@@ -79,5 +97,4 @@ export const markdownDomPurifyConfig = {
   ],
   USE_PROFILES: { html: true, svg: true, mathMl: true },
   ...domPurifySecurityOptions,
-  HOOKS: domPurifySecurityHooks,
 };

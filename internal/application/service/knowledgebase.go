@@ -677,7 +677,8 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		return nil
 	}
 
-	task := asynq.NewTask(types.TypeKBDelete, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeKBDelete, payloadBytes,
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := s.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to enqueue KB delete task: %v", err)
@@ -1027,4 +1028,149 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 		}
 	}
 	return sourceKB, targetKB, nil
+}
+
+// DuplicateKnowledgeBase creates a new KB from the source KB's settings only.
+// Runtime/content state is deliberately reset so this path never copies
+// knowledge entries, chunks, FAQ content, wiki pages, indexes, shares or pins.
+func (s *knowledgeBaseService) DuplicateKnowledgeBase(
+	ctx context.Context,
+	srcKB string,
+) (*types.KnowledgeBase, error) {
+	srcKB = strings.TrimSpace(srcKB)
+	if srcKB == "" {
+		return nil, apperrors.NewBadRequestError("source knowledge base ID cannot be empty")
+	}
+
+	tenantID := types.MustTenantIDFromContext(ctx)
+	sourceKB, err := s.repo.GetKnowledgeBaseByIDAndTenant(ctx, srcKB, tenantID)
+	if err != nil {
+		logger.Errorf(ctx, "Get source knowledge base failed: %v", err)
+		return nil, err
+	}
+	sourceKB.EnsureDefaults()
+
+	targetKB, err := cloneKnowledgeBaseConfiguration(sourceKB)
+	if err != nil {
+		return nil, err
+	}
+	targetKB.ID = uuid.New().String()
+	targetKB.TenantID = tenantID
+	targetKB.Name = s.buildDuplicateKnowledgeBaseName(ctx, tenantID, sourceKB.Name)
+	targetKB.CreatorID = ""
+	if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
+		targetKB.CreatorID = uid
+	}
+	now := time.Now()
+	targetKB.CreatedAt = now
+	targetKB.UpdatedAt = now
+	targetKB.DeletedAt.Valid = false
+	targetKB.DeletedAt.Time = time.Time{}
+	targetKB.IsTemporary = false
+	targetKB.IsPinned = false
+	targetKB.PinnedAt = nil
+	targetKB.KnowledgeCount = 0
+	targetKB.ChunkCount = 0
+	targetKB.IsProcessing = false
+	targetKB.ProcessingCount = 0
+	targetKB.ShareCount = 0
+	targetKB.CreatorName = ""
+	targetKB.EnsureDefaults()
+	targetKB.Normalize()
+
+	if targetKB.HasVectorStore() {
+		if err := s.validateVectorStoreBinding(ctx, tenantID, *targetKB.VectorStoreID); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {
+		return nil, err
+	}
+	return targetKB, nil
+}
+
+func duplicateKBCopySuffix(locale string) string {
+	locale = strings.ToLower(locale)
+	switch {
+	case strings.HasPrefix(locale, "zh"):
+		return " 副本"
+	case strings.HasPrefix(locale, "ko"):
+		return " 사본"
+	case strings.HasPrefix(locale, "ru"):
+		return " копия"
+	default:
+		return " Copy"
+	}
+}
+
+func duplicateKBDefaultName(locale string) string {
+	locale = strings.ToLower(locale)
+	switch {
+	case strings.HasPrefix(locale, "zh"):
+		return "知识库"
+	case strings.HasPrefix(locale, "ko"):
+		return "지식베이스"
+	case strings.HasPrefix(locale, "ru"):
+		return "База знаний"
+	default:
+		return "Knowledge Base"
+	}
+}
+
+func (s *knowledgeBaseService) buildDuplicateKnowledgeBaseName(
+	ctx context.Context,
+	tenantID uint64,
+	sourceName string,
+) string {
+	locale, ok := types.LanguageFromContext(ctx)
+	if !ok {
+		locale = types.DefaultLanguage()
+	}
+	suffix := duplicateKBCopySuffix(locale)
+
+	baseName := strings.TrimSpace(sourceName)
+	if baseName == "" {
+		baseName = duplicateKBDefaultName(locale)
+	}
+
+	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "List tenant knowledge bases failed while building duplicate name: %v", err)
+		return baseName + suffix
+	}
+
+	existing := make(map[string]struct{}, len(kbs))
+	for _, kb := range kbs {
+		if kb == nil {
+			continue
+		}
+		existing[kb.Name] = struct{}{}
+	}
+
+	candidate := baseName + suffix
+	if _, ok := existing[candidate]; !ok {
+		return candidate
+	}
+	for i := 2; ; i++ {
+		candidate = fmt.Sprintf("%s%s %d", baseName, suffix, i)
+		if _, ok := existing[candidate]; !ok {
+			return candidate
+		}
+	}
+}
+
+func cloneKnowledgeBaseConfiguration(sourceKB *types.KnowledgeBase) (*types.KnowledgeBase, error) {
+	if sourceKB == nil {
+		return nil, apperrors.NewBadRequestError("source knowledge base cannot be empty")
+	}
+	data, err := json.Marshal(sourceKB)
+	if err != nil {
+		return nil, err
+	}
+	var targetKB types.KnowledgeBase
+	if err := json.Unmarshal(data, &targetKB); err != nil {
+		return nil, err
+	}
+	return &targetKB, nil
 }

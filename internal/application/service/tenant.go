@@ -34,8 +34,8 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 	logger.Info(ctx, "Start creating tenant")
 
 	if tenant.Name == "" {
-		logger.Error(ctx, "Tenant name cannot be empty")
-		return nil, errors.New("tenant name cannot be empty")
+		logger.Error(ctx, "Workspace name cannot be empty")
+		return nil, errors.New("workspace name cannot be empty")
 	}
 
 	logger.Infof(ctx, "Creating tenant, name: %s", tenant.Name)
@@ -68,7 +68,7 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 // GetTenantByID retrieves a tenant by their ID
 func (s *tenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error) {
 	if id == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return nil, errors.New("tenant ID cannot be 0")
 	}
 
@@ -103,7 +103,7 @@ func (s *tenantService) ListTenants(ctx context.Context) ([]*types.Tenant, error
 // UpdateTenant updates an existing tenant's information
 func (s *tenantService) UpdateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error) {
 	if tenant.ID == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return nil, errors.New("tenant ID cannot be 0")
 	}
 
@@ -135,7 +135,7 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 	logger.Info(ctx, "Start deleting tenant")
 
 	if id == 0 {
-		logger.Error(ctx, "Tenant ID cannot be 0")
+		logger.Error(ctx, "Workspace ID cannot be 0")
 		return errors.New("tenant ID cannot be 0")
 	}
 
@@ -164,7 +164,7 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 		return err
 	}
 
-	logger.Infof(ctx, "Tenant deleted successfully, ID: %d", id)
+	logger.Infof(ctx, "Workspace deleted successfully, ID: %d", id)
 	return nil
 }
 
@@ -324,7 +324,7 @@ func (s *tenantService) validateStorageBucketUniqueness(ctx context.Context, ten
 		oldB := oldBuckets[p]
 		if b != oldB { // User is trying to change their bucket name or set a new one
 			if usedByOthers[p] != nil && usedByOthers[p][b] {
-				return werrors.NewBadRequestError("存储桶名称「" + b + "」已被其他租户使用，为保证数据隔离，请使用其他名称")
+				return werrors.NewBadRequestError("存储桶名称「" + b + "」已被其他空间使用，为保证数据隔离，请使用其他名称")
 			}
 		}
 	}

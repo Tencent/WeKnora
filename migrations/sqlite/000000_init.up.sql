@@ -166,6 +166,10 @@ CREATE TABLE IF NOT EXISTS messages (
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     is_fallback BOOLEAN NOT NULL DEFAULT 0,
     channel VARCHAR(50) NOT NULL DEFAULT '',
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    execution_context TEXT NOT NULL DEFAULT '{}',
     agent_duration_ms INTEGER DEFAULT 0,
     knowledge_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -175,6 +179,56 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_knowledge_id ON messages(knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_messages_agent_id ON messages(agent_id);
+
+CREATE TABLE IF NOT EXISTS message_suggestion_sets (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    assistant_message_id VARCHAR(36) NOT NULL,
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    placement VARCHAR(32) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    locale VARCHAR(16) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL,
+    allow_regenerate BOOLEAN NOT NULL DEFAULT 0,
+    suppression_reason VARCHAR(64) NOT NULL DEFAULT '',
+    questions TEXT NOT NULL DEFAULT '[]',
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until DATETIME,
+    generated_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_suggestion_sets_cache_key
+    ON message_suggestion_sets(tenant_id, assistant_message_id, placement, config_hash, locale);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_sets_session
+    ON message_suggestion_sets(tenant_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_sets_status
+    ON message_suggestion_sets(status, lease_until);
+
+CREATE TABLE IF NOT EXISTS message_suggestion_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    suggestion_set_id VARCHAR(36) NOT NULL,
+    question_id VARCHAR(64) NOT NULL DEFAULT '',
+    event_type VARCHAR(32) NOT NULL,
+    actor_id VARCHAR(512) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (suggestion_set_id) REFERENCES message_suggestion_sets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_set
+    ON message_suggestion_events(suggestion_set_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_session
+    ON message_suggestion_events(tenant_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_type
+    ON message_suggestion_events(event_type, created_at);
 
 CREATE TABLE IF NOT EXISTS chunks (
     id VARCHAR(36) PRIMARY KEY,

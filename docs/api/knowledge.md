@@ -29,7 +29,7 @@
 
 > **公共说明**：
 > - 路径中的 `:id`（知识库路径下）为**知识库 ID**，`/knowledge/:id` 中的 `:id` 为**知识 ID**。
-> - 所有写操作（创建、更新、删除、迁移、重新解析、取消解析）需要当前用户在知识库所属组织内具有 `editor` 或 `admin` 权限；清空知识库内容仅 KB **所有者**（admin 且租户匹配）可操作。
+> - 所有写操作（创建、更新、删除、迁移、重新解析、取消解析）需要当前用户在知识库所属组织内具有 `editor` 或 `admin` 权限；清空知识库内容仅 KB **所有者**（admin 且空间匹配）可操作。
 > - 关键状态字段：`parse_status` 取值 `pending` / `processing` / `finalizing` / `completed` / `failed` / `cancelled`；`enable_status` 取值 `enabled` / `disabled`。
 > - `processing` 指 DocReader / 分块 / 向量化阶段；`finalizing` 指主解析已完成、仍在执行摘要 / 问题生成 / 图谱抽取等索引优化任务；只有当全部子任务到达终态后才进入 `completed`。
 > - `cancelled` 表示解析被用户主动取消，可通过 `reparse` 重新触发。`pending` / `processing` / `finalizing` 这三种状态都可通过 `cancel-parse` 终止。
@@ -325,7 +325,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 
 ## DELETE `/knowledge-bases/:id/knowledge` - 清空知识库下的所有知识
 
-异步提交"清空任务"，删除该知识库下的全部知识条目；知识库本身保留。**仅 KB 所有者（admin 且租户匹配）可操作**。
+异步提交"清空任务"，删除该知识库下的全部知识条目；知识库本身保留。**仅 KB 所有者（admin 且空间匹配）可操作**。
 
 **请求**:
 
@@ -363,8 +363,8 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge-bases/k
 | 字段        | 类型     | 必填 | 说明                                                                  |
 | ----------- | -------- | ---- | --------------------------------------------------------------------- |
 | `ids`       | string[] | 是   | 知识 ID，重复 `ids=...` 传多个                                        |
-| `kb_id`     | string   | 否   | 限定知识库范围；共享知识库场景下用于按 KB 校验权限并解析有效租户       |
-| `agent_id`  | string   | 否   | 共享 Agent ID；按 Agent 所属租户拉取，常用于共享场景刷新后的文件回填   |
+| `kb_id`     | string   | 否   | 限定知识库范围；共享知识库场景下用于按 KB 校验权限并解析有效空间       |
+| `agent_id`  | string   | 否   | 共享 Agent ID；按 Agent 所属空间拉取，常用于共享场景刷新后的文件回填   |
 
 **请求**:
 
@@ -729,7 +729,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge/tags' \
 
 ## GET `/knowledge/search` - 跨知识库搜索/过滤知识
 
-按关键词在当前租户（含已共享给当前租户）的知识中检索；可按文件类型过滤；指定 `agent_id` 时按共享 Agent 所配置的知识库范围检索。
+按关键词在当前空间（含已共享给当前空间）的知识中检索；可按文件类型过滤；指定 `agent_id` 时按共享 Agent 所配置的知识库范围检索。
 
 **查询参数**:
 
@@ -827,7 +827,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge/batch-delete' \
 
 将一条或多条**处于 `completed` 状态**的知识从源 KB 迁到目标 KB（异步）。约束：
 
-- 源/目标 KB 必须属于当前租户；
+- 源/目标 KB 必须属于当前空间；
 - 源/目标必须为同一 KB 类型且**使用相同的 Embedding 模型**；
 - 源 KB ≠ 目标 KB；
 - 仅 `parse_status=completed` 的知识可迁移。

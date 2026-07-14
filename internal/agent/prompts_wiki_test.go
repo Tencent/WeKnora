@@ -123,3 +123,21 @@ func TestWikiChunkCitationPrompt_PreservesPlaceholders(t *testing.T) {
 		}
 	}
 }
+
+func TestWikiPageModifyPrompt_HidesInternalChunkAliases(t *testing.T) {
+	for _, guidance := range []string{
+		"NEVER output them in the page body or summary",
+		"Source associations are stored separately by the system",
+		"clean Markdown without inline chunk IDs",
+	} {
+		if !strings.Contains(WikiPageModifyPrompt, guidance) {
+			t.Errorf("WikiPageModifyPrompt missing chunk-alias guidance %q", guidance)
+		}
+	}
+
+	for _, obsolete := range []string{"Preserve Citations", "followed by an inline citation"} {
+		if strings.Contains(WikiPageModifyPrompt, obsolete) {
+			t.Errorf("WikiPageModifyPrompt still contains obsolete inline-citation rule %q", obsolete)
+		}
+	}
+}

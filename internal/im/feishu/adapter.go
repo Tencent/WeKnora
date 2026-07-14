@@ -435,41 +435,135 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 }
 
 // SendReply sends a reply message via Feishu API.
+//
+// It uses the "reply message" API (POST /im/v1/messages/:message_id/reply) so the
+// reply lands under the original message / thread instead of creating a new
+// top-level message (which, in topic-enabled groups, would spawn a new topic).
+// Feishu automatically replies in thread form when the replied-to message is
+// already a thread message, so we leave reply_in_thread at its default (false).
+//
+// If the reply API fails with a fallback-eligible code (e.g. 230071 group does
+// not support reply-in-thread, 230019 topic gone, 230054 unsupported message
+// type), we retry once via the plain "send message" API so the reply still
+// reaches the user.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	accessToken, err := a.getTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	// Determine receive_id_type and receive_id
-	receiveIDType := "open_id"
-	receiveID := incoming.UserID
-	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
-		receiveIDType = "chat_id"
-		receiveID = incoming.ChatID
+	// Build text message content
+	content, _ := json.Marshal(map[string]string{"text": reply.Content})
+
+	// Reply payload (no receive_id — the path message_id locates the chat)
+	replyPayload := map[string]interface{}{
+		"msg_type": "text",
+		"content":  string(content),
 	}
 
-	// Build text message
-	content, _ := json.Marshal(map[string]string{"text": reply.Content})
-	payload := map[string]interface{}{
+	// Fallback payload (plain send-message API) — needs receive_id
+	receiveIDType, receiveID := a.resolveReceiveID(incoming)
+	fallbackPayload := map[string]interface{}{
 		"receive_id": receiveID,
 		"msg_type":   "text",
 		"content":    string(content),
 	}
 
-	payloadBytes, _ := json.Marshal(payload)
+	return a.sendWithFallback(ctx, accessToken, incoming, replyPayload, fallbackPayload, receiveIDType)
+}
 
-	url := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=%s", receiveIDType)
+// resolveReceiveID computes the (receive_id_type, receive_id) pair used by the
+// plain "send message" API. Group chats target chat_id; direct chats target the
+// user's open_id. Used both for the fallback path and for legacy callers.
+func (a *Adapter) resolveReceiveID(incoming *im.IncomingMessage) (receiveIDType string, receiveID string) {
+	receiveIDType = "open_id"
+	receiveID = incoming.UserID
+	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
+		receiveIDType = "chat_id"
+		receiveID = incoming.ChatID
+	}
+	return
+}
+
+// fallbackEligibleErrorCodes are Feishu API error codes for which replying via
+// the reply-message API cannot work (e.g. the group does not support threads,
+// the topic was deleted, the message type is unsupported). In these cases we
+// retry once via the plain send-message API so the reply still reaches the user.
+var fallbackEligibleErrorCodes = map[int]bool{
+	230019: true, // The topic does NOT exist.
+	230054: true, // This operation is not supported for this message type.
+	230071: true, // The group to which the message belongs does not support reply in thread.
+}
+
+// sendWithFallback sends a message via the reply-message API first
+// (POST /im/v1/messages/:message_id/reply), and on a fallback-eligible error
+// retries once via the plain send-message API (POST /im/v1/messages).
+//
+//   - replyPayload   — body for the reply API (no receive_id needed)
+//   - fallbackPayload — body for the send API (includes receive_id)
+//   - receiveIDType   — receive_id_type query param for the fallback send API
+func (a *Adapter) sendWithFallback(
+	ctx context.Context,
+	accessToken string,
+	incoming *im.IncomingMessage,
+	replyPayload, fallbackPayload map[string]interface{},
+	receiveIDType string,
+) error {
+	// If we have a usable message_id, try the reply API first so the reply
+	// lands under the original message / thread. If message_id is empty (rare:
+	// some event payloads omit it), skip straight to the fallback send API —
+	// the reply API needs a message_id in the path and can't work without one.
+	if incoming.MessageID != "" && feishuSafePathParam(incoming.MessageID) {
+		replyURL := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages/%s/reply", incoming.MessageID)
+		code, msg, err := a.postFeishuMessage(ctx, accessToken, replyURL, replyPayload)
+		switch {
+		case err != nil:
+			// Network/transport error — try the fallback since send-message is
+			// a different endpoint that might succeed.
+			logger.Warnf(ctx, "[Feishu] reply API transport error (will try fallback): %v", err)
+		case code == 0:
+			return nil
+		case !fallbackEligibleErrorCodes[code]:
+			return fmt.Errorf("feishu reply api error: code=%d msg=%s", code, msg)
+		default:
+			// Fallback-eligible: retry via plain send-message API.
+			logger.Warnf(ctx, "[Feishu] reply API returned code=%d msg=%s, falling back to send-message API", code, msg)
+		}
+	} else if incoming.MessageID != "" {
+		// message_id present but contains unsafe characters — refuse rather
+		// than put it in a URL path. Don't fall back either, since a malformed
+		// id suggests a tampered payload.
+		return fmt.Errorf("invalid message_id for reply API: %q", incoming.MessageID)
+	} else {
+		logger.Warnf(ctx, "[Feishu] incoming message has no message_id; replying via send-message API (will not attach to thread)")
+	}
+
+	// Fallback: plain send-message API.
+	fallbackURL := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=%s", receiveIDType)
+	code, msg, err := a.postFeishuMessage(ctx, accessToken, fallbackURL, fallbackPayload)
+	if err != nil {
+		return fmt.Errorf("send message (fallback): %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("feishu send api error: code=%d msg=%s", code, msg)
+	}
+	return nil
+}
+
+// postFeishuMessage POSTs a JSON payload to a Feishu IM message API and returns
+// the (code, msg) from the response body. Shared by reply and send paths.
+func (a *Adapter) postFeishuMessage(ctx context.Context, accessToken, url string, payload map[string]interface{}) (code int, msg string, err error) {
+	payloadBytes, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return 0, "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("send message: %w", err)
+		return 0, "", fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -478,13 +572,9 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 		Msg  string `json:"msg"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return 0, "", fmt.Errorf("decode response: %w", err)
 	}
-	if result.Code != 0 {
-		return fmt.Errorf("feishu api error: code=%d msg=%s", result.Code, result.Msg)
-	}
-
-	return nil
+	return result.Code, result.Msg, nil
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -789,13 +879,12 @@ func (a *Adapter) cardkitCreate(ctx context.Context, accessToken, cardJSON strin
 
 // sendCardByCardID sends a card_id as an interactive message.
 // POST /open-apis/im/v1/messages  with content={"type":"card","data":{"card_id":"…"}}
+// sendCardByCardID sends a card_id as an interactive message via the reply
+// message API so it lands under the original message / thread. Falls back to
+// the plain send-message API on fallback-eligible errors (e.g. group does not
+// support reply-in-thread).
 func (a *Adapter) sendCardByCardID(ctx context.Context, accessToken string, incoming *im.IncomingMessage, cardID string) error {
-	receiveIDType := "open_id"
-	receiveID := incoming.UserID
-	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
-		receiveIDType = "chat_id"
-		receiveID = incoming.ChatID
-	}
+	receiveIDType, receiveID := a.resolveReceiveID(incoming)
 
 	// Key: type must be "card" (not "card_id")
 	content, _ := json.Marshal(map[string]interface{}{
@@ -803,42 +892,19 @@ func (a *Adapter) sendCardByCardID(ctx context.Context, accessToken string, inco
 		"data": map[string]string{"card_id": cardID},
 	})
 
-	payload, _ := json.Marshal(map[string]interface{}{
+	// Reply payload (no receive_id) and fallback payload (with receive_id)
+	// share the same content/msg_type — only receive_id differs.
+	replyPayload := map[string]interface{}{
+		"msg_type": "interactive",
+		"content":  string(content),
+	}
+	fallbackPayload := map[string]interface{}{
 		"receive_id": receiveID,
 		"msg_type":   "interactive",
 		"content":    string(content),
-	})
-
-	apiURL := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=%s", receiveIDType)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
 	}
 
-	var result struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("decode: %w (body: %s)", err, string(respBody))
-	}
-	if result.Code != 0 {
-		return fmt.Errorf("send card error: code=%d msg=%s", result.Code, result.Msg)
-	}
-	return nil
+	return a.sendWithFallback(ctx, accessToken, incoming, replyPayload, fallbackPayload, receiveIDType)
 }
 
 // cardkitUpdateElement updates a card element's content for streaming.

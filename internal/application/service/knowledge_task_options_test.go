@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,9 +47,10 @@ func TestDocumentProcessTaskOptions_defaults(t *testing.T) {
 			t.Parallel()
 			opts := documentProcessTaskOptions(tc.cfg)
 			queue, timeout, maxRetry := parseDocumentProcessOpts(t, opts)
-			assert.Equal(t, "default", queue)
+			assert.Equal(t, types.QueueDefault, queue)
 			assert.Equal(t, config.DefaultDocumentProcessTimeout, timeout)
-			assert.Nil(t, maxRetry)
+			require.NotNil(t, maxRetry)
+			assert.Equal(t, 3, *maxRetry)
 		})
 	}
 }
@@ -62,17 +64,27 @@ func TestDocumentProcessTaskOptions_configuredTimeout(t *testing.T) {
 	}
 	opts := documentProcessTaskOptions(cfg)
 	queue, timeout, maxRetry := parseDocumentProcessOpts(t, opts)
-	assert.Equal(t, "default", queue)
+	assert.Equal(t, types.QueueDefault, queue)
 	assert.Equal(t, 90*time.Minute, timeout)
-	assert.Nil(t, maxRetry)
+	require.NotNil(t, maxRetry)
+	assert.Equal(t, 3, *maxRetry)
 }
 
 func TestDocumentProcessTaskOptions_extraMaxRetry(t *testing.T) {
 	t.Parallel()
 	opts := documentProcessTaskOptions(nil, asynq.MaxRetry(3))
 	queue, timeout, maxRetry := parseDocumentProcessOpts(t, opts)
-	assert.Equal(t, "default", queue)
+	assert.Equal(t, types.QueueDefault, queue)
 	assert.Equal(t, config.DefaultDocumentProcessTimeout, timeout)
+	require.NotNil(t, maxRetry)
+	assert.Equal(t, 3, *maxRetry)
+}
+
+func TestKnowledgePostProcessTaskOptionsUseDedicatedQueue(t *testing.T) {
+	t.Parallel()
+	queue, timeout, maxRetry := parseDocumentProcessOpts(t, knowledgePostProcessTaskOptions())
+	assert.Equal(t, types.QueuePostProcess, queue)
+	assert.Equal(t, 30*time.Minute, timeout)
 	require.NotNil(t, maxRetry)
 	assert.Equal(t, 3, *maxRetry)
 }

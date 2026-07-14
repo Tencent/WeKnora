@@ -104,9 +104,29 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 			_ = svc.LogDenied(ctx, c, tenantID, uid, string(role), min)
 		}
 		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Forbidden: insufficient tenant role",
+			"error": "Forbidden: insufficient workspace role",
 		})
 		c.Abort()
+	}
+}
+
+// RequireRoleOrSystemAdmin applies the tenant role floor while also allowing
+// platform system administrators. Use it for routes that normally mutate
+// tenant infrastructure but have a narrowly-scoped platform-owned resource
+// (for example built-in models) that system administrators must be able to
+// maintain independently of their role in the active tenant.
+//
+// API-key behavior remains identical to RequireRole: the APIKeyGate is the
+// source of truth for machine principals, so they short-circuit the role
+// check here as well.
+func RequireRoleOrSystemAdmin(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
+	requireRole := RequireRole(min, cfg)
+	return func(c *gin.Context) {
+		if types.IsSystemAdminFromContext(c.Request.Context()) {
+			c.Next()
+			return
+		}
+		requireRole(c)
 	}
 }
 
@@ -117,7 +137,7 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 // System administrators operate independently of tenant-scoped roles and
 // are not bound by the per-tenant RBAC matrix. Use this guard for
 // platform-wide administrative endpoints (managing other system admins,
-// editing global settings, cross-tenant operations) where the per-tenant
+// editing global settings, cross-workspace operations) where the per-tenant
 // Owner/Admin/Contributor/Viewer ladder does not apply.
 //
 // Unlike tenant-role guards, this check is always enforced. The

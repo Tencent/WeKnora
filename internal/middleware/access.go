@@ -106,7 +106,7 @@ func IsTenantAccessible(
 // rather than inside one.
 //
 // Unlike RequireRole this is NOT modulated by cfg.Tenant.EnableRBAC:
-// cross-tenant operations are always sensitive regardless of whether
+// cross-workspace operations are always sensitive regardless of whether
 // per-tenant RBAC is being enforced, so we never log-and-pass.
 func RequireCrossTenantAccess(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -119,7 +119,7 @@ func RequireCrossTenantAccess(cfg *config.Config) gin.HandlerFunc {
 			logger.Warnf(ctx,
 				"[rbac] cross-tenant route blocked (EnableCrossTenantAccess=false): user=%s path=%s",
 				uid, c.Request.URL.Path)
-			_ = c.Error(apperrors.NewForbiddenError("Cross-tenant access is disabled"))
+			_ = c.Error(apperrors.NewForbiddenError("Cross-workspace access is disabled"))
 			c.Abort()
 			return
 		}
@@ -130,7 +130,7 @@ func RequireCrossTenantAccess(cfg *config.Config) gin.HandlerFunc {
 				"[rbac] cross-tenant route blocked (not a superuser): user=%s path=%s",
 				uid, c.Request.URL.Path)
 			_ = c.Error(apperrors.NewForbiddenError(
-				"Insufficient permissions for cross-tenant operation"))
+				"Insufficient permissions for cross-workspace operation"))
 			c.Abort()
 			return
 		}
@@ -156,13 +156,13 @@ func RequirePathTenantMatch(cfg *config.Config) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		raw := strings.TrimSpace(c.Param("id"))
 		if raw == "" {
-			_ = c.Error(apperrors.NewValidationError("tenant id is required"))
+			_ = c.Error(apperrors.NewValidationError("workspace id is required"))
 			c.Abort()
 			return
 		}
 		pathTenantID, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil || pathTenantID == 0 {
-			_ = c.Error(apperrors.NewValidationError("tenant id must be a positive integer"))
+			_ = c.Error(apperrors.NewValidationError("workspace id must be a positive integer"))
 			c.Abort()
 			return
 		}
@@ -172,7 +172,7 @@ func RequirePathTenantMatch(cfg *config.Config) gin.HandlerFunc {
 			// fail closed rather than silently treating "no context" as
 			// a match.
 			logger.Warnf(ctx, "[rbac] path-tenant-match: no tenant in ctx, path=%s", c.Request.URL.Path)
-			_ = c.Error(apperrors.NewUnauthorizedError("tenant context missing"))
+			_ = c.Error(apperrors.NewUnauthorizedError("workspace context missing"))
 			c.Abort()
 			return
 		}
@@ -189,7 +189,7 @@ func RequirePathTenantMatch(cfg *config.Config) gin.HandlerFunc {
 			"[rbac] path-tenant-match rejected: user=%s ctx_tenant=%d path_tenant=%d path=%s",
 			uid, ctxTenantID, pathTenantID, c.Request.URL.Path)
 		_ = c.Error(apperrors.NewForbiddenError(
-			"Access denied: URL tenant does not match the active tenant"))
+			"Access denied: URL workspace does not match the active workspace"))
 		c.Abort()
 	}
 }

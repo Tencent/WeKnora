@@ -95,8 +95,14 @@ func (r *fakeKBRepo) GetKnowledgeBaseByIDs(_ context.Context, _ []string) ([]*ty
 func (r *fakeKBRepo) ListKnowledgeBases(_ context.Context) ([]*types.KnowledgeBase, error) {
 	return nil, nil
 }
-func (r *fakeKBRepo) ListKnowledgeBasesByTenantID(_ context.Context, _ uint64) ([]*types.KnowledgeBase, error) {
-	return nil, nil
+func (r *fakeKBRepo) ListKnowledgeBasesByTenantID(_ context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
+	rows := make([]*types.KnowledgeBase, 0, len(r.rows))
+	for _, kb := range r.rows {
+		if kb != nil && kb.TenantID == tenantID {
+			rows = append(rows, kb)
+		}
+	}
+	return rows, nil
 }
 func (r *fakeKBRepo) UpdateKnowledgeBase(_ context.Context, _ *types.KnowledgeBase) error {
 	return nil
@@ -364,4 +370,130 @@ func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "different vector stores")
 	})
+}
+
+func TestDuplicateKnowledgeBase_CreatesSettingsOnlyDuplicate(t *testing.T) {
+	repo := newFakeKBRepo()
+	source := &types.KnowledgeBase{
+		ID:          "src",
+		Name:        "Source KB",
+		Type:        types.KnowledgeBaseTypeDocument,
+		Description: "source description",
+		TenantID:    1,
+		CreatorID:   "source-owner",
+		IsTemporary: true,
+		ChunkingConfig: types.ChunkingConfig{
+			ChunkSize:    800,
+			ChunkOverlap: 80,
+			Separators:   []string{"\n\n", "."},
+			ParserEngineRules: []types.ParserEngineRule{{
+				FileTypes: []string{"pdf"},
+				Engine:    "docreader",
+			}},
+		},
+		ImageProcessingConfig: types.ImageProcessingConfig{ModelID: "vlm-image"},
+		EmbeddingModelID:      "embed-1",
+		SummaryModelID:        "summary-1",
+		VLMConfig:             types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+		ASRConfig:             types.ASRConfig{Enabled: true, ModelID: "asr-1", Language: "zh"},
+		StorageProviderConfig: &types.StorageProviderConfig{Provider: "local"},
+		ExtractConfig: &types.ExtractConfig{
+			Enabled: true,
+			Text:    "extract entities",
+			Tags:    []string{"product"},
+			Nodes:   []*types.GraphNode{{Name: "Product"}},
+		},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true, QuestionCount: 5},
+		WikiConfig:               &types.WikiConfig{SynthesisModelID: "wiki-llm", MaxPagesPerIngest: 12},
+		IndexingStrategy: types.IndexingStrategy{
+			VectorEnabled:  true,
+			KeywordEnabled: true,
+			WikiEnabled:    true,
+			GraphEnabled:   true,
+		},
+		IsPinned:        true,
+		KnowledgeCount:  9,
+		ChunkCount:      27,
+		IsProcessing:    true,
+		ProcessingCount: 2,
+		ShareCount:      3,
+		CreatorName:     "Source Owner",
+	}
+	repo.rows["src"] = source
+	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
+	ctx := context.WithValue(ctxWithTenant(1), types.UserIDContextKey, "copy-user")
+
+	target, err := svc.DuplicateKnowledgeBase(ctx, "src")
+	require.NoError(t, err)
+
+	require.NotEmpty(t, target.ID)
+	assert.Equal(t, uint64(1), target.TenantID)
+	assert.Equal(t, "copy-user", target.CreatorID)
+	assert.Equal(t, "Source KB 副本", target.Name)
+	assert.Equal(t, source.Description, target.Description)
+	assert.Equal(t, source.ChunkingConfig, target.ChunkingConfig)
+	assert.Equal(t, source.ImageProcessingConfig, target.ImageProcessingConfig)
+	assert.Equal(t, source.EmbeddingModelID, target.EmbeddingModelID)
+	assert.Equal(t, source.SummaryModelID, target.SummaryModelID)
+	assert.Equal(t, source.VLMConfig, target.VLMConfig)
+	assert.Equal(t, source.ASRConfig, target.ASRConfig)
+	require.NotNil(t, target.StorageProviderConfig)
+	assert.Equal(t, "local", target.StorageProviderConfig.Provider)
+	require.NotNil(t, target.ExtractConfig)
+	assert.Equal(t, source.ExtractConfig.Text, target.ExtractConfig.Text)
+	require.NotNil(t, target.QuestionGenerationConfig)
+	assert.Equal(t, 5, target.QuestionGenerationConfig.QuestionCount)
+	require.NotNil(t, target.WikiConfig)
+	assert.Equal(t, "wiki-llm", target.WikiConfig.SynthesisModelID)
+	assert.Equal(t, source.IndexingStrategy, target.IndexingStrategy)
+
+	assert.False(t, target.IsTemporary)
+	assert.False(t, target.IsPinned)
+	assert.Nil(t, target.PinnedAt)
+	assert.Zero(t, target.KnowledgeCount)
+	assert.Zero(t, target.ChunkCount)
+	assert.False(t, target.IsProcessing)
+	assert.Zero(t, target.ProcessingCount)
+	assert.Zero(t, target.ShareCount)
+	assert.Empty(t, target.CreatorName)
+	require.Same(t, target, repo.rows[target.ID])
+}
+
+func TestDuplicateKnowledgeBase_UsesDistinctNameWhenDuplicateExists(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["src"] = &types.KnowledgeBase{
+		ID:       "src",
+		Name:     "Source KB",
+		Type:     types.KnowledgeBaseTypeDocument,
+		TenantID: 1,
+	}
+	repo.rows["existing-copy"] = &types.KnowledgeBase{
+		ID:       "existing-copy",
+		Name:     "Source KB 副本",
+		Type:     types.KnowledgeBaseTypeDocument,
+		TenantID: 1,
+	}
+	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
+
+	target, err := svc.DuplicateKnowledgeBase(ctxWithTenant(1), "src")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Source KB 副本 2", target.Name)
+}
+
+func TestDuplicateKnowledgeBase_UsesLocalizedEnglishSuffix(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["src"] = &types.KnowledgeBase{
+		ID:       "src",
+		Name:     "Source KB",
+		Type:     types.KnowledgeBaseTypeDocument,
+		TenantID: 1,
+	}
+	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
+	ctx := context.WithValue(ctxWithTenant(1), types.LanguageContextKey, "en-US")
+
+	target, err := svc.DuplicateKnowledgeBase(ctx, "src")
+	require.NoError(t, err)
+
+	assert.Equal(t, "Source KB Copy", target.Name)
 }

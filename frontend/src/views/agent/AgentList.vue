@@ -83,8 +83,8 @@
               <t-icon class="agent-section-toggle"
                 :name="isAgentSectionCollapsed('builtin') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <!-- 我创建的：当前 agent 是本租户 + 非内置 + 我亲手创建，且前一张
-                 要么不存在、要么不是本租户、要么是内置（builtin → mine 过渡）、
+            <!-- 我创建的：当前 agent 是本空间 + 非内置 + 我亲手创建，且前一张
+                 要么不存在、要么不是本空间、要么是内置（builtin → mine 过渡）、
                  要么是同事创建。与 KB 列表对齐。 -->
             <div v-if="showShareGroupHeaders
               && agent.isMine
@@ -103,7 +103,7 @@
               <t-icon class="agent-section-toggle"
                 :name="isAgentSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <!-- 本空间 · 仅查看 / 其他成员：本租户里非内置且非我创建的同事 agent。 -->
+            <!-- 本空间 · 仅查看 / 其他成员：本空间里非内置且非我创建的同事 agent。 -->
             <div v-if="showShareGroupHeaders
               && agent.isMine
               && !agent.is_builtin
@@ -482,7 +482,7 @@
                     </t-tooltip>
                   </div>
                 </div>
-                <!-- 右下角：内置 / 来源徽章（我创建 / 同租户其他成员） -->
+                <!-- 右下角：内置 / 来源徽章（我创建 / 同空间其他成员） -->
                 <div v-if="showAgentBuiltinBadge(agent)" class="builtin-badge">
                   <t-icon name="lock-on" size="12px" />
                   <span>{{ $t('agent.builtin') }}</span>
@@ -850,7 +850,7 @@ const { loaded: modelsReadyLoaded, isReadyForAgent } = useTenantModelReadiness()
 
 interface AgentWithUI extends CustomAgent {
   showMore?: boolean
-  /** 当前租户在对话下拉中停用（仅影响本租户） */
+  /** 当前空间在对话下拉中停用（仅影响本空间） */
   disabled_by_me?: boolean
 }
 
@@ -860,7 +860,7 @@ interface AgentWithUI extends CustomAgent {
 type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: false; org_name: string; source_tenant_id: number; share_id: string; permission?: string; showMore?: boolean; disabled_by_me?: boolean })
 
 // 左侧空间选择：默认根据当前角色决定。
-// 与 KnowledgeBaseList 同款逻辑：Viewer 在当前租户里通常没有自建智能体，
+// 与 KnowledgeBaseList 同款逻辑：Viewer 在当前空间里通常没有自建智能体，
 // 默认落到 "all" 才能看到内置 + 共享给我的；Contributor 以上仍默认 "mine"。
 // State synced to `?scope=` so links are shareable. The "mine" value is
 // retained for back-compat with existing links; its display label is
@@ -986,7 +986,7 @@ const filteredAgents = computed<DisplayAgent[]>(() => {
   }
   if (spaceSelection.value !== 'all') return []
   const list: DisplayAgent[] = []
-  // 本租户内的 agent 拆成 内置 → 我创建 → 同事创建 三段。
+  // 本空间内的 agent 拆成 内置 → 我创建 → 同事创建 三段。
   // 内置（is_builtin=true）和"个人所有权"是两个维度的概念，置顶为单独
   // 一段；它们的 created_by 始终为空，跟在「同事/无创建者」桶里反而让
   // tenantOthers 段同时混入"系统内置 + 历史无 owner 的自定义"两类，
@@ -1026,7 +1026,7 @@ const filteredAgents = computed<DisplayAgent[]>(() => {
   return list
 })
 
-// 「工作空间」视图下的稳定排序：本租户内「我创建」在前、「同事创建 / 内建」
+// 「工作空间」视图下的稳定排序：本空间内「我创建」在前、「同事创建 / 内建」
 // 在后。给 contributor 视图把「本空间 · 仅查看」分组标题正好插在过渡处。
 const sortedMineAgents = computed(() => {
   // 内置 → 我创建 → 同事创建。与 filteredAgents 的"全部"视图保持同序。
@@ -1327,7 +1327,7 @@ function canManageAgent(agent: AgentWithUI): boolean {
   return authStore.hasRole('admin')
 }
 
-// isMyAgent 仅用于卡片来源徽章在「我创建」与「同租户其他成员创建」之间切换。
+// isMyAgent 仅用于卡片来源徽章在「我创建」与「同空间其他成员创建」之间切换。
 // 跟 canManageAgent 区别：管理权限有 admin 兜底；徽章纯粹按 created_by 匹配。
 // 内建 agent（created_by=""）也归到非 mine 一档，由模板上的 builtin 分支
 // 提前拦截，不会落到 ResourceOriginBadge。
@@ -1336,8 +1336,8 @@ function isMyAgent(agent: { created_by?: string }): boolean {
   return !!(agent.created_by && userId && agent.created_by === userId)
 }
 
-// agentOriginVariant 跟 kbOriginVariant 对齐：右下角徽章不再重复租户名
-// （顶部 TenantSelector 已经标了租户身份），所有角色都用 creator 变体。
+// agentOriginVariant 跟 kbOriginVariant 对齐：右下角徽章不再重复空间名
+// （顶部 TenantSelector 已经标了空间身份），所有角色都用 creator 变体。
 // 内建 agent 走 v-else 前的 builtin 分支，到不了这里。
 function agentOriginVariant(agent: { created_by?: string }): 'mine' | 'creator' {
   return isMyAgent(agent) ? 'mine' : 'creator'
@@ -1371,9 +1371,9 @@ function isSharedAgentEditable(perm: string | undefined): boolean {
 // 这种客观信息分段，不再按当前用户的可写权限筛掉。
 const showShareGroupHeaders = computed(() => true)
 
-// 同租户、非当前用户创建的 Agent 分组标题。
-// contributor / viewer 在本租户里对这些 Agent 没有写权限，所以打"仅查看"；
-// admin / owner 对整个租户都有编辑权限，"仅查看"反而误导，统一改成
+// 同空间、非当前用户创建的 Agent 分组标题。
+// contributor / viewer 在本空间里对这些 Agent 没有写权限，所以打"仅查看"；
+// admin / owner 对整个空间都有编辑权限，"仅查看"反而误导，统一改成
 // "本空间 · 其他成员"——按所有权而非权限来标注。
 const tenantSectionLabelKey = computed(() =>
   authStore.hasRole('admin')
@@ -1399,23 +1399,23 @@ const toggleAgentSection = (key: AgentSectionKey) => {
   collapsedAgentSections.value = next
 }
 // 根据 agent 数据形态判分组：filteredAgents 元素带 isMine；sortedMineAgents
-// 是原始 agent（永远当作本租户）；sortedSpaceAgentsList 用 is_mine。
+// 是原始 agent（永远当作本空间）；sortedSpaceAgentsList 用 is_mine。
 //
 // 当前用户自己创建的 agent 在模板里**没有**独立分组标题（不像 KB 那边有
 // "我创建的"段），所以这里返回 null——折叠任何分组都不会影响到它们。
 const agentSectionOf = (item: any): AgentSectionKey | null => {
-  // 内置 agent（is_builtin=true）单独成段，置顶展示——它们是租户共有的
+  // 内置 agent（is_builtin=true）单独成段，置顶展示——它们是空间共有的
   // 系统资源，跟"我 / 同事 / 共享"几个所有权分类不在同一维度。判定要早于
   // shared 那一档，因为 filteredAgents 里的 shared 条目也可能携带 is_builtin
   // （理论上不会，但保守一些）。
   if (item?.is_builtin === true) return 'builtin'
-  // 跨租户 shared 条目（filteredAgents 拆出来的 isMine=false / 空间视图的
+  // 跨空间 shared 条目（filteredAgents 拆出来的 isMine=false / 空间视图的
   // sortedSpaceAgentsList 用 is_mine=false）一律按 permission 分到
   // sharedEditable / sharedReadonly。
   if (item?.isMine === false || item?.is_mine === false) {
     return isSharedAgentEditable(item?.permission) ? 'sharedEditable' : 'sharedReadonly'
   }
-  // 本租户内：我亲手创建 → 'mine'；同事 / 非内置但无 created_by → 'tenantOthers'。
+  // 本空间内：我亲手创建 → 'mine'；同事 / 非内置但无 created_by → 'tenantOthers'。
   return isMyAgent(item as AgentWithUI) ? 'mine' : 'tenantOthers'
 }
 const isAgentRowHidden = (item: any): boolean => {
@@ -1478,7 +1478,7 @@ const handleCopy = (agent: AgentWithUI) => {
   })
 }
 
-/** 切换「我的」智能体停用状态（仅影响当前租户对话下拉显示） */
+/** 切换「我的」智能体停用状态（仅影响当前空间对话下拉显示） */
 const handleToggleDisabled = (agent: AgentWithUI) => {
   openMoreAgentId.value = null
   const nextDisabled = !agent.disabled_by_me

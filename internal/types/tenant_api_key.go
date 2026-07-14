@@ -103,8 +103,9 @@ const (
 	APIKeyCapabilityManageMembers APIKeyCapability = "manage_members"
 	// APIKeyCapabilityManageSpaces lets a key manage organization/space
 	// collaboration surfaces such as space membership and join flows. It does
-	// not grant KB/agent share management, which still depends on resource
-	// ownership and remains JWT-only/default-deny for API keys.
+	// not grant KB/agent share management: share management is reserved for
+	// full-access keys (and JWT) and scoped keys stay default-deny. This
+	// capability never lifts it.
 	APIKeyCapabilityManageSpaces APIKeyCapability = "manage_spaces"
 	// APIKeyCapabilityManageTenantSettings lets a key read and update
 	// tenant-scoped integration settings exposed under /tenants, such as API

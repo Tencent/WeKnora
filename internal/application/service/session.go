@@ -46,6 +46,7 @@ type sessionService struct {
 	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
 	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
 	memoryService         interfaces.MemoryService               // Service for memory operations
+	suggestionRepo        interfaces.MessageSuggestionRepository
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -63,6 +64,7 @@ func NewSessionService(cfg *config.Config,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
 	memoryService interfaces.MemoryService,
+	suggestionRepo interfaces.MessageSuggestionRepository,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                   cfg,
@@ -79,6 +81,7 @@ func NewSessionService(cfg *config.Config,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbShareService:        kbShareService,
 		memoryService:         memoryService,
+		suggestionRepo:        suggestionRepo,
 	}
 }
 
@@ -139,7 +142,7 @@ func (s *sessionService) GetSessionByID(ctx context.Context, tenantID uint64, id
 		return nil, stderrors.New("session id is required")
 	}
 	if tenantID == 0 {
-		return nil, stderrors.New("tenant id is required")
+		return nil, stderrors.New("workspace id is required")
 	}
 	return s.sessionRepo.GetByID(ctx, tenantID, id)
 }
@@ -348,6 +351,11 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	if rows == 0 {
 		return apperrors.ErrSessionNotFound
 	}
+	if s.suggestionRepo != nil {
+		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
+			logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
+		}
+	}
 
 	return nil
 }
@@ -405,6 +413,13 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		})
 		return err
 	}
+	if s.suggestionRepo != nil {
+		for _, id := range visibleIDs {
+			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
+				logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
+			}
+		}
+	}
 
 	return nil
 }
@@ -446,6 +461,13 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 			"tenant_id": tenantID,
 		})
 		return err
+	}
+	if s.suggestionRepo != nil && sessions != nil {
+		for _, session := range sessions {
+			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, session.ID); err != nil {
+				logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", session.ID, err)
+			}
+		}
 	}
 
 	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)

@@ -122,3 +122,52 @@ func TestBuildSpanTree_LastFailureSurfaces(t *testing.T) {
 		"last_error must point at the actually-failed span, not the cascade-cancelled downstream")
 	a.Equal("DOCREADER_TIMEOUT", lastFail.ErrorCode)
 }
+
+func TestKnowledgeSpansLastError_PrefersSpanFailure(t *testing.T) {
+	now := time.Now()
+	spanFail := &types.KnowledgeProcessingSpan{
+		Name:         types.StageDocReader,
+		ErrorCode:    "DOCREADER_TIMEOUT",
+		ErrorMessage: "slow",
+		FinishedAt:   &now,
+	}
+
+	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "recovery blew up", now, spanFail)
+	a := assert.New(t)
+	a.Equal(types.StageDocReader, got["name"])
+	a.Equal("DOCREADER_TIMEOUT", got["error_code"])
+	a.Equal("slow", got["error_message"])
+}
+
+func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing.T) {
+	now := time.Now()
+	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "wiki ingest timed out", now, nil)
+	a := assert.New(t)
+	a.NotNil(got)
+	a.Equal("knowledge_processing", got["name"])
+	a.Equal("UNKNOWN", got["error_code"])
+	a.Equal("wiki ingest timed out", got["error_message"])
+	a.Equal(now, got["finished_at"])
+}
+
+func TestKnowledgeSpansLastError_ClassifiesServerRestart(t *testing.T) {
+	now := time.Now()
+	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed,
+		"Task interrupted due to application restart", now, nil)
+	a := assert.New(t)
+	a.NotNil(got)
+	a.Equal("SERVER_RESTART", got["error_code"])
+	a.Equal("SERVER_RESTART", got["code"])
+}
+
+func TestKnowledgeSpansLastError_SkipsRecoveryFallbackForHistoricalAttempt(t *testing.T) {
+	now := time.Now()
+	got := knowledgeSpansLastError(1, 2, types.ParseStatusFailed, "wiki ingest timed out", now, nil)
+	assert.Nil(t, got)
+}
+
+func TestKnowledgeSpansLastError_SkipsRecoveryFallbackWithoutMessage(t *testing.T) {
+	now := time.Now()
+	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "", now, nil)
+	assert.Nil(t, got)
+}

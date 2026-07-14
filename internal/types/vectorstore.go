@@ -33,13 +33,13 @@ func IsEnvStoreID(id string) bool {
 // In production: os.Getenv, in tests: custom lookup function.
 type EnvLookupFunc func(string) string
 
-// VectorStore represents a configured vector database instance for a tenant.
-// Each tenant can register multiple VectorStore entries (even of the same engine type)
+// VectorStore represents a configured vector database instance for a workspace.
+// Each workspace can register multiple VectorStore entries (even of the same engine type)
 // to support multi-store scenarios (e.g., ES-hot + ES-warm clusters).
 type VectorStore struct {
 	// Unique identifier (UUID, auto-generated)
 	ID string `yaml:"id" json:"id" gorm:"type:varchar(36);primaryKey"`
-	// Tenant ID for scoping
+	// Workspace ID for scoping
 	TenantID uint64 `yaml:"tenant_id" json:"tenant_id"`
 	// User-friendly name, e.g., "elasticsearch-hot"
 	Name string `yaml:"name" json:"name" gorm:"type:varchar(255);not null"`

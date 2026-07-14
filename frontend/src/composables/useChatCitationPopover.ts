@@ -7,6 +7,7 @@ import {
   getCitationChunkCache,
   setCitationChunkCache,
 } from '@/utils/citationChunkCache'
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 
 export { clearCitationChunkCache } from '@/utils/citationChunkCache'
 
@@ -36,6 +37,7 @@ export function useChatCitationPopover(
   options?: ChatCitationPopoverOptions,
 ) {
   const { t } = useI18n()
+  const referencesDrawer = useChatReferencesDrawer()
 
   const getCacheScope = () => {
     const channelId = options?.embedChannelId?.()
@@ -175,12 +177,42 @@ export function useChatCitationPopover(
     scheduleClose()
   }
 
+  const openDrawerForCitation = (payload: { url?: string; chunkId?: string }) => {
+    const refs = options?.getKnowledgeReferences?.() || []
+    if (!referencesDrawer || !refs.length) return false
+    referencesDrawer.open({
+      references: refs,
+      highlight: payload,
+    })
+    return true
+  }
+
   const onClick = (e: Event) => {
     const target = e.target as HTMLElement
+    const webEl = target.closest?.('.citation-web') as HTMLElement | null
+    if (webEl) {
+      e.preventDefault()
+      e.stopPropagation()
+      const url = webEl.getAttribute('data-url') || ''
+      if (openDrawerForCitation({ url })) return
+      openWeb(webEl)
+      return
+    }
+
     const kbEl = target.closest?.('.citation-kb') as HTMLElement | null
     if (kbEl) {
       e.preventDefault()
       e.stopPropagation()
+      const rawChunkId = kbEl.getAttribute('data-chunk-id') || ''
+      const title = kbEl.getAttribute('data-doc') || ''
+      const kbId = kbEl.getAttribute('data-kb-id') || ''
+      const chunkId =
+        resolveCitationChunkId(
+          rawChunkId,
+          { doc: title, kbId },
+          options?.getKnowledgeReferences?.(),
+        ) || rawChunkId
+      if (openDrawerForCitation({ chunkId })) return
       void openKb(kbEl)
     }
   }
