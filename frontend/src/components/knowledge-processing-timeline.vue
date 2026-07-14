@@ -1224,9 +1224,10 @@ const primaryHeadTitle = computed(() => props.docTitle || t('knowledgeStages.tit
 watch(
   [
     () => totalMs.value,
-    () => data.value?.parse_status,
+    () => headerStatus.value,
     () => currentStageIndex.value,
     () => currentStageLabel.value,
+    () => stages.value.length,
   ],
   () => {
     emit('update:summary', {

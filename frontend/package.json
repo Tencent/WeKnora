@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
-    "test": "node --test"
+    "test": "tsx --test"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
@@ -48,6 +48,7 @@
     "less": "^4.6.4",
     "less-loader": "^12.3.2",
     "npm-run-all2": "^8.0.4",
+    "tsx": "^4.23.1",
     "typescript": "~6.0.3",
     "vite": "^7.3.5",
     "vue-tsc": "^3.2.8"
