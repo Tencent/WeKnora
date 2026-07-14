@@ -26,7 +26,7 @@ interface Settings {
   enableMemory: boolean;      // 是否开启记忆功能
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
-  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源租户 ID（用于后端 model/KB/MCP 解析）
+  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源空间 ID（用于后端 model/KB/MCP 解析）
   autoCheckUpdate?: boolean; // 是否自动检查并下载更新
 }
 
@@ -107,7 +107,7 @@ const defaultSettings: Settings = {
     selectedChatModelId: "",  // 用户当前选择的对话模型ID
   },
   selectedAgentId: BUILTIN_QUICK_ANSWER_ID,  // 默认选中快速问答模式
-  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源租户 ID
+  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源空间 ID
   autoCheckUpdate: true,
 };
 
@@ -178,7 +178,7 @@ export const useSettingsStore = defineStore("settings", {
 
     // 当前选中的智能体ID
     selectedAgentId: (state) => state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
-    // 共享智能体来源租户 ID（可选）
+    // 共享智能体来源空间 ID（可选）
     selectedAgentSourceTenantId: (state) => state.settings.selectedAgentSourceTenantId ?? null,
   },
 
@@ -360,7 +360,7 @@ export const useSettingsStore = defineStore("settings", {
     },
 
     // 从 /auth/me 或 /auth/login 返回的 user.preferences 同步到本地 settings。
-    // 调用方：authStore.setUser（每次登录 / 刷新 user / 切租户后都会触发）。
+    // 调用方：authStore.setUser（每次登录 / 刷新 user / 切空间后都会触发）。
     // 不写后端，纯本地状态 + localStorage 写入，避免把后端的值再原路 PUT 回去。
     hydrateFromUserPreferences(prefs: UserPreferences | undefined | null) {
       if (!prefs) return;

@@ -111,9 +111,10 @@ type KBModelConfigRequest struct {
 		// from "field present with empty/zero value" (clear / disable).
 		// Without that distinction, users could set strategy="auto" once
 		// but never reset it back to legacy / unset.
-		Strategy   *string   `json:"strategy,omitempty"`
-		TokenLimit *int      `json:"tokenLimit,omitempty"`
-		Languages  *[]string `json:"languages,omitempty"`
+		Strategy                  *string   `json:"strategy,omitempty"`
+		TokenLimit                *int      `json:"tokenLimit,omitempty"`
+		Languages                 *[]string `json:"languages,omitempty"`
+		TableMetadataInstructions *string   `json:"tableMetadataInstructions,omitempty"`
 	} `json:"documentSplitting"`
 
 	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
@@ -126,17 +127,19 @@ type KBModelConfigRequest struct {
 
 	// 知识图谱配置
 	NodeExtract struct {
-		Enabled   bool                  `json:"enabled"`
-		Text      string                `json:"text"`
-		Tags      []string              `json:"tags"`
-		Nodes     []types.GraphNode     `json:"nodes"`
-		Relations []types.GraphRelation `json:"relations"`
+		Enabled            bool                  `json:"enabled"`
+		Text               string                `json:"text"`
+		Tags               []string              `json:"tags"`
+		Nodes              []types.GraphNode     `json:"nodes"`
+		Relations          []types.GraphRelation `json:"relations"`
+		CustomInstructions string                `json:"customInstructions"`
 	} `json:"nodeExtract"`
 
 	// 问题生成配置
 	QuestionGeneration struct {
-		Enabled       bool `json:"enabled"`
-		QuestionCount int  `json:"questionCount"`
+		Enabled            bool   `json:"enabled"`
+		QuestionCount      int    `json:"questionCount"`
+		CustomInstructions string `json:"customInstructions"`
 	} `json:"questionGeneration"`
 }
 
@@ -344,6 +347,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if req.DocumentSplitting.Languages != nil {
 		kb.ChunkingConfig.Languages = *req.DocumentSplitting.Languages
 	}
+	if req.DocumentSplitting.TableMetadataInstructions != nil {
+		kb.ChunkingConfig.TableMetadataInstructions = strings.TrimSpace(*req.DocumentSplitting.TableMetadataInstructions)
+	}
 
 	// 更新多模态配置
 	if req.Multimodal.Enabled {
@@ -351,8 +357,12 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	} else {
 		kb.VLMConfig.ModelID = ""
 	}
+	if req.VLMConfig != nil {
+		kb.VLMConfig.DescriptionLanguage = strings.TrimSpace(req.VLMConfig.DescriptionLanguage)
+		kb.VLMConfig.CustomInstructions = strings.TrimSpace(req.VLMConfig.CustomInstructions)
+	}
 
-	// 存储引擎：仅写入 provider 到新字段，参数从租户全局 StorageEngineConfig 读取
+	// 存储引擎：仅写入 provider 到新字段，参数从空间全局 StorageEngineConfig 读取
 	provider := strings.ToLower(strings.TrimSpace(req.StorageProvider))
 	if provider == "" {
 		provider = "local"
@@ -387,12 +397,15 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		}
 
 		kb.ExtractConfig = &types.ExtractConfig{
-			Enabled:   req.NodeExtract.Enabled,
-			Text:      req.NodeExtract.Text,
-			Tags:      req.NodeExtract.Tags,
-			Nodes:     nodes,
-			Relations: relations,
+			Enabled:            req.NodeExtract.Enabled,
+			Text:               req.NodeExtract.Text,
+			Tags:               req.NodeExtract.Tags,
+			Nodes:              nodes,
+			Relations:          relations,
+			CustomInstructions: strings.TrimSpace(req.NodeExtract.CustomInstructions),
 		}
+	} else if kb.ExtractConfig != nil {
+		kb.ExtractConfig.Enabled = false
 	} else {
 		kb.ExtractConfig = &types.ExtractConfig{Enabled: false}
 	}
@@ -412,11 +425,20 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			questionCount = 10
 		}
 		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
-			Enabled:       true,
-			QuestionCount: questionCount,
+			Enabled:            true,
+			QuestionCount:      questionCount,
+			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
 	} else {
-		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{Enabled: false}
+		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
+			Enabled:            false,
+			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
+		}
+	}
+	types.NormalizeKnowledgeBasePromptInstructions(kb)
+	if err := validateKnowledgeBasePromptInstructions(kb); err != nil {
+		c.Error(err)
+		return
 	}
 
 	// 保存更新后的知识库
@@ -1451,6 +1473,20 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	} else {
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
+	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" {
+		if config["multimodal"] == nil {
+			config["multimodal"] = map[string]interface{}{
+				"enabled": hasMultimodal,
+			}
+		}
+		multimodal := config["multimodal"].(map[string]interface{})
+		if kb.VLMConfig.DescriptionLanguage != "" {
+			multimodal["descriptionLanguage"] = kb.VLMConfig.DescriptionLanguage
+		}
+		if kb.VLMConfig.CustomInstructions != "" {
+			multimodal["customInstructions"] = kb.VLMConfig.CustomInstructions
+		}
+	}
 
 	// 如果没有Rerank模型，设置rerank为disabled
 	if config["rerank"] == nil {
@@ -1479,6 +1515,9 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 		if len(kb.ChunkingConfig.Languages) > 0 {
 			ds["languages"] = kb.ChunkingConfig.Languages
+		}
+		if kb.ChunkingConfig.TableMetadataInstructions != "" {
+			ds["tableMetadataInstructions"] = kb.ChunkingConfig.TableMetadataInstructions
 		}
 		config["documentSplitting"] = ds
 
@@ -1514,15 +1553,31 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	}
 
 	if kb.ExtractConfig != nil {
-		config["nodeExtract"] = map[string]interface{}{
+		nodeExtract := map[string]interface{}{
 			"enabled":   kb.ExtractConfig.Enabled,
 			"text":      kb.ExtractConfig.Text,
 			"tags":      kb.ExtractConfig.Tags,
 			"nodes":     kb.ExtractConfig.Nodes,
 			"relations": kb.ExtractConfig.Relations,
 		}
+		if kb.ExtractConfig.CustomInstructions != "" {
+			nodeExtract["customInstructions"] = kb.ExtractConfig.CustomInstructions
+		}
+		config["nodeExtract"] = nodeExtract
 	} else {
 		config["nodeExtract"] = map[string]interface{}{
+			"enabled": false,
+		}
+	}
+
+	if kb.QuestionGenerationConfig != nil {
+		config["questionGeneration"] = map[string]interface{}{
+			"enabled":            kb.QuestionGenerationConfig.Enabled,
+			"questionCount":      kb.QuestionGenerationConfig.QuestionCount,
+			"customInstructions": kb.QuestionGenerationConfig.CustomInstructions,
+		}
+	} else {
+		config["questionGeneration"] = map[string]interface{}{
 			"enabled": false,
 		}
 	}
@@ -1641,7 +1696,7 @@ func (h *InitializationHandler) buildTestModel(
 	}
 }
 
-// resolveTenantWeKnoraCloudCreds 从当前租户上下文里取出 WeKnoraCloud 凭证，
+// resolveTenantWeKnoraCloudCreds 从当前空间上下文里取出 WeKnoraCloud 凭证，
 // 供测试连接端点补齐 appID/appSecret。与 service.resolveWeKnoraCloudCredentials
 // 对应，但因为 handler 还没有被注入 tenantService（历史原因），暂时从
 // TenantInfoFromContext 读取，等效果相同。
@@ -1696,7 +1751,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("租户信息未找到"))
+		c.Error(errors.NewBadRequestError("空间信息未找到"))
 		return
 	}
 
@@ -1770,7 +1825,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("租户信息未找到"))
+		c.Error(errors.NewBadRequestError("空间信息未找到"))
 		return
 	}
 
@@ -1922,7 +1977,7 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
-		c.Error(errors.NewBadRequestError("租户信息未找到"))
+		c.Error(errors.NewBadRequestError("空间信息未找到"))
 		return
 	}
 

@@ -49,7 +49,7 @@
             </div>
         </t-tooltip>
 
-        <!-- 租户选择器：仅在用户可切换租户时显示 -->
+        <!-- 空间选择器：仅在用户可切换空间时显示 -->
         <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
 
         <!-- 折叠时右侧拖拽展开手柄 -->
@@ -153,6 +153,7 @@
                                             @navigate="gotopage(subitem.path)"
                                             @toggle-select="toggleBatchSelect(subitem.id)"
                                             @menu-click="handleSessionMenuClick($event, subitem)"
+                                            @rename-submit="renameSessionTitle(subitem, $event.title)"
                                             @hover-in="mouseenteBotDownr(subitem.id)" @hover-out="mouseleaveBotDown" />
                                     </div>
                                 </div>
@@ -201,7 +202,7 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages, pinSession, unpinSession } from "@/api/chat/index";
+import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages, pinSession, unpinSession, updateSession } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
 import SessionSidebarRow from './SessionSidebarRow.vue';
@@ -354,7 +355,7 @@ const batchDisplayCount = computed(() =>
     isAllBatchSelected.value ? total.value : batchSelectedIds.value.length
 )
 
-// 是否可以访问所有租户
+// 是否可以访问所有空间
 const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);
 
 // 是否处于知识库详情页（不包括全局聊天）
@@ -616,6 +617,7 @@ const buildSessionMenuOptions = (item: any) => {
         });
     }
     options.push(
+        { content: t('menu.renameSession'), value: 'rename', prefixIcon: () => h(TIcon, { name: 'edit-1', size: '16px' }) },
         { content: t('menu.clearMessages'), value: 'clearMessages', prefixIcon: () => h(TIcon, { name: 'clear', size: '16px' }) },
         { content: t('menu.batchManage'), value: 'batchManage', prefixIcon: () => h(TIcon, { name: 'queue', size: '16px' }) },
         { content: t('upload.deleteRecord'), value: 'delete', theme: 'error', prefixIcon: () => h(TIcon, { name: 'delete', size: '16px' }) },
@@ -636,6 +638,26 @@ const updateSessionInBuckets = (
     }
     sessionBuckets.value = next;
     syncMenuStoreFromBuckets();
+};
+
+const renameSessionTitle = async (item: any, title: string) => {
+    try {
+        const res: any = await updateSession(item.id, {
+            title,
+            description: item.description || '',
+        });
+        if (res && res.success) {
+            updateSessionInBuckets(item.id, {
+                title: res.data?.title || title,
+                isNoTitle: false,
+            });
+            MessagePlugin.success(t('menu.renameSessionSuccess'));
+        } else {
+            MessagePlugin.error(t('menu.renameSessionFailed'));
+        }
+    } catch {
+        MessagePlugin.error(t('menu.renameSessionFailed'));
+    }
 };
 
 const togglePin = (item: any, pin: boolean) => {

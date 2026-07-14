@@ -289,7 +289,8 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
-              <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
+              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
+                class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -305,6 +306,13 @@
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
+                <transition name="follow-up-toolbar-loading">
+                  <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                    aria-live="polite">
+                    <t-icon name="lightbulb" />
+                    <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
+                  </span>
+                </transition>
               </div>
             </div>
 
@@ -434,7 +442,13 @@
               || 1
           }) }}</span>
         </div>
-        <t-link theme="primary" hover="color" @click="navigateToWikiGraph">
+        <t-link
+          theme="primary"
+          hover="color"
+          :href="wikiGraphHref"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <template #prefixIcon><t-icon name="chart-bubble" /></template>
           {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
         </t-link>
@@ -690,15 +704,17 @@ const openWikiDrawer = async (kbId: string, slug: string) => {
   }
 };
 
-const navigateToWikiGraph = () => {
-  if (currentWikiKbId.value && wikiDrawerPage.value?.slug) {
-    wikiDrawerVisible.value = false;
-    try {
-      router.push(`/platform/knowledge-bases/${currentWikiKbId.value}?tab=graph&slug=${encodeURIComponent(wikiDrawerPage.value.slug)}`);
-    } catch (error) {
-      console.error('Failed to navigate to wiki graph:', error);
-    }
-  }
+const wikiGraphHref = computed(() => {
+  if (!currentWikiKbId.value || !wikiDrawerPage.value?.slug) return '';
+  return router.resolve({
+    path: `/platform/knowledge-bases/${currentWikiKbId.value}`,
+    query: { tab: 'graph', slug: wikiDrawerPage.value.slug },
+  }).href;
+});
+
+const openRouteInNewTab = (path: string) => {
+  const href = router.resolve(path).href;
+  window.open(href, '_blank', 'noopener,noreferrer');
 };
 
 const handleWikiDrawerClick = (e: MouseEvent) => {
@@ -750,6 +766,7 @@ const props = defineProps<{
   embedSessionSig?: string;
   embedVisitorId?: string;
   ragMode?: boolean;
+  followUpLoading?: boolean;
 }>();
 
 const embedAuthProps = computed(() => ({
@@ -1883,7 +1900,7 @@ const onRootClick = (e: Event) => {
     }
     if (kbId) {
       try {
-        router.push(`/platform/knowledge-bases/${kbId}`);
+        openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
       } catch (error) {
         console.error('Failed to navigate to knowledge base:', error);
       }
@@ -1955,7 +1972,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
       }
       if (kbId) {
         try {
-          router.push(`/platform/knowledge-bases/${kbId}`);
+          openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
         } catch (error) {
           console.error('Failed to navigate to knowledge base:', error);
         }

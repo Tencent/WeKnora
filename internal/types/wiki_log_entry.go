@@ -79,7 +79,7 @@ type WikiLogEntry struct {
 	// frontend pagination uses it as a stable cursor without needing to
 	// disambiguate identical created_at values.
 	ID uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
-	// Tenant scope, mirrored from the enclosing knowledge base.
+	// Workspace scope, mirrored from the enclosing knowledge base.
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 	// Knowledge base this event belongs to.
 	KnowledgeBaseID string `json:"knowledge_base_id" gorm:"type:varchar(36);index"`

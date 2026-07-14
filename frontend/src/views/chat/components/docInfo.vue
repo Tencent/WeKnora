@@ -30,9 +30,14 @@
                     </div>
                     <div class="doc-group-actions" v-if="!embeddedMode && group.knowledgeBaseId" @click.stop>
                         <t-tooltip :content="$t('chat.navigateToDocument')">
-                            <span class="doc-group-navigate" @click="navigateToDocument(group)">
+                            <a
+                                class="doc-group-navigate"
+                                :href="getDocumentHref(group)"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
                                 <t-icon name="jump" size="14px" />
-                            </span>
+                            </a>
                         </t-tooltip>
                     </div>
                 </div>
@@ -165,16 +170,16 @@ const truncateContent = (content, maxLen) => {
     return text.slice(0, maxLen) + '...';
 };
 
-const navigateToDocument = (group) => {
-    if (!group.knowledgeBaseId) return;
+const getDocumentHref = (group) => {
+    if (!group.knowledgeBaseId) return '';
     const query = {};
     if (group.knowledgeId) {
         query.knowledge_id = group.knowledgeId;
     }
-    router.push({
+    return router.resolve({
         path: `/platform/knowledge-bases/${group.knowledgeBaseId}`,
         query
-    });
+    }).href;
 };
 
 const getWebSearchUrl = (item) => {
@@ -444,6 +449,7 @@ const getWebSearchDisplayText = (item) => {
             border-radius: 4px;
             color: var(--td-brand-color);
             cursor: pointer;
+            text-decoration: none;
             transition: all 0.15s ease;
 
             &:hover {

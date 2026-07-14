@@ -31,6 +31,14 @@ func NewUserRepository(db *gorm.DB) interfaces.UserRepository {
 
 // CreateUser creates a user
 func (r *userRepository) CreateUser(ctx context.Context, user *types.User) error {
+	// users.tenant_id is nullable in both PostgreSQL and SQLite. GORM would
+	// otherwise serialise the uint64 zero value as 0, which violates the
+	// PostgreSQL FK and loses the distinction between "not provisioned yet"
+	// and a real tenant. Omitting the column stores SQL NULL; reads hydrate it
+	// back as zero, the domain sentinel used by tenantless auth flows.
+	if user != nil && user.TenantID == 0 {
+		return r.db.WithContext(ctx).Omit("tenant_id").Create(user).Error
+	}
 	return r.db.WithContext(ctx).Create(user).Error
 }
 
@@ -104,6 +112,19 @@ func (r *userRepository) GetUserByTenantID(ctx context.Context, tenantID uint64)
 
 // UpdateUser updates a user
 func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error {
+	if user != nil && user.TenantID == 0 {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Preserve Save's all-fields behaviour while keeping the nullable
+			// tenant column out of the struct write, then explicitly store NULL.
+			// Writing uint64(0) would violate the PostgreSQL tenant FK.
+			if err := tx.Omit("tenant_id").Save(user).Error; err != nil {
+				return err
+			}
+			return tx.Model(&types.User{}).
+				Where("id = ?", user.ID).
+				UpdateColumn("tenant_id", nil).Error
+		})
+	}
 	return r.db.WithContext(ctx).Save(user).Error
 }
 

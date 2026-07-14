@@ -30,6 +30,7 @@ type EmbedChannelHandler struct {
 	sessionService    interfaces.SessionService
 	sessionHandler    *session.Handler
 	messageHandler    *MessageHandler
+	suggestionHandler *MessageSuggestionHandler
 	mcpOAuthHandler   *MCPOAuthHandler
 	mcpServiceHandler *MCPServiceHandler
 	redis             *redis.Client
@@ -40,6 +41,7 @@ func NewEmbedChannelHandler(
 	sessionService interfaces.SessionService,
 	sessionHandler *session.Handler,
 	messageHandler *MessageHandler,
+	suggestionHandler *MessageSuggestionHandler,
 	mcpOAuthHandler *MCPOAuthHandler,
 	mcpServiceHandler *MCPServiceHandler,
 	redisClient *redis.Client,
@@ -49,6 +51,7 @@ func NewEmbedChannelHandler(
 		sessionService:    sessionService,
 		sessionHandler:    sessionHandler,
 		messageHandler:    messageHandler,
+		suggestionHandler: suggestionHandler,
 		mcpOAuthHandler:   mcpOAuthHandler,
 		mcpServiceHandler: mcpServiceHandler,
 		redis:             redisClient,
@@ -460,6 +463,45 @@ func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 		return
 	}
 	h.sessionHandler.StopSession(c)
+}
+
+func (h *EmbedChannelHandler) EmbedEnsureMessageSuggestions(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	ch, _ := middleware.EmbedChannelFromContext(c.Request.Context())
+	if ch == nil || !ch.ShowSuggestedQuestions || h.suggestionHandler == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"status": "suppressed", "suppression_reason": "channel_disabled", "questions": []any{},
+		}})
+		return
+	}
+	h.suggestionHandler.Ensure(c)
+}
+
+func (h *EmbedChannelHandler) EmbedGetMessageSuggestions(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	ch, _ := middleware.EmbedChannelFromContext(c.Request.Context())
+	if ch == nil || !ch.ShowSuggestedQuestions || h.suggestionHandler == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"status": "suppressed", "suppression_reason": "channel_disabled", "questions": []any{},
+		}})
+		return
+	}
+	h.suggestionHandler.Get(c)
+}
+
+func (h *EmbedChannelHandler) EmbedRecordSuggestionEvent(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.suggestionHandler == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "suggestion service unavailable"})
+		return
+	}
+	h.suggestionHandler.RecordEvent(c)
 }
 
 func (h *EmbedChannelHandler) EmbedResolveMCPOAuth(c *gin.Context) {

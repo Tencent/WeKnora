@@ -69,6 +69,14 @@
               :embed-session-sig="sessionSig"
               :embed-visitor-id="visitorId"
             />
+            <FollowUpSuggestions v-if="!session.suggestionsDismissed"
+              :suggestion-set="session.suggestionSet as any"
+              :loading="Boolean(session.suggestionLoading)"
+              :allow-regenerate="Boolean((session.suggestionSet as any)?.allow_regenerate)"
+              @select="(item) => handleFollowUpSelect(session, item)"
+              @regenerate="loadFollowUpSuggestions(session, true, true)"
+              @impression="(set) => recordFollowUpEvent(set, 'impression')"
+              @dismiss="(set) => dismissFollowUps(session, set)" />
           </div>
         </div>
 
@@ -107,13 +115,22 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getEmbedSuggestedQuestions, onEmbedHostOpenWithQuery, type SuggestedQuestion } from '@/api/embed'
+import {
+  ensureEmbedMessageSuggestions,
+  getEmbedMessageSuggestions,
+  getEmbedSuggestedQuestions,
+  onEmbedHostOpenWithQuery,
+  recordEmbedMessageSuggestionEvent,
+  type SuggestedQuestion,
+} from '@/api/embed'
 import EmbedInputField from '@/components/EmbedInputField.vue'
 import EmbedBotMessage from '@/views/embed/EmbedBotMessage.vue'
 import EmbedUserMessage from '@/views/embed/EmbedUserMessage.vue'
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue'
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
+import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue'
+import type { MessageSuggestionItem, MessageSuggestionSet } from '@/api/message-suggestion'
 
 provideChatReferencesDrawer()
 
@@ -150,6 +167,48 @@ const visitorIdRef = toRef(props, 'visitorId')
 const suggestedQuestions = ref<SuggestedQuestion[]>([])
 const suggestedLoading = ref(false)
 const hostContextRef = ref<Record<string, unknown>>(props.hostContext || {})
+
+const loadFollowUpSuggestions = async (
+  message: Record<string, unknown>,
+  ensure = false,
+  regenerate = false,
+) => {
+  const messageId = String(message.id || message.assistant_message_id || '')
+  const targetSessionId = props.sessionId
+  if (!props.showSuggestedQuestions || !messageId || !targetSessionId || message.suggestionsDismissed) return
+  message.suggestionLoading = true
+  try {
+    let response = ensure
+      ? await ensureEmbedMessageSuggestions(
+        props.channelId, props.token, targetSessionId, messageId, props.sessionSig, props.visitorId, regenerate,
+      )
+      : await getEmbedMessageSuggestions(
+        props.channelId, props.token, targetSessionId, messageId, props.sessionSig, props.visitorId,
+      )
+    let set = response?.data
+    for (let attempt = 0; set?.status === 'generating' && attempt < 120; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      if (props.sessionId !== targetSessionId || message.suggestionsDismissed) return
+      response = await getEmbedMessageSuggestions(
+        props.channelId, props.token, targetSessionId, messageId, props.sessionSig, props.visitorId,
+      )
+      set = response?.data
+    }
+    message.suggestionSet = set?.status === 'ready' ? set : null
+  } catch {
+    message.suggestionSet = null
+  } finally {
+    message.suggestionLoading = false
+  }
+}
+
+const loadPersistedFollowUps = (messages: Record<string, unknown>[]) => {
+  for (const message of messages) {
+    if (message.role === 'assistant' && message.is_completed && message.suggestionSet === undefined) {
+      void loadFollowUpSuggestions(message, false)
+    }
+  }
+}
 
 function asUnknownArray(value: unknown): unknown[] | undefined {
   return Array.isArray(value) ? value : undefined
@@ -210,6 +269,7 @@ const {
   onClickScrollToBottom,
   sendMsg,
   handleStopGeneration,
+  setSuggestionAttribution,
 } = useEmbedChatSession({
   sessionId: sessionIdRef,
   sessionSig: sessionSigRef,
@@ -227,6 +287,8 @@ const {
       emit('session-title', title)
     }
   },
+  onTurnComplete: (message) => { void loadFollowUpSuggestions(message, true) },
+  onMessagesLoaded: loadPersistedFollowUps,
 })
 
 const welcomeText = computed(() => props.welcomeMessage?.trim() || '')
@@ -277,6 +339,38 @@ const handleSuggestedClick = (question: string) => {
   const text = question.trim()
   if (!text || isReplying.value) return
   void sendMsg(text, { webSearchEnabled: webSearchEnabled.value })
+}
+
+const recordFollowUpEvent = (
+  set: MessageSuggestionSet,
+  eventType: 'impression' | 'click' | 'dismiss',
+  questionId = '',
+) => {
+  if (!set?.id) return
+  void recordEmbedMessageSuggestionEvent(
+    props.channelId,
+    props.token,
+    props.sessionId,
+    props.sessionSig,
+    props.visitorId,
+    set.id,
+    eventType,
+    questionId,
+  ).catch(() => undefined)
+}
+
+const handleFollowUpSelect = (message: Record<string, unknown>, item: MessageSuggestionItem) => {
+  const set = message.suggestionSet as MessageSuggestionSet | undefined
+  if (set) {
+    recordFollowUpEvent(set, 'click', item.id)
+    setSuggestionAttribution(set.id, item.id)
+  }
+  if (!isReplying.value) void sendMsg(item.text, { webSearchEnabled: webSearchEnabled.value })
+}
+
+const dismissFollowUps = (message: Record<string, unknown>, set: MessageSuggestionSet) => {
+  message.suggestionsDismissed = true
+  recordFollowUpEvent(set, 'dismiss')
 }
 
 let removeOpenQueryListener: (() => void) | null = null

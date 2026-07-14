@@ -2,7 +2,7 @@
 
 [返回目录](./README.md)
 
-组织（Organization，又称"空间"）是 WeKnora 的多租户协作单元。一个用户可以创建/加入多个组织，并以 owner / admin / editor / viewer 的角色参与；知识库与智能体可以共享到组织内，组织成员根据角色获得相应的访问权限。
+组织（Organization，又称"空间"）是 WeKnora 的多空间协作单元。一个用户可以创建/加入多个组织，并以 owner / admin / editor / viewer 的角色参与；知识库与智能体可以共享到组织内，组织成员根据角色获得相应的访问权限。
 
 本页文档覆盖以下六类接口：
 
@@ -1183,7 +1183,7 @@ curl --location 'http://localhost:8080/api/v1/shared-knowledge-bases' \
 
 ### GET `/shared-agents` - 获取共享给我的智能体（跨组织）
 
-返回当前用户通过所有组织共享获得的智能体列表，供"全部智能体"视图使用。`disabled_by_me: true` 表示当前租户已在对话下拉中隐藏该智能体。
+返回当前用户通过所有组织共享获得的智能体列表，供"全部智能体"视图使用。`disabled_by_me: true` 表示当前空间已在对话下拉中隐藏该智能体。
 
 **请求**:
 

@@ -60,6 +60,7 @@ type RouterParams struct {
 	ChunkHandler                 *handler.ChunkHandler
 	SessionHandler               *session.Handler
 	MessageHandler               *handler.MessageHandler
+	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
 	EvaluationHandler            *handler.EvaluationHandler
@@ -213,11 +214,15 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		// KB-scoped image proxy: lets tenants render images embedded in
+		// org-shared / agent-visible KB content, which the tenant-scoped
+		// /files route cannot serve because it enforces same-tenant paths.
+		serveKBScopedFiles(v1, rbacGuards, params.TenantService, params.FileService)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
-		RegisterSessionRoutes(v1, params.SessionHandler, rbacGuards)
+		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
@@ -387,11 +392,14 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 		// FAQ import result display status
 		faq.PUT("/import/last-result/display", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateLastImportResultDisplayStatus)
 	}
-	// FAQ import progress route (outside of knowledge-base scope) — Viewer+
-	faqImport := r.Group("/faq/import")
-	{
-		faqImport.GET("/progress/:task_id", g.Viewer(), handler.GetImportProgress)
-	}
+	// FAQ import progress route (outside of knowledge-base scope) — Viewer+.
+	// Scoped API keys that can ingest (they start the import) or retrieve may
+	// poll their own import/dry-run progress. The task is tenant-scoped by
+	// requireTaskProgressTenant, so a key only ever sees its own tenant's
+	// tasks. Declared through apiKeyRoute so the APIKeyGate doesn't fail-closed
+	// and 403 the poller with "scope does not allow this operation".
+	g.apiKeyRoute(r, http.MethodGet, "/faq/import/progress/:task_id",
+		apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.GetImportProgress)
 }
 
 // RegisterKnowledgeBaseRoutes 注册知识库相关的路由
@@ -399,13 +407,16 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	// 知识库路由组。Scoped API key 需要 retrieve 能力读取（限 KB 范围）；KB 内容写入
 	// 由 RegisterKnowledgeRoutes/FAQ/Tag/Wiki 等子路由的 ingest 能力控制；
 	// KB 自身的元数据/生命周期管理需要 full access 或 manage_kbs。创建/拷贝
-	// KB 没有单个目标 KB 可约束，继续不对 scoped API key 开放。
+	// KB 没有单个目标 KB 可约束，因此不对 scoped key 开放（capability 无法
+	// 把它约束到某个 KB 上）；但 full-access key 是空间级全权，与它已能
+	// 更新/删除/管理 KB 对齐，允许其创建 KB，消除"能删不能建"的不一致。
 	kbgrp := r.Group("/knowledge-bases")
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))
 	kbManagement := kb.With(apiKeyManageKnowledgeBases(apiKeyFullAccess()))
 	{
-		// 创建知识库 — Contributor+ for JWT callers; API keys may not create KBs.
-		kbgrp.POST("", g.Contributor(), handler.CreateKnowledgeBase)
+		// 创建知识库 — Contributor+ for JWT callers; full-access API keys may
+		// create KBs (scoped keys stay default-deny: no KB to bound against).
+		kb.With(apiKeyFullAccess()).POST("", g.Contributor(), handler.CreateKnowledgeBase)
 		// 获取知识库列表 — Viewer+ for JWT callers; retrieve-capable API keys pass via the gate.
 		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
 		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限
@@ -428,6 +439,8 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.GET("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
 		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)
 		kbgrp.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
+		// 创建知识库副本 — Contributor+ 且对源 KB 有 read 权限；只创建新的 KB 设置记录，不复制内容/索引/分享。
+		kbgrp.POST("/:id/duplicate", g.Contributor(), g.KBAccessRead("id"), handler.DuplicateKnowledgeBase)
 		// 获取知识库复制进度 — Viewer+
 		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
@@ -493,7 +506,12 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 // the message routes above. A future refactor can introduce
 // per-session ownership in the middleware layer the same way KB/agent
 // routes do today.
-func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
+func RegisterSessionRoutes(
+	r *gin.RouterGroup,
+	handler *session.Handler,
+	suggestionHandler *handler.MessageSuggestionHandler,
+	g *rbacGuards,
+) {
 	// Sessions are per-user chat state, not knowledge-base content. The
 	// chat capability lets a scoped key run the full conversation flow
 	// (create/manage its own sessions) without full tenant access.
@@ -516,6 +534,13 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbac
 		sessions.DELETE("/:id/pin", handler.UnpinSession)
 		// 继续接收活跃流
 		sessions.GET("/continue-stream/:session_id", handler.ContinueStream)
+		if suggestionHandler != nil {
+			// Gin requires wildcard names to be identical within the same HTTP-method
+			// radix tree. Existing GET session routes use :id, so keep that name here.
+			sessions.GET("/:id/messages/:message_id/suggestions", suggestionHandler.Get)
+			sessions.POST("/:session_id/messages/:message_id/suggestions", suggestionHandler.Ensure)
+			sessions.POST("/:session_id/suggestion-events", suggestionHandler.RecordEvent)
+		}
 	}
 }
 
@@ -543,7 +568,7 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 	}
 }
 
-// RegisterTenantRoutes 注册租户相关的路由
+// RegisterTenantRoutes 注册空间相关的路由
 //
 // Tenant-internal RBAC for /tenants/:id:
 //   - GET   /:id          Viewer+ (read tenant settings)
@@ -587,17 +612,17 @@ func RegisterTenantRoutes(
 	r.GET("/tenants/all", g.CrossTenant(), handler.ListAllTenants)
 	r.GET("/tenants/search", g.CrossTenant(), handler.SearchTenants)
 
-	// 租户路由组
+	// 空间路由组
 	tenantRoutes := r.Group("/tenants")
 	{
-		// 创建租户对所有已登录用户开放：用户可以为自己再开一个工作区，
-		// handler 内部会调 EnsureOwner 把调用者写成新租户的 Owner。
-		// 跨租户超管走同一个端点，但能携带 storage_quota / status 等
+		// 创建空间对所有已登录用户开放：用户可以为自己再开一个工作区，
+		// handler 内部会调 EnsureOwner 把调用者写成新空间的 Owner。
+		// 跨空间超管走同一个端点，但能携带 storage_quota / status 等
 		// 全字段（见 handler.CreateTenant 内部分支）。
 		// 安全说明：这里不挂 g.CrossTenant()，因为 self-service 创建
-		// 不需要跨租户特权；handler 也不读写 X-Tenant-ID 指向的现有
-		// 租户，所以越过 PathTenantMatch 守卫不会扩大攻击面。
-		// 创建租户不对 API key 开放（注册在原始 group，默认拒绝）。
+		// 不需要跨空间特权；handler 也不读写 X-Tenant-ID 指向的现有
+		// 空间，所以越过 PathTenantMatch 守卫不会扩大攻击面。
+		// 创建空间不对 API key 开放（注册在原始 group，默认拒绝）。
 		tenantRoutes.POST("", handler.CreateTenant)
 		g.apiKeyRoute(tenantRoutes, http.MethodGet, "", apiKeyManageTenantSettings(apiKeyFullAccess()), handler.ListTenants)
 
@@ -681,7 +706,7 @@ func RegisterModelRoutes(
 	credHandler *handler.ModelCredentialsHandler,
 	g *rbacGuards,
 ) {
-	// 模型路由组。租户级基础设施：仅完全访问（Owner）API key 可访问。
+	// 模型路由组。空间级基础设施：仅完全访问（Owner）API key 可访问。
 	models := g.apiKeyGroup(r.Group("/models"), apiKeyManageModels(apiKeyFullAccess()))
 	{
 		// 获取模型厂商列表 — Viewer+
@@ -694,13 +719,13 @@ func RegisterModelRoutes(
 		models.POST("/:id/debug", g.Admin(), handler.DebugModel)
 		// 获取单个模型 — Viewer+
 		models.GET("/:id", g.Viewer(), handler.GetModel)
-		// 更新模型 — Admin+
-		models.PUT("/:id", g.Admin(), handler.UpdateModel)
+		// 更新模型 — Admin+；内置模型仍由服务层额外限定为 SystemAdmin。
+		models.PUT("/:id", g.AdminOrSystemAdmin(), handler.UpdateModel)
 		// 删除模型 — Admin+
 		models.DELETE("/:id", g.Admin(), handler.DeleteModel)
 		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+
-		models.PUT("/:id/credentials", g.Admin(), credHandler.Put)
-		models.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		models.PUT("/:id/credentials", g.AdminOrSystemAdmin(), credHandler.Put)
+		models.DELETE("/:id/credentials/:field", g.AdminOrSystemAdmin(), credHandler.DeleteField)
 	}
 }
 
@@ -785,8 +810,8 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 		apiKeyManageKnowledgeBases(apiKeyFullAccess()), g.OwnedKBOrAdminFromKbIDParam(), g.KBAccessWrite("kbId"), handler.UpdateKBConfig)
 
 	// Ollama / 远程 API / 抽取等系统级检测/下载操作。这些不绑某个 KB，
-	// 会改租户级模型配置或拉远端模型；JWT 侧只读探测 Viewer+、变更 Admin+。
-	// 对 API key 均为租户级：full-access key 可用，scoped key 需要 manage_models。
+	// 会改空间级模型配置或拉远端模型；JWT 侧只读探测 Viewer+、变更 Admin+。
+	// 对 API key 均为空间级：full-access key 可用，scoped key 需要 manage_models。
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/status", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.CheckOllamaStatus)
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/models", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.ListOllamaModels)
 	g.apiKeyRoute(r, http.MethodPost, "/initialization/ollama/models/check", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.CheckOllamaModels)
@@ -863,6 +888,7 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.POST("/promote", handler.PromoteUserToSystemAdmin)
 		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
 		adminRoutes.GET("/list", handler.ListSystemAdmins)
+		adminRoutes.POST("/users/reset-password", handler.ResetUserPassword)
 
 		// P1: platform-wide system settings (DB-backed runtime tunables).
 		// Reads return raw model rows / arrays (no `gin.H{"data":...}`
@@ -872,6 +898,13 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.GET("/settings/:key", handler.GetSystemSetting)
 		adminRoutes.PUT("/settings/:key", handler.UpdateSystemSetting)
 		adminRoutes.DELETE("/settings/:key", handler.ResetSystemSetting)
+
+		// Runtime operations: live asynq queue depths, safe task projections,
+		// and state-checked task actions for the SystemAdmin dashboard. Lite
+		// mode returns available=false.
+		adminRoutes.GET("/runtime/queues", handler.GetRuntimeQueues)
+		adminRoutes.GET("/runtime/queues/:queue/tasks", handler.ListRuntimeTasks)
+		adminRoutes.POST("/runtime/queues/:queue/tasks/:task_id/actions/:action", handler.MutateRuntimeTask)
 
 		// Bulk action — write the current default-quota setting onto
 		// every existing tenant. Lives under /tenants instead of
@@ -1172,10 +1205,11 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 
 	// Knowledge base sharing routes (add to existing kb routes).
 	// 分享 KB 到组织 = 让组织里所有人能读这个 KB；这跟"修改 KB 元信息"
-	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己租户里
+	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己空间里
 	// 也不能私自把 KB 暴露出去。
-	// KB share management is JWT-only; not declared for API keys.
-	kbShares := r.Group("/knowledge-bases/:id/shares")
+	// 分享管理不通过 capability 授予（manage_spaces 也不含）；仅 full-access
+	// key（空间级全权）可管理分享，scoped key 保持 default-deny。
+	kbShares := g.apiKeyGroup(r.Group("/knowledge-bases/:id/shares"), apiKeyFullAccess())
 	{
 		// Share knowledge base
 		kbShares.POST("", g.OwnedKBOrAdmin(), orgHandler.ShareKnowledgeBase)
@@ -1190,12 +1224,13 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// Agent sharing routes — same rationale as KB shares: 分享/取消分享
 	// 跟修改 agent 同等敏感，挂 OwnedAgentOrAdmin。
 	//
-	// GET 同样走 OwnedAgentOrAdmin：service.ListSharesByAgent 没有 owner
-	// 校验（与 ListSharesByKnowledgeBase 不对称），如果路由层只挂 Viewer
-	// 任何同租户成员都能枚举他人 agent 的分享去向——这里把 owner 校验
-	// 兜底到路由层，匹配 POST/DELETE 的矩阵。
-	// Agent share management is JWT-only; not declared for API keys.
-	agentShares := r.Group("/agents/:id/shares")
+	// GET 走 OwnedAgentOrAdmin 作为 JWT 侧的 owner 校验；service 层
+	// ListSharesByAgent 现在也强制 tenant 归属（与 ListSharesByKnowledgeBase
+	// 对齐），这样 full-access API key（会短路路由 guard）也无法跨空间
+	// 枚举他人 agent 的分享。
+	// 同 KB 分享：分享管理不通过 capability 授予；仅 full-access key
+	// （空间级全权）可管理 agent 分享，scoped key 保持 default-deny。
+	agentShares := g.apiKeyGroup(r.Group("/agents/:id/shares"), apiKeyFullAccess())
 	{
 		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
 		agentShares.GET("", g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
@@ -1206,9 +1241,9 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
 	// Shared agents route — Viewer+
 	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedAgents)
-	// "Disable by me" 是租户级偏好（写到 tenant_disabled_shared_agents），
-	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
-	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
+	// "Disable by me" 是空间级偏好（写到 tenant_disabled_shared_agents），
+	// 影响整个空间在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
+	// 等于替整个空间做决定 — 必须 Admin+ 才允许调整。
 	g.apiKeyRoute(r, http.MethodPost, "/shared-agents/disabled", apiKeyManageSpaces(apiKeyFullAccess()), g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
@@ -1235,6 +1270,9 @@ func RegisterEmbedPublicRoutes(
 		embed.POST("/agent-chat/:session_id", embedHandler.EmbedAgentChat)
 		embed.GET("/messages/:session_id/load", embedHandler.EmbedLoadMessages)
 		embed.POST("/sessions/:session_id/stop", embedHandler.EmbedStopSession)
+		embed.GET("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedGetMessageSuggestions)
+		embed.POST("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedEnsureMessageSuggestions)
+		embed.POST("/sessions/:session_id/suggestion-events", embedHandler.EmbedRecordSuggestionEvent)
 		embed.POST("/sessions/:session_id/events", embedHandler.EmbedRelayWebhookEvent)
 		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id", embedHandler.EmbedResolveMCPOAuth)
 		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id/cancel", embedHandler.EmbedCancelMCPOAuth)
@@ -1491,7 +1529,7 @@ func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFu
 
 		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
 		if tenant == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
 		}
 
@@ -1556,6 +1594,142 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 	// attributed to a key's KB allow-list, so API keys are denied outright
 	// (embed routes use their own /embed/.../files handler).
 	r.GET("/files", middleware.DenyAPIKeyPrincipal(), newFileServeHandler(globalFileService))
+}
+
+// serveKBScopedFiles registers the KB-scoped file proxy used to render images
+// embedded in a knowledge base's content (chunks / wiki pages). Unlike the
+// tenant-scoped /files route — which enforces file_path.tenant == caller.tenant
+// and therefore cannot serve objects owned by another tenant — this route is
+// gated by RequireKBAccess. That guard resolves org-shared / agent-visible KBs
+// and rewrites the request context's tenant ID to the KB's *owner* (source)
+// tenant, so images stored under the owner tenant (local://<owner>/exports/...)
+// become reachable by tenants that legitimately share the KB, while still
+// enforcing that the requested path belongs to that owner tenant.
+//
+// Route:
+//   - GET /api/v1/knowledge-bases/:id/files?file_path=<provider://...>
+func serveKBScopedFiles(
+	r *gin.RouterGroup,
+	g *rbacGuards,
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+) {
+	logger.Infof(context.Background(), "[Router] Serving KB-scoped files from /knowledge-bases/:id/files")
+	// API keys are denied outright (as on /files): a signed URL's tenant/KB
+	// scope cannot authorize serving an arbitrary file_path under the owner
+	// tenant, and this route deliberately crosses the caller's own tenant.
+	r.GET("/knowledge-bases/:id/files",
+		middleware.DenyAPIKeyPrincipal(),
+		g.Viewer(),
+		g.KBAccessRead("id"),
+		newKBScopedFileServeHandler(tenantService, globalFileService),
+	)
+}
+
+// newKBScopedFileServeHandler builds the handler backing serveKBScopedFiles.
+// The effective (owner) tenant is taken from the request context, which
+// RequireKBAccess has already rewritten to the KB's source tenant. The owner
+// tenant's storage config is loaded via TenantService so the file is fetched
+// from the backend that actually holds it — the caller's own storage config is
+// irrelevant here.
+func newKBScopedFileServeHandler(
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+) gin.HandlerFunc {
+	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
+	if baseDir == "" {
+		baseDir = "/data/files"
+	}
+	absDir, _ := filepath.Abs(baseDir)
+
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+
+		filePath := strings.TrimSpace(c.Query("file_path"))
+		if filePath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
+			return
+		}
+		if strings.Contains(filePath, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
+			return
+		}
+
+		// RequireKBAccess rewrote the request context tenant ID to the KB's
+		// owner (source) tenant for shared KBs; for own KBs it equals the
+		// caller's tenant. Either way it is the tenant that owns this KB's
+		// storage objects, so the requested path must belong to it.
+		ownerTenantID, ok := types.TenantIDFromContext(ctx)
+		if !ok || ownerTenantID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
+			return
+		}
+
+		if err := secutils.ValidateKBScopedStoragePath(filePath, ownerTenantID); err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files denied path not allowed for KB proxy: owner_tenant_id=%d file_path=%q err=%v",
+				ownerTenantID, filePath, err)
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+			return
+		}
+
+		tenant, err := tenantService.GetTenantByID(ctx, ownerTenantID)
+		if err != nil || tenant == nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files owner tenant lookup failed: owner_tenant_id=%d err=%v",
+				ownerTenantID, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		provider := types.ParseProviderScheme(filePath)
+
+		var (
+			fileSvc          interfaces.FileService
+			resolvedProvider string
+		)
+		if tenant.StorageEngineConfig != nil {
+			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		} else {
+			err = http.ErrMissingFile
+		}
+		if err != nil {
+			globalStorageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+			if globalStorageType == "" {
+				globalStorageType = "local"
+			}
+			if provider == globalStorageType && globalFileService != nil {
+				fileSvc = globalFileService
+				resolvedProvider = globalStorageType
+			} else {
+				logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files resolve file service failed: owner_tenant_id=%d provider=%s global_storage_type=%s err=%v",
+					ownerTenantID, provider, globalStorageType, err)
+				c.Status(http.StatusBadRequest)
+				return
+			}
+		}
+
+		reader, err := fileSvc.GetFile(ctx, filePath)
+		if err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files get file failed: owner_tenant_id=%d provider=%s path=%q err=%v",
+				ownerTenantID, resolvedProvider, filePath, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+		defer reader.Close()
+
+		contentType, inline := secutils.SafeContentTypeByFilename(filePath)
+		c.Header("Content-Type", contentType)
+		c.Header("X-Content-Type-Options", "nosniff")
+		if !inline {
+			c.Header("Content-Disposition", "attachment")
+		}
+		// Cross-tenant shared content — keep it private so shared proxies /
+		// CDNs do not cache one tenant's view for another.
+		c.Header("Cache-Control", "private, max-age=86400")
+		c.Status(http.StatusOK)
+		if _, err := io.Copy(c.Writer, reader); err != nil {
+			logger.Warnf(ctx, "[Router] /knowledge-bases/:id/files write response failed: %v", err)
+		}
+	}
 }
 
 // servePresignedFiles serves files via HMAC-signed URLs without requiring authentication.
@@ -1715,7 +1889,7 @@ func servePresignedPreview(r *gin.Engine, cfg *config.Config) {
 
 			tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 			if tenant == nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 				return
 			}
 
@@ -1725,7 +1899,7 @@ func servePresignedPreview(r *gin.Engine, cfg *config.Config) {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":    err.Error(),
 					"provider": provider,
-					"hint":     "tenant storage config is missing or incomplete for this provider",
+					"hint":     "workspace storage config is missing or incomplete for this provider",
 				})
 				return
 			}

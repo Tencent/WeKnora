@@ -21,6 +21,24 @@ import (
 // wikiLinkRegex matches [[wiki-link]] syntax in markdown content
 var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
+// wikiInlineChunkCitationRegex matches internal short aliases emitted by the
+// wiki ingest prompt while it classifies supporting chunks. The stable source
+// relationship lives in WikiPage.ChunkRefs, so these aliases have no meaning
+// to readers and must not leak into generated Markdown.
+var wikiInlineChunkCitationRegex = regexp.MustCompile(`[ \t]*\[c\d{3,}(?:\s*[,;]\s*c\d{3,})*\]`)
+
+func stripWikiInlineChunkCitations(content string) string {
+	return wikiInlineChunkCitationRegex.ReplaceAllString(content, "")
+}
+
+func stripWikiPageInlineChunkCitations(page *types.WikiPage) {
+	if page == nil {
+		return
+	}
+	page.Content = stripWikiInlineChunkCitations(page.Content)
+	page.Summary = stripWikiInlineChunkCitations(page.Summary)
+}
+
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
 	repo            interfaces.WikiPageRepository
@@ -64,6 +82,7 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	if page.Version == 0 {
 		page.Version = 1
 	}
+	stripWikiPageInlineChunkCitations(page)
 
 	// Parse outbound links from content
 	page.OutLinks = s.parseOutLinks(page.Content)
@@ -101,6 +120,7 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
 	}
+	stripWikiPageInlineChunkCitations(page)
 
 	oldOutLinks := existing.OutLinks
 
@@ -183,7 +203,7 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 
 	oldOutLinks := existing.OutLinks
 
-	existing.Content = page.Content
+	existing.Content = stripWikiInlineChunkCitations(page.Content)
 	existing.OutLinks = s.parseOutLinks(existing.Content)
 	existing.UpdatedAt = time.Now()
 
@@ -199,12 +219,22 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 
 // GetPageBySlug retrieves a wiki page by its slug
 func (s *wikiPageService) GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error) {
-	return s.repo.GetBySlug(ctx, kbID, slug)
+	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if err != nil {
+		return nil, err
+	}
+	stripWikiPageInlineChunkCitations(page)
+	return page, nil
 }
 
 // GetPageByID retrieves a wiki page by its ID
 func (s *wikiPageService) GetPageByID(ctx context.Context, id string) (*types.WikiPage, error) {
-	return s.repo.GetByID(ctx, id)
+	page, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	stripWikiPageInlineChunkCitations(page)
+	return page, nil
 }
 
 // ListPages lists wiki pages with optional filtering and pagination
@@ -214,6 +244,7 @@ func (s *wikiPageService) ListPages(ctx context.Context, req *types.WikiPageList
 		return nil, err
 	}
 	for _, page := range pages {
+		stripWikiPageInlineChunkCitations(page)
 		normalizeWikiHierarchy(page)
 	}
 

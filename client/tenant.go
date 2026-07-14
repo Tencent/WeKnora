@@ -42,6 +42,11 @@ type Tenant struct {
 	StorageQuota int64 `yaml:"storage_quota"     json:"storage_quota"     gorm:"default:10737418240"`
 	// Storage used (Bytes)
 	StorageUsed int64 `yaml:"storage_used"      json:"storage_used"      gorm:"default:0"`
+	// APIKey is only populated by CreateTenant when the server has
+	// tenant.auto_create_api_key (env WEKNORA_TENANT_AUTO_CREATE_API_KEY)
+	// enabled: it carries the plaintext token of an auto-created full_access
+	// key. Empty otherwise. Save it on receipt — it is never returned again.
+	APIKey string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
 	// Creation timestamp
 	CreatedAt time.Time `yaml:"created_at"        json:"created_at"`
 	// Last update timestamp

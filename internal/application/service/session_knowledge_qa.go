@@ -800,7 +800,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		logger.Error(ctx, "Failed to get tenant ID from context")
-		return nil, fmt.Errorf("tenant ID not found in context")
+		return nil, fmt.Errorf("workspace ID not found in context")
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)

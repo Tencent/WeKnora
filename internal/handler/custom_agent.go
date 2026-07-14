@@ -93,6 +93,11 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		Avatar:      req.Avatar,
 		Config:      req.Config,
 	}
+	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 
 	logger.Infof(ctx, "Creating custom agent, name: %s, agent_mode: %s",
 		secutils.SanitizeForLog(req.Name), req.Config.AgentMode)
@@ -166,7 +171,7 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 
 // ListAgents godoc
 // @Summary      获取智能体列表
-// @Description  获取当前租户的所有智能体（包括内置智能体）
+// @Description  获取当前空间的所有智能体（包括内置智能体）
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
@@ -217,14 +222,14 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	// Per-tenant "disabled by me" for own agents (only affects this tenant's conversation dropdown)
 	tenantIDVal, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
-		logger.Error(ctx, "Tenant ID not found in context")
-		c.Error(errors.NewUnauthorizedError("Missing tenant context"))
+		logger.Error(ctx, "Workspace ID not found in context")
+		c.Error(errors.NewUnauthorizedError("Missing workspace context"))
 		return
 	}
 	tenantID, ok := tenantIDVal.(uint64)
 	if !ok {
 		logger.Errorf(ctx, "Tenant ID has unexpected type %T in context", tenantIDVal)
-		c.Error(errors.NewInternalServerError("Invalid tenant context type"))
+		c.Error(errors.NewInternalServerError("Invalid workspace context type"))
 		return
 	}
 	disabledOwnIDs, err := h.disabledRepo.ListDisabledOwnAgentIDs(ctx, tenantID)
@@ -236,7 +241,7 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		return
 	}
 
-	// 批量回填 creator_name，作用同 KB 列表：让前端能区分「我创建」与「同租户其他成员」。
+	// 批量回填 creator_name，作用同 KB 列表：让前端能区分「我创建」与「同空间其他成员」。
 	// 内建 agent（IsBuiltin=true, CreatedBy=""）不会有 creator_name，前端按 builtin
 	// 分支单独渲染。
 	enrichAgentCreatorNames(ctx, h.userService, agents)
@@ -331,6 +336,11 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		Description: req.Description,
 		Avatar:      req.Avatar,
 		Config:      req.Config,
+	}
+	agent.EnsureDefaults()
+	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
 	}
 
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s",

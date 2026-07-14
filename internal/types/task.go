@@ -1,27 +1,221 @@
 package types
 
-// Asynq queue names. MUST stay in sync with the Queues weight map in
-// router.NewAsynqServer — a task enqueued to a queue that the server does not
-// list will never be consumed.
+// Worker-pool names are part of the runtime observability API. Each pool is
+// backed by an independent asynq.Server, so concurrency is hard-isolated
+// between pools instead of being only a weighted dequeue preference.
 const (
-	QueueCritical   = "critical"
-	QueueDefault    = "default"
-	QueueLow        = "low"
-	// QueueMultimodal isolates high-volume, slow VLM image tasks (OCR + caption)
-	// so a single large scanned PDF (hundreds–thousands of page images) cannot
-	// saturate the shared worker pool and block user-facing document parsing in
-	// the default queue.
-	QueueMultimodal = "multimodal"
-	// QueueGraph isolates high-volume, slow graph-extraction tasks (one per
-	// chunk, LLM-backed, only when Neo4j is enabled). Same rationale as
-	// QueueMultimodal: a large document must not flood the default queue.
-	QueueGraph = "graph"
-	// QueueQuestion isolates high-volume, slow question-generation tasks (one
-	// per 20-chunk batch, LLM-backed). Keeps a large document's hundreds of
-	// question batches from starving the lightweight tasks in the low queue
-	// (summary, deletes, wiki ingest).
-	QueueQuestion = "question"
+	WorkerPoolCore        = "core"
+	WorkerPoolPostProcess = "postprocess"
+	WorkerPoolEnrichment  = "enrichment"
+	WorkerPoolMaintenance = "maintenance"
+	WorkerPoolShared      = "shared"
+	WorkerPoolWiki        = "wiki"
+
+	// Upstream defaults are explicit guarantees plus an elastic pool. The
+	// shared pool may consume core and enrichment queues, so idle capacity in
+	// either stage can be borrowed without sacrificing the dedicated minimums.
+	DefaultCoreWorkerConcurrency        = 8
+	DefaultPostProcessWorkerConcurrency = 2
+	DefaultEnrichmentWorkerConcurrency  = 12
+	DefaultMaintenanceWorkerConcurrency = 4
+	DefaultSharedWorkerConcurrency      = 6
+	DefaultWikiWorkerConcurrency        = 8
+	DefaultUpstreamWorkerConcurrency    = DefaultCoreWorkerConcurrency +
+		DefaultPostProcessWorkerConcurrency + DefaultEnrichmentWorkerConcurrency +
+		DefaultMaintenanceWorkerConcurrency + DefaultSharedWorkerConcurrency
 )
+
+// Asynq queue names. QueueMaintenance intentionally keeps the physical Redis
+// name "low" so tasks enqueued by older releases remain consumable during a
+// rolling deployment. New code uses the business-semantic constant.
+const (
+	QueueDefault     = "default"
+	QueuePostProcess = "postprocess"
+	QueueSummary     = "summary"
+	QueueMultimodal  = "multimodal"
+	QueueGraph       = "graph"
+	QueueQuestion    = "question"
+	QueueSync        = "sync"
+	QueueMaintenance = "low"
+	QueueWiki        = "wiki"
+)
+
+// QueueDefinition is the single source of truth for queue topology. Worker
+// servers and runtime inspection both consume this registry, preventing the
+// scheduling weights shown to operators from drifting from the actual server
+// configuration.
+type QueueDefinition struct {
+	Name         string
+	Pool         string
+	Weight       int
+	SharedWeight int
+	TaskTypes    []string
+}
+
+var queueDefinitions = []QueueDefinition{
+	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, SharedWeight: 3, TaskTypes: []string{
+		TypeDocumentProcess, TypeManualProcess,
+	}},
+	{Name: QueuePostProcess, Pool: WorkerPoolPostProcess, Weight: 1, TaskTypes: []string{
+		TypeKnowledgePostProcess,
+	}},
+	{Name: QueueSummary, Pool: WorkerPoolEnrichment, Weight: 2, SharedWeight: 2, TaskTypes: []string{
+		TypeSummaryGeneration, TypeDataTableSummary,
+	}},
+	{Name: QueueMultimodal, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeImageMultimodal}},
+	{Name: QueueGraph, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeChunkExtract}},
+	{Name: QueueQuestion, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeQuestionGeneration}},
+	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
+	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
+		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
+		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
+	}},
+	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
+}
+
+// QueueDefinitions returns a copy so callers cannot mutate global topology.
+func QueueDefinitions() []QueueDefinition {
+	definitions := make([]QueueDefinition, len(queueDefinitions))
+	for i, definition := range queueDefinitions {
+		definitions[i] = definition
+		definitions[i].TaskTypes = append([]string(nil), definition.TaskTypes...)
+	}
+	return definitions
+}
+
+// QueueForTaskType returns the declared queue for a task type. Producers still
+// pass the queue explicitly to asynq, while tests and observability can use
+// this mapping to detect drift.
+func QueueForTaskType(taskType string) (string, bool) {
+	for _, definition := range queueDefinitions {
+		for _, declaredType := range definition.TaskTypes {
+			if declaredType == taskType {
+				return definition.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
+// QueueWeightsForPool returns the asynq queue configuration for one worker
+// pool. An empty map indicates a programming error in the pool declaration.
+func QueueWeightsForPool(pool string) map[string]int {
+	weights := make(map[string]int)
+	for _, definition := range queueDefinitions {
+		if definition.Pool == pool {
+			weights[definition.Name] = definition.Weight
+		}
+	}
+	return weights
+}
+
+// QueueWeightsForSharedPool returns the core/enrichment queues eligible for
+// elastic capacity. Post-process and maintenance are deliberately excluded:
+// post-process needs a small latency guarantee, while long maintenance tasks
+// must not pin burst capacity intended for the user-facing pipeline.
+func QueueWeightsForSharedPool() map[string]int {
+	weights := make(map[string]int)
+	for _, definition := range queueDefinitions {
+		if definition.SharedWeight > 0 {
+			weights[definition.Name] = definition.SharedWeight
+		}
+	}
+	return weights
+}
+
+// WorkerPoolConcurrency contains the explicit per-instance pool capacities.
+// Unlike the old ratio allocator, each field is independently configurable.
+type WorkerPoolConcurrency struct {
+	Core        int
+	PostProcess int
+	Enrichment  int
+	Maintenance int
+	Shared      int
+	Wiki        int
+}
+
+func DefaultWorkerPoolConcurrency() WorkerPoolConcurrency {
+	return WorkerPoolConcurrency{
+		Core:        DefaultCoreWorkerConcurrency,
+		PostProcess: DefaultPostProcessWorkerConcurrency,
+		Enrichment:  DefaultEnrichmentWorkerConcurrency,
+		Maintenance: DefaultMaintenanceWorkerConcurrency,
+		Shared:      DefaultSharedWorkerConcurrency,
+		Wiki:        DefaultWikiWorkerConcurrency,
+	}
+}
+
+// ResolveWorkerPoolConcurrency centralizes setting keys, environment names,
+// defaults, and invalid-value fallback for both server construction and the
+// runtime API. The callback lets this package stay independent of the system
+// setting service interface.
+func ResolveWorkerPoolConcurrency(read func(key, env string, fallback int) int) WorkerPoolConcurrency {
+	allocation := DefaultWorkerPoolConcurrency()
+	if read == nil {
+		return allocation
+	}
+	positive := func(key, env string, fallback int) int {
+		value := read(key, env, fallback)
+		if value < 1 {
+			return fallback
+		}
+		return value
+	}
+	allocation.Core = positive("asynq.core_concurrency", "WEKNORA_ASYNQ_CORE_CONCURRENCY", allocation.Core)
+	allocation.PostProcess = positive("asynq.postprocess_concurrency", "WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY", allocation.PostProcess)
+	allocation.Enrichment = positive("asynq.enrichment_concurrency", "WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY", allocation.Enrichment)
+	allocation.Maintenance = positive("asynq.maintenance_concurrency", "WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY", allocation.Maintenance)
+	allocation.Shared = positive("asynq.shared_concurrency", "WEKNORA_ASYNQ_SHARED_CONCURRENCY", allocation.Shared)
+	allocation.Wiki = positive("asynq.wiki_concurrency", "WEKNORA_WIKI_ASYNQ_CONCURRENCY", allocation.Wiki)
+	return allocation
+}
+
+func (c WorkerPoolConcurrency) UpstreamTotal() int {
+	return c.Core + c.PostProcess + c.Enrichment + c.Maintenance + c.Shared
+}
+
+// QueueStat is a read-only depth snapshot of a single asynq queue, used
+// by the System Admin runtime dashboard. Field names mirror the counts
+// exposed by asynq.QueueInfo. Pool / Weight are static metadata (which
+// worker pool drains the queue and its scheduling weight within that
+// pool) so the UI can group and explain the lanes without the frontend
+// hard-coding the topology.
+type QueueStat struct {
+	Name string `json:"name"`
+	// Pool is the independent worker pool that drains this queue.
+	Pool string `json:"pool"`
+	// Weight is the queue's scheduling weight inside its pool.
+	Weight int `json:"weight"`
+	// Size is the total number of tasks in the queue (pending + active +
+	// scheduled + retry + aggregating + archived).
+	Size      int `json:"size"`
+	Pending   int `json:"pending"`
+	Active    int `json:"active"`
+	Scheduled int `json:"scheduled"`
+	Retry     int `json:"retry"`
+	Archived  int `json:"archived"`
+	Completed int `json:"completed"`
+	// Processed / Failed are today's counters (reset daily).
+	Processed int `json:"processed"`
+	Failed    int `json:"failed"`
+	// Paused reports whether the queue is paused (tasks not consumed).
+	Paused bool `json:"paused"`
+	// LatencyMs is the age of the oldest pending task, in milliseconds.
+	LatencyMs int64 `json:"latency_ms"`
+	// MemoryUsageBytes is the approximate Redis memory the queue occupies.
+	MemoryUsageBytes int64 `json:"memory_usage_bytes"`
+}
+
+// WorkerServerStat is one live asynq server heartbeat. Queue weights identify
+// which logical pool the server belongs to; the runtime handler aggregates
+// these records across replicas so configured per-instance capacity is not
+// confused with actual cluster capacity.
+type WorkerServerStat struct {
+	Concurrency int
+	Active      int
+	Status      string
+	Queues      map[string]int
+}
 
 const (
 	TypeChunkExtract         = "chunk:extract"
@@ -41,6 +235,7 @@ const (
 	TypeManualProcess        = "manual:process"         // 手工知识更新任务（cleanup + 重新索引）
 	TypeDataSourceSync       = "datasource:sync"        // 数据源同步任务
 	TypeWikiIngest           = "wiki:ingest"            // Wiki 页面同步任务
+	TypeWikiFinalize         = "wiki:finalize"          // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -205,8 +400,8 @@ type KnowledgeListDeletePayload struct {
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
 type KnowledgeListReparsePayload struct {
 	TracingContext
-	TenantID      uint64                      `json:"tenant_id"`
-	KnowledgeIDs  []string                    `json:"knowledge_ids"`
+	TenantID      uint64                     `json:"tenant_id"`
+	KnowledgeIDs  []string                   `json:"knowledge_ids"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 

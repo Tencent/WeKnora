@@ -9,7 +9,7 @@
         "send_time": 1700000060,
         "msgtype": "text",
         "sender_name": "李四",
-        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"好的，我先介绍一下背景。我们需要构建一个知识库管理系统，支持多种文档格式的导入，包括PDF、Word、Markdown等。系统需要具备全文检索和语义搜索能力，同时要支持多租户隔离。\"}}"
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"好的，我先介绍一下背景。我们需要构建一个知识库管理系统，支持多种文档格式的导入，包括PDF、Word、Markdown等。系统需要具备全文检索和语义搜索能力，同时要支持多空间隔离。\"}}"
     },
     {
         "send_time": 1700000120,

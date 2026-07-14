@@ -1,12 +1,14 @@
 package dto
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestModelResponse_OmitsSecrets(t *testing.T) {
@@ -68,6 +70,35 @@ func TestModelResponse_BuiltinStripsTenantConfig(t *testing.T) {
 	body, _ := json.Marshal(resp)
 	assert.False(t, strings.Contains(string(body), "should-not-leak"))
 	assert.False(t, strings.Contains(string(body), "tenant-private.example.com"))
+}
+
+func TestModelResponse_SystemAdminCanManageBuiltinConfig(t *testing.T) {
+	ctx := context.WithValue(viewerContext(), types.SystemAdminContextKey, true)
+	m := &types.Model{
+		ID:        "builtin-1",
+		IsBuiltin: true,
+		Parameters: types.ModelParameters{
+			BaseURL:       "https://global-provider.example.com",
+			APIKey:        "should-never-be-returned",
+			AppSecret:     "also-never-returned",
+			AppID:         "global-app-id",
+			ExtraConfig:   map[string]string{"region": "ap-guangzhou"},
+			CustomHeaders: map[string]string{"X-Route": "global"},
+		},
+	}
+
+	resp := NewModelResponse(ctx, m)
+	assert.Equal(t, "https://global-provider.example.com", resp.Parameters.BaseURL)
+	assert.Equal(t, "global-app-id", resp.Parameters.AppID)
+	assert.Equal(t, map[string]string{"region": "ap-guangzhou"}, resp.Parameters.ExtraConfig)
+	assert.Equal(t, map[string]string{"X-Route": "global"}, resp.Parameters.CustomHeaders)
+	assert.True(t, resp.Credentials["api_key"].Configured)
+	assert.True(t, resp.Credentials["app_secret"].Configured)
+
+	body, err := json.Marshal(resp)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "should-never-be-returned")
+	assert.NotContains(t, string(body), "also-never-returned")
 }
 
 func TestModelResponse_ViewerStripsIntegrationDetail(t *testing.T) {

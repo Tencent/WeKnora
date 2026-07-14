@@ -2,7 +2,7 @@
 //
 // Switching the active tenant always lands the user on the platform's KB
 // list. 之前是「在当前路径 reload」+ 个别敏感路径回退到 KB 列表，但即便不带
-// resource id 的页面（设置、Agent 列表等）reload 后也常常因为新租户下没有
+// resource id 的页面（设置、Agent 列表等）reload 后也常常因为新空间下没有
 // 对应数据出现空状态，体验跟跳到固定首页其实差不多——干脆统一跳到 KB 列表，
 // 用一次 full navigation 把所有 store / SSE / 请求都重置一遍。
 

@@ -183,7 +183,7 @@ const isCustomAgent = computed(() => {
 // 判断是否有智能体配置（包括内置智能体）
 const hasAgentConfig = computed(() => {
   const agent = selectedAgent.value;
-  // 共享智能体的 config 来自源租户，直接使用 agent.config，避免被本租户同 ID 的 builtin 覆盖
+  // 共享智能体的 config 来自源空间，直接使用 agent.config，避免被本空间同 ID 的 builtin 覆盖
   const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
   if (agent?.is_builtin && !sourceTenantId) {
     const builtinAgent = agents.value.find(a => a.id === agent.id);
@@ -508,7 +508,7 @@ const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
-// 已就绪的知识库（来自租户级缓存）
+// 已就绪的知识库（来自空间级缓存）
 const knowledgeBases = computed(() => chatResources.validKnowledgeBases);
 const fileList = ref<Array<{ id: string; name: string }>>([]);
 
@@ -832,9 +832,9 @@ const loadAgents = async (force = false) => {
   }
 };
 
-// 默认选中的 builtin（builtin-quick-answer）也可能被当前租户管理员停用。
-// 列表加载完后做一次纠偏：若当前选中的是本租户停用的 agent（仅限「我的/builtin」，
-// 共享智能体由源租户决定，本地停用列表不适用），按 智能推理 → 快速问答 →
+// 默认选中的 builtin（builtin-quick-answer）也可能被当前空间管理员停用。
+// 列表加载完后做一次纠偏：若当前选中的是本空间停用的 agent（仅限「我的/builtin」，
+// 共享智能体由源空间决定，本地停用列表不适用），按 智能推理 → 快速问答 →
 // 第一个可用 的顺序兜底切换。全部都被停用时保持原选择不动（极端场景，UI 仍会
 // 在 enabledAgents 过滤后显示空，由用户在智能体页恢复任意一个）。
 const ensureSelectedAgentNotDisabled = () => {
@@ -863,7 +863,7 @@ const ensureSelectedAgentNotDisabled = () => {
   }
 }
 
-// 对话下拉中展示的「我的」智能体（排除当前租户已停用的）
+// 对话下拉中展示的「我的」智能体（排除当前空间已停用的）
 const enabledAgents = computed(() =>
   agents.value.filter(a => !disabledOwnAgentIds.value.includes(a.id))
 );
@@ -948,7 +948,7 @@ const ensureModelSelection = () => {
 
 // 智能体身份或其数据到位时，把对话模型同步到智能体配置的 model_id。
 // 修复场景：导航离开再返回时，initChatModelSelection 会用 localStorage 的 lastPick
-// 覆盖共享智能体绑定的源租户 model_id，UI 显示「未配置」——此时需要拉回 agent 模型。
+// 覆盖共享智能体绑定的源空间 model_id，UI 显示「未配置」——此时需要拉回 agent 模型。
 // 但若用户在本页手动改过模型（lastPick 与 agent 默认不同且当前选中即为 lastPick），
 // 则保留用户选择，避免 creatChat → chat 跳转后把模型 B 冲回智能体默认 A。
 watch(
@@ -1021,7 +1021,7 @@ const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
 });
 
-// 模型展示名：本租户列表中有则用名称；若为共享智能体且其 model_id 不在本租户列表中则显示“共享智能体配置的模型”
+// 模型展示名：本空间列表中有则用名称；若为共享智能体且其 model_id 不在本空间列表中则显示“共享智能体配置的模型”
 const selectedModelDisplayName = computed(() => {
   if (selectedModel.value) return modelDisplayName(selectedModel.value);
   if (!selectedModelId.value) return t('input.notConfigured');
@@ -1154,7 +1154,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     mentionOffset.value = 0;
   }
 
-  // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该租户下的知识库，否则使用本租户 + 共享给自己的
+  // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该空间下的知识库，否则使用本空间 + 共享给自己的
   let kbItems: any[] = [];
   let tagItems: MentionItem[] = [];
   let mcpItems: MentionItem[] = [];
@@ -1164,7 +1164,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
     const agentId = selectedAgentId.value;
     if (sourceTenantId && agentId) {
-      // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析租户）
+      // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析空间）
       try {
         const list = await chatResources.ensureAgentKnowledgeBases(agentId);
         const orgLabel = sharedAgentOrgName.value || '';

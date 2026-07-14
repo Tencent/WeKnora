@@ -144,11 +144,11 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 
 	if tenantID == 0 {
-		logger.Errorf(ctx, "[Tool][WebSearch] Tenant ID not found in context")
+		logger.Errorf(ctx, "[Tool][WebSearch] Workspace ID not found in context")
 		return &types.ToolResult{
 			Success: false,
-			Error:   "tenant ID not found in context",
-		}, fmt.Errorf("tenant ID not found in context")
+			Error:   "workspace ID not found in context",
+		}, fmt.Errorf("workspace ID not found in context")
 	}
 
 	// Get tenant info from context (same approach as search.go)

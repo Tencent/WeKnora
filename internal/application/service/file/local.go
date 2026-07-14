@@ -120,7 +120,10 @@ func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.Rea
 
 	file, err := os.Open(resolved)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to open file: %v", err)
+		// baseDir/resolved are logged so a storage base-dir mismatch (e.g.
+		// writer and reader started with different LOCAL_STORAGE_BASE_DIR)
+		// is immediately visible instead of just "no such file or directory".
+		logger.Errorf(ctx, "Failed to open file: baseDir=%s resolvedPath=%s err=%v", s.baseDir, resolved, err)
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 

@@ -17,12 +17,12 @@
             <div v-if="session.isRagMode" class="rag-answer-stack">
                 <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
-                    :user-query="userQuery" :rag-mode="true" />
+                    :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading" />
             </div>
             <template v-else>
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
-                    v-if="session.isAgentMode" />
+                    v-if="session.isAgentMode" :follow-up-loading="followUpLoading" />
             </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
         </div>
@@ -43,7 +43,7 @@
                 </div>
             </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
-            <div v-if="session.is_completed && (content || session.content)" class="answer-toolbar">
+            <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
                     :title="$t('agent.copy')">
                     <t-icon name="copy" />
@@ -59,6 +59,13 @@
                     </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
+                <transition name="follow-up-toolbar-loading">
+                    <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                        aria-live="polite">
+                        <t-icon name="lightbulb" />
+                        <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
+                    </span>
+                </transition>
             </div>
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
                 $t('common.loading') }}</span></div>
@@ -155,6 +162,10 @@ const props = defineProps({
     sessionId: {
         type: String,
         default: ''
+    },
+    followUpLoading: {
+        type: Boolean,
+        default: false
     }
 });
 
@@ -193,6 +204,13 @@ const answerText = computed(() => {
 const { displayed: typedAnswer } = useTypewriter(
     () => answerText.value,
     () => Boolean(props.session?.is_completed),
+);
+
+// The backend completion event can arrive while the local typewriter still has
+// buffered text to reveal. Treat the answer as visually complete only after the
+// displayed text has caught up, so actions never appear beside a moving answer.
+const answerFullyRendered = computed(() =>
+    Boolean(props.session?.is_completed) && typedAnswer.value.length >= answerText.value.length
 );
 
 // 单次渲染整个 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）

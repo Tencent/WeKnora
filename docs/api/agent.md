@@ -111,7 +111,7 @@ curl --location 'http://localhost:8080/api/v1/agents' \
 
 ## GET `/agents` - 获取智能体列表
 
-获取当前租户的所有智能体，包括内置智能体和自定义智能体。响应中额外返回 `disabled_own_agent_ids`，指示当前租户在前端对话下拉框中主动隐藏的本租户自有智能体 ID 列表（不影响其他租户）。
+获取当前空间的所有智能体，包括内置智能体和自定义智能体。响应中额外返回 `disabled_own_agent_ids`，指示当前空间在前端对话下拉框中主动隐藏的本空间自有智能体 ID 列表（不影响其他空间）。
 
 **请求**:
 
@@ -164,7 +164,7 @@ curl --location 'http://localhost:8080/api/v1/agents' \
 
 | 状态码 | 错误码 | 错误                  | 说明               |
 | ------ | ------ | --------------------- | ------------------ |
-| 401    | 1001   | Unauthorized          | 缺少租户上下文     |
+| 401    | 1001   | Unauthorized          | 缺少空间上下文     |
 | 500    | 1007   | Internal Server Error | 服务器内部错误     |
 
 ---
@@ -470,7 +470,7 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 |------|------|--------|------|
 | `web_search_enabled` | bool | true | 是否启用网络搜索 |
 | `web_search_max_results` | int | 5 | 网络搜索最大结果数 |
-| `web_search_provider_id` | string | - | 网络搜索提供者 ID，为空使用租户默认提供者 |
+| `web_search_provider_id` | string | - | 网络搜索提供者 ID，为空使用空间默认提供者 |
 | `web_fetch_enabled` | bool | false | 是否自动获取重排后的搜索结果页面全文 |
 | `web_fetch_top_n` | int | 3 | 重排后获取全文的最大页面数 |
 
@@ -493,9 +493,27 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 
 ### 推荐问题设置
 
+`question_suggestions` 是智能体拥有的统一策略。网页嵌入等渠道只能关闭展示，不能覆盖内容或生成规则。
+
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `suggested_prompts` | []string | - | 推荐问题列表，用于在前端对话面板展示快捷提问 |
+| `question_suggestions.starters.enabled` | bool | true | 是否在首次提问前展示开场问题 |
+| `question_suggestions.starters.mode` | string | `hybrid` | `curated`、`knowledge` 或 `hybrid` |
+| `question_suggestions.starters.items` | []string | `[]` | 运营配置的开场问题 |
+| `question_suggestions.starters.count` | int | 6 | 展示数量，范围 1-8 |
+| `question_suggestions.follow_ups.enabled` | bool | false | 是否在每次完整回答后异步生成追问 |
+| `question_suggestions.follow_ups.mode` | string | `hybrid` | `generated`、`knowledge` 或 `hybrid` |
+| `question_suggestions.follow_ups.count` | int | 3 | 生成数量，范围 1-5 |
+| `question_suggestions.follow_ups.model_id` | string | - | 独立生成模型；为空使用本轮对话模型 |
+| `question_suggestions.follow_ups.categories` | []string | `clarify,deepen,action` | 允许的问题类型 |
+| `question_suggestions.follow_ups.max_context_turns` | int | 2 | 生成时使用的最近对话轮数，范围 1-5 |
+| `question_suggestions.follow_ups.additional_instruction` | string | - | 智能体作者的附加生成要求 |
+| `question_suggestions.follow_ups.suppress_on_fallback` | bool | true | 兜底回答后不展示 |
+| `question_suggestions.follow_ups.suppress_when_answer_asks_question` | bool | true | 回答本身以问题结尾时不展示 |
+| `question_suggestions.follow_ups.knowledge_fallback` | bool | true | 模型失败时使用知识库候选补位 |
+| `question_suggestions.follow_ups.allow_regenerate` | bool | false | 是否允许用户换一批 |
+
+旧 `suggested_prompts` 会在数据库迁移时一次性写入 `starters.items`，API 不再接受该字段。
 
 ### 高级设置
 
@@ -530,6 +548,6 @@ curl --location 'http://localhost:8080/api/v1/agent-chat/session-123' \
 
 ## 相关文档
 
-- 智能体的组织共享、跨租户分发与禁用（`/agents/:id/shares`、`/shared-agents` 等）：见 [组织管理 API](./organization.md)
+- 智能体的组织共享、跨空间分发与禁用（`/agents/:id/shares`、`/shared-agents` 等）：见 [组织管理 API](./organization.md)
 - 智能体绑定 IM 渠道（`/agents/:id/im-channels`）：见组织/IM 渠道相关文档
 - 网络搜索提供者配置（被 `web_search_provider_id` 引用）：见 [Web Search API](./web-search.md)

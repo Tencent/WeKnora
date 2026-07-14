@@ -77,6 +77,47 @@ func isNoAuthAPI(path string, method string) bool {
 	return false
 }
 
+// isTenantOptionalAPI lists authenticated identity-level operations that are
+// meaningful before a user belongs to any tenant. Every other authenticated
+// route remains tenant-scoped and returns TENANT_REQUIRED when the JWT and
+// request headers do not resolve a tenant.
+func isTenantOptionalAPI(path, method string) bool {
+	switch {
+	case path == "/api/v1/auth/me" && (method == http.MethodGet || method == http.MethodPut):
+		return true
+	case path == "/api/v1/auth/me/preferences" && method == http.MethodPut:
+		return true
+	case path == "/api/v1/auth/logout" && method == http.MethodPost:
+		return true
+	case path == "/api/v1/auth/change-password" && method == http.MethodPost:
+		return true
+	case path == "/api/v1/auth/validate" && method == http.MethodGet:
+		return true
+	case path == "/api/v1/auth/switch-tenant" && method == http.MethodPost:
+		return true
+	case path == "/api/v1/tenants" && method == http.MethodPost:
+		return true
+	case strings.HasPrefix(path, "/api/v1/me/invitations"):
+		return true
+	default:
+		return false
+	}
+}
+
+func attachTenantlessUserContext(c *gin.Context, user *types.User) {
+	principal := types.Principal{Type: types.PrincipalWebUser, ID: user.ID}
+	c.Set(types.UserContextKey.String(), user)
+	c.Set(types.UserIDContextKey.String(), user.ID)
+	c.Set(types.SystemAdminContextKey.String(), user.IsSystemAdmin)
+	c.Set(types.PrincipalContextKey.String(), principal)
+	ctx := c.Request.Context()
+	ctx = context.WithValue(ctx, types.UserContextKey, user)
+	ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+	ctx = context.WithValue(ctx, types.SystemAdminContextKey, user.IsSystemAdmin)
+	ctx = types.WithPrincipal(ctx, principal)
+	c.Request = c.Request.WithContext(ctx)
+}
+
 // Auth 认证中间件
 func Auth(
 	tenantService interfaces.TenantService,
@@ -114,8 +155,8 @@ func Auth(
 				crossTenantSwitch := targetTenantID != user.TenantID
 				tenantHeader := c.GetHeader("X-Tenant-ID")
 				if tenantHeader != "" {
-					// 解析目标租户ID。畸形 / 零值必须显式拒绝：静默忽略会让坏掉的
-					// 前端/SDK 悄悄写错租户，反而看不到问题。与 RequirePathTenantMatch
+					// 解析目标空间ID。畸形 / 零值必须显式拒绝：静默忽略会让坏掉的
+					// 前端/SDK 悄悄写错空间，反而看不到问题。与 RequirePathTenantMatch
 					// 中对 :id 的校验保持一致（非空、可解析、>0）。
 					parsedTenantID, err := strconv.ParseUint(tenantHeader, 10, 64)
 					if err != nil || parsedTenantID == 0 {
@@ -128,11 +169,11 @@ func Auth(
 						c.Abort()
 						return
 					}
-					// 检查用户是否有权限访问目标租户：自家租户、跨租户超管、或
+					// 检查用户是否有权限访问目标空间：自家空间、跨空间超管、或
 					// 有 active membership 行——三选一，由 IsTenantAccessible
 					// 统一判定。
 					if IsTenantAccessible(c.Request.Context(), user, parsedTenantID, memberService, cfg) {
-						// 验证目标租户是否存在
+						// 验证目标空间是否存在
 						targetTenant, err := tenantService.GetTenantByID(c.Request.Context(), parsedTenantID)
 						if err == nil && targetTenant != nil {
 							targetTenantID = parsedTenantID
@@ -141,34 +182,53 @@ func Auth(
 						} else {
 							log.Printf("Error getting target tenant by ID: %v, tenantID: %d", err, parsedTenantID)
 							c.JSON(http.StatusBadRequest, gin.H{
-								"error": "Invalid target tenant ID",
+								"error": "Invalid target workspace ID",
 							})
 							c.Abort()
 							return
 						}
 					} else {
-						// 用户没有权限访问目标租户
+						// 用户没有权限访问目标空间
 						log.Printf("User %s attempted to access tenant %d without permission", user.ID, parsedTenantID)
 						c.JSON(http.StatusForbidden, gin.H{
-							"error": "Forbidden: insufficient permissions to access target tenant",
+							"error": "Forbidden: insufficient permissions to access target workspace",
 						})
 						c.Abort()
 						return
 					}
 				}
 
-				// 获取租户信息（使用目标租户ID）
-				tenant, err := tenantService.GetTenantByID(c.Request.Context(), targetTenantID)
-				if err != nil {
-					log.Printf("Error getting tenant by ID: %v, tenantID: %d, userID: %s", err, targetTenantID, user.ID)
-					c.JSON(http.StatusUnauthorized, gin.H{
-						"error": "Unauthorized: invalid tenant",
+				if targetTenantID == 0 {
+					targetTenantID = resolveFirstMembershipTarget(c.Request.Context(), user, memberService, tenantService)
+					crossTenantSwitch = targetTenantID != user.TenantID
+				}
+
+				if targetTenantID == 0 {
+					if isTenantOptionalAPI(c.Request.URL.Path, c.Request.Method) {
+						attachTenantlessUserContext(c, user)
+						c.Next()
+						return
+					}
+					c.JSON(http.StatusConflict, gin.H{
+						"error": "Workspace required",
+						"code":  "TENANT_REQUIRED",
 					})
 					c.Abort()
 					return
 				}
 
-				// 解析当前租户内的角色 (issue #1303)
+				// 获取空间信息（使用目标空间ID）
+				tenant, err := tenantService.GetTenantByID(c.Request.Context(), targetTenantID)
+				if err != nil {
+					log.Printf("Error getting tenant by ID: %v, tenantID: %d, userID: %s", err, targetTenantID, user.ID)
+					c.JSON(http.StatusUnauthorized, gin.H{
+						"error": "Unauthorized: invalid workspace",
+					})
+					c.Abort()
+					return
+				}
+
+				// 解析当前空间内的角色 (issue #1303)
 				role, ok := resolveTenantRole(c.Request.Context(), memberService, user, targetTenantID, crossTenantSwitch, cfg)
 				if !ok {
 					// 强制 RBAC 时，缺少 active membership 即拒绝；fail-open 路径已在
@@ -176,13 +236,13 @@ func Auth(
 					logger.Warnf(c.Request.Context(),
 						"User %s has no active membership in tenant %d", user.ID, targetTenantID)
 					c.JSON(http.StatusForbidden, gin.H{
-						"error": "Forbidden: not a member of the target tenant",
+						"error": "Forbidden: not a member of the target workspace",
 					})
 					c.Abort()
 					return
 				}
 
-				// 存储用户和租户信息到上下文
+				// 存储用户和空间信息到上下文
 				logger.Infof(c.Request.Context(),
 					"[auth] resolved role=%s for user=%s in tenant=%d (jwt_tenant=%d, header=%q, cross_switch=%v)",
 					role, user.ID, targetTenantID, jwtTenantID, tenantHeader, crossTenantSwitch)
@@ -227,6 +287,37 @@ func Auth(
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication"})
 		c.Abort()
 	}
+}
+
+// resolveFirstMembershipTarget lets a tenantless session immediately become
+// usable once an active membership exists (for example after accepting its
+// first invitation or being added directly by an administrator). The user
+// service persists the same earliest-membership choice on the next token
+// issuance; middleware keeps the current JWT usable until then.
+func resolveFirstMembershipTarget(
+	ctx context.Context,
+	user *types.User,
+	memberService interfaces.TenantMemberService,
+	tenantService interfaces.TenantService,
+) uint64 {
+	if user == nil || memberService == nil || tenantService == nil {
+		return 0
+	}
+	members, err := memberService.ListByUser(ctx, user.ID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to list memberships for tenantless user %s: %v", user.ID, err)
+		return 0
+	}
+	for _, member := range members {
+		if member == nil || member.TenantID == 0 || member.Status != types.TenantMemberStatusActive {
+			continue
+		}
+		tenant, err := tenantService.GetTenantByID(ctx, member.TenantID)
+		if err == nil && tenant != nil {
+			return member.TenantID
+		}
+	}
+	return 0
 }
 
 func authenticateAPIKeyRequest(
@@ -412,7 +503,7 @@ func verifyExternalUserJWT(tokenString string, tenantID uint64, secret string) (
 		return "", errors.New("token not yet valid")
 	}
 	if got := principalTenantIDFromClaims(claims); got != tenantID {
-		return "", fmt.Errorf("tenant mismatch: got %d want %d", got, tenantID)
+		return "", fmt.Errorf("workspace mismatch: got %d want %d", got, tenantID)
 	}
 	sub, _ := claims["sub"].(string)
 	sub = strings.TrimSpace(sub)
@@ -546,8 +637,8 @@ func resolveTenantRole(
 			user.ID, targetTenantID, statusInfo)
 	}
 
-	// 2. 跨租户超管直通：CanAccessAllTenants 用户切到别的租户时不强制要求 membership。
-	//    注意：这里只授予临时 Admin 角色，不写入 tenant_members，避免"看一眼别人租户"
+	// 2. 跨空间超管直通：CanAccessAllTenants 用户切到别的空间时不强制要求 membership。
+	//    注意：这里只授予临时 Admin 角色，不写入 tenant_members，避免"看一眼别人空间"
 	//    意外升级为持久化所有权。
 	if crossTenantSwitch && user.CanAccessAllTenants {
 		logger.Infof(ctx,
@@ -556,9 +647,9 @@ func resolveTenantRole(
 		return types.TenantRoleAdmin, true
 	}
 
-	// 3. 孤儿租户自愈：仅当用户登录的是自己的 home tenant、且该租户尚无任何活跃成员时
-	//    允许自动晋升为 Owner。跨租户 switch / JWT 指向他人租户的场景一律不进入此分支，
-	//    防止越权获得他人租户的 Owner 权限。
+	// 3. 孤儿空间自愈：仅当用户登录的是自己的 home tenant、且该空间尚无任何活跃成员时
+	//    允许自动晋升为 Owner。跨空间 switch / JWT 指向他人空间的场景一律不进入此分支，
+	//    防止越权获得他人空间的 Owner 权限。
 	isHomeTenant := !crossTenantSwitch && targetTenantID == user.TenantID
 	if isHomeTenant {
 		hasAny, anyErr := memberService.HasAnyMembers(ctx, targetTenantID)
@@ -588,7 +679,7 @@ func resolveTenantRole(
 	logger.Warnf(ctx,
 		"[auth] resolveTenantRole step4 fail-open (EnableRBAC=false) -> Admin: user=%s tenant=%d",
 		user.ID, targetTenantID)
-	// fail-open 期间保持现有行为（每个登录用户在自己租户里都是"管理员"）。
+	// fail-open 期间保持现有行为（每个登录用户在自己空间里都是"管理员"）。
 	return types.TenantRoleAdmin, true
 }
 
@@ -596,7 +687,7 @@ func resolveTenantRole(
 func GetTenantIDFromContext(ctx context.Context) (uint64, error) {
 	tenantID, ok := ctx.Value("tenantID").(uint64)
 	if !ok {
-		return 0, errors.New("tenant ID not found in context")
+		return 0, errors.New("workspace ID not found in context")
 	}
 	return tenantID, nil
 }

@@ -36,7 +36,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; enable_memory?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; enable_memory?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
     const myGeneration = ++streamGeneration
     // 重置状态
     output.value = '';
@@ -55,13 +55,13 @@ export function useStream() {
       return;
     }
 
-    // 跨租户访问请求头：只要 setSelectedTenant 写过激活租户，就附
+    // 跨空间访问请求头：只要 setSelectedTenant 写过激活空间，就附
     // X-Tenant-ID。早期版本会 short-circuit "selectedTenantId ===
     // defaultTenantId 时不附" 来减少 header 体积，但任何把 weknora_tenant
-    // 写成激活租户的代码（OIDC 同步 / UserMenu loadUserInfo / router
+    // 写成激活空间的代码（OIDC 同步 / UserMenu loadUserInfo / router
     // hydrate）都会让两者相等，使得后续流式请求悄悄丢 header、落到
-    // home 租户上，导致 SSE 接口返回 404。直接附即可——后端
-    // IsTenantAccessible 也允许 header 指向自家租户。
+    // home 空间上，导致 SSE 接口返回 404。直接附即可——后端
+    // IsTenantAccessible 也允许 header 指向自家空间。
     const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
     const tenantIdHeader: string | null = selectedTenantId || null;
 
@@ -132,6 +132,9 @@ export function useStream() {
       // Include attachment_uploads if provided (documents, audio, etc.)
       if (params.attachment_uploads !== undefined && params.attachment_uploads.length > 0) {
         postBody.attachment_uploads = params.attachment_uploads;
+      }
+      if (params.suggestion_attribution) {
+        postBody.suggestion_attribution = params.suggestion_attribution;
       }
       postBody.channel = embedToken ? "embed" : "web";
 

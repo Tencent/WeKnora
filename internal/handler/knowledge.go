@@ -256,7 +256,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 	task := asynq.NewTask(types.TypeKnowledgeListDelete, payloadBytes,
-		asynq.Queue("low"), asynq.MaxRetry(3))
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		return "", fmt.Errorf("enqueue task: %w", err)
@@ -280,7 +280,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 	task := asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
-		asynq.Queue("low"), asynq.MaxRetry(3))
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		return "", fmt.Errorf("enqueue task: %w", err)
@@ -680,16 +680,18 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	rows := []types.KnowledgeProcessingSpan{}
 	currentAttempt := 0
+	latestAttempt := 0
 	if h.spanRepo != nil {
-		if requestedAttempt == 0 {
-			latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
-			if lerr != nil {
-				logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
-			} else {
-				currentAttempt = latest
-			}
+		latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
+		if lerr != nil {
+			logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
 		} else {
+			latestAttempt = latest
+		}
+		if requestedAttempt > 0 {
 			currentAttempt = requestedAttempt
+		} else {
+			currentAttempt = latestAttempt
 		}
 		if currentAttempt > 0 {
 			rows, err = h.spanRepo.ListByAttempt(ctx, knowledge.ID, currentAttempt)
@@ -713,23 +715,66 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	resp := gin.H{
 		"knowledge_id":    knowledge.ID,
+		"attempt":         currentAttempt,
+		"latest_attempt":  latestAttempt,
 		"parse_status":    knowledge.ParseStatus,
 		"current_attempt": currentAttempt,
 		"current_stage":   currentStageName,
 		"trace":           tree,
 	}
-	if lastErr != nil {
-		resp["last_error"] = gin.H{
-			"stage":       lastErr.Name,
-			"code":        lastErr.ErrorCode,
-			"message":     lastErr.ErrorMessage,
-			"finished_at": lastErr.FinishedAt,
-		}
+	if lastError := knowledgeSpansLastError(
+		currentAttempt,
+		latestAttempt,
+		knowledge.ParseStatus,
+		knowledge.ErrorMessage,
+		knowledge.UpdatedAt,
+		lastErr,
+	); lastError != nil {
+		resp["last_error"] = lastError
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    resp,
 	})
+}
+
+// knowledgeSpansLastError builds the last_error payload for GetKnowledgeSpans.
+// Span failures win when present; otherwise a failed knowledge row without a
+// matching span error (recovery / dead-letter paths) surfaces ErrorMessage.
+func knowledgeSpansLastError(
+	currentAttempt, latestAttempt int,
+	parseStatus, knowledgeErrorMessage string,
+	knowledgeUpdatedAt time.Time,
+	spanFailure *types.KnowledgeProcessingSpan,
+) gin.H {
+	if spanFailure != nil {
+		return gin.H{
+			"stage":         spanFailure.Name,
+			"code":          spanFailure.ErrorCode,
+			"message":       spanFailure.ErrorMessage,
+			"name":          spanFailure.Name,
+			"error_code":    spanFailure.ErrorCode,
+			"error_message": spanFailure.ErrorMessage,
+			"finished_at":   spanFailure.FinishedAt,
+		}
+	}
+	if currentAttempt != latestAttempt || parseStatus != types.ParseStatusFailed || knowledgeErrorMessage == "" {
+		return nil
+	}
+	errorCode := "UNKNOWN"
+	if strings.EqualFold(strings.TrimSpace(knowledgeErrorMessage),
+		"Task interrupted due to application restart") {
+		errorCode = "SERVER_RESTART"
+	}
+	return gin.H{
+		"stage":         "knowledge_processing",
+		"code":          errorCode,
+		"message":       knowledgeErrorMessage,
+		"name":          "knowledge_processing",
+		"error_code":    errorCode,
+		"error_message": knowledgeErrorMessage,
+		"finished_at":   knowledgeUpdatedAt,
+	}
 }
 
 // buildSpanTree assembles a flat list of span rows into a parent-child
@@ -1002,7 +1047,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	effectiveTenantID, _ := effCtx.Value(types.TenantIDContextKey).(uint64)
 	if effectiveTenantID == 0 {
 		logger.Error(ctx, "Effective tenant ID missing after access validation")
-		c.Error(errors.NewInternalServerError("tenant context unavailable"))
+		c.Error(errors.NewInternalServerError("workspace context unavailable"))
 		return
 	}
 
@@ -1341,13 +1386,13 @@ type GetKnowledgeBatchRequest struct {
 
 // GetKnowledgeBatch godoc
 // @Summary      批量获取知识
-// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属租户查询（用于刷新后恢复共享知识库下的文件）
+// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的空间解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属空间查询（用于刷新后恢复共享知识库下的文件）
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
 // @Param        ids       query     []string  true   "知识ID列表"
 // @Param        kb_id     query     string   false  "可选，知识库ID（用于共享知识库时指定范围）"
-// @Param        agent_id  query     string   false  "可选，共享智能体ID（用于按智能体租户批量拉取文件详情）"
+// @Param        agent_id  query     string   false  "可选，共享智能体ID（用于按智能体空间批量拉取文件详情）"
 // @Success      200       {object}  map[string]interface{}  "知识列表"
 // @Failure      400       {object}  errors.AppError        "请求参数错误"
 // @Security     Bearer
@@ -1709,7 +1754,7 @@ type knowledgeTagBatchRequest struct {
 
 // UpdateKnowledgeTagBatch godoc
 // @Summary      批量更新知识标签
-// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的租户解析
+// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1898,7 +1943,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		_ = userIDVal
 		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 		if currentTenantID == 0 {
-			c.Error(errors.NewUnauthorizedError("tenant ID not found"))
+			c.Error(errors.NewUnauthorizedError("workspace ID not found"))
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
@@ -2186,7 +2231,8 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 
 	// Enqueue move task
 	task := asynq.NewTask(types.TypeKnowledgeMove, payloadBytes,
-		asynq.TaskID(taskID), asynq.Queue("default"), asynq.MaxRetry(3))
+		asynq.TaskID(taskID), asynq.Queue(types.QueueMaintenance),
+		asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "MoveKnowledge: failed to enqueue task: %v", err)
