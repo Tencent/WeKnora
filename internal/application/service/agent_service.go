@@ -389,9 +389,51 @@ func (s *agentService) initializeSkillsManager(
 		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager)
 		toolRegistry.RegisterTool(executeSkillTool)
 		logger.Infof(ctx, "Registered execute_skill_script tool")
+
+		// list_sandbox_files / read_sandbox_file are read-only tools that
+		// let the LLM see and inspect files produced by prior skill
+		// executions in the same session. They rely on the sandbox
+		// backend exposing per-session file inspection (currently
+		// satisfied by *sandbox.SessionBoundManager). When the backend
+		// does not satisfy the interface (custom / legacy backends) we
+		// silently skip registration so unsupported deployments do not
+		// advertise a tool that would error at runtime.
+		if source, ok := sandboxMgr.(tools.SandboxFileSource); ok {
+			toolRegistry.RegisterTool(tools.NewListSandboxFilesTool(source))
+			toolRegistry.RegisterTool(tools.NewReadSandboxFileTool(source))
+			logger.Infof(ctx, "Registered list_sandbox_files and read_sandbox_file tools")
+		} else {
+			logger.Infof(ctx, "Sandbox backend does not support per-session file inspection; list_sandbox_files/read_sandbox_file not registered")
+		}
+
+		// shell_exec is deliberately Cube-only. Check both the effective
+		// backend type and the capability interface: a SessionBoundManager
+		// that fell back to Local still implements SandboxCommandExecutor,
+		// but must never expose shell execution on the WeKnora host.
+		if sandboxMgr.GetType() == sandbox.SandboxTypeCube {
+			if executor, ok := cubeShellExecutor(sandboxMgr); ok {
+				toolRegistry.RegisterTool(tools.NewShellExecTool(executor))
+				logger.Infof(ctx, "Registered shell_exec tool")
+			} else {
+				logger.Warnf(ctx, "Cube sandbox backend does not implement shell command execution; shell_exec not registered")
+			}
+		} else {
+			logger.Infof(ctx, "Sandbox backend is %s, not Cube; shell_exec not registered", sandboxMgr.GetType())
+		}
 	}
 
 	return skillsManager, nil
+}
+
+// cubeShellExecutor is the single registration gate for shell_exec. Checking
+// only the interface is insufficient because SessionBoundManager still
+// implements it while operating with a Local fallback.
+func cubeShellExecutor(manager sandbox.Manager) (tools.SandboxCommandExecutor, bool) {
+	if manager == nil || manager.GetType() != sandbox.SandboxTypeCube {
+		return nil, false
+	}
+	executor, ok := manager.(tools.SandboxCommandExecutor)
+	return executor, ok
 }
 
 // registerTools registers tools based on the agent configuration

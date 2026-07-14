@@ -141,6 +141,19 @@ func (m *cubeMockServer) handle(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/files" && r.Method == http.MethodPost:
 		m.handleFileWrite(w, r)
 
+	case r.URL.Path == "/filesystem.Filesystem/MakeDir" && r.Method == http.MethodPost:
+		var req struct {
+			Path string `json:"path"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"entry": map[string]any{
+				"name": filepath.Base(req.Path),
+				"path": req.Path,
+				"type": "directory",
+			},
+		})
+
 	case r.URL.Path == "/process.Process/Start" && r.Method == http.MethodPost:
 		m.handleProcessStart(w, r)
 
@@ -435,6 +448,39 @@ func TestSessionBoundManager_ReusesSandboxAcrossExecutes(t *testing.T) {
 	}
 	if got := mock.execCount.Load(); got != 3 {
 		t.Fatalf("expected 3 executions, got %d", got)
+	}
+}
+
+func TestSessionBoundManager_ConcurrentInputStagingCreatesOneSandbox(t *testing.T) {
+	mock := newCubeMockServer(t)
+	cfg := testConfig(t, mock)
+	cfg.CubeIdleTTL = time.Minute
+	mgr, err := NewSessionBoundManager(cfg)
+	if err != nil {
+		t.Fatalf("NewSessionBoundManager: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+
+	const workers = 12
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			filePath := fmt.Sprintf("%s/hash-%d/input.txt", SessionInputRoot, index)
+			errs <- mgr.WriteSessionInputFile(context.Background(), "sess-concurrent", filePath, []byte("input"))
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for writeErr := range errs {
+		if writeErr != nil {
+			t.Fatalf("WriteSessionInputFile: %v", writeErr)
+		}
+	}
+	if got := mock.createCount.Load(); got != 1 {
+		t.Fatalf("expected one sandbox create for concurrent staging, got %d", got)
 	}
 }
 

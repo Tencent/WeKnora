@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -143,6 +144,27 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
+	// Reconcile all durable session attachments into the current Cube before
+	// the model can request shell or skill execution. The durable storage URL,
+	// not the ephemeral sandbox path, remains the source of truth.
+	var stagedAttachments []stagedSessionAttachment
+	if s.sandboxMgr != nil && s.sandboxMgr.GetType() == sandbox.SandboxTypeCube {
+		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
+		if loadErr != nil {
+			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
+		}
+		stager, ok := s.agentService.(interface {
+			stageSessionAttachments(context.Context, string, types.MessageAttachments) ([]stagedSessionAttachment, error)
+		})
+		if !ok {
+			return errors.New("agent service does not support Cube attachment staging")
+		}
+		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, sessionAttachments)
+		if err != nil {
+			return fmt.Errorf("restore session attachments into sandbox: %w", err)
+		}
+	}
+
 	// Create agent engine with EventBus
 	logger.Info(ctx, "Creating agent engine")
 	engine, err := s.agentService.CreateAgentEngine(
@@ -185,6 +207,10 @@ func (s *sessionService) AgentQA(
 	if len(req.Attachments) > 0 {
 		agentQuery += req.Attachments.BuildPrompt()
 		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
+	}
+	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments); manifest != "" {
+		agentQuery += manifest
+		logger.Infof(ctx, "Appended %d staged sandbox attachment path(s) to agent query", len(stagedAttachments))
 	}
 
 	// Scope envelopes (runtime_context / must_use) are injected per LLM call inside
