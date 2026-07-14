@@ -9,7 +9,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 )
 
 type orphanKnowledgeRepo struct {
@@ -93,6 +95,58 @@ func TestImageMultimodalHandleDropsMissingKnowledge(t *testing.T) {
 	}
 	if err := svc.Handle(context.Background(), asynq.NewTask(types.TypeImageMultimodal, payload)); err != nil {
 		t.Fatalf("orphan task should succeed without retry: %v", err)
+	}
+}
+
+type orphanTaskEnqueuer struct {
+	interfaces.TaskEnqueuer
+	enqueued []*asynq.Task
+}
+
+func (e *orphanTaskEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	e.enqueued = append(e.enqueued, task)
+	return &asynq.TaskInfo{ID: "post-process"}, nil
+}
+
+func TestImageMultimodalHandleDropFinalizesPendingCounter(t *testing.T) {
+	t.Parallel()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	enqueuer := &orphanTaskEnqueuer{}
+	svc := &ImageMultimodalService{
+		knowledgeRepo: &orphanKnowledgeRepo{err: repository.ErrKnowledgeNotFound},
+		kbService:     &orphanKBService{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		redisClient:   rdb,
+		taskEnqueuer:  enqueuer,
+	}
+	const knowledgeID = "missing"
+	redisKey := "multimodal:pending:" + knowledgeID
+	if err := rdb.Set(context.Background(), redisKey, 1, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(types.ImageMultimodalPayload{
+		TenantID:        1,
+		KnowledgeID:     knowledgeID,
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "minio://bucket/img.png",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Handle(context.Background(), asynq.NewTask(types.TypeImageMultimodal, payload)); err != nil {
+		t.Fatalf("orphan drop should succeed: %v", err)
+	}
+	if mr.Exists(redisKey) {
+		t.Fatal("pending counter should be cleared after drop finalize")
+	}
+	if len(enqueuer.enqueued) != 1 || enqueuer.enqueued[0].Type() != types.TypeKnowledgePostProcess {
+		t.Fatalf("expected post-process enqueue, got %d tasks", len(enqueuer.enqueued))
 	}
 }
 

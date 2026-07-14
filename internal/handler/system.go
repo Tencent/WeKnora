@@ -1827,29 +1827,31 @@ func isKnowledgeGone(err error) bool {
 }
 
 // purgeOrphanRuntimeTask removes queue records for a task whose knowledge row
-// is already gone. Best-effort: CancelTasksForKnowledge sweeps every queue
-// state; ForceDeleteRuntimeTask is the fallback for the specific task ID.
+// is already gone. CancelTasksForKnowledge sweeps sibling tasks best-effort;
+// success is reported only once the requested task ID is gone.
 func (h *SystemHandler) purgeOrphanRuntimeTask(
 	ctx context.Context,
 	inspector interfaces.RuntimeTaskInspector,
 	queue, taskID, knowledgeID string,
 ) bool {
 	if h.taskInspector != nil && knowledgeID != "" {
-		deleted, _, err := h.taskInspector.CancelTasksForKnowledge(ctx, knowledgeID)
-		if err != nil {
+		if _, _, err := h.taskInspector.CancelTasksForKnowledge(ctx, knowledgeID); err != nil {
 			logger.Warnf(ctx, "purge orphan tasks for knowledge %s: %v", knowledgeID, err)
-		} else if deleted > 0 {
-			return true
 		}
 	}
 	supported, err := inspector.ForceDeleteRuntimeTask(ctx, queue, taskID)
-	if !supported || err != nil {
-		if err != nil {
-			logger.Warnf(ctx, "force delete orphan task queue=%s task=%s: %v", queue, taskID, err)
-		}
+	if !supported {
 		return false
 	}
-	return true
+	if err == nil {
+		return true
+	}
+	// The knowledge-wide sweep may have already removed this task ID.
+	if _, available, getErr := inspector.GetRuntimeTask(ctx, queue, taskID); available && getErr != nil {
+		return true
+	}
+	logger.Warnf(ctx, "force delete orphan task queue=%s task=%s: %v", queue, taskID, err)
+	return false
 }
 
 // MutateRuntimeTask executes a backend-advertised action after re-reading the

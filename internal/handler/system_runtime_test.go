@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -85,6 +86,10 @@ type runtimeTaskTestInspector struct {
 	cancelKnowledge string
 	cancelDeleted   int
 	mutatedQueue    string
+	forceDeleteErr      error
+	getRuntimeErr       error
+	getRuntimeErrFrom   int
+	getRuntimeTaskCalls int
 }
 
 func (r *runtimeTaskTestInspector) CancelTasksForKnowledge(
@@ -134,6 +139,10 @@ func (r *runtimeTaskTestInspector) ListRuntimeTasks(
 func (r *runtimeTaskTestInspector) GetRuntimeTask(
 	_ context.Context, queue, taskID string,
 ) (*types.RuntimeTaskInfo, bool, error) {
+	r.getRuntimeTaskCalls++
+	if r.getRuntimeErr != nil && r.getRuntimeTaskCalls >= r.getRuntimeErrFrom {
+		return nil, true, r.getRuntimeErr
+	}
 	for i := range r.tasks {
 		if r.tasks[i].ID == taskID {
 			return &r.tasks[i], true, nil
@@ -169,7 +178,7 @@ func (r *runtimeTaskTestInspector) ForceDeleteRuntimeTask(
 ) (bool, error) {
 	r.mutatedQueue = queue
 	r.forceDeleted = taskID
-	return true, nil
+	return true, r.forceDeleteErr
 }
 
 func TestGetRuntimeQueuesReportsIsolatedPoolCapacity(t *testing.T) {
@@ -399,5 +408,69 @@ func TestRuntimeTaskCancelPurgesOrphanWhenKnowledgeGone(t *testing.T) {
 	if inspector.forceDeleted != "task-orphan" {
 		t.Fatalf("expected force delete, got deleted=%q force=%q cancel=%q",
 			inspector.deletedTask, inspector.forceDeleted, inspector.cancelKnowledge)
+	}
+}
+
+func TestRuntimeTaskCancelPurgesOrphanAfterSiblingSweep(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inspector := &runtimeTaskTestInspector{
+		cancelDeleted: 2,
+		tasks: []types.RuntimeTaskInfo{{
+			ID: "task-orphan", Queue: types.QueueMultimodal, Type: types.TypeImageMultimodal,
+			State: types.RuntimeTaskArchived, TenantID: 42, KnowledgeID: "knowledge-gone",
+			AllowedActions: []types.RuntimeTaskAction{types.RuntimeTaskActionCancel},
+		}},
+	}
+	canceller := &runtimeKnowledgeCancelTest{err: repository.ErrKnowledgeNotFound}
+	handler := &SystemHandler{taskInspector: inspector, knowledgeSvc: canceller}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{
+		{Key: "queue", Value: types.QueueMultimodal},
+		{Key: "task_id", Value: "task-orphan"},
+		{Key: "action", Value: string(types.RuntimeTaskActionCancel)},
+	}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/cancel", nil)
+
+	handler.MutateRuntimeTask(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if inspector.cancelKnowledge != "knowledge-gone" || inspector.forceDeleted != "task-orphan" {
+		t.Fatalf("expected sibling sweep then force delete, got cancel=%q force=%q",
+			inspector.cancelKnowledge, inspector.forceDeleted)
+	}
+}
+
+func TestRuntimeTaskCancelPurgesOrphanWhenSweepAlreadyRemovedTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inspector := &runtimeTaskTestInspector{
+		cancelDeleted:     1,
+		forceDeleteErr:    errors.New("task not found"),
+		getRuntimeErr:     errors.New("task not found"),
+		getRuntimeErrFrom: 2,
+		tasks: []types.RuntimeTaskInfo{{
+			ID: "task-orphan", Queue: types.QueueMultimodal, Type: types.TypeImageMultimodal,
+			State: types.RuntimeTaskRetry, TenantID: 42, KnowledgeID: "knowledge-gone",
+			AllowedActions: []types.RuntimeTaskAction{types.RuntimeTaskActionCancel},
+		}},
+	}
+	canceller := &runtimeKnowledgeCancelTest{err: repository.ErrKnowledgeNotFound}
+	handler := &SystemHandler{taskInspector: inspector, knowledgeSvc: canceller}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{
+		{Key: "queue", Value: types.QueueMultimodal},
+		{Key: "task_id", Value: "task-orphan"},
+		{Key: "action", Value: string(types.RuntimeTaskActionCancel)},
+	}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/cancel", nil)
+
+	handler.MutateRuntimeTask(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if inspector.forceDeleted != "task-orphan" {
+		t.Fatalf("expected force delete attempt, got %q", inspector.forceDeleted)
 	}
 }

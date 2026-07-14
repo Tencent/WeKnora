@@ -151,6 +151,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		logger.Infof(ctx,
 			"[ImageMultimodal] Dropping task chunk=%s knowledge=%s kb=%s image=%s",
 			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, payload.ImageURL)
+		// Still count this image toward the parent finalize gate so a batch
+		// of dropped orphans cannot strand multimodal:pending forever.
+		s.checkAndFinalizeAllImages(ctx, payload)
 		return nil
 	}
 
