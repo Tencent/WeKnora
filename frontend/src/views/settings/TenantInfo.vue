@@ -257,6 +257,7 @@ import {
   persistLastActiveTenantPreference,
   stashTenantSwitchToast,
 } from '@/utils/tenantSwitch'
+import { withFrontendBasePath } from '@/utils/base-path'
 
 const { t, locale } = useI18n()
 const { formatRole } = useRoleLabel()
@@ -348,7 +349,7 @@ function confirmLeaveTenant() {
         if (resp.success) {
           MessagePlugin.success(t('tenantMember.leave.success'))
           authStore.logout()
-          window.location.href = '/login'
+          window.location.href = withFrontendBasePath('/login')
         } else {
           MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
         }
@@ -413,7 +414,7 @@ async function deleteCurrentTenant() {
         return
       }
       authStore.logout()
-      window.location.href = '/login'
+      window.location.href = withFrontendBasePath('/login')
     } else {
       MessagePlugin.error(resp.message || t('tenant.deleteDangerZone.failed'))
     }
