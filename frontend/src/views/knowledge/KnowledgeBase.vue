@@ -780,7 +780,10 @@ const onTagManageChanged = (payload?: { deletedTagId?: string }) => {
       await loadKnowledgeFiles(kbId.value);
       await loadTags(kbId.value, true);
     })();
+    return;
   }
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
 };
 
 const handleKnowledgeTagChange = async (knowledgeId: string, tagIds: string[]) => {
