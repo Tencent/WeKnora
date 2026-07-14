@@ -1453,7 +1453,7 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 // ListSystemSettings godoc
 // @Summary      List all system settings
 // @Description  Return every row in the system_settings table (system-scope,
-// @Description  not tenant-scope). SystemAdmin only.
+// @Description  not workspace-scoped). SystemAdmin only.
 // @Tags         System Admin
 // @Produce      json
 // @Success      200 {array} types.SystemSetting "list of settings"
@@ -2015,11 +2015,11 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 }
 
 // ApplyDefaultStorageQuotaToAllTenants godoc
-// @Summary      Apply the default storage quota to every existing tenant
+// @Summary      Apply the default storage quota to every existing workspace
 // @Description  Reads the current value of `tenant.default_storage_quota_gb`
 // @Description  (3-tier resolver: DB > ENV > default) and writes that many
 // @Description  GiB into storage_quota for every row in tenants. Bypasses
-// @Description  the per-tenant PUT whitelist, which forbids storage_quota
+// @Description  the per-workspace PUT whitelist, which forbids storage_quota
 // @Description  edits by Owners. SystemAdmin only.
 // @Description  Idempotent — running twice with the same setting is a no-op.
 // @Tags         System Admin

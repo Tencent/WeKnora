@@ -651,7 +651,7 @@ definitions:
       image_storage_provider:
         description: |-
           Storage provider for image uploads: "local", "minio", "cos", "tos", "s3", "oss", "ks3".
-          Empty means use the global/tenant default provider.
+          Empty means use the global/workspace default provider.
         type: string
       image_upload_enabled:
         description: |-
@@ -792,7 +792,7 @@ definitions:
         description: Vector retrieval threshold
         type: number
       vlm_model_id:
-        description: VLM model ID for image analysis (optional, falls back to tenant-level
+        description: VLM model ID for image analysis (optional, falls back to workspace-level
           VLM)
         type: string
       web_fetch_enabled:
@@ -813,7 +813,7 @@ definitions:
       web_search_provider_id:
         description: |-
           WebSearchProviderID references a specific WebSearchProviderEntity.
-          If empty, the tenant's default provider (is_default=true) is used.
+          If empty, the workspace's default provider (is_default=true) is used.
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.DataSource:
@@ -881,7 +881,7 @@ definitions:
           6 hours)
         type: string
       tenant_id:
-        description: Tenant ID for multi-tenancy
+        description: Workspace ID for multi-workspace isolation
         type: integer
       total_items_synced:
         description: Total items synced (not stored in DB, calculated on query)
@@ -1186,14 +1186,15 @@ definitions:
         description: |-
           RepresentativeUserID identifies the user attached to the OTM row for
           display/audit. Optional: when unset, the handler picks a stable default
-          (the user from the legacy UserID field, or the tenant's owner).
+          (the user from the legacy UserID field, or the workspace's owner).
         type: string
       role:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
         description: 'Role to assign: admin/editor/viewer'
       tenant_id:
-        description: TenantID is the tenant to enrol as an org member. Preferred field.
+        description: TenantID is the workspace to enrol as an org member. Preferred
+          field.
         type: integer
       user_id:
         description: |-
@@ -1343,7 +1344,7 @@ definitions:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag'
         type: array
       tenant_id:
-        description: Tenant ID
+        description: Workspace ID
         type: integer
       title:
         description: Title of the knowledge
@@ -1374,16 +1375,16 @@ definitions:
       creator_id:
         description: |-
           CreatorID records the user ID of whoever originally created the KB.
-          Used by the tenant-level RBAC middleware to let Contributors edit
+          Used by the workspace-level RBAC middleware to let Contributors edit
           their own KBs without granting them access to everyone else's.
           Nullable for backward compatibility with rows created before the
-          RBAC migration backfilled the column to the tenant Owner.
+          RBAC migration backfilled the column to the workspace Owner.
         type: string
       creator_name:
         description: |-
           CreatorName 是 CreatorID 对应用户的展示名（username / email 等），
           仅在列表场景由 handler 批量回填，不落库；为空表示创建者无法解析（用户已删除、
-          CreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs tenant 的二分。
+          CreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs workspace 的二分。
         type: string
       deleted_at:
         allOf:
@@ -1421,7 +1422,7 @@ definitions:
         description: |-
           IsPinned and PinnedAt are computed per-caller from user_kb_pins
           (see migration 000050). They used to be stored on the row itself,
-          which made pinning a tenant-wide ordering decision gated behind
+          which made pinning a workspace-wide ordering decision gated behind
           the kb-edit RBAC guard. The columns are still present in legacy
           schemas for rollback safety but are no longer read or written by
           the application — both fields are tagged `gorm:"-"` so GORM
@@ -1469,12 +1470,12 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.StorageProviderConfig'
         description: 'Storage provider config (new): only stores provider selection;
-          credentials from tenant StorageEngineConfig'
+          credentials from workspace StorageEngineConfig'
       summary_model_id:
         description: Summary model ID
         type: string
       tenant_id:
-        description: Tenant ID
+        description: Workspace ID
         type: integer
       type:
         description: Type of the knowledge base (document, faq, etc.)
@@ -1485,7 +1486,7 @@ definitions:
       vector_store_id:
         description: |-
           VectorStoreID references the VectorStore this knowledge base is bound to.
-          When nil, the KB falls back to the tenant's effective engines derived from
+          When nil, the KB falls back to the workspace's effective engines derived from
           the RETRIEVE_DRIVER environment variable (env store flow).
           This field is set once at creation time and must not be modified afterwards;
           enforcement lives at the GORM layer (`<-:create`) plus the service-layer
@@ -1616,7 +1617,7 @@ definitions:
           type: string
         description: |-
           ParserEngineOverrides passes key-value configuration to docreader parsers
-          (e.g. pdf_force_scanned=true). Merged with tenant-level overrides in the
+          (e.g. pdf_force_scanned=true). Merged with workspace-level overrides in the
           parse pipeline; per-upload values take priority on conflict.
         type: object
       parser_engine_rules:
@@ -1652,7 +1653,7 @@ definitions:
         description: Sort order within the same knowledge base
         type: integer
       tenant_id:
-        description: Tenant ID
+        description: Workspace ID
         type: integer
       updated_at:
         description: Last updated time
@@ -1711,15 +1712,15 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant'
         description: |-
-          ActiveTenant is the tenant whose ID is encoded in the issued JWT;
+          ActiveTenant is the workspace whose ID is encoded in the issued JWT;
           future requests are scoped to it until the client calls /auth/switch-tenant.
-          Defaults to the user's home tenant on a fresh login.
+          Defaults to the user's home workspace on a fresh login.
       memberships:
         description: |-
-          Memberships lists every tenant the user can authenticate into,
+          Memberships lists every workspace the user can authenticate into,
           along with their role in each. Always populated (length 1 for users
-          who only belong to their home tenant) so frontends can render a
-          tenant switcher without a follow-up request. Serialised without
+          who only belong to their home workspace) so frontends can render a
+          workspace switcher without a follow-up request. Serialised without
           omitempty so the field is always present as a JSON array (possibly
           empty) — the "always populated" contract relies on the server side
           guaranteeing a non-nil slice.
@@ -1829,7 +1830,7 @@ definitions:
       id:
         type: string
       is_builtin:
-        description: Whether this is a builtin MCP service (visible to all tenants)
+        description: Whether this is a builtin MCP service (visible to all workspaces)
         type: boolean
       name:
         type: string
@@ -2385,9 +2386,9 @@ definitions:
         type: string
       owner_tenant_id:
         description: |-
-          OwnerTenantID is the persisted owner tenant of the organization
+          OwnerTenantID is the persisted owner workspace of the organization
           (Plan 3, migration 000046). Frontend uses this to identify the
-          "owner row" in the tenant-keyed members list — comparing
+          "owner row" in the workspace-keyed members list — comparing
           member.tenant_id against owner_tenant_id is the post-Plan-3
           equivalent of the old member.user_id == owner_id check.
         type: integer
@@ -3008,7 +3009,7 @@ definitions:
         description: PinnedAt records when the session was pinned; nil when not pinned.
         type: string
       tenant_id:
-        description: Tenant ID
+        description: Workspace ID
         type: integer
       title:
         description: Title
@@ -3211,7 +3212,7 @@ definitions:
         description: 'Sync status: running, success, partial, failed, canceled'
         type: string
       tenant_id:
-        description: Tenant ID
+        description: Workspace ID
         type: integer
       updated_at:
         description: Last update timestamp
@@ -3305,8 +3306,8 @@ definitions:
       context_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ContextConfig'
-        description: Global Context configuration for this tenant (default for all
-          sessions)
+        description: Global Context configuration for this workspace (default for
+          all sessions)
       created_at:
         description: Creation time
         type: string
@@ -3363,7 +3364,7 @@ definitions:
       web_search_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchConfig'
-        description: Global WebSearch configuration for this tenant
+        description: Global WebSearch configuration for this workspace
     type: object
   github_com_Tencent_WeKnora_internal_types.TenantRole:
     enum:
@@ -3476,7 +3477,7 @@ definitions:
         description: Avatar URL of the user
         type: string
       can_access_all_tenants:
-        description: Whether the user can access all tenants (cross-tenant access)
+        description: Whether the user can access all workspaces (cross-workspace access)
         type: boolean
       created_at:
         description: Creation time of the user
@@ -3495,7 +3496,7 @@ definitions:
         description: Whether the user is active
         type: boolean
       is_system_admin:
-        description: Whether the user is a system administrator (independent of tenant
+        description: Whether the user is a system administrator (independent of workspace
           roles)
         type: boolean
       preferences:
@@ -3510,7 +3511,7 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant'
         description: Association relationship, not stored in the database
       tenant_id:
-        description: Tenant ID that the user belongs to
+        description: Workspace ID that the user belongs to
         type: integer
       updated_at:
         description: Last updated time of the user
@@ -3554,11 +3555,11 @@ definitions:
         type: boolean
       last_active_tenant_id:
         description: |-
-          LastActiveTenantID remembers the last tenant the user actively
+          LastActiveTenantID remembers the last workspace the user actively
           switched into, so a fresh login (new device, cleared browser, new
           refresh token) lands them back in that workspace instead of always
-          bouncing to their home tenant. Login / RefreshToken validate that
-          the tenant still exists and the user still has an active membership
+          bouncing to their home workspace. Login / RefreshToken validate that
+          the workspace still exists and the user still has an active membership
           (or CanAccessAllTenants) before honouring this preference; an
           invalid pointer is best-effort cleared and the user falls back to
           home.
@@ -3567,7 +3568,7 @@ definitions:
           *0   = "clear preference" sentinel for the partial-update endpoint
                  (UpdateUserPreferences turns this into nil). Otherwise treat
                  a stored *0 the same as nil.
-          *N   = preferred tenant id.
+          *N   = preferred workspace id.
         type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.VLMConfig:
@@ -3661,7 +3662,7 @@ definitions:
         description: Unique identifier (UUID, auto-generated)
         type: string
       is_default:
-        description: Whether this is the default provider for the tenant
+        description: Whether this is the default provider for the workspace
         type: boolean
       name:
         description: User-friendly name, e.g., "Production Bing Search"
@@ -3676,7 +3677,7 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderType'
         description: 'Provider type: bing, google, duckduckgo, tavily'
       tenant_id:
-        description: Tenant ID for scoping
+        description: Workspace ID for scoping
         type: integer
       updated_at:
         type: string
@@ -4015,7 +4016,7 @@ definitions:
           logged.
         type: string
       tenant_id:
-        description: Tenant scope, mirrored from the enclosing knowledge base.
+        description: Workspace scope, mirrored from the enclosing knowledge base.
         type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse:
@@ -4139,7 +4140,7 @@ definitions:
         description: One-line summary for index listing
         type: string
       tenant_id:
-        description: Tenant ID for multi-tenant isolation
+        description: Workspace ID for multi-workspace isolation
         type: integer
       title:
         description: Human-readable title
@@ -4942,7 +4943,7 @@ definitions:
     type: object
   internal_handler.RuntimeWorkerPool:
     description: Return every row in the system_settings table (system-scope, not
-      tenant-scope). SystemAdmin only.
+      workspace-scoped). SystemAdmin only.
     properties:
       active:
         description: live workers assigned to this pool
@@ -5319,7 +5320,7 @@ definitions:
         description: |-
           LastActiveTenantID lets the SPA persist "after a fresh login,
           drop me back into this workspace" across devices. Send a positive
-          tenant id to set / replace, or 0 to clear. Membership is validated
+          workspace id to set / replace, or 0 to clear. Membership is validated
           at next login, not here. Nil = field omitted from the PATCH and
           stays untouched.
         type: integer
@@ -5343,7 +5344,7 @@ definitions:
         type: boolean
       agent_id:
         description: Selected custom agent ID (backend resolves shared agent and its
-          tenant from share relation)
+          workspace from share relation)
         type: string
       attachment_uploads:
         description: Attached files (documents, audio, etc.)
@@ -5641,7 +5642,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前租户的所有智能体（包括内置智能体）
+      description: 获取当前空间的所有智能体（包括内置智能体）
       produces:
       - application/json
       responses:
@@ -5976,7 +5977,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
+      description: Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
       produces:
       - application/json
       responses:
@@ -6046,7 +6047,7 @@ paths:
       consumes:
       - application/json
       description: |-
-        根据邀请链接中的 token 返回邀请上下文（租户名 / 角色 / 过期时间），
+        根据邀请链接中的 token 返回邀请上下文（空间名 / 角色 / 过期时间），
         供注册页展示。无认证；token 无效或被撤销返回 410。
         使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。
       parameters:
@@ -6311,7 +6312,7 @@ paths:
       - application/json
       description: |-
         通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。
-        注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应租户。
+        注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应空间。
       parameters:
       - description: 邀请注册请求
         in: body
@@ -6345,7 +6346,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 为当前用户在目标租户重新签发访问令牌；要求该用户在目标租户存在 active 成员关系
+      description: 为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系
       parameters:
       - description: 切换请求
         in: body
@@ -6370,12 +6371,12 @@ paths:
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "403":
-          description: 无该租户成员关系
+          description: 无该空间成员关系
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 切换激活租户
+      summary: 切换激活空间
       tags:
       - 认证
   /auth/validate:
@@ -7835,7 +7836,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前租户的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）
+      description: 获取当前空间的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）
       parameters:
       - description: 共享智能体 ID（传入时返回该智能体可用的知识库）
         in: query
@@ -9433,7 +9434,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属租户查询（用于刷新后恢复共享知识库下的文件）
+      description: 根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的空间解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属空间查询（用于刷新后恢复共享知识库下的文件）
       parameters:
       - collectionFormat: csv
         description: 知识ID列表
@@ -9447,7 +9448,7 @@ paths:
         in: query
         name: kb_id
         type: string
-      - description: 可选，共享智能体ID（用于按智能体租户批量拉取文件详情）
+      - description: 可选，共享智能体ID（用于按智能体空间批量拉取文件详情）
         in: query
         name: agent_id
         type: string
@@ -9724,7 +9725,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的租户解析
+      description: 批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
       parameters:
       - description: 标签更新请求（updates 必填，kb_id 可选）
         in: body
@@ -10411,7 +10412,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前租户的所有MCP服务
+      description: 获取当前空间的所有MCP服务
       produces:
       - application/json
       responses:
@@ -11059,7 +11060,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前租户的所有模型
+      description: 获取当前空间的所有模型
       produces:
       - application/json
       responses:
@@ -11224,7 +11225,7 @@ paths:
       - 模型管理
   /models/weknoracloud/status:
     get:
-      description: 检查当前租户的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存
+      description: 检查当前空间的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存
       produces:
       - application/json
       responses:
@@ -11246,7 +11247,7 @@ paths:
       - WeKnoraCloud
   /organizations:
     get:
-      description: 获取当前租户所属的所有组织，并附带各空间内知识库/智能体数量
+      description: 获取当前空间所属的所有组织，并附带各空间内知识库/智能体数量
       produces:
       - application/json
       responses:
@@ -11551,7 +11552,7 @@ paths:
       - 组织管理
   /organizations/{id}/members:
     get:
-      description: 获取组织的所有成员（按租户）
+      description: 获取组织的所有成员（按空间）
       parameters:
       - description: 组织ID
         in: path
@@ -11572,14 +11573,14 @@ paths:
       - 组织管理
   /organizations/{id}/members/{tenant_id}:
     delete:
-      description: 从组织中移除成员租户（需要管理员权限）
+      description: 从组织中移除成员空间（需要管理员权限）
       parameters:
       - description: 组织ID
         in: path
         name: id
         required: true
         type: string
-      - description: 成员租户ID
+      - description: 成员空间ID
         in: path
         name: tenant_id
         required: true
@@ -11602,14 +11603,14 @@ paths:
     put:
       consumes:
       - application/json
-      description: 更新组织成员（租户）的角色（需要管理员权限）
+      description: 更新组织成员（空间）的角色（需要管理员权限）
       parameters:
       - description: 组织ID
         in: path
         name: id
         required: true
         type: string
-      - description: 成员租户ID
+      - description: 成员空间ID
         in: path
         name: tenant_id
         required: true
@@ -11673,14 +11674,14 @@ paths:
       - 组织管理
   /organizations/{id}/search-tenants:
     get:
-      description: 搜索租户（排除已加入的租户）用于邀请加入组织；按租户去重，附带代表用户
+      description: 搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户
       parameters:
       - description: 组织ID
         in: path
         name: id
         required: true
         type: string
-      - description: 搜索关键词（租户名、用户名或邮箱）
+      - description: 搜索关键词（空间名、用户名或邮箱）
         in: query
         name: q
         required: true
@@ -11704,7 +11705,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 搜索可邀请的租户
+      summary: 搜索可邀请的空间
       tags:
       - 组织管理
   /organizations/{id}/search-users:
@@ -11919,7 +11920,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前租户的会话列表，支持分页、关键字搜索、按来源/Agent 筛选
+      description: 获取当前空间的会话列表，支持分页、关键字搜索、按来源/Agent 筛选
       parameters:
       - description: 页码
         in: query
@@ -12402,7 +12403,7 @@ paths:
     delete:
       consumes:
       - application/json
-      description: 根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前租户的所有会话
+      description: 根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前空间的所有会话
       parameters:
       - description: 批量删除请求
         in: body
@@ -12904,7 +12905,7 @@ paths:
         Reads the current value of `tenant.default_storage_quota_gb`
         (3-tier resolver: DB > ENV > default) and writes that many
         GiB into storage_quota for every row in tenants. Bypasses
-        the per-tenant PUT whitelist, which forbids storage_quota
+        the per-workspace PUT whitelist, which forbids storage_quota
         edits by Owners. SystemAdmin only.
         Idempotent — running twice with the same setting is a no-op.
       produces:
@@ -12920,7 +12921,7 @@ paths:
           schema:
             additionalProperties: true
             type: object
-      summary: Apply the default storage quota to every existing tenant
+      summary: Apply the default storage quota to every existing workspace
       tags:
       - System Admin
   /system/admin/users/reset-password:
@@ -13068,12 +13069,12 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前用户可访问的租户列表
+      description: 获取当前用户可访问的空间列表
       produces:
       - application/json
       responses:
         "200":
-          description: 租户列表
+          description: 空间列表
           schema:
             additionalProperties: true
             type: object
@@ -13083,20 +13084,20 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 获取租户列表
+      summary: 获取空间列表
       tags:
-      - 租户管理
+      - 空间管理
     post:
       consumes:
       - application/json
       description: |-
-        创建新的租户。任意已登录用户均可调用以建立自己的新工作区，
-        调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样
-        通过本接口创建任意租户。
+        创建新的空间。任意已登录用户均可调用以建立自己的新工作区，
+        调用方会被自动设为该空间的 Owner。跨空间超管仍可像以前一样
+        通过本接口创建任意空间。
         当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）
         开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。
       parameters:
-      - description: 租户信息
+      - description: 空间信息
         in: body
         name: request
         required: true
@@ -13106,7 +13107,7 @@ paths:
       - application/json
       responses:
         "201":
-          description: 创建的租户（可选含 api_key）
+          description: 创建的空间（可选含 api_key）
           schema:
             additionalProperties: true
             type: object
@@ -13116,16 +13117,16 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 创建租户
+      summary: 创建空间
       tags:
-      - 租户管理
+      - 空间管理
   /tenants/{id}:
     delete:
       consumes:
       - application/json
-      description: 删除指定的租户
+      description: 删除指定的空间
       parameters:
-      - description: 租户ID
+      - description: 空间ID
         in: path
         name: id
         required: true
@@ -13144,15 +13145,15 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 删除租户
+      summary: 删除空间
       tags:
-      - 租户管理
+      - 空间管理
     get:
       consumes:
       - application/json
-      description: 根据ID获取租户详情
+      description: 根据ID获取空间详情
       parameters:
-      - description: 租户ID
+      - description: 空间ID
         in: path
         name: id
         required: true
@@ -13161,7 +13162,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: 租户详情
+          description: 空间详情
           schema:
             additionalProperties: true
             type: object
@@ -13170,26 +13171,26 @@ paths:
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
-          description: 租户不存在
+          description: 空间不存在
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 获取租户详情
+      summary: 获取空间详情
       tags:
-      - 租户管理
+      - 空间管理
     put:
       consumes:
       - application/json
-      description: 更新租户信息
+      description: 更新空间信息
       parameters:
-      - description: 租户ID
+      - description: 空间ID
         in: path
         name: id
         required: true
         type: integer
-      - description: 租户信息
+      - description: 空间信息
         in: body
         name: request
         required: true
@@ -13199,7 +13200,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: 更新后的租户
+          description: 更新后的空间
           schema:
             additionalProperties: true
             type: object
@@ -13209,16 +13210,16 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 更新租户
+      summary: 更新空间
       tags:
-      - 租户管理
+      - 空间管理
   /tenants/{id}/api-principal-config:
     get:
       consumes:
       - application/json
       description: 返回 X-API-Key 请求如何映射为终端 Principal 的配置（Owner）
       parameters:
-      - description: 租户ID
+      - description: 空间ID
         in: path
         name: id
         required: true
@@ -13241,15 +13242,15 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 获取租户 API Key 用户身份配置
+      summary: 获取空间 API Key 用户身份配置
       tags:
-      - 租户管理
+      - 空间管理
     put:
       consumes:
       - application/json
       description: 配置 X-API-Key 请求如何映射为终端 Principal（Owner）
       parameters:
-      - description: 租户ID
+      - description: 空间ID
         in: path
         name: id
         required: true
@@ -13278,16 +13279,16 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 更新租户 API Key 用户身份配置
+      summary: 更新空间 API Key 用户身份配置
       tags:
-      - 租户管理
+      - 空间管理
   /tenants/{id}/api-principal-test-token:
     post:
       consumes:
       - application/json
-      description: 使用租户已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）
+      description: 使用空间已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）
       parameters:
-      - description: 租户ID
+      - description: 空间ID
         in: path
         name: id
         required: true
@@ -13318,12 +13319,12 @@ paths:
       - Bearer: []
       summary: 生成 API Playground 测试 JWT
       tags:
-      - 租户管理
+      - 空间管理
   /tenants/{id}/audit-log:
     get:
-      description: 返回该租户最近的审计事件，按 id 倒序。游标分页：将上次响应的 next_cursor 作为下一次请求的 after_id。
+      description: 返回该空间最近的审计事件，按 id 倒序。游标分页：将上次响应的 next_cursor 作为下一次请求的 after_id。
       parameters:
-      - description: 租户ID
+      - description: 空间ID
         in: path
         name: id
         required: true
@@ -13362,14 +13363,14 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 获取租户审计日志
+      summary: 获取空间审计日志
       tags:
       - 审计日志
   /tenants/{id}/invitations:
     get:
-      description: 按 tenant 列出待接受 / 历史邀请。query include_terminal=true 时附带 accepted/declined/revoked/expired。
+      description: 按空间列出待接受 / 历史邀请。query include_terminal=true 时附带 accepted/declined/revoked/expired。
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13398,15 +13399,15 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 列出租户邀请
+      summary: 列出空间邀请
       tags:
-      - 租户邀请
+      - 空间邀请
     post:
       consumes:
       - application/json
-      description: Owner 通过邮箱邀请已注册用户加入当前租户；被邀请人需要在 /me/invitations 接受后才会成为成员。
+      description: Owner 通过邮箱邀请已注册用户加入当前空间；被邀请人需要在 /me/invitations 接受后才会成为成员。
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13427,14 +13428,14 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 发出租户邀请
+      summary: 发出空间邀请
       tags:
-      - 租户邀请
+      - 空间邀请
   /tenants/{id}/invitations/{inv_id}:
     delete:
       description: Owner 取消一条还在 pending 的邀请；已 accepted/declined/revoked/expired 的行不可再撤销。
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13456,16 +13457,16 @@ paths:
       - Bearer: []
       summary: 撤销待接受邀请
       tags:
-      - 租户邀请
+      - 空间邀请
   /tenants/{id}/invite-links:
     post:
       consumes:
       - application/json
       description: |-
-        生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前租户。
+        生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前空间。
         链接持续有效，直到过期或被撤销。
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13488,12 +13489,12 @@ paths:
       - Bearer: []
       summary: 生成共享邀请链接
       tags:
-      - 租户邀请
+      - 空间邀请
   /tenants/{id}/leave:
     post:
-      description: 调用方主动退出当前租户。等价于以自己的 user_id 调 RemoveMember，
+      description: 调用方主动退出当前空间。等价于以自己的 user_id 调 RemoveMember，
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13508,14 +13509,14 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 退出当前租户
+      summary: 退出当前空间
       tags:
-      - 租户成员
+      - 空间成员
   /tenants/{id}/members:
     get:
-      description: 分页返回当前租户内 active 成员（含每位成员的角色、邮箱、头像）；支持 q 按邮箱/用户名筛选
+      description: 分页返回当前空间内 active 成员（含每位成员的角色、邮箱、头像）；支持 q 按邮箱/用户名筛选
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13544,14 +13545,14 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 列出租户成员
+      summary: 列出空间成员
       tags:
-      - 租户成员
+      - 空间成员
     post:
       consumes:
       - application/json
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13572,14 +13573,14 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 直接添加租户成员（直加路径）
+      summary: 直接添加空间成员（直加路径）
       tags:
-      - 租户成员
+      - 空间成员
   /tenants/{id}/members/{user_id}:
     delete:
-      description: Owner 将某位成员从当前租户中移除（软删除 tenant_members 行）；不能移除最后一位 Owner
+      description: Owner 将某位成员从当前空间中移除（软删除 tenant_members 行）；不能移除最后一位 Owner
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13599,15 +13600,15 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 移除租户成员
+      summary: 移除空间成员
       tags:
-      - 租户成员
+      - 空间成员
     put:
       consumes:
       - application/json
-      description: Owner 修改某位成员在当前租户内的角色；不能将最后一位 Owner 降级
+      description: Owner 修改某位成员在当前空间内的角色；不能将最后一位 Owner 降级
       parameters:
-      - description: 租户 ID
+      - description: 空间 ID
         in: path
         name: id
         required: true
@@ -13633,19 +13634,19 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 修改租户成员角色
+      summary: 修改空间成员角色
       tags:
-      - 租户成员
+      - 空间成员
   /tenants/all:
     get:
       consumes:
       - application/json
-      description: 获取系统中所有租户（需要跨租户访问权限）
+      description: 获取系统中所有空间（需要跨空间访问权限）
       produces:
       - application/json
       responses:
         "200":
-          description: 所有租户列表
+          description: 所有空间列表
           schema:
             additionalProperties: true
             type: object
@@ -13655,14 +13656,14 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
-      summary: 获取所有租户列表
+      summary: 获取所有空间列表
       tags:
-      - 租户管理
+      - 空间管理
   /tenants/kv/{key}:
     get:
       consumes:
       - application/json
-      description: 获取租户级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+      description: 获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
       parameters:
       - description: 配置键名
         in: path
@@ -13684,13 +13685,13 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 获取租户KV配置
+      summary: 获取空间KV配置
       tags:
-      - 租户管理
+      - 空间管理
     put:
       consumes:
       - application/json
-      description: 更新租户级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+      description: 更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
       parameters:
       - description: 配置键名
         in: path
@@ -13718,9 +13719,9 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 更新租户KV配置
+      summary: 更新空间KV配置
       tags:
-      - 租户管理
+      - 空间管理
   /tenants/kv/prompt-templates:
     get:
       consumes:
@@ -13743,12 +13744,12 @@ paths:
       - ApiKeyAuth: []
       summary: 获取提示词模板
       tags:
-      - 租户管理
+      - 空间管理
   /tenants/kv/web-search-config:
     get:
       consumes:
       - application/json
-      description: 获取租户的网络搜索配置
+      description: 获取空间的网络搜索配置
       produces:
       - application/json
       responses:
@@ -13764,20 +13765,20 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 获取租户网络搜索配置
+      summary: 获取空间网络搜索配置
       tags:
-      - 租户管理
+      - 空间管理
   /tenants/search:
     get:
       consumes:
       - application/json
-      description: 分页搜索租户（需要跨租户访问权限）
+      description: 分页搜索空间（需要跨空间访问权限）
       parameters:
       - description: 搜索关键词
         in: query
         name: keyword
         type: string
-      - description: 租户ID筛选
+      - description: 空间ID筛选
         in: query
         name: tenant_id
         type: integer
@@ -13806,13 +13807,13 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 搜索租户
+      summary: 搜索空间
       tags:
-      - 租户管理
+      - 空间管理
   /user/favorites:
     get:
-      description: Lists this user's starred resources in the current tenant for a
-        given type
+      description: Lists this user's starred resources in the current workspace for
+        a given type
       parameters:
       - description: Resource type (kb | agent)
         in: query
@@ -13869,7 +13870,7 @@ paths:
       - User
   /vector-stores:
     get:
-      description: List all vector stores for the current tenant, including environment-configured
+      description: List all vector stores for the current workspace, including environment-configured
         and user-created stores
       produces:
       - application/json
@@ -13893,7 +13894,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a new vector store configuration for the current tenant
+      description: Create a new vector store configuration for the current workspace
       parameters:
       - description: Vector store configuration
         in: body
@@ -14379,7 +14380,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 保存 APPID/APPSECRET 到当前租户配置（不自动创建模型）
+      description: 保存 APPID/APPSECRET 到当前空间配置（不自动创建模型）
       parameters:
       - description: '{app_id, app_secret}'
         in: body
@@ -14409,7 +14410,7 @@ paths:
       - WeKnoraCloud
 securityDefinitions:
   ApiKeyAuth:
-    description: 租户身份认证：输入 sk- 开头的 API Key
+    description: 空间身份认证：输入 sk- 开头的 API Key
     in: header
     name: X-API-Key
     type: apiKey

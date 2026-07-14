@@ -5,7 +5,7 @@
       <p class="section-desc">{{ $t('knowledgeEditor.share.description') }}</p>
     </div>
     <div class="section-body">
-      <!-- 共享表单：仅 KB creator 或租户 Admin+ 可见，其他角色看到的是只读列表。 -->
+      <!-- 共享表单：仅 KB creator 或空间 Admin+ 可见，其他角色看到的是只读列表。 -->
       <div v-if="canShare" class="share-form">
         <div class="form-item">
           <label class="form-label">{{ $t('organization.share.selectOrg') }}</label>
@@ -181,7 +181,7 @@ function getOrgForShare(organizationId: string) {
 interface Props {
   kbId: string
   // 后端 POST/PUT/DELETE /knowledge-bases/:id/shares 受 OwnedKBOrAdmin
-  // 守卫：仅 KB creator 或租户 Admin+ 能改动共享。父组件根据 KB.creator_id
+  // 守卫：仅 KB creator 或空间 Admin+ 能改动共享。父组件根据 KB.creator_id
   // 计算后传入，缺省 false 表示只读。
   canShare?: boolean
 }

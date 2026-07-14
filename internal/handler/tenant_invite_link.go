@@ -54,12 +54,12 @@ type createInviteLinkRequest struct {
 
 // CreateInviteLink godoc
 // @Summary      生成共享邀请链接
-// @Description  生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前租户。
+// @Description  生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前空间。
 // @Description  链接持续有效，直到过期或被撤销。
-// @Tags         租户邀请
+// @Tags         空间邀请
 // @Accept       json
 // @Produce      json
-// @Param        id       path  string                   true  "租户 ID"
+// @Param        id       path  string                   true  "空间 ID"
 // @Param        request  body  createInviteLinkRequest  true  "共享链接配置"
 // @Success      201  {object}  map[string]interface{}
 // @Security     Bearer

@@ -142,7 +142,7 @@ func (s *sessionService) GetSessionByID(ctx context.Context, tenantID uint64, id
 		return nil, stderrors.New("session id is required")
 	}
 	if tenantID == 0 {
-		return nil, stderrors.New("tenant id is required")
+		return nil, stderrors.New("workspace id is required")
 	}
 	return s.sessionRepo.GetByID(ctx, tenantID, id)
 }

@@ -111,7 +111,7 @@ curl --location 'http://localhost:8080/api/v1/agents' \
 
 ## GET `/agents` - 获取智能体列表
 
-获取当前租户的所有智能体，包括内置智能体和自定义智能体。响应中额外返回 `disabled_own_agent_ids`，指示当前租户在前端对话下拉框中主动隐藏的本租户自有智能体 ID 列表（不影响其他租户）。
+获取当前空间的所有智能体，包括内置智能体和自定义智能体。响应中额外返回 `disabled_own_agent_ids`，指示当前空间在前端对话下拉框中主动隐藏的本空间自有智能体 ID 列表（不影响其他空间）。
 
 **请求**:
 
@@ -164,7 +164,7 @@ curl --location 'http://localhost:8080/api/v1/agents' \
 
 | 状态码 | 错误码 | 错误                  | 说明               |
 | ------ | ------ | --------------------- | ------------------ |
-| 401    | 1001   | Unauthorized          | 缺少租户上下文     |
+| 401    | 1001   | Unauthorized          | 缺少空间上下文     |
 | 500    | 1007   | Internal Server Error | 服务器内部错误     |
 
 ---
@@ -470,7 +470,7 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 |------|------|--------|------|
 | `web_search_enabled` | bool | true | 是否启用网络搜索 |
 | `web_search_max_results` | int | 5 | 网络搜索最大结果数 |
-| `web_search_provider_id` | string | - | 网络搜索提供者 ID，为空使用租户默认提供者 |
+| `web_search_provider_id` | string | - | 网络搜索提供者 ID，为空使用空间默认提供者 |
 | `web_fetch_enabled` | bool | false | 是否自动获取重排后的搜索结果页面全文 |
 | `web_fetch_top_n` | int | 3 | 重排后获取全文的最大页面数 |
 
@@ -548,6 +548,6 @@ curl --location 'http://localhost:8080/api/v1/agent-chat/session-123' \
 
 ## 相关文档
 
-- 智能体的组织共享、跨租户分发与禁用（`/agents/:id/shares`、`/shared-agents` 等）：见 [组织管理 API](./organization.md)
+- 智能体的组织共享、跨空间分发与禁用（`/agents/:id/shares`、`/shared-agents` 等）：见 [组织管理 API](./organization.md)
 - 智能体绑定 IM 渠道（`/agents/:id/im-channels`）：见组织/IM 渠道相关文档
 - 网络搜索提供者配置（被 `web_search_provider_id` 引用）：见 [Web Search API](./web-search.md)

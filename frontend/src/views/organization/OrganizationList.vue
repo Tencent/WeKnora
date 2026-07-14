@@ -570,7 +570,7 @@ const orgStore = useOrganizationStore()
 const authStore = useAuthStore()
 
 // 后端 /api/v1/organizations 下的写操作（创建、加入、申请加入、邀请、审批、改设置等）
-// 在路由层都要求当前租户角色 ≥ admin。前端只用于 UI 渲染，安全边界仍在服务端。
+// 在路由层都要求当前空间角色 ≥ admin。前端只用于 UI 渲染，安全边界仍在服务端。
 const canManageOrg = computed(
   () => authStore.hasRole('admin') || authStore.canAccessAllTenants
 )

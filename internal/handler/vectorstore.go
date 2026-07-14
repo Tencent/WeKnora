@@ -79,7 +79,7 @@ func envStoreReadonlyError() gin.H {
 
 // CreateStore godoc
 // @Summary      Create vector store
-// @Description  Create a new vector store configuration for the current tenant
+// @Description  Create a new vector store configuration for the current workspace
 // @Tags         VectorStore
 // @Accept       json
 // @Produce      json
@@ -96,7 +96,7 @@ func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 
 // ListStores godoc
 // @Summary      List vector stores
-// @Description  List all vector stores for the current tenant, including environment-configured and user-created stores
+// @Description  List all vector stores for the current workspace, including environment-configured and user-created stores
 // @Tags         VectorStore
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}   "List of vector stores (env + DB)"
@@ -142,7 +142,7 @@ func (h *VectorStoreHandler) ListStores(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -189,7 +189,7 @@ func (h *VectorStoreHandler) GetStore(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -311,7 +311,7 @@ func (h *VectorStoreHandler) DeleteStore(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -369,7 +369,7 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 
@@ -434,7 +434,7 @@ func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 
 	tenantID := h.getTenantID(c)
 	if tenantID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: tenant context missing"})
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized: workspace context missing"})
 		return
 	}
 

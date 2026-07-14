@@ -104,7 +104,7 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 			_ = svc.LogDenied(ctx, c, tenantID, uid, string(role), min)
 		}
 		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Forbidden: insufficient tenant role",
+			"error": "Forbidden: insufficient workspace role",
 		})
 		c.Abort()
 	}
@@ -137,7 +137,7 @@ func RequireRoleOrSystemAdmin(min types.TenantRole, cfg *config.Config) gin.Hand
 // System administrators operate independently of tenant-scoped roles and
 // are not bound by the per-tenant RBAC matrix. Use this guard for
 // platform-wide administrative endpoints (managing other system admins,
-// editing global settings, cross-tenant operations) where the per-tenant
+// editing global settings, cross-workspace operations) where the per-tenant
 // Owner/Admin/Contributor/Viewer ladder does not apply.
 //
 // Unlike tenant-role guards, this check is always enforced. The

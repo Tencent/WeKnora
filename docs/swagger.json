@@ -186,7 +186,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的所有智能体（包括内置智能体）",
+                "description": "获取当前空间的所有智能体（包括内置智能体）",
                 "consumes": [
                     "application/json"
                 ],
@@ -711,7 +711,7 @@
         },
         "/auth/auto-setup": {
             "post": {
-                "description": "Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程",
+                "description": "Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程",
                 "consumes": [
                     "application/json"
                 ],
@@ -818,7 +818,7 @@
         },
         "/auth/invitations/lookup": {
             "post": {
-                "description": "根据邀请链接中的 token 返回邀请上下文（租户名 / 角色 / 过期时间），\n供注册页展示。无认证；token 无效或被撤销返回 410。\n使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。",
+                "description": "根据邀请链接中的 token 返回邀请上下文（空间名 / 角色 / 过期时间），\n供注册页展示。无认证；token 无效或被撤销返回 410。\n使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。",
                 "consumes": [
                     "application/json"
                 ],
@@ -1219,7 +1219,7 @@
         },
         "/auth/register-by-invite": {
             "post": {
-                "description": "通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。\n注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应租户。",
+                "description": "通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。\n注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应空间。",
                 "consumes": [
                     "application/json"
                 ],
@@ -1276,7 +1276,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "为当前用户在目标租户重新签发访问令牌；要求该用户在目标租户存在 active 成员关系",
+                "description": "为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系",
                 "consumes": [
                     "application/json"
                 ],
@@ -1286,7 +1286,7 @@
                 "tags": [
                     "认证"
                 ],
-                "summary": "切换激活租户",
+                "summary": "切换激活空间",
                 "parameters": [
                     {
                         "description": "切换请求",
@@ -1320,7 +1320,7 @@
                         }
                     },
                     "403": {
-                        "description": "无该租户成员关系",
+                        "description": "无该空间成员关系",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -3612,7 +3612,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）",
+                "description": "获取当前空间的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）",
                 "consumes": [
                     "application/json"
                 ],
@@ -5769,7 +5769,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属租户查询（用于刷新后恢复共享知识库下的文件）",
+                "description": "根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的空间解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属空间查询（用于刷新后恢复共享知识库下的文件）",
                 "consumes": [
                     "application/json"
                 ],
@@ -5800,7 +5800,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "可选，共享智能体ID（用于按智能体租户批量拉取文件详情）",
+                        "description": "可选，共享智能体ID（用于按智能体空间批量拉取文件详情）",
                         "name": "agent_id",
                         "in": "query"
                     }
@@ -6233,7 +6233,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的租户解析",
+                "description": "批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析",
                 "consumes": [
                     "application/json"
                 ],
@@ -7654,7 +7654,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的所有MCP服务",
+                "description": "获取当前空间的所有MCP服务",
                 "consumes": [
                     "application/json"
                 ],
@@ -8691,7 +8691,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的所有模型",
+                "description": "获取当前空间的所有模型",
                 "consumes": [
                     "application/json"
                 ],
@@ -8816,7 +8816,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "检查当前租户的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存",
+                "description": "检查当前空间的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存",
                 "produces": [
                     "application/json"
                 ],
@@ -8995,7 +8995,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "获取当前租户所属的所有组织，并附带各空间内知识库/智能体数量",
+                "description": "获取当前空间所属的所有组织，并附带各空间内知识库/智能体数量",
                 "produces": [
                     "application/json"
                 ],
@@ -9695,7 +9695,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "获取组织的所有成员（按租户）",
+                "description": "获取组织的所有成员（按空间）",
                 "produces": [
                     "application/json"
                 ],
@@ -9729,7 +9729,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "更新组织成员（租户）的角色（需要管理员权限）",
+                "description": "更新组织成员（空间）的角色（需要管理员权限）",
                 "consumes": [
                     "application/json"
                 ],
@@ -9750,7 +9750,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "成员租户ID",
+                        "description": "成员空间ID",
                         "name": "tenant_id",
                         "in": "path",
                         "required": true
@@ -9787,7 +9787,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "从组织中移除成员租户（需要管理员权限）",
+                "description": "从组织中移除成员空间（需要管理员权限）",
                 "tags": [
                     "组织管理"
                 ],
@@ -9802,7 +9802,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "成员租户ID",
+                        "description": "成员空间ID",
                         "name": "tenant_id",
                         "in": "path",
                         "required": true
@@ -9885,14 +9885,14 @@
                         "Bearer": []
                     }
                 ],
-                "description": "搜索租户（排除已加入的租户）用于邀请加入组织；按租户去重，附带代表用户",
+                "description": "搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "组织管理"
                 ],
-                "summary": "搜索可邀请的租户",
+                "summary": "搜索可邀请的空间",
                 "parameters": [
                     {
                         "type": "string",
@@ -9903,7 +9903,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "搜索关键词（租户名、用户名或邮箱）",
+                        "description": "搜索关键词（空间名、用户名或邮箱）",
                         "name": "q",
                         "in": "query",
                         "required": true
@@ -10053,7 +10053,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的会话列表，支持分页、关键字搜索、按来源/Agent 筛选",
+                "description": "获取当前空间的会话列表，支持分页、关键字搜索、按来源/Agent 筛选",
                 "consumes": [
                     "application/json"
                 ],
@@ -10170,7 +10170,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前租户的所有会话",
+                "description": "根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前空间的所有会话",
                 "consumes": [
                     "application/json"
                 ],
@@ -11553,14 +11553,14 @@
         },
         "/system/admin/tenants/apply-default-storage-quota": {
             "post": {
-                "description": "Reads the current value of `tenant.default_storage_quota_gb`\n(3-tier resolver: DB \u003e ENV \u003e default) and writes that many\nGiB into storage_quota for every row in tenants. Bypasses\nthe per-tenant PUT whitelist, which forbids storage_quota\nedits by Owners. SystemAdmin only.\nIdempotent — running twice with the same setting is a no-op.",
+                "description": "Reads the current value of `tenant.default_storage_quota_gb`\n(3-tier resolver: DB \u003e ENV \u003e default) and writes that many\nGiB into storage_quota for every row in tenants. Bypasses\nthe per-workspace PUT whitelist, which forbids storage_quota\nedits by Owners. SystemAdmin only.\nIdempotent — running twice with the same setting is a no-op.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "System Admin"
                 ],
-                "summary": "Apply the default storage quota to every existing tenant",
+                "summary": "Apply the default storage quota to every existing workspace",
                 "responses": {
                     "200": {
                         "description": "{ affected: int64, quota_bytes: int64 }",
@@ -11799,7 +11799,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "获取当前用户可访问的租户列表",
+                "description": "获取当前用户可访问的空间列表",
                 "consumes": [
                     "application/json"
                 ],
@@ -11807,12 +11807,12 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户列表",
+                "summary": "获取空间列表",
                 "responses": {
                     "200": {
-                        "description": "租户列表",
+                        "description": "空间列表",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11832,7 +11832,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "创建新的租户。任意已登录用户均可调用以建立自己的新工作区，\n调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样\n通过本接口创建任意租户。\n当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）\n开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。",
+                "description": "创建新的空间。任意已登录用户均可调用以建立自己的新工作区，\n调用方会被自动设为该空间的 Owner。跨空间超管仍可像以前一样\n通过本接口创建任意空间。\n当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）\n开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。",
                 "consumes": [
                     "application/json"
                 ],
@@ -11840,12 +11840,12 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "创建租户",
+                "summary": "创建空间",
                 "parameters": [
                     {
-                        "description": "租户信息",
+                        "description": "空间信息",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -11856,7 +11856,7 @@
                 ],
                 "responses": {
                     "201": {
-                        "description": "创建的租户（可选含 api_key）",
+                        "description": "创建的空间（可选含 api_key）",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11878,7 +11878,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "获取系统中所有租户（需要跨租户访问权限）",
+                "description": "获取系统中所有空间（需要跨空间访问权限）",
                 "consumes": [
                     "application/json"
                 ],
@@ -11886,12 +11886,12 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取所有租户列表",
+                "summary": "获取所有空间列表",
                 "responses": {
                     "200": {
-                        "description": "所有租户列表",
+                        "description": "所有空间列表",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11924,7 +11924,7 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
                 "summary": "获取提示词模板",
                 "responses": {
@@ -11954,7 +11954,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取租户的网络搜索配置",
+                "description": "获取空间的网络搜索配置",
                 "consumes": [
                     "application/json"
                 ],
@@ -11962,9 +11962,9 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户网络搜索配置",
+                "summary": "获取空间网络搜索配置",
                 "responses": {
                     "200": {
                         "description": "网络搜索配置",
@@ -11992,7 +11992,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取租户级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
+                "description": "获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
                 "consumes": [
                     "application/json"
                 ],
@@ -12000,9 +12000,9 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户KV配置",
+                "summary": "获取空间KV配置",
                 "parameters": [
                     {
                         "type": "string",
@@ -12037,7 +12037,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "更新租户级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
+                "description": "更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
                 "consumes": [
                     "application/json"
                 ],
@@ -12045,9 +12045,9 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "更新租户KV配置",
+                "summary": "更新空间KV配置",
                 "parameters": [
                     {
                         "type": "string",
@@ -12093,7 +12093,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "分页搜索租户（需要跨租户访问权限）",
+                "description": "分页搜索空间（需要跨空间访问权限）",
                 "consumes": [
                     "application/json"
                 ],
@@ -12101,9 +12101,9 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "搜索租户",
+                "summary": "搜索空间",
                 "parameters": [
                     {
                         "type": "string",
@@ -12113,7 +12113,7 @@
                     },
                     {
                         "type": "integer",
-                        "description": "租户ID筛选",
+                        "description": "空间ID筛选",
                         "name": "tenant_id",
                         "in": "query"
                     },
@@ -12159,7 +12159,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据ID获取租户详情",
+                "description": "根据ID获取空间详情",
                 "consumes": [
                     "application/json"
                 ],
@@ -12167,13 +12167,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户详情",
+                "summary": "获取空间详情",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12181,7 +12181,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "租户详情",
+                        "description": "空间详情",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -12194,7 +12194,7 @@
                         }
                     },
                     "404": {
-                        "description": "租户不存在",
+                        "description": "空间不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -12207,7 +12207,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "更新租户信息",
+                "description": "更新空间信息",
                 "consumes": [
                     "application/json"
                 ],
@@ -12215,19 +12215,19 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "更新租户",
+                "summary": "更新空间",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "租户信息",
+                        "description": "空间信息",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -12238,7 +12238,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "更新后的租户",
+                        "description": "更新后的空间",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -12258,7 +12258,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "删除指定的租户",
+                "description": "删除指定的空间",
                 "consumes": [
                     "application/json"
                 ],
@@ -12266,13 +12266,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "删除租户",
+                "summary": "删除空间",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12310,13 +12310,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户 API Key 用户身份配置",
+                "summary": "获取空间 API Key 用户身份配置",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12358,13 +12358,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "更新租户 API Key 用户身份配置",
+                "summary": "更新空间 API Key 用户身份配置",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12409,7 +12409,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "使用租户已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）",
+                "description": "使用空间已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）",
                 "consumes": [
                     "application/json"
                 ],
@@ -12417,13 +12417,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
                 "summary": "生成 API Playground 测试 JWT",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12471,18 +12471,18 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "返回该租户最近的审计事件，按 id 倒序。游标分页：将上次响应的 next_cursor 作为下一次请求的 after_id。",
+                "description": "返回该空间最近的审计事件，按 id 倒序。游标分页：将上次响应的 next_cursor 作为下一次请求的 after_id。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "审计日志"
                 ],
-                "summary": "获取租户审计日志",
+                "summary": "获取空间审计日志",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12541,18 +12541,18 @@
                         "Bearer": []
                     }
                 ],
-                "description": "按 tenant 列出待接受 / 历史邀请。query include_terminal=true 时附带 accepted/declined/revoked/expired。",
+                "description": "按空间列出待接受 / 历史邀请。query include_terminal=true 时附带 accepted/declined/revoked/expired。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "租户邀请"
+                    "空间邀请"
                 ],
-                "summary": "列出租户邀请",
+                "summary": "列出空间邀请",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12594,7 +12594,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "Owner 通过邮箱邀请已注册用户加入当前租户；被邀请人需要在 /me/invitations 接受后才会成为成员。",
+                "description": "Owner 通过邮箱邀请已注册用户加入当前空间；被邀请人需要在 /me/invitations 接受后才会成为成员。",
                 "consumes": [
                     "application/json"
                 ],
@@ -12602,13 +12602,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户邀请"
+                    "空间邀请"
                 ],
-                "summary": "发出租户邀请",
+                "summary": "发出空间邀请",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12646,13 +12646,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户邀请"
+                    "空间邀请"
                 ],
                 "summary": "撤销待接受邀请",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12683,7 +12683,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前租户。\n链接持续有效，直到过期或被撤销。",
+                "description": "生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前空间。\n链接持续有效，直到过期或被撤销。",
                 "consumes": [
                     "application/json"
                 ],
@@ -12691,13 +12691,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户邀请"
+                    "空间邀请"
                 ],
                 "summary": "生成共享邀请链接",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12730,18 +12730,18 @@
                         "Bearer": []
                     }
                 ],
-                "description": "调用方主动退出当前租户。等价于以自己的 user_id 调 RemoveMember，",
+                "description": "调用方主动退出当前空间。等价于以自己的 user_id 调 RemoveMember，",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "退出当前租户",
+                "summary": "退出当前空间",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12765,18 +12765,18 @@
                         "Bearer": []
                     }
                 ],
-                "description": "分页返回当前租户内 active 成员（含每位成员的角色、邮箱、头像）；支持 q 按邮箱/用户名筛选",
+                "description": "分页返回当前空间内 active 成员（含每位成员的角色、邮箱、头像）；支持 q 按邮箱/用户名筛选",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "列出租户成员",
+                "summary": "列出空间成员",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12825,13 +12825,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "直接添加租户成员（直加路径）",
+                "summary": "直接添加空间成员（直加路径）",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12864,7 +12864,7 @@
                         "Bearer": []
                     }
                 ],
-                "description": "Owner 修改某位成员在当前租户内的角色；不能将最后一位 Owner 降级",
+                "description": "Owner 修改某位成员在当前空间内的角色；不能将最后一位 Owner 降级",
                 "consumes": [
                     "application/json"
                 ],
@@ -12872,13 +12872,13 @@
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "修改租户成员角色",
+                "summary": "修改空间成员角色",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12916,18 +12916,18 @@
                         "Bearer": []
                     }
                 ],
-                "description": "Owner 将某位成员从当前租户中移除（软删除 tenant_members 行）；不能移除最后一位 Owner",
+                "description": "Owner 将某位成员从当前空间中移除（软删除 tenant_members 行）；不能移除最后一位 Owner",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "移除租户成员",
+                "summary": "移除空间成员",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12953,7 +12953,7 @@
         },
         "/user/favorites": {
             "get": {
-                "description": "Lists this user's starred resources in the current tenant for a given type",
+                "description": "Lists this user's starred resources in the current workspace for a given type",
                 "tags": [
                     "User"
                 ],
@@ -13047,7 +13047,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "List all vector stores for the current tenant, including environment-configured and user-created stores",
+                "description": "List all vector stores for the current workspace, including environment-configured and user-created stores",
                 "produces": [
                     "application/json"
                 ],
@@ -13081,7 +13081,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Create a new vector store configuration for the current tenant",
+                "description": "Create a new vector store configuration for the current workspace",
                 "consumes": [
                     "application/json"
                 ],
@@ -13845,7 +13845,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "保存 APPID/APPSECRET 到当前租户配置（不自动创建模型）",
+                "description": "保存 APPID/APPSECRET 到当前空间配置（不自动创建模型）",
                 "consumes": [
                     "application/json"
                 ],
@@ -14669,7 +14669,7 @@
                     "type": "integer"
                 },
                 "image_storage_provider": {
-                    "description": "Storage provider for image uploads: \"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\".\nEmpty means use the global/tenant default provider.",
+                    "description": "Storage provider for image uploads: \"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\".\nEmpty means use the global/workspace default provider.",
                     "type": "string"
                 },
                 "image_upload_enabled": {
@@ -14812,7 +14812,7 @@
                     "type": "number"
                 },
                 "vlm_model_id": {
-                    "description": "VLM model ID for image analysis (optional, falls back to tenant-level VLM)",
+                    "description": "VLM model ID for image analysis (optional, falls back to workspace-level VLM)",
                     "type": "string"
                 },
                 "web_fetch_enabled": {
@@ -14832,7 +14832,7 @@
                     "type": "integer"
                 },
                 "web_search_provider_id": {
-                    "description": "WebSearchProviderID references a specific WebSearchProviderEntity.\nIf empty, the tenant's default provider (is_default=true) is used.",
+                    "description": "WebSearchProviderID references a specific WebSearchProviderEntity.\nIf empty, the workspace's default provider (is_default=true) is used.",
                     "type": "string"
                 }
             }
@@ -14926,7 +14926,7 @@
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID for multi-tenancy",
+                    "description": "Workspace ID for multi-workspace isolation",
                     "type": "integer"
                 },
                 "total_items_synced": {
@@ -15359,7 +15359,7 @@
             ],
             "properties": {
                 "representative_user_id": {
-                    "description": "RepresentativeUserID identifies the user attached to the OTM row for\ndisplay/audit. Optional: when unset, the handler picks a stable default\n(the user from the legacy UserID field, or the tenant's owner).",
+                    "description": "RepresentativeUserID identifies the user attached to the OTM row for\ndisplay/audit. Optional: when unset, the handler picks a stable default\n(the user from the legacy UserID field, or the workspace's owner).",
                     "type": "string"
                 },
                 "role": {
@@ -15371,7 +15371,7 @@
                     ]
                 },
                 "tenant_id": {
-                    "description": "TenantID is the tenant to enrol as an org member. Preferred field.",
+                    "description": "TenantID is the workspace to enrol as an org member. Preferred field.",
                     "type": "integer"
                 },
                 "user_id": {
@@ -15568,7 +15568,7 @@
                     }
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "title": {
@@ -15613,11 +15613,11 @@
                     "type": "string"
                 },
                 "creator_id": {
-                    "description": "CreatorID records the user ID of whoever originally created the KB.\nUsed by the tenant-level RBAC middleware to let Contributors edit\ntheir own KBs without granting them access to everyone else's.\nNullable for backward compatibility with rows created before the\nRBAC migration backfilled the column to the tenant Owner.",
+                    "description": "CreatorID records the user ID of whoever originally created the KB.\nUsed by the workspace-level RBAC middleware to let Contributors edit\ntheir own KBs without granting them access to everyone else's.\nNullable for backward compatibility with rows created before the\nRBAC migration backfilled the column to the workspace Owner.",
                     "type": "string"
                 },
                 "creator_name": {
-                    "description": "CreatorName 是 CreatorID 对应用户的展示名（username / email 等），\n仅在列表场景由 handler 批量回填，不落库；为空表示创建者无法解析（用户已删除、\nCreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs tenant 的二分。",
+                    "description": "CreatorName 是 CreatorID 对应用户的展示名（username / email 等），\n仅在列表场景由 handler 批量回填，不落库；为空表示创建者无法解析（用户已删除、\nCreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs workspace 的二分。",
                     "type": "string"
                 },
                 "deleted_at": {
@@ -15673,7 +15673,7 @@
                     ]
                 },
                 "is_pinned": {
-                    "description": "IsPinned and PinnedAt are computed per-caller from user_kb_pins\n(see migration 000050). They used to be stored on the row itself,\nwhich made pinning a tenant-wide ordering decision gated behind\nthe kb-edit RBAC guard. The columns are still present in legacy\nschemas for rollback safety but are no longer read or written by\nthe application — both fields are tagged `gorm:\"-\"` so GORM\nignores them on every CRUD call and the list handler stamps them\nafter enriching with the caller's pin set.",
+                    "description": "IsPinned and PinnedAt are computed per-caller from user_kb_pins\n(see migration 000050). They used to be stored on the row itself,\nwhich made pinning a workspace-wide ordering decision gated behind\nthe kb-edit RBAC guard. The columns are still present in legacy\nschemas for rollback safety but are no longer read or written by\nthe application — both fields are tagged `gorm:\"-\"` so GORM\nignores them on every CRUD call and the list handler stamps them\nafter enriching with the caller's pin set.",
                     "type": "boolean"
                 },
                 "is_processing": {
@@ -15721,7 +15721,7 @@
                     ]
                 },
                 "storage_provider_config": {
-                    "description": "Storage provider config (new): only stores provider selection; credentials from tenant StorageEngineConfig",
+                    "description": "Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageProviderConfig"
@@ -15733,7 +15733,7 @@
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "type": {
@@ -15745,7 +15745,7 @@
                     "type": "string"
                 },
                 "vector_store_id": {
-                    "description": "VectorStoreID references the VectorStore this knowledge base is bound to.\nWhen nil, the KB falls back to the tenant's effective engines derived from\nthe RETRIEVE_DRIVER environment variable (env store flow).\nThis field is set once at creation time and must not be modified afterwards;\nenforcement lives at the GORM layer (`\u003c-:create`) plus the service-layer\nKB update path, which omits this field from its update DTO.",
+                    "description": "VectorStoreID references the VectorStore this knowledge base is bound to.\nWhen nil, the KB falls back to the workspace's effective engines derived from\nthe RETRIEVE_DRIVER environment variable (env store flow).\nThis field is set once at creation time and must not be modified afterwards;\nenforcement lives at the GORM layer (`\u003c-:create`) plus the service-layer\nKB update path, which omits this field from its update DTO.",
                     "type": "string"
                 },
                 "vlm_config": {
@@ -15935,7 +15935,7 @@
                     "type": "boolean"
                 },
                 "parser_engine_overrides": {
-                    "description": "ParserEngineOverrides passes key-value configuration to docreader parsers\n(e.g. pdf_force_scanned=true). Merged with tenant-level overrides in the\nparse pipeline; per-upload values take priority on conflict.",
+                    "description": "ParserEngineOverrides passes key-value configuration to docreader parsers\n(e.g. pdf_force_scanned=true). Merged with workspace-level overrides in the\nparse pipeline; per-upload values take priority on conflict.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -15987,7 +15987,7 @@
                     "type": "integer"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "updated_at": {
@@ -16074,7 +16074,7 @@
             "type": "object",
             "properties": {
                 "active_tenant": {
-                    "description": "ActiveTenant is the tenant whose ID is encoded in the issued JWT;\nfuture requests are scoped to it until the client calls /auth/switch-tenant.\nDefaults to the user's home tenant on a fresh login.",
+                    "description": "ActiveTenant is the workspace whose ID is encoded in the issued JWT;\nfuture requests are scoped to it until the client calls /auth/switch-tenant.\nDefaults to the user's home workspace on a fresh login.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
@@ -16082,7 +16082,7 @@
                     ]
                 },
                 "memberships": {
-                    "description": "Memberships lists every tenant the user can authenticate into,\nalong with their role in each. Always populated (length 1 for users\nwho only belong to their home tenant) so frontends can render a\ntenant switcher without a follow-up request. Serialised without\nomitempty so the field is always present as a JSON array (possibly\nempty) — the \"always populated\" contract relies on the server side\nguaranteeing a non-nil slice.",
+                    "description": "Memberships lists every workspace the user can authenticate into,\nalong with their role in each. Always populated (length 1 for users\nwho only belong to their home workspace) so frontends can render a\nworkspace switcher without a follow-up request. Serialised without\nomitempty so the field is always present as a JSON array (possibly\nempty) — the \"always populated\" contract relies on the server side\nguaranteeing a non-nil slice.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Membership"
@@ -16225,7 +16225,7 @@
                     "type": "string"
                 },
                 "is_builtin": {
-                    "description": "Whether this is a builtin MCP service (visible to all tenants)",
+                    "description": "Whether this is a builtin MCP service (visible to all workspaces)",
                     "type": "boolean"
                 },
                 "name": {
@@ -16947,7 +16947,7 @@
                     "type": "string"
                 },
                 "owner_tenant_id": {
-                    "description": "OwnerTenantID is the persisted owner tenant of the organization\n(Plan 3, migration 000046). Frontend uses this to identify the\n\"owner row\" in the tenant-keyed members list — comparing\nmember.tenant_id against owner_tenant_id is the post-Plan-3\nequivalent of the old member.user_id == owner_id check.",
+                    "description": "OwnerTenantID is the persisted owner workspace of the organization\n(Plan 3, migration 000046). Frontend uses this to identify the\n\"owner row\" in the workspace-keyed members list — comparing\nmember.tenant_id against owner_tenant_id is the post-Plan-3\nequivalent of the old member.user_id == owner_id check.",
                     "type": "integer"
                 },
                 "pending_join_request_count": {
@@ -17778,7 +17778,7 @@
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "title": {
@@ -18068,7 +18068,7 @@
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "updated_at": {
@@ -18172,7 +18172,7 @@
                     ]
                 },
                 "context_config": {
-                    "description": "Global Context configuration for this tenant (default for all sessions)",
+                    "description": "Global Context configuration for this workspace (default for all sessions)",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextConfig"
@@ -18260,7 +18260,7 @@
                     "type": "string"
                 },
                 "web_search_config": {
-                    "description": "Global WebSearch configuration for this tenant",
+                    "description": "Global WebSearch configuration for this workspace",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchConfig"
@@ -18428,7 +18428,7 @@
                     "type": "string"
                 },
                 "can_access_all_tenants": {
-                    "description": "Whether the user can access all tenants (cross-tenant access)",
+                    "description": "Whether the user can access all workspaces (cross-workspace access)",
                     "type": "boolean"
                 },
                 "created_at": {
@@ -18456,7 +18456,7 @@
                     "type": "boolean"
                 },
                 "is_system_admin": {
-                    "description": "Whether the user is a system administrator (independent of tenant roles)",
+                    "description": "Whether the user is a system administrator (independent of workspace roles)",
                     "type": "boolean"
                 },
                 "preferences": {
@@ -18476,7 +18476,7 @@
                     ]
                 },
                 "tenant_id": {
-                    "description": "Tenant ID that the user belongs to",
+                    "description": "Workspace ID that the user belongs to",
                     "type": "integer"
                 },
                 "updated_at": {
@@ -18535,7 +18535,7 @@
                     "type": "boolean"
                 },
                 "last_active_tenant_id": {
-                    "description": "LastActiveTenantID remembers the last tenant the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home tenant. Login / RefreshToken validate that\nthe tenant still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred tenant id.",
+                    "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
                     "type": "integer"
                 }
             }
@@ -18657,7 +18657,7 @@
                     "type": "string"
                 },
                 "is_default": {
-                    "description": "Whether this is the default provider for the tenant",
+                    "description": "Whether this is the default provider for the workspace",
                     "type": "boolean"
                 },
                 "name": {
@@ -18681,7 +18681,7 @@
                     ]
                 },
                 "tenant_id": {
-                    "description": "Tenant ID for scoping",
+                    "description": "Workspace ID for scoping",
                     "type": "integer"
                 },
                 "updated_at": {
@@ -19106,7 +19106,7 @@
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant scope, mirrored from the enclosing knowledge base.",
+                    "description": "Workspace scope, mirrored from the enclosing knowledge base.",
                     "type": "integer"
                 }
             }
@@ -19245,7 +19245,7 @@
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID for multi-tenant isolation",
+                    "description": "Workspace ID for multi-workspace isolation",
                     "type": "integer"
                 },
                 "title": {
@@ -20393,7 +20393,7 @@
             }
         },
         "internal_handler.RuntimeWorkerPool": {
-            "description": "Return every row in the system_settings table (system-scope, not tenant-scope). SystemAdmin only.",
+            "description": "Return every row in the system_settings table (system-scope, not workspace-scoped). SystemAdmin only.",
             "type": "object",
             "properties": {
                 "active": {
@@ -20950,7 +20950,7 @@
                     "type": "boolean"
                 },
                 "last_active_tenant_id": {
-                    "description": "LastActiveTenantID lets the SPA persist \"after a fresh login,\ndrop me back into this workspace\" across devices. Send a positive\ntenant id to set / replace, or 0 to clear. Membership is validated\nat next login, not here. Nil = field omitted from the PATCH and\nstays untouched.",
+                    "description": "LastActiveTenantID lets the SPA persist \"after a fresh login,\ndrop me back into this workspace\" across devices. Send a positive\nworkspace id to set / replace, or 0 to clear. Membership is validated\nat next login, not here. Nil = field omitted from the PATCH and\nstays untouched.",
                     "type": "integer"
                 }
             }
@@ -20983,7 +20983,7 @@
                     "type": "boolean"
                 },
                 "agent_id": {
-                    "description": "Selected custom agent ID (backend resolves shared agent and its tenant from share relation)",
+                    "description": "Selected custom agent ID (backend resolves shared agent and its workspace from share relation)",
                     "type": "string"
                 },
                 "attachment_uploads": {
@@ -21223,7 +21223,7 @@
     },
     "securityDefinitions": {
         "ApiKeyAuth": {
-            "description": "租户身份认证：输入 sk- 开头的 API Key",
+            "description": "空间身份认证：输入 sk- 开头的 API Key",
             "type": "apiKey",
             "name": "X-API-Key",
             "in": "header"

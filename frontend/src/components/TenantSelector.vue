@@ -102,8 +102,8 @@ const loading = ref(false)
 const searchTimer = ref<number | null>(null)
 
 const selectedTenantId = computed(() => authStore.selectedTenantId)
-// home 租户 id 来自 user.tenant_id（注册时分配、永不变）。不要读
-// authStore.tenant.id —— 那是当前激活租户，会随 X-Tenant-ID 切换；用它
+// home 空间 id 来自 user.tenant_id（注册时分配、永不变）。不要读
+// authStore.tenant.id —— 那是当前激活空间，会随 X-Tenant-ID 切换；用它
 // 当 home 会让「切回 home」分支错判，详见 useHomeTenant() 注释。
 const defaultTenantId = computed(() =>
   authStore.user?.tenant_id ? Number(authStore.user.tenant_id) : null,
@@ -115,14 +115,14 @@ const currentTenantId = computed(() => {
 
 const currentTenantName = computed(() => {
   if (!currentTenantId.value) return t('tenant.unknown')
-  // 首先从当前加载的租户列表中查找
+  // 首先从当前加载的空间列表中查找
   const tenant = tenants.value.find(t => t.id === currentTenantId.value)
   if (tenant) return tenant.name
-  // 如果是选中的租户，使用保存的租户名称
+  // 如果是选中的空间，使用保存的空间名称
   if (selectedTenantId.value && authStore.selectedTenantName) {
     return authStore.selectedTenantName
   }
-  // 最后使用默认租户名称
+  // 最后使用默认空间名称
   return authStore.tenant?.name || t('tenant.unknown')
 })
 
@@ -165,7 +165,7 @@ const clearSearch = () => {
 }
 
 const selectTenant = (tenantId: number) => {
-  // 找到选中的租户信息
+  // 找到选中的空间信息
   const selectedTenant = tenants.value.find(t => t.id === tenantId)
 
   // 始终写入 override，让 request.ts 永远附 X-Tenant-ID 覆盖 JWT；不要因为
@@ -174,7 +174,7 @@ const selectTenant = (tenantId: number) => {
   const switchingToHome = tenantId === defaultTenantId.value
   // 切到 home 时，selectedTenant 可能因为分页 / 搜索没把 home 加载进列表，
   // 退而求其次从 memberships 上挑名字。注意不要回退到 authStore.tenant?.name
-  // —— 那是当前激活租户的名字，在 active != home 的会话里就是 peer 的名字。
+  // —— 那是当前激活空间的名字，在 active != home 的会话里就是 peer 的名字。
   const homeNameFallback = switchingToHome
     ? (authStore.memberships ?? []).find((m) => Number(m.tenant_id) === tenantId)?.tenant_name
       || null
@@ -198,7 +198,7 @@ const selectTenant = (tenantId: number) => {
   // Persist "last active tenant" preference (switching to home clears
   // it). Fire-and-forget, but race it against the existing 500ms grace
   // window so most writes finish before the hard reload tears the page
-  // down. 切换租户后跳转到新租户下安全的入口（详见 tenantSwitch.ts 注释）。
+  // down. 切换空间后跳转到新空间下安全的入口（详见 tenantSwitch.ts 注释）。
   const persist = persistLastActiveTenantPreference(switchingToHome ? null : tenantId)
   Promise.race([persist, new Promise((r) => setTimeout(r, 500))])
     .finally(() => navigateAfterTenantSwitch())
@@ -213,7 +213,7 @@ const loadTenants = async (append = false) => {
     let tenantID: number | undefined = undefined
 
     // 如果是纯数字，同时作为 tenant_id 和 keyword 搜索
-    // 这样既能精确匹配租户ID，也能模糊匹配名称中包含数字的租户
+    // 这样既能精确匹配空间ID，也能模糊匹配名称中包含数字的空间
     if (keyword && /^\d+$/.test(keyword)) {
       tenantID = Number(keyword)
     }
@@ -283,7 +283,7 @@ const openCreateDialog = () => {
 }
 
 const onTenantCreated = async (newTenant: TenantInfo) => {
-  // 把新租户合并进当前列表并切过去。和 selectTenant 走同一条链路：
+  // 把新空间合并进当前列表并切过去。和 selectTenant 走同一条链路：
   // setSelectedTenant + navigateAfterTenantSwitch。后端 X-Tenant-ID 中
   // 间件会查 tenant_members 校验，EnsureOwner 已经在后端写好 owner 行。
   tenants.value = [newTenant, ...tenants.value.filter(t => t.id !== newTenant.id)]
@@ -299,7 +299,7 @@ const onTenantCreated = async (newTenant: TenantInfo) => {
 }
 
 onMounted(() => {
-  // 预加载租户列表
+  // 预加载空间列表
   loadTenants()
 })
 

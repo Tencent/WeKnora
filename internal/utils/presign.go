@@ -111,7 +111,7 @@ func ValidateStoragePathTenant(filePath string, tenantID uint64) error {
 		return fmt.Errorf("storage path has no tenant segment")
 	}
 	if pathTenant != tenantID {
-		return fmt.Errorf("storage path tenant mismatch")
+		return fmt.Errorf("storage path workspace mismatch")
 	}
 	return nil
 }

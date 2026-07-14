@@ -8,7 +8,7 @@
       </div>
       <template v-if="!uiStore.sidebarCollapsed">
         <div class="user-info">
-          <!-- 多租户 / superuser：首行租户名，次行 username · 角色。单租户：昵称 + 邮箱。 -->
+          <!-- 多空间 / superuser：首行空间名，次行 username · 角色。单空间：昵称 + 邮箱。 -->
           <template v-if="showTenantIdentityLine">
             <div class="user-tenant-name" :title="activeTenantName">{{ activeTenantName }}</div>
             <div class="user-tenant-meta">
@@ -31,7 +31,7 @@
     <!-- 下拉菜单 -->
     <Transition name="dropdown">
       <div v-if="menuVisible" class="user-dropdown" @click.stop>
-        <!-- 弹出菜单：账号（头像+昵称）／当前租户（名称+权限）；底部侧栏样式不改。 -->
+        <!-- 弹出菜单：账号（头像+昵称）／当前空间（名称+权限）；底部侧栏样式不改。 -->
         <div v-if="userName" class="dropdown-user-header">
           <div class="dropdown-user-avatar">
             <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
@@ -118,7 +118,7 @@
           <t-icon name="server" class="menu-icon" />
           <span>{{ $t('settings.system') }}</span>
         </div>
-        <!-- 切换租户入口在下拉「当前租户」区块 hover；此处仅为分隔线与菜单项。 -->
+        <!-- 切换空间入口在下拉「当前空间」区块 hover；此处仅为分隔线与菜单项。 -->
         <div class="menu-divider"></div>
         <div class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
           <t-icon name="logo-github" class="menu-icon" />
@@ -225,9 +225,9 @@ const authStore = useAuthStore()
 const { formatRole, roleIcon } = useRoleLabel()
 const { homeTenantId, isHomeTenantActive, isHomeTenant } = useHomeTenant()
 
-// 顶部用户卡片展示的租户名 / 当前角色：跟着 tenant 切换器实时变。
+// 顶部用户卡片展示的空间名 / 当前角色：跟着 tenant 切换器实时变。
 // activeTenantName 优先用切换器选中的名字（含 fallback 到 home tenant 名字），
-// 单租户用户也能正常显示自己的 home tenant 名。
+// 单空间用户也能正常显示自己的 home tenant 名。
 const activeTenantName = computed(() => {
   return (
     authStore.selectedTenantName ||
@@ -238,8 +238,8 @@ const activeTenantName = computed(() => {
 const currentRoleLabel = computed(() => formatRole(authStore.currentTenantRole))
 const currentRoleIcon = computed(() => roleIcon(authStore.currentTenantRole))
 
-// 单租户用户（memberships <= 1 且非 superuser）= 永远 home + owner，第三
-// 行就是 user-email 信息的重复，没必要占视觉空间；只对多租户 / superuser
+// 单空间用户（memberships <= 1 且非 superuser）= 永远 home + owner，第三
+// 行就是 user-email 信息的重复，没必要占视觉空间；只对多空间 / superuser
 // 渲染。Lite 模式下没有 RBAC 概念，统一隐藏。
 const showTenantIdentityLine = computed(() => {
   if (authStore.isLiteMode) return false
@@ -333,10 +333,10 @@ const closeAll = () => {
 }
 
 // ---------- Create new tenant ----------
-// 普通用户在租户子菜单底部点 "+ 创建新工作区" → 弹 CreateTenantDialog →
-// 后端写一行 owner 的 tenant_members → 直接切到新租户。复用 switchToTenant
+// 普通用户在空间子菜单底部点 "+ 创建新工作区" → 弹 CreateTenantDialog →
+// 后端写一行 owner 的 tenant_members → 直接切到新空间。复用 switchToTenant
 // 同款的 setSelectedTenant + navigateAfterTenantSwitch 链路，避免 token
-// 依然指向旧租户带来的 SSE / store 不一致。
+// 依然指向旧空间带来的 SSE / store 不一致。
 const createTenantDialogVisible = ref(false)
 
 const openCreateTenantDialog = () => {
@@ -406,9 +406,9 @@ const switchToTenant = (m: Membership) => {
     closeAll()
     return
   }
-  // 始终把激活租户写进 selectedTenantId，让 request.ts 永远附 X-Tenant-ID。
-  // 历史实现里「切回 home 就清 override」会让请求落回 JWT 编码的租户，
-  // 而 JWT 在 last_active != home 的会话里恰好是 peer 租户（见
+  // 始终把激活空间写进 selectedTenantId，让 request.ts 永远附 X-Tenant-ID。
+  // 历史实现里「切回 home 就清 override」会让请求落回 JWT 编码的空间，
+  // 而 JWT 在 last_active != home 的会话里恰好是 peer 空间（见
   // userService.resolveLoginTenantID），结果切回 home 反而原地不动。
   // 服务端持久化偏好仍然按 home/peer 区分：home 时清空 last_active，
   // 让下次干净重登能正确回到 home。
@@ -556,8 +556,8 @@ const loadUserInfo = async () => {
       // （同时污染 localStorage），系统管理入口在 hover 工作空间触发
       // refreshFromAuthMe 后才出现。新增字段请只改 userInfoFromApi。
       authStore.setUser(userInfoFromApi(user))
-      // 如果返回了租户信息，也更新租户信息；tenantless 用户（/auth/me
-      // 无 tenant）必须显式清空，否则会残留上一账号/上一会话的租户快照。
+      // 如果返回了空间信息，也更新空间信息；tenantless 用户（/auth/me
+      // 无 tenant）必须显式清空，否则会残留上一账号/上一会话的空间快照。
       if (response.data.tenant) {
         authStore.setTenant({
           id: String(response.data.tenant.id),
@@ -1052,7 +1052,7 @@ onUnmounted(() => {
   margin: 3px 0;
 }
 
-// 紧跟账号/租户区块后的分隔线：略收紧与上方的留白
+// 紧跟账号/空间区块后的分隔线：略收紧与上方的留白
 .dropdown-user-header+.menu-divider,
 .dropdown-tenant-panel+.menu-divider {
   margin-top: 1px;
@@ -1207,7 +1207,7 @@ onUnmounted(() => {
 
   // Home 标识改为叠在 avatar 右下角的小 dot，不在 meta 行额外占位，让
   // 各行徽标列宽对齐；用户切到非 home tenant 时这个小 icon 仍能一眼指
-  // 出「我的主租户在哪一行」。
+  // 出「我的主空间在哪一行」。
   .tenant-submenu-item-avatar {
     position: relative;
   }

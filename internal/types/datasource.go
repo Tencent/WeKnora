@@ -54,7 +54,7 @@ type DataSource struct {
 	// Unique identifier
 	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
 
-	// Tenant ID for multi-tenancy
+	// Workspace ID for multi-workspace isolation
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 
 	// Target knowledge base ID
@@ -137,7 +137,7 @@ type SyncLog struct {
 	// Reference to the data source
 	DataSourceID string `json:"data_source_id" gorm:"index"`
 
-	// Tenant ID
+	// Workspace ID
 	TenantID uint64 `json:"tenant_id" gorm:"index"`
 
 	// Sync status: running, success, partial, failed, canceled
@@ -369,7 +369,7 @@ type DataSourceSyncPayload struct {
 	// Data source ID to sync
 	DataSourceID string `json:"data_source_id"`
 
-	// Tenant ID
+	// Workspace ID
 	TenantID uint64 `json:"tenant_id"`
 
 	// Sync log ID (for tracking)

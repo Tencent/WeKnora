@@ -39,9 +39,9 @@ func (h *KnowledgeBaseHandler) KBCreatorLookup(c *gin.Context) (string, error) {
 	ctx := c.Request.Context()
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
-		// 没有租户上下文意味着 auth 中间件未完成；当作 lookup 失败让上层 503，
+		// 没有空间上下文意味着 auth 中间件未完成；当作 lookup 失败让上层 503，
 		// 而不是 silently 走 fail-open 给一个不该有的访问。
-		return "", errors.New("tenant context missing")
+		return "", errors.New("workspace context missing")
 	}
 	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
@@ -53,8 +53,8 @@ func (h *KnowledgeBaseHandler) KBCreatorLookup(c *gin.Context) (string, error) {
 	if kb == nil {
 		return "", middleware.ErrResourceNotFound
 	}
-	// 显式重校验租户：repo.GetKnowledgeBaseByID 不带 tenant 过滤，
-	// 万一未来 :id 被攻击者从他人租户 UUID 试探到，也不会借由
+	// 显式重校验空间：repo.GetKnowledgeBaseByID 不带 tenant 过滤，
+	// 万一未来 :id 被攻击者从他人空间 UUID 试探到，也不会借由
 	// "ownership match" 通过中间件。
 	if kb.TenantID != tenantID {
 		return "", middleware.ErrResourceNotFound
@@ -77,7 +77,7 @@ func (h *KnowledgeBaseHandler) KBCreatorLookupFromKbIDParam(c *gin.Context) (str
 	ctx := c.Request.Context()
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
-		return "", errors.New("tenant context missing")
+		return "", errors.New("workspace context missing")
 	}
 	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
@@ -112,7 +112,7 @@ func (h *CustomAgentHandler) AgentCreatorLookup(c *gin.Context) (string, error) 
 	ctx := c.Request.Context()
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
-		return "", errors.New("tenant context missing")
+		return "", errors.New("workspace context missing")
 	}
 	agent, err := h.service.GetAgentByID(ctx, id)
 	if err != nil {
@@ -195,7 +195,7 @@ func (h *ChunkHandler) KBCreatorLookupFromChunkIDParam(c *gin.Context) (string, 
 	ctx := c.Request.Context()
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
-		return "", errors.New("tenant context missing")
+		return "", errors.New("workspace context missing")
 	}
 	chunk, err := h.service.GetChunkByIDOnly(ctx, chunkID)
 	if err != nil {
@@ -207,7 +207,7 @@ func (h *ChunkHandler) KBCreatorLookupFromChunkIDParam(c *gin.Context) (string, 
 	if chunk == nil {
 		return "", middleware.ErrResourceNotFound
 	}
-	// 显式重校验租户：GetChunkByIDOnly 无租户过滤，必须在此挡住跨租户 chunk
+	// 显式重校验空间：GetChunkByIDOnly 无空间过滤，必须在此挡住跨空间 chunk
 	// id 撞库通过 ownership 匹配获取本不该有的访问。
 	if chunk.TenantID != tenantID {
 		return "", middleware.ErrResourceNotFound
@@ -229,7 +229,7 @@ func (h *WikiPageHandler) KBCreatorLookupFromKBPath(c *gin.Context) (string, err
 	ctx := c.Request.Context()
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
-		return "", errors.New("tenant context missing")
+		return "", errors.New("workspace context missing")
 	}
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -258,7 +258,7 @@ func resolveKBCreatorByKBID(
 	ctx := c.Request.Context()
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
-		return "", errors.New("tenant context missing")
+		return "", errors.New("workspace context missing")
 	}
 	kb, err := kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -291,7 +291,7 @@ func resolveKBCreatorByKnowledgeID(
 		// Same fail-closed reasoning as KBCreatorLookup: no tenant
 		// context means auth didn't complete, and we'd rather have the
 		// caller see a 503 than a silent fail-open.
-		return "", errors.New("tenant context missing")
+		return "", errors.New("workspace context missing")
 	}
 	creatorID, err := kgService.GetOwningKBCreatorID(ctx, knowledgeID)
 	if err != nil {

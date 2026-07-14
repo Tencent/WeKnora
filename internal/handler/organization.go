@@ -148,7 +148,7 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 // ListMyOrganizations lists organizations that the current tenant belongs to.
 // Response includes resource_counts (per-org KB/agent counts) for list sidebar so frontend does not need a separate GET /me/resource-counts.
 // @Summary      获取我的组织列表
-// @Description  获取当前租户所属的所有组织，并附带各空间内知识库/智能体数量
+// @Description  获取当前空间所属的所有组织，并附带各空间内知识库/智能体数量
 // @Tags         组织管理
 // @Produce      json
 // @Success      200  {object}  types.ListOrganizationsResponse
@@ -370,7 +370,7 @@ func (h *OrganizationHandler) DeleteOrganization(c *gin.Context) {
 
 // ListMembers lists all tenant-members of an organization
 // @Summary      获取组织成员列表
-// @Description  获取组织的所有成员（按租户）
+// @Description  获取组织的所有成员（按空间）
 // @Tags         组织管理
 // @Produce      json
 // @Param        id  path  string  true  "组织ID"
@@ -389,7 +389,7 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 	// get 403 — mirrors ListOrgShares / ListOrgAgentShares which already
 	// gate on GetTenantMember.
 	if _, err := h.orgService.GetTenantMember(ctx, orgID, tenantID); err != nil {
-		c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
+		c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 		return
 	}
 
@@ -439,12 +439,12 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 
 // UpdateMemberRole updates a tenant-member's role
 // @Summary      更新成员角色
-// @Description  更新组织成员（租户）的角色（需要管理员权限）
+// @Description  更新组织成员（空间）的角色（需要管理员权限）
 // @Tags         组织管理
 // @Accept       json
 // @Produce      json
 // @Param        id          path      string                       true  "组织ID"
-// @Param        tenant_id   path      string                       true  "成员租户ID"
+// @Param        tenant_id   path      string                       true  "成员空间ID"
 // @Param        request     body      types.UpdateMemberRoleRequest  true  "角色信息"
 // @Success      200      {object}  map[string]interface{}
 // @Failure      403      {object}  apperrors.AppError
@@ -457,7 +457,7 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 	memberTenantIDStr := c.Param("tenant_id")
 	memberTenantID, err := strconv.ParseUint(memberTenantIDStr, 10, 64)
 	if err != nil {
-		c.Error(apperrors.NewValidationError("Invalid tenant ID"))
+		c.Error(apperrors.NewValidationError("Invalid workspace ID"))
 		return
 	}
 	operatorUserID := c.GetString(types.UserIDContextKey.String())
@@ -483,10 +483,10 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 
 // RemoveMember removes a tenant-member from an organization
 // @Summary      移除成员
-// @Description  从组织中移除成员租户（需要管理员权限）
+// @Description  从组织中移除成员空间（需要管理员权限）
 // @Tags         组织管理
 // @Param        id         path  string  true  "组织ID"
-// @Param        tenant_id  path  string  true  "成员租户ID"
+// @Param        tenant_id  path  string  true  "成员空间ID"
 // @Success      200      {object}  map[string]interface{}
 // @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
@@ -498,7 +498,7 @@ func (h *OrganizationHandler) RemoveMember(c *gin.Context) {
 	memberTenantIDStr := c.Param("tenant_id")
 	memberTenantID, err := strconv.ParseUint(memberTenantIDStr, 10, 64)
 	if err != nil {
-		c.Error(apperrors.NewValidationError("Invalid tenant ID"))
+		c.Error(apperrors.NewValidationError("Invalid workspace ID"))
 		return
 	}
 	operatorUserID := c.GetString(types.UserIDContextKey.String())
@@ -681,7 +681,7 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 	// Check if caller's tenant is already a member
 	_, memberErr := h.orgService.GetTenantMember(ctx, org.ID, tenantID)
 	if memberErr == nil {
-		c.Error(apperrors.NewValidationError("Your tenant is already a member of this organization"))
+		c.Error(apperrors.NewValidationError("Your workspace is already a member of this organization"))
 		return
 	}
 
@@ -1225,7 +1225,7 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 	// Check if caller's tenant is a member and get its role for effective-permission calculation
 	member, err := h.orgService.GetTenantMember(ctx, orgID, tenantID)
 	if err != nil {
-		c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
+		c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 		return
 	}
 	myRoleInOrg := member.Role
@@ -1436,7 +1436,7 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	member, err := h.orgService.GetTenantMember(ctx, orgID, tenantID)
 	if err != nil {
-		c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
+		c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 		return
 	}
 	myRoleInOrg := member.Role
@@ -1622,7 +1622,7 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 					SourceTenantID: sourceTenantID,
 					SharedAt:       agentItem.SharedAt,
 				},
-				// 即便 KB 是「被共享智能体捎带进来」的，只要它属于当前租户
+				// 即便 KB 是「被共享智能体捎带进来」的，只要它属于当前空间
 				// 就应该归到「我共享的」分组——否则用户会在共享空间里看到
 				// 自己的 KB 出现在「共享给我·仅查看」组里，非常迷惑。
 				IsMine: sourceTenantID == tenantID,
@@ -1656,7 +1656,7 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 	list, err := h.listSpaceKnowledgeBasesInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
 		if errors.Is(err, service.ErrTenantNotInOrg) {
-			c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
+			c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 			return
 		}
 		logger.Errorf(ctx, "Failed to list organization shared knowledge bases: %v", err)
@@ -1703,7 +1703,7 @@ func (h *OrganizationHandler) ListOrganizationSharedAgents(c *gin.Context) {
 	list, err := h.agentShareService.ListSharedAgentsInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
 		if errors.Is(err, service.ErrTenantNotInOrg) {
-			c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
+			c.Error(apperrors.NewForbiddenError("Your workspace is not a member of this organization"))
 			return
 		}
 		logger.Errorf(ctx, "Failed to list organization shared agents: %v", err)
@@ -1833,12 +1833,12 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 // canonical name, filters out tenants already in the org, and returns one row
 // per candidate tenant with one representative user attached for display.
 //
-// @Summary      搜索可邀请的租户
-// @Description  搜索租户（排除已加入的租户）用于邀请加入组织；按租户去重，附带代表用户
+// @Summary      搜索可邀请的空间
+// @Description  搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户
 // @Tags         组织管理
 // @Produce      json
 // @Param        id     path   string  true   "组织ID"
-// @Param        q      query  string  true   "搜索关键词（租户名、用户名或邮箱）"
+// @Param        q      query  string  true   "搜索关键词（空间名、用户名或邮箱）"
 // @Param        limit  query  int     false  "返回数量限制" default(10)
 // @Success      200    {object}  map[string]interface{}
 // @Failure      403    {object}  apperrors.AppError
@@ -2048,7 +2048,7 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		// Tenant-id path: validate the tenant exists; pick a sensible
 		// representative when the caller didn't pin one.
 		if _, err := h.tenantService.GetTenantByID(ctx, targetTenantID); err != nil {
-			c.Error(apperrors.NewNotFoundError("Tenant not found"))
+			c.Error(apperrors.NewNotFoundError("Workspace not found"))
 			return
 		}
 		if representativeUserID == "" {
@@ -2086,7 +2086,7 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 
 	// Check if target tenant is already a member of this org.
 	if _, memberErr := h.orgService.GetTenantMember(ctx, orgID, targetTenantID); memberErr == nil {
-		c.Error(apperrors.NewValidationError("Tenant is already a member of this organization"))
+		c.Error(apperrors.NewValidationError("Workspace is already a member of this organization"))
 		return
 	}
 

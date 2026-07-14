@@ -104,7 +104,7 @@ set WEKNORA_API_KEY=your_api_key_here
 ## 🛠️ 功能特性
 
 ### MCP 工具 (21个)
-- **租户管理**: `create_tenant`, `list_tenants`
+- **空间管理**: `create_tenant`, `list_tenants`
 - **知识库管理**: `create_knowledge_base`, `list_knowledge_bases`, `get_knowledge_base`, `delete_knowledge_base`, `hybrid_search`
 - **知识管理**: `create_knowledge_from_url`, `list_knowledge`, `get_knowledge`, `delete_knowledge`
 - **模型管理**: `create_model`, `list_models`, `get_model`

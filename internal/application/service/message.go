@@ -167,8 +167,8 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 
 	tenantID, ok := sessionTenantIDForLookup(ctx)
 	if !ok {
-		logger.Error(ctx, "Tenant ID not found in context for session lookup")
-		return nil, errors.New("tenant ID not found in context")
+		logger.Error(ctx, "Workspace ID not found in context for session lookup")
+		return nil, errors.New("workspace ID not found in context")
 	}
 	logger.Infof(ctx, "Checking if session exists, tenant ID: %d", tenantID)
 	_, err := s.sessionRepo.Get(ctx, tenantID, sessionUserIDForLookup(ctx), sessionID)
@@ -200,8 +200,8 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 
 	tenantID, ok := sessionTenantIDForLookup(ctx)
 	if !ok {
-		logger.Error(ctx, "Tenant ID not found in context for session lookup")
-		return nil, errors.New("tenant ID not found in context")
+		logger.Error(ctx, "Workspace ID not found in context for session lookup")
+		return nil, errors.New("workspace ID not found in context")
 	}
 	logger.Infof(ctx, "Checking if session exists, tenant ID: %d", tenantID)
 	_, err := s.sessionRepo.Get(ctx, tenantID, sessionUserIDForLookup(ctx), sessionID)

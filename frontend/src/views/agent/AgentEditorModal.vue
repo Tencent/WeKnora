@@ -3199,7 +3199,7 @@ const applyPromptTemplateDefaults = (cfg: PromptTemplatesConfig | null) => {
   }
 };
 
-// 加载依赖数据（复用租户级缓存，避免重复请求）
+// 加载依赖数据（复用空间级缓存，避免重复请求）
 const loadDependencies = async () => {
   try {
     await Promise.all([

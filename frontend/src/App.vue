@@ -194,7 +194,7 @@ watch(
   { immediate: true },
 )
 
-// 切换租户后会 hard reload；切换前 stash 的 toast 这里 consume 并弹出，
+// 切换空间后会 hard reload；切换前 stash 的 toast 这里 consume 并弹出，
 // 这样 toast 显示在新页面上，duration 才真正生效。
 const showPendingTenantSwitchToast = () => {
   const pending = consumePendingTenantSwitchToast()

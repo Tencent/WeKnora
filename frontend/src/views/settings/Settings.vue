@@ -73,7 +73,7 @@
                 'content-wrapper--wide': currentSection === 'members',
                 'content-wrapper--full': SYSTEM_ADMIN_SECTIONS.has(currentSection) || isIntegrationSection(currentSection),
               }">
-                <!-- 角色不允许访问当前 section（deep-link 进来 / 跨租户切换后角色降级）—— 优先于具体 section 渲染。
+                <!-- 角色不允许访问当前 section（deep-link 进来 / 跨空间切换后角色降级）—— 优先于具体 section 渲染。
                      正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
                      的瞬间触发；这一段做兜底兼容旧 URL。 -->
                 <div v-if="!canSeeSection(currentSection)" class="section role-denied">
@@ -150,7 +150,7 @@
                     <UserProfile />
                   </div>
 
-                  <!-- 租户信息 -->
+                  <!-- 空间信息 -->
                   <div v-if="currentSection === 'tenant'" class="section">
                     <TenantInfo />
                   </div>
@@ -512,7 +512,7 @@ watch(
   { immediate: true },
 )
 
-// 切换租户后角色可能变化，原本可见的 admin-only 面板可能消失。
+// 切换空间后角色可能变化，原本可见的 admin-only 面板可能消失。
 // 如果 currentSection 落到了不再显示的 key 上，就回退到第一个可见项。
 watch(navItems, (items) => {
   if (!items.some((item) => item.key === currentSection.value)) {

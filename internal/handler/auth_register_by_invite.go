@@ -49,7 +49,7 @@ type invitationLookupRequest struct {
 
 // LookupInvitationByToken godoc
 // @Summary      解析共享邀请链接 token
-// @Description  根据邀请链接中的 token 返回邀请上下文（租户名 / 角色 / 过期时间），
+// @Description  根据邀请链接中的 token 返回邀请上下文（空间名 / 角色 / 过期时间），
 // @Description  供注册页展示。无认证；token 无效或被撤销返回 410。
 // @Description  使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。
 // @Tags         认证
@@ -107,7 +107,7 @@ func (h *AuthHandler) LookupInvitationByToken(c *gin.Context) {
 // RegisterByInvite godoc
 // @Summary      使用共享链接注册
 // @Description  通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。
-// @Description  注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应租户。
+// @Description  注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应空间。
 // @Tags         认证
 // @Accept       json
 // @Produce      json

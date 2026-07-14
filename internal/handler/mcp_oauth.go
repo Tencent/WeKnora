@@ -286,7 +286,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 			case stderrors.Is(err, approval.ErrAlreadyResolved):
 				c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
 			case stderrors.Is(err, approval.ErrTenantMismatch):
-				c.Error(errors.NewBadRequestError("tenant mismatch"))
+				c.Error(errors.NewBadRequestError("workspace mismatch"))
 			case stderrors.Is(err, approval.ErrUserMismatch):
 				c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
 			default:
@@ -325,7 +325,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 		case stderrors.Is(err, approval.ErrAlreadyResolved):
 			c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
 		case stderrors.Is(err, approval.ErrTenantMismatch):
-			c.Error(errors.NewBadRequestError("tenant mismatch"))
+			c.Error(errors.NewBadRequestError("workspace mismatch"))
 		case stderrors.Is(err, approval.ErrUserMismatch):
 			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
 		default:
@@ -376,7 +376,7 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		case stderrors.Is(err, approval.ErrAlreadyResolved):
 			c.Error(errors.NewBadRequestError("pending authorization already resolved (timeout / cancel raced your action)"))
 		case stderrors.Is(err, approval.ErrTenantMismatch):
-			c.Error(errors.NewBadRequestError("tenant mismatch"))
+			c.Error(errors.NewBadRequestError("workspace mismatch"))
 		case stderrors.Is(err, approval.ErrUserMismatch):
 			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this prompt"))
 		default:

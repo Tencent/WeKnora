@@ -162,7 +162,7 @@ func NewValidationError(message string) *AppError {
 func NewTenantNotFoundError() *AppError {
 	return &AppError{
 		Code:     ErrTenantNotFound,
-		Message:  "租户不存在",
+		Message:  "空间不存在",
 		HTTPCode: http.StatusNotFound,
 	}
 }
@@ -171,7 +171,7 @@ func NewTenantNotFoundError() *AppError {
 func NewTenantAlreadyExistsError() *AppError {
 	return &AppError{
 		Code:     ErrTenantAlreadyExists,
-		Message:  "租户已存在",
+		Message:  "空间已存在",
 		HTTPCode: http.StatusConflict,
 	}
 }
@@ -180,7 +180,7 @@ func NewTenantAlreadyExistsError() *AppError {
 func NewTenantInactiveError() *AppError {
 	return &AppError{
 		Code:     ErrTenantInactive,
-		Message:  "租户已停用",
+		Message:  "空间已停用",
 		HTTPCode: http.StatusForbidden,
 	}
 }
@@ -190,7 +190,7 @@ func NewTenantInactiveError() *AppError {
 func NewTenantCreationDisabledError() *AppError {
 	return &AppError{
 		Code:     ErrTenantCreationDisabled,
-		Message:  "self-service tenant creation is disabled; join a workspace by invitation",
+		Message:  "self-service workspace creation is disabled; join a workspace by invitation",
 		HTTPCode: http.StatusForbidden,
 	}
 }

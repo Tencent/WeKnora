@@ -191,7 +191,7 @@ func (h *Handler) GetSession(c *gin.Context) {
 
 // GetSessionsByTenant godoc
 // @Summary      获取会话列表
-// @Description  获取当前租户的会话列表，支持分页、关键字搜索、按来源/Agent 筛选
+// @Description  获取当前空间的会话列表，支持分页、关键字搜索、按来源/Agent 筛选
 // @Tags         会话
 // @Accept       json
 // @Produce      json
@@ -405,7 +405,7 @@ type batchDeleteRequest struct {
 
 // BatchDeleteSessions godoc
 // @Summary      批量删除会话
-// @Description  根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前租户的所有会话
+// @Description  根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前空间的所有会话
 // @Tags         会话
 // @Accept       json
 // @Produce      json

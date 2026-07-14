@@ -160,7 +160,7 @@ func TestResolveTenantRole_ActiveMembershipWins(t *testing.T) {
 }
 
 func TestResolveTenantRole_CrossTenantSuperuserGetsAdmin_NoAutoPromote(t *testing.T) {
-	// 回归 H1：跨租户超管 switch 到他人租户时，绝对不能写入 tenant_members。
+	// 回归 H1：跨空间超管 switch 到他人空间时，绝对不能写入 tenant_members。
 	svc := newFakeMemberService()
 	user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
 
@@ -174,9 +174,9 @@ func TestResolveTenantRole_CrossTenantSuperuserGetsAdmin_NoAutoPromote(t *testin
 }
 
 func TestResolveTenantRole_AutoPromoteRequiresHomeTenant(t *testing.T) {
-	// 回归 H1：即便 target 是孤儿租户，只要不是用户自己的 home tenant，
+	// 回归 H1：即便 target 是孤儿空间，只要不是用户自己的 home tenant，
 	// 就不能 auto-promote 为 Owner。
-	svc := newFakeMemberService() // 空 — 任何租户都是孤儿
+	svc := newFakeMemberService() // 空 — 任何空间都是孤儿
 	user := &types.User{ID: "u1", TenantID: 1, CanAccessAllTenants: true}
 
 	got, ok := resolveTenantRole(context.Background(), svc, user, 42, true, cfgWithRBAC(true))
@@ -189,7 +189,7 @@ func TestResolveTenantRole_AutoPromoteRequiresHomeTenant(t *testing.T) {
 }
 
 func TestResolveTenantRole_AutoPromoteHomeTenant(t *testing.T) {
-	// home tenant + 孤儿租户 + 非 switch → 允许 auto-promote 为 Owner。
+	// home tenant + 孤儿空间 + 非 switch → 允许 auto-promote 为 Owner。
 	svc := newFakeMemberService()
 	user := &types.User{ID: "u1", TenantID: 7}
 
@@ -242,7 +242,7 @@ func TestResolveTenantRole_LookupErrorFailsOpenWhenRBACDisabled(t *testing.T) {
 	// 选与 home 不同的值，避免进入 home-tenant auto-promote 分支。
 	svc := newFakeMemberService()
 	svc.failGet = errors.New("transient db failure")
-	// 让 HasAnyMembers 返回 true，关闭孤儿租户自愈路径。
+	// 让 HasAnyMembers 返回 true，关闭孤儿空间自愈路径。
 	svc.seedActive("placeholder", 8, types.TenantRoleAdmin)
 	user := &types.User{ID: "u1", TenantID: 7}
 

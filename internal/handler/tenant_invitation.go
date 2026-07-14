@@ -187,11 +187,11 @@ func (h *TenantInvitationHandler) hydrateTenants(c *gin.Context, invs []*types.T
 }
 
 // ListTenantInvitations godoc
-// @Summary      列出租户邀请
-// @Description  按 tenant 列出待接受 / 历史邀请。query include_terminal=true 时附带 accepted/declined/revoked/expired。
-// @Tags         租户邀请
+// @Summary      列出空间邀请
+// @Description  按空间列出待接受 / 历史邀请。query include_terminal=true 时附带 accepted/declined/revoked/expired。
+// @Tags         空间邀请
 // @Produce      json
-// @Param        id                path   string  true   "租户 ID"
+// @Param        id                path   string  true   "空间 ID"
 // @Param        include_terminal  query  bool    false  "是否包含终止态行（默认 false）"
 // @Param        page              query  int     false  "页码（从 1 起）"  default(1)
 // @Param        page_size         query  int     false  "每页数量"  default(20)
@@ -244,12 +244,12 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 }
 
 // CreateInvitation godoc
-// @Summary      发出租户邀请
-// @Description  Owner 通过邮箱邀请已注册用户加入当前租户；被邀请人需要在 /me/invitations 接受后才会成为成员。
-// @Tags         租户邀请
+// @Summary      发出空间邀请
+// @Description  Owner 通过邮箱邀请已注册用户加入当前空间；被邀请人需要在 /me/invitations 接受后才会成为成员。
+// @Tags         空间邀请
 // @Accept       json
 // @Produce      json
-// @Param        id       path  string                   true  "租户 ID"
+// @Param        id       path  string                   true  "空间 ID"
 // @Param        request  body  createInvitationRequest  true  "邀请请求"
 // @Success      201  {object}  map[string]interface{}
 // @Security     Bearer
@@ -325,9 +325,9 @@ func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
 // RevokeInvitation godoc
 // @Summary      撤销待接受邀请
 // @Description  Owner 取消一条还在 pending 的邀请；已 accepted/declined/revoked/expired 的行不可再撤销。
-// @Tags         租户邀请
+// @Tags         空间邀请
 // @Produce      json
-// @Param        id      path  string  true  "租户 ID"
+// @Param        id      path  string  true  "空间 ID"
 // @Param        inv_id  path  string  true  "邀请 ID"
 // @Success      200  {object}  map[string]interface{}
 // @Security     Bearer
@@ -498,7 +498,7 @@ func (h *TenantInvitationHandler) AcceptMyInvitation(c *gin.Context) {
 		if updateErr := h.userService.UpdateUser(ctx, user); updateErr != nil {
 			logger.Errorf(ctx, "AcceptMyInvitation failed to set default tenant: user=%s tenant=%d err=%v",
 				caller, member.TenantID, updateErr)
-			c.Error(apperrors.NewInternalServerError("invitation accepted but default tenant update failed").WithDetails(updateErr.Error()))
+			c.Error(apperrors.NewInternalServerError("invitation accepted but default workspace update failed").WithDetails(updateErr.Error()))
 			return
 		}
 	}

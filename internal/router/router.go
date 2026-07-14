@@ -408,7 +408,7 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	// 由 RegisterKnowledgeRoutes/FAQ/Tag/Wiki 等子路由的 ingest 能力控制；
 	// KB 自身的元数据/生命周期管理需要 full access 或 manage_kbs。创建/拷贝
 	// KB 没有单个目标 KB 可约束，因此不对 scoped key 开放（capability 无法
-	// 把它约束到某个 KB 上）；但 full-access key 是租户级全权，与它已能
+	// 把它约束到某个 KB 上）；但 full-access key 是空间级全权，与它已能
 	// 更新/删除/管理 KB 对齐，允许其创建 KB，消除"能删不能建"的不一致。
 	kbgrp := r.Group("/knowledge-bases")
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))
@@ -568,7 +568,7 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 	}
 }
 
-// RegisterTenantRoutes 注册租户相关的路由
+// RegisterTenantRoutes 注册空间相关的路由
 //
 // Tenant-internal RBAC for /tenants/:id:
 //   - GET   /:id          Viewer+ (read tenant settings)
@@ -612,17 +612,17 @@ func RegisterTenantRoutes(
 	r.GET("/tenants/all", g.CrossTenant(), handler.ListAllTenants)
 	r.GET("/tenants/search", g.CrossTenant(), handler.SearchTenants)
 
-	// 租户路由组
+	// 空间路由组
 	tenantRoutes := r.Group("/tenants")
 	{
-		// 创建租户对所有已登录用户开放：用户可以为自己再开一个工作区，
-		// handler 内部会调 EnsureOwner 把调用者写成新租户的 Owner。
-		// 跨租户超管走同一个端点，但能携带 storage_quota / status 等
+		// 创建空间对所有已登录用户开放：用户可以为自己再开一个工作区，
+		// handler 内部会调 EnsureOwner 把调用者写成新空间的 Owner。
+		// 跨空间超管走同一个端点，但能携带 storage_quota / status 等
 		// 全字段（见 handler.CreateTenant 内部分支）。
 		// 安全说明：这里不挂 g.CrossTenant()，因为 self-service 创建
-		// 不需要跨租户特权；handler 也不读写 X-Tenant-ID 指向的现有
-		// 租户，所以越过 PathTenantMatch 守卫不会扩大攻击面。
-		// 创建租户不对 API key 开放（注册在原始 group，默认拒绝）。
+		// 不需要跨空间特权；handler 也不读写 X-Tenant-ID 指向的现有
+		// 空间，所以越过 PathTenantMatch 守卫不会扩大攻击面。
+		// 创建空间不对 API key 开放（注册在原始 group，默认拒绝）。
 		tenantRoutes.POST("", handler.CreateTenant)
 		g.apiKeyRoute(tenantRoutes, http.MethodGet, "", apiKeyManageTenantSettings(apiKeyFullAccess()), handler.ListTenants)
 
@@ -706,7 +706,7 @@ func RegisterModelRoutes(
 	credHandler *handler.ModelCredentialsHandler,
 	g *rbacGuards,
 ) {
-	// 模型路由组。租户级基础设施：仅完全访问（Owner）API key 可访问。
+	// 模型路由组。空间级基础设施：仅完全访问（Owner）API key 可访问。
 	models := g.apiKeyGroup(r.Group("/models"), apiKeyManageModels(apiKeyFullAccess()))
 	{
 		// 获取模型厂商列表 — Viewer+
@@ -810,8 +810,8 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 		apiKeyManageKnowledgeBases(apiKeyFullAccess()), g.OwnedKBOrAdminFromKbIDParam(), g.KBAccessWrite("kbId"), handler.UpdateKBConfig)
 
 	// Ollama / 远程 API / 抽取等系统级检测/下载操作。这些不绑某个 KB，
-	// 会改租户级模型配置或拉远端模型；JWT 侧只读探测 Viewer+、变更 Admin+。
-	// 对 API key 均为租户级：full-access key 可用，scoped key 需要 manage_models。
+	// 会改空间级模型配置或拉远端模型；JWT 侧只读探测 Viewer+、变更 Admin+。
+	// 对 API key 均为空间级：full-access key 可用，scoped key 需要 manage_models。
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/status", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.CheckOllamaStatus)
 	g.apiKeyRoute(r, http.MethodGet, "/initialization/ollama/models", apiKeyManageModels(apiKeyFullAccess()), g.Viewer(), handler.ListOllamaModels)
 	g.apiKeyRoute(r, http.MethodPost, "/initialization/ollama/models/check", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.CheckOllamaModels)
@@ -1205,10 +1205,10 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 
 	// Knowledge base sharing routes (add to existing kb routes).
 	// 分享 KB 到组织 = 让组织里所有人能读这个 KB；这跟"修改 KB 元信息"
-	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己租户里
+	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己空间里
 	// 也不能私自把 KB 暴露出去。
 	// 分享管理不通过 capability 授予（manage_spaces 也不含）；仅 full-access
-	// key（租户级全权）可管理分享，scoped key 保持 default-deny。
+	// key（空间级全权）可管理分享，scoped key 保持 default-deny。
 	kbShares := g.apiKeyGroup(r.Group("/knowledge-bases/:id/shares"), apiKeyFullAccess())
 	{
 		// Share knowledge base
@@ -1226,10 +1226,10 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	//
 	// GET 走 OwnedAgentOrAdmin 作为 JWT 侧的 owner 校验；service 层
 	// ListSharesByAgent 现在也强制 tenant 归属（与 ListSharesByKnowledgeBase
-	// 对齐），这样 full-access API key（会短路路由 guard）也无法跨租户
+	// 对齐），这样 full-access API key（会短路路由 guard）也无法跨空间
 	// 枚举他人 agent 的分享。
 	// 同 KB 分享：分享管理不通过 capability 授予；仅 full-access key
-	// （租户级全权）可管理 agent 分享，scoped key 保持 default-deny。
+	// （空间级全权）可管理 agent 分享，scoped key 保持 default-deny。
 	agentShares := g.apiKeyGroup(r.Group("/agents/:id/shares"), apiKeyFullAccess())
 	{
 		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
@@ -1241,9 +1241,9 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	g.apiKeyRoute(r, http.MethodGet, "/shared-knowledge-bases", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedKnowledgeBases)
 	// Shared agents route — Viewer+
 	g.apiKeyRoute(r, http.MethodGet, "/shared-agents", apiKeyManageSpaces(apiKeyFullAccess()), g.Viewer(), orgHandler.ListSharedAgents)
-	// "Disable by me" 是租户级偏好（写到 tenant_disabled_shared_agents），
-	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
-	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
+	// "Disable by me" 是空间级偏好（写到 tenant_disabled_shared_agents），
+	// 影响整个空间在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
+	// 等于替整个空间做决定 — 必须 Admin+ 才允许调整。
 	g.apiKeyRoute(r, http.MethodPost, "/shared-agents/disabled", apiKeyManageSpaces(apiKeyFullAccess()), g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
@@ -1529,7 +1529,7 @@ func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFu
 
 		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
 		if tenant == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
 		}
 
@@ -1661,7 +1661,7 @@ func newKBScopedFileServeHandler(
 		// storage objects, so the requested path must belong to it.
 		ownerTenantID, ok := types.TenantIDFromContext(ctx)
 		if !ok || ownerTenantID == 0 {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
 		}
 
@@ -1889,7 +1889,7 @@ func servePresignedPreview(r *gin.Engine, cfg *config.Config) {
 
 			tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 			if tenant == nil {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 				return
 			}
 
@@ -1899,7 +1899,7 @@ func servePresignedPreview(r *gin.Engine, cfg *config.Config) {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error":    err.Error(),
 					"provider": provider,
-					"hint":     "tenant storage config is missing or incomplete for this provider",
+					"hint":     "workspace storage config is missing or incomplete for this provider",
 				})
 				return
 			}

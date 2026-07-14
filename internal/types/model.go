@@ -115,7 +115,7 @@ type Model struct {
 	// GORM's struct tag is documented to match so AutoMigrate paths
 	// produce the same shape.
 	ID string `yaml:"id"          json:"id"          gorm:"type:varchar(64);primaryKey"`
-	// Tenant ID
+	// Workspace ID
 	TenantID uint64 `yaml:"tenant_id"   json:"tenant_id"`
 	// Name of the model
 	Name string `yaml:"name"        json:"name"`

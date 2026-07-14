@@ -164,7 +164,7 @@ export default {
         },
         storage: {
           title: "存储引擎（可选）",
-          desc: "原始文件存放位置（本地或对象存储）。默认跟随租户设置即可。",
+          desc: "原始文件存放位置（本地或对象存储）。默认跟随空间设置即可。",
         },
         navMultimodal: {
           title: "多模态 / 图片理解（可选）",
@@ -2127,7 +2127,7 @@ export default {
       rerankModel: "ReRank 模型",
       rerankModelDesc: "用于对知识库检索结果进行重排序，提高回答准确性",
       rerankModelPlaceholder: "请选择 ReRank 模型",
-      rerankModelOptionalHint: "当前作用域内暂无 RAG 类型知识库，可不填；后续若加入 RAG 知识库，将自动使用租户默认重排模型，仍建议显式配置。",
+      rerankModelOptionalHint: "当前作用域内暂无 RAG 类型知识库，可不填；后续若加入 RAG 知识库，将自动使用空间默认重排模型，仍建议显式配置。",
       maxIterations: "最大迭代次数",
       allowedTools: "允许的工具",
       multiTurn: "多轮对话",
@@ -2474,7 +2474,7 @@ export default {
     },
     globalSettings: {
       title: "系统设置",
-      description: "平台级运行时配置，保存后立即对所有租户生效。仅系统管理员可见可改。",
+      description: "平台级运行时配置，保存后立即对所有空间生效。仅系统管理员可见可改。",
       loading: "加载中...",
       empty: "暂无可配置的系统设置",
       autoSaveHint: "修改后自动保存",
@@ -2506,9 +2506,9 @@ export default {
           description: "管理系统管理员、公开注册与用户创建空间的规则。",
         },
         tenant: {
-          tab: "租户默认值 {count}",
-          title: "租户默认值",
-          description: "设置新租户的初始配额与兼容性行为，不会自动改写已有租户。",
+          tab: "空间默认值 {count}",
+          title: "空间默认值",
+          description: "设置新空间的初始配额与兼容性行为，不会自动改写已有空间。",
         },
         runtime: {
           tab: "运行与并发 {count}",
@@ -2606,7 +2606,7 @@ export default {
           knowledgeBaseLabel: "知识库 ID",
           knowledgeLabel: "文档 ID",
           taskIDLabel: "业务任务 ID",
-          tenantLabel: "租户 ID",
+          tenantLabel: "空间 ID",
           sourceLabel: "来源 ID",
           targetLabel: "目标 ID",
           sourceKBLabel: "来源知识库",
@@ -2735,10 +2735,10 @@ export default {
           whitelist: "SSRF 防护白名单",
         },
         tenant: {
-          max_owned_per_user: "每用户最大租户数",
+          max_owned_per_user: "每用户最大空间数",
           self_service_creation_enabled: "允许用户自助创建空间",
-          default_storage_quota_gb: "新租户默认存储配额 (GB)",
-          auto_create_api_key: "创建租户时自动生成 API Key",
+          default_storage_quota_gb: "新空间默认存储配额 (GB)",
+          auto_create_api_key: "创建空间时自动生成 API Key",
         },
         asynq: {
           core_concurrency: "核心解析保底并发数",
@@ -2768,17 +2768,17 @@ export default {
         },
         tenant: {
           max_owned_per_user:
-            "每个非超管用户通过自助创建可拥有的最大租户数。每次创建租户时实时读取，" +
+            "每个非超管用户通过自助创建可拥有的最大空间数。每次创建空间时实时读取，" +
             "修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。",
           self_service_creation_enabled:
             "是否允许非超管用户主动创建空间。关闭后，普通用户只能通过邀请加入已有空间；" +
-            "跨租户超管仍可创建。修改后立即生效。",
+            "跨空间超管仍可创建。修改后立即生效。",
           default_storage_quota_gb:
-            "新建租户时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
-            "仅在创建时读取，修改后只对之后新建的租户生效，不会回写已存在的租户。" +
+            "新建空间时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
+            "仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。" +
             "0 或负数表示使用内置默认值 10GB。",
           auto_create_api_key:
-            "为新租户自动生成 full_access API Key，并在创建响应中返回明文 token。" +
+            "为新空间自动生成 full_access API Key，并在创建响应中返回明文 token。" +
             "仅用于兼容依赖旧行为的集成；默认关闭，建议通过 API Key 管理显式创建。",
         },
         asynq: {
@@ -2857,7 +2857,7 @@ export default {
         confirm: {
           promote: {
             header: "提升为系统管理员",
-            body: "确认将 {email} 提升为系统管理员？该用户将获得平台级权限，可访问所有租户、修改系统设置、管理其他管理员。",
+            body: "确认将 {email} 提升为系统管理员？该用户将获得平台级权限，可访问所有空间、修改系统设置、管理其他管理员。",
             confirmBtn: "确认提升",
           },
           revoke: {
@@ -2894,12 +2894,12 @@ export default {
         },
       },
       bulkApply: {
-        label: "应用到所有现有租户",
-        tooltip: "保存的值默认只对之后新建的租户生效；点击此按钮将当前值同步写入所有现有租户。",
+        label: "应用到所有现有空间",
+        tooltip: "保存的值默认只对之后新建的空间生效；点击此按钮将当前值同步写入所有现有空间。",
         confirmBtn: "确认应用",
-        confirmBody: "将把所有现有租户的存储配额覆盖为 {value} GB。如有租户被运维单独调整过的配额，也会一并被覆盖。是否继续？",
-        success: "已将 {count} 个租户的存储配额更新为 {gb} GB",
-        failed: "应用到所有租户失败",
+        confirmBody: "将把所有现有空间的存储配额覆盖为 {value} GB。如有空间被运维单独调整过的配额，也会一并被覆盖。是否继续？",
+        success: "已将 {count} 个空间的存储配额更新为 {gb} GB",
+        failed: "应用到所有空间失败",
       },
       audit: {
         tabLabel: "审计日志",
@@ -2942,7 +2942,7 @@ export default {
         },
         target: {
           bulkQuota: "批量同步：默认存储配额",
-          bulkQuotaDiff: "应用到 {count} 个租户（{gb} GB）",
+          bulkQuotaDiff: "应用到 {count} 个空间（{gb} GB）",
           promoteIdempotent: "目标已是系统管理员（幂等）",
           revokeNoop: "目标本就不是系统管理员（幂等）",
           requiredRole: "需要角色：{role}",
@@ -3349,7 +3349,7 @@ export default {
     multimodalParsing: "多模态文档解析",
     hybridSearchEngine: "混合检索 + 知识图谱",
     ragQandA: "ReAct 智能体问答",
-    independentTenant: "独立租户空间",
+    independentTenant: "独立空间",
     fullApiAccess: "完整 API 访问",
     knowledgeBaseManagement: "知识库管理",
     carousel: {
@@ -4724,8 +4724,8 @@ export default {
     copySuffix: " 副本",
     builtinModels: {
       title: "内置模型",
-      description: "内置模型对所有租户可见，敏感信息会被隐藏，且不可编辑或删除。",
-      descriptionAdmin: "内置模型对所有租户可见。系统管理员可编辑配置和凭据；删除仍由部署配置管理。",
+      description: "内置模型对所有空间可见，敏感信息会被隐藏，且不可编辑或删除。",
+      descriptionAdmin: "内置模型对所有空间可见。系统管理员可编辑配置和凭据；删除仍由部署配置管理。",
       viewGuide: "查看内置模型管理指南",
     },
     builtinTag: "内置",
@@ -5336,7 +5336,7 @@ export default {
       loading: "正在加载向量存储列表...",
       engineLabel: "向量存储",
       engineDesc:
-        "从全局向量存储配置中选择，或保持系统默认以使用租户的 RETRIEVE_DRIVER 引擎。",
+        "从全局向量存储配置中选择，或保持系统默认以使用空间的 RETRIEVE_DRIVER 引擎。",
       boundLabel: "已绑定的向量存储",
       systemDefault: "系统默认",
       immutableHint:
@@ -6200,7 +6200,7 @@ export default {
       save: "保存",
       baseUrl: "API 地址",
       baseUrlDesc: "与 REST API 路径拼接使用。",
-      apiKey: "租户 API Key",
+      apiKey: "空间 API Key",
       apiKeyDesc: "为集成创建带权限和知识库范围的 API Key。",
       apiKeys: "API Keys",
       apiKeysDesc: "为不同集成创建独立 Key，并限制操作权限与可访问知识库范围。",
@@ -6216,28 +6216,28 @@ export default {
       apiKeyScopedAccess: "能力授权",
       apiKeyAccessRole: "访问角色",
       apiKeyAccessType: "访问类型",
-      apiKeyAccessTypeHint: "「知识库」按下方权限级别在知识库范围内操作；「租户完全访问」额外开放模型、数据源等全部租户级接口。",
+      apiKeyAccessTypeHint: "「知识库」按下方权限级别在知识库范围内操作；「空间完全访问」额外开放模型、数据源等全部空间级接口。",
       accessTypeKnowledgeBase: "知识库",
-      accessTypeTenantFull: "租户完全访问",
+      accessTypeTenantFull: "空间完全访问",
       apiKeyPermissionLevel: "权限级别",
-      apiKeyAccessRoleHint: "前三档仅限知识库范围内操作；「租户完全访问」额外开放模型、数据源等租户级接口。",
+      apiKeyAccessRoleHint: "前三档仅限知识库范围内操作；「空间完全访问」额外开放模型、数据源等空间级接口。",
       accessRoleViewer: "知识库只读",
       accessRoleContributor: "知识库读写",
       accessRoleAdmin: "知识库管理员",
-      accessRoleOwner: "租户完全访问",
+      accessRoleOwner: "空间完全访问",
       accessRoleViewerDesc: "查询、检索和对话，不修改知识库内容。",
       accessRoleContributorDesc: "创建、更新或删除知识库内容，受知识库范围限制。",
-      accessRoleAdminDesc: "知识库管理，包含清空知识库等破坏性操作，受知识库范围限制；不涉及租户级配置。",
-	      accessRoleOwnerDesc: "完全访问，等同租户所有者：可调用模型、向量库、数据源、渠道等全部租户级接口，不受知识库范围限制。",
+      accessRoleAdminDesc: "知识库管理，包含清空知识库等破坏性操作，受知识库范围限制；不涉及空间级配置。",
+	      accessRoleOwnerDesc: "完全访问，等同空间所有者：可调用模型、向量库、数据源、渠道等全部空间级接口，不受知识库范围限制。",
 	      apiKeyCapabilities: "可用能力",
 	      apiKeyCapabilityGroupKnowledge: "知识库数据",
 	      apiKeyCapabilityGroupAutomation: "智能体与集成",
 	      apiKeyCapabilityGroupCollaboration: "成员与空间",
-	      apiKeyCapabilityGroupTenant: "租户配置",
+	      apiKeyCapabilityGroupTenant: "空间配置",
 	      apiKeyCapabilitySelectGroup: "全选",
 	      apiKeyCapabilityClearGroup: "清空",
-	      capabilityTenantFull: "租户完全访问",
-	      capabilityTenantFullHint: "允许调用模型、向量库、数据源、渠道等全部租户级接口；知识库范围不再生效。",
+	      capabilityTenantFull: "空间完全访问",
+	      capabilityTenantFullHint: "允许调用模型、向量库、数据源、渠道等全部空间级接口；知识库范围不再生效。",
 	      capabilityRetrieve: "检索知识库",
 	      capabilityRetrieveHint: "允许读取、查询和检索所选知识库范围内的数据；不创建会话，也不修改内容。",
 	      capabilityChat: "对话能力",
@@ -6251,7 +6251,7 @@ export default {
 	      capabilityManageAgents: "管理智能体",
 	      capabilityManageAgentsHint: "允许创建、修改、删除、复制智能体。智能体配置可能含模型/MCP 等敏感绑定，默认关闭，按需开启。",
 	      capabilityMessageHistory: "消息历史",
-	      capabilityMessageHistoryHint: "允许检索租户聊天历史并读取聊天历史统计；不授予租户配置权限。",
+	      capabilityMessageHistoryHint: "允许检索空间聊天历史并读取聊天历史统计；不授予空间配置权限。",
 	      capabilityManageModels: "管理模型",
 	      capabilityManageModelsHint: "允许管理模型配置、模型凭据、模型连通性测试和 WeKnoraCloud 凭据。",
 	      capabilityManageMcpServices: "管理 MCP 服务",
@@ -6267,11 +6267,11 @@ export default {
 	      capabilityRunEvaluations: "运行评测",
 	      capabilityRunEvaluationsHint: "允许运行评测任务并读取评测结果。",
 	      capabilityManageMembers: "管理成员",
-	      capabilityManageMembersHint: "允许查看和管理租户成员、角色、邀请和邀请链接；不包含 API Key 管理、租户删除或所有权转移。",
+	      capabilityManageMembersHint: "允许查看和管理空间成员、角色、邀请和邀请链接；不包含 API Key 管理、空间删除或所有权转移。",
 	      capabilityManageSpaces: "管理空间",
 	      capabilityManageSpacesHint: "允许管理组织空间、加入流程、空间成员、邀请和共享空间可见性；不授予知识库或智能体分享管理权限。",
-	      capabilityManageTenantSettings: "管理租户设置",
-	      capabilityManageTenantSettingsHint: "允许读取和更新租户级集成设置，例如 API 终端用户身份模式、请求头配置、租户 KV 配置等；不包含 API Key 管理、成员管理、租户删除或所有权转移。",
+	      capabilityManageTenantSettings: "管理空间设置",
+	      capabilityManageTenantSettingsHint: "允许读取和更新空间级集成设置，例如 API 终端用户身份模式、请求头配置、空间 KV 配置等；不包含 API Key 管理、成员管理、空间删除或所有权转移。",
 	      apiKeyKnowledgeScope: "知识库范围",
       apiKeyKnowledgeScopePlaceholder: "留空表示允许访问全部知识库",
       apiKeyKnowledgeScopeOwnerHint: "完全访问密钥不受知识库范围限制。",
@@ -6291,7 +6291,7 @@ export default {
         "配置 API 请求如何识别终端用户。该身份会同时用于区分不同用户的对话 Session 与 MCP 工具授权。",
       principalScope:
         "终端用户身份负责隔离 Session 与 MCP OAuth；API Key 自身的操作权限和知识库范围由上方 API Keys 管理。",
-      modeTenant: "仅租户",
+      modeTenant: "仅空间",
       modeDirect: "直接传用户 ID",
       modeSigned: "签名 Token",
       directWarning: "直接传用户 ID 会信任调用方请求头，仅适用于可信服务端到服务端调用。",
@@ -6303,7 +6303,7 @@ export default {
       directHeader: "用户 ID 请求头",
       requireDirectHeader: "必须携带用户 ID",
       requireDirectHeaderDesc:
-        "开启后，缺少用户 ID 请求头的 API Key 请求将被拒绝；关闭则按整个租户统一处理，不区分具体终端用户。",
+        "开启后，缺少用户 ID 请求头的 API Key 请求将被拒绝；关闭则按整个空间统一处理，不区分具体终端用户。",
       tokenHeader: "Token 请求头",
       tokenHeaderDesc: "客户端在该固定请求头中携带后端签发的 JWT。",
       hmacSecret: "HMAC 密钥",
@@ -6337,7 +6337,7 @@ export default {
       playgroundAgentsLoadFailed: "智能体列表加载失败",
       playgroundExternalUser: "外部用户 ID",
       playgroundExternalUserPlaceholder: "user_123",
-      playgroundTenantModeHint: "仅租户模式不会发送外部用户身份，所有 API 会话归属同一个租户级主体。",
+      playgroundTenantModeHint: "仅空间模式不会发送外部用户身份，所有 API 会话归属同一个空间级主体。",
       playgroundDirectModeHint: "将通过 {headerName} 请求头发送此用户 ID。",
       playgroundSignedModeHint: "签名模式由 JWT 的 sub 代表外部用户；Playground 会用这里的用户 ID 自动签出短期测试 JWT。",
       playgroundQuestion: "测试问题",
@@ -6345,7 +6345,7 @@ export default {
       playgroundRequestPreview: "请求预览（已遮蔽密钥）",
       playgroundRun: "运行测试",
       playgroundStop: "停止",
-      playgroundNeedApiKey: "当前租户没有 API Key。",
+      playgroundNeedApiKey: "当前空间没有 API Key。",
       playgroundNeedAgent: "请选择测试智能体。",
       playgroundNeedQuestion: "请输入测试问题。",
       playgroundNeedExternalUser: "请输入外部用户 ID。",

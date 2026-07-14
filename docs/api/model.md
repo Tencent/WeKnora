@@ -2,7 +2,7 @@
 
 [返回目录](./README.md)
 
-模型管理接口用于维护当前租户下可用的 LLM / Embedding / Rerank / VLLM / ASR 模型配置。
+模型管理接口用于维护当前空间下可用的 LLM / Embedding / Rerank / VLLM / ASR 模型配置。
 
 | 方法   | 路径                | 描述                  |
 | ------ | ------------------- | --------------------- |
@@ -46,7 +46,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 
 ## GET `/models/providers` - 获取模型服务商列表
 
-根据模型类型获取支持的服务商列表及配置信息（系统级元数据，与租户无关）。
+根据模型类型获取支持的服务商列表及配置信息（系统级元数据，与空间无关）。
 
 **查询参数**:
 
@@ -100,7 +100,7 @@ curl --location 'http://localhost:8080/api/v1/models/providers?model_type=embedd
 
 ## POST `/models` - 创建模型
 
-为当前租户创建一个新的模型配置。
+为当前空间创建一个新的模型配置。
 
 **参数说明（请求体）**:
 
@@ -314,7 +314,7 @@ curl --location 'http://localhost:8080/api/v1/models' \
 
 ## GET `/models` - 获取模型列表
 
-返回当前租户下的所有模型。内置模型（`is_builtin = true`）的 `base_url` 与 `api_key` 会被清空以隐藏敏感信息。
+返回当前空间下的所有模型。内置模型（`is_builtin = true`）的 `base_url` 与 `api_key` 会被清空以隐藏敏感信息。
 
 **请求**:
 

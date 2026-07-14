@@ -71,7 +71,7 @@ export interface ParserEngineInfo {
   UnavailableReason?: string
 }
 
-/** 解析引擎配置（引擎相关存租户；docreader 地址由环境变量配置） */
+/** 解析引擎配置（引擎相关存空间；docreader 地址由环境变量配置） */
 export interface ParserEngineConfig {
   docreader_addr?: string
   docreader_transport?: string
@@ -130,7 +130,7 @@ export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse 
   return post('/api/v1/system/docreader/reconnect', { addr })
 }
 
-// ---- 存储引擎配置（租户级，供文档/图片存储与 docreader 使用） ----
+// ---- 存储引擎配置（空间级，供文档/图片存储与 docreader 使用） ----
 
 export interface StorageEngineConfig {
   default_provider: string // "local" | "minio" | "cos" | "tos" | "s3" | "oss" | "ks3" | "obs"

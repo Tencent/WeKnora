@@ -44,7 +44,7 @@ func favoriteContext(c *gin.Context) (string, uint64, bool) {
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.Error(apperrors.NewUnauthorizedError("tenant ID not found"))
+		c.Error(apperrors.NewUnauthorizedError("workspace ID not found"))
 		return "", 0, false
 	}
 	return userID, tenantID, true
@@ -52,7 +52,7 @@ func favoriteContext(c *gin.Context) (string, uint64, bool) {
 
 // ListFavorites godoc
 // @Summary      List my favorites
-// @Description  Lists this user's starred resources in the current tenant for a given type
+// @Description  Lists this user's starred resources in the current workspace for a given type
 // @Tags         User
 // @Param        type  query     string  true  "Resource type (kb | agent)"
 // @Success      200   {object}  map[string]interface{}

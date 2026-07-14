@@ -157,7 +157,7 @@ export function userInfoFromApi(
   }
 }
 
-// 租户信息接口
+// 空间信息接口
 export interface TenantInfo {
   id: string
   name: string
@@ -288,7 +288,7 @@ export async function register(data: RegisterRequest): Promise<RegisterResponse>
 }
 
 /**
- * Lite 版自动初始化（创建默认用户/租户 + 签发令牌）
+ * Lite 版自动初始化（创建默认用户/空间 + 签发令牌）
  */
 export async function autoSetup(): Promise<LoginResponse> {
   try {
@@ -353,7 +353,7 @@ export async function updateMyPreferences(
 }
 
 /**
- * 获取当前租户信息
+ * 获取当前空间信息
  */
 export async function getCurrentTenant(): Promise<{ success: boolean; data?: TenantInfo; message?: string }> {
   try {

@@ -130,7 +130,7 @@
               <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'"
                 size="14px" />
             </div>
-            <!-- 本空间 · 仅查看：本租户里同事创建、对当前 contributor 不可编辑。
+            <!-- 本空间 · 仅查看：本空间里同事创建、对当前 contributor 不可编辑。
                  当前卡片必须是非置顶（否则归在「已置顶」），且前一张要么
                  不存在、要么是「共享给我」、要么是我创建、要么是置顶卡片
                  （置顶→非置顶的过渡同样要打这个标题）。 -->
@@ -630,7 +630,7 @@
           </template>
         </div>
 
-        <!-- 全部空状态：保留「新建知识库」CTA，因为是租户没有任何 KB 的真空场景 -->
+        <!-- 全部空状态：保留「新建知识库」CTA，因为是空间没有任何 KB 的真空场景 -->
         <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
@@ -814,7 +814,7 @@ const chatResources = useChatResourcesStore()
 const { t } = useI18n()
 
 // 左侧空间选择：默认根据当前角色决定。
-// Viewer 在该租户里通常 0 KB owned，"我的"会显示空状态、又把共享 KB 藏起来，
+// Viewer 在该空间里通常 0 KB owned，"我的"会显示空状态、又把共享 KB 藏起来，
 // 体验非常误导；所以 Viewer 默认落到 "all"（我的 + 共享给我都显示）。
 // Contributor 及以上一进来主要管理自己创建的 KB，仍默认 "mine"。
 //
@@ -916,7 +916,7 @@ const sharedKbsByOrg = computed(() => {
 const spaceKbsList = ref<OrganizationSharedKnowledgeBaseItem[]>([])
 const spaceKbsLoading = ref(false)
 
-// 「工作空间」视图下的稳定排序：本租户内「我创建」在前、「同事创建」在后；
+// 「工作空间」视图下的稳定排序：本空间内「我创建」在前、「同事创建」在后；
 // 子段内保留服务端的置顶优先顺序。给 contributor 视图把「本空间 · 仅查看」
 // 分组标题正好插在过渡处；其他角色看不到标题，纯排序变化也无害。
 // Ordering for the 「本空间」 tab:
@@ -1054,9 +1054,9 @@ const recentsList = computed(() => {
 })
 
 // 可编辑权限：editor / admin。viewer 进入「仅查看」组。
-// 用 share-level permission（不是租户角色）做判断——跨租户拿到 viewer 的，
-// 即便我在本租户是 owner 也确实改不动那个 KB；反过来跨租户拿到 editor 的，
-// 哪怕我在本租户是 contributor 也确实能改。
+// 用 share-level permission（不是空间角色）做判断——跨空间拿到 viewer 的，
+// 即便我在本空间是 owner 也确实改不动那个 KB；反过来跨空间拿到 editor 的，
+// 哪怕我在本空间是 contributor 也确实能改。
 const EDITABLE_PERMS = new Set(['admin', 'editor'])
 function isSharedKbEditable(perm: string | undefined): boolean {
   return !!perm && EDITABLE_PERMS.has(perm)
@@ -1073,9 +1073,9 @@ function isSharedKbEditable(perm: string | undefined): boolean {
 // 不需要再回头碰这个 computed。
 const showShareGroupHeaders = computed(() => true)
 
-// 同租户、非当前用户创建的 KB 分组标题。
-// contributor / viewer 在本租户里对这些 KB 没有写权限，所以打"仅查看"；
-// admin / owner 反而对整个租户都有编辑权限，"仅查看"会反复误导他们以为
+// 同空间、非当前用户创建的 KB 分组标题。
+// contributor / viewer 在本空间里对这些 KB 没有写权限，所以打"仅查看"；
+// admin / owner 反而对整个空间都有编辑权限，"仅查看"会反复误导他们以为
 // 自己改不了——这一段实际上是"工作空间里其他成员创建的 KB"，按所有权
 // 而非权限来标注更准确。
 const tenantSectionLabelKey = computed(() =>
@@ -1111,10 +1111,10 @@ const toggleKbSection = (key: KbSectionKey) => {
 //
 // 输入有两种形态：
 //   1. filteredKnowledgeBases 的元素，会显式带 `isMine` 标志（见
-//      filteredKnowledgeBases 里的 spread；跨租户 shared 拆给 isMine=false）。
+//      filteredKnowledgeBases 里的 spread；跨空间 shared 拆给 isMine=false）。
 //   2. sortedMineKbs 的元素就是原始 KB，无 isMine、也无 permission 字段。
-// 跨租户共享条目一定带 `permission`，本租户条目永远没有，所以"无 permission"
-// 是本租户的安全标识。综合：先看 isMine，再回退到 permission 是否存在。
+// 跨空间共享条目一定带 `permission`，本空间条目永远没有，所以"无 permission"
+// 是本空间的安全标识。综合：先看 isMine，再回退到 permission 是否存在。
 const kbSectionOf = (kb: any): KbSectionKey => {
   if (kb?.is_pinned) return 'pinned'
   const isOwnTenant = kb?.isMine === true || (kb?.isMine !== false && kb?.permission == null)
@@ -1361,10 +1361,10 @@ function canDuplicateKBCard(kb: any): boolean {
   return authStore.hasRole('contributor') && kb.isMine !== false
 }
 
-// isMyKb 仅用于卡片右下角徽章在「我创建」与「同租户其他成员创建」之间切换。
+// isMyKb 仅用于卡片右下角徽章在「我创建」与「同空间其他成员创建」之间切换。
 // 与 canManageKBCard 不同：管理权限有 admin 兜底，徽章纯粹按创建者匹配。
 // creator_id 为空（PR 5 RBAC 迁移之前的老 KB）一律按 tenant 处理——避免把
-// 全租户共有的旧 KB 错误地都标成「我创建」。
+// 全空间共有的旧 KB 错误地都标成「我创建」。
 function isMyKb(kb: { creator_id?: string }): boolean {
   const userId = authStore.user?.id || ''
   return !!(kb.creator_id && userId && kb.creator_id === userId)
@@ -1372,9 +1372,9 @@ function isMyKb(kb: { creator_id?: string }): boolean {
 
 // kbOriginVariant 决定卡片右下角徽章的展示形态：
 //   - 我自己创建的：mine（绿色 "我创建"）
-//   - 同租户他人创建的：creator 变体——只显示创建者名字。用户始终在
-//     某个工作空间内浏览（顶部 TenantSelector 已经标了租户身份），右下
-//     角再贴一遍租户名属于重复信息；contributor / admin / owner / viewer
+//   - 同空间他人创建的：creator 变体——只显示创建者名字。用户始终在
+//     某个工作空间内浏览（顶部 TenantSelector 已经标了空间身份），右下
+//     角再贴一遍空间名属于重复信息；contributor / admin / owner / viewer
 //     看到的徽章一致。创建者无法解析时，creator 变体自动回退到
 //     resourceOrigin.tenant 文案（"本空间"），不会出现空标签。
 function kbOriginVariant(kb: { creator_id?: string }): 'mine' | 'creator' {

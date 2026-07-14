@@ -46,7 +46,7 @@ onMounted(async () => {
     return
   }
 
-  // 后端 POST /organizations/join 要求当前租户角色 ≥ admin，先在前端拦截以给出友好提示
+  // 后端 POST /organizations/join 要求当前空间角色 ≥ admin，先在前端拦截以给出友好提示
   if (!authStore.hasRole('admin') && !authStore.canAccessAllTenants) {
     error.value = t('organization.rbac.cannotJoin')
     loading.value = false

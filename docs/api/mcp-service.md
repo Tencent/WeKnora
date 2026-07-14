@@ -7,7 +7,7 @@ MCP（Model Context Protocol）服务管理接口，提供 MCP 服务的 CRUD、
 | 方法   | 路径                                              | 描述                                          |
 | ------ | ------------------------------------------------- | --------------------------------------------- |
 | POST   | `/mcp-services`                                   | 创建 MCP 服务                                 |
-| GET    | `/mcp-services`                                   | 获取当前租户的 MCP 服务列表                   |
+| GET    | `/mcp-services`                                   | 获取当前空间的 MCP 服务列表                   |
 | GET    | `/mcp-services/:id`                               | 获取 MCP 服务详情                             |
 | PUT    | `/mcp-services/:id`                               | 更新 MCP 服务（部分字段更新）                 |
 | DELETE | `/mcp-services/:id`                               | 删除 MCP 服务                                 |
@@ -113,7 +113,7 @@ curl --location 'http://localhost:8080/api/v1/mcp-services' \
 
 ## GET `/mcp-services` - 获取 MCP 服务列表
 
-返回当前租户已配置的所有 MCP 服务。
+返回当前空间已配置的所有 MCP 服务。
 
 **请求**:
 
@@ -497,7 +497,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/mcp-services/mcp-000
 
 用于 Agent 在执行过程中阻塞等待人工审批的场景：当 Agent 命中一个 `require_approval = true` 的工具时会生成一条 `pending_id`，前端拿到这个 ID 后调用此接口将审批结果回传给 Agent，Agent 才会继续执行（或终止）。
 
-**鉴权要求**：请求上下文中必须有已认证用户（`user_id`），且该用户必须是当前 pending 会话的所有者；租户与用户两层都会做 fail-close 校验。
+**鉴权要求**：请求上下文中必须有已认证用户（`user_id`），且该用户必须是当前 pending 会话的所有者；空间与用户两层都会做 fail-close 校验。
 
 **路径参数**:
 
@@ -552,6 +552,6 @@ curl --location --request POST 'http://localhost:8080/api/v1/agent/tool-approval
 
 | HTTP | 触发条件                                                                                |
 | ---- | --------------------------------------------------------------------------------------- |
-| 400  | `decision` 不是 `approve`/`reject`；或 `modified_args` 是 `null`/非对象；或租户/用户错配 |
+| 400  | `decision` 不是 `approve`/`reject`；或 `modified_args` 是 `null`/非对象；或空间/用户错配 |
 | 401  | 上下文缺失认证用户（中间件未注入 `user_id`）                                            |
 | 404  | `pending_id` 不存在或已完成（超时/取消已先一步消费）                                    |

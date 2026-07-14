@@ -154,7 +154,7 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 
 		createdTenant, err = s.tenantService.CreateTenant(ctx, tenant)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to create tenant")
+			logger.Errorf(ctx, "Failed to create workspace")
 			return nil, errors.New("failed to create workspace")
 		}
 	}
@@ -931,14 +931,14 @@ func (s *userService) SwitchTenant(
 		return nil, errors.New("user is required")
 	}
 	if targetTenantID == 0 {
-		return nil, errors.New("target tenant ID is required")
+		return nil, errors.New("target workspace ID is required")
 	}
 
 	// Verify membership unless the caller is a cross-tenant superuser
 	// switching outside their home tenant.
 	if !user.CanAccessAllTenants || targetTenantID == user.TenantID {
 		if s.memberService == nil {
-			return nil, errors.New("tenant membership service unavailable")
+			return nil, errors.New("workspace membership service unavailable")
 		}
 		member, err := s.memberService.GetMembership(ctx, user.ID, targetTenantID)
 		if err != nil {
@@ -951,7 +951,7 @@ func (s *userService) SwitchTenant(
 
 	tenant, err := s.tenantService.GetTenantByID(ctx, targetTenantID)
 	if err != nil {
-		return nil, fmt.Errorf("load target tenant: %w", err)
+		return nil, fmt.Errorf("load target workspace: %w", err)
 	}
 
 	accessToken, refreshToken, err := s.generateTokensForTenant(ctx, user, targetTenantID)
@@ -972,7 +972,7 @@ func (s *userService) SwitchTenant(
 
 	return &types.LoginResponse{
 		Success:      true,
-		Message:      "Tenant switched",
+		Message:      "Workspace switched",
 		User:         user,
 		ActiveTenant: tenant,
 		Memberships:  memberships,
