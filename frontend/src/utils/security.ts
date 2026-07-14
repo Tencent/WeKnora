@@ -3,15 +3,36 @@
  */
 
 import DOMPurify from 'dompurify';
-import type { Config } from 'dompurify';
+import type { Config, NodeHook } from 'dompurify';
 import {
   domPurifySecurityHooks,
   domPurifySecurityOptions,
   markdownDomPurifyConfig,
+  markdownDomPurifySecurityHooks,
 } from './markdownDomPurify.ts';
 
 const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 const PROVIDER_FILE_SCHEME_RE = /^(local|minio|cos|tos|s3|oss|ks3|obs):\/\/\S+$/i;
+
+type SecurityHooks = {
+  beforeSanitizeElements: NodeHook;
+  afterSanitizeElements: NodeHook;
+};
+
+function sanitizeWithSecurityHooks(
+  html: string,
+  config: Config,
+  hooks: SecurityHooks,
+): string {
+  DOMPurify.addHook('beforeSanitizeElements', hooks.beforeSanitizeElements);
+  DOMPurify.addHook('afterSanitizeElements', hooks.afterSanitizeElements);
+  try {
+    return DOMPurify.sanitize(html, config);
+  } finally {
+    DOMPurify.removeHook('afterSanitizeElements', hooks.afterSanitizeElements);
+    DOMPurify.removeHook('beforeSanitizeElements', hooks.beforeSanitizeElements);
+  }
+}
 
 // 配置 DOMPurify 的安全策略
 const DOMPurifyConfig = {
@@ -54,7 +75,6 @@ const DOMPurifyConfig = {
   ],
   USE_PROFILES: { html: true, svg: true, mathMl: true },
   ...domPurifySecurityOptions,
-  HOOKS: domPurifySecurityHooks,
 };
 
 /**
@@ -69,7 +89,11 @@ export function sanitizeHTML(html: string): string {
   
   try {
     const preparedHTML = protectProviderImageSrcInHTML(html);
-    return DOMPurify.sanitize(preparedHTML, DOMPurifyConfig as unknown as Config);
+    return sanitizeWithSecurityHooks(
+      preparedHTML,
+      DOMPurifyConfig as unknown as Config,
+      domPurifySecurityHooks,
+    );
   } catch (error) {
     console.error('HTML sanitization failed:', error);
     // 如果清理失败，返回转义的纯文本
@@ -85,7 +109,11 @@ export function sanitizeMarkdownHTML(html: string): string {
 
   try {
     const preparedHTML = protectProviderImageSrcInHTML(html);
-    return DOMPurify.sanitize(preparedHTML, markdownDomPurifyConfig as unknown as Config);
+    return sanitizeWithSecurityHooks(
+      preparedHTML,
+      markdownDomPurifyConfig as unknown as Config,
+      markdownDomPurifySecurityHooks,
+    );
   } catch (error) {
     console.error('Markdown HTML sanitization failed:', error);
     return escapeHTML(html);

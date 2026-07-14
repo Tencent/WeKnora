@@ -106,10 +106,16 @@
               </component>
 
               <div v-if="item.kind === 'document'" class="reference-card__actions">
-                <button v-if="item.knowledgeBaseId && !embeddedMode" type="button" class="reference-card__action" @click="navigateToDocument(item)">
+                <a
+                  v-if="item.knowledgeBaseId && !embeddedMode"
+                  class="reference-card__action"
+                  :href="getDocumentHref(item)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   <t-icon name="jump" size="14px" />
                   <span>{{ t('chat.navigateToDocument') }}</span>
-                </button>
+                </a>
               </div>
             </article>
           </section>
@@ -250,14 +256,14 @@ function toggleDocumentSnippet(item: ReferenceListItem, event?: MouseEvent) {
   expandedKeys.add(item.key)
 }
 
-function navigateToDocument(item: ReferenceListItem) {
-  if (!item.knowledgeBaseId) return
+function getDocumentHref(item: ReferenceListItem) {
+  if (!item.knowledgeBaseId) return ''
   const query: Record<string, string> = {}
   if (item.knowledgeId) query.knowledge_id = item.knowledgeId
-  router.push({
+  return router.resolve({
     path: `/platform/knowledge-bases/${item.knowledgeBaseId}`,
     query,
-  })
+  }).href
 }
 
 async function scrollToHighlight() {
@@ -540,6 +546,7 @@ watch(visible, (open) => {
   gap: 4px;
   cursor: pointer;
   padding: 0;
+  text-decoration: none;
 
   &:hover {
     color: var(--td-text-color-primary);

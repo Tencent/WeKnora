@@ -442,7 +442,13 @@
               || 1
           }) }}</span>
         </div>
-        <t-link theme="primary" hover="color" @click="navigateToWikiGraph">
+        <t-link
+          theme="primary"
+          hover="color"
+          :href="wikiGraphHref"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <template #prefixIcon><t-icon name="chart-bubble" /></template>
           {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
         </t-link>
@@ -698,15 +704,17 @@ const openWikiDrawer = async (kbId: string, slug: string) => {
   }
 };
 
-const navigateToWikiGraph = () => {
-  if (currentWikiKbId.value && wikiDrawerPage.value?.slug) {
-    wikiDrawerVisible.value = false;
-    try {
-      router.push(`/platform/knowledge-bases/${currentWikiKbId.value}?tab=graph&slug=${encodeURIComponent(wikiDrawerPage.value.slug)}`);
-    } catch (error) {
-      console.error('Failed to navigate to wiki graph:', error);
-    }
-  }
+const wikiGraphHref = computed(() => {
+  if (!currentWikiKbId.value || !wikiDrawerPage.value?.slug) return '';
+  return router.resolve({
+    path: `/platform/knowledge-bases/${currentWikiKbId.value}`,
+    query: { tab: 'graph', slug: wikiDrawerPage.value.slug },
+  }).href;
+});
+
+const openRouteInNewTab = (path: string) => {
+  const href = router.resolve(path).href;
+  window.open(href, '_blank', 'noopener,noreferrer');
 };
 
 const handleWikiDrawerClick = (e: MouseEvent) => {
@@ -1892,7 +1900,7 @@ const onRootClick = (e: Event) => {
     }
     if (kbId) {
       try {
-        router.push(`/platform/knowledge-bases/${kbId}`);
+        openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
       } catch (error) {
         console.error('Failed to navigate to knowledge base:', error);
       }
@@ -1964,7 +1972,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
       }
       if (kbId) {
         try {
-          router.push(`/platform/knowledge-bases/${kbId}`);
+          openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
         } catch (error) {
           console.error('Failed to navigate to knowledge base:', error);
         }
