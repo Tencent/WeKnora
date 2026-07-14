@@ -200,7 +200,12 @@
               <p class="desc">{{ t('system.globalSettings.passwordReset.description') }}</p>
             </div>
             <div class="setting-control">
-              <t-button theme="primary" variant="outline" @click="openPasswordResetDialog">
+              <t-button
+                theme="danger"
+                variant="text"
+                class="password-reset-trigger"
+                @click="openPasswordResetDialog"
+              >
                 <template #icon><t-icon name="lock-on" /></template>
                 {{ t('system.globalSettings.passwordReset.action') }}
               </t-button>
@@ -442,13 +447,18 @@
     <t-dialog
       v-model:visible="passwordResetVisible"
       :header="t('system.globalSettings.passwordReset.dialogTitle')"
-      width="460px"
+      width="440px"
+      placement="center"
+      dialog-class-name="password-reset-dialog"
       :confirm-btn="{
         content: t('system.globalSettings.passwordReset.confirmBtn'),
         theme: 'danger',
         loading: passwordResetSubmitting,
       }"
-      :cancel-btn="t('system.globalSettings.confirm.cancelBtn')"
+      :cancel-btn="{
+        content: t('system.globalSettings.confirm.cancelBtn'),
+        variant: 'outline',
+      }"
       :close-on-overlay-click="!passwordResetSubmitting"
       :close-btn="!passwordResetSubmitting"
       @confirm="submitPasswordReset"
@@ -464,6 +474,7 @@
         :data="passwordResetForm"
         :rules="passwordResetRules"
         label-align="top"
+        class="password-reset-form"
       >
         <t-form-item :label="t('system.globalSettings.passwordReset.emailLabel')" name="email">
           <t-input
@@ -2493,8 +2504,29 @@ onUnmounted(() => {
   width: 320px;
 }
 
+.password-reset-trigger {
+  min-width: 112px;
+  height: 32px;
+  padding: 0 12px;
+  color: var(--td-error-color);
+  background: var(--td-error-color-light);
+  border: 1px solid transparent;
+  border-radius: 6px;
+
+  &:hover {
+    color: var(--td-error-color-hover);
+    background: var(--td-error-color-light-hover);
+    border-color: var(--td-error-color-focus);
+  }
+
+  &:active {
+    color: var(--td-error-color-active);
+    background: var(--td-error-color-focus);
+  }
+}
+
 .password-reset-warning {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 @media (max-width: 860px) {
@@ -2561,6 +2593,97 @@ onUnmounted(() => {
 </style>
 
 <style lang="less">
+/* The dialog is teleported to body, so its visual shell cannot be
+   styled from the scoped block above. Keep this class specific to the
+   password-reset flow instead of changing every TDesign dialog. */
+.password-reset-dialog {
+  padding: 0;
+  overflow: hidden;
+  border-color: var(--td-component-stroke);
+  border-radius: 12px;
+  box-shadow:
+    0 12px 32px rgba(15, 23, 42, 0.12),
+    0 2px 8px rgba(15, 23, 42, 0.08);
+
+  .t-dialog__header {
+    min-height: 64px;
+    padding: 0 24px;
+    font-size: 18px;
+    line-height: 26px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  .t-dialog__close {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 6px;
+  }
+
+  .t-dialog__body {
+    padding: 20px 24px 4px;
+  }
+
+  .password-reset-warning {
+    padding: 12px 14px;
+    border-radius: 8px;
+
+    .t-alert__content {
+      font-size: 13px;
+      line-height: 20px;
+    }
+  }
+
+  .password-reset-form {
+    .t-form__item {
+      margin-bottom: 16px;
+    }
+
+    .t-form__label--top {
+      min-height: 28px;
+      padding: 0;
+      font-size: 14px;
+      line-height: 22px;
+    }
+
+    .t-input {
+      border-radius: 6px;
+    }
+  }
+
+  .t-dialog__footer {
+    box-sizing: border-box;
+    padding: 16px 24px 20px;
+    border-top: 1px solid var(--td-component-stroke);
+
+    .t-button {
+      min-width: 88px;
+      border-radius: 6px;
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .password-reset-dialog {
+    width: calc(100vw - 24px) !important;
+
+    .t-dialog__header {
+      min-height: 56px;
+      padding: 0 20px;
+      font-size: 17px;
+    }
+
+    .t-dialog__body {
+      padding: 16px 20px 4px;
+    }
+
+    .t-dialog__footer {
+      padding: 14px 20px 18px;
+    }
+  }
+}
+
 /* t-drawer teleports its content-wrapper to body, so the height-chain
    needed for the internal scroll area must be declared globally. Same
    pattern as `.tenant-members-audit-drawer` in TenantMembers.vue. */
