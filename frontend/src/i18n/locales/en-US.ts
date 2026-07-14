@@ -4713,6 +4713,7 @@ export default {
     builtinModels: {
       title: 'Built-in Models',
       description: 'Built-in models are visible to all tenants. Sensitive information is hidden, and they cannot be edited or deleted.',
+      descriptionAdmin: 'Built-in models are visible to all tenants. System administrators can edit configuration and credentials; deletion remains deployment-managed.',
       viewGuide: 'View Built-in Models Guide',
     },
     builtinTag: 'Built-in',

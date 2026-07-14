@@ -41,8 +41,8 @@ export interface ModelConfig {
   is_default?: boolean;
   is_builtin?: boolean;
   status?: string;
-  // Per-field configured? metadata from the main response. Absent for
-  // builtin models.
+  // Per-field configured? metadata from the main response. For builtin
+  // models it is returned only to system administrators.
   credentials?: Record<ModelCredentialField, { configured: boolean }>;
   created_at?: string;
   updated_at?: string;

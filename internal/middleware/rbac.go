@@ -110,6 +110,26 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
+// RequireRoleOrSystemAdmin applies the tenant role floor while also allowing
+// platform system administrators. Use it for routes that normally mutate
+// tenant infrastructure but have a narrowly-scoped platform-owned resource
+// (for example built-in models) that system administrators must be able to
+// maintain independently of their role in the active tenant.
+//
+// API-key behavior remains identical to RequireRole: the APIKeyGate is the
+// source of truth for machine principals, so they short-circuit the role
+// check here as well.
+func RequireRoleOrSystemAdmin(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
+	requireRole := RequireRole(min, cfg)
+	return func(c *gin.Context) {
+		if types.IsSystemAdminFromContext(c.Request.Context()) {
+			c.Next()
+			return
+		}
+		requireRole(c)
+	}
+}
+
 // RequireSystemAdmin returns a gin middleware that aborts the request with
 // HTTP 403 unless the caller is a system administrator
 // (User.IsSystemAdmin = true).

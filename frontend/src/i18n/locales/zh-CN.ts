@@ -4725,6 +4725,7 @@ export default {
     builtinModels: {
       title: "内置模型",
       description: "内置模型对所有租户可见，敏感信息会被隐藏，且不可编辑或删除。",
+      descriptionAdmin: "内置模型对所有租户可见。系统管理员可编辑配置和凭据；删除仍由部署配置管理。",
       viewGuide: "查看内置模型管理指南",
     },
     builtinTag: "内置",

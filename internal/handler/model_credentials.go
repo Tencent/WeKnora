@@ -66,6 +66,10 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 			c.Error(errors.NewNotFoundError("Model not found"))
 			return
 		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model_id": secutils.SanitizeForLog(id)})
 		c.Error(errors.NewInternalServerError("failed to update credentials: " + err.Error()))
 		return
@@ -96,6 +100,10 @@ func (h *ModelCredentialsHandler) DeleteField(c *gin.Context) {
 	if err := h.svc.ClearModelCredential(ctx, id, field); err != nil {
 		if err == service.ErrModelNotFound {
 			c.Error(errors.NewNotFoundError("Model not found"))
+			return
+		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
 			return
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{

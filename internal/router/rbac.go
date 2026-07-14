@@ -204,6 +204,10 @@ func (g *rbacGuards) Admin() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleAdmin, g.cfg)
 }
 
+func (g *rbacGuards) AdminOrSystemAdmin() gin.HandlerFunc {
+	return middleware.RequireRoleOrSystemAdmin(types.TenantRoleAdmin, g.cfg)
+}
+
 func (g *rbacGuards) Owner() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleOwner, g.cfg)
 }

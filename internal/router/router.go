@@ -719,13 +719,13 @@ func RegisterModelRoutes(
 		models.POST("/:id/debug", g.Admin(), handler.DebugModel)
 		// 获取单个模型 — Viewer+
 		models.GET("/:id", g.Viewer(), handler.GetModel)
-		// 更新模型 — Admin+
-		models.PUT("/:id", g.Admin(), handler.UpdateModel)
+		// 更新模型 — Admin+；内置模型仍由服务层额外限定为 SystemAdmin。
+		models.PUT("/:id", g.AdminOrSystemAdmin(), handler.UpdateModel)
 		// 删除模型 — Admin+
 		models.DELETE("/:id", g.Admin(), handler.DeleteModel)
 		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+
-		models.PUT("/:id/credentials", g.Admin(), credHandler.Put)
-		models.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		models.PUT("/:id/credentials", g.AdminOrSystemAdmin(), credHandler.Put)
+		models.DELETE("/:id/credentials/:field", g.AdminOrSystemAdmin(), credHandler.DeleteField)
 	}
 }
 

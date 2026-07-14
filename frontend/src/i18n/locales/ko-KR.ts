@@ -4719,6 +4719,7 @@ export default {
     builtinModels: {
       title: "기본 제공 모델",
       description: "기본 제공 모델은 모든 테넌트에게 표시됩니다. 민감한 정보는 숨겨지며, 편집하거나 삭제할 수 없습니다.",
+      descriptionAdmin: "기본 제공 모델은 모든 테넌트에게 표시됩니다. 시스템 관리자는 구성과 자격 증명을 편집할 수 있으며, 삭제는 배포 구성에서 관리됩니다.",
       viewGuide: "기본 제공 모델 관리 가이드 보기",
     },
     builtinTag: "기본제공",
