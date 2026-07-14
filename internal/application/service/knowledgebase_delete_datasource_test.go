@@ -60,6 +60,15 @@ func (r *kbDeleteDSRepo) Update(_ context.Context, _ *types.DataSource) error { 
 func (r *kbDeleteDSRepo) UpdateSyncState(_ context.Context, _ *types.DataSource) error {
 	return nil
 }
+func (r *kbDeleteDSRepo) InvalidateCursorItem(
+	_ context.Context,
+	_ uint64,
+	_ string,
+	_ string,
+	_ string,
+) error {
+	return nil
+}
 func (r *kbDeleteDSRepo) Delete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
