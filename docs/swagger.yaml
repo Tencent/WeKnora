@@ -294,6 +294,10 @@ definitions:
     - system.admin_promoted
     - system.admin_revoked
     - system.user_password_reset
+    - system.queue_task_retried
+    - system.queue_task_deleted
+    - system.queue_task_run_now
+    - system.queue_task_cancelled
     type: string
     x-enum-varnames:
     - AuditActionMemberAdded
@@ -316,6 +320,10 @@ definitions:
     - AuditActionSystemAdminPromoted
     - AuditActionSystemAdminRevoked
     - AuditActionSystemUserPasswordReset
+    - AuditActionSystemQueueTaskRetried
+    - AuditActionSystemQueueTaskDeleted
+    - AuditActionSystemQueueTaskRunNow
+    - AuditActionSystemQueueTaskCancelled
   github_com_Tencent_WeKnora_internal_types.AuditLog:
     properties:
       action:
@@ -2739,6 +2747,91 @@ definitions:
         description: 'Optional: role to assign when approving; overrides applicant''s
           requested role'
     type: object
+  github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction:
+    enum:
+    - cancel
+    - run_now
+    - delete
+    type: string
+    x-enum-varnames:
+    - RuntimeTaskActionCancel
+    - RuntimeTaskActionRunNow
+    - RuntimeTaskActionDelete
+  github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo:
+    properties:
+      allowed_actions:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction'
+        type: array
+      completed_at:
+        type: string
+      data_source_id:
+        type: string
+      deadline:
+        type: string
+      enqueued_at:
+        type: string
+      id:
+        type: string
+      is_orphaned:
+        type: boolean
+      knowledge_base_id:
+        type: string
+      knowledge_count:
+        type: integer
+      knowledge_id:
+        type: string
+      last_error:
+        type: string
+      last_failed_at:
+        type: string
+      max_retry:
+        type: integer
+      next_process_at:
+        type: string
+      queue:
+        type: string
+      retried:
+        type: integer
+      source_id:
+        type: string
+      source_kb_id:
+        type: string
+      started_at:
+        type: string
+      state:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState'
+      sync_log_id:
+        type: string
+      target_id:
+        type: string
+      target_kb_id:
+        type: string
+      task_id:
+        type: string
+      tenant_id:
+        type: integer
+      type:
+        type: string
+      worker:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.RuntimeTaskState:
+    enum:
+    - pending
+    - active
+    - scheduled
+    - retry
+    - archived
+    - completed
+    type: string
+    x-enum-varnames:
+    - RuntimeTaskPending
+    - RuntimeTaskActive
+    - RuntimeTaskScheduled
+    - RuntimeTaskRetry
+    - RuntimeTaskArchived
+    - RuntimeTaskCompleted
   github_com_Tencent_WeKnora_internal_types.S3EngineConfig:
     properties:
       access_key:
@@ -4831,6 +4924,21 @@ definitions:
       wiki_concurrency:
         description: compatibility field
         type: integer
+    type: object
+  internal_handler.RuntimeTasksResponse:
+    properties:
+      available:
+        type: boolean
+      has_more:
+        type: boolean
+      page:
+        type: integer
+      page_size:
+        type: integer
+      tasks:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo'
+        type: array
     type: object
   internal_handler.RuntimeWorkerPool:
     description: Return every row in the system_settings table (system-scope, not
@@ -12614,6 +12722,80 @@ paths:
       summary: 获取解析任务队列运行时状态
       tags:
       - 系统管理
+  /system/admin/runtime/queues/{queue}/tasks:
+    get:
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue
+        required: true
+        type: string
+      - description: Task state
+        enum:
+        - pending
+        - active
+        - scheduled
+        - retry
+        - archived
+        - completed
+        in: query
+        name: state
+        required: true
+        type: string
+      - default: 1
+        description: Page
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Page size
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.RuntimeTasksResponse'
+      summary: List runtime queue tasks by state
+      tags:
+      - System Admin
+  /system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action}:
+    post:
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: Action
+        enum:
+        - cancel
+        - run_now
+        - delete
+        in: path
+        name: action
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      summary: Run a safe runtime task action
+      tags:
+      - System Admin
   /system/admin/settings/{key}:
     delete:
       description: |-

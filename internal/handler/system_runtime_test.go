@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
@@ -75,21 +76,79 @@ func (runtimeTestInspector) WorkerServerStats(context.Context) ([]types.WorkerSe
 	}, true, nil
 }
 
-type runtimeFailedTestInspector struct {
+type runtimeTaskTestInspector struct {
 	runtimeTestInspector
-	tasks        []types.FailedTaskInfo
-	retriedTask  string
-	deletedTask  string
-	mutatedQueue string
+	tasks           []types.RuntimeTaskInfo
+	retriedTask     string
+	deletedTask     string
+	forceDeleted    string
+	cancelKnowledge string
+	cancelDeleted   int
+	mutatedQueue    string
 }
 
-func (r *runtimeFailedTestInspector) ListFailedTasks(
-	context.Context, string, int, int,
-) ([]types.FailedTaskInfo, bool, error) {
+func (r *runtimeTaskTestInspector) CancelTasksForKnowledge(
+	_ context.Context, knowledgeID string,
+) (int, int, error) {
+	r.cancelKnowledge = knowledgeID
+	if r.cancelDeleted > 0 {
+		return r.cancelDeleted, 0, nil
+	}
+	return 0, 0, nil
+}
+
+type runtimeKnowledgeCancelTest struct {
+	tenantID    uint64
+	knowledgeID string
+	err         error
+}
+
+func (r *runtimeKnowledgeCancelTest) CancelKnowledgeParse(
+	ctx context.Context, knowledgeID string,
+) (*types.Knowledge, error) {
+	r.tenantID, _ = ctx.Value(types.TenantIDContextKey).(uint64)
+	r.knowledgeID = knowledgeID
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &types.Knowledge{ID: knowledgeID, TenantID: r.tenantID}, nil
+}
+
+func (r *runtimeTaskTestInspector) ListRuntimeTasks(
+	_ context.Context, _ string, state types.RuntimeTaskState, _, _ int,
+) ([]types.RuntimeTaskInfo, bool, error) {
+	for i := range r.tasks {
+		if r.tasks[i].State == "" {
+			r.tasks[i].State = state
+		}
+		if r.tasks[i].AllowedActions == nil && state == types.RuntimeTaskArchived {
+			r.tasks[i].AllowedActions = []types.RuntimeTaskAction{
+				types.RuntimeTaskActionRunNow,
+				types.RuntimeTaskActionDelete,
+			}
+		}
+	}
 	return r.tasks, true, nil
 }
 
-func (r *runtimeFailedTestInspector) RetryFailedTask(
+func (r *runtimeTaskTestInspector) GetRuntimeTask(
+	_ context.Context, queue, taskID string,
+) (*types.RuntimeTaskInfo, bool, error) {
+	for i := range r.tasks {
+		if r.tasks[i].ID == taskID {
+			return &r.tasks[i], true, nil
+		}
+	}
+	return &types.RuntimeTaskInfo{
+		ID: taskID, Queue: queue, State: types.RuntimeTaskArchived,
+		AllowedActions: []types.RuntimeTaskAction{
+			types.RuntimeTaskActionRunNow,
+			types.RuntimeTaskActionDelete,
+		},
+	}, true, nil
+}
+
+func (r *runtimeTaskTestInspector) RunRuntimeTask(
 	_ context.Context, queue, taskID string,
 ) (bool, error) {
 	r.mutatedQueue = queue
@@ -97,11 +156,19 @@ func (r *runtimeFailedTestInspector) RetryFailedTask(
 	return true, nil
 }
 
-func (r *runtimeFailedTestInspector) DeleteFailedTask(
+func (r *runtimeTaskTestInspector) DeleteRuntimeTask(
 	_ context.Context, queue, taskID string,
 ) (bool, error) {
 	r.mutatedQueue = queue
 	r.deletedTask = taskID
+	return true, nil
+}
+
+func (r *runtimeTaskTestInspector) ForceDeleteRuntimeTask(
+	_ context.Context, queue, taskID string,
+) (bool, error) {
+	r.mutatedQueue = queue
+	r.forceDeleted = taskID
 	return true, nil
 }
 
@@ -186,9 +253,9 @@ func TestGetRuntimeQueuesFallsBackFromInvalidHistoricalConcurrency(t *testing.T)
 	}
 }
 
-func TestListRuntimeFailedTasksReturnsSafeTaskDetails(t *testing.T) {
+func TestListRuntimeTasksReturnsSafeTaskDetails(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	inspector := &runtimeFailedTestInspector{tasks: []types.FailedTaskInfo{{
+	inspector := &runtimeTaskTestInspector{tasks: []types.RuntimeTaskInfo{{
 		ID:              "task-1",
 		Queue:           types.QueueDefault,
 		Type:            types.TypeDocumentProcess,
@@ -202,13 +269,13 @@ func TestListRuntimeFailedTasksReturnsSafeTaskDetails(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Params = gin.Params{{Key: "queue", Value: types.QueueDefault}}
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/runtime/queues/default/failed-tasks", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/system/admin/runtime/queues/default/tasks?state=archived", nil)
 
-	handler.ListRuntimeFailedTasks(ctx)
+	handler.ListRuntimeTasks(ctx)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
-	var response RuntimeFailedTasksResponse
+	var response RuntimeTasksResponse
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -220,9 +287,9 @@ func TestListRuntimeFailedTasksReturnsSafeTaskDetails(t *testing.T) {
 	}
 }
 
-func TestRuntimeFailedTaskMutationsDelegateToInspector(t *testing.T) {
+func TestRuntimeTaskMutationsDelegateToInspector(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	inspector := &runtimeFailedTestInspector{}
+	inspector := &runtimeTaskTestInspector{}
 	handler := &SystemHandler{taskInspector: inspector}
 
 	retryRecorder := httptest.NewRecorder()
@@ -230,9 +297,10 @@ func TestRuntimeFailedTaskMutationsDelegateToInspector(t *testing.T) {
 	retryCtx.Params = gin.Params{
 		{Key: "queue", Value: types.QueueDefault},
 		{Key: "task_id", Value: "task-1"},
+		{Key: "action", Value: string(types.RuntimeTaskActionRunNow)},
 	}
 	retryCtx.Request = httptest.NewRequest(http.MethodPost, "/retry", nil)
-	handler.RetryRuntimeFailedTask(retryCtx)
+	handler.MutateRuntimeTask(retryCtx)
 	if retryRecorder.Code != http.StatusOK || inspector.retriedTask != "task-1" {
 		t.Fatalf("retry failed: status=%d inspector=%+v", retryRecorder.Code, inspector)
 	}
@@ -242,24 +310,94 @@ func TestRuntimeFailedTaskMutationsDelegateToInspector(t *testing.T) {
 	deleteCtx.Params = gin.Params{
 		{Key: "queue", Value: types.QueueDefault},
 		{Key: "task_id", Value: "task-2"},
+		{Key: "action", Value: string(types.RuntimeTaskActionDelete)},
 	}
 	deleteCtx.Request = httptest.NewRequest(http.MethodDelete, "/task-2", nil)
-	handler.DeleteRuntimeFailedTask(deleteCtx)
+	handler.MutateRuntimeTask(deleteCtx)
 	if deleteRecorder.Code != http.StatusOK || inspector.deletedTask != "task-2" {
 		t.Fatalf("delete failed: status=%d inspector=%+v", deleteRecorder.Code, inspector)
 	}
 }
 
-func TestListRuntimeFailedTasksRejectsUnknownQueue(t *testing.T) {
+func TestListRuntimeTasksRejectsUnknownQueue(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	handler := &SystemHandler{taskInspector: &runtimeFailedTestInspector{}}
+	handler := &SystemHandler{taskInspector: &runtimeTaskTestInspector{}}
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Params = gin.Params{{Key: "queue", Value: "unknown"}}
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/failed-tasks", nil)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/tasks?state=archived", nil)
 
-	handler.ListRuntimeFailedTasks(ctx)
+	handler.ListRuntimeTasks(ctx)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestListRuntimeTasksRejectsUnknownState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &SystemHandler{taskInspector: &runtimeTaskTestInspector{}}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "queue", Value: types.QueueDefault}}
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/tasks?state=unknown", nil)
+
+	handler.ListRuntimeTasks(ctx)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestRuntimeTaskCancelUsesDomainCancellationWithTaskTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inspector := &runtimeTaskTestInspector{tasks: []types.RuntimeTaskInfo{{
+		ID: "task-cancel", Queue: types.QueueDefault, Type: types.TypeDocumentProcess,
+		State: types.RuntimeTaskActive, TenantID: 42, KnowledgeID: "knowledge-42",
+		AllowedActions: []types.RuntimeTaskAction{types.RuntimeTaskActionCancel},
+	}}}
+	canceller := &runtimeKnowledgeCancelTest{}
+	handler := &SystemHandler{taskInspector: inspector, knowledgeSvc: canceller}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{
+		{Key: "queue", Value: types.QueueDefault},
+		{Key: "task_id", Value: "task-cancel"},
+		{Key: "action", Value: string(types.RuntimeTaskActionCancel)},
+	}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/cancel", nil)
+
+	handler.MutateRuntimeTask(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if canceller.tenantID != 42 || canceller.knowledgeID != "knowledge-42" {
+		t.Fatalf("domain cancellation context mismatch: %+v", canceller)
+	}
+}
+
+func TestRuntimeTaskCancelPurgesOrphanWhenKnowledgeGone(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	inspector := &runtimeTaskTestInspector{tasks: []types.RuntimeTaskInfo{{
+		ID: "task-orphan", Queue: types.QueueMultimodal, Type: types.TypeImageMultimodal,
+		State: types.RuntimeTaskRetry, TenantID: 42, KnowledgeID: "knowledge-gone",
+		AllowedActions: []types.RuntimeTaskAction{types.RuntimeTaskActionCancel},
+	}}}
+	canceller := &runtimeKnowledgeCancelTest{err: repository.ErrKnowledgeNotFound}
+	handler := &SystemHandler{taskInspector: inspector, knowledgeSvc: canceller}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{
+		{Key: "queue", Value: types.QueueMultimodal},
+		{Key: "task_id", Value: "task-orphan"},
+		{Key: "action", Value: string(types.RuntimeTaskActionCancel)},
+	}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/cancel", nil)
+
+	handler.MutateRuntimeTask(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if inspector.forceDeleted != "task-orphan" {
+		t.Fatalf("expected force delete, got deleted=%q force=%q cancel=%q",
+			inspector.deletedTask, inspector.forceDeleted, inspector.cancelKnowledge)
 	}
 }

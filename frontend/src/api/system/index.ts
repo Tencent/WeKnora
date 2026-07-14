@@ -555,23 +555,42 @@ export interface RuntimeQueuesResponse {
   timestamp: number
 }
 
-export interface RuntimeFailedTask {
+export type RuntimeTaskState = 'pending' | 'active' | 'scheduled' | 'retry' | 'archived' | 'completed'
+export type RuntimeTaskAction = 'cancel' | 'run_now' | 'delete'
+
+export interface RuntimeTask {
   id: string
   queue: string
   type: string
-  last_error: string
-  last_failed_at: string
+  state: RuntimeTaskState
+  allowed_actions: RuntimeTaskAction[]
+  last_error?: string
+  last_failed_at?: string
+  next_process_at?: string
+  started_at?: string
+  completed_at?: string
+  deadline?: string
+  enqueued_at?: string
   retried: number
   max_retry: number
+  is_orphaned?: boolean
+  worker?: string
   tenant_id?: number
   knowledge_base_id?: string
   knowledge_id?: string
   task_id?: string
+  source_id?: string
+  target_id?: string
+  source_kb_id?: string
+  target_kb_id?: string
+  data_source_id?: string
+  sync_log_id?: string
+  knowledge_count?: number
 }
 
-export interface RuntimeFailedTasksResponse {
+export interface RuntimeTasksResponse {
   available: boolean
-  tasks: RuntimeFailedTask[]
+  tasks: RuntimeTask[]
   page: number
   page_size: number
   has_more: boolean
@@ -588,24 +607,23 @@ export async function getRuntimeQueues(): Promise<RuntimeQueuesResponse> {
   return response as unknown as RuntimeQueuesResponse
 }
 
-export async function getRuntimeFailedTasks(
+export async function getRuntimeTasks(
   queue: string,
+  state: RuntimeTaskState,
   page = 1,
   pageSize = 20,
-): Promise<RuntimeFailedTasksResponse> {
-  return get(`/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/failed-tasks`, {
-    params: { page, page_size: pageSize },
+): Promise<RuntimeTasksResponse> {
+  return get(`/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/tasks`, {
+    params: { state, page, page_size: pageSize },
   })
 }
 
-export async function retryRuntimeFailedTask(queue: string, taskID: string): Promise<void> {
+export async function mutateRuntimeTask(
+  queue: string,
+  taskID: string,
+  action: RuntimeTaskAction,
+): Promise<void> {
   await post(
-    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/failed-tasks/${encodeURIComponent(taskID)}/retry`,
-  )
-}
-
-export async function deleteRuntimeFailedTask(queue: string, taskID: string): Promise<void> {
-  await del(
-    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/failed-tasks/${encodeURIComponent(taskID)}`,
+    `/api/v1/system/admin/runtime/queues/${encodeURIComponent(queue)}/tasks/${encodeURIComponent(taskID)}/actions/${encodeURIComponent(action)}`,
   )
 }

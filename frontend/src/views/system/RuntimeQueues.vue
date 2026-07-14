@@ -171,18 +171,46 @@
               </div>
             </template>
             <template #active="{ row }">
-              <span class="rq-number" :class="{ 'rq-number--active': row.active > 0 }">{{ row.active }}</span>
+              <t-button
+                v-if="row.active > 0"
+                variant="text"
+                size="small"
+                class="rq-task-count rq-task-count--active"
+                @click="openRuntimeTasks(row, 'active')"
+              >
+                {{ row.active }}<t-icon name="chevron-right" />
+              </t-button>
+              <span v-else class="rq-number">0</span>
             </template>
             <template #pending="{ row }">
               <div class="rq-backlog">
-                <span class="rq-number" :class="{ 'rq-number--active': row.pending > 0 }">{{ row.pending }}</span>
-                <small v-if="row.scheduled > 0">
-                  +{{ row.scheduled }} {{ t('system.globalSettings.runtime.columns.scheduled') }}
-                </small>
+                <t-button
+                  v-if="row.pending > 0"
+                  variant="text"
+                  size="small"
+                  class="rq-task-count"
+                  @click="openRuntimeTasks(row, 'pending')"
+                >{{ row.pending }}<t-icon name="chevron-right" /></t-button>
+                <span v-else class="rq-number">0</span>
+                <t-button
+                  v-if="row.scheduled > 0"
+                  variant="text"
+                  size="small"
+                  class="rq-scheduled-count"
+                  @click="openRuntimeTasks(row, 'scheduled')"
+                >+{{ row.scheduled }} {{ t('system.globalSettings.runtime.columns.scheduled') }}</t-button>
               </div>
             </template>
             <template #retry="{ row }">
-              <span class="rq-number" :class="{ 'rq-number--warning': row.retry > 0 }">{{ row.retry }}</span>
+              <t-button
+                v-if="row.retry > 0"
+                variant="text"
+                theme="warning"
+                size="small"
+                class="rq-task-count"
+                @click="openRuntimeTasks(row, 'retry')"
+              >{{ row.retry }}<t-icon name="chevron-right" /></t-button>
+              <span v-else class="rq-number">0</span>
             </template>
             <template #archived="{ row }">
               <t-button
@@ -190,12 +218,22 @@
                 variant="text"
                 theme="danger"
                 size="small"
-                class="rq-failed-count"
-                :aria-label="t('system.globalSettings.runtime.failedTasks.openAria', { queue: queueLabel(row.name), count: row.archived })"
-                @click="openFailedTasks(row)"
+                class="rq-task-count rq-failed-count"
+                :aria-label="t('system.globalSettings.runtime.tasks.openAria', { state: taskStateLabel('archived'), queue: queueLabel(row.name), count: row.archived })"
+                @click="openRuntimeTasks(row, 'archived')"
               >
                 {{ row.archived }}<t-icon name="chevron-right" />
               </t-button>
+              <span v-else class="rq-number">0</span>
+            </template>
+            <template #completed="{ row }">
+              <t-button
+                v-if="row.completed > 0"
+                variant="text"
+                size="small"
+                class="rq-task-count rq-task-count--completed"
+                @click="openRuntimeTasks(row, 'completed')"
+              >{{ row.completed }}<t-icon name="chevron-right" /></t-button>
               <span v-else class="rq-number">0</span>
             </template>
             <template #latency_ms="{ row }">
@@ -254,109 +292,113 @@
     </template>
 
     <SettingDrawer
-      v-model:visible="failedTasksVisible"
+      v-model:visible="taskDrawerVisible"
       class="rq-failed-drawer"
-      :title="t('system.globalSettings.runtime.failedTasks.title', { queue: failedTaskQueueLabel })"
-      :description="t('system.globalSettings.runtime.failedTasks.description')"
-      icon="error-circle"
-      width="680px"
+      :title="t('system.globalSettings.runtime.tasks.title', { queue: taskQueueLabel })"
+      :description="t('system.globalSettings.runtime.tasks.description')"
+      icon="queue"
+      width="720px"
       :min-width="520"
-      :max-width="960"
-      storage-key="setting-drawer:width:runtime-failed-tasks"
+      :max-width="1040"
+      storage-key="setting-drawer:width:runtime-tasks"
       hide-footer
     >
       <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">
-          {{ t('system.globalSettings.runtime.failedTasks.guideTitle') }}
-        </h4>
-        <p class="rq-failed-guide-desc">
-          {{ t('system.globalSettings.runtime.failedTasks.guideDescription') }}
-        </p>
+        <div
+          class="rq-task-state-filter"
+          role="tablist"
+          :aria-label="t('system.globalSettings.runtime.tasks.stateFilter')"
+        >
+          <button
+            v-for="state in taskStates"
+            :key="state"
+            type="button"
+            role="tab"
+            class="rq-task-state-option"
+            :class="{ 'is-active': taskState === state }"
+            :aria-selected="taskState === state"
+            @click="selectTaskState(state)"
+          >
+            <span class="rq-task-state-option__label">{{ taskStateLabel(state) }}</span>
+            <span
+              class="rq-task-state-option__count"
+              :class="{ 'has-value': taskStateCount(taskQueue, state) > 0 }"
+            >
+              {{ taskStateCount(taskQueue, state) }}
+            </span>
+          </button>
+        </div>
+        <p class="rq-failed-guide-desc">{{ taskStateGuide }}</p>
       </section>
 
       <section class="setting-drawer__section">
         <div class="rq-failed-section-head">
           <h4 class="setting-drawer__section-title">
-            {{ t('system.globalSettings.runtime.failedTasks.listTitle') }}
+            {{ t('system.globalSettings.runtime.tasks.listTitle', { state: taskStateLabel(taskState) }) }}
           </h4>
           <t-button
             variant="text"
             size="small"
-            :loading="failedTasksLoading && !failedTasksLoadingMore"
-            @click="reloadFailedTasks"
+            :loading="tasksLoading && !tasksLoadingMore"
+            @click="reloadRuntimeTasks"
           >
             <template #icon><t-icon name="refresh" /></template>
             {{ t('system.globalSettings.runtime.refresh') }}
           </t-button>
         </div>
 
-        <div v-if="failedTasksLoading && failedTasks.length === 0" class="rq-failed-loading">
+        <div v-if="tasksLoading && tasks.length === 0" class="rq-failed-loading">
           <t-loading size="small" />
           <span>{{ t('system.globalSettings.runtime.loading') }}</span>
         </div>
-        <div v-else-if="failedTasksError" class="rq-failed-error-state">
-          <span>{{ failedTasksError }}</span>
-          <t-button size="small" variant="outline" @click="reloadFailedTasks">
+        <div v-else-if="tasksError" class="rq-failed-error-state">
+          <span>{{ tasksError }}</span>
+          <t-button size="small" variant="outline" @click="reloadRuntimeTasks">
             {{ t('system.globalSettings.runtime.retry') }}
           </t-button>
         </div>
         <t-empty
-          v-else-if="failedTasks.length === 0"
-          :description="t('system.globalSettings.runtime.failedTasks.empty')"
+          v-else-if="tasks.length === 0"
+          :description="t('system.globalSettings.runtime.tasks.empty', { state: taskStateLabel(taskState) })"
         />
         <div v-else class="rq-failed-list-panel">
           <article
-            v-for="task in failedTasks"
+            v-for="task in tasks"
             :key="task.id"
             class="rq-failed-row"
           >
             <div class="rq-failed-row-content">
               <div class="rq-failed-row-summary">
-                <span class="rq-failed-row-type">{{ failedTaskTypeLabel(task.type) }}</span>
+                <span class="rq-failed-row-type">{{ runtimeTaskTypeLabel(task.type) }}</span>
                 <span class="rq-failed-row-sep" aria-hidden="true">·</span>
-                <span class="rq-failed-row-stat">
-                  {{ t('system.globalSettings.runtime.failedTasks.attempts', { count: task.retried + 1 }) }}
+                <span class="rq-task-state-pill" :class="`rq-task-state-pill--${task.state}`">
+                  {{ taskStateLabel(task.state) }}
                 </span>
                 <span class="rq-failed-row-sep" aria-hidden="true">·</span>
-                <time :datetime="task.last_failed_at">{{ formatFailedAt(task.last_failed_at) }}</time>
+                <span class="rq-failed-row-stat">
+                  {{ t('system.globalSettings.runtime.tasks.attempts', { current: task.retried + 1, max: task.max_retry + 1 }) }}
+                </span>
               </div>
-              <dl v-if="failedTaskRefs(task).length > 0" class="rq-failed-row-refs">
-                <div v-for="ref in failedTaskRefs(task)" :key="ref.key" class="rq-failed-ref">
+              <dl v-if="runtimeTaskMeta(task).length > 0" class="rq-failed-row-refs">
+                <div v-for="ref in runtimeTaskMeta(task)" :key="ref.key" class="rq-failed-ref">
                   <dt>{{ ref.label }}</dt>
                   <dd :title="ref.value">{{ ref.value }}</dd>
                 </div>
               </dl>
               <p v-else class="rq-failed-row-unknown">
-                {{ t('system.globalSettings.runtime.failedTasks.unknownTarget') }}
+                {{ t('system.globalSettings.runtime.tasks.unknownTarget') }}
               </p>
-              <p class="rq-failed-row-error">
-                {{ task.last_error || t('system.globalSettings.runtime.failedTasks.noError') }}
+              <p v-if="task.last_error" class="rq-failed-row-error">
+                {{ task.last_error }}
               </p>
             </div>
 
-            <div class="rq-failed-row-actions">
+            <div v-if="task.allowed_actions.length > 0" class="rq-failed-row-actions">
               <t-popconfirm
-                theme="warning"
-                :content="t('system.globalSettings.runtime.failedTasks.retryConfirm')"
-                @confirm="retryFailedTask(task)"
-              >
-                <t-button
-                  shape="square"
-                  variant="text"
-                  size="small"
-                  class="rq-failed-icon-btn"
-                  :title="t('system.globalSettings.runtime.failedTasks.retryOnce')"
-                  :aria-label="t('system.globalSettings.runtime.failedTasks.retryOnce')"
-                  :loading="failedTaskActionID === task.id && failedTaskAction === 'retry'"
-                  :disabled="Boolean(failedTaskActionID)"
-                >
-                  <t-icon name="refresh" />
-                </t-button>
-              </t-popconfirm>
-              <t-popconfirm
+                v-if="task.allowed_actions.includes('cancel')"
                 theme="danger"
-                :content="t('system.globalSettings.runtime.failedTasks.deleteConfirm')"
-                @confirm="removeFailedTask(task)"
+                :content="t('system.globalSettings.runtime.tasks.cancelConfirm')"
+                @confirm="runTaskAction(task, 'cancel')"
               >
                 <t-button
                   shape="square"
@@ -364,10 +406,47 @@
                   size="small"
                   theme="danger"
                   class="rq-failed-icon-btn"
-                  :title="t('system.globalSettings.runtime.failedTasks.deleteRecord')"
-                  :aria-label="t('system.globalSettings.runtime.failedTasks.deleteRecord')"
-                  :loading="failedTaskActionID === task.id && failedTaskAction === 'delete'"
-                  :disabled="Boolean(failedTaskActionID)"
+                  :title="t('system.globalSettings.runtime.tasks.cancel')"
+                  :aria-label="t('system.globalSettings.runtime.tasks.cancel')"
+                  :loading="taskActionID === task.id && taskAction === 'cancel'"
+                  :disabled="Boolean(taskActionID)"
+                ><t-icon name="close-circle" /></t-button>
+              </t-popconfirm>
+              <t-popconfirm
+                v-if="task.allowed_actions.includes('run_now')"
+                theme="warning"
+                :content="t('system.globalSettings.runtime.tasks.runNowConfirm')"
+                @confirm="runTaskAction(task, 'run_now')"
+              >
+                <t-button
+                  shape="square"
+                  variant="text"
+                  size="small"
+                  class="rq-failed-icon-btn"
+                  :title="t('system.globalSettings.runtime.tasks.runNow')"
+                  :aria-label="t('system.globalSettings.runtime.tasks.runNow')"
+                  :loading="taskActionID === task.id && taskAction === 'run_now'"
+                  :disabled="Boolean(taskActionID)"
+                >
+                  <t-icon name="refresh" />
+                </t-button>
+              </t-popconfirm>
+              <t-popconfirm
+                v-if="task.allowed_actions.includes('delete')"
+                theme="danger"
+                :content="t('system.globalSettings.runtime.tasks.deleteConfirm')"
+                @confirm="runTaskAction(task, 'delete')"
+              >
+                <t-button
+                  shape="square"
+                  variant="text"
+                  size="small"
+                  theme="danger"
+                  class="rq-failed-icon-btn"
+                  :title="t('system.globalSettings.runtime.tasks.deleteRecord')"
+                  :aria-label="t('system.globalSettings.runtime.tasks.deleteRecord')"
+                  :loading="taskActionID === task.id && taskAction === 'delete'"
+                  :disabled="Boolean(taskActionID)"
                 >
                   <t-icon name="delete" />
                 </t-button>
@@ -375,28 +454,28 @@
             </div>
           </article>
 
-          <div ref="failedTasksSentinelRef" class="rq-failed-load-sentinel" aria-hidden="true" />
+          <div ref="tasksSentinelRef" class="rq-failed-load-sentinel" aria-hidden="true" />
 
           <div class="rq-failed-list-footer">
             <span class="rq-failed-list-status">
-              <template v-if="failedTasksLoadingMore">
-                {{ t('system.globalSettings.runtime.failedTasks.loadingMore') }}
+              <template v-if="tasksLoadingMore">
+                {{ t('system.globalSettings.runtime.tasks.loadingMore') }}
               </template>
-              <template v-else-if="!failedTasksHasMore">
-                {{ t('system.globalSettings.runtime.failedTasks.loadedAll', { count: failedTasks.length }) }}
+              <template v-else-if="!tasksHasMore">
+                {{ t('system.globalSettings.runtime.tasks.loadedAll', { count: tasks.length }) }}
               </template>
               <template v-else>
-                {{ t('system.globalSettings.runtime.failedTasks.loadedSummary', { count: failedTasks.length }) }}
+                {{ t('system.globalSettings.runtime.tasks.loadedSummary', { count: tasks.length }) }}
               </template>
             </span>
             <t-button
-              v-if="failedTasksHasMore"
+              v-if="tasksHasMore"
               variant="outline"
               block
-              :loading="failedTasksLoadingMore"
-              @click="loadMoreFailedTasks"
+              :loading="tasksLoadingMore"
+              @click="loadMoreRuntimeTasks"
             >
-              {{ t('system.globalSettings.runtime.failedTasks.loadMore') }}
+              {{ t('system.globalSettings.runtime.tasks.loadMore') }}
             </t-button>
           </div>
         </div>
@@ -411,13 +490,14 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import {
-  deleteRuntimeFailedTask,
-  getRuntimeFailedTasks,
+  getRuntimeTasks,
   getRuntimeQueues,
-  retryRuntimeFailedTask,
+  mutateRuntimeTask,
   type ModelRuntimeStat,
   type QueueStat,
-  type RuntimeFailedTask,
+  type RuntimeTask,
+  type RuntimeTaskAction,
+  type RuntimeTaskState,
   type RuntimeWorkerPool,
 } from '@/api/system'
 
@@ -435,20 +515,22 @@ const loadedOnce = ref(false)
 const error = ref('')
 const autoRefresh = ref(true)
 const updatedAt = ref('')
-const failedTasksVisible = ref(false)
-const failedTaskQueue = ref<QueueStat | null>(null)
-const failedTasks = ref<RuntimeFailedTask[]>([])
-const failedTasksLoading = ref(false)
-const failedTasksLoadingMore = ref(false)
-const failedTasksError = ref('')
-const failedTasksPage = ref(1)
-const failedTasksHasMore = ref(false)
-const failedTasksSentinelRef = ref<HTMLElement | null>(null)
-const failedTaskActionID = ref('')
-const failedTaskAction = ref<'retry' | 'delete' | ''>('')
+const taskDrawerVisible = ref(false)
+const taskQueue = ref<QueueStat | null>(null)
+const taskState = ref<RuntimeTaskState>('archived')
+const tasks = ref<RuntimeTask[]>([])
+const tasksLoading = ref(false)
+const tasksLoadingMore = ref(false)
+const tasksError = ref('')
+const tasksPage = ref(1)
+const tasksHasMore = ref(false)
+const tasksSentinelRef = ref<HTMLElement | null>(null)
+const taskActionID = ref('')
+const taskAction = ref<RuntimeTaskAction | ''>('')
 
-const FAILED_TASK_PAGE_SIZE = 20
-const failedTaskTypeKeys: Record<string, string> = {
+const TASK_PAGE_SIZE = 20
+const taskStates: RuntimeTaskState[] = ['active', 'pending', 'scheduled', 'retry', 'archived', 'completed']
+const runtimeTaskTypeKeys: Record<string, string> = {
   'document:process': 'documentProcess',
   'manual:process': 'manualProcess',
   'knowledge:post_process': 'postProcess',
@@ -470,7 +552,8 @@ const failedTaskTypeKeys: Record<string, string> = {
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
-let failedTasksScrollObserver: IntersectionObserver | null = null
+let tasksScrollObserver: IntersectionObserver | null = null
+let tasksRequestID = 0
 
 const columns = computed(() => [
   { colKey: 'name', title: t('system.globalSettings.runtime.columns.queue'), minWidth: 188 },
@@ -478,6 +561,7 @@ const columns = computed(() => [
   { colKey: 'pending', title: t('system.globalSettings.runtime.columns.pending'), width: 84, align: 'center' as const },
   { colKey: 'retry', title: t('system.globalSettings.runtime.columns.retry'), width: 68, align: 'center' as const },
   { colKey: 'archived', title: t('system.globalSettings.runtime.columns.archived'), width: 96, align: 'center' as const },
+  { colKey: 'completed', title: t('system.globalSettings.runtime.columns.completed'), width: 84, align: 'center' as const },
   { colKey: 'latency_ms', title: t('system.globalSettings.runtime.columns.latency'), width: 104, align: 'center' as const },
   { colKey: 'status', title: t('system.globalSettings.runtime.columns.status'), width: 96 },
 ])
@@ -504,7 +588,8 @@ const totalActive = computed(() => queues.value.reduce((s, q) => s + q.active, 0
 const totalPending = computed(() => queues.value.reduce((s, q) => s + q.pending, 0))
 const totalRetry = computed(() => queues.value.reduce((s, q) => s + q.retry, 0))
 const totalArchived = computed(() => queues.value.reduce((s, q) => s + q.archived, 0))
-const failedTaskQueueLabel = computed(() => failedTaskQueue.value ? queueLabel(failedTaskQueue.value.name) : '')
+const taskQueueLabel = computed(() => taskQueue.value ? queueLabel(taskQueue.value.name) : '')
+const taskStateGuide = computed(() => t(`system.globalSettings.runtime.tasks.guides.${taskState.value}`))
 
 // Friendly per-queue label lives in i18n; falls back to the raw queue
 // name so a queue added on the backend still renders before translations
@@ -527,53 +612,30 @@ function queueMeta(row: QueueStat): string {
   return scope
 }
 
-function failedTaskTypeLabel(type: string): string {
-  const key = failedTaskTypeKeys[type]
+function runtimeTaskTypeLabel(type: string): string {
+  const key = runtimeTaskTypeKeys[type]
   if (!key) return type
-  const path = `system.globalSettings.runtime.failedTasks.taskTypes.${key}`
+  const path = `system.globalSettings.runtime.tasks.taskTypes.${key}`
   return te(path) ? (t(path) as string) : type
 }
 
-interface FailedTaskRef {
+interface RuntimeTaskMeta {
   key: string
   label: string
   value: string
 }
 
-function failedTaskRefs(task: RuntimeFailedTask): FailedTaskRef[] {
-  const refs: FailedTaskRef[] = []
-  if (task.knowledge_base_id) {
-    refs.push({
-      key: 'kb',
-      label: t('system.globalSettings.runtime.failedTasks.knowledgeBaseLabel'),
-      value: task.knowledge_base_id,
-    })
-  }
-  if (task.knowledge_id) {
-    refs.push({
-      key: 'knowledge',
-      label: t('system.globalSettings.runtime.failedTasks.knowledgeLabel'),
-      value: task.knowledge_id,
-    })
-  }
-  if (task.task_id) {
-    refs.push({
-      key: 'task',
-      label: t('system.globalSettings.runtime.failedTasks.taskIDLabel'),
-      value: task.task_id,
-    })
-  }
-  if (refs.length === 0 && task.tenant_id) {
-    refs.push({
-      key: 'tenant',
-      label: t('system.globalSettings.runtime.failedTasks.tenantLabel'),
-      value: String(task.tenant_id),
-    })
-  }
-  return refs
+function taskStateLabel(state: RuntimeTaskState): string {
+  return t(`system.globalSettings.runtime.tasks.states.${state}`)
 }
 
-function formatFailedAt(value: string): string {
+function taskStateCount(row: QueueStat | null, state: RuntimeTaskState): number {
+  if (!row) return 0
+  return row[state] ?? 0
+}
+
+function formatTaskTime(value?: string): string {
+  if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
   return date.toLocaleString(locale.value, {
@@ -585,6 +647,56 @@ function formatFailedAt(value: string): string {
     second: '2-digit',
     hour12: false,
   })
+}
+
+function runtimeTaskMeta(task: RuntimeTask): RuntimeTaskMeta[] {
+  const refs: RuntimeTaskMeta[] = []
+  if (task.knowledge_base_id) {
+    refs.push({
+      key: 'kb',
+      label: t('system.globalSettings.runtime.tasks.knowledgeBaseLabel'),
+      value: task.knowledge_base_id,
+    })
+  }
+  if (task.knowledge_id) {
+    refs.push({
+      key: 'knowledge',
+      label: t('system.globalSettings.runtime.tasks.knowledgeLabel'),
+      value: task.knowledge_id,
+    })
+  }
+  if (task.task_id) {
+    refs.push({
+      key: 'task',
+      label: t('system.globalSettings.runtime.tasks.taskIDLabel'),
+      value: task.task_id,
+    })
+  }
+  if (task.source_id) refs.push({ key: 'source', label: t('system.globalSettings.runtime.tasks.sourceLabel'), value: task.source_id })
+  if (task.target_id) refs.push({ key: 'target', label: t('system.globalSettings.runtime.tasks.targetLabel'), value: task.target_id })
+  if (task.source_kb_id) refs.push({ key: 'source-kb', label: t('system.globalSettings.runtime.tasks.sourceKBLabel'), value: task.source_kb_id })
+  if (task.target_kb_id) refs.push({ key: 'target-kb', label: t('system.globalSettings.runtime.tasks.targetKBLabel'), value: task.target_kb_id })
+  if (task.data_source_id) refs.push({ key: 'datasource', label: t('system.globalSettings.runtime.tasks.dataSourceLabel'), value: task.data_source_id })
+  if (task.sync_log_id) refs.push({ key: 'sync-log', label: t('system.globalSettings.runtime.tasks.syncLogLabel'), value: task.sync_log_id })
+  if (task.knowledge_count) {
+    refs.push({ key: 'knowledge-count', label: t('system.globalSettings.runtime.tasks.knowledgeCountLabel'), value: String(task.knowledge_count) })
+  }
+  if (task.tenant_id) {
+    refs.push({
+      key: 'tenant',
+      label: t('system.globalSettings.runtime.tasks.tenantLabel'),
+      value: String(task.tenant_id),
+    })
+  }
+  if (task.enqueued_at) refs.push({ key: 'enqueued', label: t('system.globalSettings.runtime.tasks.enqueuedAt'), value: formatTaskTime(task.enqueued_at) })
+  if (task.started_at) refs.push({ key: 'started', label: t('system.globalSettings.runtime.tasks.startedAt'), value: formatTaskTime(task.started_at) })
+  if (task.next_process_at) refs.push({ key: 'next', label: t('system.globalSettings.runtime.tasks.nextProcessAt'), value: formatTaskTime(task.next_process_at) })
+  if (task.last_failed_at) refs.push({ key: 'failed', label: t('system.globalSettings.runtime.tasks.lastFailedAt'), value: formatTaskTime(task.last_failed_at) })
+  if (task.completed_at) refs.push({ key: 'completed', label: t('system.globalSettings.runtime.tasks.completedAt'), value: formatTaskTime(task.completed_at) })
+  if (task.deadline) refs.push({ key: 'deadline', label: t('system.globalSettings.runtime.tasks.deadline'), value: formatTaskTime(task.deadline) })
+  if (task.worker) refs.push({ key: 'worker', label: t('system.globalSettings.runtime.tasks.worker'), value: task.worker })
+  if (task.is_orphaned) refs.push({ key: 'orphaned', label: t('system.globalSettings.runtime.tasks.health'), value: t('system.globalSettings.runtime.tasks.orphaned') })
+  return refs
 }
 
 function poolLabel(pool: string): string {
@@ -634,110 +746,106 @@ function queueState(row: QueueStat): { label: string; tone: string } {
   return { label: t('system.globalSettings.runtime.status.idle'), tone: 'idle' }
 }
 
-async function fetchFailedTasks(reset: boolean) {
-  const queue = failedTaskQueue.value?.name
+async function fetchRuntimeTasks(reset: boolean) {
+  const queue = taskQueue.value?.name
   if (!queue) return
-  if (!reset && (failedTasksLoadingMore.value || !failedTasksHasMore.value)) return
+  if (!reset && (tasksLoadingMore.value || !tasksHasMore.value)) return
 
-  const page = reset ? 1 : failedTasksPage.value + 1
+  const requestedState = taskState.value
+  const requestID = ++tasksRequestID
+  const page = reset ? 1 : tasksPage.value + 1
   if (reset) {
-    failedTasksPage.value = 1
-    failedTasks.value = []
-    failedTasksLoading.value = true
+    tasksPage.value = 1
+    tasks.value = []
+    tasksLoading.value = true
   } else {
-    failedTasksLoadingMore.value = true
+    tasksLoadingMore.value = true
   }
-  failedTasksError.value = ''
+  tasksError.value = ''
   try {
-    const response = await getRuntimeFailedTasks(queue, page, FAILED_TASK_PAGE_SIZE)
+    const response = await getRuntimeTasks(queue, requestedState, page, TASK_PAGE_SIZE)
+    if (requestID !== tasksRequestID || taskQueue.value?.name !== queue || taskState.value !== requestedState) return
     if (!response.available) {
-      failedTasksError.value = t('system.globalSettings.runtime.failedTasks.unavailable')
+      tasksError.value = t('system.globalSettings.runtime.tasks.unavailable')
       return
     }
-    failedTasks.value = reset ? response.tasks : [...failedTasks.value, ...response.tasks]
-    failedTasksPage.value = page
-    failedTasksHasMore.value = response.has_more
+    tasks.value = reset ? response.tasks : [...tasks.value, ...response.tasks]
+    tasksPage.value = page
+    tasksHasMore.value = response.has_more
   } catch (err: any) {
-    failedTasksError.value = err?.message || t('system.globalSettings.runtime.failedTasks.loadError')
+    if (requestID !== tasksRequestID) return
+    tasksError.value = err?.message || t('system.globalSettings.runtime.tasks.loadError')
   } finally {
+    if (requestID !== tasksRequestID) return
     if (reset) {
-      failedTasksLoading.value = false
+      tasksLoading.value = false
     } else {
-      failedTasksLoadingMore.value = false
+      tasksLoadingMore.value = false
     }
     await nextTick()
-    attachFailedTasksScrollObserver()
+    attachTasksScrollObserver()
   }
 }
 
-function detachFailedTasksScrollObserver() {
-  failedTasksScrollObserver?.disconnect()
-  failedTasksScrollObserver = null
+function detachTasksScrollObserver() {
+  tasksScrollObserver?.disconnect()
+  tasksScrollObserver = null
 }
 
-function attachFailedTasksScrollObserver() {
-  detachFailedTasksScrollObserver()
-  const sentinel = failedTasksSentinelRef.value
-  if (!sentinel || !failedTasksVisible.value || !failedTasksHasMore.value) return
+function attachTasksScrollObserver() {
+  detachTasksScrollObserver()
+  const sentinel = tasksSentinelRef.value
+  if (!sentinel || !taskDrawerVisible.value || !tasksHasMore.value) return
   const root = sentinel.closest('.t-drawer__body') as HTMLElement | null
   if (!root) return
-  failedTasksScrollObserver = new IntersectionObserver(
+  tasksScrollObserver = new IntersectionObserver(
     (entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
-        void loadMoreFailedTasks()
+        void loadMoreRuntimeTasks()
       }
     },
     { root, rootMargin: '96px 0px', threshold: 0 },
   )
-  failedTasksScrollObserver.observe(sentinel)
+  tasksScrollObserver.observe(sentinel)
 }
 
-function openFailedTasks(row: QueueStat) {
-  failedTaskQueue.value = row
-  failedTasksVisible.value = true
-  fetchFailedTasks(true)
+function openRuntimeTasks(row: QueueStat, state: RuntimeTaskState) {
+  taskQueue.value = row
+  taskState.value = state
+  taskDrawerVisible.value = true
+  void fetchRuntimeTasks(true)
 }
 
-function reloadFailedTasks() {
-  return fetchFailedTasks(true)
+function selectTaskState(state: RuntimeTaskState) {
+  if (taskState.value === state) return
+  taskState.value = state
+  void fetchRuntimeTasks(true)
 }
 
-function loadMoreFailedTasks() {
-  if (failedTasksLoading.value || failedTasksLoadingMore.value || !failedTasksHasMore.value) return
-  return fetchFailedTasks(false)
+function reloadRuntimeTasks() {
+  return fetchRuntimeTasks(true)
 }
 
-async function retryFailedTask(task: RuntimeFailedTask) {
-  const queue = failedTaskQueue.value?.name
+function loadMoreRuntimeTasks() {
+  if (tasksLoading.value || tasksLoadingMore.value || !tasksHasMore.value) return
+  return fetchRuntimeTasks(false)
+}
+
+async function runTaskAction(task: RuntimeTask, action: RuntimeTaskAction) {
+  const queue = taskQueue.value?.name
   if (!queue) return
-  failedTaskActionID.value = task.id
-  failedTaskAction.value = 'retry'
+  taskActionID.value = task.id
+  taskAction.value = action
   try {
-    await retryRuntimeFailedTask(queue, task.id)
-    MessagePlugin.success(t('system.globalSettings.runtime.failedTasks.retrySuccess'))
-    await Promise.all([reloadFailedTasks(), load(false)])
+    await mutateRuntimeTask(queue, task.id, action)
+    MessagePlugin.success(t(`system.globalSettings.runtime.tasks.actionSuccess.${action}`))
+    await Promise.all([reloadRuntimeTasks(), load(false)])
+    taskQueue.value = queues.value.find((item) => item.name === queue) ?? taskQueue.value
   } catch (err: any) {
-    MessagePlugin.error(err?.message || t('system.globalSettings.runtime.failedTasks.retryError'))
+    MessagePlugin.error(err?.message || t(`system.globalSettings.runtime.tasks.actionError.${action}`))
   } finally {
-    failedTaskActionID.value = ''
-    failedTaskAction.value = ''
-  }
-}
-
-async function removeFailedTask(task: RuntimeFailedTask) {
-  const queue = failedTaskQueue.value?.name
-  if (!queue) return
-  failedTaskActionID.value = task.id
-  failedTaskAction.value = 'delete'
-  try {
-    await deleteRuntimeFailedTask(queue, task.id)
-    MessagePlugin.success(t('system.globalSettings.runtime.failedTasks.deleteSuccess'))
-    await Promise.all([reloadFailedTasks(), load(false)])
-  } catch (err: any) {
-    MessagePlugin.error(err?.message || t('system.globalSettings.runtime.failedTasks.deleteError'))
-  } finally {
-    failedTaskActionID.value = ''
-    failedTaskAction.value = ''
+    taskActionID.value = ''
+    taskAction.value = ''
   }
 }
 
@@ -748,6 +856,9 @@ async function load(showSpinner: boolean) {
     available.value = resp.available
     pools.value = resp.pools || []
     queues.value = resp.queues || []
+    if (taskQueue.value) {
+      taskQueue.value = queues.value.find((item) => item.name === taskQueue.value?.name) ?? taskQueue.value
+    }
     models.value = resp.models || []
     modelLimiterAvailable.value = Boolean(resp.model_limiter_available)
     updatedAt.value = new Date((resp.timestamp || Date.now() / 1000) * 1000)
@@ -786,19 +897,19 @@ watch(autoRefresh, (on) => {
   else stopPolling()
 })
 
-watch(failedTasksVisible, async (open) => {
+watch(taskDrawerVisible, async (open) => {
   if (!open) {
-    detachFailedTasksScrollObserver()
+    detachTasksScrollObserver()
     return
   }
   await nextTick()
-  attachFailedTasksScrollObserver()
+  attachTasksScrollObserver()
 }, { flush: 'post' })
 
-watch(failedTasksHasMore, async () => {
-  if (!failedTasksVisible.value) return
+watch(tasksHasMore, async () => {
+  if (!taskDrawerVisible.value) return
   await nextTick()
-  attachFailedTasksScrollObserver()
+  attachTasksScrollObserver()
 })
 
 onMounted(() => {
@@ -808,7 +919,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPolling()
-  detachFailedTasksScrollObserver()
+  detachTasksScrollObserver()
 })
 </script>
 
@@ -1220,6 +1331,81 @@ onUnmounted(() => {
   line-height: 1.6;
 }
 
+.rq-task-state-filter {
+  display: flex;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.rq-task-state-option {
+  position: relative;
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+
+  &:hover:not(.is-active) {
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: -2px;
+  }
+
+  &.is-active {
+    color: var(--td-brand-color);
+    font-weight: 600;
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: -1px;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: var(--td-brand-color);
+    }
+  }
+}
+
+.rq-task-state-option__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rq-task-state-option__count {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+
+  &.has-value {
+    color: var(--td-text-color-secondary);
+  }
+
+  .rq-task-state-option.is-active & {
+    color: var(--td-brand-color);
+    font-weight: 600;
+  }
+}
+
 .rq-failed-section-head {
   display: flex;
   align-items: center;
@@ -1317,7 +1503,7 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.rq-failed-count {
+.rq-task-count {
   min-width: 0;
   height: 28px;
   padding: 0 2px;
@@ -1329,6 +1515,22 @@ onUnmounted(() => {
     align-items: center;
     gap: 2px;
   }
+}
+
+.rq-task-count--active {
+  color: var(--td-brand-color);
+}
+
+.rq-task-count--completed {
+  color: var(--td-success-color);
+}
+
+.rq-scheduled-count {
+  min-width: 0;
+  height: 18px;
+  padding: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
 }
 
 .rq-backlog {
@@ -1412,7 +1614,7 @@ onUnmounted(() => {
     text-align: center;
   }
 
-  &:deep(td.t-align-center .rq-failed-count) {
+  &:deep(td.t-align-center .rq-task-count) {
     margin-inline: auto;
   }
 
@@ -1470,6 +1672,35 @@ onUnmounted(() => {
   color: var(--td-text-color-primary);
   font-size: 13px;
   font-weight: 600;
+}
+
+.rq-task-state-pill {
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  &--active {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  &--retry,
+  &--scheduled {
+    color: var(--td-warning-color);
+    background: var(--td-warning-color-1);
+  }
+
+  &--archived {
+    color: var(--td-error-color);
+    background: var(--td-error-color-1);
+  }
+
+  &--completed {
+    color: var(--td-success-color);
+    background: var(--td-success-color-1);
+  }
 }
 
 .rq-failed-row-sep {
@@ -1602,6 +1833,21 @@ onUnmounted(() => {
 }
 
 @media (max-width: 620px) {
+  .rq-task-state-filter {
+    overflow-x: auto;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .rq-task-state-option {
+    flex: 0 0 auto;
+    min-width: 72px;
+    padding: 10px 10px;
+  }
+
   .rq-loading-metrics {
     grid-template-columns: 1fr;
   }

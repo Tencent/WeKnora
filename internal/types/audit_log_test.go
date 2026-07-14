@@ -40,6 +40,8 @@ func TestAuditAction_DotNamespaceConvention(t *testing.T) {
 		AuditActionSystemUserPasswordReset,
 		AuditActionSystemQueueTaskRetried,
 		AuditActionSystemQueueTaskDeleted,
+		AuditActionSystemQueueTaskRunNow,
+		AuditActionSystemQueueTaskCancelled,
 	}
 	for _, a := range all {
 		s := string(a)
@@ -124,6 +126,8 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 	register("AuditActionSystemUserPasswordReset", AuditActionSystemUserPasswordReset)
 	register("AuditActionSystemQueueTaskRetried", AuditActionSystemQueueTaskRetried)
 	register("AuditActionSystemQueueTaskDeleted", AuditActionSystemQueueTaskDeleted)
+	register("AuditActionSystemQueueTaskRunNow", AuditActionSystemQueueTaskRunNow)
+	register("AuditActionSystemQueueTaskCancelled", AuditActionSystemQueueTaskCancelled)
 }
 
 // TestAuditAction_SystemNamespacePrefix pins the system.* actions
@@ -140,6 +144,8 @@ func TestAuditAction_SystemNamespacePrefix(t *testing.T) {
 		AuditActionSystemUserPasswordReset,
 		AuditActionSystemQueueTaskRetried,
 		AuditActionSystemQueueTaskDeleted,
+		AuditActionSystemQueueTaskRunNow,
+		AuditActionSystemQueueTaskCancelled,
 	}
 	for _, a := range cases {
 		assert.True(t,
@@ -164,6 +170,8 @@ func TestAuditAction_SystemWireValues(t *testing.T) {
 		{AuditActionSystemUserPasswordReset, "system.user_password_reset"},
 		{AuditActionSystemQueueTaskRetried, "system.queue_task_retried"},
 		{AuditActionSystemQueueTaskDeleted, "system.queue_task_deleted"},
+		{AuditActionSystemQueueTaskRunNow, "system.queue_task_run_now"},
+		{AuditActionSystemQueueTaskCancelled, "system.queue_task_cancelled"},
 	}
 	for _, c := range cases {
 		assert.Equal(t, c.wire, string(c.constant))

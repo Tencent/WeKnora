@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -46,12 +47,21 @@ type knowledgeIDProbe struct {
 	KnowledgeID string `json:"knowledge_id,omitempty"`
 }
 
-type failedTaskPayloadProbe struct {
-	TenantID        uint64 `json:"tenant_id,omitempty"`
-	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
-	KBID            string `json:"kb_id,omitempty"`
-	KnowledgeID     string `json:"knowledge_id,omitempty"`
-	TaskID          string `json:"task_id,omitempty"`
+type runtimeTaskPayloadProbe struct {
+	TenantID        uint64   `json:"tenant_id,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
+	KBID            string   `json:"kb_id,omitempty"`
+	KnowledgeID     string   `json:"knowledge_id,omitempty"`
+	TaskID          string   `json:"task_id,omitempty"`
+	SourceID        string   `json:"source_id,omitempty"`
+	TargetID        string   `json:"target_id,omitempty"`
+	SourceKBID      string   `json:"source_kb_id,omitempty"`
+	TargetKBID      string   `json:"target_kb_id,omitempty"`
+	DataSourceID    string   `json:"data_source_id,omitempty"`
+	SyncLogID       string   `json:"sync_log_id,omitempty"`
+	KnowledgeIDs    []string `json:"knowledge_ids,omitempty"`
+	EnqueuedAt      int64    `json:"enqueued_at,omitempty"`
+	CreatedAt       int64    `json:"created_at,omitempty"`
 }
 
 // queuesScanned is the fixed set of queue names this codebase enqueues
@@ -192,16 +202,164 @@ func (a *asynqTaskInspector) QueueStats(
 	return stats, true, nil
 }
 
-// ListFailedTasks returns archived tasks newest-first. Only routing metadata is
-// projected from the payload so the SystemAdmin dashboard never exposes raw
-// document content or connector secrets.
-func (a *asynqTaskInspector) ListFailedTasks(
+type runtimeWorkerMetadata struct {
+	started time.Time
+	worker  string
+}
+
+func runtimeTaskState(state asynq.TaskState) (types.RuntimeTaskState, error) {
+	switch state {
+	case asynq.TaskStatePending:
+		return types.RuntimeTaskPending, nil
+	case asynq.TaskStateActive:
+		return types.RuntimeTaskActive, nil
+	case asynq.TaskStateScheduled:
+		return types.RuntimeTaskScheduled, nil
+	case asynq.TaskStateRetry:
+		return types.RuntimeTaskRetry, nil
+	case asynq.TaskStateArchived:
+		return types.RuntimeTaskArchived, nil
+	case asynq.TaskStateCompleted:
+		return types.RuntimeTaskCompleted, nil
+	default:
+		return "", fmt.Errorf("unsupported runtime task state %v", state)
+	}
+}
+
+func runtimeTaskTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	copy := value
+	return &copy
+}
+
+func runtimePayloadTime(value int64) *time.Time {
+	if value <= 0 {
+		return nil
+	}
+	// Payload timestamps in this repository are seconds today. Accept the
+	// common higher-precision Unix forms as well for connector-originated jobs.
+	var parsed time.Time
+	if value > 100_000_000_000_000_000 {
+		parsed = time.Unix(0, value)
+	} else if value > 100_000_000_000_000 {
+		parsed = time.UnixMicro(value)
+	} else if value > 10_000_000_000 {
+		parsed = time.UnixMilli(value)
+	} else {
+		parsed = time.Unix(value, 0)
+	}
+	return &parsed
+}
+
+func runtimeTaskActions(info types.RuntimeTaskInfo) []types.RuntimeTaskAction {
+	actions := make([]types.RuntimeTaskAction, 0, 3)
+	if _, cancellable := taskTypesForKnowledgeCancel[info.Type]; cancellable &&
+		info.TenantID > 0 && info.KnowledgeID != "" {
+		switch info.State {
+		case types.RuntimeTaskPending, types.RuntimeTaskActive,
+			types.RuntimeTaskScheduled, types.RuntimeTaskRetry:
+			actions = append(actions, types.RuntimeTaskActionCancel)
+		}
+	}
+	switch info.State {
+	case types.RuntimeTaskScheduled, types.RuntimeTaskRetry:
+		actions = append(actions, types.RuntimeTaskActionRunNow)
+	case types.RuntimeTaskArchived:
+		actions = append(actions, types.RuntimeTaskActionRunNow, types.RuntimeTaskActionDelete)
+	}
+	return actions
+}
+
+func projectRuntimeTask(task *asynq.TaskInfo, worker runtimeWorkerMetadata) (types.RuntimeTaskInfo, error) {
+	state, err := runtimeTaskState(task.State)
+	if err != nil {
+		return types.RuntimeTaskInfo{}, err
+	}
+	probe := runtimeTaskPayloadProbe{}
+	_ = json.Unmarshal(task.Payload, &probe)
+	kbID := probe.KnowledgeBaseID
+	if kbID == "" {
+		kbID = probe.KBID
+	}
+	enqueuedAt := probe.EnqueuedAt
+	if enqueuedAt == 0 {
+		enqueuedAt = probe.CreatedAt
+	}
+	info := types.RuntimeTaskInfo{
+		ID:              task.ID,
+		Queue:           task.Queue,
+		Type:            task.Type,
+		State:           state,
+		LastError:       task.LastErr,
+		LastFailedAt:    runtimeTaskTime(task.LastFailedAt),
+		NextProcessAt:   runtimeTaskTime(task.NextProcessAt),
+		StartedAt:       runtimeTaskTime(worker.started),
+		CompletedAt:     runtimeTaskTime(task.CompletedAt),
+		Deadline:        runtimeTaskTime(task.Deadline),
+		EnqueuedAt:      runtimePayloadTime(enqueuedAt),
+		Retried:         task.Retried,
+		MaxRetry:        task.MaxRetry,
+		IsOrphaned:      task.IsOrphaned,
+		Worker:          worker.worker,
+		TenantID:        probe.TenantID,
+		KnowledgeBaseID: kbID,
+		KnowledgeID:     probe.KnowledgeID,
+		TaskID:          probe.TaskID,
+		SourceID:        probe.SourceID,
+		TargetID:        probe.TargetID,
+		SourceKBID:      probe.SourceKBID,
+		TargetKBID:      probe.TargetKBID,
+		DataSourceID:    probe.DataSourceID,
+		SyncLogID:       probe.SyncLogID,
+		KnowledgeCount:  len(probe.KnowledgeIDs),
+	}
+	info.AllowedActions = runtimeTaskActions(info)
+	return info, nil
+}
+
+func (a *asynqTaskInspector) activeWorkerMetadata() map[string]runtimeWorkerMetadata {
+	result := make(map[string]runtimeWorkerMetadata)
+	servers, err := a.inspector.Servers()
+	if err != nil {
+		return result
+	}
+	for _, server := range servers {
+		if server == nil {
+			continue
+		}
+		workerName := server.Host
+		if server.PID > 0 {
+			workerName = fmt.Sprintf("%s:%d", server.Host, server.PID)
+		}
+		for _, worker := range server.ActiveWorkers {
+			if worker == nil {
+				continue
+			}
+			result[worker.Queue+"\x00"+worker.TaskID] = runtimeWorkerMetadata{
+				started: worker.Started,
+				worker:  workerName,
+			}
+		}
+	}
+	return result
+}
+
+// ListRuntimeTasks returns one task state page. Only allow-listed routing
+// metadata is projected from the payload so the dashboard never exposes raw
+// document content, signed URLs, or connector secrets.
+func (a *asynqTaskInspector) ListRuntimeTasks(
 	ctx context.Context,
 	queue string,
+	state types.RuntimeTaskState,
 	page, pageSize int,
-) ([]types.FailedTaskInfo, bool, error) {
+) ([]types.RuntimeTaskInfo, bool, error) {
 	if a == nil || a.inspector == nil {
 		return nil, false, nil
+	}
+	if !state.Valid() {
+		return nil, true, fmt.Errorf("unsupported runtime task state %q", state)
 	}
 	if page < 1 {
 		page = 1
@@ -212,79 +370,104 @@ func (a *asynqTaskInspector) ListFailedTasks(
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	tasks, err := a.inspector.ListArchivedTasks(queue, asynq.Page(page), asynq.PageSize(pageSize))
+	opts := []asynq.ListOption{asynq.Page(page), asynq.PageSize(pageSize)}
+	var tasks []*asynq.TaskInfo
+	var err error
+	switch state {
+	case types.RuntimeTaskPending:
+		tasks, err = a.inspector.ListPendingTasks(queue, opts...)
+	case types.RuntimeTaskActive:
+		tasks, err = a.inspector.ListActiveTasks(queue, opts...)
+	case types.RuntimeTaskScheduled:
+		tasks, err = a.inspector.ListScheduledTasks(queue, opts...)
+	case types.RuntimeTaskRetry:
+		tasks, err = a.inspector.ListRetryTasks(queue, opts...)
+	case types.RuntimeTaskArchived:
+		tasks, err = a.inspector.ListArchivedTasks(queue, opts...)
+	case types.RuntimeTaskCompleted:
+		tasks, err = a.inspector.ListCompletedTasks(queue, opts...)
+	}
 	if errors.Is(err, asynq.ErrQueueNotFound) {
-		return []types.FailedTaskInfo{}, true, nil
+		return []types.RuntimeTaskInfo{}, true, nil
 	}
 	if err != nil {
 		return nil, true, err
 	}
-	result := make([]types.FailedTaskInfo, 0, len(tasks))
+	workers := map[string]runtimeWorkerMetadata{}
+	if state == types.RuntimeTaskActive {
+		workers = a.activeWorkerMetadata()
+	}
+	result := make([]types.RuntimeTaskInfo, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
 			continue
 		}
-		probe := failedTaskPayloadProbe{}
-		_ = json.Unmarshal(task.Payload, &probe)
-		kbID := probe.KnowledgeBaseID
-		if kbID == "" {
-			kbID = probe.KBID
+		info, projectErr := projectRuntimeTask(task, workers[task.Queue+"\x00"+task.ID])
+		if projectErr != nil {
+			logger.Warnf(ctx, "[TaskInspector] project runtime task queue=%s id=%s: %v", queue, task.ID, projectErr)
+			continue
 		}
-		result = append(result, types.FailedTaskInfo{
-			ID:              task.ID,
-			Queue:           task.Queue,
-			Type:            task.Type,
-			LastError:       task.LastErr,
-			LastFailedAt:    task.LastFailedAt,
-			Retried:         task.Retried,
-			MaxRetry:        task.MaxRetry,
-			TenantID:        probe.TenantID,
-			KnowledgeBaseID: kbID,
-			KnowledgeID:     probe.KnowledgeID,
-			TaskID:          probe.TaskID,
-		})
+		result = append(result, info)
 	}
 	return result, true, nil
 }
 
-// RetryFailedTask schedules one archived task for one immediate manual run.
-// Asynq deliberately preserves the retry counter, so a repeated failure is
-// archived again instead of silently starting a fresh automatic retry cycle.
-func (a *asynqTaskInspector) RetryFailedTask(
-	ctx context.Context,
-	queue, taskID string,
-) (bool, error) {
+func (a *asynqTaskInspector) GetRuntimeTask(
+	ctx context.Context, queue, taskID string,
+) (*types.RuntimeTaskInfo, bool, error) {
+	if a == nil || a.inspector == nil {
+		return nil, false, nil
+	}
+	task, err := a.inspector.GetTaskInfo(queue, taskID)
+	if err != nil {
+		return nil, true, err
+	}
+	workers := map[string]runtimeWorkerMetadata{}
+	if task.State == asynq.TaskStateActive {
+		workers = a.activeWorkerMetadata()
+	}
+	info, err := projectRuntimeTask(task, workers[task.Queue+"\x00"+task.ID])
+	if err != nil {
+		return nil, true, err
+	}
+	return &info, true, nil
+}
+
+// RunRuntimeTask moves a scheduled, retry, or archived task to pending. Asynq
+// deliberately preserves the retry counter.
+func (a *asynqTaskInspector) RunRuntimeTask(ctx context.Context, queue, taskID string) (bool, error) {
 	if a == nil || a.inspector == nil {
 		return false, nil
 	}
-	if err := a.ensureTaskArchived(queue, taskID); err != nil {
+	task, _, err := a.GetRuntimeTask(ctx, queue, taskID)
+	if err != nil {
 		return true, err
+	}
+	if task == nil || !task.Allows(types.RuntimeTaskActionRunNow) {
+		return true, fmt.Errorf("task %s in queue %s cannot run now", taskID, queue)
 	}
 	return true, a.inspector.RunTask(queue, taskID)
 }
 
-func (a *asynqTaskInspector) DeleteFailedTask(
-	ctx context.Context,
-	queue, taskID string,
-) (bool, error) {
+func (a *asynqTaskInspector) DeleteRuntimeTask(ctx context.Context, queue, taskID string) (bool, error) {
 	if a == nil || a.inspector == nil {
 		return false, nil
 	}
-	if err := a.ensureTaskArchived(queue, taskID); err != nil {
+	task, _, err := a.GetRuntimeTask(ctx, queue, taskID)
+	if err != nil {
 		return true, err
+	}
+	if task == nil || !task.Allows(types.RuntimeTaskActionDelete) {
+		return true, fmt.Errorf("task %s in queue %s cannot be deleted", taskID, queue)
 	}
 	return true, a.inspector.DeleteTask(queue, taskID)
 }
 
-func (a *asynqTaskInspector) ensureTaskArchived(queue, taskID string) error {
-	task, err := a.inspector.GetTaskInfo(queue, taskID)
-	if err != nil {
-		return err
+func (a *asynqTaskInspector) ForceDeleteRuntimeTask(ctx context.Context, queue, taskID string) (bool, error) {
+	if a == nil || a.inspector == nil {
+		return false, nil
 	}
-	if task.State != asynq.TaskStateArchived {
-		return fmt.Errorf("task %s in queue %s is no longer archived", taskID, queue)
-	}
-	return nil
+	return true, a.inspector.DeleteTask(queue, taskID)
 }
 
 func (a *asynqTaskInspector) WorkerServerStats(

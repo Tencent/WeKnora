@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	modellimiter "github.com/Tencent/WeKnora/internal/models/limiter"
@@ -31,6 +32,10 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
+
+type runtimeKnowledgeCanceller interface {
+	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+}
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
@@ -49,6 +54,10 @@ type SystemHandler struct {
 	// Lite mode), so GetRuntimeQueues can distinguish "no queues in this
 	// deployment" from "queues are empty".
 	taskInspector interfaces.TaskInspector
+	// knowledgeSvc supplies the domain-level cancellation path used by the
+	// runtime task console. It updates business state and tracing before queue
+	// records are removed, unlike a raw Redis deletion.
+	knowledgeSvc runtimeKnowledgeCanceller
 }
 
 // NewSystemHandler creates a new system handler
@@ -60,6 +69,7 @@ func NewSystemHandler(cfg *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
 	auditSvc interfaces.AuditLogService,
 	taskInspector interfaces.TaskInspector,
+	knowledgeSvc interfaces.KnowledgeService,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:              cfg,
@@ -70,6 +80,7 @@ func NewSystemHandler(cfg *config.Config,
 		systemSettingSvc: systemSettingSvc,
 		auditSvc:         auditSvc,
 		taskInspector:    taskInspector,
+		knowledgeSvc:     knowledgeSvc,
 	}
 }
 
@@ -1593,15 +1604,12 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// RuntimeFailedTasksResponse is a page of tasks that exhausted automatic
-// retries. Available=false is used by Lite mode, where there is no durable
-// queue backend to inspect or mutate.
-type RuntimeFailedTasksResponse struct {
-	Available bool                   `json:"available"`
-	Tasks     []types.FailedTaskInfo `json:"tasks"`
-	Page      int                    `json:"page"`
-	PageSize  int                    `json:"page_size"`
-	HasMore   bool                   `json:"has_more"`
+type RuntimeTasksResponse struct {
+	Available bool                    `json:"available"`
+	Tasks     []types.RuntimeTaskInfo `json:"tasks"`
+	Page      int                     `json:"page"`
+	PageSize  int                     `json:"page_size"`
+	HasMore   bool                    `json:"has_more"`
 }
 
 func isKnownRuntimeQueue(name string) bool {
@@ -1613,7 +1621,7 @@ func isKnownRuntimeQueue(name string) bool {
 	return false
 }
 
-func runtimeFailedTaskPage(c *gin.Context) (int, int) {
+func runtimeTaskPage(c *gin.Context) (int, int) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	if page < 1 {
@@ -1628,40 +1636,37 @@ func runtimeFailedTaskPage(c *gin.Context) (int, int) {
 	return page, pageSize
 }
 
-// ListRuntimeFailedTasks godoc
-// @Summary      List tasks that stopped after exhausting automatic retries
-// @Tags         System Admin
-// @Produce      json
-// @Param        queue path string true "Queue name"
-// @Success      200 {object} RuntimeFailedTasksResponse
-// @Router       /system/admin/runtime/queues/{queue}/failed-tasks [get]
-func (h *SystemHandler) ListRuntimeFailedTasks(c *gin.Context) {
+func (h *SystemHandler) listRuntimeTasks(c *gin.Context, state types.RuntimeTaskState) {
 	queue := c.Param("queue")
 	if !isKnownRuntimeQueue(queue) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task queue"})
 		return
 	}
-	page, pageSize := runtimeFailedTaskPage(c)
-	inspector, ok := h.taskInspector.(interfaces.FailedTaskInspector)
+	if !state.Valid() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task state"})
+		return
+	}
+	page, pageSize := runtimeTaskPage(c)
+	inspector, ok := h.taskInspector.(interfaces.RuntimeTaskInspector)
 	if !ok {
-		c.JSON(http.StatusOK, RuntimeFailedTasksResponse{
+		c.JSON(http.StatusOK, RuntimeTasksResponse{
 			Available: false,
-			Tasks:     []types.FailedTaskInfo{},
+			Tasks:     []types.RuntimeTaskInfo{},
 			Page:      page,
 			PageSize:  pageSize,
 		})
 		return
 	}
-	tasks, supported, err := inspector.ListFailedTasks(c.Request.Context(), queue, page, pageSize)
+	tasks, supported, err := inspector.ListRuntimeTasks(c.Request.Context(), queue, state, page, pageSize)
 	if err != nil {
-		logger.Errorf(c.Request.Context(), "list failed queue tasks queue=%s: %v", queue, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list stopped tasks"})
+		logger.Errorf(c.Request.Context(), "list runtime queue tasks queue=%s state=%s: %v", queue, state, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list queue tasks"})
 		return
 	}
 	if tasks == nil {
-		tasks = []types.FailedTaskInfo{}
+		tasks = []types.RuntimeTaskInfo{}
 	}
-	c.JSON(http.StatusOK, RuntimeFailedTasksResponse{
+	c.JSON(http.StatusOK, RuntimeTasksResponse{
 		Available: supported,
 		Tasks:     tasks,
 		Page:      page,
@@ -1670,29 +1675,55 @@ func (h *SystemHandler) ListRuntimeFailedTasks(c *gin.Context) {
 	})
 }
 
+// ListRuntimeTasks returns one live task-state page for the unified operator
+// drawer. Raw task payloads are never included.
+// @Summary      List runtime queue tasks by state
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Param        state query string true "Task state" Enums(pending,active,scheduled,retry,archived,completed)
+// @Param        page query int false "Page" default(1)
+// @Param        page_size query int false "Page size" default(20)
+// @Success      200 {object} RuntimeTasksResponse
+// @Router       /system/admin/runtime/queues/{queue}/tasks [get]
+func (h *SystemHandler) ListRuntimeTasks(c *gin.Context) {
+	h.listRuntimeTasks(c, types.RuntimeTaskState(c.Query("state")))
+}
+
 func (h *SystemHandler) emitQueueTaskAudit(
 	ctx context.Context,
 	action types.AuditAction,
 	queue, taskID string,
+	extra map[string]string,
 ) {
 	if h.auditSvc == nil {
 		return
 	}
 	actorID, _ := types.UserIDFromContext(ctx)
-	details, _ := json.Marshal(map[string]string{"queue": queue, "task_id": taskID})
+	detailMap := map[string]string{"queue": queue, "task_id": taskID}
+	for key, value := range extra {
+		detailMap[key] = value
+	}
+	details, _ := json.Marshal(detailMap)
+	targetType := "queue_task"
+	targetID := taskID
+	if targetID == "" {
+		targetType = "task_queue"
+		targetID = queue
+	}
 	_ = h.auditSvc.Log(ctx, &types.AuditLog{
 		TenantID:    0,
 		ActorUserID: actorID,
 		ActorRole:   "system_admin",
 		Action:      action,
-		TargetType:  "queue_task",
-		TargetID:    taskID,
+		TargetType:  targetType,
+		TargetID:    targetID,
 		Outcome:     types.AuditOutcomeSuccess,
 		Details:     types.JSON(details),
 	})
 }
 
-func runtimeFailedTaskParams(c *gin.Context) (string, string, bool) {
+func runtimeTaskParams(c *gin.Context) (string, string, bool) {
 	queue := c.Param("queue")
 	taskID := c.Param("task_id")
 	if !isKnownRuntimeQueue(queue) || taskID == "" {
@@ -1702,56 +1733,137 @@ func runtimeFailedTaskParams(c *gin.Context) (string, string, bool) {
 	return queue, taskID, true
 }
 
-// RetryRuntimeFailedTask schedules one stopped task for one immediate manual
-// run. It does not reset the automatic retry counter.
-func (h *SystemHandler) RetryRuntimeFailedTask(c *gin.Context) {
-	queue, taskID, ok := runtimeFailedTaskParams(c)
+func (h *SystemHandler) mutateRuntimeTask(c *gin.Context, action types.RuntimeTaskAction) {
+	queue, taskID, ok := runtimeTaskParams(c)
 	if !ok {
 		return
 	}
-	inspector, supported := h.taskInspector.(interfaces.FailedTaskInspector)
+	inspector, supported := h.taskInspector.(interfaces.RuntimeTaskInspector)
 	if !supported {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
 		return
 	}
-	available, err := inspector.RetryFailedTask(c.Request.Context(), queue, taskID)
+	task, available, err := inspector.GetRuntimeTask(c.Request.Context(), queue, taskID)
 	if !available {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
 		return
 	}
-	if err != nil {
-		logger.Errorf(c.Request.Context(), "retry failed queue task queue=%s task=%s: %v", queue, taskID, err)
-		c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available for retry"})
+	if err != nil || task == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available"})
 		return
 	}
-	h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueTaskRetried, queue, taskID)
+	if !task.Allows(action) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Action is not allowed for the current task state"})
+		return
+	}
+
+	var auditAction types.AuditAction
+	auditDetails := map[string]string{
+		"task_type":  task.Type,
+		"from_state": string(task.State),
+		"action":     string(action),
+	}
+	switch action {
+	case types.RuntimeTaskActionCancel:
+		if h.knowledgeSvc == nil || task.TenantID == 0 || task.KnowledgeID == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Business cancellation is unavailable"})
+			return
+		}
+		cancelCtx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, task.TenantID)
+		if _, err = h.knowledgeSvc.CancelKnowledgeParse(cancelCtx, task.KnowledgeID); err != nil {
+			if isKnowledgeGone(err) {
+				if h.purgeOrphanRuntimeTask(c.Request.Context(), inspector, queue, taskID, task.KnowledgeID) {
+					logger.Warnf(c.Request.Context(),
+						"cancel runtime queue task queue=%s task=%s: knowledge gone, purged queue record",
+						queue, taskID)
+					auditDetails["orphan_purge"] = "true"
+					auditAction = types.AuditActionSystemQueueTaskCancelled
+					break
+				}
+			}
+			logger.Errorf(c.Request.Context(), "cancel runtime queue task queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task can no longer be cancelled"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskCancelled
+	case types.RuntimeTaskActionRunNow:
+		available, err = inspector.RunRuntimeTask(c.Request.Context(), queue, taskID)
+		if !available {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+			return
+		}
+		if err != nil {
+			logger.Errorf(c.Request.Context(), "run queue task now queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available to run"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskRunNow
+	case types.RuntimeTaskActionDelete:
+		available, err = inspector.DeleteRuntimeTask(c.Request.Context(), queue, taskID)
+		if !available {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
+			return
+		}
+		if err != nil {
+			logger.Errorf(c.Request.Context(), "delete queue task queue=%s task=%s: %v", queue, taskID, err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available for deletion"})
+			return
+		}
+		auditAction = types.AuditActionSystemQueueTaskDeleted
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown task action"})
+		return
+	}
+	h.emitQueueTaskAudit(c.Request.Context(), auditAction, queue, taskID, auditDetails)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// DeleteRuntimeFailedTask removes one stopped task from the queue archive. It
-// does not rerun the task or change its related business object.
-func (h *SystemHandler) DeleteRuntimeFailedTask(c *gin.Context) {
-	queue, taskID, ok := runtimeFailedTaskParams(c)
-	if !ok {
-		return
+func isKnowledgeGone(err error) bool {
+	if errors.Is(err, repository.ErrKnowledgeNotFound) {
+		return true
 	}
-	inspector, supported := h.taskInspector.(interfaces.FailedTaskInspector)
-	if !supported {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
-		return
+	var appErr *apperrors.AppError
+	return errors.As(err, &appErr) && appErr.Code == apperrors.ErrNotFound
+}
+
+// purgeOrphanRuntimeTask removes queue records for a task whose knowledge row
+// is already gone. Best-effort: CancelTasksForKnowledge sweeps every queue
+// state; ForceDeleteRuntimeTask is the fallback for the specific task ID.
+func (h *SystemHandler) purgeOrphanRuntimeTask(
+	ctx context.Context,
+	inspector interfaces.RuntimeTaskInspector,
+	queue, taskID, knowledgeID string,
+) bool {
+	if h.taskInspector != nil && knowledgeID != "" {
+		deleted, _, err := h.taskInspector.CancelTasksForKnowledge(ctx, knowledgeID)
+		if err != nil {
+			logger.Warnf(ctx, "purge orphan tasks for knowledge %s: %v", knowledgeID, err)
+		} else if deleted > 0 {
+			return true
+		}
 	}
-	available, err := inspector.DeleteFailedTask(c.Request.Context(), queue, taskID)
-	if !available {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Task queue is unavailable"})
-		return
+	supported, err := inspector.ForceDeleteRuntimeTask(ctx, queue, taskID)
+	if !supported || err != nil {
+		if err != nil {
+			logger.Warnf(ctx, "force delete orphan task queue=%s task=%s: %v", queue, taskID, err)
+		}
+		return false
 	}
-	if err != nil {
-		logger.Errorf(c.Request.Context(), "delete failed queue task queue=%s task=%s: %v", queue, taskID, err)
-		c.JSON(http.StatusConflict, gin.H{"error": "Task is no longer available for deletion"})
-		return
-	}
-	h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueTaskDeleted, queue, taskID)
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	return true
+}
+
+// MutateRuntimeTask executes a backend-advertised action after re-reading the
+// current task state to close click/race windows.
+// @Summary      Run a safe runtime task action
+// @Tags         System Admin
+// @Produce      json
+// @Param        queue path string true "Queue name"
+// @Param        task_id path string true "Task ID"
+// @Param        action path string true "Action" Enums(cancel,run_now,delete)
+// @Success      200 {object} map[string]bool
+// @Router       /system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action} [post]
+func (h *SystemHandler) MutateRuntimeTask(c *gin.Context) {
+	h.mutateRuntimeTask(c, types.RuntimeTaskAction(c.Param("action")))
 }
 
 func (h *SystemHandler) ListSystemSettings(c *gin.Context) {

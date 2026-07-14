@@ -899,14 +899,12 @@ func RegisterSystemAdminRoutes(
 		adminRoutes.PUT("/settings/:key", handler.UpdateSystemSetting)
 		adminRoutes.DELETE("/settings/:key", handler.ResetSystemSetting)
 
-		// Runtime observability: live asynq queue depths + worker pool
-		// concurrency for the parse/wiki pools. Read-only snapshot for the
-		// SystemAdmin runtime dashboard. Returns available=false in Lite
-		// mode (no Redis) so the UI degrades gracefully.
+		// Runtime operations: live asynq queue depths, safe task projections,
+		// and state-checked task actions for the SystemAdmin dashboard. Lite
+		// mode returns available=false.
 		adminRoutes.GET("/runtime/queues", handler.GetRuntimeQueues)
-		adminRoutes.GET("/runtime/queues/:queue/failed-tasks", handler.ListRuntimeFailedTasks)
-		adminRoutes.POST("/runtime/queues/:queue/failed-tasks/:task_id/retry", handler.RetryRuntimeFailedTask)
-		adminRoutes.DELETE("/runtime/queues/:queue/failed-tasks/:task_id", handler.DeleteRuntimeFailedTask)
+		adminRoutes.GET("/runtime/queues/:queue/tasks", handler.ListRuntimeTasks)
+		adminRoutes.POST("/runtime/queues/:queue/tasks/:task_id/actions/:action", handler.MutateRuntimeTask)
 
 		// Bulk action — write the current default-quota setting onto
 		// every existing tenant. Lives under /tenants instead of

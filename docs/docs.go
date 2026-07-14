@@ -11316,6 +11316,113 @@ const docTemplate = `{
                 }
             }
         },
+        "/system/admin/runtime/queues/{queue}/tasks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "List runtime queue tasks by state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Queue name",
+                        "name": "queue",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "pending",
+                            "active",
+                            "scheduled",
+                            "retry",
+                            "archived",
+                            "completed"
+                        ],
+                        "type": "string",
+                        "description": "Task state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.RuntimeTasksResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action}": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Run a safe runtime task action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Queue name",
+                        "name": "queue",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "cancel",
+                            "run_now",
+                            "delete"
+                        ],
+                        "type": "string",
+                        "description": "Action",
+                        "name": "action",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/system/admin/settings/{key}": {
             "get": {
                 "description": "Returns the row matching :key. 404 when the key is unknown\nto the registry; 200 with the row when known.",
@@ -14170,7 +14277,11 @@ const docTemplate = `{
                 "system.setting_changed",
                 "system.admin_promoted",
                 "system.admin_revoked",
-                "system.user_password_reset"
+                "system.user_password_reset",
+                "system.queue_task_retried",
+                "system.queue_task_deleted",
+                "system.queue_task_run_now",
+                "system.queue_task_cancelled"
             ],
             "x-enum-varnames": [
                 "AuditActionMemberAdded",
@@ -14192,7 +14303,11 @@ const docTemplate = `{
                 "AuditActionSystemSettingChanged",
                 "AuditActionSystemAdminPromoted",
                 "AuditActionSystemAdminRevoked",
-                "AuditActionSystemUserPasswordReset"
+                "AuditActionSystemUserPasswordReset",
+                "AuditActionSystemQueueTaskRetried",
+                "AuditActionSystemQueueTaskDeleted",
+                "AuditActionSystemQueueTaskRunNow",
+                "AuditActionSystemQueueTaskCancelled"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.AuditLog": {
@@ -17324,6 +17439,127 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction": {
+            "type": "string",
+            "enum": [
+                "cancel",
+                "run_now",
+                "delete"
+            ],
+            "x-enum-varnames": [
+                "RuntimeTaskActionCancel",
+                "RuntimeTaskActionRunNow",
+                "RuntimeTaskActionDelete"
+            ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo": {
+            "type": "object",
+            "properties": {
+                "allowed_actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction"
+                    }
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "data_source_id": {
+                    "type": "string"
+                },
+                "deadline": {
+                    "type": "string"
+                },
+                "enqueued_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_orphaned": {
+                    "type": "boolean"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_count": {
+                    "type": "integer"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "last_failed_at": {
+                    "type": "string"
+                },
+                "max_retry": {
+                    "type": "integer"
+                },
+                "next_process_at": {
+                    "type": "string"
+                },
+                "queue": {
+                    "type": "string"
+                },
+                "retried": {
+                    "type": "integer"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "source_kb_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState"
+                },
+                "sync_log_id": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_kb_id": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "worker": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskState": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "active",
+                "scheduled",
+                "retry",
+                "archived",
+                "completed"
+            ],
+            "x-enum-varnames": [
+                "RuntimeTaskPending",
+                "RuntimeTaskActive",
+                "RuntimeTaskScheduled",
+                "RuntimeTaskRetry",
+                "RuntimeTaskArchived",
+                "RuntimeTaskCompleted"
+            ]
+        },
         "github_com_Tencent_WeKnora_internal_types.S3EngineConfig": {
             "type": "object",
             "properties": {
@@ -20137,6 +20373,29 @@ const docTemplate = `{
                 "wiki_concurrency": {
                     "description": "compatibility field",
                     "type": "integer"
+                }
+            }
+        },
+        "internal_handler.RuntimeTasksResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo"
+                    }
                 }
             }
         },

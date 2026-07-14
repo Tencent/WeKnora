@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -138,16 +140,18 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
-	// Short-circuit when the parent knowledge has been cancelled by the user
-	// or marked for deletion. Skip the VLM call entirely so we don't burn
-	// model quota on already-aborted work.
-	if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID); kerr == nil && k != nil {
-		switch k.ParseStatus {
-		case types.ParseStatusCancelled, types.ParseStatusDeleting:
-			logger.Infof(ctx, "[ImageMultimodal] Knowledge %s aborted (%s), skipping image %s",
-				payload.KnowledgeID, k.ParseStatus, payload.ImageURL)
-			return nil
-		}
+	// Drop orphaned or user-aborted work before touching VLM. Missing
+	// knowledge/KB rows are permanent failures — retrying only burns queue
+	// capacity (asynq default MaxRetry=25 on legacy tasks).
+	drop, dropErr := s.shouldDropOrphanedMultimodal(ctx, &payload)
+	if dropErr != nil {
+		return dropErr
+	}
+	if drop {
+		logger.Infof(ctx,
+			"[ImageMultimodal] Dropping task chunk=%s knowledge=%s kb=%s image=%s",
+			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, payload.ImageURL)
+		return nil
 	}
 
 	// Open a per-image subspan under the parent attempt's multimodal
@@ -348,6 +352,41 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// all images are processed before triggering summary/question generation.
 	// Deferred finalize handles the parent knowledge counter.
 	return nil
+}
+
+// shouldDropOrphanedMultimodal reports whether the task should exit without
+// retrying. True for user-cancelled/deleting knowledge, or when the parent
+// knowledge / knowledge-base row no longer exists (deleted while queue entries
+// survived).
+func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
+	ctx context.Context, payload *types.ImageMultimodalPayload,
+) (bool, error) {
+	if payload.KnowledgeID != "" && s.knowledgeRepo != nil {
+		k, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
+		if errors.Is(err, repository.ErrKnowledgeNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		switch k.ParseStatus {
+		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+			return true, nil
+		}
+	}
+	if payload.KnowledgeBaseID != "" && s.kbService != nil {
+		kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+		if errors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if kb == nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // isFinalAsynqAttempt reports whether the current task context belongs to the

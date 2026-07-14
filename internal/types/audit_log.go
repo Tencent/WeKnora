@@ -125,8 +125,10 @@ const (
 	// Runtime queue mutations are privileged SystemAdmin actions. Retrying an
 	// archived task can repeat its original side effects; deleting one removes
 	// the Redis failure record. Both must leave a platform audit trail.
-	AuditActionSystemQueueTaskRetried AuditAction = "system.queue_task_retried"
-	AuditActionSystemQueueTaskDeleted AuditAction = "system.queue_task_deleted"
+	AuditActionSystemQueueTaskRetried   AuditAction = "system.queue_task_retried"
+	AuditActionSystemQueueTaskDeleted   AuditAction = "system.queue_task_deleted"
+	AuditActionSystemQueueTaskRunNow    AuditAction = "system.queue_task_run_now"
+	AuditActionSystemQueueTaskCancelled AuditAction = "system.queue_task_cancelled"
 )
 
 // AuditOutcome distinguishes successful mutations from middleware-level
