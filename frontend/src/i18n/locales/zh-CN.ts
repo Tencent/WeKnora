@@ -886,6 +886,8 @@ export default {
       MULTIMODAL_ALL_FAILED_SUGGESTION: "请检查多模态模型配置。",
       TASK_TIMEOUT: "任务超过最大运行时间",
       TASK_TIMEOUT_SUGGESTION: "任务运行时间超出限制，请重试或联系支持人员。",
+      SERVER_RESTART: "服务重启导致任务中断",
+      SERVER_RESTART_SUGGESTION: "Redis 模式会由任务队列继续重试；Lite 模式中可恢复的 Wiki 任务会自动续跑。若仍失败，请点击重试。",
       UPSTREAM_FAILED: "上游阶段失败已中止",
       UPSTREAM_FAILED_SUGGESTION: "前置阶段失败，导致本步骤无法执行。",
       UNKNOWN: "未知错误",

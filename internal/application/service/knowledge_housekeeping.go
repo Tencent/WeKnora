@@ -112,7 +112,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	threshold := h.staleThreshold()
 	cutoff := time.Now().Add(-threshold)
 
-	// Sweep A: knowledge stuck in "processing".
+	// Sweep A: knowledge stuck in "pending", "processing", or "finalizing".
 	//
 	// Two-stage check is critical here: knowledge.updated_at advances
 	// only at parse_status transitions, but a long stage (DocReader on
@@ -127,7 +127,9 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// Knowledge rows with no spans at all (lite mode, in-flight tasks
 	// from before this code shipped) fall back to the simple
 	// updated_at check — they have no heartbeat to consult.
-	// Include 'finalizing' alongside 'processing': finalizing rows still
+	// Include 'pending' so a task whose enqueue was lost is eventually
+	// recovered too; filterOutQueued below protects legitimately backlogged
+	// tasks. Include 'finalizing' alongside 'processing': finalizing rows still
 	// consume LLM compute via enrichment subtasks (summary/question/graph),
 	// and the same stall modes (subtask worker dies, retry budget exhausted
 	// without decrementing the counter) leave the row hanging just as
@@ -136,7 +138,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	var candidates []types.Knowledge
 	if err := h.db.WithContext(ctx).
 		Where("parse_status IN ? AND updated_at < ?",
-			[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}, cutoff).
+			[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}, cutoff).
 		Find(&candidates).Error; err != nil {
 		logger.Warnf(ctx, "[Housekeeping] knowledge candidate query failed: %v", err)
 		return
@@ -162,7 +164,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		}
 		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
 			Where("id IN ? AND parse_status IN ?", stuckIDs,
-				[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}).
+				[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}).
 			Updates(map[string]interface{}{
 				"parse_status":           types.ParseStatusFailed,
 				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",

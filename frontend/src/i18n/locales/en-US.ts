@@ -884,6 +884,8 @@ export default {
       MULTIMODAL_ALL_FAILED_SUGGESTION: 'Verify the multimodal model configuration.',
       TASK_TIMEOUT: 'Task exceeded maximum runtime',
       TASK_TIMEOUT_SUGGESTION: 'The task ran longer than allowed. Retry or contact support.',
+      SERVER_RESTART: 'Task interrupted by server restart',
+      SERVER_RESTART_SUGGESTION: 'Redis-backed tasks retry from the queue; recoverable Wiki work also resumes in Lite mode. Retry if this task remains failed.',
       UPSTREAM_FAILED: 'Stopped because an upstream stage failed',
       UPSTREAM_FAILED_SUGGESTION: 'A previous stage failed and prevented this step from running.',
       UNKNOWN: 'Unknown error',

@@ -165,6 +165,40 @@ func TestHousekeeping_RecoversAbandoned(t *testing.T) {
 	assert.Contains(t, errMsg, "stuck in processing")
 }
 
+func TestHousekeeping_RecoversPendingTaskMissingFromQueue(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-pending-orphan", types.ParseStatusPending, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-pending-orphan",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFailed, status,
+		"a stale pending row with no queue task must not remain pending forever")
+}
+
+func TestHousekeeping_PreservesPendingTaskStillQueued(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		queued: map[string]bool{"kid-pending-queued": true},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-pending-queued", types.ParseStatusPending, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-pending-queued",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusPending, status,
+		"backlogged pending work remains owned by the durable queue")
+}
+
 // TestHousekeeping_NoFalseKill_ActiveSpan is the regression test for
 // the "long DocReader silently runs longer than DocumentProcessTimeout"
 // scenario the user flagged. A knowledge whose knowledge.updated_at

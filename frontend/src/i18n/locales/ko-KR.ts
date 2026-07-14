@@ -888,6 +888,8 @@ export default {
       MULTIMODAL_ALL_FAILED_SUGGESTION: "멀티모달 모델 구성을 확인하세요.",
       TASK_TIMEOUT: "작업이 최대 실행 시간을 초과함",
       TASK_TIMEOUT_SUGGESTION: "작업이 허용된 시간보다 오래 실행되었습니다. 재시도하거나 지원팀에 문의하세요.",
+      SERVER_RESTART: "서버 재시작으로 작업이 중단됨",
+      SERVER_RESTART_SUGGESTION: "Redis 모드 작업은 큐에서 재시도되고, Lite 모드의 복구 가능한 Wiki 작업도 자동으로 재개됩니다. 계속 실패하면 다시 시도하세요.",
       UPSTREAM_FAILED: "상위 단계 실패로 중단됨",
       UPSTREAM_FAILED_SUGGESTION: "이전 단계가 실패하여 이 단계가 실행되지 않았습니다.",
       UNKNOWN: "알 수 없는 오류",

@@ -761,12 +761,17 @@ func knowledgeSpansLastError(
 	if currentAttempt != latestAttempt || parseStatus != types.ParseStatusFailed || knowledgeErrorMessage == "" {
 		return nil
 	}
+	errorCode := "UNKNOWN"
+	if strings.EqualFold(strings.TrimSpace(knowledgeErrorMessage),
+		"Task interrupted due to application restart") {
+		errorCode = "SERVER_RESTART"
+	}
 	return gin.H{
 		"stage":         "knowledge_processing",
-		"code":          "UNKNOWN",
+		"code":          errorCode,
 		"message":       knowledgeErrorMessage,
 		"name":          "knowledge_processing",
-		"error_code":    "UNKNOWN",
+		"error_code":    errorCode,
 		"error_message": knowledgeErrorMessage,
 		"finished_at":   knowledgeUpdatedAt,
 	}

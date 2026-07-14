@@ -150,6 +150,16 @@ func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing
 	a.Equal(now, got["finished_at"])
 }
 
+func TestKnowledgeSpansLastError_ClassifiesServerRestart(t *testing.T) {
+	now := time.Now()
+	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed,
+		"Task interrupted due to application restart", now, nil)
+	a := assert.New(t)
+	a.NotNil(got)
+	a.Equal("SERVER_RESTART", got["error_code"])
+	a.Equal("SERVER_RESTART", got["code"])
+}
+
 func TestKnowledgeSpansLastError_SkipsRecoveryFallbackForHistoricalAttempt(t *testing.T) {
 	now := time.Now()
 	got := knowledgeSpansLastError(1, 2, types.ParseStatusFailed, "wiki ingest timed out", now, nil)

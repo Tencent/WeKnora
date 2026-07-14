@@ -390,6 +390,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	} else {
 		must(container.Invoke(router.RegisterSyncHandlers))
 	}
+	// Wiki operation rows are durable, while their wake-up triggers may be
+	// lost across a process restart (always in Lite mode, and in Redis mode if
+	// persistence succeeded immediately before trigger enqueue failed). Re-arm
+	// them only after the matching handlers are ready.
+	must(container.Invoke(recoverPendingWikiTasks))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
