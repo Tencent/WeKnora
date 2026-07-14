@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     credentials TEXT DEFAULT NULL,
     chat_history_config TEXT,
     retrieval_config TEXT,
+    api_principal_config TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -64,6 +65,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     extract_config TEXT NULL DEFAULT NULL,
     faq_config TEXT,
     question_generation_config TEXT NULL,
+    wiki_config TEXT NULL,
+    indexing_strategy TEXT NULL,
     is_temporary BOOLEAN NOT NULL DEFAULT 0,
     is_pinned INTEGER NOT NULL DEFAULT 0,
     pinned_at DATETIME NULL,
@@ -103,6 +106,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     summary_status VARCHAR(32) DEFAULT 'none',
     last_faq_import_result TEXT DEFAULT NULL,
     channel VARCHAR(50) NOT NULL DEFAULT 'web',
+    pending_subtasks_count INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     processed_at DATETIME,
@@ -163,6 +167,7 @@ CREATE TABLE IF NOT EXISTS messages (
     agent_steps TEXT DEFAULT NULL,
     mentioned_items TEXT DEFAULT '[]',
     images TEXT DEFAULT '[]',
+    attachments TEXT DEFAULT '[]',
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     is_fallback BOOLEAN NOT NULL DEFAULT 0,
     channel VARCHAR(50) NOT NULL DEFAULT '',
@@ -277,6 +282,7 @@ CREATE TABLE IF NOT EXISTS users (
     tenant_id INTEGER,
     is_active BOOLEAN NOT NULL DEFAULT 1,
     can_access_all_tenants BOOLEAN NOT NULL DEFAULT 0,
+    is_system_admin BOOLEAN NOT NULL DEFAULT 0,
     -- Per-user JSON preferences (memory toggle, future UI knobs).
     -- SQLite has no JSONB; store as TEXT and let GORM (de)serialise via
     -- the driver.Valuer / sql.Scanner methods on types.UserPreferences.
@@ -290,6 +296,22 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_users_is_system_admin ON users(is_system_admin);
+
+CREATE TABLE IF NOT EXISTS system_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key VARCHAR(128) NOT NULL UNIQUE,
+    value TEXT NOT NULL,
+    value_type VARCHAR(16) NOT NULL,
+    category VARCHAR(32) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    is_secret BOOLEAN NOT NULL DEFAULT 0,
+    requires_restart BOOLEAN NOT NULL DEFAULT 0,
+    last_modified_by VARCHAR(36) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_system_settings_category ON system_settings(category);
 
 CREATE TABLE IF NOT EXISTS auth_tokens (
     id VARCHAR(36) PRIMARY KEY,
@@ -431,6 +453,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_tags_kb_name ON knowledge_tags(t
 CREATE INDEX IF NOT EXISTS idx_knowledge_tags_kb ON knowledge_tags(tenant_id, knowledge_base_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_tags_seq_id ON knowledge_tags(seq_id);
 
+CREATE TABLE IF NOT EXISTS knowledge_tag_relations (
+    knowledge_id VARCHAR(36) NOT NULL,
+    tag_id VARCHAR(36) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (knowledge_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ktr_knowledge ON knowledge_tag_relations(knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_ktr_tag ON knowledge_tag_relations(tag_id);
+
 CREATE TABLE IF NOT EXISTS mcp_services (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
@@ -488,6 +520,8 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
     user_id VARCHAR(64) NOT NULL,
+    principal_type VARCHAR(32) NOT NULL DEFAULT 'web_user',
+    principal_id VARCHAR(512) NOT NULL DEFAULT '',
     service_id VARCHAR(36) NOT NULL,
     access_token TEXT,
     refresh_token TEXT,
@@ -498,9 +532,10 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
     FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_tenant_user_svc ON mcp_oauth_tokens(tenant_id, user_id, service_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_tenant_principal_svc ON mcp_oauth_tokens(tenant_id, principal_type, principal_id, service_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_service_id ON mcp_oauth_tokens(service_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_user_id ON mcp_oauth_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_principal ON mcp_oauth_tokens(principal_type, principal_id);
 
 CREATE TABLE IF NOT EXISTS custom_agents (
     id VARCHAR(36) NOT NULL,

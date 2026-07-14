@@ -1,4 +1,8 @@
 export default {
+  knowledgeFolder: {
+    folders: '文件夹', root: '根目录', newFolder: '新建文件夹', rename: '重命名', move: '移动', ask: '对该文件夹提问', delete: '删除',
+    moveDocuments: '移动到文件夹', includeDescendants: '包含子目录', currentFolder: '当前目录', emptyRequired: '仅可删除空文件夹', loadMore: '加载更多文件夹',
+  },
   menu: {
     knowledgeBase: "知识库",
     agents: "智能体",

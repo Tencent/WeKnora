@@ -27,6 +27,8 @@ type CompositeRetrieveEngine struct {
 	engineInfos []*engineInfo
 }
 
+const maxConcurrentRetrieveParams = 4
+
 // Retrieve performs retrieval operations by delegating to the appropriate engine
 // based on the retriever type specified in the parameters
 func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
@@ -133,21 +135,30 @@ func concurrentRetrieve(
 	retrieveParams []types.RetrieveParams,
 	fn func(ctx context.Context, param types.RetrieveParams, results *[]*types.RetrieveResult, mu *sync.Mutex) error,
 ) ([]*types.RetrieveResult, error) {
+	if len(retrieveParams) == 0 {
+		return nil, nil
+	}
 	var results []*types.RetrieveResult
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(retrieveParams))
-
-	for _, param := range retrieveParams {
+	jobs := make(chan types.RetrieveParams)
+	workerCount := min(maxConcurrentRetrieveParams, len(retrieveParams))
+	for range workerCount {
 		wg.Add(1)
-		p := param // Create local copy for safe use in closure
 		go func() {
 			defer wg.Done()
-			if err := fn(ctx, p, &results, &mu); err != nil {
-				errCh <- err
+			for param := range jobs {
+				if err := fn(ctx, param, &results, &mu); err != nil {
+					errCh <- err
+				}
 			}
 		}()
 	}
+	for _, param := range retrieveParams {
+		jobs <- param
+	}
+	close(jobs)
 
 	wg.Wait()
 	close(errCh)

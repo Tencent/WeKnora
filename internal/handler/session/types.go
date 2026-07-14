@@ -52,6 +52,7 @@ type CreateKnowledgeQARequest struct {
 	MCPServiceIDs    []string               `json:"mcp_service_ids"`                       // Per-request MCP services selected via @mention
 	SkillNames       []string               `json:"skill_names"`                           // Per-request Skills selected via @mention
 	TagIDs           []string               `json:"tag_ids"`                               // @mentioned tag IDs (display/debug; scoped via MentionedItems)
+	FolderScopes     []types.FolderScope    `json:"folder_scopes"`                         // Recursive folder scopes
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // @mentioned knowledge bases and files
 	DisableTitle     bool                   `json:"disable_title"`                         // Whether to disable auto title generation
 	// EnableMemory is the per-request override for the memory feature.
@@ -86,6 +87,7 @@ type SearchKnowledgeRequest struct {
 	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
 	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
 	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
+	FolderScopes     []types.FolderScope    `json:"folder_scopes"`                         // Recursive folder scopes
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
 }
 

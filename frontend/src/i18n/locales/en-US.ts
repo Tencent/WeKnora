@@ -1,4 +1,8 @@
 export default {
+  knowledgeFolder: {
+    folders: 'Folders', root: 'Root', newFolder: 'New folder', rename: 'Rename', move: 'Move', ask: 'Ask this folder', delete: 'Delete',
+    moveDocuments: 'Move to folder', includeDescendants: 'Include subfolders', currentFolder: 'Current folder', emptyRequired: 'Only empty folders can be deleted', loadMore: 'Load more folders',
+  },
   menu: {
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',

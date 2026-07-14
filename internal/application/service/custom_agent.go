@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -557,7 +558,11 @@ func (s *customAgentService) getSuggestedQuestions(
 			})
 			return s.truncateQuestions(result, limit), nil
 		}
-		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolved)
+		if len(knowledgeIDs) > 0 {
+			knowledgeIDs = intersectStrings(knowledgeIDs, resolved)
+		} else {
+			knowledgeIDs = mergeUniqueStrings(nil, resolved)
+		}
 		if len(knowledgeIDs) == 0 {
 			return s.truncateQuestions(result, limit), nil
 		}
@@ -778,6 +783,201 @@ func (s *customAgentService) getSuggestedQuestions(
 	}
 
 	return s.truncateQuestions(result, limit), nil
+}
+
+// GetSuggestedQuestionsWithFolders expands folder subtrees before delegating
+// to the established knowledge-ID suggestion path.
+func (s *customAgentService) GetSuggestedQuestionsWithFolders(ctx context.Context, agentID string, kbIDs, knowledgeIDs, tagIDs []string, limit int, folderScopes []types.FolderScope) ([]types.SuggestedQuestion, error) {
+	return s.getSuggestedQuestionsWithFolders(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, folderScopes, true)
+}
+
+// GetKnowledgeSuggestedQuestionsWithFolders returns folder-scoped candidates
+// without mixing in curated starter prompts.
+func (s *customAgentService) GetKnowledgeSuggestedQuestionsWithFolders(ctx context.Context, agentID string, kbIDs, knowledgeIDs, tagIDs []string, limit int, folderScopes []types.FolderScope) ([]types.SuggestedQuestion, error) {
+	return s.getSuggestedQuestionsWithFolders(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, folderScopes, false)
+}
+
+func (s *customAgentService) getSuggestedQuestionsWithFolders(ctx context.Context, agentID string, kbIDs, knowledgeIDs, tagIDs []string, limit int, folderScopes []types.FolderScope, includeCurated bool) ([]types.SuggestedQuestion, error) {
+	if len(folderScopes) == 0 {
+		return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, includeCurated)
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return nil, ErrInvalidTenantID
+	}
+	authKBIDs := append([]string(nil), kbIDs...)
+	for _, scope := range folderScopes {
+		authKBIDs = append(authKBIDs, scope.KnowledgeBaseID)
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, authKBIDs, knowledgeIDs); err != nil {
+		return nil, err
+	}
+	agent, err := s.GetAgentByID(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	folderIDsByKB := mergeFolderScopesByKB(folderScopes)
+	fullKBSet := make(map[string]bool, len(kbIDs))
+	for _, kbID := range mergeUniqueStrings(nil, kbIDs) {
+		fullKBSet[kbID] = true
+	}
+	folderKnowledgeIDsByKB := make(map[string][]string, len(folderIDsByKB))
+	for kbID, folderIDs := range folderIDsByKB {
+		if !agentAllowsKnowledgeBase(agent, kbID) {
+			return nil, apperrors.NewForbiddenError("folder knowledge base is outside the agent scope")
+		}
+		kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+		if err != nil {
+			return nil, err
+		}
+		if kb == nil {
+			return nil, apperrors.NewBadRequestError("folder knowledge base not found")
+		}
+		if kb.Type == types.KnowledgeBaseTypeFAQ {
+			return nil, apperrors.NewBadRequestError("folders are not available for FAQ knowledge bases")
+		}
+		if kb.TenantID != tenantID {
+			if s.kbShareService == nil {
+				return nil, apperrors.NewForbiddenError("no permission to access folder knowledge base")
+			}
+			allowed, accessErr := s.kbShareService.HasTenantKBPermission(
+				ctx,
+				kbID,
+				tenantID,
+				types.TenantRoleFromContext(ctx),
+				types.OrgRoleViewer,
+			)
+			if accessErr != nil {
+				return nil, accessErr
+			}
+			if !allowed {
+				return nil, apperrors.NewForbiddenError("no permission to access folder knowledge base")
+			}
+		}
+		ids, err := s.knowledgeRepo.ListIDsByFolderIDs(ctx, kb.TenantID, kbID, folderIDs)
+		if err != nil {
+			if errors.Is(err, repository.ErrKnowledgeFolderScopeMismatch) {
+				return nil, apperrors.NewBadRequestError("folder does not belong to the knowledge base")
+			}
+			return nil, err
+		}
+		folderKnowledgeIDsByKB[kbID] = mergeUniqueStrings(nil, ids)
+	}
+
+	explicitByKB := make(map[string][]string)
+	for _, knowledgeID := range mergeUniqueStrings(nil, knowledgeIDs) {
+		knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, knowledgeID)
+		if err == nil && knowledge != nil && knowledge.KnowledgeBaseID != "" {
+			explicitByKB[knowledge.KnowledgeBaseID] = append(explicitByKB[knowledge.KnowledgeBaseID], knowledge.ID)
+		}
+	}
+
+	// A single global knowledge-ID filter cannot represent "all of KB A plus a
+	// folder in KB B". Query unrestricted KBs together, then query every
+	// document-constrained KB independently and merge the suggestions. This also
+	// prevents an empty folder from becoming an unrestricted KB query.
+	scopedKBs := make(map[string]bool, len(folderIDsByKB))
+	for kbID := range folderIDsByKB {
+		if !fullKBSet[kbID] {
+			scopedKBs[kbID] = true
+		}
+	}
+	fullKBsWithoutExplicitDocs := make([]string, 0, len(kbIDs))
+	type suggestionQuery struct {
+		kbIDs        []string
+		knowledgeIDs []string
+	}
+	queries := make([]suggestionQuery, 0, len(folderIDsByKB)+len(explicitByKB)+1)
+	for _, kbID := range mergeUniqueStrings(nil, kbIDs) {
+		if scopedKBs[kbID] {
+			continue
+		}
+		if len(knowledgeIDs) > 0 {
+			if explicitIDs := mergeUniqueStrings(nil, explicitByKB[kbID]); len(explicitIDs) > 0 {
+				queries = append(queries, suggestionQuery{kbIDs: []string{kbID}, knowledgeIDs: explicitIDs})
+			}
+		} else {
+			fullKBsWithoutExplicitDocs = append(fullKBsWithoutExplicitDocs, kbID)
+		}
+	}
+	if len(fullKBsWithoutExplicitDocs) > 0 {
+		queries = append(queries, suggestionQuery{kbIDs: fullKBsWithoutExplicitDocs})
+	}
+	for kbID, folderKnowledgeIDs := range folderKnowledgeIDsByKB {
+		if fullKBSet[kbID] {
+			continue
+		}
+		resolved := folderKnowledgeIDs
+		if len(knowledgeIDs) > 0 {
+			resolved = intersectStrings(explicitByKB[kbID], folderKnowledgeIDs)
+		}
+		if len(resolved) > 0 {
+			queries = append(queries, suggestionQuery{kbIDs: []string{kbID}, knowledgeIDs: mergeUniqueStrings(nil, resolved)})
+		}
+	}
+
+	if len(queries) == 0 {
+		if !includeCurated {
+			return []types.SuggestedQuestion{}, nil
+		}
+		agent, err := s.GetAgentByID(ctx, agentID)
+		if err != nil {
+			return nil, err
+		}
+		return s.truncateQuestions(agentConfiguredSuggestions(agent), limit), nil
+	}
+
+	merged := make([]types.SuggestedQuestion, 0, limit)
+	seen := make(map[string]bool)
+	for _, query := range queries {
+		questions, err := s.getSuggestedQuestions(ctx, agentID, query.kbIDs, query.knowledgeIDs, tagIDs, limit, includeCurated)
+		if err != nil {
+			return nil, err
+		}
+		for _, question := range questions {
+			if question.Question == "" || seen[question.Question] {
+				continue
+			}
+			seen[question.Question] = true
+			merged = append(merged, question)
+		}
+	}
+	return s.truncateQuestions(merged, limit), nil
+}
+
+func agentAllowsKnowledgeBase(agent *types.CustomAgent, kbID string) bool {
+	if agent == nil || kbID == "" {
+		return false
+	}
+	switch agent.Config.KBSelectionMode {
+	case "all":
+		return true
+	case "none":
+		return false
+	}
+	for _, allowedKBID := range agent.Config.KnowledgeBases {
+		if allowedKBID == kbID {
+			return true
+		}
+	}
+	return false
+}
+
+func agentConfiguredSuggestions(agent *types.CustomAgent) []types.SuggestedQuestion {
+	if agent == nil || agent.Config.QuestionSuggestions == nil {
+		return nil
+	}
+	starters := agent.Config.QuestionSuggestions.Starters
+	if !starters.Enabled || (starters.Mode != types.SuggestionModeCurated && starters.Mode != types.SuggestionModeHybrid) {
+		return nil
+	}
+	result := make([]types.SuggestedQuestion, 0, len(starters.Items))
+	for _, prompt := range starters.Items {
+		if prompt = strings.TrimSpace(prompt); prompt != "" {
+			result = append(result, types.SuggestedQuestion{Question: prompt, Source: "agent_config"})
+		}
+	}
+	return result
 }
 
 func (s *customAgentService) resolveKnowledgeIDsFromTags(

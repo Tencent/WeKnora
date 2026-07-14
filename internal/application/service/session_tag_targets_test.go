@@ -33,6 +33,35 @@ type tagTargetKnowledgeService struct {
 	interfaces.KnowledgeService
 	knowledges []*types.Knowledge
 	tagIDs     map[string][]string
+	folderIDs  map[string][]string
+}
+
+type folderTargetRepository struct {
+	interfaces.KnowledgeRepository
+	service *tagTargetKnowledgeService
+}
+
+func (r *folderTargetRepository) ListIDsByFolderIDs(_ context.Context, _ uint64, kbID string, folderIDs []string) ([]string, error) {
+	allowed := map[string]bool{}
+	for _, id := range folderIDs {
+		allowed[id] = true
+	}
+	var out []string
+	for knowledgeID, folders := range r.service.folderIDs {
+		if !knowledgeBelongsToKB(r.service.knowledges, knowledgeID, kbID) {
+			continue
+		}
+		for _, folderID := range folders {
+			if allowed[folderID] {
+				out = append(out, knowledgeID)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+func (s *tagTargetKnowledgeService) GetRepository() interfaces.KnowledgeRepository {
+	return &folderTargetRepository{service: s}
 }
 
 func (s *tagTargetKnowledgeService) GetKnowledgeBatchWithSharedAccess(
@@ -106,8 +135,89 @@ func newTagTargetSessionService() *sessionService {
 				"doc-2": {"tag-b"},
 				"doc-3": {"tag-a", "tag-b"},
 			},
+			folderIDs: map[string][]string{"doc-1": {"folder-a"}, "doc-2": {"folder-b"}, "doc-3": {"folder-a", "folder-child"}},
 		},
 	}
+}
+
+func TestBuildSearchTargets_FolderUnionAndExplicitIntersection(t *testing.T) {
+	svc := newTagTargetSessionService()
+	targets, err := svc.buildSearchTargets(tagTargetContext(), 100, nil, nil, nil, []types.FolderScope{{KnowledgeBaseID: "doc-kb", FolderIDs: []string{"folder-a", "folder-b"}}})
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.ElementsMatch(t, []string{"doc-1", "doc-2", "doc-3"}, targets[0].KnowledgeIDs)
+	targets, err = svc.buildSearchTargets(tagTargetContext(), 100, nil, []string{"doc-2", "doc-3"}, nil, []types.FolderScope{{KnowledgeBaseID: "doc-kb", FolderIDs: []string{"folder-a"}}})
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, []string{"doc-3"}, targets[0].KnowledgeIDs)
+}
+
+func TestBuildSearchTargets_ExplicitWholeKBSupersedesFolderScope(t *testing.T) {
+	svc := newTagTargetSessionService()
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		nil,
+		nil,
+		[]types.FolderScope{{KnowledgeBaseID: "doc-kb", FolderIDs: []string{"folder-a"}}},
+	)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledgeBase, targets[0].Type)
+	assert.Equal(t, "doc-kb", targets[0].KnowledgeBaseID)
+	assert.Empty(t, targets[0].KnowledgeIDs)
+}
+
+func TestFullKnowledgeBasesForFolderScopesPreservesExplicitWholeKB(t *testing.T) {
+	resolved := []string{"kb-explicit", "kb-default", "kb-unscoped"}
+	scopes := []types.FolderScope{
+		{KnowledgeBaseID: "kb-explicit", FolderIDs: []string{"folder-a"}},
+		{KnowledgeBaseID: "kb-default", FolderIDs: []string{"folder-b"}},
+	}
+
+	assert.Equal(t,
+		[]string{"kb-explicit", "kb-unscoped"},
+		fullKnowledgeBasesForFolderScopes(resolved, []string{"kb-explicit"}, scopes),
+	)
+	assert.Equal(t,
+		[]string{"kb-unscoped"},
+		fullKnowledgeBasesForFolderScopes(resolved, nil, scopes),
+	)
+}
+
+func TestBuildSearchTargets_FolderAndTagIntersect(t *testing.T) {
+	svc := newTagTargetSessionService()
+	targets, err := svc.buildSearchTargets(tagTargetContext(), 100, nil, nil, []types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-b"}}}, []types.FolderScope{{KnowledgeBaseID: "doc-kb", FolderIDs: []string{"folder-a"}}})
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, []string{"doc-3"}, targets[0].KnowledgeIDs)
+}
+
+func TestResolveKnowledgeBasesTreatsFolderAsExplicitAndRestrictsSharedAgentScope(t *testing.T) {
+	svc := newTagTargetSessionService()
+	agent := &types.CustomAgent{
+		ID: "shared-agent", TenantID: 200,
+		Config: types.CustomAgentConfig{
+			KBSelectionMode:             "selected",
+			KnowledgeBases:              []string{"doc-kb"},
+			RetrieveKBOnlyWhenMentioned: true,
+		},
+	}
+	req := &types.QARequest{
+		Session:     &types.Session{ID: "session-1", TenantID: 100},
+		CustomAgent: agent,
+		FolderScopes: []types.FolderScope{
+			{KnowledgeBaseID: "doc-kb", FolderIDs: []string{"folder-a"}},
+			{KnowledgeBaseID: "blocked-kb", FolderIDs: []string{"folder-x"}},
+		},
+	}
+
+	kbIDs, knowledgeIDs, err := svc.resolveKnowledgeBases(tagTargetContext(), req)
+	require.NoError(t, err)
+	assert.Empty(t, kbIDs, "folder mention is the explicit retrieval target, not the full KB")
+	assert.Empty(t, knowledgeIDs)
+	require.Equal(t, []types.FolderScope{{KnowledgeBaseID: "doc-kb", FolderIDs: []string{"folder-a"}}}, req.FolderScopes)
 }
 
 func tagTargetContext() context.Context {

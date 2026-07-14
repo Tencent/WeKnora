@@ -1,6 +1,8 @@
 DROP TABLE IF EXISTS tenants;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS knowledge_bases;
+DROP TABLE IF EXISTS knowledge_folder_closure;
+DROP TABLE IF EXISTS knowledge_folders;
 DROP TABLE IF EXISTS knowledges;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS messages;
@@ -63,6 +65,7 @@ CREATE TABLE knowledges (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INT NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
+    folder_id VARCHAR(36) NOT NULL DEFAULT '',
     type VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
     description TEXT,
@@ -85,6 +88,23 @@ CREATE TABLE knowledges (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_knowledges_tenant_id ON knowledges(tenant_id, knowledge_base_id);
+CREATE INDEX idx_knowledges_folder ON knowledges(tenant_id, knowledge_base_id, folder_id);
+
+CREATE TABLE knowledge_folders (
+    id VARCHAR(36) PRIMARY KEY, tenant_id BIGINT NOT NULL, knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_id VARCHAR(36) NOT NULL DEFAULT '', name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_knowledge_folder_sibling (tenant_id, knowledge_base_id, parent_id, name),
+    KEY idx_knowledge_folders_parent (tenant_id, knowledge_base_id, parent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE knowledge_folder_closure (
+    ancestor_id VARCHAR(36) NOT NULL, descendant_id VARCHAR(36) NOT NULL, depth INT NOT NULL,
+    PRIMARY KEY (ancestor_id, descendant_id),
+    KEY idx_kfc_ancestor (ancestor_id, depth, descendant_id),
+    KEY idx_kfc_descendant (descendant_id, depth, ancestor_id),
+    CHECK (depth >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE sessions (
     id VARCHAR(36) PRIMARY KEY,

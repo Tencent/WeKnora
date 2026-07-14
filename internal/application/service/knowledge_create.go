@@ -23,6 +23,19 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+func knowledgeFolderIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(types.KnowledgeFolderIDContextKey).(string)
+	return id
+}
+
+func (s *knowledgeService) validateKnowledgeFolderTarget(ctx context.Context, tenantID uint64, kbID string) error {
+	folderID := knowledgeFolderIDFromContext(ctx)
+	if folderID == "" {
+		return nil
+	}
+	return s.repo.ValidateKnowledgeFolder(ctx, tenantID, kbID, folderID)
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
@@ -78,6 +91,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	// Check if file already exists
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	if err := s.validateKnowledgeFolderTarget(ctx, tenantID, kbID); err != nil {
+		return nil, err
+	}
 	logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
 		Type:     "file",
@@ -188,6 +204,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         knowledgeFolderIDFromContext(ctx),
 		Type:             "file",
 		Channel:          defaultChannel(channel),
 		Title:            safeFilename,
@@ -354,6 +371,9 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 
 	// Check if URL already exists in the knowledge base
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	if err := s.validateKnowledgeFolderTarget(ctx, tenantID, kbID); err != nil {
+		return nil, err
+	}
 	logger.Infof(ctx, "Checking if URL exists, tenant ID: %d", tenantID)
 	fileHash := calculateStr(url)
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
@@ -390,6 +410,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         knowledgeFolderIDFromContext(ctx),
 		Type:             "url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -583,6 +604,9 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 
 	// Check for duplicate (by URL hash)
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	if err := s.validateKnowledgeFolderTarget(ctx, tenantID, kbID); err != nil {
+		return nil, err
+	}
 	fileHash := calculateStr(fileURL)
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
 		Type:     "file_url",
@@ -616,6 +640,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         knowledgeFolderIDFromContext(ctx),
 		Type:             "file_url",
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -760,6 +785,9 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	}
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	if err := s.validateKnowledgeFolderTarget(ctx, tenantID, kbID); err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	title := safeTitle
 	if title == "" {
@@ -772,6 +800,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         knowledgeFolderIDFromContext(ctx),
 		Type:             types.KnowledgeTypeManual,
 		Channel:          defaultChannel(channel),
 		Title:            title,
@@ -856,6 +885,10 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		return nil, err
 	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	if err := s.validateKnowledgeFolderTarget(ctx, tenantID, kbID); err != nil {
+		return nil, err
+	}
 
 	// Create knowledge record
 	if syncMode {
@@ -865,8 +898,9 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 	}
 	knowledge := &types.Knowledge{
 		ID:               uuid.New().String(),
-		TenantID:         ctx.Value(types.TenantIDContextKey).(uint64),
+		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		FolderID:         knowledgeFolderIDFromContext(ctx),
 		Type:             "passage",
 		Channel:          defaultChannel(channel),
 		ParseStatus:      "pending",

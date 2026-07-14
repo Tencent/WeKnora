@@ -176,6 +176,7 @@ export function uploadKnowledgeFile(
   data: {
     file: File
     tag_ids?: string[]
+    folder_id?: string
     fileName?: string
     process_config?: KnowledgeProcessOverrides | string
     [key: string]: any
@@ -197,11 +198,42 @@ export function uploadKnowledgeFile(
   return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress);
 }
 
+export interface KnowledgeFolder {
+  id: string;
+  tenant_id: number;
+  knowledge_base_id: string;
+  parent_id: string;
+  name: string;
+  ancestors?: KnowledgeFolder[];
+  direct_knowledge_count: number;
+  total_knowledge_count: number;
+  child_folder_count: number;
+  has_children: boolean;
+}
+
+export interface FolderScope { knowledge_base_id: string; folder_ids: string[] }
+
+export function listKnowledgeFolders(kbId: string, params: { parent_id?: string; page?: number; page_size?: number; keyword?: string; agent_id?: string } = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return get(`/api/v1/knowledge-bases/${kbId}/folders${suffix}`);
+}
+export function getKnowledgeFolder(kbId: string, folderId: string, options?: { agent_id?: string }) {
+  const query = options?.agent_id ? `?agent_id=${encodeURIComponent(options.agent_id)}` : '';
+  return get(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}${query}`);
+}
+export function createKnowledgeFolder(kbId: string, data: { name: string; parent_id: string }) { return post(`/api/v1/knowledge-bases/${kbId}/folders`, data); }
+export function updateKnowledgeFolder(kbId: string, folderId: string, data: { name?: string; parent_id?: string }) { return put(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`, data); }
+export function deleteKnowledgeFolder(kbId: string, folderId: string) { return del(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`); }
+export function ensureKnowledgeFolderPaths(kbId: string, data: { parent_id?: string; paths: Array<{ client_key: string; segments: string[] }> }) { return post(`/api/v1/knowledge-bases/${kbId}/folders/ensure-paths`, data); }
+export function moveKnowledgeToFolder(kbId: string, data: { knowledge_ids: string[]; folder_id: string }) { return put(`/api/v1/knowledge-bases/${kbId}/knowledge/folder`, data); }
+
 // 从URL创建知识
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
 export function createKnowledgeFromURL(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
+  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; folder_id?: string; process_config?: KnowledgeProcessOverrides },
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
@@ -215,6 +247,7 @@ export function createManualKnowledge(
     content: string
     status: string
     tag_ids?: string[]
+    folder_id?: string
     process_config?: KnowledgeProcessOverrides
   },
 ) {
@@ -233,6 +266,9 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    folder_id?: string;
+    include_descendants?: boolean;
+    agent_id?: string;
   },
 ) {
   const query = new URLSearchParams();
@@ -245,6 +281,9 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  if (params.folder_id !== undefined) query.append('folder_id', params.folder_id);
+  if (params.include_descendants !== undefined) query.append('include_descendants', String(params.include_descendants));
+  if (params.agent_id) query.append('agent_id', params.agent_id);
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }

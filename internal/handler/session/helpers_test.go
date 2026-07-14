@@ -52,3 +52,20 @@ func TestValidateUnscopedTagIDs(t *testing.T) {
 	assert.Error(t, validateUnscopedTagIDs([]string{"tag-9"}, []string{"kb-1", "kb-2"}))
 	assert.Error(t, validateUnscopedTagIDs([]string{"tag-9"}, nil))
 }
+
+func TestMergeFolderScopesGroupsByKBAndDeduplicatesRequestAndMentions(t *testing.T) {
+	scopes := mergeFolderScopes(
+		[]types.FolderScope{
+			{KnowledgeBaseID: "kb-1", FolderIDs: []string{"folder-a", "folder-a"}},
+			{KnowledgeBaseID: "kb-2", FolderIDs: []string{"folder-c"}},
+		},
+		[]types.FolderScope{
+			{KnowledgeBaseID: "kb-1", FolderIDs: []string{"folder-a", "folder-b"}},
+			{KnowledgeBaseID: "", FolderIDs: []string{"ignored"}},
+		},
+	)
+	assert.Equal(t, []types.FolderScope{
+		{KnowledgeBaseID: "kb-1", FolderIDs: []string{"folder-a", "folder-b"}},
+		{KnowledgeBaseID: "kb-2", FolderIDs: []string{"folder-c"}},
+	}, scopes)
+}

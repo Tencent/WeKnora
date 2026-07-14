@@ -45,3 +45,18 @@ func TestGetSuggestedQuestionsRejectsTagIDsForRestrictedKey(t *testing.T) {
 		t.Fatal("expected forbidden for tag_ids under KB-restricted key")
 	}
 }
+
+func TestGetSuggestedQuestionsWithFoldersEnforcesAPIKeyKnowledgeBaseScope(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+	})
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(1))
+
+	svc := &customAgentService{}
+	_, err := svc.GetSuggestedQuestionsWithFolders(ctx, "agent-1", nil, nil, nil, 6, []types.FolderScope{{
+		KnowledgeBaseID: "kb-2", FolderIDs: []string{"folder-1"},
+	}})
+	if err == nil {
+		t.Fatal("expected forbidden for an out-of-scope folder knowledge base")
+	}
+}

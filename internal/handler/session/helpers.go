@@ -98,6 +98,62 @@ func tagScopesFromMentionedItems(items []MentionedItemRequest) []types.TagScope 
 	return scopes
 }
 
+func folderScopesFromMentionedItems(items []MentionedItemRequest) []types.FolderScope {
+	byKB := make(map[string][]string)
+	seen := make(map[string]map[string]bool)
+	for _, item := range items {
+		if item.Type != "folder" || item.ID == "" || item.KBID == "" {
+			continue
+		}
+		if seen[item.KBID] == nil {
+			seen[item.KBID] = make(map[string]bool)
+		}
+		if !seen[item.KBID][item.ID] {
+			seen[item.KBID][item.ID] = true
+			byKB[item.KBID] = append(byKB[item.KBID], item.ID)
+		}
+	}
+	result := make([]types.FolderScope, 0, len(byKB))
+	for kbID, ids := range byKB {
+		result = append(result, types.FolderScope{KnowledgeBaseID: kbID, FolderIDs: ids})
+	}
+	return result
+}
+
+func mergeFolderScopes(scopeGroups ...[]types.FolderScope) []types.FolderScope {
+	result := make([]types.FolderScope, 0)
+	indexByKB := make(map[string]int)
+	seenByKB := make(map[string]map[string]bool)
+	for _, scopes := range scopeGroups {
+		for _, scope := range scopes {
+			if scope.KnowledgeBaseID == "" {
+				continue
+			}
+			index, exists := indexByKB[scope.KnowledgeBaseID]
+			if !exists {
+				index = len(result)
+				indexByKB[scope.KnowledgeBaseID] = index
+				seenByKB[scope.KnowledgeBaseID] = make(map[string]bool)
+				result = append(result, types.FolderScope{KnowledgeBaseID: scope.KnowledgeBaseID})
+			}
+			for _, folderID := range scope.FolderIDs {
+				if folderID == "" || seenByKB[scope.KnowledgeBaseID][folderID] {
+					continue
+				}
+				seenByKB[scope.KnowledgeBaseID][folderID] = true
+				result[index].FolderIDs = append(result[index].FolderIDs, folderID)
+			}
+		}
+	}
+	filtered := result[:0]
+	for _, scope := range result {
+		if len(scope.FolderIDs) > 0 {
+			filtered = append(filtered, scope)
+		}
+	}
+	return filtered
+}
+
 // orphanTagIDsForScope returns tag IDs from the request that are not already
 // covered by scoped mentions.
 func orphanTagIDsForScope(tagIDs []string, scopes []types.TagScope) []string {

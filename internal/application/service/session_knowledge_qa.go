@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -87,7 +88,7 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes, req.FolderScopes)
 	if err != nil {
 		return fmt.Errorf("build search targets: %w", err)
 	}
@@ -435,9 +436,15 @@ func (s *sessionService) buildSearchTargets(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderScopeArg ...[]types.FolderScope,
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
 	tagIDsByKB := mergeTagScopesByKB(tagScopes)
+	var folderScopes []types.FolderScope
+	if len(folderScopeArg) > 0 {
+		folderScopes = folderScopeArg[0]
+	}
+	folderIDsByKB := mergeFolderScopesByKB(folderScopes)
 
 	// Build a map from KB ID to TenantID for all KBs we need to process
 	kbTenantMap := make(map[string]uint64)
@@ -449,6 +456,9 @@ func (s *sessionService) buildSearchTargets(
 	callerTenantRole := types.TenantRoleFromContext(ctx)
 	kbIDsToFetch := append([]string(nil), knowledgeBaseIDs...)
 	for kbID := range tagIDsByKB {
+		kbIDsToFetch = append(kbIDsToFetch, kbID)
+	}
+	for kbID := range folderIDsByKB {
 		kbIDsToFetch = append(kbIDsToFetch, kbID)
 	}
 	kbIDsToFetch = uniqueNonEmptyStrings(kbIDsToFetch)
@@ -504,15 +514,45 @@ func (s *sessionService) buildSearchTargets(
 	}
 
 	kbToKnowledgeIDs := make(map[string][]string)
+	explicitKnowledgeIDs := uniqueNonEmptyStrings(knowledgeIDs)
+	explicitSet := make(map[string]bool, len(explicitKnowledgeIDs))
+	for _, id := range explicitKnowledgeIDs {
+		explicitSet[id] = true
+	}
+	// A full-KB selection supersedes its folder scope. Otherwise expand all
+	// selected folders recursively; multiple folders naturally form a union.
+	folderAllowedByKB := make(map[string]map[string]bool)
+	for kbID, folderIDs := range folderIDsByKB {
+		if fullKBSet[kbID] {
+			continue
+		}
+		folderKnowledgeIDs, err := s.knowledgeService.GetRepository().ListIDsByFolderIDs(ctx, resolveKBTenant(kbID), kbID, folderIDs)
+		if err != nil {
+			return nil, fmt.Errorf("resolve knowledge IDs for folder scope kb_id=%s: %w", kbID, err)
+		}
+		folderAllowedByKB[kbID] = make(map[string]bool, len(folderKnowledgeIDs))
+		for _, id := range folderKnowledgeIDs {
+			folderAllowedByKB[kbID][id] = true
+		}
+	}
 
-	// Process individual knowledge IDs (include shared KB files the user has access to)
-	if len(knowledgeIDs) > 0 {
-		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
+	// Resolve only caller-supplied knowledge IDs through the shared-access
+	// authorization path. Folder-derived IDs already came from a tenant- and
+	// KB-scoped closure query; passing a very large folder through this lookup
+	// again would create a huge IN list (and an N+1 fallback for shared KBs).
+	explicitKB := make(map[string]bool)
+	if len(explicitKnowledgeIDs) > 0 {
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, explicitKnowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
 			return targets, nil // Return what we have, don't fail
 		}
 
+		for _, k := range knowledgeList {
+			if k != nil {
+				explicitKB[k.KnowledgeBaseID] = true
+			}
+		}
 		// Group knowledge IDs by their KB, excluding those already covered by full KB search
 		// Also track KB tenant IDs from knowledge items
 		for _, k := range knowledgeList {
@@ -529,23 +569,49 @@ func (s *sessionService) buildSearchTargets(
 			}
 			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
 		}
+	}
 
-		// Create SearchTargetTypeKnowledge targets for each KB with specific files
-		for kbID, kidList := range kbToKnowledgeIDs {
-			if len(tagIDsByKB[kbID]) > 0 {
-				continue
+	// Apply folder scopes after explicit-file authorization. Within the same KB,
+	// explicit files intersect the recursive folder result. With no explicit file
+	// in that KB, the recursive folder result becomes the complete target set.
+	for kbID, allowed := range folderAllowedByKB {
+		if explicitKB[kbID] {
+			filtered := make([]string, 0, len(kbToKnowledgeIDs[kbID]))
+			for _, id := range kbToKnowledgeIDs[kbID] {
+				if explicitSet[id] && allowed[id] {
+					filtered = append(filtered, id)
+				}
 			}
-			kbTenant := kbTenantMap[kbID]
-			if kbTenant == 0 {
-				kbTenant = tenantID // fallback
-			}
-			targets = append(targets, &types.SearchTarget{
-				Type:            types.SearchTargetTypeKnowledge,
-				KnowledgeBaseID: kbID,
-				TenantID:        kbTenant,
-				KnowledgeIDs:    kidList,
-			})
+			kbToKnowledgeIDs[kbID] = filtered
+			continue
 		}
+		folderIDs := make([]string, 0, len(allowed))
+		for id := range allowed {
+			folderIDs = append(folderIDs, id)
+		}
+		// Stabilize target order for deterministic batching and tests.
+		sort.Strings(folderIDs)
+		kbToKnowledgeIDs[kbID] = folderIDs
+	}
+
+	// Create SearchTargetTypeKnowledge targets for each KB with specific files.
+	for kbID, kidList := range kbToKnowledgeIDs {
+		kidList = uniqueNonEmptyStrings(kidList)
+		kbToKnowledgeIDs[kbID] = kidList
+		if len(kidList) == 0 || len(tagIDsByKB[kbID]) > 0 {
+			continue
+		}
+		kbTenant := kbTenantMap[kbID]
+		if kbTenant == 0 {
+			kbTenant = resolveKBTenant(kbID)
+		}
+		targets = append(targets, &types.SearchTarget{
+			Type:              types.SearchTargetTypeKnowledge,
+			KnowledgeBaseID:   kbID,
+			TenantID:          kbTenant,
+			KnowledgeIDs:      kidList,
+			DisableDirectLoad: folderAllowedByKB[kbID] != nil,
+		})
 	}
 
 	for kbID, tagIDs := range tagIDsByKB {
@@ -600,6 +666,19 @@ func (s *sessionService) buildSearchTargets(
 		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
 
 	return targets, nil
+}
+
+func mergeFolderScopesByKB(scopes []types.FolderScope) map[string][]string {
+	result := make(map[string][]string)
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID != "" {
+			result[scope.KnowledgeBaseID] = append(result[scope.KnowledgeBaseID], scope.FolderIDs...)
+		}
+	}
+	for kbID, ids := range result {
+		result[kbID] = uniqueNonEmptyStrings(ids)
+	}
+	return result
 }
 
 func mergeTagScopesByKB(scopes []types.TagScope) map[string][]string {
@@ -791,6 +870,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 // knowledgeIDs: list of specific knowledge (file) IDs to search
 func (s *sessionService) SearchKnowledge(ctx context.Context,
 	knowledgeBaseIDs []string, knowledgeIDs []string, tagScopes []types.TagScope, query string,
+	folderScopeArg ...[]types.FolderScope,
 ) ([]*types.SearchResult, error) {
 	logger.Info(ctx, "Start knowledge base search without LLM summary")
 	logger.Infof(ctx, "Knowledge base search parameters, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
@@ -804,7 +884,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes, folderScopeArg...)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}

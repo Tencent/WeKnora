@@ -15,6 +15,7 @@ export const useUIStore = defineStore('ui', {
     manualEditorVisible: false,
     manualEditorMode: 'create' as 'create' | 'edit',
     manualEditorKBId: null as string | null,
+    manualEditorFolderId: '' as string,
     manualEditorKnowledgeId: null as string | null,
     manualEditorInitialTitle: '',
     manualEditorInitialContent: '',
@@ -70,6 +71,7 @@ export const useUIStore = defineStore('ui', {
     openManualEditor(options: {
       mode?: 'create' | 'edit'
       kbId?: string | null
+	  folderId?: string
       knowledgeId?: string | null
       title?: string
       content?: string
@@ -78,6 +80,7 @@ export const useUIStore = defineStore('ui', {
     } = {}) {
       this.manualEditorMode = options.mode || 'create'
       this.manualEditorKBId = options.kbId ?? null
+	  this.manualEditorFolderId = options.folderId || ''
       this.manualEditorKnowledgeId = options.knowledgeId ?? null
       this.manualEditorInitialTitle = options.title || ''
       this.manualEditorInitialContent = options.content || ''
@@ -89,6 +92,7 @@ export const useUIStore = defineStore('ui', {
     closeManualEditor() {
       this.manualEditorVisible = false
       this.manualEditorKnowledgeId = null
+	  this.manualEditorFolderId = ''
       this.manualEditorInitialContent = ''
       this.manualEditorInitialTitle = ''
       this.manualEditorInitialStatus = 'draft'
@@ -136,4 +140,3 @@ export const useUIStore = defineStore('ui', {
     }
   }
 })
-

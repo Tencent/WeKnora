@@ -49,6 +49,7 @@ type RouterParams struct {
 	AgentShareService            interfaces.AgentShareService
 	KBHandler                    *handler.KnowledgeBaseHandler
 	KnowledgeHandler             *handler.KnowledgeHandler
+	KnowledgeFolderHandler       *handler.KnowledgeFolderHandler
 	TenantHandler                *handler.TenantHandler
 	TenantService                interfaces.TenantService
 	TenantAPIKeyService          interfaces.TenantAPIKeyService
@@ -219,6 +220,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// /files route cannot serve because it enforces same-tenant paths.
 		serveKBScopedFiles(v1, rbacGuards, params.TenantService, params.FileService)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
+		RegisterKnowledgeFolderRoutes(v1, params.KnowledgeFolderHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
@@ -253,6 +255,25 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	return r
+}
+
+// RegisterKnowledgeFolderRoutes exposes document-folder subresources. Reads
+// accept Viewer access; every mutation uses the same ownership and Editor
+// checks as document ingestion.
+func RegisterKnowledgeFolderRoutes(r *gin.RouterGroup, h *handler.KnowledgeFolderHandler, g *rbacGuards) {
+	if h == nil {
+		return
+	}
+	group := g.apiKeyGroup(r.Group("/knowledge-bases/:id/folders"), apiKeyIngest(apiKeyFullAccess()))
+	read := group.With(apiKeyRetrieve(apiKeyFullAccess()))
+	read.GET("", g.Viewer(), g.KBAccessRead("id"), h.List)
+	read.GET("/:folder_id", g.Viewer(), g.KBAccessRead("id"), h.Get)
+	group.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.Create)
+	group.POST("/ensure-paths", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.EnsurePaths)
+	group.PUT("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.Update)
+	group.DELETE("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.Delete)
+	knowledge := g.apiKeyGroup(r.Group("/knowledge-bases/:id/knowledge"), apiKeyIngest(apiKeyFullAccess()))
+	knowledge.PUT("/folder", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), h.MoveKnowledge)
 }
 
 // RegisterChunkerDebugRoutes wires the read-only chunker preview endpoint

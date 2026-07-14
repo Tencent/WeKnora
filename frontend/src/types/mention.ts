@@ -1,4 +1,4 @@
-export type MentionItemType = 'kb' | 'file' | 'tag' | 'mcp' | 'skill';
+export type MentionItemType = 'kb' | 'file' | 'folder' | 'tag' | 'mcp' | 'skill';
 
 export interface MentionItem {
   id: string;
