@@ -680,16 +680,18 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	rows := []types.KnowledgeProcessingSpan{}
 	currentAttempt := 0
+	latestAttempt := 0
 	if h.spanRepo != nil {
-		if requestedAttempt == 0 {
-			latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
-			if lerr != nil {
-				logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
-			} else {
-				currentAttempt = latest
-			}
+		latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
+		if lerr != nil {
+			logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
 		} else {
+			latestAttempt = latest
+		}
+		if requestedAttempt > 0 {
 			currentAttempt = requestedAttempt
+		} else {
+			currentAttempt = latestAttempt
 		}
 		if currentAttempt > 0 {
 			rows, err = h.spanRepo.ListByAttempt(ctx, knowledge.ID, currentAttempt)
@@ -713,6 +715,8 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	resp := gin.H{
 		"knowledge_id":    knowledge.ID,
+		"attempt":         currentAttempt,
+		"latest_attempt":  latestAttempt,
 		"parse_status":    knowledge.ParseStatus,
 		"current_attempt": currentAttempt,
 		"current_stage":   currentStageName,
@@ -720,10 +724,27 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 	}
 	if lastErr != nil {
 		resp["last_error"] = gin.H{
-			"stage":       lastErr.Name,
-			"code":        lastErr.ErrorCode,
-			"message":     lastErr.ErrorMessage,
-			"finished_at": lastErr.FinishedAt,
+			"stage":         lastErr.Name,
+			"code":          lastErr.ErrorCode,
+			"message":       lastErr.ErrorMessage,
+			"name":          lastErr.Name,
+			"error_code":    lastErr.ErrorCode,
+			"error_message": lastErr.ErrorMessage,
+			"finished_at":   lastErr.FinishedAt,
+		}
+	} else if currentAttempt == latestAttempt && knowledge.ParseStatus == types.ParseStatusFailed && knowledge.ErrorMessage != "" {
+		// The knowledge row can be failed by recovery/dead-letter paths after
+		// the main root span has already closed. Surface that authoritative
+		// failure reason instead of leaving the detail drawer with a red status
+		// but no explanation.
+		resp["last_error"] = gin.H{
+			"stage":         "knowledge_processing",
+			"code":          "UNKNOWN",
+			"message":       knowledge.ErrorMessage,
+			"name":          "knowledge_processing",
+			"error_code":    "UNKNOWN",
+			"error_message": knowledge.ErrorMessage,
+			"finished_at":   knowledge.UpdatedAt,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
