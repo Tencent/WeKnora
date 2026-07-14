@@ -97,7 +97,7 @@
       <section class="rq-pools">
         <div class="rq-pools-header">
           <div>
-            <h3>{{ t('system.globalSettings.runtime.poolsTitle') }}</h3>
+            <h3 class="rq-section-title">{{ t('system.globalSettings.runtime.poolsTitle') }}</h3>
             <p>{{ t('system.globalSettings.runtime.poolsDescription') }}</p>
           </div>
           <span class="rq-pools-note">{{ t('system.globalSettings.runtime.perInstance') }}</span>
@@ -128,7 +128,7 @@
       <section class="rq-details">
         <div class="rq-details-header">
           <div>
-            <h3>{{ t('system.globalSettings.runtime.detailsTitle') }}</h3>
+            <h3 class="rq-section-title">{{ t('system.globalSettings.runtime.detailsTitle') }}</h3>
             <p>{{ t('system.globalSettings.runtime.detailsDescription') }}</p>
           </div>
           <span v-if="updatedAt" class="rq-updated-at">
@@ -137,14 +137,19 @@
           </span>
         </div>
 
-        <t-alert v-if="totalArchived > 0" theme="warning" class="rq-failed-alert">
-          <template #message>
-            <div class="rq-failed-alert-copy">
-              <strong>{{ t('system.globalSettings.runtime.failedNotice.title', { count: totalArchived }) }}</strong>
-              <span>{{ t('system.globalSettings.runtime.failedNotice.description') }}</span>
-            </div>
-          </template>
-        </t-alert>
+        <div v-if="totalArchived > 0" class="rq-failed-notice" role="status">
+          <span class="rq-failed-notice__icon" aria-hidden="true">
+            <t-icon name="error-circle" />
+          </span>
+          <div class="rq-failed-notice__text">
+            <p class="rq-failed-notice__title">
+              {{ t('system.globalSettings.runtime.failedNotice.title', { count: totalArchived }) }}
+            </p>
+            <p class="rq-failed-notice__desc">
+              {{ t('system.globalSettings.runtime.failedNotice.description') }}
+            </p>
+          </div>
+        </div>
 
         <div v-if="queues.length === 0" class="rq-empty">
           <t-icon name="queue" size="28px" />
@@ -162,12 +167,7 @@
             <template #name="{ row }">
               <div class="rq-queue-cell">
                 <span class="rq-queue-name">{{ queueLabel(row.name) }}</span>
-                <span class="rq-queue-meta">
-                  {{ queueDescription(row.name) }} · {{ poolLabel(row.pool) }}
-                  <template v-if="poolQueueCount(row.pool) > 1">
-                    · {{ t('system.globalSettings.runtime.weight', { value: row.weight }) }}
-                  </template>
-                </span>
+                <span class="rq-queue-meta">{{ queueMeta(row) }}</span>
               </div>
             </template>
             <template #active="{ row }">
@@ -214,7 +214,7 @@
       <section class="rq-details rq-models">
         <div class="rq-details-header">
           <div>
-            <h3>{{ t('system.globalSettings.runtime.models.title') }}</h3>
+            <h3 class="rq-section-title">{{ t('system.globalSettings.runtime.models.title') }}</h3>
             <p>{{ t('system.globalSettings.runtime.models.description') }}</p>
           </div>
           <span class="rq-pools-note">{{ t('system.globalSettings.runtime.models.scope') }}</span>
@@ -253,29 +253,38 @@
       <p class="rq-footnote">{{ t('system.globalSettings.runtime.footnote') }}</p>
     </template>
 
-    <t-drawer
+    <SettingDrawer
       v-model:visible="failedTasksVisible"
-      :header="t('system.globalSettings.runtime.failedTasks.title', { queue: failedTaskQueueLabel })"
-      drawer-class-name="rq-failed-drawer"
-      size="680px"
-      :footer="false"
-      :close-btn="true"
-      placement="right"
-      destroy-on-close
+      class="rq-failed-drawer"
+      :title="t('system.globalSettings.runtime.failedTasks.title', { queue: failedTaskQueueLabel })"
+      :description="t('system.globalSettings.runtime.failedTasks.description')"
+      icon="error-circle"
+      width="680px"
+      :min-width="520"
+      :max-width="960"
+      storage-key="setting-drawer:width:runtime-failed-tasks"
+      hide-footer
     >
-      <div class="rq-failed-drawer-inner">
-        <t-alert theme="warning" class="rq-failed-drawer-guide">
-          <template #message>
-            <div class="rq-failed-guide-copy">
-              <strong>{{ t('system.globalSettings.runtime.failedTasks.guideTitle') }}</strong>
-              <span>{{ t('system.globalSettings.runtime.failedTasks.guideDescription') }}</span>
-            </div>
-          </template>
-        </t-alert>
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">
+          {{ t('system.globalSettings.runtime.failedTasks.guideTitle') }}
+        </h4>
+        <p class="rq-failed-guide-desc">
+          {{ t('system.globalSettings.runtime.failedTasks.guideDescription') }}
+        </p>
+      </section>
 
-        <div class="rq-failed-toolbar">
-          <span>{{ t('system.globalSettings.runtime.failedTasks.description') }}</span>
-          <t-button variant="text" size="small" :loading="failedTasksLoading" @click="reloadFailedTasks">
+      <section class="setting-drawer__section">
+        <div class="rq-failed-section-head">
+          <h4 class="setting-drawer__section-title">
+            {{ t('system.globalSettings.runtime.failedTasks.listTitle') }}
+          </h4>
+          <t-button
+            variant="text"
+            size="small"
+            :loading="failedTasksLoading && !failedTasksLoadingMore"
+            @click="reloadFailedTasks"
+          >
             <template #icon><t-icon name="refresh" /></template>
             {{ t('system.globalSettings.runtime.refresh') }}
           </t-button>
@@ -285,47 +294,63 @@
           <t-loading size="small" />
           <span>{{ t('system.globalSettings.runtime.loading') }}</span>
         </div>
-        <t-alert v-else-if="failedTasksError" theme="error" :message="failedTasksError">
-          <template #operation>
-            <t-button size="small" @click="reloadFailedTasks">
-              {{ t('system.globalSettings.runtime.retry') }}
-            </t-button>
-          </template>
-        </t-alert>
+        <div v-else-if="failedTasksError" class="rq-failed-error-state">
+          <span>{{ failedTasksError }}</span>
+          <t-button size="small" variant="outline" @click="reloadFailedTasks">
+            {{ t('system.globalSettings.runtime.retry') }}
+          </t-button>
+        </div>
         <t-empty
           v-else-if="failedTasks.length === 0"
           :description="t('system.globalSettings.runtime.failedTasks.empty')"
         />
-        <div v-else class="rq-failed-list">
-          <article v-for="task in failedTasks" :key="task.id" class="rq-failed-card">
-            <div class="rq-failed-card-head">
-              <div class="rq-failed-card-title">
-                <strong>{{ failedTaskTypeLabel(task.type) }}</strong>
-                <code>{{ task.type }}</code>
+        <div v-else class="rq-failed-list-panel">
+          <article
+            v-for="task in failedTasks"
+            :key="task.id"
+            class="rq-failed-row"
+          >
+            <div class="rq-failed-row-content">
+              <div class="rq-failed-row-summary">
+                <span class="rq-failed-row-type">{{ failedTaskTypeLabel(task.type) }}</span>
+                <span class="rq-failed-row-sep" aria-hidden="true">·</span>
+                <span class="rq-failed-row-stat">
+                  {{ t('system.globalSettings.runtime.failedTasks.attempts', { count: task.retried + 1 }) }}
+                </span>
+                <span class="rq-failed-row-sep" aria-hidden="true">·</span>
+                <time :datetime="task.last_failed_at">{{ formatFailedAt(task.last_failed_at) }}</time>
               </div>
-              <time :datetime="task.last_failed_at">{{ formatFailedAt(task.last_failed_at) }}</time>
+              <dl v-if="failedTaskRefs(task).length > 0" class="rq-failed-row-refs">
+                <div v-for="ref in failedTaskRefs(task)" :key="ref.key" class="rq-failed-ref">
+                  <dt>{{ ref.label }}</dt>
+                  <dd :title="ref.value">{{ ref.value }}</dd>
+                </div>
+              </dl>
+              <p v-else class="rq-failed-row-unknown">
+                {{ t('system.globalSettings.runtime.failedTasks.unknownTarget') }}
+              </p>
+              <p class="rq-failed-row-error">
+                {{ task.last_error || t('system.globalSettings.runtime.failedTasks.noError') }}
+              </p>
             </div>
-            <div class="rq-failed-meta">
-              <span>{{ failedTaskTarget(task) }}</span>
-              <span>{{ t('system.globalSettings.runtime.failedTasks.attempts', { count: task.retried + 1 }) }}</span>
-            </div>
-            <div class="rq-failed-error">
-              <span>{{ t('system.globalSettings.runtime.failedTasks.lastError') }}</span>
-              <p>{{ task.last_error || t('system.globalSettings.runtime.failedTasks.noError') }}</p>
-            </div>
-            <div class="rq-failed-actions">
+
+            <div class="rq-failed-row-actions">
               <t-popconfirm
                 theme="warning"
                 :content="t('system.globalSettings.runtime.failedTasks.retryConfirm')"
                 @confirm="retryFailedTask(task)"
               >
                 <t-button
+                  shape="square"
+                  variant="text"
                   size="small"
+                  class="rq-failed-icon-btn"
+                  :title="t('system.globalSettings.runtime.failedTasks.retryOnce')"
+                  :aria-label="t('system.globalSettings.runtime.failedTasks.retryOnce')"
                   :loading="failedTaskActionID === task.id && failedTaskAction === 'retry'"
                   :disabled="Boolean(failedTaskActionID)"
                 >
-                  <template #icon><t-icon name="refresh" /></template>
-                  {{ t('system.globalSettings.runtime.failedTasks.retryOnce') }}
+                  <t-icon name="refresh" />
                 </t-button>
               </t-popconfirm>
               <t-popconfirm
@@ -334,37 +359,57 @@
                 @confirm="removeFailedTask(task)"
               >
                 <t-button
-                  size="small"
+                  shape="square"
                   variant="text"
+                  size="small"
                   theme="danger"
+                  class="rq-failed-icon-btn"
+                  :title="t('system.globalSettings.runtime.failedTasks.deleteRecord')"
+                  :aria-label="t('system.globalSettings.runtime.failedTasks.deleteRecord')"
                   :loading="failedTaskActionID === task.id && failedTaskAction === 'delete'"
                   :disabled="Boolean(failedTaskActionID)"
                 >
-                  {{ t('system.globalSettings.runtime.failedTasks.deleteRecord') }}
+                  <t-icon name="delete" />
                 </t-button>
               </t-popconfirm>
             </div>
           </article>
 
-          <t-button
-            v-if="failedTasksHasMore"
-            variant="outline"
-            class="rq-failed-load-more"
-            :loading="failedTasksLoading"
-            @click="loadMoreFailedTasks"
-          >
-            {{ t('system.globalSettings.runtime.failedTasks.loadMore') }}
-          </t-button>
+          <div ref="failedTasksSentinelRef" class="rq-failed-load-sentinel" aria-hidden="true" />
+
+          <div class="rq-failed-list-footer">
+            <span class="rq-failed-list-status">
+              <template v-if="failedTasksLoadingMore">
+                {{ t('system.globalSettings.runtime.failedTasks.loadingMore') }}
+              </template>
+              <template v-else-if="!failedTasksHasMore">
+                {{ t('system.globalSettings.runtime.failedTasks.loadedAll', { count: failedTasks.length }) }}
+              </template>
+              <template v-else>
+                {{ t('system.globalSettings.runtime.failedTasks.loadedSummary', { count: failedTasks.length }) }}
+              </template>
+            </span>
+            <t-button
+              v-if="failedTasksHasMore"
+              variant="outline"
+              block
+              :loading="failedTasksLoadingMore"
+              @click="loadMoreFailedTasks"
+            >
+              {{ t('system.globalSettings.runtime.failedTasks.loadMore') }}
+            </t-button>
+          </div>
         </div>
-      </div>
-    </t-drawer>
+      </section>
+    </SettingDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import {
   deleteRuntimeFailedTask,
   getRuntimeFailedTasks,
@@ -394,9 +439,11 @@ const failedTasksVisible = ref(false)
 const failedTaskQueue = ref<QueueStat | null>(null)
 const failedTasks = ref<RuntimeFailedTask[]>([])
 const failedTasksLoading = ref(false)
+const failedTasksLoadingMore = ref(false)
 const failedTasksError = ref('')
 const failedTasksPage = ref(1)
 const failedTasksHasMore = ref(false)
+const failedTasksSentinelRef = ref<HTMLElement | null>(null)
 const failedTaskActionID = ref('')
 const failedTaskAction = ref<'retry' | 'delete' | ''>('')
 
@@ -423,20 +470,21 @@ const failedTaskTypeKeys: Record<string, string> = {
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let failedTasksScrollObserver: IntersectionObserver | null = null
 
 const columns = computed(() => [
   { colKey: 'name', title: t('system.globalSettings.runtime.columns.queue'), minWidth: 188 },
-  { colKey: 'active', title: t('system.globalSettings.runtime.columns.active'), width: 74, align: 'right' as const },
-  { colKey: 'pending', title: t('system.globalSettings.runtime.columns.pending'), width: 84, align: 'right' as const },
-  { colKey: 'retry', title: t('system.globalSettings.runtime.columns.retry'), width: 68, align: 'right' as const },
-  { colKey: 'archived', title: t('system.globalSettings.runtime.columns.archived'), width: 96, align: 'right' as const },
-  { colKey: 'latency_ms', title: t('system.globalSettings.runtime.columns.latency'), width: 104, align: 'right' as const },
+  { colKey: 'active', title: t('system.globalSettings.runtime.columns.active'), width: 74, align: 'center' as const },
+  { colKey: 'pending', title: t('system.globalSettings.runtime.columns.pending'), width: 84, align: 'center' as const },
+  { colKey: 'retry', title: t('system.globalSettings.runtime.columns.retry'), width: 68, align: 'center' as const },
+  { colKey: 'archived', title: t('system.globalSettings.runtime.columns.archived'), width: 96, align: 'center' as const },
+  { colKey: 'latency_ms', title: t('system.globalSettings.runtime.columns.latency'), width: 104, align: 'center' as const },
   { colKey: 'status', title: t('system.globalSettings.runtime.columns.status'), width: 96 },
 ])
 const modelColumns = computed(() => [
   { colKey: 'model_id', title: t('system.globalSettings.runtime.models.columns.model'), minWidth: 240 },
-  { colKey: 'active', title: t('system.globalSettings.runtime.models.columns.active'), width: 86, align: 'right' as const },
-  { colKey: 'waiting', title: t('system.globalSettings.runtime.models.columns.waiting'), width: 86, align: 'right' as const },
+  { colKey: 'active', title: t('system.globalSettings.runtime.models.columns.active'), width: 86, align: 'center' as const },
+  { colKey: 'waiting', title: t('system.globalSettings.runtime.models.columns.waiting'), width: 86, align: 'center' as const },
   { colKey: 'usage', title: t('system.globalSettings.runtime.models.columns.usage'), width: 190 },
   { colKey: 'status', title: t('system.globalSettings.runtime.columns.status'), width: 96 },
 ])
@@ -471,6 +519,14 @@ function queueDescription(name: string): string {
   return te(path) ? (t(path) as string) : name
 }
 
+function queueMeta(row: QueueStat): string {
+  const scope = queueDescription(row.name)
+  if (poolQueueCount(row.pool) > 1) {
+    return `${scope} · ${t('system.globalSettings.runtime.weightShort', { value: row.weight })}`
+  }
+  return scope
+}
+
 function failedTaskTypeLabel(type: string): string {
   const key = failedTaskTypeKeys[type]
   if (!key) return type
@@ -478,27 +534,57 @@ function failedTaskTypeLabel(type: string): string {
   return te(path) ? (t(path) as string) : type
 }
 
-function failedTaskTarget(task: RuntimeFailedTask): string {
-  const parts: string[] = []
+interface FailedTaskRef {
+  key: string
+  label: string
+  value: string
+}
+
+function failedTaskRefs(task: RuntimeFailedTask): FailedTaskRef[] {
+  const refs: FailedTaskRef[] = []
   if (task.knowledge_base_id) {
-    parts.push(t('system.globalSettings.runtime.failedTasks.knowledgeBase', { id: task.knowledge_base_id }))
+    refs.push({
+      key: 'kb',
+      label: t('system.globalSettings.runtime.failedTasks.knowledgeBaseLabel'),
+      value: task.knowledge_base_id,
+    })
   }
   if (task.knowledge_id) {
-    parts.push(t('system.globalSettings.runtime.failedTasks.knowledge', { id: task.knowledge_id }))
+    refs.push({
+      key: 'knowledge',
+      label: t('system.globalSettings.runtime.failedTasks.knowledgeLabel'),
+      value: task.knowledge_id,
+    })
   }
   if (task.task_id) {
-    parts.push(t('system.globalSettings.runtime.failedTasks.taskID', { id: task.task_id }))
+    refs.push({
+      key: 'task',
+      label: t('system.globalSettings.runtime.failedTasks.taskIDLabel'),
+      value: task.task_id,
+    })
   }
-  if (parts.length === 0 && task.tenant_id) {
-    parts.push(t('system.globalSettings.runtime.failedTasks.tenant', { id: task.tenant_id }))
+  if (refs.length === 0 && task.tenant_id) {
+    refs.push({
+      key: 'tenant',
+      label: t('system.globalSettings.runtime.failedTasks.tenantLabel'),
+      value: String(task.tenant_id),
+    })
   }
-  return parts.join(' · ') || t('system.globalSettings.runtime.failedTasks.unknownTarget')
+  return refs
 }
 
 function formatFailedAt(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleString(locale.value, { hour12: false })
+  return date.toLocaleString(locale.value, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
 }
 
 function poolLabel(pool: string): string {
@@ -551,25 +637,59 @@ function queueState(row: QueueStat): { label: string; tone: string } {
 async function fetchFailedTasks(reset: boolean) {
   const queue = failedTaskQueue.value?.name
   if (!queue) return
+  if (!reset && (failedTasksLoadingMore.value || !failedTasksHasMore.value)) return
+
+  const page = reset ? 1 : failedTasksPage.value + 1
   if (reset) {
     failedTasksPage.value = 1
     failedTasks.value = []
+    failedTasksLoading.value = true
+  } else {
+    failedTasksLoadingMore.value = true
   }
-  failedTasksLoading.value = true
   failedTasksError.value = ''
   try {
-    const response = await getRuntimeFailedTasks(queue, failedTasksPage.value, FAILED_TASK_PAGE_SIZE)
+    const response = await getRuntimeFailedTasks(queue, page, FAILED_TASK_PAGE_SIZE)
     if (!response.available) {
       failedTasksError.value = t('system.globalSettings.runtime.failedTasks.unavailable')
       return
     }
     failedTasks.value = reset ? response.tasks : [...failedTasks.value, ...response.tasks]
+    failedTasksPage.value = page
     failedTasksHasMore.value = response.has_more
   } catch (err: any) {
     failedTasksError.value = err?.message || t('system.globalSettings.runtime.failedTasks.loadError')
   } finally {
-    failedTasksLoading.value = false
+    if (reset) {
+      failedTasksLoading.value = false
+    } else {
+      failedTasksLoadingMore.value = false
+    }
+    await nextTick()
+    attachFailedTasksScrollObserver()
   }
+}
+
+function detachFailedTasksScrollObserver() {
+  failedTasksScrollObserver?.disconnect()
+  failedTasksScrollObserver = null
+}
+
+function attachFailedTasksScrollObserver() {
+  detachFailedTasksScrollObserver()
+  const sentinel = failedTasksSentinelRef.value
+  if (!sentinel || !failedTasksVisible.value || !failedTasksHasMore.value) return
+  const root = sentinel.closest('.t-drawer__body') as HTMLElement | null
+  if (!root) return
+  failedTasksScrollObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        void loadMoreFailedTasks()
+      }
+    },
+    { root, rootMargin: '96px 0px', threshold: 0 },
+  )
+  failedTasksScrollObserver.observe(sentinel)
 }
 
 function openFailedTasks(row: QueueStat) {
@@ -583,7 +703,7 @@ function reloadFailedTasks() {
 }
 
 function loadMoreFailedTasks() {
-  failedTasksPage.value += 1
+  if (failedTasksLoading.value || failedTasksLoadingMore.value || !failedTasksHasMore.value) return
   return fetchFailedTasks(false)
 }
 
@@ -666,12 +786,30 @@ watch(autoRefresh, (on) => {
   else stopPolling()
 })
 
+watch(failedTasksVisible, async (open) => {
+  if (!open) {
+    detachFailedTasksScrollObserver()
+    return
+  }
+  await nextTick()
+  attachFailedTasksScrollObserver()
+}, { flush: 'post' })
+
+watch(failedTasksHasMore, async () => {
+  if (!failedTasksVisible.value) return
+  await nextTick()
+  attachFailedTasksScrollObserver()
+})
+
 onMounted(() => {
   load(true)
   startPolling()
 })
 
-onUnmounted(() => stopPolling())
+onUnmounted(() => {
+  stopPolling()
+  detachFailedTasksScrollObserver()
+})
 </script>
 
 <style lang="less" scoped>
@@ -895,19 +1033,33 @@ onUnmounted(() => stopPolling())
   margin-bottom: 30px;
 }
 
+.rq-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: var(--td-text-color-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  user-select: none;
+
+  &::before {
+    content: '';
+    flex-shrink: 0;
+    width: 3px;
+    height: 15px;
+    border-radius: 2px;
+    background: var(--td-brand-color);
+  }
+}
+
 .rq-pools-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
   margin-bottom: 14px;
-
-  h3 {
-    margin: 0 0 6px;
-    color: var(--td-text-color-primary);
-    font-size: 16px;
-    font-weight: 600;
-  }
 
   p {
     margin: 0;
@@ -996,13 +1148,6 @@ onUnmounted(() => stopPolling())
   gap: 20px;
   margin-bottom: 14px;
 
-  h3 {
-    margin: 0 0 6px;
-    color: var(--td-text-color-primary);
-    font-size: 16px;
-    font-weight: 600;
-  }
-
   p {
     margin: 0;
     color: var(--td-text-color-secondary);
@@ -1021,21 +1166,94 @@ onUnmounted(() => stopPolling())
   font-variant-numeric: tabular-nums;
 }
 
-.rq-failed-alert {
+.rq-failed-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
   margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
 }
 
-.rq-failed-alert-copy,
-.rq-failed-guide-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  line-height: 1.55;
+.rq-failed-notice__icon {
+  display: grid;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--td-error-color);
+  font-size: 16px;
+  background: color-mix(in srgb, var(--td-error-color) 10%, transparent);
+}
 
-  strong {
-    color: var(--td-text-color-primary);
-    font-weight: 600;
+.rq-failed-notice__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rq-failed-notice__title {
+  margin: 0;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.rq-failed-notice__desc {
+  margin: 0;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.rq-failed-guide-desc {
+  margin: 0;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.rq-failed-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+
+  .setting-drawer__section-title {
+    margin-bottom: 0;
   }
+}
+
+.rq-failed-loading {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+}
+
+.rq-failed-error-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--td-bg-color-container);
 }
 
 .rq-empty {
@@ -1069,9 +1287,13 @@ onUnmounted(() => stopPolling())
 }
 
 .rq-queue-meta {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--td-text-color-placeholder);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .rq-number,
@@ -1111,7 +1333,7 @@ onUnmounted(() => stopPolling())
 
 .rq-backlog {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   flex-direction: column;
   gap: 1px;
 
@@ -1172,6 +1394,7 @@ onUnmounted(() => stopPolling())
     font-size: 12px;
     font-weight: 500;
     letter-spacing: 0.01em;
+    white-space: nowrap;
     background-color: var(--td-bg-color-secondarycontainer) !important;
   }
 
@@ -1181,6 +1404,16 @@ onUnmounted(() => stopPolling())
     padding-bottom: 10px;
     font-size: 14px;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Metric columns: center short numbers under multi-char headers. */
+  &:deep(.t-table th.t-align-center),
+  &:deep(.t-table td.t-align-center) {
+    text-align: center;
+  }
+
+  &:deep(td.t-align-center .rq-failed-count) {
+    margin-inline: auto;
   }
 
   &:deep(.t-table__body tr:last-child td) {
@@ -1195,127 +1428,145 @@ onUnmounted(() => stopPolling())
   line-height: 1.55;
 }
 
-.rq-failed-drawer-inner {
-  display: flex;
-  min-height: 100%;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.rq-failed-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  color: var(--td-text-color-secondary);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.rq-failed-loading {
-  display: flex;
-  min-height: 180px;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--td-text-color-secondary);
-  font-size: 13px;
-}
-
-.rq-failed-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.rq-failed-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+.rq-failed-list-panel {
+  overflow: hidden;
   border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
   background: var(--td-bg-color-container);
 }
 
-.rq-failed-card-head {
+.rq-failed-row {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 8px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
 
-  time {
-    flex-shrink: 0;
-    color: var(--td-text-color-placeholder);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
+  &:last-of-type {
+    border-bottom: 0;
   }
 }
 
-.rq-failed-card-title {
+.rq-failed-row-content {
   display: flex;
   min-width: 0;
+  flex: 1;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+}
 
-  strong {
-    color: var(--td-text-color-primary);
-    font-size: 14px;
-    font-weight: 600;
+.rq-failed-row-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.rq-failed-row-type {
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rq-failed-row-sep {
+  color: var(--td-text-color-placeholder);
+}
+
+.rq-failed-row-stat,
+.rq-failed-row-summary time {
+  font-variant-numeric: tabular-nums;
+}
+
+.rq-failed-row-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 0;
+}
+
+.rq-failed-ref {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+
+  dt {
+    margin: 0;
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: nowrap;
   }
 
-  code {
+  dd {
+    margin: 0;
     overflow: hidden;
-    color: var(--td-text-color-placeholder);
+    color: var(--td-text-color-secondary);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 11px;
+    line-height: 1.45;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
 
-.rq-failed-meta {
+.rq-failed-row-unknown {
+  margin: 2px 0 0;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.rq-failed-row-error {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--td-text-color-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.rq-failed-row-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  color: var(--td-text-color-secondary);
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0;
+  margin-top: -2px;
+}
+
+.rq-failed-icon-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.rq-failed-load-sentinel {
+  height: 1px;
+}
+
+.rq-failed-list-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.rq-failed-list-status {
+  color: var(--td-text-color-placeholder);
   font-size: 12px;
   line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.rq-failed-error {
-  padding: 12px;
-  border-radius: 8px;
-  background: var(--td-bg-color-secondarycontainer);
-
-  > span {
-    color: var(--td-text-color-secondary);
-    font-size: 12px;
-    font-weight: 500;
-  }
-
-  p {
-    margin: 6px 0 0;
-    color: var(--td-text-color-primary);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.55;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-  }
-}
-
-.rq-failed-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.rq-failed-load-more {
-  align-self: center;
-  min-width: 120px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 860px) {
@@ -1374,22 +1625,12 @@ onUnmounted(() => stopPolling())
     }
   }
 
-  .rq-failed-toolbar,
-  .rq-failed-card-head {
-    align-items: flex-start;
-    flex-direction: column;
+  .rq-failed-row {
+    padding: 12px;
   }
 
-  .rq-failed-actions {
-    justify-content: flex-start;
+  .rq-failed-row-summary {
+    gap: 4px;
   }
-}
-</style>
-
-<style lang="less">
-.t-drawer.rq-failed-drawer.t-drawer--right .t-drawer__content-wrapper--right {
-  box-sizing: border-box;
-  width: min(680px, 100vw) !important;
-  max-width: 100vw;
 }
 </style>
