@@ -1020,36 +1020,19 @@ const handleAddWikiModel = () => {
 const handleStorageProviderUpdate = (value: string) => {
   if (formData.value) {
     formData.value.storageProvider = props.mode === 'create'
-      ? pickUsableStorageProvider(value || tenantDefaultStorageProvider.value)
+      ? editorResources.resolveUsableStorageProvider(value || tenantDefaultStorageProvider.value)
       : (value || tenantDefaultStorageProvider.value || 'local')
   }
-}
-
-function pickUsableStorageProvider(candidate?: string): string {
-  const provider = candidate?.trim() || ''
-  const engines = editorResources.storageStatus || []
-  const allowedProviders = editorResources.storageAllowedProviders || []
-  const isUsable = (name: string) => {
-    if (!name) return false
-    const status = engines.find((item) => item.name === name)
-    if (status) return status.allowed !== false && status.available !== false
-    if (engines.length > 0) return false
-    if (allowedProviders.length > 0) return allowedProviders.includes(name)
-    return false
-  }
-
-  if (isUsable(provider)) return provider
-  const fallback = engines.find((item) => item.allowed !== false && item.available !== false)?.name
-  if (fallback) return fallback
-  return allowedProviders[0] || provider || 'local'
 }
 
 async function loadTenantDefaultStorageProvider(force = false) {
   try {
     await editorResources.ensureStorageEngine(force)
-    tenantDefaultStorageProvider.value = pickUsableStorageProvider(editorResources.storageConfig?.default_provider)
+    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider(
+      editorResources.storageConfig?.default_provider,
+    )
   } catch {
-    tenantDefaultStorageProvider.value = 'local'
+    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider()
   }
 }
 
@@ -1057,7 +1040,7 @@ async function loadTenantDefaultStorageProvider(force = false) {
 function resolvedStorageProvider(): string {
   const explicit = formData.value?.storageProvider?.trim()
   if (props.mode === 'create') {
-    return pickUsableStorageProvider(explicit || tenantDefaultStorageProvider.value)
+    return editorResources.resolveUsableStorageProvider(explicit || tenantDefaultStorageProvider.value)
   }
   if (explicit) return explicit
   return tenantDefaultStorageProvider.value || 'local'

@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -157,11 +158,15 @@ func applyTenantDefaultStorageProvider(ctx context.Context, kb *types.KnowledgeB
 		return
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	provider := "local"
+	provider := ""
 	if tenant != nil && tenant.StorageEngineConfig != nil {
-		if p := strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider)); p != "" {
-			provider = p
-		}
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+	if provider == "" || !storageallowlist.IsAllowed(provider) {
+		provider = storageallowlist.FirstAllowed()
+	}
+	if provider == "" {
+		return
 	}
 	kb.SetStorageProvider(provider)
 }

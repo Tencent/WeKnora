@@ -620,7 +620,7 @@ func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 	ks3Configured := h.isKS3Configured(c)
 	obsConfigured := h.isOBSConfigured(c)
 	allowed := getAllowedStorageProviders()
-	allowedProviders := make([]string, 0, len(supportedStorageProviders))
+	allowedProviders := make([]string, 0, len(getSupportedStorageProviders()))
 	for _, provider := range getSupportedStorageProviders() {
 		if allowed[provider] {
 			allowedProviders = append(allowedProviders, provider)

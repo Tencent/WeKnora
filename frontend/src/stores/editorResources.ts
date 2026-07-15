@@ -18,6 +18,27 @@ import { getTenantRetrievalConfig } from '@/api/retrieval'
 
 const CACHE_TTL_MS = 60_000
 
+export function pickUsableStorageProvider(
+  candidate: string | undefined,
+  engines: StorageEngineStatusItem[],
+  allowedProviders: string[],
+): string {
+  const provider = candidate?.trim() || ''
+  const isUsable = (name: string) => {
+    if (!name) return false
+    const status = engines.find((item) => item.name === name)
+    if (status) return status.allowed !== false && status.available !== false
+    if (engines.length > 0) return false
+    if (allowedProviders.length > 0) return allowedProviders.includes(name)
+    return false
+  }
+
+  if (isUsable(provider)) return provider
+  const fallback = engines.find((item) => item.allowed !== false && item.available !== false)?.name
+  if (fallback) return fallback
+  return allowedProviders[0] || provider || 'local'
+}
+
 type EditorResourceKey =
   | 'storageEngine'
   | 'mcpServices'
@@ -71,6 +92,14 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       storageAllowedProviders.value = statusRes?.data?.allowed_providers ?? []
       loadedAt.value.storageEngine = Date.now()
     })
+  }
+
+  function resolveUsableStorageProvider(candidate?: string): string {
+    return pickUsableStorageProvider(
+      candidate,
+      storageStatus.value || [],
+      storageAllowedProviders.value || [],
+    )
   }
 
   async function ensureMcpServices(force = false): Promise<void> {
@@ -193,6 +222,7 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     parserEngines,
     systemInfo,
     ensureStorageEngine,
+    resolveUsableStorageProvider,
     ensureMcpServices,
     ensureSkills,
     ensureAgentTypePresets,

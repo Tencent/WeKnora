@@ -168,10 +168,9 @@ function handleChange() {
 }
 
 function ensureAllowedProvider() {
-  const current = engineOptions.value.find(o => o.value === localProvider.value && !o.disabled)
-  if (current) return
-  const fallback = engineOptions.value.find(o => !o.disabled)?.value || defaultProvider.value || 'local'
-  localProvider.value = fallback
+  const resolved = editorResources.resolveUsableStorageProvider(localProvider.value)
+  if (resolved === localProvider.value) return
+  localProvider.value = resolved
   emit('update:storageProvider', localProvider.value)
 }
 
@@ -187,7 +186,9 @@ async function load(force = false) {
     const engines = editorResources.storageStatus
     engineStatus.value = engines
     allowedProviders.value = editorResources.storageAllowedProviders
-    defaultProvider.value = editorResources.storageConfig?.default_provider || 'local'
+    defaultProvider.value = editorResources.resolveUsableStorageProvider(
+      editorResources.storageConfig?.default_provider,
+    )
     const d = editorResources.storageConfig
     hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name || d?.oss?.bucket_name || d?.ks3?.bucket_name || d?.obs?.bucket_name)
     const parentUnset = !props.storageProvider
