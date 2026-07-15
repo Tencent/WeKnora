@@ -11,6 +11,7 @@ type QARequest struct {
 	CustomAgent        *CustomAgent       // Optional custom agent for config override
 	KnowledgeBaseIDs   []string           // Knowledge base IDs to search (from request + @mentions)
 	KnowledgeIDs       []string           // Specific knowledge (file) IDs to search
+	FolderIDs          []string           // Folder IDs to search (from @mentions); expands to the folder + all descendant folders' knowledges
 	TagScopes          []TagScope         // Tag-constrained KB scopes from @mentions
 	MCPServiceIDs      []string           // Per-request MCP service IDs from @mentions
 	SkillNames         []string           // Per-request preloaded skill names from @mentions

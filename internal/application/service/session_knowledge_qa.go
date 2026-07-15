@@ -84,7 +84,7 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes, req.FolderIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 	}
@@ -432,6 +432,7 @@ func (s *sessionService) buildSearchTargets(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	folderIDs []string,
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
 
@@ -440,6 +441,11 @@ func (s *sessionService) buildSearchTargets(
 
 	// Track which KBs are fully searched
 	fullKBSet := make(map[string]bool)
+
+	// Knowledge IDs scoped to a specific KB (from explicit file mentions or
+	// expanded folder mentions). Built up across the knowledge-ID and folder-ID
+	// passes, then turned into SearchTargetTypeKnowledge targets below.
+	kbToKnowledgeIDs := make(map[string][]string)
 
 	// First pass: batch-fetch KBs, then resolve tenant per ID (tenant scope already set by caller)
 	callerTenantRole := types.TenantRoleFromContext(ctx)
@@ -485,9 +491,10 @@ func (s *sessionService) buildSearchTargets(
 			return targets, nil // Return what we have, don't fail
 		}
 
-		// Group knowledge IDs by their KB, excluding those already covered by full KB search
-		// Also track KB tenant IDs from knowledge items
-		kbToKnowledgeIDs := make(map[string][]string)
+		// Group knowledge IDs by their KB, excluding those already covered by full
+		// KB search. Also track KB tenant IDs from knowledge items. The map is
+		// turned into SearchTargetTypeKnowledge targets once, after the folder
+		// pass below, so folder-expanded IDs are merged in rather than dropped.
 		for _, k := range knowledgeList {
 			if k == nil || k.KnowledgeBaseID == "" {
 				continue
@@ -502,20 +509,64 @@ func (s *sessionService) buildSearchTargets(
 			}
 			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
 		}
+	}
 
-		// Create SearchTargetTypeKnowledge targets for each KB with specific files
-		for kbID, kidList := range kbToKnowledgeIDs {
-			kbTenant := kbTenantMap[kbID]
-			if kbTenant == 0 {
-				kbTenant = tenantID // fallback
+	// Process @mentioned folder IDs. A folder mention is a partial-KB scope:
+	// expand the folder (and its whole subtree) to the knowledge IDs filed
+	// beneath it, then scope retrieval to exactly those files. If the folder's
+	// KB is already searched in full, the folder target is redundant and skipped.
+	if len(folderIDs) > 0 {
+		for _, folderID := range folderIDs {
+			if folderID == "" {
+				continue
 			}
-			targets = append(targets, &types.SearchTarget{
-				Type:            types.SearchTargetTypeKnowledge,
-				KnowledgeBaseID: kbID,
-				TenantID:        kbTenant,
-				KnowledgeIDs:    kidList,
-			})
+			kbID, fTenant, kids, ferr := s.knowledgeService.ExpandFolderToKnowledgeIDs(ctx, folderID)
+			if ferr != nil {
+				logger.Warnf(ctx, "Failed to expand folder %s to knowledge IDs: %v", folderID, ferr)
+				continue
+			}
+			if kbID == "" || fullKBSet[kbID] {
+				continue
+			}
+			if len(kids) == 0 {
+				continue
+			}
+			if kbTenantMap[kbID] == 0 {
+				kbTenantMap[kbID] = fTenant
+			}
+			if kbToKnowledgeIDs[kbID] == nil {
+				kbToKnowledgeIDs[kbID] = make([]string, 0, len(kids))
+			}
+			seen := make(map[string]bool, len(kbToKnowledgeIDs[kbID]))
+			for _, id := range kbToKnowledgeIDs[kbID] {
+				seen[id] = true
+			}
+			for _, id := range kids {
+				if !seen[id] {
+					kbToKnowledgeIDs[kbID] = append(kbToKnowledgeIDs[kbID], id)
+					seen[id] = true
+				}
+			}
 		}
+	}
+
+	// Turn the accumulated per-KB knowledge IDs (from explicit file mentions and
+	// expanded folder mentions) into a single SearchTargetTypeKnowledge target
+	// per KB. Done once here so file + folder scopes on the same KB merge.
+	for kbID, kidList := range kbToKnowledgeIDs {
+		if len(kidList) == 0 {
+			continue
+		}
+		kbTenant := kbTenantMap[kbID]
+		if kbTenant == 0 {
+			kbTenant = tenantID // fallback
+		}
+		targets = append(targets, &types.SearchTarget{
+			Type:            types.SearchTargetTypeKnowledge,
+			KnowledgeBaseID: kbID,
+			TenantID:        kbTenant,
+			KnowledgeIDs:    kidList,
+		})
 	}
 
 	if len(tagScopes) > 0 {
@@ -723,7 +774,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, nil)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, nil, nil)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 	}

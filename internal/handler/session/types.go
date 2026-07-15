@@ -23,9 +23,9 @@ type GenerateTitleRequest struct {
 type MentionedItemRequest struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill"
+	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill", "folder"
 	KBType    string `json:"kb_type"`    // "document" or "faq" (only for kb type)
-	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag mentions
+	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag/folder mentions
 	KBName    string `json:"kb_name"`    // Display name for parent KB
 	ServiceID string `json:"service_id"` // Parent MCP service for MCP tool mentions
 	SkillName string `json:"skill_name"` // Preloaded agent skill name
@@ -45,6 +45,7 @@ type CreateKnowledgeQARequest struct {
 	Query            string                 `json:"query"              binding:"required"` // Query text for knowledge base search
 	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // Selected knowledge base ID for this request
 	KnowledgeIds     []string               `json:"knowledge_ids"`                         // Selected knowledge ID for this request
+	FolderIDs        []string               `json:"folder_ids"`                            // @mentioned folder IDs to scope retrieval to a folder (+ descendants)
 	AgentEnabled     bool                   `json:"agent_enabled"`                         // Whether agent mode is enabled for this request
 	AgentID          string                 `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its tenant from share relation)
 	WebSearchEnabled bool                   `json:"web_search_enabled"`                    // Whether web search is enabled for this request

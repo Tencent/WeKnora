@@ -31,6 +31,7 @@ type qaRequestContext struct {
 	assistantMessage  *types.Message
 	knowledgeBaseIDs  []string
 	knowledgeIDs      []string
+	folderIDs         []string
 	tagScopes         []types.TagScope
 	tagIDs            []string
 	mcpServiceIDs     []string
@@ -63,6 +64,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		CustomAgent:        rc.customAgent,
 		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
 		KnowledgeIDs:       rc.knowledgeIDs,
+		FolderIDs:          rc.folderIDs,
 		TagScopes:          rc.tagScopes,
 		MCPServiceIDs:      rc.mcpServiceIDs,
 		SkillNames:         rc.skillNames,
@@ -128,7 +130,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	customAgent, effectiveTenantID := h.resolveAgent(ctx, c, request.AgentID)
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
-	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
+	kbIDs, knowledgeIDs, folderIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.FolderIDs, request.MentionedItems)
 
 	// The built-in wiki fixer is invoked from a KB page, not from a tenant's
 	// regular agent picker. When the KB is shared, run it in the source tenant
@@ -275,6 +277,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		},
 		knowledgeBaseIDs:  secutils.SanitizeForLogArray(kbIDs),
 		knowledgeIDs:      secutils.SanitizeForLogArray(knowledgeIDs),
+		folderIDs:         secutils.SanitizeForLogArray(folderIDs),
 		tagScopes:         tagScopes,
 		tagIDs:            secutils.SanitizeForLogArray(tagIDs),
 		mcpServiceIDs:     secutils.SanitizeForLogArray(mcpServiceIDs),
@@ -364,8 +367,8 @@ func (h *Handler) resolveAgent(ctx context.Context, c *gin.Context, agentID stri
 	return customAgent, effectiveTenantID
 }
 
-// mergeKnowledgeTargets merges request KB/knowledge IDs with @mentioned items into deduplicated slices.
-func mergeKnowledgeTargets(requestKBIDs []string, requestKnowledgeIDs []string, mentionedItems []MentionedItemRequest) (kbIDs []string, knowledgeIDs []string) {
+// mergeKnowledgeTargets merges request KB/knowledge/folder IDs with @mentioned items into deduplicated slices.
+func mergeKnowledgeTargets(requestKBIDs []string, requestKnowledgeIDs []string, requestFolderIDs []string, mentionedItems []MentionedItemRequest) (kbIDs []string, knowledgeIDs []string, folderIDs []string) {
 	kbIDSet := make(map[string]bool)
 	kbIDs = make([]string, 0, len(requestKBIDs)+len(mentionedItems))
 	for _, id := range requestKBIDs {
@@ -384,6 +387,15 @@ func mergeKnowledgeTargets(requestKBIDs []string, requestKnowledgeIDs []string, 
 		}
 	}
 
+	folderIDSet := make(map[string]bool)
+	folderIDs = make([]string, 0, len(requestFolderIDs)+len(mentionedItems))
+	for _, id := range requestFolderIDs {
+		if id != "" && !folderIDSet[id] {
+			folderIDs = append(folderIDs, id)
+			folderIDSet[id] = true
+		}
+	}
+
 	for _, item := range mentionedItems {
 		if item.ID == "" {
 			continue
@@ -399,9 +411,14 @@ func mergeKnowledgeTargets(requestKBIDs []string, requestKnowledgeIDs []string, 
 				knowledgeIDs = append(knowledgeIDs, item.ID)
 				knowledgeIDSet[item.ID] = true
 			}
+		case "folder":
+			if !folderIDSet[item.ID] {
+				folderIDs = append(folderIDs, item.ID)
+				folderIDSet[item.ID] = true
+			}
 		}
 	}
-	return kbIDs, knowledgeIDs
+	return kbIDs, knowledgeIDs, folderIDs
 }
 
 // sseStreamContext holds the context for SSE streaming

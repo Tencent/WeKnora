@@ -297,7 +297,7 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes, req.FolderIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets for agent: %v", err)
 	}
