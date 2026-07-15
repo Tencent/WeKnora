@@ -204,3 +204,21 @@ CREATE TABLE chunks (
 CREATE INDEX idx_chunks_tenant_knowledge ON chunks(tenant_id, knowledge_id);
 CREATE INDEX idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX idx_chunks_chunk_type ON chunks(chunk_type);
+
+CREATE TABLE processing_artifacts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    stage VARCHAR(64) NOT NULL,
+    key_version INTEGER NOT NULL,
+    input_fingerprint CHAR(64) NOT NULL,
+    payload LONGBLOB NULL,
+    object_path VARCHAR(2048) NOT NULL DEFAULT '',
+    content_sha256 CHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_processing_artifacts_key
+        UNIQUE (tenant_id, stage, key_version, input_fingerprint)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_processing_artifacts_tenant_created
+    ON processing_artifacts (tenant_id, created_at);

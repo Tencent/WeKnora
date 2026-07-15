@@ -184,6 +184,24 @@ CREATE INDEX IF NOT EXISTS idx_chunks_tenant_kg ON chunks(tenant_id, knowledge_i
 CREATE INDEX IF NOT EXISTS idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_chunk_type ON chunks(chunk_type);
 
+CREATE TABLE IF NOT EXISTS processing_artifacts (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    stage VARCHAR(64) NOT NULL,
+    key_version INTEGER NOT NULL,
+    input_fingerprint CHAR(64) NOT NULL,
+    payload BYTEA NULL,
+    object_path TEXT NOT NULL DEFAULT '',
+    content_sha256 CHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_processing_artifacts_key
+        UNIQUE (tenant_id, stage, key_version, input_fingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_processing_artifacts_tenant_created
+    ON processing_artifacts (tenant_id, created_at);
+
 CREATE TABLE IF NOT EXISTS embeddings (
     id SERIAL PRIMARY KEY,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
