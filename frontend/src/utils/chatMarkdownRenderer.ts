@@ -78,6 +78,84 @@ export function replaceIncompleteImageWithPlaceholder(content: string): string {
   return content
 }
 
+const LEGACY_IMAGE_BLOCK_RE = /<image\b([^>]*)>([\s\S]*?)<\/images?>/gi
+const LEGACY_IMAGES_WRAPPER_RE = /<\/?images\b[^>]*>/gi
+const LEGACY_IMAGE_ORIGINAL_RE = /<image_original>([\s\S]*?)<\/image_original>/i
+const LEGACY_IMAGE_CAPTION_RE = /<image_caption>([\s\S]*?)<\/image_caption>/i
+const LEGACY_IMAGE_OCR_RE = /<image_ocr>([\s\S]*?)<\/image_ocr>/i
+const COMPLETE_MARKDOWN_CODE_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g
+
+function legacyImageField(body: string, pattern: RegExp): string {
+  const value = body.match(pattern)?.[1] || ''
+  return value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+}
+
+function escapeMarkdownImageAlt(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]')
+}
+
+function legacyImageBlockToMarkdown(attributes: string, body: string): string {
+  const original = body.match(LEGACY_IMAGE_ORIGINAL_RE)?.[1]?.trim()
+  if (original) return original
+
+  const urlMatch = attributes.match(/\burl\s*=\s*(["'])(.*?)\1/i)
+  const url = urlMatch?.[2]?.trim() || ''
+  const caption = legacyImageField(body, LEGACY_IMAGE_CAPTION_RE)
+  const ocr = legacyImageField(body, LEGACY_IMAGE_OCR_RE)
+  if (!url) return caption || ocr
+
+  const alt = escapeMarkdownImageAlt(caption || ocr || 'image')
+  return `![${alt}](${url})`
+}
+
+function normalizeLegacyImageSegment(content: string): string {
+  return content
+    .replace(
+      LEGACY_IMAGE_BLOCK_RE,
+      (_match, attributes: string, body: string) => legacyImageBlockToMarkdown(attributes, body),
+    )
+    .replace(LEGACY_IMAGES_WRAPPER_RE, '')
+}
+
+/**
+ * Normalize the legacy image-context protocol if a model copies it into an
+ * answer. New chat context is Markdown-native, but persisted conversations and
+ * older deployments can still contain `<image url="…">` blocks.
+ *
+ * Complete blocks become ordinary Markdown images and therefore pass through
+ * the same URL validation/sanitization as model-authored images. While a block
+ * is still streaming, its unfinished tail is replaced by the existing image
+ * skeleton so internal tags, captions, and OCR never flash as prose.
+ */
+export function normalizeLegacyImageContextMarkup(content: string, streaming = false): string {
+  if (!content) return content
+  const hasLegacyImageTag = /<\/?images?\b/i.test(content)
+  const partialTagPattern = /(^|\n)[ \t]*<i(?:m(?:a(?:g(?:e(?:[ \t][^>\n]*)?)?)?)?)?$/i
+  const hasPartialStreamingTag = streaming && partialTagPattern.test(content)
+  if (!hasLegacyImageTag && !hasPartialStreamingTag) return content
+
+  const parts = content.split(COMPLETE_MARKDOWN_CODE_RE)
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = normalizeLegacyImageSegment(parts[i])
+  }
+  if (streaming) {
+    // The split always leaves normal Markdown in the final even-indexed part,
+    // so code examples containing literal <image> tags stay untouched.
+    const tailIndex = parts.length - 1
+    let tail = parts[tailIndex]
+    const openingMatches = Array.from(tail.matchAll(/<image(?:\s|>)/gi))
+    const lastOpening = openingMatches[openingMatches.length - 1]
+    if (lastOpening?.index !== undefined) {
+      tail = tail.slice(0, lastOpening.index) + STREAMING_IMAGE_PLACEHOLDER
+    } else {
+      // Also hide the few frames before the opening tag name itself is complete.
+      tail = tail.replace(partialTagPattern, `$1${STREAMING_IMAGE_PLACEHOLDER}`)
+    }
+    parts[tailIndex] = tail
+  }
+  return parts.join('')
+}
+
 /**
  * Hide a trailing Markdown horizontal-rule candidate while content is streaming.
  *
@@ -353,7 +431,11 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
   const streamingSafeText = options.streaming
     ? stripTrailingStreamingListMarker(stripTrailingStreamingHorizontalRule(rawText))
     : rawText
-  const citationSafeText = stripIncompleteCitationTag(streamingSafeText)
+  const imageContextSafeText = normalizeLegacyImageContextMarkup(
+    streamingSafeText,
+    Boolean(options.streaming),
+  )
+  const citationSafeText = stripIncompleteCitationTag(imageContextSafeText)
   const { text: tagSafe, tags } = preserveCitationTags(citationSafeText)
   const imageSafe = replaceIncompleteImageWithPlaceholder(tagSafe)
   const mathSafe = preprocessMathDelimiters(imageSafe)

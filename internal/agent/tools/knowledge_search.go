@@ -1247,14 +1247,10 @@ func (t *KnowledgeSearchTool) formatOutput(
 				var imageInfos []types.ImageInfo
 				if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
 					for _, img := range imageInfos {
-						ob.WriteString(fmt.Sprintf("<image url=\"%s\">\n", xmlEscape(img.URL)))
-						if img.Caption != "" {
-							ob.WriteString(fmt.Sprintf("<image_caption>%s</image_caption>\n", xmlEscape(img.Caption)))
+						if imageMarkdown := searchutil.BuildImageInfoMarkdownWithURL(img.URL, &img); imageMarkdown != "" {
+							ob.WriteString(imageMarkdown)
+							ob.WriteString("\n")
 						}
-						if img.OCRText != "" {
-							ob.WriteString(fmt.Sprintf("<image_ocr>%s</image_ocr>\n", xmlEscape(img.OCRText)))
-						}
-						ob.WriteString("</image>\n")
 					}
 				}
 			}

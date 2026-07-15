@@ -412,7 +412,7 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 	for _, c := range chunks {
 		if c.ChunkType == types.ChunkTypeFAQ {
 			writeFAQEntryXML(&b, c)
-			writeChunkImagesXML(&b, c)
+			writeChunkImagesMarkdown(&b, c)
 			continue
 		}
 
@@ -424,7 +424,7 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 				c.ID, c.ChunkIndex, c.ChunkType)
 		}
 		fmt.Fprintf(&b, "<content>%s</content>\n", summarizeContent(c.Content))
-		writeChunkImagesXML(&b, c)
+		writeChunkImagesMarkdown(&b, c)
 		b.WriteString("</chunk>\n")
 	}
 
@@ -436,7 +436,7 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 	return b.String()
 }
 
-func writeChunkImagesXML(b *strings.Builder, c *types.Chunk) {
+func writeChunkImagesMarkdown(b *strings.Builder, c *types.Chunk) {
 	if c == nil || c.ImageInfo == "" {
 		return
 	}
@@ -445,18 +445,10 @@ func writeChunkImagesXML(b *strings.Builder, c *types.Chunk) {
 		return
 	}
 	for _, img := range imageInfos {
-		if img.URL != "" {
-			fmt.Fprintf(b, "<image url=\"%s\">\n", img.URL)
-		} else {
-			b.WriteString("<image>\n")
+		if imageMarkdown := searchutil.BuildImageInfoMarkdownWithURL(img.URL, &img); imageMarkdown != "" {
+			b.WriteString(imageMarkdown)
+			b.WriteString("\n")
 		}
-		if img.Caption != "" {
-			fmt.Fprintf(b, "<image_caption>%s</image_caption>\n", img.Caption)
-		}
-		if img.OCRText != "" {
-			fmt.Fprintf(b, "<image_ocr>%s</image_ocr>\n", img.OCRText)
-		}
-		b.WriteString("</image>\n")
 	}
 }
 

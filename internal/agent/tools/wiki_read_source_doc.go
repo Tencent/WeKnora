@@ -96,15 +96,9 @@ func enrichChunkContent(c *types.Chunk) string {
 		if err := json.Unmarshal([]byte(c.ImageInfo), &imgInfos); err == nil && len(imgInfos) > 0 {
 			var imgBuilder strings.Builder
 			for _, img := range imgInfos {
-				if img.URL != "" {
-					imgBuilder.WriteString(fmt.Sprintf("\n<image url=\"%s\">\n", img.URL))
-					if img.Caption != "" {
-						imgBuilder.WriteString(fmt.Sprintf("<caption>%s</caption>\n", img.Caption))
-					}
-					if img.OCRText != "" {
-						imgBuilder.WriteString(fmt.Sprintf("<ocr_text>%s</ocr_text>\n", img.OCRText))
-					}
-					imgBuilder.WriteString("</image>")
+				if imageMarkdown := searchutil.BuildImageInfoMarkdownWithURL(img.URL, &img); imageMarkdown != "" {
+					imgBuilder.WriteString("\n")
+					imgBuilder.WriteString(imageMarkdown)
 				}
 			}
 			content += imgBuilder.String()
@@ -163,7 +157,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	pageSize := 100
 	page := 1
 	if hasRange {
-		page = (params.StartChunkIndex - 1) / pageSize + 1
+		page = (params.StartChunkIndex-1)/pageSize + 1
 	}
 
 	var chunksOutput strings.Builder
@@ -293,7 +287,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	}
 
 	sb.WriteString(fmt.Sprintf("<total_chunks>%d</total_chunks>\n</metadata>\n", totalChunks))
-	
+
 	if matchCount > 0 {
 		sb.WriteString(fmt.Sprintf("<chunks count=\"%d\">\n", matchCount))
 		sb.WriteString(chunksOutput.String())
