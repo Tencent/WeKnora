@@ -35,7 +35,7 @@ func (s *StorageBackendService) Create(ctx context.Context, backend *types.Stora
 		return err
 	}
 	if err := s.Test(ctx, backend); err != nil {
-		return apperrors.NewBadRequestError("storage connection test failed").WithDetails(err.Error())
+		return apperrors.NewBadRequestError("storage connection test failed").WithDetails(secutils.SanitizeStorageConnectivityError(err))
 	}
 	backend.CreatedAt, backend.UpdatedAt = time.Now(), time.Now()
 	if err := s.repo.Create(ctx, backend); err != nil {
@@ -87,7 +87,7 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 		return err
 	}
 	if err := s.Test(ctx, incoming); err != nil {
-		return apperrors.NewBadRequestError("storage connection test failed").WithDetails(err.Error())
+		return apperrors.NewBadRequestError("storage connection test failed").WithDetails(secutils.SanitizeStorageConnectivityError(err))
 	}
 	incoming.UpdatedAt = time.Now()
 	return s.repo.Update(ctx, incoming)

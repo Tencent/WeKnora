@@ -131,12 +131,34 @@ func ValidateKBScopedStoragePath(filePath string, tenantID uint64) error {
 	return nil
 }
 
+// storageBackendScheme wraps a provider:// path with the concrete instance id:
+// storage://<backendID>/<provider>://...  It is duplicated here (rather than
+// reusing types.ParseStorageBackendPath) because internal/types already imports
+// internal/utils, so a reverse import would create a cycle.
+const storageBackendScheme = "storage://"
+
+// unwrapStorageBackendPath strips a leading storage://<backendID>/ wrapper and
+// returns the inner provider:// path. Non-wrapped paths are returned unchanged.
+// This keeps tenant/exports parsing anchored on the provider path instead of
+// relying on the backend id happening not to look like a tenant segment.
+func unwrapStorageBackendPath(filePath string) string {
+	if !strings.HasPrefix(filePath, storageBackendScheme) {
+		return filePath
+	}
+	rest := strings.TrimPrefix(filePath, storageBackendScheme)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return filePath
+	}
+	return parts[1]
+}
+
 // storagePathHasExportsScope reports whether tenantID appears next to an
 // exports segment in either canonical layout:
 //   - {tenant}/exports/...  (local, minio, s3, most cloud backends)
 //   - exports/{tenant}/...  (OSS temp-bucket layout)
 func storagePathHasExportsScope(filePath string, tenantID uint64) bool {
-	_, rest, ok := strings.Cut(filePath, "://")
+	_, rest, ok := strings.Cut(unwrapStorageBackendPath(filePath), "://")
 	if !ok {
 		return false
 	}
@@ -165,6 +187,9 @@ func storagePathHasExportsScope(filePath string, tenantID uint64) bool {
 // Callers that have an authoritative resource-owner tenant ID available
 // should pass it directly to SignFileURL instead of relying on this parser.
 func ParseTenantIDFromStoragePath(filePath string) uint64 {
+	// Unwrap storage://<backendID>/ so the tenant scan is anchored on the inner
+	// provider path, not the (opaque) backend id.
+	filePath = unwrapStorageBackendPath(filePath)
 	// Strip scheme: "local://1/abc/img.png" → "1/abc/img.png"
 	_, rest, ok := strings.Cut(filePath, "://")
 	if !ok {

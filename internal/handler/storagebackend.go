@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -9,6 +10,18 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
+
+// storageTestErrorMessage returns a safe user-facing message for a storage
+// connectivity test failure. Validation/AppError messages are already
+// user-facing and are passed through, while raw driver/network errors are
+// sanitized so they don't leak internal hostnames, IPs, ports or TLS details.
+func storageTestErrorMessage(err error) string {
+	var appErr *apperrors.AppError
+	if errors.As(err, &appErr) {
+		return appErr.Message
+	}
+	return sanitizeStorageCheckError(err)
+}
 
 type StorageBackendHandler struct {
 	repo    interfaces.StorageBackendRepository
@@ -121,7 +134,7 @@ func (h *StorageBackendHandler) TestRaw(c *gin.Context) {
 		return
 	}
 	if err := h.service.Test(c.Request.Context(), backend); err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": storageTestErrorMessage(err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -138,7 +151,7 @@ func (h *StorageBackendHandler) TestByID(c *gin.Context) {
 		return
 	}
 	if err := h.service.Test(c.Request.Context(), backend); err != nil {
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": storageTestErrorMessage(err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
