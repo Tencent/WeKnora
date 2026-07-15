@@ -93,6 +93,14 @@ import (
 	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
 )
 
+func registerProcessingArtifactRepository(container *dig.Container) {
+	must(container.Provide(repository.NewProcessingArtifactRepository))
+}
+
+func registerProcessingArtifactStore(container *dig.Container) {
+	must(container.Provide(service.NewProcessingArtifactStore))
+}
+
 // BuildContainer constructs the dependency injection container
 // Registers all components, services, repositories and handlers needed by the application
 // Creates a fully configured application container with proper dependency resolution
@@ -148,6 +156,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
+	registerProcessingArtifactRepository(container)
 	must(container.Provide(repository.NewKnowledgeTagRepository))
 	must(container.Provide(repository.NewSessionRepository))
 	must(container.Provide(repository.NewMessageRepository))
@@ -196,6 +205,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewKnowledgeService))
 	must(container.Provide(service.NewSpanTracker))
 	must(container.Provide(service.NewChunkService))
+	registerProcessingArtifactStore(container)
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
 	must(container.Provide(service.NewModelService))
