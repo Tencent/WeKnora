@@ -182,44 +182,38 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 	}
 }
 
-func TestKnowledgeBaseCreateRouteRequiresFullAccessForAPIKeys(t *testing.T) {
+func TestKnowledgeBaseLifecycleRoutesDeclareManageCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
 	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
 
-	// Creating a KB is open to full-access keys (tenant-wide authority),
-	// matching KB update/delete, but carries no capability so scoped keys
-	// stay denied.
-	policy := mustLookupAPIKeyPolicy(t, g, http.MethodPost, "/api/v1/knowledge-bases")
-	if !policy.RequireFullAccess {
-		t.Fatal("KB create should require full access for API keys")
-	}
-	if len(policy.Capabilities) != 0 {
-		t.Fatalf("KB create must not be granted by any capability: %#v", policy.Capabilities)
-	}
-}
-
-func TestKnowledgeBaseCopyRoutesRemainDefaultDenyForAPIKeys(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	g := &rbacGuards{}
-	v1 := gin.New().Group("/api/v1")
-
-	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
-
+	// The whole KB lifecycle (create/copy/duplicate/update/delete) shares one
+	// policy tier: manage_kbs OR full-access. create/copy/duplicate produce a
+	// new KB but are still KB-management operations, so manage_kbs admits them
+	// (the allow-list bounds copy/duplicate/update/delete downstream; ingest
+	// must never grant any of these).
 	cases := []struct {
 		method string
 		path   string
 	}{
+		{http.MethodPost, "/api/v1/knowledge-bases"},
 		{http.MethodPost, "/api/v1/knowledge-bases/copy"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/duplicate"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			if _, ok := g.apiKeyAuthorizer.Lookup(tc.method, tc.path); ok {
-				t.Fatalf("route should remain default-deny for API keys: %s %s", tc.method, tc.path)
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityManageKnowledgeBases) {
+				t.Fatalf("policy capabilities = %#v, want manage_kbs", policy.Capabilities)
+			}
+			if policyHasCapability(policy, types.APIKeyCapabilityIngest) {
+				t.Fatalf("KB lifecycle route must not be granted by ingest: %#v", policy.Capabilities)
 			}
 		})
 	}

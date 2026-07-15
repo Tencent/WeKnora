@@ -53,7 +53,7 @@ export interface APIPrincipalTestToken {
 //  - 'chat': run the conversation flow (sessions + agent listing + self identity)
 //  - 'read_agents': list/read agents without chat or authoring
 //  - 'ingest': write content into allowed knowledge bases (docs/chunks/FAQ/tags/wiki)
-//  - 'manage_kbs': manage existing knowledge-base metadata/configuration
+//  - 'manage_kbs': manage the KB lifecycle (create/copy/duplicate/update/delete + config)
 //  - 'manage_agents': create/update/delete/copy agents
 //  - 'message_history': search/read tenant chat-history metadata
 //  - 'manage_models': manage tenant model definitions, checks, and credentials

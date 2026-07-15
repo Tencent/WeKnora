@@ -6225,7 +6225,7 @@ export default {
       capabilityIngest: 'Write KB content',
       capabilityIngestHint: 'Let this key write content into its allowed knowledge bases (upload documents, edit chunks/FAQ/tags/wiki). It cannot create knowledge bases or agents, cannot clear a knowledge base, and stays bounded to the selected knowledge bases.',
       capabilityManageKbs: 'Manage knowledge bases',
-      capabilityManageKbsHint: 'Let this key update or delete existing knowledge bases and change their initialization/configuration within the selected scope. It does not create new knowledge bases.',
+      capabilityManageKbsHint: 'Let this key manage the full knowledge-base lifecycle: create, copy, update, and delete knowledge bases and change their initialization/configuration. Operations on existing knowledge bases (copy/update/delete) stay bounded by the selected scope; creating a new knowledge base is unrestricted (the new KB belongs to this space).',
 	      capabilityManageAgents: 'Manage agents',
 	      capabilityManageAgentsHint: 'Let this key create, update, delete and copy agents. Agent config can carry sensitive model/MCP bindings, so this is off by default — enable only when needed.',
 	      capabilityMessageHistory: 'Message history',

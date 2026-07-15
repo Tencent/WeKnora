@@ -404,26 +404,38 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 
 // RegisterKnowledgeBaseRoutes 注册知识库相关的路由
 func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
-	// 知识库路由组。Scoped API key 需要 retrieve 能力读取（限 KB 范围）；KB 内容写入
-	// 由 RegisterKnowledgeRoutes/FAQ/Tag/Wiki 等子路由的 ingest 能力控制；
-	// KB 自身的元数据/生命周期管理需要 full access 或 manage_kbs。创建/拷贝
-	// KB 没有单个目标 KB 可约束，因此不对 scoped key 开放（capability 无法
-	// 把它约束到某个 KB 上）；但 full-access key 是空间级全权，与它已能
-	// 更新/删除/管理 KB 对齐，允许其创建 KB，消除"能删不能建"的不一致。
+	// 知识库路由组。API-key 可达性按能力分两档，全部通过 apiKeyGroup 声明，
+	// 不要再用裸 kbgrp.Handle 注册（那会绕过网关、对所有 key 静默默认拒绝）：
+	//
+	//   1. 读取（list/detail/search/progress/move-targets）—— retrieve OR full-access（kb）
+	//   2. KB 生命周期管理（create/copy/duplicate/update/delete）
+	//      —— manage_kbs OR full-access（kbManagement）
+	//
+	// 第 2 档整条 KB 生命周期共用同一策略：manage_kbs 是「管理知识库」capability，
+	// 建/拷/改/删都是它的分内事。KB 的 allow-list 仍在下游生效——copy/duplicate/
+	// update/delete 的目标 KB 会被 allow-list 兜住；create 无源可约束，限定 allow-list
+	// 的 key 建出的新 KB 落在其 allow-list 之外（同租户、无越权，只是建完自己管不到），
+	// 空 allow-list 的 key 则是全租户 KB 管理、新建天然在范围内。KB 内容写入（文档/
+	// 分块/FAQ/Tag/Wiki）由对应子路由的 ingest 能力控制，不在本组。
 	kbgrp := r.Group("/knowledge-bases")
 	kb := g.apiKeyGroup(kbgrp, apiKeyRetrieve(apiKeyFullAccess()))
 	kbManagement := kb.With(apiKeyManageKnowledgeBases(apiKeyFullAccess()))
 	{
-		// 创建知识库 — Contributor+ for JWT callers; full-access API keys may
-		// create KBs (scoped keys stay default-deny: no KB to bound against).
-		kb.With(apiKeyFullAccess()).POST("", g.Contributor(), handler.CreateKnowledgeBase)
+		// 创建知识库 — JWT Contributor+；API key 需 manage_kbs 或 full-access。
+		kbManagement.POST("", g.Contributor(), handler.CreateKnowledgeBase)
 		// 获取知识库列表 — Viewer+ for JWT callers; retrieve-capable API keys pass via the gate.
 		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
 		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id", g.Viewer(), g.KBAccessRead("id"), handler.GetKnowledgeBase)
-		// 更新知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
+		// 更新/删除知识库 — 两层正交鉴权，缺一不可：
+		//   OwnedKBOrAdmin  管「租户内」归属：非创建者的 Contributor 改不了
+		//                   同事的 KB（跨租户 KB 在此走 lookup=NotFound → 交给
+		//                   下游处理，不在此拦）。
+		//   KBAccessWrite   管「跨租户」访问级：自有 KB 或被组织共享(editor)。
+		// handler 内再按 permission/所有者租户做最终判定 —— 尤其 DeleteKnowledgeBase
+		// 以调用者「自身」租户(c.Keys，未被 KBAccess 改写)校验 kb.TenantID，
+		// 把删除锁死为「所有者租户 + Admin」，共享 editor 无法删除源 KB。
 		kbManagement.PUT("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeBase)
-		// 删除知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
 		kbManagement.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
 		// Pin state is now per-(user, kb) (migration 000050). Anyone with
@@ -437,11 +449,16 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// POST is preferred; GET with JSON body is kept for backward compatibility (#1727).
 		kb.POST("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
 		kb.GET("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
-		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)
-		kbgrp.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
-		// 创建知识库副本 — Contributor+ 且对源 KB 有 read 权限；只创建新的 KB 设置记录，不复制内容/索引/分享。
-		kbgrp.POST("/:id/duplicate", g.Contributor(), g.KBAccessRead("id"), handler.DuplicateKnowledgeBase)
-		// 获取知识库复制进度 — Viewer+
+		// 拷贝知识库 — 产出新 KB，与 create 同档：JWT Contributor+，API key 需 manage_kbs 或 full-access。
+		// 源 KB 通过 body 里的 source_id 传入（非 :id 路径参数），无法套用基于路径参数
+		// 的 KBAccessRead，故源/目标 KB 的租户归属与 allow-list 校验在 handler 内完成
+		// （requireTenantAPIKeyKnowledgeBases 会把 source_id/target_id 兜进 allow-list）。
+		// 副本归调用者所有，不需要原 KB 的所有权。
+		kbManagement.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
+		// 创建知识库副本 — 产出新 KB，与 create 同档：JWT Contributor+，API key 需 manage_kbs 或 full-access；
+		// 且对源 KB 有 read 权限（KBAccessRead 会对限定 key 兜住源 KB）。只创建新的 KB 设置记录，不复制内容/索引/分享。
+		kbManagement.POST("/:id/duplicate", g.Contributor(), g.KBAccessRead("id"), handler.DuplicateKnowledgeBase)
+		// 获取知识库复制进度 — Viewer+；只读，retrieve OR full-access 均可轮询（租户自查）。
 		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
 		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
 		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)

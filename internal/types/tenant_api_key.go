@@ -60,10 +60,16 @@ const (
 	// bases or agents, nor destructive KB clears, and the key's
 	// knowledge_base_ids allow-list still bounds every write.
 	APIKeyCapabilityIngest APIKeyCapability = "ingest"
-	// APIKeyCapabilityManageKnowledgeBases lets a scoped key manage existing
-	// knowledge-base metadata/configuration within its allowed KB scope. It is
-	// separate from ingest: uploading or editing KB contents does not imply
-	// permission to rename, reconfigure, or delete the KB itself.
+	// APIKeyCapabilityManageKnowledgeBases lets a scoped key manage the full
+	// knowledge-base lifecycle: create, copy, duplicate, rename/reconfigure,
+	// and delete. For operations that target an existing KB (copy/duplicate
+	// source, update, delete) the key's allowed KB scope still bounds which
+	// KBs it may touch; create has no source to bound against, so a
+	// scope-restricted key may add a new KB to its tenant (same-tenant, no
+	// cross-tenant reach — the new KB simply falls outside the key's
+	// allow-list and stays unmanageable by it). It is separate from ingest:
+	// uploading or editing KB contents does not imply permission to manage
+	// the KB itself.
 	APIKeyCapabilityManageKnowledgeBases APIKeyCapability = "manage_kbs"
 	// APIKeyCapabilityManageAgents lets a key create/read/update/delete/copy
 	// agents. Agent config can carry sensitive model/MCP bindings, so this is

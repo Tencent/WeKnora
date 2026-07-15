@@ -6250,7 +6250,7 @@ export default {
       capabilityIngest: "写入知识库内容",
       capabilityIngestHint: "允许向授权范围内的知识库写入内容（上传文档、编辑分块/FAQ/标签/wiki）；不能新建知识库、不能新建智能体、不能清空知识库，且仅限所选知识库范围。",
       capabilityManageKbs: "管理知识库",
-      capabilityManageKbsHint: "允许在所选知识库范围内修改或删除已有知识库，并调整初始化/配置信息；不允许新建知识库。",
+      capabilityManageKbsHint: "允许管理知识库全生命周期：新建、复制、修改、删除知识库并调整初始化/配置信息。针对已有知识库的操作（复制/更新/删除）仍受所选知识库范围限制；新建不受限（新知识库归本空间）。",
 	      capabilityManageAgents: "管理智能体",
 	      capabilityManageAgentsHint: "允许创建、修改、删除、复制智能体。智能体配置可能含模型/MCP 等敏感绑定，默认关闭，按需开启。",
 	      capabilityMessageHistory: "消息历史",

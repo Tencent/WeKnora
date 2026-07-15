@@ -6229,7 +6229,7 @@ export default {
       capabilityIngest: "지식베이스 콘텐츠 쓰기",
       capabilityIngestHint: "허용된 지식베이스에 콘텐츠를 작성할 수 있습니다(문서 업로드, 청크/FAQ/태그/wiki 편집). 지식베이스나 에이전트를 새로 만들 수 없고, 지식베이스를 비울 수 없으며, 선택한 지식베이스 범위로 제한됩니다.",
       capabilityManageKbs: "지식베이스 관리",
-      capabilityManageKbsHint: "선택한 범위 안에서 기존 지식베이스를 수정 또는 삭제하고 초기화/설정을 변경할 수 있습니다. 새 지식베이스 생성은 허용하지 않습니다.",
+      capabilityManageKbsHint: "지식베이스 전체 수명 주기를 관리할 수 있습니다: 생성, 복사, 수정, 삭제 및 초기화/설정 변경. 기존 지식베이스에 대한 작업(복사/수정/삭제)은 선택한 범위로 제한되며, 새 지식베이스 생성은 제한되지 않습니다(새 지식베이스는 이 스페이스에 속함).",
 	      capabilityManageAgents: "에이전트 관리",
 	      capabilityManageAgentsHint: "에이전트를 생성, 수정, 삭제, 복사할 수 있습니다. 에이전트 설정에는 모델/MCP 등 민감한 바인딩이 포함될 수 있으므로 기본적으로 꺼져 있으며 필요할 때만 켜세요.",
 	      capabilityMessageHistory: "메시지 기록",
