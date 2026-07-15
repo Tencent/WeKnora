@@ -1026,7 +1026,21 @@ const handleStorageProviderUpdate = (value: string) => {
 async function loadTenantDefaultStorageProvider(force = false) {
   try {
     await editorResources.ensureStorageEngine(force)
-    tenantDefaultStorageProvider.value = editorResources.storageConfig?.default_provider || 'local'
+    const rawDefault = editorResources.storageConfig?.default_provider || 'local'
+    const engines = editorResources.storageStatus
+    // Check whether the tenant's configured default is permitted by STORAGE_ALLOW_LIST.
+    // If not, substitute the first allowed engine so the form is never pre-filled with a
+    // provider the backend would reject — even when the storage tab is never visited.
+    const isAllowed = (name: string) => {
+      const e = engines.find(en => en.name === name)
+      return !!e && e.allowed !== false
+    }
+    tenantDefaultStorageProvider.value = isAllowed(rawDefault)
+      ? rawDefault
+      // prefer allowed + available; fall back to allowed-only if nothing is configured yet
+      : (engines.find(e => e.allowed !== false && e.available)?.name
+         ?? engines.find(e => e.allowed !== false)?.name
+         ?? rawDefault)
   } catch {
     tenantDefaultStorageProvider.value = 'local'
   }
