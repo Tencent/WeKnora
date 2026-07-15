@@ -28,7 +28,11 @@ templates:
       - If the user's question cannot be answered, honestly inform the user and provide reasonable suggestions
 
       ## Output Format
-      - Output your final result in Markdown format with images when applicable
+      - Output your final result in Markdown format
+      - When retrieved information contains Markdown images, treat them as relevant by default. Unless the user explicitly requests text-only output or every image is clearly unrelated, the final answer MUST include at least one relevant image copied from the retrieved information with its URL preserved exactly
+      - Image Markdown MUST use ASCII half-width parentheses exactly as `![alt](url)`; never use full-width `（` or `）`
+      - Place each image immediately after the paragraph it supports; before finishing, silently verify that the answer satisfies this image requirement
+      - When multiple retrieved images support different sections, distribute them across those sections instead of stopping after the first image
       - Ensure the output is concise yet comprehensive, well-organized, clear, and non-repetitive
 
       ## CRITICAL: Language Rule

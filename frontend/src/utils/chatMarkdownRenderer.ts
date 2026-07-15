@@ -84,6 +84,33 @@ const LEGACY_IMAGE_ORIGINAL_RE = /<image_original>([\s\S]*?)<\/image_original>/i
 const LEGACY_IMAGE_CAPTION_RE = /<image_caption>([\s\S]*?)<\/image_caption>/i
 const LEGACY_IMAGE_OCR_RE = /<image_ocr>([\s\S]*?)<\/image_ocr>/i
 const COMPLETE_MARKDOWN_CODE_RE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g
+const IMAGE_URL_SCHEME = '(?:https?|resource|storage|local|minio|s3|cos|tos|oss|obs|ks3)'
+const FULLWIDTH_IMAGE_OPEN_RE = new RegExp(`(!\\[[^\\]\\n]*\\])（(?=${IMAGE_URL_SCHEME}://)`, 'gi')
+const FULLWIDTH_IMAGE_CLOSE_RE = new RegExp(
+  `(!\\[[^\\]\\n]*\\]\\(${IMAGE_URL_SCHEME}://[^）\\n]*?)）`,
+  'gi',
+)
+
+/**
+ * Repair image Markdown when a model localizes its destination parentheses:
+ * `![alt]（resource://…）` -> `![alt](resource://…)`.
+ *
+ * The rewrite is limited to supported image URL schemes and skips code, so
+ * ordinary Chinese punctuation and literal Markdown examples stay unchanged.
+ * Normalizing an opening parenthesis before the closing one streams in also
+ * lets the existing incomplete-image skeleton suppress the unstable tail.
+ */
+export function normalizeFullwidthMarkdownImageParentheses(content: string): string {
+  if (!content || (!content.includes('（') && !content.includes('）'))) return content
+
+  const parts = content.split(COMPLETE_MARKDOWN_CODE_RE)
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i]
+      .replace(FULLWIDTH_IMAGE_OPEN_RE, '$1(')
+      .replace(FULLWIDTH_IMAGE_CLOSE_RE, '$1)')
+  }
+  return parts.join('')
+}
 
 function legacyImageField(body: string, pattern: RegExp): string {
   const value = body.match(pattern)?.[1] || ''
@@ -437,7 +464,8 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
   )
   const citationSafeText = stripIncompleteCitationTag(imageContextSafeText)
   const { text: tagSafe, tags } = preserveCitationTags(citationSafeText)
-  const imageSafe = replaceIncompleteImageWithPlaceholder(tagSafe)
+  const normalizedImageMarkdown = normalizeFullwidthMarkdownImageParentheses(tagSafe)
+  const imageSafe = replaceIncompleteImageWithPlaceholder(normalizedImageMarkdown)
   const mathSafe = preprocessMathDelimiters(imageSafe)
   const restoredTags = restoreCitationTags(mathSafe, tags)
   const inlineTags = joinCitationTagsToPreviousLine(restoredTags)

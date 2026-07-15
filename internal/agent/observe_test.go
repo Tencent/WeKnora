@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,6 +161,37 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 		assert.Equal(t, "assistant", out[2].Role)
 		assert.Equal(t, "thinking", out[2].ReasoningContent)
 	})
+}
+
+func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *testing.T) {
+	engine := &AgentEngine{}
+	prior := []chat.Message{
+		{Role: "system", Content: "Custom agent prompt."},
+		{Role: "user", Content: "解释流程"},
+	}
+	step := types.AgentStep{
+		ToolCalls: []types.ToolCall{{
+			ID:   "call-image",
+			Name: "knowledge_search",
+			Result: &types.ToolResult{
+				Success: true,
+				Output:  "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)",
+			},
+		}},
+	}
+
+	out := engine.appendToolResults(prior, step)
+	require.Len(t, out, 4)
+	assert.Contains(t, out[0].Content, "Custom agent prompt.")
+	assert.Contains(t, out[0].Content, agentRetrievedImageRequirementMarker)
+	assert.Contains(t, out[0].Content, "MUST include at least one relevant Markdown image")
+	assert.Contains(t, out[0].Content, "ASCII half-width parentheses")
+	assert.Equal(t, "tool", out[3].Role)
+	assert.Contains(t, out[3].Content, "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
+
+	// A later image-bearing step must not duplicate the system requirement.
+	out = engine.appendToolResults(out, step)
+	assert.Equal(t, 1, strings.Count(out[0].Content, agentRetrievedImageRequirementMarker))
 }
 
 func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {

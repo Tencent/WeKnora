@@ -6,6 +6,7 @@ import {
   closeDanglingStreamingEmphasis,
   createChatMarkdownRenderer,
   markStandaloneStrongParagraphs,
+  normalizeFullwidthMarkdownImageParentheses,
   normalizeLegacyImageContextMarkup,
   preprocessMathDelimiters,
   renderChatMarkdown,
@@ -44,6 +45,56 @@ test('replaceIncompleteImageWithPlaceholder hides an unfinished streaming image'
     replaceIncompleteImageWithPlaceholder('before ![chart](local://bucket/path'),
     'before <span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>',
   )
+})
+
+test('normalizeFullwidthMarkdownImageParentheses repairs localized image delimiters', () => {
+  const ref = 'resource://yB7V7wE1gls7h9WonCDq5Q'
+  assert.equal(
+    normalizeFullwidthMarkdownImageParentheses(`![]（${ref}）`),
+    `![](${ref})`,
+  )
+  assert.equal(
+    normalizeFullwidthMarkdownImageParentheses(`![流程图]（${ref}）`),
+    `![流程图](${ref})`,
+  )
+  assert.equal(
+    normalizeFullwidthMarkdownImageParentheses(`普通中文（说明）和 ![示例]（unknown://value）`),
+    `普通中文（说明）和 ![示例]（unknown://value）`,
+  )
+})
+
+test('normalizeFullwidthMarkdownImageParentheses preserves literal examples in code', () => {
+  const code = '`![]（resource://example）`\n```md\n![]（resource://example）\n```'
+  assert.equal(normalizeFullwidthMarkdownImageParentheses(code), code)
+})
+
+test('renderChatMarkdown safely renders an image with fullwidth parentheses', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    isValidImageUrl: (href) => href.startsWith('resource://'),
+  })
+  const html = renderChatMarkdown('![]（resource://yB7V7wE1gls7h9WonCDq5Q）', {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+  })
+
+  assert.match(html, /<img src="resource:\/\/yB7V7wE1gls7h9WonCDq5Q" alt="">/)
+  assert.doesNotMatch(html, /（|）/)
+})
+
+test('renderChatMarkdown hides an unfinished fullwidth-parenthesis image while streaming', () => {
+  const renderer = createChatMarkdownRenderer()
+  const html = renderChatMarkdown('before ![流程图]（resource://yB7V7wE1gls7h9WonCDq5Q', {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: true,
+  })
+
+  assert.match(html, /streaming-image-loading/)
+  assert.doesNotMatch(html, /resource:\/\/|（/)
 })
 
 test('normalizeLegacyImageContextMarkup converts copied image XML to Markdown', () => {
