@@ -269,6 +269,7 @@ const suggestedQuestionsLoading = ref(false);
 let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
 let pendingSuggestionAttribution = null;
+let pendingSuggestionKnowledgeBaseIds = [];
 
 const cancelSuggestedQuestionsFetch = () => {
     suggestedQuestionsFetchId++;
@@ -364,6 +365,10 @@ const handleFollowUpSelect = (message, item) => {
         suggestion_set_id: message.suggestionSet.id,
         question_id: item.id,
     };
+    // Knowledge-backed follow-ups are generated from a specific KB. Keep that
+    // authorized retrieval anchor for the immediate next request; model-backed
+    // suggestions intentionally do not inherit transient @file/@tag/MCP/Skill scope.
+    pendingSuggestionKnowledgeBaseIds = [...new Set(item.knowledge_base_ids || [])];
     if (inputFieldRef.value?.triggerSend) inputFieldRef.value.triggerSend(item.text);
     else sendMsg(item.text);
 };
@@ -718,6 +723,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const sidebarFileIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedFiles || []);
     const kbIdSet = new Set(sidebarKbIds);
     const fileIdSet = new Set(sidebarFileIds);
+    for (const kbId of pendingSuggestionKnowledgeBaseIds) {
+        if (kbId) kbIdSet.add(kbId);
+    }
     for (const item of mentionedItems || []) {
         if (!item?.id) continue;
         if (item.type === 'kb' && !kbIdSet.has(item.id)) {
@@ -742,6 +750,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     const suggestionAttribution = pendingSuggestionAttribution;
     pendingSuggestionAttribution = null;
+    pendingSuggestionKnowledgeBaseIds = [];
     await startStream({
         session_id: session_id.value,
         knowledge_base_ids: kbIds,

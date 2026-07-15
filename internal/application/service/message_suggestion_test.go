@@ -128,23 +128,22 @@ func TestBuildSuggestionEvidenceUsesTopReferencesAndDeduplicatesKnowledge(t *tes
 	}
 }
 
-func TestBuildSuggestionCapabilitiesDoesNotExposeResourceIDs(t *testing.T) {
-	message := &types.Message{ExecutionContext: types.MessageExecutionContext{
-		KnowledgeBaseIDs: []string{"kb-secret-id"},
-		MCPServiceIDs:    []string{"mcp-secret-id"},
-		SkillNames:       []string{"reporting"},
-		WebSearchEnabled: true,
-	}}
-	capabilities := buildSuggestionCapabilities(message)
-	for _, expected := range []string{"knowledge retrieval", "web search", "MCP tools", "reporting"} {
-		if !strings.Contains(capabilities, expected) {
-			t.Fatalf("Capabilities %q does not contain %q", capabilities, expected)
+func TestBuildSuggestionSystemPromptAllowsGroundedExploration(t *testing.T) {
+	prompt := buildSuggestionSystemPrompt(3, "Chinese", "clarify, deepen, action")
+	for _, expected := range []string{
+		"Fresh retrieval is allowed",
+		"self-contained",
+		"concrete entity names or keywords",
+		"at most roughly one third",
+		"Do not assume unsupported facts",
+		"must not override these grounding and capability rules",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("Prompt does not contain %q: %q", expected, prompt)
 		}
 	}
-	for _, secret := range []string{"kb-secret-id", "mcp-secret-id"} {
-		if strings.Contains(capabilities, secret) {
-			t.Fatalf("Capabilities leaked resource ID %q: %q", secret, capabilities)
-		}
+	if strings.Contains(prompt, "enabled knowledge sources or tools") {
+		t.Fatalf("Prompt still promises per-turn capabilities: %q", prompt)
 	}
 }
 
@@ -157,5 +156,43 @@ func TestRankKnowledgeSuggestionsPrioritizesCurrentTopic(t *testing.T) {
 	rankKnowledgeSuggestions(candidates, "The current answer explains battery charging and battery life.")
 	if candidates[0].Question != "How can I extend battery life while charging?" {
 		t.Fatalf("first candidate = %q, want battery-related question", candidates[0].Question)
+	}
+}
+
+func TestMergeHybridSuggestionItemsReservesKnowledgeSlots(t *testing.T) {
+	model := types.SuggestionItems{
+		{Text: "model one", Source: "model"},
+		{Text: "model two", Source: "model"},
+		{Text: "model three", Source: "model"},
+	}
+	knowledge := types.SuggestionItems{
+		{Text: "knowledge one", Source: "document"},
+		{Text: "knowledge two", Source: "faq"},
+	}
+
+	items := mergeHybridSuggestionItems(model, knowledge, 3)
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3", len(items))
+	}
+	if items[0].Source != "model" || items[1].Source != "model" || items[2].Source != "document" {
+		t.Fatalf("sources = [%s %s %s], want [model model document]", items[0].Source, items[1].Source, items[2].Source)
+	}
+}
+
+func TestMergeHybridSuggestionItemsFillsMissingKnowledgeSlotsFromModel(t *testing.T) {
+	model := types.SuggestionItems{
+		{Text: "model one", Source: "model"},
+		{Text: "model two", Source: "model"},
+		{Text: "model three", Source: "model"},
+	}
+
+	items := mergeHybridSuggestionItems(model, nil, 3)
+	if len(items) != 3 {
+		t.Fatalf("len(items) = %d, want 3", len(items))
+	}
+	for _, item := range items {
+		if item.Source != "model" {
+			t.Fatalf("source = %q, want model", item.Source)
+		}
 	}
 }
