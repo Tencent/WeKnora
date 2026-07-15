@@ -7,7 +7,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags, listAllKnowledgeFolders } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -571,6 +571,21 @@ const selectedMCPItems = computed<MentionItem[]>(() => {
     });
 });
 
+// 选中的文件夹（用于"对文件夹内容问答"），补全所属知识库名称以便展示
+const selectedFolders = computed(() => settingsStore.settings.selectedFolders || []);
+const selectedFolderItems = computed<MentionItem[]>(() => {
+  const kbNameById = new Map<string, string>();
+  knowledgeBases.value.forEach((kb: any) => kbNameById.set(kb.id, kb.name));
+  return selectedFolders.value.map((f) => ({
+    id: f.id,
+    name: f.name,
+    type: 'folder' as const,
+    kbId: f.kbId,
+    kbName: kbNameById.get(f.kbId) || '',
+    isAgentConfigured: false,
+  }));
+});
+
 // 合并所有选中项（用于输入框内显示）
 // 现在智能体配置的知识库也在 store 中，统一从 selectedKbs 获取
 const allSelectedItems = computed(() => {
@@ -621,7 +636,7 @@ const allSelectedItems = computed(() => {
     isAgentConfigured: false,
   }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value, ...selectedFolderItems.value];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
@@ -636,6 +651,8 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeMCPService(item.id);
   } else if (item.type === 'skill') {
     settingsStore.removeSkill(item.skillName || item.id);
+  } else if (item.type === 'folder') {
+    settingsStore.removeFolder(item.id);
   }
 };
 
@@ -645,6 +662,7 @@ const getMentionIcon = (item: MentionItem) => {
     case 'tag': return 'tag';
     case 'mcp': return 'tools';
     case 'skill': return 'bookmark';
+    case 'folder': return 'folder-open';
     default: return 'folder';
   }
 };
@@ -1152,6 +1170,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   let tagItems: MentionItem[] = [];
   let mcpItems: MentionItem[] = [];
   let skillItems: MentionItem[] = [];
+  let folderItems: MentionItem[] = [];
   if (!append) {
     let availableKbs: any[];
     const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
@@ -1316,6 +1335,36 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
             || (skill.description || '').toLowerCase().includes(keyword);
         });
     }
+
+    // 加载文件夹候选项：从当前可用知识库拉取全部文件夹（扁平），供 @文件夹 检索
+    const folderKeyword = q.trim().toLowerCase();
+    try {
+      const folderResults = await Promise.all(availableKbs.map(async (kb: any) => {
+        try {
+          const res: any = await listAllKnowledgeFolders(kb.id);
+          const payload = res?.data ?? res;
+          const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : []);
+          return list.map((folder: any) => ({
+            id: folder.id,
+            name: folder.name,
+            type: 'folder' as const,
+            kbId: kb.id,
+            kbName: kb.name,
+            // path 便于同名文件夹区分展示
+            description: folder.path || '',
+          }));
+        } catch {
+          return [];
+        }
+      }));
+      folderItems = folderResults.flat().filter((f: any) =>
+        !folderKeyword || (f.name && f.name.toLowerCase().includes(folderKeyword))
+      );
+      mentionGroupCounts.value.folder = folderItems.length;
+    } catch (e) {
+      console.error('[Mention] listAllKnowledgeFolders error:', e);
+      folderItems = [];
+    }
   }
 
   // Fetch Files from API
@@ -1410,9 +1459,9 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
   } else {
-    mentionItems.value = [...kbItems, ...tagItems, ...mcpItems, ...skillItems, ...fileItems];
+    mentionItems.value = [...kbItems, ...tagItems, ...mcpItems, ...skillItems, ...folderItems, ...fileItems];
   }
-  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
+  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length, folderItems: folderItems.length });
 
   // Only reset index if query changed or explicitly requested
   if (resetIndex || q !== lastMentionQuery) {
@@ -1635,6 +1684,10 @@ const onMentionSelect = (item: any) => {
     settingsStore.addMCPService(item.id);
   } else if (item.type === 'skill') {
     settingsStore.addSkill(item.skillName || item.id);
+  } else if (item.type === 'folder') {
+    if (item.kbId) {
+      settingsStore.addFolder({ id: item.id, kbId: item.kbId, name: item.name });
+    }
   }
 
   const textarea = getTextareaEl();

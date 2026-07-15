@@ -17,6 +17,7 @@ interface Settings {
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
+  selectedFolders: Array<{ id: string; kbId: string; name: string }>; // 当前选中的文件夹（用于"对文件夹内容问答"）
   selectedMCPServices: string[];
   selectedSkills: string[];
   selectedTools?: string[];
@@ -87,6 +88,7 @@ const defaultSettings: Settings = {
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
+  selectedFolders: [],
   selectedMCPServices: [],
   selectedSkills: [],
   modelConfig: {
@@ -312,8 +314,12 @@ export const useSettingsStore = defineStore("settings", {
     
     // 移除单个知识库
     removeKnowledgeBase(kbId: string) {
-      this.settings.selectedKnowledgeBases = 
+      this.settings.selectedKnowledgeBases =
         this.settings.selectedKnowledgeBases.filter((id: string) => id !== kbId);
+      // 同时清理该知识库下选中的文件夹，避免悬空引用
+      if (this.settings.selectedFolders?.length) {
+        this.settings.selectedFolders = this.settings.selectedFolders.filter(f => f.kbId !== kbId);
+      }
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
@@ -419,6 +425,25 @@ export const useSettingsStore = defineStore("settings", {
 
     clearTags() {
       this.settings.selectedTags = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    addFolder(folder: { id: string; kbId: string; name: string }) {
+      if (!this.settings.selectedFolders) this.settings.selectedFolders = [];
+      if (!this.settings.selectedFolders.some(f => f.id === folder.id)) {
+        this.settings.selectedFolders.push(folder);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeFolder(folderId: string) {
+      if (!this.settings.selectedFolders) return;
+      this.settings.selectedFolders = this.settings.selectedFolders.filter(f => f.id !== folderId);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFolders() {
+      this.settings.selectedFolders = [];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 

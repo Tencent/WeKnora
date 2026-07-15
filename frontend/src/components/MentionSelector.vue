@@ -317,6 +317,7 @@ const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; 
   { type: 'tag', label: '标签', icon: 'tag' },
   { type: 'mcp', label: 'MCP', icon: 'tools' },
   { type: 'skill', label: 'Skills', icon: 'bookmark' },
+  { type: 'folder', label: '文件夹', icon: 'folder-open' },
   { type: 'file', label: t('common.file'), icon: 'file' },
 ]);
 

@@ -16,6 +16,7 @@ export function isStoredSettingsRecord(
 
 type ReconcilableSettings = {
   selectedTags?: unknown;
+  selectedFolders?: unknown;
   selectedMCPServices?: unknown;
   selectedSkills?: unknown;
   selectedTools?: unknown;
@@ -26,6 +27,7 @@ type ReconcilableSettings = {
 
 function reconcileLoadedSettings<T extends ReconcilableSettings>(loaded: T): T {
   loaded.selectedTags ||= [];
+  loaded.selectedFolders ||= [];
   loaded.selectedMCPServices ||= [];
   loaded.selectedSkills ||= (loaded.selectedTools as string[] | undefined) || [];
   loaded.selectedFileKbMap ||= {};

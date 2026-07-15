@@ -60,6 +60,7 @@ const mentionTagIcon = (item) => {
     if (item.type === 'tag') return 'tag';
     if (item.type === 'mcp') return 'tools';
     if (item.type === 'skill') return 'bookmark';
+    if (item.type === 'folder') return 'folder-open';
     return 'file';
 };
 

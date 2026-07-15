@@ -223,6 +223,7 @@ export function listKnowledgeFiles(
     source?: string;
     start_time?: string;
     end_time?: string;
+    folder_id?: string;
   },
 ) {
   const query = new URLSearchParams();
@@ -235,8 +236,74 @@ export function listKnowledgeFiles(
   if (params.source) query.append('source', params.source);
   if (params.start_time) query.append('start_time', params.start_time);
   if (params.end_time) query.append('end_time', params.end_time);
+  if (params.folder_id) query.append('folder_id', params.folder_id);
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
+}
+
+// --- Knowledge folder tree (multi-level folders) ---
+
+export interface KnowledgeFolder {
+  id: string;
+  tenant_id: number;
+  knowledge_base_id: string;
+  parent_id: string;
+  name: string;
+  path: string;
+  depth: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeFolderNode extends KnowledgeFolder {
+  knowledge_count: number;
+  has_children: boolean;
+}
+
+export interface KnowledgeFolderListResponse {
+  parent_id: string;
+  folders: KnowledgeFolderNode[];
+}
+
+// listKnowledgeFolders returns the direct child folders of parentId ('' = root).
+export function listKnowledgeFolders(kbId: string, parentId = '') {
+  const query = new URLSearchParams();
+  if (parentId) query.set('parent_id', parentId);
+  const qs = query.toString();
+  return get(`/api/v1/knowledge-bases/${kbId}/folders${qs ? '?' + qs : ''}`);
+}
+
+// listAllKnowledgeFolders returns the entire folder tree for a knowledge base
+// (with recursive knowledge counts) in a single request, for the chat @mention
+// folder picker.
+export function listAllKnowledgeFolders(kbId: string) {
+  return get(`/api/v1/knowledge-bases/${kbId}/folders?all=true`);
+}
+
+// createKnowledgeFolder creates a new empty folder under parentId ('' = root).
+export function createKnowledgeFolder(kbId: string, parentId: string, name: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/folders`, { parent_id: parentId, name });
+}
+
+// updateKnowledgeFolder renames and/or reparents a folder. Pass move_parent: true
+// (and parent_id) to reparent; omit it for a pure rename.
+export function updateKnowledgeFolder(
+  kbId: string,
+  folderId: string,
+  data: { name?: string; parent_id?: string; move_parent?: boolean },
+) {
+  return put(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`, data);
+}
+
+// deleteKnowledgeFolder removes an empty folder (no knowledges, no sub-folders).
+export function deleteKnowledgeFolder(kbId: string, folderId: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/folders/${folderId}`);
+}
+
+// setKnowledgeFolder moves a knowledge into a folder (folderId '' = root).
+export function setKnowledgeFolder(kbId: string, knowledgeId: string, folderId: string) {
+  return put(`/api/v1/knowledge-bases/${kbId}/knowledge/${knowledgeId}/folder`, { folder_id: folderId });
 }
 
 export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {
