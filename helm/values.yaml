@@ -95,6 +95,11 @@ app:
     LOCAL_STORAGE_BASE_DIR: /data/files
     AUTO_RECOVER_DIRTY: "true"
     STREAM_MANAGER_TYPE: redis
+    # Redis: leave REDIS_MODE empty for standalone (REDIS_ADDR).
+    # For Redis Cluster set REDIS_MODE=cluster and REDIS_CLUSTER_ADDRS.
+    REDIS_MODE: ""
+    REDIS_CLUSTER_ADDRS: ""
+    REDIS_ADDR: redis:6379
     CONCURRENCY_POOL_SIZE: "5"
     ENABLE_GRAPH_RAG: "false"
     TZ: UTC

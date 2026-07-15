@@ -115,6 +115,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initDatabase))
 	must(container.Provide(initFileService))
 	must(container.Provide(initRedisClient))
+	// Standalone *redis.Client for constructors still typed on Client.
+	// Cluster mode yields nil here; callers that need Redis in cluster must
+	// take redis.UniversalClient instead.
+	must(container.Provide(func(rdb redis.UniversalClient) *redis.Client {
+		if c, ok := rdb.(*redis.Client); ok {
+			return c
+		}
+		return nil
+	}))
 	must(container.Provide(initAntsPool))
 
 	must(container.Invoke(registerLangfuseCleanup))
@@ -268,7 +277,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSessionService))
 
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
-	redisAvailable := os.Getenv("REDIS_ADDR") != ""
+	redisAvailable := redisConfigured()
 	if redisAvailable {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
 		// Dedicated pools guarantee capacity for each stage. The shared pool
@@ -515,7 +524,48 @@ func registerLiteModelConcurrencyLimiter(ss interfaces.SystemSettingService) {
 		"[ModelLimiter] background model concurrency governed per-model, limit=%d (in-process, lite mode)", limit)
 }
 
-func initRedisClient() (*redis.Client, error) {
+func redisConfigured() bool {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("REDIS_MODE")), "cluster") {
+		return strings.TrimSpace(os.Getenv("REDIS_CLUSTER_ADDRS")) != ""
+	}
+	return os.Getenv("REDIS_ADDR") != ""
+}
+
+// initRedisClient initializes Redis: standalone *redis.Client, or ClusterClient
+// when REDIS_MODE=cluster. Returns redis.UniversalClient; nil when Redis is
+// disabled (Lite mode: no REDIS_ADDR and not cluster).
+func initRedisClient() (redis.UniversalClient, error) {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("REDIS_MODE")))
+	username := os.Getenv("REDIS_USERNAME")
+	password := os.Getenv("REDIS_PASSWORD")
+
+	if mode == "cluster" {
+		raw := os.Getenv("REDIS_CLUSTER_ADDRS")
+		parts := strings.Split(raw, ",")
+		addrs := make([]string, 0, len(parts))
+		for _, s := range parts {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				addrs = append(addrs, s)
+			}
+		}
+		if len(addrs) == 0 {
+			return nil, fmt.Errorf("REDIS_MODE=cluster requires non-empty REDIS_CLUSTER_ADDRS")
+		}
+		client := redis.NewClusterClient(&redis.ClusterOptions{
+			Addrs:        addrs,
+			Username:     username,
+			Password:     password,
+			ReadTimeout:  100 * time.Millisecond,
+			WriteTimeout: 200 * time.Millisecond,
+			TLSConfig:    common.RedisTLSConfig(),
+		})
+		if _, err := client.Ping(context.Background()).Result(); err != nil {
+			return nil, fmt.Errorf("connect Redis cluster: %w", err)
+		}
+		return client, nil
+	}
+
 	redisAddr := os.Getenv("REDIS_ADDR")
 	if redisAddr == "" {
 		logger.Infof(context.Background(), "[Redis] No REDIS_ADDR configured, Redis disabled (Lite mode)")
@@ -528,8 +578,8 @@ func initRedisClient() (*redis.Client, error) {
 
 	client := redis.NewClient(&redis.Options{
 		Addr:      redisAddr,
-		Username:  os.Getenv("REDIS_USERNAME"),
-		Password:  os.Getenv("REDIS_PASSWORD"),
+		Username:  username,
+		Password:  password,
 		DB:        db,
 		TLSConfig: common.RedisTLSConfig(),
 	})
