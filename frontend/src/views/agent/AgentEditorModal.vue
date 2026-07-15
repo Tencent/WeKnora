@@ -985,6 +985,7 @@
                         <div class="setting-control setting-control-full">
                           <t-textarea
                             v-model="formData.config.question_suggestions.follow_ups.additional_instruction"
+                            :placeholder="$t('agentEditor.questionSuggestions.instructionPlaceholder')"
                             :maxlength="2000" :autosize="{ minRows: 3, maxRows: 8 }" />
                         </div>
                       </div>

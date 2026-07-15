@@ -5671,6 +5671,7 @@ export default {
       advancedSettingsDesc: '컨텍스트, 질문 유형, 생성 지침 및 표시 규칙',
       displayRules: '표시 및 폴백 규칙',
       contextTurns: '컨텍스트 턴 수', categories: '질문 유형', instruction: '추가 생성 지침',
+      instructionPlaceholder: '예: 실행 가능한 다음 단계 질문을 우선하고 광범위한 질문이나 답변 반복은 피하세요…',
       suppressFallback: '대체 답변 뒤에는 숨기기', suppressQuestion: '답변이 질문으로 끝나면 숨기기',
       knowledgeFallback: '생성 실패 시 지식 후보 사용', allowRegenerate: '새 질문 묶음 허용',
       modeCurated: '운영 설정', modeKnowledge: '지식 기반', modeGenerated: '모델 생성', modeHybrid: '혼합',

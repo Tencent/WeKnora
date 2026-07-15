@@ -5685,6 +5685,7 @@ export default {
       contextTurns: "上下文轮数",
       categories: "问题类型",
       instruction: "附加生成要求",
+      instructionPlaceholder: "例如：优先推荐能帮助用户落地执行的问题，避免宽泛问题或重复当前回答…",
       suppressFallback: "兜底回答后不展示",
       suppressQuestion: "回答本身以提问结尾时不展示",
       knowledgeFallback: "模型生成失败时使用知识库候选",

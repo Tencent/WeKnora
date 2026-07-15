@@ -5660,6 +5660,7 @@ export default {
       contextTurns: 'Context turns',
       categories: 'Question types',
       instruction: 'Additional instruction',
+      instructionPlaceholder: 'For example: prioritize practical next-step questions and avoid broad questions or repeating the answer…',
       suppressFallback: 'Hide after fallback answers',
       suppressQuestion: 'Hide when the answer ends with a question',
       knowledgeFallback: 'Use knowledge candidates if generation fails',

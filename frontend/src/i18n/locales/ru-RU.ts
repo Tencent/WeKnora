@@ -5171,6 +5171,7 @@ export default {
       advancedSettingsDesc: 'Контекст, типы вопросов, инструкции и правила показа',
       displayRules: 'Правила показа и резерва',
       contextTurns: 'Ходы контекста', categories: 'Типы вопросов', instruction: 'Дополнительная инструкция',
+      instructionPlaceholder: 'Например: предлагайте практические следующие шаги, избегая общих вопросов и повторения ответа…',
       suppressFallback: 'Скрывать после резервного ответа', suppressQuestion: 'Скрывать, если ответ заканчивается вопросом',
       knowledgeFallback: 'Использовать базу знаний при ошибке', allowRegenerate: 'Разрешить обновление',
       modeCurated: 'Редакторские', modeKnowledge: 'База знаний', modeGenerated: 'Модель', modeHybrid: 'Гибрид',
