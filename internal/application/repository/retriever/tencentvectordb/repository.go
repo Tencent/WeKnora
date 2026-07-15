@@ -67,6 +67,12 @@ func (r *repository) Support() []types.RetrieverType {
 	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
 }
 
+// PhysicalIndexNamespace reports the collection that owns vectors for a
+// dimension. Explicit collection configuration is shared across dimensions.
+func (r *repository) PhysicalIndexNamespace(dimension int, _ string) string {
+	return r.collectionName(dimension)
+}
+
 func (r *repository) Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error {
 	return r.BatchSave(ctx, []*types.IndexInfo{indexInfo}, params)
 }

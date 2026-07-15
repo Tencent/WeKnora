@@ -2,12 +2,14 @@ package retriever
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils"
@@ -57,6 +59,27 @@ func (v *KeywordsVectorHybridRetrieveEngineService) EngineType() types.Retriever
 	return v.engineType
 }
 
+// PhysicalIndexNamespace identifies engines whose index storage is split by
+// embedding dimension. Callers may safely delete the prior namespace only when
+// this value changes; all other engines are treated as shared namespaces.
+func (v *KeywordsVectorHybridRetrieveEngineService) PhysicalIndexNamespace(
+	dimension int,
+	knowledgeType string,
+) string {
+	if provider, ok := v.indexRepository.(physicalIndexNamespaceProvider); ok {
+		return provider.PhysicalIndexNamespace(dimension, knowledgeType)
+	}
+	switch v.engineType {
+	case types.QdrantRetrieverEngineType,
+		types.MilvusRetrieverEngineType,
+		types.WeaviateRetrieverEngineType,
+		types.DorisRetrieverEngineType:
+		return fmt.Sprintf("%s:%d", v.engineType, dimension)
+	default:
+		return string(v.engineType)
+	}
+}
+
 // Retrieve performs retrieval based on the provided parameters
 func (v *KeywordsVectorHybridRetrieveEngineService) Retrieve(ctx context.Context,
 	params types.RetrieveParams,
@@ -103,6 +126,9 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 
 		batchSize := 40
 		chunks := utils.ChunkSlice(indexInfoList, batchSize)
+		if repository.IsReconciliationTransaction(ctx) {
+			return v.sequentialBatchSave(ctx, chunks, embeddings, batchSize)
+		}
 
 		// Use concurrent batch saving for better performance
 		// Limit concurrency to avoid overwhelming the backend
@@ -118,6 +144,9 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 
 	// For non-vector retrieval, use concurrent batch saving as well
 	chunks := utils.ChunkSlice(indexInfoList, 10)
+	if repository.IsReconciliationTransaction(ctx) {
+		return v.sequentialBatchSaveNoEmbedding(ctx, chunks)
+	}
 	const maxConcurrency = 5
 	if len(chunks) <= maxConcurrency {
 		return v.concurrentBatchSaveNoEmbedding(ctx, chunks)
@@ -196,6 +225,26 @@ func (v *KeywordsVectorHybridRetrieveEngineService) concurrentBatchSave(
 	return g.Wait()
 }
 
+func (v *KeywordsVectorHybridRetrieveEngineService) sequentialBatchSave(
+	ctx context.Context,
+	chunks [][]*types.IndexInfo,
+	embeddings [][]float32,
+	batchSize int,
+) error {
+	for i, indexChunk := range chunks {
+		params := make(map[string]any)
+		embeddingMap := make(map[string][]float32)
+		for j, indexInfo := range indexChunk {
+			embeddingMap[indexInfo.SourceID] = embeddings[i*batchSize+j]
+		}
+		params["embedding"] = embeddingMap
+		if err := v.indexRepository.BatchSave(ctx, indexChunk, params); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // boundedConcurrentBatchSave saves batches with bounded concurrency using semaphore pattern
 func (v *KeywordsVectorHybridRetrieveEngineService) boundedConcurrentBatchSave(
 	ctx context.Context,
@@ -241,6 +290,18 @@ func (v *KeywordsVectorHybridRetrieveEngineService) concurrentBatchSaveNoEmbeddi
 		})
 	}
 	return g.Wait()
+}
+
+func (v *KeywordsVectorHybridRetrieveEngineService) sequentialBatchSaveNoEmbedding(
+	ctx context.Context,
+	chunks [][]*types.IndexInfo,
+) error {
+	for _, indexChunk := range chunks {
+		if err := v.indexRepository.BatchSave(ctx, indexChunk, map[string]any{}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // boundedConcurrentBatchSaveNoEmbedding saves batches with bounded concurrency without embeddings

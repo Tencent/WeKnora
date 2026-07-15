@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"strings"
 	"time"
 
@@ -53,6 +55,17 @@ func deleteExtractedImages(ctx context.Context, fileSvc interfaces.FileService, 
 			logger.Errorf(ctx, "Failed to delete extracted image %s: %v", url, err)
 		}
 	}
+}
+
+// deleteExtractedImagesStrict removes stale image objects before their source
+// chunk rows are hard-deleted, so a failed delete remains retryable.
+func deleteExtractedImagesStrict(ctx context.Context, fileSvc interfaces.FileService, imageURLs []string) error {
+	for _, url := range imageURLs {
+		if err := fileSvc.DeleteFile(ctx, url); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("delete extracted image %s: %w", url, err)
+		}
+	}
+	return nil
 }
 
 // DeleteKnowledge deletes a knowledge entry and all related resources

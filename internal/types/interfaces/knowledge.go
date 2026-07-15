@@ -217,6 +217,12 @@ type KnowledgeRepository interface {
 		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// UpdateKnowledgeAndTenantStorage atomically persists a knowledge's storage
+	// total and applies the exact delta to its tenant usage.
+	UpdateKnowledgeAndTenantStorage(ctx context.Context, knowledge *types.Knowledge) (int64, error)
+	// WithKnowledgeReconciliation serializes a destructive reconciliation for one
+	// knowledge item and provides its transaction through the callback context.
+	WithKnowledgeReconciliation(ctx context.Context, tenantID uint64, knowledgeID string, fn func(context.Context) error) error
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error

@@ -98,7 +98,23 @@ func (g *pgRepository) BatchSave(
 	for i := range indexInfoList {
 		indexInfoDBList[i] = toDBVectorEmbedding(indexInfoList[i], additionalParams)
 	}
-	err := g.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(indexInfoDBList).Error
+	err := g.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "source_id"},
+			{Name: "source_type"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"chunk_id",
+			"knowledge_id",
+			"knowledge_base_id",
+			"tag_id",
+			"content",
+			"dimension",
+			"embedding",
+			"is_enabled",
+			"updated_at",
+		}),
+	}).Create(indexInfoDBList).Error
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("[Postgres] Batch save failed: %v", err)
 		return err

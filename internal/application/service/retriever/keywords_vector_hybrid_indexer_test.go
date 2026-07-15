@@ -3,11 +3,17 @@ package retriever
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type capturingEmbedder struct {
@@ -36,6 +42,33 @@ func (e *capturingEmbedder) BatchEmbedWithPool(
 
 type saveOnlyRepository struct {
 	interfaces.RetrieveEngineRepository
+}
+
+type concurrentSaveRepository struct {
+	saveOnlyRepository
+	mu        sync.Mutex
+	active    int
+	maxActive int
+}
+
+func (r *concurrentSaveRepository) BatchSave(
+	context.Context,
+	[]*types.IndexInfo,
+	map[string]any,
+) error {
+	r.mu.Lock()
+	r.active++
+	if r.active > r.maxActive {
+		r.maxActive = r.active
+	}
+	r.mu.Unlock()
+
+	time.Sleep(20 * time.Millisecond)
+
+	r.mu.Lock()
+	r.active--
+	r.mu.Unlock()
+	return nil
 }
 
 func (r *saveOnlyRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error {
@@ -104,6 +137,38 @@ func TestBatchIndexTruncatesOversizedEmbeddingInput(t *testing.T) {
 	}
 	if got := len([]rune(embedder.batchTexts[0])); got > safetyMaxChars {
 		t.Fatalf("embedding input length = %d, want <= %d", got, safetyMaxChars)
+	}
+}
+
+func TestBatchIndexSerializesWritesInsideKnowledgeReconciliation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&types.Knowledge{}); err != nil {
+		t.Fatalf("migrate knowledge: %v", err)
+	}
+	knowledge := &types.Knowledge{ID: uuid.NewString(), TenantID: 1, KnowledgeBaseID: uuid.NewString()}
+	if err := db.Create(knowledge).Error; err != nil {
+		t.Fatalf("create knowledge: %v", err)
+	}
+
+	repo := repository.NewKnowledgeRepository(db)
+	indexRepo := &concurrentSaveRepository{}
+	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: indexRepo}
+	infos := make([]*types.IndexInfo, 41)
+	for i := range infos {
+		infos[i] = &types.IndexInfo{SourceID: uuid.NewString(), Content: "indexed"}
+	}
+
+	err = repo.WithKnowledgeReconciliation(context.Background(), knowledge.TenantID, knowledge.ID, func(ctx context.Context) error {
+		return service.BatchIndex(ctx, &capturingEmbedder{}, infos, []types.RetrieverType{types.VectorRetrieverType})
+	})
+	if err != nil {
+		t.Fatalf("batch index under reconciliation: %v", err)
+	}
+	if indexRepo.maxActive != 1 {
+		t.Fatalf("concurrent batch writes inside reconciliation = %d, want 1", indexRepo.maxActive)
 	}
 }
 

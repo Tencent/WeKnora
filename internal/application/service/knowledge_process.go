@@ -164,6 +164,23 @@ type ProcessChunksOptions struct {
 	Metadata     map[string]string
 }
 
+type knowledgeCommitOps struct {
+	Persist  func() error
+	Finalize func()
+	Enqueue  func()
+}
+
+func executeKnowledgeCommit(ops knowledgeCommitOps) error {
+	if err := ops.Persist(); err != nil {
+		return err
+	}
+	if ops.Finalize != nil {
+		ops.Finalize()
+	}
+	ops.Enqueue()
+	return nil
+}
+
 // finalizeIndexedKnowledgeState makes a document retrievable as soon as chunks
 // and indexes are persisted (enable_status=enabled), but it deliberately does
 // NOT mark the row completed when enrichment is still expected. Whenever the
@@ -266,17 +283,29 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		options = opts[0]
 	}
 
-	// Check if knowledge is being deleted/cancelled before processing.
-	// Both statuses short-circuit identically here — there's nothing to clean
-	// up yet so the branch is purely "stop early".
-	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
-		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
+	reconciliationAborted := errors.New("chunk reconciliation aborted")
+	checkReconciliationAbort := func(checkCtx context.Context, checkpoint string) error {
+		attempt := attemptFromCtx(checkCtx)
+		if attemptSuperseded(checkCtx, s.tracker(), knowledge.ID, attempt) {
+			logger.Infof(checkCtx, "Knowledge attempt %d superseded at %s, skipping chunk reconciliation: %s",
+				attempt, checkpoint, knowledge.ID)
+			return reconciliationAborted
+		}
+		if aborted, status := s.isKnowledgeAborted(checkCtx, knowledge.TenantID, knowledge.ID); aborted {
+			logger.Infof(checkCtx, "Knowledge aborted (%s) at %s, skipping chunk reconciliation: %s",
+				status, checkpoint, knowledge.ID)
+			return reconciliationAborted
+		}
+		return nil
+	}
+	if err := checkReconciliationAbort(ctx, "start"); err != nil {
 		return
 	}
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
+	indexingEnabled := kb.NeedsEmbeddingModel()
 	var embeddingModel embedding.Embedder
-	if kb.NeedsEmbeddingModel() {
+	if indexingEnabled {
 		var err error
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
@@ -287,36 +316,30 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
 
-	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
-	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
-
-	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
-		// 不返回错误，继续处理（可能没有旧数据）
-	}
-
-	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
-	if err == nil && embeddingModel != nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
-			// 不返回错误，继续处理（可能没有旧数据）
-		} else {
-			logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
+	oldEmbeddingModelID := knowledge.EmbeddingModelID
+	modelChanged := oldEmbeddingModelID != "" && oldEmbeddingModelID != kb.EmbeddingModelID
+	var oldEmbeddingModel embedding.Embedder
+	if modelChanged {
+		var err error
+		oldEmbeddingModel, err = s.modelService.GetEmbeddingModel(ctx, oldEmbeddingModelID)
+		if err != nil {
+			logger.GetLogger(ctx).WithField("error", err).
+				Errorf("processChunks get previous embedding model failed")
+			return
 		}
 	}
 
-	// 删除知识图谱数据（如果存在）
-	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
-		// 不返回错误，继续处理
+	var retrieveEngine *retriever.CompositeRetrieveEngine
+	if indexingEnabled || modelChanged {
+		var err error
+		retrieveEngine, err = retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
+		if err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks create retrieve engine failed")
+			return
+		}
 	}
-
-	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
 
 	// ========== DocReader 解析结果日志 ==========
 	logger.Infof(ctx, "[DocReader] ========== 解析结果概览 ==========")
@@ -367,179 +390,26 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 	logger.Infof(ctx, "[DocReader] ========== 解析结果概览结束 ==========")
 
-	// Create chunk objects from proto chunks
-	maxSeq := 0
-
-	// 统计图片相关的子Chunk数量，用于扩展insertChunks的容量
-	imageChunkCount := 0
-	for _, chunkData := range chunks {
-		if len(chunkData.Images) > 0 {
-			// 为每个图片的OCR和Caption分别创建一个Chunk
-			imageChunkCount += len(chunkData.Images) * 2
+	desiredChunks, textChunks := buildStableDocumentChunks(knowledge, chunks, options.ParentChunks)
+	if indexingEnabled {
+		modelKey := kb.EmbeddingModelID
+		if modelKey == "" {
+			modelKey = embeddingModel.GetModelID()
 		}
-		if int(chunkData.Seq) > maxSeq {
-			maxSeq = int(chunkData.Seq)
+		if modelKey == "" {
+			modelKey = embeddingModel.GetModelName()
 		}
-	}
-
-	// === Parent-Child Chunking: create parent chunks first ===
-	hasParentChild := len(options.ParentChunks) > 0
-	var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
-	if hasParentChild {
-		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
-		for i, pc := range options.ParentChunks {
-			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
-				TenantID:        knowledge.TenantID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				Content:         pc.Content,
-				ChunkIndex:      pc.Seq,
-				IsEnabled:       true,
-				CreatedAt:       time.Now(),
-				UpdatedAt:       time.Now(),
-				StartAt:         pc.Start,
-				EndAt:           pc.End,
-				ChunkType:       types.ChunkTypeParentText,
-			}
-		}
-		// Set prev/next links for parent chunks
-		for i := range parentDBChunks {
-			if i > 0 {
-				parentDBChunks[i-1].NextChunkID = parentDBChunks[i].ID
-				parentDBChunks[i].PreChunkID = parentDBChunks[i-1].ID
-			}
-		}
-		logger.Infof(ctx, "Created %d parent chunks for parent-child strategy", len(parentDBChunks))
-	}
-
-	// 重新分配容量，考虑图片相关的Chunk + parent chunks
-	parentCount := len(options.ParentChunks)
-	insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount+parentCount)
-	// Add parent chunks first (they go into DB but NOT into the vector index)
-	if hasParentChild {
-		insertChunks = append(insertChunks, parentDBChunks...)
-	}
-
-	for idx, chunkData := range chunks {
-		if strings.TrimSpace(chunkData.Content) == "" {
-			continue
-		}
-
-		// 创建主文本Chunk
-		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         chunkData.Content,
-			ContextHeader:   chunkData.ContextHeader,
-			ChunkIndex:      int(chunkData.Seq),
-			IsEnabled:       true,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-			StartAt:         int(chunkData.Start),
-			EndAt:           int(chunkData.End),
-			ChunkType:       types.ChunkTypeText,
-		}
-
-		// Wire up ParentChunkID for child chunks
-		if hasParentChild && chunkData.ParentIndex >= 0 && chunkData.ParentIndex < len(parentDBChunks) {
-			textChunk.ParentChunkID = parentDBChunks[chunkData.ParentIndex].ID
-		}
-
-		chunks[idx].ChunkID = textChunk.ID
-		insertChunks = append(insertChunks, textChunk)
-	}
-
-	// Sort chunks by index for proper ordering
-	sort.Slice(insertChunks, func(i, j int) bool {
-		return insertChunks[i].ChunkIndex < insertChunks[j].ChunkIndex
-	})
-
-	// 仅为文本类型的Chunk设置前后关系（child chunks only, parents already linked above）
-	textChunks := make([]*types.Chunk, 0, len(chunks))
-	for _, chunk := range insertChunks {
-		if chunk.ChunkType == types.ChunkTypeText && chunk.ParentChunkID != "" {
-			// This is a child chunk in parent-child mode
-			textChunks = append(textChunks, chunk)
-		} else if chunk.ChunkType == types.ChunkTypeText && !hasParentChild {
-			// Normal flat chunk (no parent-child mode)
-			textChunks = append(textChunks, chunk)
+		if err := setDesiredEmbeddingFingerprints(textChunks, modelKey, embeddingModel.GetDimensions(), knowledge.Title); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks set embedding fingerprints failed")
+			return
 		}
 	}
 
-	// 设置文本Chunk之间的前后关系 (skip if parent-child, children don't need prev/next links)
-	if !hasParentChild {
-		for i, chunk := range textChunks {
-			if i > 0 {
-				textChunks[i-1].NextChunkID = chunk.ID
-			}
-			if i < len(textChunks)-1 {
-				textChunks[i+1].PreChunkID = chunk.ID
-			}
-		}
-	}
-
-	// Check if knowledge is being deleted/cancelled before writing chunks.
-	// Nothing has been persisted yet, so both branches just bail.
-	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
-		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
-		return
-	}
-
-	// Save chunks to database — ALWAYS, regardless of indexing strategy.
-	// Chunks are needed for wiki generation, graph extraction, and summary generation
-	// even when vector/keyword indexing is disabled.
-	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
-		"chunks_planned": len(insertChunks),
-	})
-	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
-		knowledge.ParseStatus = types.ParseStatusFailed
-		knowledge.ErrorMessage = err.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		s.failStage(ctx, knowledge.ID, types.StageChunking,
-			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
-		return
-	}
-	totalChunkChars := 0
-	for _, c := range insertChunks {
-		totalChunkChars += len(c.Content)
-	}
-	s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
-		"chunks_written":   len(insertChunks),
-		"total_text_chars": totalChunkChars,
-	})
-
-	// Create index information and perform vector indexing — only when vector/keyword is enabled.
-	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
-	var totalStorageSize int64
-	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
-		embedInput := types.JSONMap{
-			"chunks_to_embed": len(textChunks),
-			"model_id":        kb.EmbeddingModelID,
-		}
-		if dim := embeddingModel.GetDimensions(); dim > 0 {
-			embedInput["dim"] = dim
-		}
-		s.beginStage(ctx, knowledge.ID, types.StageEmbedding, embedInput)
-		// Create index information — only for child/flat chunks, NOT parent chunks.
-		// Parent chunks are stored for context retrieval but do not need vector embeddings.
-		// Prepend the document title to improve semantic alignment between
-		// question-style queries and statement-style chunk content.
-		indexInfoList := make([]*types.IndexInfo, 0, len(textChunks))
-		titlePrefix := ""
-		if t := strings.TrimSpace(knowledge.Title); t != "" {
-			titlePrefix = t + "\n"
-		}
-		for _, chunk := range textChunks {
-			// chunk.EmbeddingContent prepends ContextHeader (heading breadcrumb)
-			// when the chunker populated it during Tier-1 splitting; falls back
-			// to plain Content otherwise. Title prefix sits outermost.
-			indexContent := titlePrefix + chunk.EmbeddingContent()
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         indexContent,
+	indexInfosFor := func(indexedChunks []*types.Chunk) []*types.IndexInfo {
+		indexInfos := make([]*types.IndexInfo, 0, len(indexedChunks))
+		for _, chunk := range indexedChunks {
+			indexInfos = append(indexInfos, &types.IndexInfo{
+				Content:         types.EmbeddingInput(knowledge.Title, chunk.ContextHeader, chunk.Content),
 				SourceID:        chunk.ID,
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
@@ -548,95 +418,69 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				IsEnabled:       true,
 			})
 		}
+		return indexInfos
+	}
 
-		// Calculate storage size required for embeddings
-		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
-		if tenantInfo.StorageQuota > 0 {
-			// Re-fetch tenant storage information
-			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
-			if err != nil {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-				return
-			}
-			// Check if there's enough storage quota available
-			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = "存储空间不足"
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-				return
-			}
-		}
-
-		// Check again before batch indexing (heavy operation).
-		// deleting → row is going away anyway, drop the chunks we just wrote.
-		// cancelled → user wants to keep what was already persisted, just stop.
-		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
-			logger.Infof(ctx, "Knowledge aborted (%s) before indexing: %s", status, knowledge.ID)
-			if status == types.ParseStatusDeleting {
-				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
-				}
-			}
-			return
-		}
-
-		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
+	var totalStorageSize int64
+	if indexingEnabled {
+		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfosFor(textChunks))
+	}
+	var err error
+	storageDelta := reparseStorageDelta(totalStorageSize, knowledge.StorageSize)
+	if tenantInfo.StorageQuota > 0 && storageDelta > 0 {
+		tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
 		if err != nil {
 			knowledge.ParseStatus = types.ParseStatusFailed
 			knowledge.ErrorMessage = err.Error()
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
-
-			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-				logger.Errorf(ctx, "Delete chunks failed: %v", err)
-			}
-
-			// delete index
-			if err := retrieveEngine.DeleteByKnowledgeIDList(
-				ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
-			); err != nil {
-				logger.Errorf(ctx, "Delete index failed: %v", err)
-			}
-			// Map vector store / embedding rate-limit errors to a
-			// stable code so the UI can offer "retry later" hints.
-			code := werrors.ErrCodeVectorStoreWriteFailed
-			if isLikelyRateLimitError(err) {
-				code = werrors.ErrCodeEmbeddingRateLimit
-			}
-			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
-				code, "batch index failed", err)
 			return
 		}
-		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
-		s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
-			"vectors_written": len(indexInfoList),
-			"storage_bytes":   totalStorageSize,
-		})
-
-		// Final check before marking as completed.
-		// deleting → drop chunks+index we just wrote.
-		// cancelled → keep persisted data; the row stays in cancelled status
-		// and downstream stages skip via the entry guards.
-		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
-			logger.Infof(ctx, "Knowledge aborted (%s) after indexing: %s", status, knowledge.ID)
-			if status == types.ParseStatusDeleting {
-				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
-				}
-				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
-					logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
-				}
-			}
+		if tenantInfo.StorageUsed+storageDelta > tenantInfo.StorageQuota {
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = "存储空间不足"
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
 			return
 		}
-	} else {
-		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
-		s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
+	}
+
+	totalChunkChars := 0
+	for _, chunk := range textChunks {
+		totalChunkChars += len(chunk.Content)
+	}
+	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+		"chunks_planned": len(desiredChunks),
+	})
+	if indexingEnabled {
+		embedInput := types.JSONMap{
+			// The exact reuse count is only known after the per-knowledge
+			// reconciliation lock is acquired; the completed stage records it.
+			"chunks_to_embed": len(textChunks),
+			"model_id":        kb.EmbeddingModelID,
+		}
+		if dim := embeddingModel.GetDimensions(); dim > 0 {
+			embedInput["dim"] = dim
+		}
+		s.beginStage(ctx, knowledge.ID, types.StageEmbedding, embedInput)
+	}
+
+	var (
+		plan           *chunkReusePlan
+		updates        []*types.Chunk
+		staleImageURLs []string
+		created        map[string]struct{}
+	)
+	isCreatedCleanup := func(ids []string) bool {
+		if len(ids) != len(created) {
+			return false
+		}
+		for _, id := range ids {
+			if _, found := created[id]; !found {
+				return false
+			}
+		}
+		return true
 	}
 
 	// Check if this document has extracted images that will be processed asynchronously
@@ -645,41 +489,189 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	pendingMultimodal := isImage && options.EnableMultimodel && len(options.StoredImages) > 0
 	pendingPDFMultimodal := !isImage && !isVideo && options.EnableMultimodel && len(options.StoredImages) > 0
 
-	now := time.Now()
-	finalizeIndexedKnowledgeState(
-		knowledge,
-		totalStorageSize,
-		len(textChunks),
-		pendingMultimodal || pendingPDFMultimodal,
-		now,
-	)
+	indexStarted := false
+	indexSucceeded := false
+	err = executeKnowledgeCommit(knowledgeCommitOps{
+		Persist: func() error {
+			return s.repo.WithKnowledgeReconciliation(ctx, knowledge.TenantID, knowledge.ID, func(reconcileCtx context.Context) error {
+				if err := checkReconciliationAbort(reconcileCtx, "reconciliation lock"); err != nil {
+					return err
+				}
+				existingChunks, err := s.chunkRepo.ListAllChunksByKnowledgeID(reconcileCtx, knowledge.TenantID, knowledge.ID)
+				if err != nil {
+					return err
+				}
+				plan, err = planChunkReuse(desiredChunks, existingChunks, indexingEnabled)
+				if err != nil {
+					return err
+				}
+				for _, chunk := range plan.Create {
+					if indexingEnabled && chunk.ChunkType == types.ChunkTypeText {
+						chunk.Status = int(types.ChunkStatusStored)
+					}
+				}
+				if !indexingEnabled {
+					for _, chunk := range textChunks {
+						chunk.Status = int(types.ChunkStatusDefault)
+					}
+				}
+				updates = append([]*types.Chunk{}, plan.Create...)
+				updates = append(updates, plan.Update...)
+				staleImageURLs = staleExtractedImageURLs(reconcileCtx, plan, options.StoredImages)
+				created = make(map[string]struct{}, len(plan.Create))
+				for _, chunk := range plan.Create {
+					created[chunk.ID] = struct{}{}
+				}
+				if err := executeChunkReconciliation(reconcileCtx, plan, chunkReconcileOps{
+					Create: func(ctx context.Context, chunks []*types.Chunk) error {
+						if err := checkReconciliationAbort(ctx, "create"); err != nil {
+							return err
+						}
+						if len(chunks) == 0 {
+							return nil
+						}
+						return s.chunkService.CreateChunks(ctx, chunks)
+					},
+					Index: func(ctx context.Context, chunks []*types.Chunk) error {
+						if err := checkReconciliationAbort(ctx, "index"); err != nil {
+							return err
+						}
+						if len(chunks) == 0 {
+							return nil
+						}
+						indexStarted = true
+						if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfosFor(chunks)); err != nil {
+							return err
+						}
+						for _, chunk := range chunks {
+							chunk.Status = int(types.ChunkStatusIndexed)
+						}
+						indexSucceeded = true
+						return nil
+					},
+					Update: func(ctx context.Context, _ []*types.Chunk) error {
+						if err := checkReconciliationAbort(ctx, "update"); err != nil {
+							return err
+						}
+						now := time.Now()
+						for _, chunk := range updates {
+							chunk.UpdatedAt = now
+						}
+						return s.chunkRepo.UpdateChunksForReparse(ctx, knowledge.TenantID, updates)
+					},
+					DeleteVector: func(ctx context.Context, ids []string) error {
+						if !isCreatedCleanup(ids) {
+							if err := checkReconciliationAbort(ctx, "stale cleanup"); err != nil {
+								return err
+							}
+						}
+						if !indexingEnabled || len(ids) == 0 {
+							return nil
+						}
+						return retrieveEngine.DeleteByChunkIDList(ctx, ids, embeddingModel.GetDimensions(), kb.Type)
+					},
+					DeleteImages: func(ctx context.Context) error {
+						return deleteExtractedImagesStrict(ctx, s.resolveFileService(ctx, kb), staleImageURLs)
+					},
+					HardDelete: func(ctx context.Context, ids []string) error {
+						if len(ids) == 0 {
+							return nil
+						}
+						return s.chunkRepo.HardDeleteChunks(ctx, knowledge.TenantID, ids)
+					},
+				}); err != nil {
+					return err
+				}
 
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
-	}
+				if modelChanged && indexingEnabled {
+					if err := checkReconciliationAbort(reconcileCtx, "previous model cleanup"); err != nil {
+						return err
+					}
+					if err := retrieveEngine.DeletePreviousModelVectors(
+						reconcileCtx,
+						[]string{knowledge.ID},
+						oldEmbeddingModel.GetDimensions(),
+						embeddingModel.GetDimensions(),
+						kb.Type,
+					); err != nil {
+						return err
+					}
+				}
 
-	// Enqueue multimodal tasks for images (async, non-blocking)
-	if options.EnableMultimodel && len(options.StoredImages) > 0 {
-		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
-			"image_count":    len(options.StoredImages),
-			"enable_ocr":     true,
-			"enable_caption": true,
-		})
-		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
-	} else {
-		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
-		// If there are no multimodal tasks, enqueue the post process task immediately
-		lang, _ := types.LanguageFromContext(ctx)
-		postProcessPayload := types.KnowledgePostProcessPayload{
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Language:        lang,
-			Attempt:         attemptFromCtx(ctx),
-		}
-		langfuse.InjectTracing(ctx, &postProcessPayload)
-		payloadBytes, err := json.Marshal(postProcessPayload)
-		if err == nil {
+				if err := checkReconciliationAbort(reconcileCtx, "graph cleanup"); err != nil {
+					return err
+				}
+				namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+				if err := s.graphEngine.DelGraph(reconcileCtx, []types.NameSpace{namespace}); err != nil {
+					return err
+				}
+
+				knowledge.EmbeddingModelID = kb.EmbeddingModelID
+				finalizeIndexedKnowledgeState(
+					knowledge,
+					totalStorageSize,
+					len(textChunks),
+					pendingMultimodal || pendingPDFMultimodal,
+					time.Now(),
+				)
+				storageDelta, err = s.repo.UpdateKnowledgeAndTenantStorage(reconcileCtx, knowledge)
+				return err
+			})
+		},
+		Finalize: func() {
+			if indexingEnabled {
+				embeddingReuse := "miss"
+				switch {
+				case len(textChunks) == 0 || len(plan.Reuse) == len(textChunks):
+					embeddingReuse = "hit"
+				case len(plan.Reuse) > 0:
+					embeddingReuse = "partial"
+				}
+				s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
+					"vectors_reused":  len(plan.Reuse),
+					"vectors_written": len(plan.Index),
+					"embedding_reuse": embeddingReuse,
+					"storage_bytes":   totalStorageSize,
+				})
+			} else {
+				logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
+				s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
+			}
+			s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+				"chunks_created":   len(plan.Create),
+				"chunks_updated":   len(plan.Update),
+				"chunks_reused":    len(plan.Reuse),
+				"chunks_deleted":   len(plan.Delete) + len(plan.DeleteGenerated),
+				"total_text_chars": totalChunkChars,
+			})
+		},
+		Enqueue: func() {
+			// Enqueue multimodal tasks for images (async, non-blocking)
+			if options.EnableMultimodel && len(options.StoredImages) > 0 {
+				s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
+					"image_count":    len(options.StoredImages),
+					"enable_ocr":     true,
+					"enable_caption": true,
+				})
+				s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
+				return
+			}
+
+			s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
+			lang, _ := types.LanguageFromContext(ctx)
+			postProcessPayload := types.KnowledgePostProcessPayload{
+				TenantID:        knowledge.TenantID,
+				KnowledgeID:     knowledge.ID,
+				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				Language:        lang,
+				Attempt:         attemptFromCtx(ctx),
+			}
+			langfuse.InjectTracing(ctx, &postProcessPayload)
+			payloadBytes, err := json.Marshal(postProcessPayload)
+			if err != nil {
+				logger.Errorf(ctx, "Failed to marshal knowledge post process payload: %v", err)
+				return
+			}
 			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes,
 				knowledgePostProcessTaskOptions()...)
 			if _, err := s.task.Enqueue(task); err != nil {
@@ -687,16 +679,36 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			} else {
 				logger.Infof(ctx, "Enqueued knowledge post process task for %s", knowledge.ID)
 			}
-		} else {
-			logger.Errorf(ctx, "Failed to marshal knowledge post process payload: %v", err)
+		},
+	})
+	if err != nil {
+		if errors.Is(err, reconciliationAborted) {
+			return
 		}
+		if err := checkReconciliationAbort(ctx, "failure status"); err != nil {
+			return
+		}
+		_ = s.repo.UpdateKnowledgeColumns(ctx, knowledge.ID, map[string]interface{}{
+			"parse_status":  types.ParseStatusFailed,
+			"error_message": err.Error(),
+			"updated_at":    time.Now(),
+		})
+		if indexingEnabled && indexStarted && !indexSucceeded {
+			code := werrors.ErrCodeVectorStoreWriteFailed
+			if isLikelyRateLimitError(err) {
+				code = werrors.ErrCodeEmbeddingRateLimit
+			}
+			s.failStage(ctx, knowledge.ID, types.StageEmbedding, code, "batch index failed", err)
+		} else {
+			s.failStage(ctx, knowledge.ID, types.StageChunking, werrors.ErrCodeChunkingFailed, "reconcile chunks failed", err)
+			if indexingEnabled && !indexStarted {
+				s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
+			}
+		}
+		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
+		return
 	}
-
-	// Update tenant's storage usage
-	tenantInfo.StorageUsed += totalStorageSize
-	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, totalStorageSize); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
-	}
+	tenantInfo.StorageUsed += storageDelta
 	logger.GetLogger(ctx).Infof("processChunks successfully")
 }
 
@@ -1964,8 +1976,8 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	return questions, nil
 }
 
-// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
-// This method reuses the logic from UpdateManualKnowledge for resource cleanup and async parsing.
+// ReparseKnowledge schedules asynchronous reparsing. Manual knowledge retains its
+// cleanup path, while document knowledge is reconciled non-destructively by the worker.
 func (s *knowledgeService) ReparseKnowledge(
 	ctx context.Context,
 	knowledgeID string,
@@ -2070,21 +2082,13 @@ func (s *knowledgeService) ReparseKnowledge(
 		return existing, nil
 	}
 
-	// For non-manual knowledge, cleanup synchronously then enqueue document processing
-	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
-		return nil, err
-	}
-
-	// Step 2: Update knowledge status and metadata
+	// Non-manual reparses retain current chunks, vectors, graph data, storage,
+	// and the previous embedding model until the worker safely reconciles them.
+	// Step 2: Update knowledge status and metadata.
 	existing.ParseStatus = "pending"
 	existing.EnableStatus = "disabled"
 	existing.Description = ""
 	existing.ProcessedAt = nil
-	existing.EmbeddingModelID = kb.EmbeddingModelID
 	// Reset the enrichment counter so a leftover value from a previous
 	// attempt cannot block the new finalizing transition later. This must
 	// be an explicit column write: UpdateKnowledge (full-row Save) omits

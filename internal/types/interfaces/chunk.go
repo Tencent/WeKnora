@@ -30,6 +30,8 @@ type ChunkRepository interface {
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListAllChunksByKnowledgeID lists all chunk types by knowledge id.
+	ListAllChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagID is non-empty, results are filtered by tag_id.
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
@@ -56,10 +58,14 @@ type ChunkRepository interface {
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
 	// UpdateChunks updates chunks in batch
 	UpdateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// UpdateChunksForReparse updates the fields owned by reparsing while preserving stable identity fields.
+	UpdateChunksForReparse(ctx context.Context, tenantID uint64, chunks []*types.Chunk) error
 	// DeleteChunk deletes a chunk
 	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
 	// DeleteChunks deletes chunks by IDs in batch
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
+	// HardDeleteChunks permanently deletes chunks by IDs in batch.
+	HardDeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list

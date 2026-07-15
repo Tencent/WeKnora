@@ -106,7 +106,7 @@ func (r *knowledgeSpanRepository) Upsert(ctx context.Context, row *types.Knowled
 
 func (r *knowledgeSpanRepository) NextAttempt(ctx context.Context, knowledgeID string) (int, error) {
 	var max int
-	err := r.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+	err := DBFromContext(ctx, r.db).Model(&types.KnowledgeProcessingSpan{}).
 		Where("knowledge_id = ?", knowledgeID).
 		Select("COALESCE(MAX(attempt), 0)").
 		Row().Scan(&max)
@@ -118,7 +118,7 @@ func (r *knowledgeSpanRepository) NextAttempt(ctx context.Context, knowledgeID s
 
 func (r *knowledgeSpanRepository) LatestAttempt(ctx context.Context, knowledgeID string) (int, error) {
 	var max int
-	err := r.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+	err := DBFromContext(ctx, r.db).Model(&types.KnowledgeProcessingSpan{}).
 		Where("knowledge_id = ?", knowledgeID).
 		Select("COALESCE(MAX(attempt), 0)").
 		Row().Scan(&max)

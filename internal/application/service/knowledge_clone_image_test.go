@@ -20,6 +20,7 @@ type countingFileService struct {
 	copiedFrom  []string
 	failOnURL   string // when non-empty, CopyFile returns an error for this srcPath
 	deleteCalls int
+	deleteErr   error
 }
 
 func (c *countingFileService) CheckConnectivity(ctx context.Context) error { return nil }
@@ -42,7 +43,7 @@ func (c *countingFileService) GetFileURL(ctx context.Context, filePath string) (
 
 func (c *countingFileService) DeleteFile(ctx context.Context, filePath string) error {
 	c.deleteCalls++
-	return nil
+	return c.deleteErr
 }
 
 func (c *countingFileService) CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error) {

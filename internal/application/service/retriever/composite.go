@@ -27,6 +27,10 @@ type CompositeRetrieveEngine struct {
 	engineInfos []*engineInfo
 }
 
+type physicalIndexNamespaceProvider interface {
+	PhysicalIndexNamespace(dimension int, knowledgeType string) string
+}
+
 // Retrieve performs retrieval operations by delegating to the appropriate engine
 // based on the retriever type specified in the parameters
 func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
@@ -295,6 +299,38 @@ func (c *CompositeRetrieveEngine) DeleteByKnowledgeIDList(ctx context.Context,
 			return err
 		}
 		return nil
+	})
+}
+
+// DeletePreviousModelVectors removes the old model's vectors only when a
+// backend declares a distinct physical namespace for the old dimension. Shared
+// stores (such as PostgreSQL) are already replaced by the stable source-ID
+// upsert, so a knowledge-wide delete would remove the replacement as well.
+func (c *CompositeRetrieveEngine) DeletePreviousModelVectors(
+	ctx context.Context,
+	knowledgeIDList []string,
+	previousDimension int,
+	currentDimension int,
+	knowledgeType string,
+) error {
+	if previousDimension == currentDimension {
+		return nil
+	}
+	return c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
+		provider, ok := engineInfo.retrieveEngine.(physicalIndexNamespaceProvider)
+		if !ok {
+			return nil
+		}
+		if provider.PhysicalIndexNamespace(previousDimension, knowledgeType) ==
+			provider.PhysicalIndexNamespace(currentDimension, knowledgeType) {
+			return nil
+		}
+		return engineInfo.retrieveEngine.DeleteByKnowledgeIDList(
+			ctx,
+			knowledgeIDList,
+			previousDimension,
+			knowledgeType,
+		)
 	})
 }
 

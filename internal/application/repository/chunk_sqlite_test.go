@@ -215,3 +215,64 @@ func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
 	assert.Equal(t, "updated content", saved.Content)
 }
+
+func TestReparseRepositoryOperations(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+	knowledgeID := uuid.New().String()
+	kbID := uuid.New().String()
+
+	text := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	text.ID = "stable-text"
+	text.Metadata = types.JSON(`{"questions":["q1"]}`)
+	parent := makeChunk(kbID, knowledgeID, types.ChunkTypeParentText)
+	parent.ID = "stable-parent"
+	otherTenant := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	otherTenant.ID = "other-tenant"
+	otherTenant.TenantID = 2
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{text, parent, otherTenant}))
+
+	all, err := repo.ListAllChunksByKnowledgeID(ctx, 1, knowledgeID)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+
+	seqID := text.SeqID
+	text.ChunkIndex = 9
+	text.PreChunkID = "before"
+	text.Status = int(types.ChunkStatusIndexed)
+	require.NoError(t, repo.UpdateChunksForReparse(ctx, 1, []*types.Chunk{text}))
+
+	saved, err := repo.GetChunkByID(ctx, 1, text.ID)
+	require.NoError(t, err)
+	assert.Equal(t, seqID, saved.SeqID)
+	assert.Equal(t, 9, saved.ChunkIndex)
+	assert.Equal(t, "before", saved.PreChunkID)
+	assert.JSONEq(t, `{"questions":["q1"]}`, saved.Metadata.ToString())
+
+	require.NoError(t, repo.HardDeleteChunks(ctx, 1, []string{text.ID}))
+	recreated := makeChunk(kbID, knowledgeID, types.ChunkTypeText)
+	recreated.ID = text.ID
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{recreated}))
+
+	other, err := repo.GetChunkByID(ctx, 2, otherTenant.ID)
+	require.NoError(t, err)
+	assert.Equal(t, otherTenant.ID, other.ID)
+}
+
+func TestUpdateChunksForReparse_RequiresTenantScopedActiveRow(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	chunk := makeChunk(uuid.New().String(), uuid.New().String(), types.ChunkTypeText)
+	chunk.TenantID = 2
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+
+	chunk.ChunkIndex = 9
+	require.Error(t, repo.UpdateChunksForReparse(ctx, 1, []*types.Chunk{chunk}))
+
+	saved, err := repo.GetChunkByID(ctx, 2, chunk.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, saved.ChunkIndex)
+}

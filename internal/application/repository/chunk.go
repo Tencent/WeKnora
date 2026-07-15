@@ -42,7 +42,7 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
 	}
 
-	db := r.db.WithContext(ctx)
+	db := DBFromContext(ctx, r.db)
 
 	// SQLite doesn't support autoIncrement on non-PK columns,
 	// so we must pre-assign SeqIDs manually (safe: single connection).
@@ -101,7 +101,7 @@ func (r *chunkRepository) ListChunksByID(
 	ctx context.Context, tenantID uint64, ids []string,
 ) ([]*types.Chunk, error) {
 	var chunks []*types.Chunk
-	if err := r.db.WithContext(ctx).
+	if err := DBFromContext(ctx, r.db).
 		Where("tenant_id = ? AND id IN ?", tenantID, ids).
 		Find(&chunks).Error; err != nil {
 		return nil, err
@@ -144,6 +144,20 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	var chunks []*types.Chunk
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_id = ? and chunk_type = ?", tenantID, knowledgeID, "text").
+		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// ListAllChunksByKnowledgeID lists all chunk types for a knowledge ID.
+func (r *chunkRepository) ListAllChunksByKnowledgeID(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	if err := DBFromContext(ctx, r.db).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
 		Order("chunk_index ASC").
 		Find(&chunks).Error; err != nil {
 		return nil, err
@@ -421,6 +435,47 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 	return r.db.WithContext(ctx).Exec(sql, args...).Error
 }
 
+// UpdateChunksForReparse updates fields owned by reparsing while preserving stable identity fields.
+func (r *chunkRepository) UpdateChunksForReparse(
+	ctx context.Context,
+	tenantID uint64,
+	chunks []*types.Chunk,
+) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+
+	return DBFromContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
+		for _, chunk := range chunks {
+			updates := map[string]any{
+				"knowledge_base_id": chunk.KnowledgeBaseID,
+				"content":           common.CleanInvalidUTF8(chunk.Content),
+				"content_hash":      chunk.ContentHash,
+				"chunk_index":       chunk.ChunkIndex,
+				"is_enabled":        chunk.IsEnabled,
+				"status":            chunk.Status,
+				"start_at":          chunk.StartAt,
+				"end_at":            chunk.EndAt,
+				"pre_chunk_id":      chunk.PreChunkID,
+				"next_chunk_id":     chunk.NextChunkID,
+				"parent_chunk_id":   chunk.ParentChunkID,
+				"metadata":          chunk.Metadata,
+				"updated_at":        chunk.UpdatedAt,
+			}
+			result := tx.Model(&types.Chunk{}).
+				Where("tenant_id = ? AND id = ?", tenantID, chunk.ID).
+				Updates(updates)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("expected to update one active chunk %q for tenant %d, updated %d", chunk.ID, tenantID, result.RowsAffected)
+			}
+		}
+		return nil
+	})
+}
+
 // DeleteChunk deletes a chunk by its ID
 func (r *chunkRepository) DeleteChunk(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Chunk{}).Error
@@ -439,6 +494,28 @@ func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids
 			end = len(ids)
 		}
 		if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).Delete(&types.Chunk{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// HardDeleteChunks permanently deletes chunks by IDs in batches.
+func (r *chunkRepository) HardDeleteChunks(ctx context.Context, tenantID uint64, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	const batchSize = 5000
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := DBFromContext(ctx, r.db).
+			Unscoped().
+			Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).
+			Delete(&types.Chunk{}).Error; err != nil {
 			return err
 		}
 	}

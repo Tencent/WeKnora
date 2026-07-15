@@ -16,7 +16,9 @@ import (
 // mockEngineService is a minimal mock for testing registry operations.
 // Only EngineType() is meaningful; all other methods are no-ops.
 type mockEngineService struct {
-	engineType types.RetrieverEngineType
+	engineType       types.RetrieverEngineType
+	namespace        func(int, string) string
+	knowledgeDeletes []int
 }
 
 func (m *mockEngineService) EngineType() types.RetrieverEngineType { return m.engineType }
@@ -42,8 +44,16 @@ func (m *mockEngineService) DeleteByChunkIDList(_ context.Context, _ []string, _
 func (m *mockEngineService) DeleteBySourceIDList(_ context.Context, _ []string, _ int, _ string) error {
 	return nil
 }
-func (m *mockEngineService) DeleteByKnowledgeIDList(_ context.Context, _ []string, _ int, _ string) error {
+
+func (m *mockEngineService) DeleteByKnowledgeIDList(_ context.Context, _ []string, dimension int, _ string) error {
+	m.knowledgeDeletes = append(m.knowledgeDeletes, dimension)
 	return nil
+}
+func (m *mockEngineService) PhysicalIndexNamespace(dimension int, knowledgeType string) string {
+	if m.namespace == nil {
+		return ""
+	}
+	return m.namespace(dimension, knowledgeType)
 }
 func (m *mockEngineService) BatchUpdateChunkEnabledStatus(_ context.Context, _ map[string]bool) error {
 	return nil

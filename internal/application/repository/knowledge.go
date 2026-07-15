@@ -61,7 +61,7 @@ func (r *knowledgeRepository) GetKnowledgeByID(
 	id string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).First(&knowledge).Error; err != nil {
+	if err := DBFromContext(ctx, r.db).Where("tenant_id = ? AND id = ?", tenantID, id).First(&knowledge).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrKnowledgeNotFound
 		}
@@ -181,8 +181,83 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	err := r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledge).Error
+	err := DBFromContext(ctx, r.db).Omit(omitFieldsOnUpdate...).Save(knowledge).Error
 	return err
+}
+
+// UpdateKnowledgeAndTenantStorage persists a knowledge's new storage total and
+// its tenant's exact storage delta in one transaction. Repeating a completed
+// update is idempotent because the delta is derived from the persisted total.
+func (r *knowledgeRepository) UpdateKnowledgeAndTenantStorage(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+) (int64, error) {
+	var delta int64
+	err := DBFromContext(ctx, r.db).Transaction(func(tx *gorm.DB) error {
+		var current struct {
+			StorageSize int64 `gorm:"column:storage_size"`
+		}
+		if err := tx.Model(&types.Knowledge{}).
+			Select("storage_size").
+			Where("tenant_id = ? AND id = ?", knowledge.TenantID, knowledge.ID).
+			Take(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrKnowledgeNotFound
+			}
+			return err
+		}
+
+		delta = knowledge.StorageSize - current.StorageSize
+		if err := tx.Omit(omitFieldsOnUpdate...).Save(knowledge).Error; err != nil {
+			return err
+		}
+		if delta == 0 {
+			return nil
+		}
+
+		result := tx.Table("tenants").
+			Where("id = ?", knowledge.TenantID).
+			UpdateColumn("storage_used", gorm.Expr(
+				"CASE WHEN storage_used + ? < 0 THEN 0 ELSE storage_used + ? END",
+				delta,
+				delta,
+			))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrTenantNotFound
+		}
+		return nil
+	})
+	return delta, err
+}
+
+// WithKnowledgeReconciliation serializes destructive reconciliation for one
+// knowledge row across workers sharing the database. The transaction is placed
+// in the callback context so SQLite uses the same single connection for its
+// callback writes while PostgreSQL and MySQL retain the row lock.
+func (r *knowledgeRepository) WithKnowledgeReconciliation(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	fn func(context.Context) error,
+) error {
+	if fn == nil {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&types.Knowledge{}).
+			Where("tenant_id = ? AND id = ?", tenantID, knowledgeID).
+			UpdateColumn("updated_at", time.Now())
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrKnowledgeNotFound
+		}
+		return fn(withReconciliationDB(ctx, tx))
+	})
 }
 
 // UpdateKnowledgeBatch updates knowledge items in batch

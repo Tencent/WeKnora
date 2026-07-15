@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -34,6 +35,11 @@ type sqliteEmbedding struct {
 }
 
 func (sqliteEmbedding) TableName() string { return "lite_embeddings" }
+
+type sqliteEmbeddingSource struct {
+	sourceID   string
+	sourceType int
+}
 
 type sqliteRepository struct {
 	db        *gorm.DB
@@ -106,23 +112,43 @@ func vecTableName(dim int) string {
 }
 
 func (r *sqliteRepository) ensureVecTable(dim int) {
-	if dim <= 0 || r.vecTables[dim] {
-		return
+	if err := r.ensureVecTableWithDB(r.db, dim); err != nil {
+		logger.GetLogger(context.Background()).Errorf("[SQLite] Failed to create vec0 table for dim %d: %v", dim, err)
+	}
+}
+
+func (r *sqliteRepository) ensureVecTableWithDB(db *gorm.DB, dim int) error {
+	if dim <= 0 {
+		return nil
 	}
 	tbl := vecTableName(dim)
+	ready, err := validateCachedVecTable(r.vecTables, dim, func() (bool, error) {
+		var count int64
+		err := db.Raw(
+			"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+			tbl,
+		).Scan(&count).Error
+		return count > 0, err
+	})
+	if err != nil {
+		return err
+	}
+	if ready {
+		return nil
+	}
 	createSQL := fmt.Sprintf(
 		`CREATE VIRTUAL TABLE IF NOT EXISTS %s USING vec0(embedding float[%d] distance_metric=cosine)`,
 		tbl, dim,
 	)
-	if err := r.db.Exec(createSQL).Error; err != nil {
+	if err := db.Exec(createSQL).Error; err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			r.vecTables[dim] = true
-			return
+			return nil
 		}
-		logger.GetLogger(context.Background()).Errorf("[SQLite] Failed to create vec0 table for dim %d: %v", dim, err)
-		return
+		return err
 	}
 	r.vecTables[dim] = true
+	return nil
 }
 
 func (r *sqliteRepository) ensureExistingVecTables() {
@@ -142,19 +168,7 @@ func (r *sqliteRepository) Support() []types.RetrieverType {
 }
 
 func (r *sqliteRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error {
-	row := toSQLiteEmbedding(indexInfo)
-	emb := extractEmbedding(params, indexInfo.SourceID)
-	if len(emb) > 0 {
-		row.Dimension = len(emb)
-	}
-	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error; err != nil {
-		return err
-	}
-	r.syncFTS5Insert(ctx, row)
-	if len(emb) > 0 && row.ID > 0 {
-		r.insertVec(ctx, row.ID, row.Dimension, emb)
-	}
-	return nil
+	return r.BatchSave(ctx, []*types.IndexInfo{indexInfo}, params)
 }
 
 func (r *sqliteRepository) BatchSave(ctx context.Context, indexInfoList []*types.IndexInfo, params map[string]any) error {
@@ -171,13 +185,72 @@ func (r *sqliteRepository) BatchSave(ctx context.Context, indexInfoList []*types
 			rows[i].Dimension = len(emb)
 		}
 	}
-	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(rows).Error; err != nil {
+	db := repository.DBFromContext(ctx, r.db)
+	sourceIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		sourceIDs = append(sourceIDs, row.SourceID)
+	}
+	var previousRows []sqliteEmbedding
+	if err := db.Where("source_id IN ?", sourceIDs).Find(&previousRows).Error; err != nil {
 		return err
 	}
+	previousBySource := make(map[sqliteEmbeddingSource]sqliteEmbedding, len(previousRows))
+	for _, row := range previousRows {
+		previousBySource[sqliteEmbeddingSource{sourceID: row.SourceID, sourceType: row.SourceType}] = row
+	}
+
+	if err := db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "source_id"},
+			{Name: "source_type"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"chunk_id",
+			"knowledge_id",
+			"knowledge_base_id",
+			"tag_id",
+			"content",
+			"dimension",
+			"is_enabled",
+			"updated_at",
+		}),
+	}).Create(rows).Error; err != nil {
+		return err
+	}
+
+	var persistedRows []sqliteEmbedding
+	if err := db.Where("source_id IN ?", sourceIDs).Find(&persistedRows).Error; err != nil {
+		return err
+	}
+	persistedBySource := make(map[sqliteEmbeddingSource]sqliteEmbedding, len(persistedRows))
+	for _, row := range persistedRows {
+		persistedBySource[sqliteEmbeddingSource{sourceID: row.SourceID, sourceType: row.SourceType}] = row
+	}
 	for i, row := range rows {
-		r.syncFTS5Insert(ctx, row)
+		persisted, found := persistedBySource[sqliteEmbeddingSource{sourceID: row.SourceID, sourceType: row.SourceType}]
+		if !found {
+			return fmt.Errorf("sqlite embedding upsert did not return source %q", row.SourceID)
+		}
+		row.ID = persisted.ID
+		if err := r.syncFTS5Insert(ctx, row); err != nil {
+			return err
+		}
 		if len(embs[i]) > 0 && row.ID > 0 {
-			r.insertVec(ctx, row.ID, row.Dimension, embs[i])
+			previous, existed := previousBySource[sqliteEmbeddingSource{sourceID: row.SourceID, sourceType: row.SourceType}]
+			if existed && previous.Dimension > 0 && previous.Dimension == row.Dimension {
+				if err := r.updateVec(ctx, row.ID, row.Dimension, embs[i]); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := r.insertVec(ctx, row.ID, row.Dimension, embs[i]); err != nil {
+				return err
+			}
+			if existed && previous.Dimension > 0 {
+				if err := r.deleteVec(ctx, previous.ID, previous.Dimension); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -192,24 +265,39 @@ func (r *sqliteRepository) EstimateStorageSize(_ context.Context, indexInfoList 
 }
 
 func (r *sqliteRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, _ int, _ string) error {
+	db := repository.DBFromContext(ctx, r.db)
 	var rows []sqliteEmbedding
-	r.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Find(&rows)
-	r.deleteRowsAndVecs(ctx, rows)
-	return r.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Delete(&sqliteEmbedding{}).Error
+	if err := db.Where("chunk_id IN ?", chunkIDList).Find(&rows).Error; err != nil {
+		return err
+	}
+	if err := r.deleteRowsAndVecs(ctx, rows); err != nil {
+		return err
+	}
+	return db.Where("chunk_id IN ?", chunkIDList).Delete(&sqliteEmbedding{}).Error
 }
 
 func (r *sqliteRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, _ int, _ string) error {
+	db := repository.DBFromContext(ctx, r.db)
 	var rows []sqliteEmbedding
-	r.db.WithContext(ctx).Where("source_id IN ?", sourceIDList).Find(&rows)
-	r.deleteRowsAndVecs(ctx, rows)
-	return r.db.WithContext(ctx).Where("source_id IN ?", sourceIDList).Delete(&sqliteEmbedding{}).Error
+	if err := db.Where("source_id IN ?", sourceIDList).Find(&rows).Error; err != nil {
+		return err
+	}
+	if err := r.deleteRowsAndVecs(ctx, rows); err != nil {
+		return err
+	}
+	return db.Where("source_id IN ?", sourceIDList).Delete(&sqliteEmbedding{}).Error
 }
 
 func (r *sqliteRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, _ int, _ string) error {
+	db := repository.DBFromContext(ctx, r.db)
 	var rows []sqliteEmbedding
-	r.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Find(&rows)
-	r.deleteRowsAndVecs(ctx, rows)
-	return r.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Delete(&sqliteEmbedding{}).Error
+	if err := db.Where("knowledge_id IN ?", knowledgeIDList).Find(&rows).Error; err != nil {
+		return err
+	}
+	if err := r.deleteRowsAndVecs(ctx, rows); err != nil {
+		return err
+	}
+	return db.Where("knowledge_id IN ?", knowledgeIDList).Delete(&sqliteEmbedding{}).Error
 }
 
 func (r *sqliteRepository) CopyIndices(ctx context.Context,
@@ -494,17 +582,37 @@ func extractEmbedding(params map[string]any, sourceID string) []float32 {
 	return embMap[sourceID]
 }
 
-func (r *sqliteRepository) insertVec(_ context.Context, rowID uint, dim int, emb []float32) {
-	r.ensureVecTable(dim)
+func (r *sqliteRepository) insertVec(ctx context.Context, rowID uint, dim int, emb []float32) error {
+	db := repository.DBFromContext(ctx, r.db)
+	if err := r.ensureVecTableWithDB(db, dim); err != nil {
+		return err
+	}
 	blob, err := sqlite_vec.SerializeFloat32(emb)
 	if err != nil {
-		return
+		return err
 	}
 	sql := fmt.Sprintf("INSERT INTO %s(rowid, embedding) VALUES (?, ?)", vecTableName(dim))
-	r.db.Exec(sql, rowID, blob)
+	return db.Exec(sql, rowID, blob).Error
 }
 
-func (r *sqliteRepository) deleteRowsAndVecs(_ context.Context, rows []sqliteEmbedding) {
+func (r *sqliteRepository) updateVec(ctx context.Context, rowID uint, dim int, emb []float32) error {
+	blob, err := sqlite_vec.SerializeFloat32(emb)
+	if err != nil {
+		return err
+	}
+	return repository.DBFromContext(ctx, r.db).
+		Exec(fmt.Sprintf("UPDATE %s SET embedding = ? WHERE rowid = ?", vecTableName(dim)), blob, rowID).Error
+}
+
+func (r *sqliteRepository) deleteVec(ctx context.Context, rowID uint, dim int) error {
+	if dim <= 0 || !r.vecTables[dim] {
+		return nil
+	}
+	return repository.DBFromContext(ctx, r.db).
+		Exec(fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", vecTableName(dim)), rowID).Error
+}
+
+func (r *sqliteRepository) deleteRowsAndVecs(ctx context.Context, rows []sqliteEmbedding) error {
 	dimIDs := make(map[int][]uint)
 	for _, row := range rows {
 		if row.Dimension > 0 {
@@ -512,17 +620,19 @@ func (r *sqliteRepository) deleteRowsAndVecs(_ context.Context, rows []sqliteEmb
 		}
 	}
 	for dim, ids := range dimIDs {
-		if !r.vecTables[dim] {
-			continue
-		}
-		tbl := vecTableName(dim)
 		for _, id := range ids {
-			r.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", tbl), id)
+			if err := r.deleteVec(ctx, id, dim); err != nil {
+				return err
+			}
 		}
 	}
 	for _, row := range rows {
-		r.db.Exec("DELETE FROM lite_embeddings_fts WHERE rowid = ?", row.ID)
+		if err := repository.DBFromContext(ctx, r.db).
+			Exec("DELETE FROM lite_embeddings_fts WHERE rowid = ?", row.ID).Error; err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (r *sqliteRepository) copyVec(_ context.Context, srcID, dstID uint, dim int) {
@@ -536,13 +646,14 @@ func (r *sqliteRepository) copyVec(_ context.Context, srcID, dstID uint, dim int
 	), dstID, srcID)
 }
 
-func (r *sqliteRepository) syncFTS5Insert(_ context.Context, row *sqliteEmbedding) {
+func (r *sqliteRepository) syncFTS5Insert(ctx context.Context, row *sqliteEmbedding) error {
 	if row.ID == 0 {
-		return
+		return nil
 	}
 	tokenizedContent := tokenizeCJKBigram(row.Content)
-	sql := `INSERT INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) VALUES(?, ?, ?, ?, ?, ?)`
-	r.db.Exec(sql, row.ID, tokenizedContent, row.SourceID, row.ChunkID, row.KnowledgeID, row.KnowledgeBaseID)
+	sql := `INSERT OR REPLACE INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) VALUES(?, ?, ?, ?, ?, ?)`
+	return repository.DBFromContext(ctx, r.db).
+		Exec(sql, row.ID, tokenizedContent, row.SourceID, row.ChunkID, row.KnowledgeID, row.KnowledgeBaseID).Error
 }
 
 type whereClause struct {
