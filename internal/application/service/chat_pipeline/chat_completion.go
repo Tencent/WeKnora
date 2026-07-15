@@ -68,6 +68,12 @@ func (p *PluginChatCompletion) OnEvent(
 		return ErrModelCall.WithError(err)
 	}
 	resourceRefs.DecodeResponse(chatResponse)
+	if orphans := resourceRefs.OrphanAliases(chatResponse.Content); len(orphans) > 0 {
+		pipelineWarn(ctx, "Completion", "orphan_resource_aliases", map[string]interface{}{
+			"session_id": chatManage.SessionID,
+			"aliases":    orphans,
+		})
+	}
 
 	pipelineInfo(ctx, "Completion", "output", map[string]interface{}{
 		"answer_preview":    chatResponse.Content,

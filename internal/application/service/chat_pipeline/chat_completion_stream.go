@@ -129,9 +129,34 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			thinkingOpen = false
 		}
 
+		// flushDecoders drains any alias suffix the stream decoders held back to
+		// bridge references split across provider chunks. Both the normal close
+		// and the cancellation path must call this, otherwise a resource
+		// reference in flight at teardown is silently dropped (and never
+		// persisted, since the assistant message is saved from these events).
+		flushDecoders := func() {
+			if tail := thinkingDecoder.Flush(); tail != "" {
+				_ = eventBus.Emit(ctx, types.Event{
+					ID:        thinkingID,
+					Type:      types.EventType(event.EventAgentThought),
+					SessionID: chatManage.SessionID,
+					Data:      event.AgentThoughtData{Content: tail},
+				})
+			}
+			if tail := answerDecoder.Flush(); tail != "" {
+				_ = eventBus.Emit(ctx, types.Event{
+					ID:        answerID,
+					Type:      types.EventType(event.EventAgentFinalAnswer),
+					SessionID: chatManage.SessionID,
+					Data:      event.AgentFinalAnswerData{Content: tail},
+				})
+			}
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
+				flushDecoders()
 				closeThinking()
 				pipelineInfo(ctx, "Stream", "context_cancelled", map[string]interface{}{
 					"session_id": chatManage.SessionID,
@@ -140,22 +165,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 			case response, ok := <-responseChan:
 				if !ok {
-					if tail := thinkingDecoder.Flush(); tail != "" {
-						_ = eventBus.Emit(ctx, types.Event{
-							ID:        thinkingID,
-							Type:      types.EventType(event.EventAgentThought),
-							SessionID: chatManage.SessionID,
-							Data:      event.AgentThoughtData{Content: tail},
-						})
-					}
-					if tail := answerDecoder.Flush(); tail != "" {
-						_ = eventBus.Emit(ctx, types.Event{
-							ID:        answerID,
-							Type:      types.EventType(event.EventAgentFinalAnswer),
-							SessionID: chatManage.SessionID,
-							Data:      event.AgentFinalAnswerData{Content: tail},
-						})
-					}
+					flushDecoders()
 					closeThinking()
 					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
 						"session_id": chatManage.SessionID,

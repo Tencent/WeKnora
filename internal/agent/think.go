@@ -106,6 +106,10 @@ func (e *AgentEngine) streamLLMToEventBus(
 	// accumulated call in the final chunk. Decode once more after assembly so
 	// aliases split across provider chunks cannot leak into tool execution.
 	e.resourceRefs.DecodeToolCalls(result.ToolCalls)
+	if orphans := e.resourceRefs.OrphanAliases(result.Content); len(orphans) > 0 {
+		logger.Warnf(ctx, "[Agent][Stream] Model emitted %d unresolvable resource alias(es): %v",
+			len(orphans), orphans)
+	}
 
 	// Stream diagnostic summary: helps identify non-streaming patterns
 	streamDuration := time.Duration(0)

@@ -23,6 +23,11 @@ var storedRefRE = regexp.MustCompile(
 		`(?:local|minio|cos|tos|s3|oss|ks3|obs)://[^\s)\]>"']+`,
 )
 
+// aliasShapeRE matches the alias syntax produced by EncodeText. It is used only
+// to spot alias-shaped tokens the model emitted that the registry cannot map
+// back — either a hallucinated reference or a coincidental collision.
+var aliasShapeRE = regexp.MustCompile(`res:\d{4,}`)
+
 // Registry assigns low-entropy, request-local aliases to stable resource
 // handles. It is safe to reuse across all rounds of one Agent execution.
 type Registry struct {
@@ -118,6 +123,35 @@ func (r *Registry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
 	for i := range toolCalls {
 		toolCalls[i].Function.Arguments = r.DecodeText(toolCalls[i].Function.Arguments)
 	}
+}
+
+// OrphanAliases returns the distinct alias-shaped tokens in an already-decoded
+// string that the registry cannot resolve. A non-empty result means the model
+// emitted a reference no real resource backs (hallucination) or the user text
+// happened to collide with the alias syntax. Callers should log/observe these
+// rather than surfacing them to end users as broken links.
+func (r *Registry) OrphanAliases(decoded string) []string {
+	if decoded == "" {
+		return nil
+	}
+	var orphans []string
+	seen := make(map[string]struct{})
+	for _, match := range aliasShapeRE.FindAllString(decoded, -1) {
+		if r != nil {
+			r.mu.RLock()
+			_, known := r.aliasToRef[match]
+			r.mu.RUnlock()
+			if known {
+				continue
+			}
+		}
+		if _, dup := seen[match]; dup {
+			continue
+		}
+		seen[match] = struct{}{}
+		orphans = append(orphans, match)
+	}
+	return orphans
 }
 
 func (r *Registry) aliases() []string {
