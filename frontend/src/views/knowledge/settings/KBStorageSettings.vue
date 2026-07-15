@@ -2,14 +2,14 @@
   <div class="kb-storage-settings">
     <div class="section-header">
       <h2>{{ $t('kbSettings.storage.title') }}</h2>
-      <p class="section-description">选择此知识库绑定的具体存储实例。</p>
+      <p class="section-description">{{ $t('kbSettings.storage.selectDescription') }}</p>
     </div>
-    <div v-if="loading" class="loading-inline"><t-loading size="small" /><span>加载中...</span></div>
+    <div v-if="loading" class="loading-inline"><t-loading size="small" /><span>{{ $t('kbSettings.storage.loading') }}</span></div>
     <div v-else class="settings-group">
       <div class="setting-row">
         <div class="setting-info">
-          <label>存储实例</label>
-          <p class="desc">同一种存储类型可以配置多个不同 Endpoint、Bucket 或凭据的实例。</p>
+          <label>{{ $t('kbSettings.storage.instanceLabel') }}</label>
+          <p class="desc">{{ $t('kbSettings.storage.instanceDesc') }}</p>
         </div>
         <div class="setting-control">
           <t-select v-model="localID" style="width:100%;min-width:260px" :disabled="!!props.hasFiles" @change="handleChange">
@@ -17,13 +17,13 @@
               <span class="select-option">
                 <span>{{ backend.name }}</span>
                 <t-tag theme="primary" variant="light" size="small">{{ backend.provider.toUpperCase() }}</t-tag>
-                <t-tag v-if="backend.id === defaultID" variant="light" size="small">默认</t-tag>
+                <t-tag v-if="backend.id === defaultID" variant="light" size="small">{{ $t('kbSettings.storage.defaultTag') }}</t-tag>
               </span>
             </t-option>
           </t-select>
-          <p v-if="props.hasFiles" class="option-hint change-warning">知识库中已有文件，需通过存储迁移流程才能更换实例。</p>
-          <p v-else-if="selected" class="option-hint">{{ selected.config.endpoint || selected.config.bucket_name || selected.config.path_prefix || '本地存储' }}</p>
-          <a href="javascript:void(0)" class="go-settings" @click.prevent="goToSettings">管理存储实例</a>
+          <p v-if="props.hasFiles" class="option-hint change-warning">{{ $t('kbSettings.storage.migrateHint') }}</p>
+          <p v-else-if="selected" class="option-hint">{{ selected.config.endpoint || selected.config.bucket_name || selected.config.path_prefix || $t('kbSettings.storage.localStorage') }}</p>
+          <a href="javascript:void(0)" class="go-settings" @click.prevent="goToSettings">{{ $t('kbSettings.storage.manageInstances') }}</a>
         </div>
       </div>
     </div>

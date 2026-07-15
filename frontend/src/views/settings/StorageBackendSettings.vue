@@ -4,7 +4,7 @@
       <div class="section-header__top">
         <div>
           <h2>{{ t('settings.storage.title') }}</h2>
-          <p class="section-description">管理文件与图片使用的存储实例；同一种类型可以配置多个实例。</p>
+          <p class="section-description">{{ t('settings.storageBackend.description') }}</p>
         </div>
       </div>
     </div>
@@ -12,7 +12,7 @@
     <t-loading :loading="loading" size="small" class="backend-list-loading">
       <t-empty
         v-if="!loading && backends.length === 0 && !authStore.hasRole('admin')"
-        description="尚未配置存储实例"
+        :description="t('settings.storageBackend.empty')"
       />
       <div v-else-if="!loading" class="backend-grid">
         <div
@@ -45,7 +45,7 @@
           <div class="backend-card__body">
             <div class="backend-card__header">
               <h3 class="backend-card__title">{{ backend.name }}</h3>
-              <t-tag v-if="backend.id === defaultID" theme="primary" variant="light" size="small">默认</t-tag>
+              <t-tag v-if="backend.id === defaultID" theme="primary" variant="light" size="small">{{ t('settings.storageBackend.defaultTag') }}</t-tag>
               <div v-if="hasActions(backend)" class="backend-card__actions" @click.stop>
                 <t-dropdown
                   :options="getBackendOptions(backend)"
@@ -79,14 +79,14 @@
           <span class="backend-card--add__icon" aria-hidden="true">
             <add-icon />
           </span>
-          <span class="backend-card--add__label">添加存储实例</span>
+          <span class="backend-card--add__label">{{ t('settings.storageBackend.add') }}</span>
         </button>
       </div>
     </t-loading>
 
     <SettingDrawer
       v-model:visible="visible"
-      :title="editing ? '编辑存储实例' : '添加存储实例'"
+      :title="editing ? t('settings.storageBackend.editTitle') : t('settings.storageBackend.createTitle')"
       :class="`storage-backend-drawer storage-backend-drawer--${form.provider}`"
       :confirm-loading="saving"
       @confirm="save"
@@ -107,18 +107,18 @@
         <span v-else class="header-icon__text">{{ providerInitial(form.provider) }}</span>
       </template>
       <template #subtitle>
-        <span>{{ editing ? '修改此存储实例的连接配置。' : '为文件与图片新增一个存储实例。' }}</span>
+        <span>{{ editing ? t('settings.storageBackend.editSubtitle') : t('settings.storageBackend.createSubtitle') }}</span>
       </template>
 
       <t-form :data="form" layout="vertical">
         <section class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">基本信息</h4>
+          <h4 class="setting-drawer__section-title">{{ t('settings.storageBackend.basicSection') }}</h4>
           <div class="form-item">
-            <label class="form-label required">名称</label>
-            <t-input v-model="form.name" placeholder="例如：生产 COS、归档 COS" clearable />
+            <label class="form-label required">{{ t('settings.storageBackend.nameLabel') }}</label>
+            <t-input v-model="form.name" :placeholder="t('settings.storageBackend.namePlaceholder')" clearable />
           </div>
           <div class="form-item">
-            <label class="form-label required">存储类型</label>
+            <label class="form-label required">{{ t('settings.storageBackend.providerLabel') }}</label>
             <t-select v-model="form.provider" :disabled="!!editing" @change="resetConfig">
               <t-option
                 v-for="provider in providers"
@@ -129,7 +129,7 @@
             </t-select>
           </div>
           <div v-if="form.provider === 'minio'" class="form-item">
-            <label class="form-label">部署模式</label>
+            <label class="form-label">{{ t('settings.storageBackend.modeLabel') }}</label>
             <div class="source-options" role="radiogroup">
               <button
                 type="button"
@@ -139,7 +139,7 @@
                 @click="form.config.mode = 'remote'"
               >
                 <t-icon name="cloud" class="source-option__icon" />
-                <span class="source-option__label">远程实例</span>
+                <span class="source-option__label">{{ t('settings.storageBackend.modeRemote') }}</span>
               </button>
               <button
                 type="button"
@@ -149,14 +149,14 @@
                 @click="form.config.mode = 'docker'"
               >
                 <t-icon name="server" class="source-option__icon" />
-                <span class="source-option__label">环境变量</span>
+                <span class="source-option__label">{{ t('settings.storageBackend.modeEnv') }}</span>
               </button>
             </div>
           </div>
         </section>
 
         <section class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">连接配置</h4>
+          <h4 class="setting-drawer__section-title">{{ t('settings.storageBackend.connectionSection') }}</h4>
           <div v-if="needsEndpoint" class="form-item">
             <label class="form-label required">Endpoint</label>
             <t-input
@@ -190,42 +190,42 @@
           </div>
           <div v-if="form.provider === 'cos'" class="form-item">
             <label class="form-label">App ID</label>
-            <t-input v-model="form.config.app_id" :disabled="!!editing" placeholder="可选" clearable />
+            <t-input v-model="form.config.app_id" :disabled="!!editing" :placeholder="t('settings.storageBackend.optionalPlaceholder')" clearable />
           </div>
         </section>
 
         <section class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">高级选项</h4>
+          <h4 class="setting-drawer__section-title">{{ t('settings.storageBackend.advancedSection') }}</h4>
           <div class="form-item">
-            <label class="form-label">路径前缀</label>
+            <label class="form-label">{{ t('settings.storageBackend.pathPrefixLabel') }}</label>
             <t-input v-model="form.config.path_prefix" :disabled="!!editing" placeholder="weknora/" clearable />
           </div>
           <div v-if="form.provider === 'minio'" class="form-item">
             <div class="vision-toggle">
               <t-switch v-model="form.config.use_ssl" />
-              <span class="form-desc form-desc--inline">使用 HTTPS 访问 MinIO</span>
+              <span class="form-desc form-desc--inline">{{ t('settings.storageBackend.useSslDesc') }}</span>
             </div>
           </div>
           <div v-if="form.provider === 's3'" class="form-item">
             <div class="vision-toggle">
               <t-switch v-model="form.config.force_path_style" />
-              <span class="form-desc form-desc--inline">使用 Path Style</span>
+              <span class="form-desc form-desc--inline">{{ t('settings.storageBackend.forcePathStyleDesc') }}</span>
             </div>
           </div>
           <div v-if="form.provider === 'oss'" class="form-item">
             <div class="vision-toggle">
               <t-switch v-model="form.config.use_temp_bucket" />
-              <span class="form-desc form-desc--inline">使用临时桶</span>
+              <span class="form-desc form-desc--inline">{{ t('settings.storageBackend.useTempBucketDesc') }}</span>
             </div>
           </div>
           <template v-if="['cos', 'tos'].includes(form.provider) || (form.provider === 'oss' && form.config.use_temp_bucket)">
             <div class="form-item">
-              <label class="form-label">临时桶</label>
-              <t-input v-model="form.config.temp_bucket_name" placeholder="可选，用于临时文件" clearable />
+              <label class="form-label">{{ t('settings.storageBackend.tempBucketLabel') }}</label>
+              <t-input v-model="form.config.temp_bucket_name" :placeholder="t('settings.storageBackend.tempBucketPlaceholder')" clearable />
             </div>
             <div class="form-item">
-              <label class="form-label">临时桶 Region</label>
-              <t-input v-model="form.config.temp_region" placeholder="留空时使用主 Region" clearable />
+              <label class="form-label">{{ t('settings.storageBackend.tempRegionLabel') }}</label>
+              <t-input v-model="form.config.temp_region" :placeholder="t('settings.storageBackend.tempRegionPlaceholder')" clearable />
             </div>
           </template>
         </section>
@@ -237,7 +237,7 @@
             <t-icon v-if="!testing && rawTestResult === 'ok'" name="check-circle-filled" class="status-icon available" />
             <t-icon v-else-if="!testing && rawTestResult === 'error'" name="close-circle-filled" class="status-icon unavailable" />
           </template>
-          测试连接
+          {{ t('settings.storageBackend.testConnection') }}
         </t-button>
       </template>
     </SettingDrawer>
@@ -293,7 +293,7 @@ const monoLogoStyle = computed((): Record<string, string> => {
 })
 
 function backendMeta(backend: StorageBackend): string {
-  return backend.config.endpoint || backend.config.bucket_name || backend.config.path_prefix || '本地存储'
+  return backend.config.endpoint || backend.config.bucket_name || backend.config.path_prefix || t('settings.storageBackend.localStorage')
 }
 
 const canEdit = (backend: StorageBackend) => authStore.hasRole('admin') && backend.source !== 'env'
@@ -304,10 +304,10 @@ const hasActions = (_backend: StorageBackend) => true
 
 function getBackendOptions(backend: StorageBackend) {
   const options: { content: string; value: string; theme?: string }[] = []
-  options.push({ content: '测试连接', value: 'test' })
-  if (canSetDefault(backend)) options.push({ content: '设为默认', value: 'default' })
-  if (canEdit(backend)) options.push({ content: '编辑', value: 'edit' })
-  if (canDelete(backend)) options.push({ content: '删除', value: 'delete', theme: 'error' })
+  options.push({ content: t('settings.storageBackend.testConnection'), value: 'test' })
+  if (canSetDefault(backend)) options.push({ content: t('settings.storageBackend.setDefault'), value: 'default' })
+  if (canEdit(backend)) options.push({ content: t('settings.storageBackend.edit'), value: 'edit' })
+  if (canDelete(backend)) options.push({ content: t('settings.storageBackend.delete'), value: 'delete', theme: 'error' })
   return options
 }
 
@@ -340,23 +340,23 @@ async function testRaw() {
   rawTestResult.value = null
   try {
     const r: any = editing.value ? await testStorageBackendByID(editing.value.id) : await testStorageBackend(form)
-    if (r.success) { rawTestResult.value = 'ok'; MessagePlugin.success('连接成功') }
-    else { rawTestResult.value = 'error'; MessagePlugin.error(r.error || '连接失败') }
+    if (r.success) { rawTestResult.value = 'ok'; MessagePlugin.success(t('settings.storageBackend.testSuccess')) }
+    else { rawTestResult.value = 'error'; MessagePlugin.error(r.error || t('settings.storageBackend.testFailed')) }
   } finally { testing.value = false }
 }
-async function testSaved(backend: StorageBackend) { const r: any = await testStorageBackendByID(backend.id); r.success ? MessagePlugin.success('连接成功') : MessagePlugin.error(r.error || '连接失败') }
+async function testSaved(backend: StorageBackend) { const r: any = await testStorageBackendByID(backend.id); r.success ? MessagePlugin.success(t('settings.storageBackend.testSuccess')) : MessagePlugin.error(r.error || t('settings.storageBackend.testFailed')) }
 async function save() {
-  if (!form.name.trim()) { MessagePlugin.warning('请输入名称'); return }
+  if (!form.name.trim()) { MessagePlugin.warning(t('settings.storageBackend.nameRequired')); return }
   saving.value = true
   try {
     const payload = { name: form.name.trim(), provider: form.provider, config: { ...form.config } }
     if (editing.value) await updateStorageBackend(editing.value.id, payload); else await createStorageBackend(payload)
-    MessagePlugin.success('保存成功'); visible.value = false; await load()
-  } catch (e: any) { MessagePlugin.error(e?.message || '保存失败') } finally { saving.value = false }
+    MessagePlugin.success(t('settings.storageBackend.saveSuccess')); visible.value = false; await load()
+  } catch (e: any) { MessagePlugin.error(e?.message || t('settings.storageBackend.saveFailed')) } finally { saving.value = false }
 }
-async function makeDefault(backend: StorageBackend) { await setDefaultStorageBackend(backend.id); defaultID.value = backend.id; MessagePlugin.success('默认存储已更新') }
+async function makeDefault(backend: StorageBackend) { await setDefaultStorageBackend(backend.id); defaultID.value = backend.id; MessagePlugin.success(t('settings.storageBackend.defaultUpdated')) }
 function remove(backend: StorageBackend) {
-  const dialog = DialogPlugin.confirm({ header: '删除存储实例', body: `确定删除“${backend.name}”吗？`, onConfirm: async () => { dialog.destroy(); try { await deleteStorageBackend(backend.id); await load(); MessagePlugin.success('已删除') } catch (e: any) { MessagePlugin.error(e?.message || '删除失败') } }, onCancel: () => dialog.destroy() })
+  const dialog = DialogPlugin.confirm({ header: t('settings.storageBackend.deleteTitle'), body: t('settings.storageBackend.deleteConfirm', { name: backend.name }), onConfirm: async () => { dialog.destroy(); try { await deleteStorageBackend(backend.id); await load(); MessagePlugin.success(t('settings.storageBackend.deleted')) } catch (e: any) { MessagePlugin.error(e?.message || t('settings.storageBackend.deleteFailed')) } }, onCancel: () => dialog.destroy() })
 }
 onMounted(load)
 </script>
