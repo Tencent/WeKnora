@@ -2,7 +2,6 @@ package router
 
 import (
 	"crypto/tls"
-	"os"
 	"testing"
 
 	"github.com/hibiken/asynq"
@@ -42,7 +41,7 @@ func TestGetAsynqRedisConnOpt_ClusterTLS(t *testing.T) {
 func TestGetAsynqRedisConnOpt_PlaintextDefault(t *testing.T) {
 	t.Setenv("REDIS_MODE", "cluster")
 	t.Setenv("REDIS_CLUSTER_ADDRS", "10.0.0.1:6379")
-	os.Unsetenv("REDIS_USE_TLS")
+	t.Setenv("REDIS_USE_TLS", "")
 
 	opt, ok := getAsynqRedisConnOpt().(*asynq.RedisClusterClientOpt)
 	require.True(t, ok)
