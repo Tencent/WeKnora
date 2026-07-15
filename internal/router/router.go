@@ -294,9 +294,20 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
 		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
 		kb.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
+		// Move a knowledge into a folder (empty folder_id = root).
+		kb.PUT("/:knowledge_id/folder", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.SetKnowledgeFolder)
 		// Clearing all contents under a KB is a destructive op; gate
 		// behind Admin instead of Contributor.
 		kb.DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
+	}
+
+	// 多级文件夹树（目录节点）
+	folders := r.Group("/knowledge-bases/:id/folders")
+	{
+		folders.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListFolders)
+		folders.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateFolder)
+		folders.PUT("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateFolder)
+		folders.DELETE("/:folder_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteFolder)
 	}
 
 	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）

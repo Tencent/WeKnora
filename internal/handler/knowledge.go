@@ -902,6 +902,13 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
 	}
+	if raw := strings.TrimSpace(c.Query("folder_id")); raw != "" && raw != "all" {
+		fid := raw
+		if fid == "root" {
+			fid = ""
+		}
+		filter.FolderID = &fid
+	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)
 		if err != nil {
