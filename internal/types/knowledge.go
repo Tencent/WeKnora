@@ -104,6 +104,9 @@ type KnowledgeListFilter struct {
 	UpdatedFrom time.Time
 	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
 	UpdatedTo time.Time
+	// FolderID filters by folder. nil = no folder filter. Pointer so callers can
+	// distinguish "root level" (non-nil pointing to "") from "no filter" (nil).
+	FolderID *string
 }
 
 // Knowledge represents a knowledge entity in the system.
@@ -116,6 +119,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// FolderID is the folder this knowledge lives in (nil/empty = root level).
+	FolderID *string `json:"folder_id" gorm:"column:folder_id;type:varchar(36)"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge
