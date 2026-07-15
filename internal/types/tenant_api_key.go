@@ -97,6 +97,14 @@ const (
 	// APIKeyCapabilityManageVectorStores lets a key manage retrieval
 	// infrastructure such as vector stores, parser engines, and storage checks.
 	APIKeyCapabilityManageVectorStores APIKeyCapability = "manage_vector_stores"
+	// APIKeyCapabilityManageStorageBackends lets a key manage object/file
+	// storage backend instances (e.g. S3-compatible or local file storage):
+	// their CRUD lifecycle, connectivity tests, and the tenant default
+	// selection. It is separate from manage_vector_stores because storage
+	// backends are the file-persistence layer (holding object-store
+	// credentials and user-controllable endpoints) rather than retrieval
+	// infrastructure.
+	APIKeyCapabilityManageStorageBackends APIKeyCapability = "manage_storage_backends"
 	// APIKeyCapabilityManageWebSearch lets a key manage tenant web-search
 	// provider configurations and credentials.
 	APIKeyCapabilityManageWebSearch APIKeyCapability = "manage_web_search"
@@ -148,6 +156,8 @@ func NormalizeAPIKeyCapability(c APIKeyCapability) APIKeyCapability {
 		return APIKeyCapabilityManageChannels
 	case APIKeyCapabilityManageVectorStores:
 		return APIKeyCapabilityManageVectorStores
+	case APIKeyCapabilityManageStorageBackends:
+		return APIKeyCapabilityManageStorageBackends
 	case APIKeyCapabilityManageWebSearch:
 		return APIKeyCapabilityManageWebSearch
 	case APIKeyCapabilityRunEvaluations:

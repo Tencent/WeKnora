@@ -79,6 +79,7 @@ export type TenantAPIKeyCapability =
   | 'manage_datasources'
   | 'manage_channels'
   | 'manage_vector_stores'
+  | 'manage_storage_backends'
   | 'manage_web_search'
   | 'run_evaluations'
   | 'manage_members'

@@ -6065,6 +6065,8 @@ export default {
 	      capabilityManageChannelsHint: 'Управление embed-каналами агентов, IM-каналами и привязкой WeChat через QR-код.',
 	      capabilityManageVectorStores: 'Управление инфраструктурой поиска',
 	      capabilityManageVectorStoresHint: 'Управление векторными хранилищами и проверками парсеров, чтения документов и storage engine.',
+	      capabilityManageStorageBackends: 'Управление хранилищами (backends)',
+	      capabilityManageStorageBackendsHint: 'Управление экземплярами объектных/файловых хранилищ (например, S3-совместимых или локальных): их CRUD, проверки подключения и выбор хранилища по умолчанию для арендатора.',
 	      capabilityManageWebSearch: 'Управление веб-поиском',
 	      capabilityManageWebSearchHint: 'Управление провайдерами веб-поиска, учётными данными и проверками подключения.',
 	      capabilityRunEvaluations: 'Запуск оценок',

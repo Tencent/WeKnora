@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     web_search_config TEXT DEFAULT NULL,
     parser_engine_config TEXT DEFAULT NULL,
     storage_engine_config TEXT DEFAULT NULL,
+    default_storage_backend_id VARCHAR(36),
     credentials TEXT DEFAULT NULL,
     chat_history_config TEXT,
     retrieval_config TEXT,
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     pinned_at DATETIME NULL,
     asr_config TEXT,
     vector_store_id VARCHAR(36),
+    storage_backend_id VARCHAR(36),
     creator_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -78,6 +80,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_id ON knowledge_bases(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_vector_store
     ON knowledge_bases(tenant_id, vector_store_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_storage_backend
+    ON knowledge_bases(tenant_id, storage_backend_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_creator
     ON knowledge_bases(tenant_id, creator_id);
 
@@ -803,6 +807,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_stores_name_tenant
 CREATE INDEX IF NOT EXISTS idx_vector_stores_tenant_id ON vector_stores(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_engine_type ON vector_stores(engine_type);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_deleted_at ON vector_stores(deleted_at);
+
+CREATE TABLE IF NOT EXISTS storage_backends (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    config TEXT NOT NULL DEFAULT '{}',
+    source VARCHAR(16) NOT NULL DEFAULT 'user',
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    legacy_alias BOOLEAN NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_backends_name_tenant
+    ON storage_backends(tenant_id, name) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_backends_legacy_alias
+    ON storage_backends(tenant_id, provider) WHERE deleted_at IS NULL AND legacy_alias = 1;
+CREATE INDEX IF NOT EXISTS idx_storage_backends_tenant ON storage_backends(tenant_id);
 
 CREATE TABLE IF NOT EXISTS tenant_api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -100,6 +100,7 @@ type agentService struct {
 	webSearchStateService interfaces.WebSearchStateService
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
+	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
 }
 
@@ -120,6 +121,7 @@ func NewAgentService(
 	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
+	storageResolver interfaces.StorageBackendResolver,
 	toolApprovalGate approval.MCPApproval,
 ) interfaces.AgentService {
 	return &agentService{
@@ -138,6 +140,7 @@ func NewAgentService(
 		webSearchStateService: webSearchStateService,
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
+		storageResolver:       storageResolver,
 		toolApprovalGate:      toolApprovalGate,
 	}
 }
@@ -622,7 +625,7 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
-			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID)
+			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver)
 			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
 
 		case tools.ToolDataSchema:

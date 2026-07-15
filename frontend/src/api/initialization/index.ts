@@ -142,6 +142,7 @@ export interface KBModelConfigRequest {
         enabled: boolean
     }
     /** 存储引擎选择："local" | "minio" | "cos" | "obs" 等，影响文档上传与文档内图片存储 */
+    storageBackendId?: string
     storageProvider?: string
     nodeExtract: {
         enabled: boolean

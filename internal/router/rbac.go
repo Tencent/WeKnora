@@ -297,6 +297,13 @@ func apiKeyManageVectorStores(base middleware.APIKeyRoutePolicy) middleware.APIK
 	return base.WithCapability(types.APIKeyCapabilityManageVectorStores)
 }
 
+// apiKeyManageStorageBackends layers the "manage_storage_backends" capability
+// on top of a base policy so a scoped key can manage object/file storage
+// backend instances without carrying vector-store or full tenant access.
+func apiKeyManageStorageBackends(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
+	return base.WithCapability(types.APIKeyCapabilityManageStorageBackends)
+}
+
 func apiKeyManageWebSearch(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityManageWebSearch)
 }

@@ -77,8 +77,9 @@ func stripImageXMLTags(s string) string {
 	})
 }
 
-// storageSchemeRe matches provider:// URLs used by file storage backends.
-var storageSchemeRe = regexp.MustCompile(`\b(local|minio|s3|cos|tos|oss)://[^\s)\]>"]+`)
+// storageSchemeRe matches both legacy provider:// URLs and canonical
+// storage://<backend-id>/provider:// URLs.
+var storageSchemeRe = regexp.MustCompile(`\b(?:storage://[0-9A-Za-z_-]+/)?(?:local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]+`)
 
 // rewriteStorageURLs replaces all provider:// URLs in content with HTTP URLs
 // obtained from fileService.GetFileURL. URLs that are already HTTP or cannot
@@ -127,7 +128,7 @@ func rewriteStorageURLs(ctx context.Context, content string, resolver *imFileSer
 // incompleteURLSuffixRe matches a provider:// URL that reaches the end of the
 // string — it may continue in the next chunk.
 var incompleteURLSuffixRe = regexp.MustCompile(
-	`\b(?:local|minio|s3|cos|tos|oss)://[^\s)\]>"]*$`,
+	`\b(?:storage|local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]*$`,
 )
 
 // findIncompleteStorageURL returns the byte offset of a potentially truncated
@@ -197,18 +198,19 @@ func holdbackCutoff(chunk string) int {
 }
 
 // formatIMOutboundAnswer strips thinking/tool blocks and applies IM content cleanup.
-func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenant, defaultFileSvc interfaces.FileService) string {
-	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), tenant, defaultFileSvc)
+func formatIMOutboundAnswer(ctx context.Context, raw string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
+	return cleanIMContent(ctx, FormatIMDisplayContent(raw, StreamDisplayFinal), tenant, defaultFileSvc, storageResolvers...)
 }
 
 // cleanIMContent applies all IM-specific content transformations:
 //  1. Collapse <image> XML blocks back to plain markdown
 //  2. Strip <kb/> and <web/> citation tags
 //  3. Rewrite provider:// URLs to HTTP URLs (scheme-aware per tenant config)
-func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService) string {
+func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) string {
 	content = stripImageXMLTags(content)
 	content = stripIMCitationTags(content)
-	resolver := newIMFileServiceResolver(tenant, defaultFileSvc)
+	resolver := newIMFileServiceResolver(tenant, defaultFileSvc, storageResolvers...)
+	resolver.ctx = ctx
 	content = rewriteStorageURLs(ctx, content, resolver)
 	return content
 }
@@ -225,20 +227,28 @@ func imLocalStorageBaseDir() string {
 // for the lifetime of one cleanIMContent / outbound message (avoids re-creating SDK clients
 // for every URL in a long answer).
 type imFileServiceResolver struct {
-	tenant     *types.Tenant
-	defaultSvc interfaces.FileService
-	cache      map[string]interfaces.FileService
+	tenant          *types.Tenant
+	defaultSvc      interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
+	ctx             context.Context
+	cache           map[string]interfaces.FileService
 }
 
-func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileService) *imFileServiceResolver {
-	return &imFileServiceResolver{
+func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileService, storageResolvers ...interfaces.StorageBackendResolver) *imFileServiceResolver {
+	resolver := &imFileServiceResolver{
 		tenant:     tenant,
 		defaultSvc: defaultSvc,
+		ctx:        context.Background(),
 		cache:      make(map[string]interfaces.FileService),
 	}
+	if len(storageResolvers) > 0 {
+		resolver.storageResolver = storageResolvers[0]
+	}
+	return resolver
 }
 
 func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService {
+	backendID, _, _ := types.ParseStorageBackendPath(filePath)
 	provider := types.ParseProviderScheme(filePath)
 	if provider == "" {
 		if r.tenant != nil && r.tenant.StorageEngineConfig != nil {
@@ -248,12 +258,21 @@ func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService 
 			return nil
 		}
 	}
-	if svc, ok := r.cache[provider]; ok {
+	cacheKey := backendID + ":" + provider
+	if svc, ok := r.cache[cacheKey]; ok {
 		return svc
+	}
+	if r.storageResolver != nil && r.tenant != nil {
+		svc, _, err := r.storageResolver.ResolveFileService(r.ctx, r.tenant, backendID, provider, imLocalStorageBaseDir())
+		if err == nil {
+			r.cache[cacheKey] = svc
+			return svc
+		}
+		logger.Warnf(r.ctx, "[IM] resolve storage backend failed: backend_id=%s provider=%s err=%v", backendID, provider, err)
 	}
 	svc := buildIMFileServiceForProvider(r.tenant, provider, r.defaultSvc)
 	if svc != nil {
-		r.cache[provider] = svc
+		r.cache[cacheKey] = svc
 	}
 	return svc
 }
@@ -374,7 +393,8 @@ type Service struct {
 
 	// defaultFileSvc is the process-wide storage backend (STORAGE_TYPE / env).
 	// Used when tenant StorageEngineConfig cannot build a service for the URL scheme.
-	defaultFileSvc interfaces.FileService
+	defaultFileSvc  interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
 
 	// cmdRegistry holds all registered slash-commands.
 	cmdRegistry *CommandRegistry
@@ -787,6 +807,7 @@ func NewService(
 	oauthManager *mcppkg.OAuthManager,
 	redisClient *redis.Client,
 	appCfg *config.Config,
+	storageResolver interfaces.StorageBackendResolver,
 ) *Service {
 	// Resolve IM configuration with defaults.
 	workers, maxQueue, maxPerUser, globalMaxWorkers, rlWindow, rlMax := resolveIMConfig(appCfg)
@@ -811,6 +832,7 @@ func NewService(
 		modelService:     modelService,
 		streamManager:    streamManager,
 		defaultFileSvc:   defaultFileSvc,
+		storageResolver:  storageResolver,
 		oauthManager:     oauthManager,
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
@@ -1602,7 +1624,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	reply := &ReplyMessage{
-		Content: formatIMOutboundAnswer(ctx, answer, req.tenant, s.defaultFileSvc),
+		Content: formatIMOutboundAnswer(ctx, answer, req.tenant, s.defaultFileSvc, s.storageResolver),
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
@@ -2357,7 +2379,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			displaySource = displaySource[:cut]
 		}
 
-		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc)
+		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc, s.storageResolver)
 		if err := streamer.UpdateStreamContent(ctx, msg, streamID, display); err != nil {
 			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: %v", err)
 		}
@@ -2396,7 +2418,7 @@ loop:
 	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	bufMu.Unlock()
 
-	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc)
+	finalDisplay := cleanIMContent(ctx, FormatIMFinalFromParts(parts), tenant, s.defaultFileSvc, s.storageResolver)
 	if noVisibleContent || finalDisplay == "" {
 		fallback := "抱歉，我暂时无法回答这个问题。"
 		if finalErr != nil {
@@ -2443,7 +2465,7 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 	}
 
-	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc), IsFinal: true})
+	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: formatIMOutboundAnswer(ctx, answer, tenant, s.defaultFileSvc, s.storageResolver), IsFinal: true})
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.

@@ -141,12 +141,21 @@ func mimeToExt(mime string) string {
 }
 
 func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider string) interfaces.FileService {
-	if strings.TrimSpace(storageProvider) == "" {
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil {
 		return h.fileService
 	}
-
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenant == nil || tenant.StorageEngineConfig == nil {
+	if h.storageResolver != nil {
+		svc, resolvedProvider, err := h.storageResolver.ResolveFileService(ctx, tenant, "", storageProvider, "")
+		if err == nil && svc != nil {
+			logger.Infof(ctx, "[image-storage] using storage instance provider=%s for image uploads", resolvedProvider)
+			return svc
+		}
+		if err != nil {
+			logger.Warnf(ctx, "[image-storage] failed to resolve storage instance for provider=%s: %v", storageProvider, err)
+		}
+	}
+	if strings.TrimSpace(storageProvider) == "" || tenant.StorageEngineConfig == nil {
 		return h.fileService
 	}
 

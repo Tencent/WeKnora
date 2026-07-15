@@ -273,6 +273,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
+	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterEmbedChannelRoutes(v1, &handler.EmbedChannelHandler{}, g)
 	RegisterIMChannelRoutes(v1, &handler.IMHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
@@ -290,6 +291,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
+		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
 		{http.MethodGet, "/api/v1/embed-channels", types.APIKeyCapabilityManageChannels},
 		{http.MethodGet, "/api/v1/im-channels", types.APIKeyCapabilityManageChannels},
 		{http.MethodGet, "/api/v1/datasource", types.APIKeyCapabilityManageDataSources},

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -79,7 +78,8 @@ type ImageMultimodalService struct {
 	// (e.g. images were saved using the global MINIO_* env vars while the
 	// tenant's StorageEngineConfig.MinIO is empty). Mirrors the write-side
 	// fallback in knowledgeService.resolveFileService.
-	fileSvc interfaces.FileService
+	fileSvc         interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
 
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
@@ -98,21 +98,23 @@ func NewImageMultimodalService(
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
 	fileSvc interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
 	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
-		chunkService:   chunkService,
-		modelService:   modelService,
-		kbService:      kbService,
-		knowledgeRepo:  knowledgeRepo,
-		tenantRepo:     tenantRepo,
-		retrieveEngine: retrieveEngine,
-		ownership:      ownership,
-		ollamaService:  ollamaService,
-		taskEnqueuer:   taskEnqueuer,
-		redisClient:    redisClient,
-		fileSvc:        fileSvc,
-		spanTracker:    spanTracker,
+		chunkService:    chunkService,
+		modelService:    modelService,
+		kbService:       kbService,
+		knowledgeRepo:   knowledgeRepo,
+		tenantRepo:      tenantRepo,
+		retrieveEngine:  retrieveEngine,
+		ownership:       ownership,
+		ollamaService:   ollamaService,
+		taskEnqueuer:    taskEnqueuer,
+		redisClient:     redisClient,
+		fileSvc:         fileSvc,
+		storageResolver: storageResolver,
+		spanTracker:     spanTracker,
 	}
 }
 
@@ -550,6 +552,7 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 		return s.fileSvc
 	}
 
+	backendID, _, _ := types.ParseStorageBackendPath(payload.ImageURL)
 	provider := types.ParseProviderScheme(payload.ImageURL)
 	if provider == "" {
 		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
@@ -557,13 +560,20 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v", payload.KnowledgeBaseID, kbErr)
 		} else if kb != nil {
 			provider = strings.ToLower(strings.TrimSpace(kb.GetStorageProvider()))
+			if backendID == "" && kb.StorageBackendID != nil {
+				backendID = *kb.StorageBackendID
+			}
 		}
+	}
+
+	if s.storageResolver == nil {
+		return s.fileSvc
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	logger.Infof(ctx, "[ImageMultimodal] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
 		payload.TenantID, provider, baseDir, payload.ImageURL)
-	fileSvc, _, svcErr := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, baseDir)
+	fileSvc, _, svcErr := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
 	if svcErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
 			payload.TenantID, provider, svcErr)

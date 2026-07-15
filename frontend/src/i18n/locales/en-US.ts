@@ -6240,6 +6240,8 @@ export default {
 	      capabilityManageChannelsHint: 'Manage agent embed channels, IM channels, and WeChat QR binding flows.',
 	      capabilityManageVectorStores: 'Manage retrieval infrastructure',
 	      capabilityManageVectorStoresHint: 'Manage vector-store configuration plus parser, document reader, and storage engine connectivity checks.',
+	      capabilityManageStorageBackends: 'Manage storage backends',
+	      capabilityManageStorageBackendsHint: 'Manage object/file storage backend instances (e.g. S3-compatible or local file storage): their CRUD lifecycle, connectivity tests, and the tenant default selection.',
 	      capabilityManageWebSearch: 'Manage web search',
 	      capabilityManageWebSearchHint: 'Manage web-search provider configurations, credentials, and connection tests.',
 	      capabilityRunEvaluations: 'Run evaluations',

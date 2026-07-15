@@ -21,5 +21,6 @@ DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS knowledges;
 DROP TABLE IF EXISTS knowledge_bases;
+DROP TABLE IF EXISTS storage_backends;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS tenants;
