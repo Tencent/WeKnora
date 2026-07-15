@@ -84,9 +84,13 @@
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
                             <div class="menu_icon">
-                                <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
-                                    alt="">
+                                <SvgIcon
+                                    :name="resolveMenuIcon(item).name"
+                                    :variant="resolveMenuIcon(item).variant"
+                                    :theme="resolveMenuIcon(item).theme"
+                                    :size="20"
+                                    class="icon"
+                                />
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
                                 <span class="menu_title" :title="item.title">{{ item.title }}</span>
@@ -247,6 +251,7 @@ import { useCommandPaletteStore } from '@/stores/commandPalette';
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
+import { SvgIcon, type IconName, type IconVariant } from '@/components/icons';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
 
@@ -406,19 +411,24 @@ const isMenuItemActive = (itemPath: string): boolean => {
     }
 };
 
-// 统一的图标激活状态判断
-const getIconActiveState = (itemPath: string) => {
-    const currentRoute = route.name;
+type MenuIconTheme = 'default' | 'brand' | 'secondary' | 'placeholder' | 'anti';
+const menuIconNameMap: Record<string, IconName> = {
+    'zhishiku': 'zhishiku',
+    'shared-kb': 'zhishiku',
+    'search': 'websearch',
+    'prefixIcon': 'prefixIcon',
+    'agent': 'agent',
+    'integration': 'agent',
+    'organization': 'organization',
+    'setting': 'setting',
+};
 
+const resolveMenuIcon = (item: MenuItem): { name: IconName; variant: IconVariant; theme: MenuIconTheme } => {
+    const isActive = isMenuItemActive(item.path) || (!!item.childrenPath && item.childrenPath === currentpath.value);
     return {
-        isKbActive: itemPath === 'knowledge-bases' && (
-            currentRoute === 'knowledgeBaseList' ||
-            currentRoute === 'knowledgeBaseDetail' ||
-            currentRoute === 'knowledgeBaseSettings'
-        ),
-        isCreatChatActive: itemPath === 'creatChat' && (currentRoute === 'kbCreatChat' || currentRoute === 'globalCreatChat'),
-        isSettingsActive: itemPath === 'settings' && currentRoute === 'settings',
-        isChatActive: itemPath === 'chat' && currentRoute === 'chat'
+        name: menuIconNameMap[item.icon] ?? 'zhishiku',
+        variant: 'default',
+        theme: isActive ? 'brand' : 'secondary',
     };
 };
 
@@ -1021,48 +1031,11 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
         void syncActiveBucketFromChat(newChatId);
     }
 
-    // 路由变化时更新图标状态和知识库信息（不涉及对话列表）
-    getIcon(nameStr);
-
     // 如果切换了知识库，更新知识库名称但不重新加载对话列表
     if (newvalue[1].kbId !== oldvalue?.[1]?.kbId) {
         loadCurrentKbInfo((newvalue[1] as any)?.kbId as string);
     }
 });
-let knowledgeIcon = ref('zhishiku-green.svg');
-let prefixIcon = ref('prefixIcon.svg');
-let logoutIcon = ref('logout.svg');
-let settingIcon = ref('setting.svg');
-let agentIcon = ref('agent.svg');
-let organizationIcon = ref('organization.svg');
-let pathPrefix = ref(route.name)
-const getIcon = (path: string) => {
-    // 根据当前路由状态更新所有图标
-    const kbActiveState = getIconActiveState('knowledge-bases');
-    const creatChatActiveState = getIconActiveState('creatChat');
-    const settingsActiveState = getIconActiveState('settings');
-    const agentsActiveState = route.name === 'agentList';
-    const organizationsActiveState = route.name === 'organizationList';
-
-    // 知识库图标：只在知识库页面显示绿色
-    knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
-
-    // 智能体图标：只在智能体页面显示绿色
-    agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
-
-    // 组织图标：只在组织页面显示绿色
-    organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
-
-    // 对话图标：只在对话创建页面显示绿色，其他情况显示默认
-    prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 'prefixIcon.svg';
-
-    // 设置图标：只在设置页面显示绿色
-    settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';
-
-    // 退出图标：始终显示默认
-    logoutIcon.value = 'logout.svg';
-}
-getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
 const handleMenuClick = async (path: string) => {
     if (path === 'knowledge-bases') {
         // 知识库菜单项：如果在知识库内部，跳转到当前知识库文件页；否则跳转到知识库列表
@@ -1100,7 +1073,6 @@ const getCurrentKbId = async (): Promise<string | null> => {
 }
 
 const gotopage = async (path: string) => {
-    pathPrefix.value = path;
     // 处理退出登录
     if (path === 'logout') {
         try {
@@ -1128,7 +1100,6 @@ const gotopage = async (path: string) => {
             router.push(`/platform/${path}`);
         }
     }
-    getIcon(path)
 }
 
 const getImgSrc = (url: string) => {

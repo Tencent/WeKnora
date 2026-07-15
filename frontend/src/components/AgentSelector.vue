@@ -165,11 +165,11 @@
           <div v-if="activeDetail.sharedMeta?.org_name || activeDetail.sharedMeta?.shared_by_username"
             class="detail-meta">
             <div v-if="activeDetail.sharedMeta.org_name" class="detail-meta-row">
-              <img src="@/assets/img/organization-green.svg" class="detail-meta-icon" alt="" aria-hidden="true" />
+              <SvgIcon name="organization" variant="green" :size="14" class="detail-meta-icon" />
               <span>{{ activeDetail.sharedMeta.org_name }}</span>
             </div>
             <div v-if="activeDetail.sharedMeta.shared_by_username" class="detail-meta-row">
-              <img src="@/assets/img/user.svg" class="detail-meta-icon" alt="" aria-hidden="true" />
+              <SvgIcon name="user" theme="secondary" :size="14" class="detail-meta-icon" />
               <span>{{ activeDetail.sharedMeta.shared_by_username }}</span>
             </div>
           </div>
@@ -186,6 +186,7 @@ import { useRouter } from 'vue-router';
 import { Icon as TIcon, Tooltip as TTooltip } from 'tdesign-vue-next';
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import AgentAvatar from '@/components/AgentAvatar.vue';
+import { SvgIcon } from '@/components/icons';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { SharedAgentInfo } from '@/api/organization';
