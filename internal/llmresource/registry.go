@@ -26,7 +26,7 @@ var storedRefRE = regexp.MustCompile(
 // aliasShapeRE matches the alias syntax produced by EncodeText. It is used only
 // to spot alias-shaped tokens the model emitted that the registry cannot map
 // back — either a hallucinated reference or a coincidental collision.
-var aliasShapeRE = regexp.MustCompile(`res:\d{4,}`)
+var aliasShapeRE = regexp.MustCompile(`res://\d{4,}`)
 
 // Registry assigns low-entropy, request-local aliases to stable resource
 // handles. It is safe to reuse across all rounds of one Agent execution.
@@ -55,7 +55,10 @@ func (r *Registry) EncodeText(value string) string {
 		if alias, ok := r.refToAlias[ref]; ok {
 			return alias
 		}
-		alias := fmt.Sprintf("res:%04d", len(r.aliasToRef)+1)
+		// A URL-shaped alias (scheme://digits) keeps the token low-entropy while
+		// looking enough like a link that the model reuses it verbatim inside
+		// Markdown image/link syntax instead of reasoning about or rewriting it.
+		alias := fmt.Sprintf("res://%04d", len(r.aliasToRef)+1)
 		r.refToAlias[ref] = alias
 		r.aliasToRef[alias] = ref
 		return alias

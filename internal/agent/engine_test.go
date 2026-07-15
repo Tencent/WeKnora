@@ -53,7 +53,7 @@ func (m *mockChat) ChatStream(
 func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
 	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
-		{ResponseType: types.ResponseTypeAnswer, Content: "![image](res:0"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "![image](res://0"},
 		{ResponseType: types.ResponseTypeAnswer, Content: "001)", Done: true},
 	}}}}
 	engine := newTestEngine(t, model)
@@ -66,7 +66,7 @@ func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "![image]("+ref+")", result.Content)
 	require.Len(t, model.calls, 1)
-	require.Equal(t, "source=res:0001", model.calls[0][0].Content)
+	require.Equal(t, "source=res://0001", model.calls[0][0].Content)
 }
 
 func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {

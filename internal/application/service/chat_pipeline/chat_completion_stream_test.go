@@ -80,19 +80,19 @@ func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, err
 
 // TestStreamFlushesHeldAliasOnCancel verifies that when the request is cancelled
 // mid-stream, the decoder's held-back alias suffix is flushed (emitted) rather
-// than silently dropped. Without the ctx.Done() flush, "res:0" would be lost.
+// than silently dropped. Without the ctx.Done() flush, "res://0" would be lost.
 func TestStreamFlushesHeldAliasOnCancel(t *testing.T) {
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
 	bus := &syncEventBus{}
 	model := &openStreamChat{chunks: []types.StreamResponse{
-		// Ends with a partial alias prefix ("res:0"), so the stream decoder
+		// Ends with a partial alias prefix ("res://0"), so the stream decoder
 		// holds it back waiting for the rest that never arrives before cancel.
-		{ResponseType: types.ResponseTypeAnswer, Content: "hello res:0"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "hello res://0"},
 	}}
 
 	chatManage := &types.ChatManage{}
 	chatManage.SessionID = "sess-cancel"
-	chatManage.UserContent = ref // seeds the registry so res:0001 becomes a known alias
+	chatManage.UserContent = ref // seeds the registry so res://0001 becomes a known alias
 	chatManage.EventBus = bus
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -111,10 +111,10 @@ func TestStreamFlushesHeldAliasOnCancel(t *testing.T) {
 
 	cancel()
 
-	// After cancel, the held "res:0" suffix must be flushed as a final-answer chunk.
+	// After cancel, the held "res://0" suffix must be flushed as a final-answer chunk.
 	require.Eventually(t, func() bool {
 		for _, c := range bus.finalAnswerContents() {
-			if c == "res:0" {
+			if c == "res://0" {
 				return true
 			}
 		}
