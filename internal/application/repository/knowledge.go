@@ -143,6 +143,11 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	if !filter.UpdatedTo.IsZero() {
 		query = query.Where("updated_at <= ?", filter.UpdatedTo)
 	}
+	if filter.FolderID != nil {
+		// Empty string means "root level" (folder_id = ''); a non-empty
+		// value matches that specific folder directly.
+		query = query.Where("folder_id = ?", *filter.FolderID)
+	}
 	return query
 }
 

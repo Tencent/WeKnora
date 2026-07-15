@@ -197,6 +197,28 @@ type KnowledgeService interface {
 	SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
 	// SearchKnowledgeForScopes searches knowledge within the given (tenant_id, kb_id) scopes (e.g. for shared agent context).
 	SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error)
+
+	// --- Knowledge folder tree (knowledge_folders) ---
+
+	// GetFolder retrieves a single folder by id.
+	GetFolder(ctx context.Context, kbID string, id string) (*types.KnowledgeFolder, error)
+	// ListChildFolders returns the direct child folder nodes of parentID, enriched
+	// with recursive knowledge counts and a has-children flag for tree rendering.
+	ListChildFolders(ctx context.Context, kbID string, parentID string) ([]types.KnowledgeFolderNode, error)
+	// CreateFolder creates a new (initially empty) folder under parentID.
+	CreateFolder(ctx context.Context, kbID string, tenantID uint64, parentID string, name string) (*types.KnowledgeFolder, error)
+	// RenameOrMoveFolder renames and/or reparents a folder, recomputing the subtree's path/depth.
+	RenameOrMoveFolder(ctx context.Context, kbID string, id string, newName string, newParentID string, moveParent bool) (*types.KnowledgeFolder, error)
+	// DeleteFolder removes an empty folder (no knowledges, no sub-folders).
+	DeleteFolder(ctx context.Context, kbID string, id string) error
+	// SetKnowledgeFolder moves a knowledge into a folder (empty folderID = root).
+	SetKnowledgeFolder(ctx context.Context, kbID string, knowledgeID string, folderID string) (*types.Knowledge, error)
+	// ListAllFoldersFlat returns the whole folder tree (not just one level) enriched
+	// with recursive knowledge counts, for flat pickers like the chat @mention list.
+	ListAllFoldersFlat(ctx context.Context, kbID string) ([]types.KnowledgeFolderNode, error)
+	// ExpandFolderToKnowledgeIDs expands a folder (and its descendants) to the
+	// knowledge IDs filed beneath it, plus the owning KB id and tenant.
+	ExpandFolderToKnowledgeIDs(ctx context.Context, folderID string) (kbID string, tenantID uint64, knowledgeIDs []string, err error)
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.
@@ -271,4 +293,32 @@ type KnowledgeRepository interface {
 	GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error)
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.
 	DeleteKnowledgeTagRelations(ctx context.Context, knowledgeID string) error
+
+	// --- Knowledge folder tree (knowledge_folders) ---
+
+	// CreateFolder persists a new (initially empty) folder node.
+	CreateFolder(ctx context.Context, folder *types.KnowledgeFolder) error
+	// GetFolderByID retrieves a single folder by id within a knowledge base.
+	GetFolderByID(ctx context.Context, kbID string, id string) (*types.KnowledgeFolder, error)
+	// GetFolderByIDGlobal retrieves a single folder by its primary key without
+	// scoping to a knowledge base (folder UUIDs are globally unique).
+	GetFolderByIDGlobal(ctx context.Context, id string) (*types.KnowledgeFolder, error)
+	// GetChildFolderByName retrieves a folder by (kb, parent, name) — used for uniqueness checks.
+	GetChildFolderByName(ctx context.Context, kbID string, parentID string, name string) (*types.KnowledgeFolder, error)
+	// ListChildFolders returns the direct children of parentID.
+	ListChildFolders(ctx context.Context, kbID string, parentID string) ([]*types.KnowledgeFolder, error)
+	// ListAllFolders returns every folder in a knowledge base (used to recompute paths/counts).
+	ListAllFolders(ctx context.Context, kbID string) ([]*types.KnowledgeFolder, error)
+	// UpdateFolder persists a folder's mutable columns (parent/name/path/depth/sort).
+	UpdateFolder(ctx context.Context, folder *types.KnowledgeFolder) error
+	// DeleteFolder removes a folder node by id within a knowledge base.
+	DeleteFolder(ctx context.Context, kbID string, id string) error
+	// CountKnowledgesInFolder returns the number of knowledges directly in a folder.
+	CountKnowledgesInFolder(ctx context.Context, kbID string, folderID string) (int64, error)
+	// CountKnowledgesByFolder returns a map of folder_id -> direct knowledge count.
+	CountKnowledgesByFolder(ctx context.Context, kbID string) (map[string]int64, error)
+	// ListKnowledgesByFolderIDs returns knowledges whose folder_id is in the given set.
+	ListKnowledgesByFolderIDs(ctx context.Context, kbID string, folderIDs []string) ([]*types.Knowledge, error)
+	// UpdateKnowledgeFolder sets the folder_id of a single knowledge (empty = root).
+	UpdateKnowledgeFolder(ctx context.Context, id string, folderID string) error
 }
