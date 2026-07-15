@@ -258,8 +258,9 @@ func apiKeyIngest(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolic
 }
 
 // apiKeyManageKnowledgeBases layers the "manage_kbs" capability on top of a
-// base policy so a scoped key can manage existing KB metadata/config within
-// its KB allow-list.
+// base policy so a scoped key can manage the KB lifecycle (create/copy/
+// duplicate/update/delete + config). Existing-KB operations stay bounded by
+// the key's allow-list downstream; create has no source to bound.
 func apiKeyManageKnowledgeBases(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityManageKnowledgeBases)
 }

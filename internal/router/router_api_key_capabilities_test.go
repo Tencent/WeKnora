@@ -429,6 +429,25 @@ func TestChunkerPreviewRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
 	}
 }
 
+func TestKBCloneProgressRouteRequiresRetrieveOrManageKbsCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
+
+	policy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/knowledge-bases/copy/progress/:task_id")
+	if !policy.RequireFullAccess {
+		t.Fatal("policy should require full access without a matching capability")
+	}
+	if !policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+		t.Fatalf("policy capabilities = %#v, want retrieve", policy.Capabilities)
+	}
+	if !policyHasCapability(policy, types.APIKeyCapabilityManageKnowledgeBases) {
+		t.Fatalf("policy capabilities = %#v, want manage_kbs", policy.Capabilities)
+	}
+}
+
 func TestFAQImportProgressRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
