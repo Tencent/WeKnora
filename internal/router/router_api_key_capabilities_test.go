@@ -231,6 +231,7 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 	RegisterChatRoutes(v1, &sessionhandler.Handler{}, g)
 	RegisterInitializationRoutes(v1, &handler.InitializationHandler{}, g)
 	RegisterWikiPageRoutes(v1, &handler.WikiPageHandler{}, g)
+	RegisterKnowledgeFolderRoutes(v1, handler.NewKnowledgeFolderHandler(nil), g)
 
 	cases := []struct {
 		method string
@@ -246,6 +247,8 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledge-search"},
 		{http.MethodGet, "/api/v1/initialization/config/:kbId"},
 		{http.MethodGet, "/api/v1/knowledgebase/:kb_id/wiki/pages"},
+		{http.MethodGet, "/api/v1/knowledge-bases/:id/folders"},
+		{http.MethodGet, "/api/v1/knowledge-bases/:id/folders/:folder_id"},
 	}
 
 	for _, tc := range cases {

@@ -729,6 +729,17 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
+    const selectedFolders = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedFolders || []);
+    const mentionedFolders = (mentionedItems || [])
+        .filter(item => item.type === 'folder' && item.id && (item.kb_id || item.kbId))
+        .map(item => ({ id: item.id, kbId: item.kb_id || item.kbId }));
+    const folderMap = new Map();
+    for (const folder of [...selectedFolders, ...mentionedFolders]) {
+        if (!folder.kbId) continue;
+        if (!folderMap.has(folder.kbId)) folderMap.set(folder.kbId, new Set());
+        folderMap.get(folder.kbId).add(folder.id);
+    }
+    const folderScopes = [...folderMap].map(([knowledge_base_id, ids]) => ({ knowledge_base_id, folder_ids: [...ids] }));
     const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
     const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
 
@@ -754,6 +765,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,
+        folder_scopes: folderScopes,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,

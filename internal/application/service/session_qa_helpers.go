@@ -27,7 +27,7 @@ func (s *sessionService) resolveKnowledgeBases(
 	requestedKBIDs := append([]string(nil), req.KnowledgeBaseIDs...)
 	customAgent := req.CustomAgent
 
-	hasExplicitMention := len(kbIDs) > 0 || len(knowledgeIDs) > 0 || len(req.TagScopes) > 0
+	hasExplicitMention := len(kbIDs) > 0 || len(knowledgeIDs) > 0 || len(req.TagScopes) > 0 || len(req.FolderScopes) > 0
 	if customAgent != nil {
 		logger.Infof(ctx, "KB resolution: hasExplicitMention=%v, RetrieveKBOnlyWhenMentioned=%v, KBSelectionMode=%s",
 			hasExplicitMention, customAgent.Config.RetrieveKBOnlyWhenMentioned, customAgent.Config.KBSelectionMode)
@@ -40,6 +40,10 @@ func (s *sessionService) resolveKnowledgeBases(
 		if customAgent != nil && req.Session != nil && req.Session.TenantID != customAgent.TenantID {
 			kbIDs, knowledgeIDs = s.restrictMentionsToAgentScope(ctx, customAgent, req.Session.TenantID, kbIDs, knowledgeIDs)
 			req.TagScopes = s.restrictTagScopesToAgentScope(ctx, customAgent, req.Session.TenantID, req.TagScopes)
+			req.FolderScopes = s.restrictFolderScopesToAgentScope(ctx, customAgent, req.Session.TenantID, req.FolderScopes)
+		}
+		if customAgent != nil && req.Session != nil {
+			req.FolderScopes = s.restrictFolderScopesToAgentScope(ctx, customAgent, req.Session.TenantID, req.FolderScopes)
 		}
 	} else if customAgent != nil && customAgent.Config.RetrieveKBOnlyWhenMentioned {
 		kbIDs = nil
@@ -57,6 +61,24 @@ func (s *sessionService) resolveKnowledgeBases(
 		return nil, nil, err
 	}
 	return kbIDs, knowledgeIDs, nil
+}
+
+func (s *sessionService) restrictFolderScopesToAgentScope(ctx context.Context, agent *types.CustomAgent, sessionTenantID uint64, scopes []types.FolderScope) []types.FolderScope {
+	if len(scopes) == 0 {
+		return nil
+	}
+	allowed := s.resolveKnowledgeBasesFromAgent(ctx, agent, sessionTenantID)
+	set := make(map[string]bool, len(allowed))
+	for _, id := range allowed {
+		set[id] = true
+	}
+	result := make([]types.FolderScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if set[scope.KnowledgeBaseID] {
+			result = append(result, scope)
+		}
+	}
+	return result
 }
 
 func (s *sessionService) restrictTagScopesToAgentScope(

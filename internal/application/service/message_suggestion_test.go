@@ -1,10 +1,32 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type folderAwareKnowledgeSuggestionStub struct {
+	interfaces.CustomAgentService
+	called       bool
+	folderScopes []types.FolderScope
+}
+
+func (s *folderAwareKnowledgeSuggestionStub) GetKnowledgeSuggestedQuestionsWithFolders(
+	_ context.Context,
+	_ string,
+	_, _, _ []string,
+	_ int,
+	folderScopes []types.FolderScope,
+) ([]types.SuggestedQuestion, error) {
+	s.called = true
+	s.folderScopes = append([]types.FolderScope(nil), folderScopes...)
+	return []types.SuggestedQuestion{{Question: "Folder question?", Source: "document", KnowledgeBaseID: "kb-1"}}, nil
+}
 
 func TestParseGeneratedSuggestionsFiltersAndDeduplicates(t *testing.T) {
 	content := "```json\n{\"questions\":[" +
@@ -55,4 +77,23 @@ func TestAnswerEndsWithQuestion(t *testing.T) {
 	if !answerEndsWithQuestion("需要我继续展开吗？\n<kb>1</kb>") {
 		t.Fatal("question before a trailing citation was not detected")
 	}
+}
+
+func TestGenerateFromKnowledgeUsesFolderAwarePath(t *testing.T) {
+	stub := &folderAwareKnowledgeSuggestionStub{}
+	service := &messageSuggestionService{customAgentService: stub}
+	scopes := []types.FolderScope{{KnowledgeBaseID: "kb-1", FolderIDs: []string{"folder-1"}}}
+	items, err := service.generateFromKnowledge(context.Background(), &types.Message{
+		AgentID: "agent-1",
+		ExecutionContext: types.MessageExecutionContext{
+			KnowledgeBaseIDs: []string{"kb-1"},
+			FolderScopes:     scopes,
+		},
+	}, 3)
+	require.NoError(t, err)
+	assert.True(t, stub.called)
+	assert.Equal(t, scopes, stub.folderScopes)
+	require.Len(t, items, 1)
+	assert.Equal(t, "Folder question?", items[0].Text)
+	assert.Equal(t, []string{"kb-1"}, items[0].KnowledgeBaseIDs)
 }

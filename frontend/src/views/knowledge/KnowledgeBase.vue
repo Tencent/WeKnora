@@ -15,6 +15,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { useSettingsStore } from '@/stores/settings';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
@@ -22,6 +23,7 @@ const orgStore = useOrganizationStore();
 const authStore = useAuthStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const settingsStore = useSettingsStore();
 const router = useRouter();
 import {
   batchQueryKnowledge,
@@ -35,12 +37,19 @@ import {
   batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  ensureKnowledgeFolderPaths,
+  moveKnowledgeToFolder,
+  getKnowledgeFolder,
 } from "@/api/knowledge-base/index";
+import { dedupeFolderPaths, folderIDFromQuery, mapFilesToFolderIDs, parseRelativeFolderFiles, runWithConcurrency } from '@/utils/knowledgeFolders';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import KnowledgeFolderTree from './components/KnowledgeFolderTree.vue';
+import KnowledgeFolderPicker from './components/KnowledgeFolderPicker.vue';
+import type { KnowledgeFolder } from '@/api/knowledge-base';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
@@ -57,10 +66,43 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
+import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
+const accessAgentId = computed(() => typeof route.query.agent_id === 'string' ? route.query.agent_id : '');
+const accessSourceTenantId = computed(() => typeof route.query.source_tenant_id === 'string' ? route.query.source_tenant_id : '');
 const kbInfo = ref<any>(null);
+const currentFolderId = ref(folderIDFromQuery(route.query.folder_id));
+const currentFolderPath = ref<KnowledgeFolder[]>([]);
+const folderTreeRef = ref<InstanceType<typeof KnowledgeFolderTree>|null>(null);
+watch([kbId,currentFolderId,accessAgentId], async ([id,folderId]) => {
+  if (!id || !folderId) { currentFolderPath.value=[];return; }
+  try { const res:any=await getKnowledgeFolder(id,folderId,{agent_id:accessAgentId.value||undefined});const folder=res?.data;currentFolderPath.value=folder?[...(folder.ancestors||[]),folder]:[]; } catch { currentFolderPath.value=[]; }
+},{immediate:true});
+watch(() => route.query.folder_id, (value) => {
+  const next = folderIDFromQuery(value);
+  if (next !== currentFolderId.value) { currentFolderId.value = next; resetPage(); void loadKnowledgeFiles(kbId.value); }
+});
+const includeFolderDescendants = ref(true);
+const selectFolder = async (folderId: string) => {
+  currentFolderId.value = folderId;
+  selectedIds.value.clear();
+  await router.replace({ query: { ...route.query, folder_id: folderId || 'root' } });
+  resetPage();
+  await loadKnowledgeFiles(kbId.value);
+};
+const askFolder = async (folder: KnowledgeFolder) => {
+  // "Ask this folder" establishes a folder-only knowledge scope. Leaving a
+  // stale whole-KB selection in place would intentionally supersede folders
+  // in the backend and answer from more documents than the user requested.
+  settingsStore.selectAgent(
+    accessAgentId.value || BUILTIN_QUICK_ANSWER_ID,
+    accessAgentId.value ? accessSourceTenantId.value || null : null,
+  );
+  settingsStore.addFolder({ id: folder.id, name: folder.name, kbId: kbId.value, kbName: kbInfo.value?.name });
+  await router.push('/platform/creatChat');
+};
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
 const uploading = ref(false);
 const kbLoading = ref(false);
@@ -403,6 +445,23 @@ const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
 const batchDeleting = ref(false);
 const batchReparsing = ref(false);
+const folderMoveVisible = ref(false);
+const mobileFolderDrawerVisible = ref(false);
+const folderMoveTarget = ref('');
+const folderMoveKnowledgeIDs = ref<string[]>([]);
+const folderMoving = ref(false);
+const openFolderMove = (knowledgeIDs: string[]) => {
+  folderMoveKnowledgeIDs.value = [...new Set(knowledgeIDs.filter(Boolean))];
+  folderMoveTarget.value = currentFolderId.value;
+  folderMoveVisible.value = folderMoveKnowledgeIDs.value.length > 0;
+};
+const confirmFolderMove = async () => {
+  if (folderMoveKnowledgeIDs.value.length===0 || folderMoving.value) return;
+  folderMoving.value=true;
+  try { await moveKnowledgeToFolder(kbId.value,{knowledge_ids:folderMoveKnowledgeIDs.value,folder_id:folderMoveTarget.value});MessagePlugin.success(t('common.success'));folderMoveVisible.value=false;folderMoveKnowledgeIDs.value=[];clearSelection();await loadKnowledgeFiles(kbId.value);await folderTreeRef.value?.refresh(); }
+  catch(error:any){MessagePlugin.error(error?.message||t('common.operationFailed'));}
+  finally{folderMoving.value=false;}
+};
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
 
@@ -558,6 +617,9 @@ const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)
 const filterParams = computed(() => {
   const [start, end] = updatedTimeRange.value || [];
   return {
+	 folder_id: currentFolderId.value || 'root',
+	 include_descendants: !!docSearchKeyword.value && includeFolderDescendants.value,
+	 agent_id: accessAgentId.value || undefined,
     tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
     keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
     file_type: selectedFileType.value || undefined,
@@ -1406,51 +1468,35 @@ const executeUploadBatch = async (
     return !!relativePath && relativePath.split('/').length > 2;
   });
 
-  for (const file of files) {
-    try {
+  const parsedPaths = parseRelativeFolderFiles(files);
+  let folderByFile = new Map<File,string>();
+  const paths = dedupeFolderPaths(parsedPaths);
+  if (paths.length > 0) {
+    const ensured:any = await ensureKnowledgeFolderPaths(targetKbId, { parent_id: currentFolderId.value, paths });
+    folderByFile = mapFilesToFolderIDs(parsedPaths, ensured?.data || []);
+  }
+  const tasks = files.map(file => async () => {
       const uploadData: {
         file: File
         tag_ids?: string[]
         fileName?: string
+        folder_id?: string
         process_config?: KnowledgeProcessOverrides
       } = { file, tag_ids: tagIdsToUpload };
 
-      const fileName = getFolderUploadFileName(file);
-      if (fileName) uploadData.fileName = fileName;
+      uploadData.folder_id = folderByFile.get(file) || currentFolderId.value;
       if (options.processConfig) {
         uploadData.process_config = options.processConfig;
       }
 
       const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
-      if (isSuccess) {
-        successCount++;
-      } else {
-        failCount++;
-        if (totalCount === 1) {
-          let errorMessage = t('knowledgeBase.uploadFailed');
-          if (responseData?.error?.message) {
-            errorMessage = responseData.error.message;
-          } else if (responseData?.message) {
-            errorMessage = responseData.message;
-          }
-          if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
-            errorMessage = t('knowledgeBase.fileExists');
-          }
-          MessagePlugin.error(errorMessage);
-        }
-      }
-    } catch (error: any) {
-      failCount++;
-      if (totalCount === 1) {
-        let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
-        if (error?.code === 'duplicate_file') {
-          errorMessage = t('knowledgeBase.fileExists');
-        }
-        MessagePlugin.error(errorMessage);
-      }
-    }
-  }
+      if (!isSuccess) throw responseData;
+      return responseData;
+  });
+  const settled = await runWithConcurrency(tasks, 4);
+  successCount = settled.filter(result => result.status === 'fulfilled').length;
+  failCount = settled.length - successCount;
 
   if (successCount > 0) {
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
@@ -1474,6 +1520,7 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
       tag_ids: tagIdsToUpload,
+	  folder_id: currentFolderId.value,
       process_config: processConfig,
     });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
@@ -1562,6 +1609,7 @@ const handleManualCreate = () => {
   uiStore.openManualEditor({
     mode: 'create',
     kbId: kbId.value,
+	folderId: currentFolderId.value,
     status: 'draft',
     onSuccess: manualEditorSuccess,
   });
@@ -1856,7 +1904,7 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1867,6 +1915,7 @@ const handleCardAction = (
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-folder') return openFolderMove([item.id]);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -1874,7 +1923,7 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1882,6 +1931,7 @@ const handleListAction = (
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-folder') return openFolderMove([item.id]);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -2048,8 +2098,12 @@ async function createNewSession(value: string): Promise<void> {
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
           <div class="tag-content">
+            <div class="desktop-folder-tree"><KnowledgeFolderTree ref="folderTreeRef" v-if="kbId" :kb-id="kbId" :model-value="currentFolderId" :can-edit="canEdit" :agent-id="accessAgentId"
+              @update:model-value="selectFolder" @ask="askFolder" @changed="loadKnowledgeFiles(kbId)" /></div>
             <div class="doc-card-area">
+			  <nav class="folder-breadcrumb" :aria-label="t('knowledgeFolder.currentFolder')"><button @click="selectFolder('')">{{ t('knowledgeFolder.root') }}</button><template v-for="folder in currentFolderPath" :key="folder.id"><t-icon name="chevron-right"/><button @click="selectFolder(folder.id)">{{ folder.name }}</button></template></nav>
               <div class="doc-filter-bar">
+				<t-button class="mobile-folder-trigger" shape="square" variant="outline" :title="t('knowledgeFolder.folders')" @click="mobileFolderDrawerVisible=true"><t-icon name="folder" /></t-button>
                 <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
                   clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
                   @enter="loadKnowledgeFiles(kbId)">
@@ -2057,6 +2111,7 @@ async function createNewSession(value: string): Promise<void> {
                     <t-icon name="search" size="16px" />
                   </template>
                 </t-input>
+				<t-checkbox v-if="docSearchKeyword" v-model="includeFolderDescendants" @change="loadKnowledgeFiles(kbId)">{{ t('knowledgeFolder.includeDescendants') }}</t-checkbox>
                 <div class="doc-filter-bar__filters">
                 <t-popup v-model:visible="tagFilterPanelVisible" trigger="click" placement="bottom-left"
                   overlay-class-name="tag-filter-popup" :overlay-inner-style="{ padding: 0 }">
@@ -2287,11 +2342,16 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
               </div>
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
+                <t-button v-if="selectedIds.size>0" variant="outline" @click="openFolderMove([...selectedIds])"><template #icon><t-icon name="folder-move" /></template>{{ t('knowledgeFolder.moveDocuments') }}</t-button>
                 <DocumentBatchBar :count="selectedIds.size" :delete-loading="batchDeleting"
                   :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
               </div>
+			  <t-dialog v-model:visible="folderMoveVisible" :header="t('knowledgeFolder.moveDocuments')" :confirm-btn="{content:t('common.confirm'),loading:folderMoving}" @confirm="confirmFolderMove">
+				<KnowledgeFolderPicker v-if="folderMoveVisible" v-model="folderMoveTarget" :kb-id="kbId" />
+			  </t-dialog>
             </div>
+			<t-drawer v-model:visible="mobileFolderDrawerVisible" placement="left" :header="t('knowledgeFolder.folders')" size="min(86vw, 320px)"><KnowledgeFolderTree v-if="kbId" :kb-id="kbId" :model-value="currentFolderId" :can-edit="canEdit" :agent-id="accessAgentId" @update:model-value="(id:string)=>{mobileFolderDrawerVisible=false;selectFolder(id)}" @ask="askFolder" /></t-drawer>
           </div>
         </div>
       </template>
@@ -2348,7 +2408,7 @@ async function createNewSession(value: string): Promise<void> {
 
 .tag-more-popup .tag-menu {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
 }
 
 .tag-more-popup .tag-menu-item {
@@ -2665,6 +2725,27 @@ async function createNewSession(value: string): Promise<void> {
   background: transparent;
 }
 
+.desktop-folder-tree { display: flex; min-height: 0; }
+.mobile-folder-trigger { display: none; }
+.folder-breadcrumb { height:36px;display:flex;align-items:center;gap:4px;overflow:hidden;flex:none; }
+.folder-breadcrumb button { border:0;background:transparent;color:var(--td-text-color-secondary);cursor:pointer;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.folder-breadcrumb button:last-child { color:var(--td-text-color-primary);font-weight:500; }
+@media (max-width: 760px) {
+  :global(.main) {
+    width: 100vw;
+    min-width: 0;
+  }
+
+  .knowledge-layout {
+    margin: 0;
+    padding: 16px 12px 0;
+    gap: 12px;
+  }
+
+  .desktop-folder-tree { display: none; }
+  .mobile-folder-trigger { display: inline-flex; }
+}
+
 .doc-card-area {
   flex: 1;
   display: flex;
@@ -2722,13 +2803,8 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   @media (min-width: 1280px) {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    gap: 12px;
-
     &__filters {
-      flex: 0 1 auto;
+      flex-wrap: wrap;
       overflow-x: visible;
     }
   }

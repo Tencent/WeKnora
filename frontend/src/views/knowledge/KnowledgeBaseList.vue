@@ -1476,12 +1476,24 @@ const handleShareSuccess = () => {
 const handleSharedKbClick = (sharedKb: SharedKnowledgeBase) => {
   pins.touchRecent('kb', sharedKb.knowledge_base.id)
   // 跳转到共享知识库详情页
-  router.push(`/platform/knowledge-bases/${sharedKb.knowledge_base.id}`)
+  const source = (sharedKb as SharedKbDetailItem).source_from_agent
+  router.push({
+    path: `/platform/knowledge-bases/${sharedKb.knowledge_base.id}`,
+    query: source ? {
+      agent_id: source.agent_id,
+      source_tenant_id: String(sharedKb.source_tenant_id),
+    } : undefined,
+  })
 }
 
 // 处理"全部"Tab 中的共享知识库卡片点击（直接进入知识库）
 const handleSharedKbClickFromAll = (kb: any) => {
   pins.touchRecent('kb', kb.id)
+  const shared = sharedKbs.value.find(item => item.knowledge_base.id === kb.id)
+  if (shared) {
+    handleSharedKbClick(shared)
+    return
+  }
   router.push(`/platform/knowledge-bases/${kb.id}`)
 }
 
@@ -1520,7 +1532,7 @@ const agentKbStrategyText = (mode: string) => {
 // 从右侧面板进入知识库
 const goToSharedKbFromPanel = () => {
   if (currentSharedKbForDetail.value) {
-    router.push(`/platform/knowledge-bases/${currentSharedKbForDetail.value.knowledge_base.id}`)
+    handleSharedKbClick(currentSharedKbForDetail.value)
     closeSharedDetailPanel()
   }
 }

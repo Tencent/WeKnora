@@ -12,6 +12,24 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+// Keep document filters below common SQL parameter and vector-store expression
+// limits. Folder scopes can resolve to hundreds of thousands of documents; the
+// composite retriever executes these batches with bounded concurrency and the
+// caller performs one final fusion/truncation across all batch results.
+const maxKnowledgeIDsPerRetrieve = 500
+
+func splitKnowledgeIDBatches(ids []string) [][]string {
+	if len(ids) == 0 {
+		return [][]string{nil}
+	}
+	batches := make([][]string, 0, (len(ids)+maxKnowledgeIDsPerRetrieve-1)/maxKnowledgeIDsPerRetrieve)
+	for start := 0; start < len(ids); start += maxKnowledgeIDsPerRetrieve {
+		end := min(start+maxKnowledgeIDsPerRetrieve, len(ids))
+		batches = append(batches, ids[start:end])
+	}
+	return batches
+}
+
 // GetQueryEmbedding computes the query embedding using the embedding model
 // associated with the given knowledge base. Callers can pre-compute and reuse
 // the result across multiple KBs that share the same embedding model to avoid
@@ -193,7 +211,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		Input: map[string]interface{}{
 			"query_text":             params.QueryText,
 			"kb_ids":                 searchKBIDs,
-			"knowledge_ids":          params.KnowledgeIDs,
+			"knowledge_id_count":     len(params.KnowledgeIDs),
 			"tag_ids":                params.TagIDs,
 			"match_count":            matchCount,
 			"vector_threshold":       params.VectorThreshold,
@@ -203,9 +221,9 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			"group_count":            len(groups),
 		},
 		Metadata: map[string]interface{}{
-			"primary_kb_id":      kb.ID,
-			"primary_kb_type":    string(kb.Type),
-			"embedding_model_id": kb.EmbeddingModelID,
+			"primary_kb_id":       kb.ID,
+			"primary_kb_type":     string(kb.Type),
+			"embedding_model_id":  kb.EmbeddingModelID,
 			"has_query_embedding": len(params.QueryEmbedding) > 0,
 		},
 	})
@@ -359,17 +377,19 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		}
 
 		appendVectorParams := func(kbIDs []string, knowledgeType string) {
-			retrieveParams = append(retrieveParams, types.RetrieveParams{
-				Query:            params.QueryText,
-				Embedding:        queryEmbedding,
-				KnowledgeBaseIDs: kbIDs,
-				TopK:             matchCount,
-				Threshold:        params.VectorThreshold,
-				RetrieverType:    types.VectorRetrieverType,
-				KnowledgeIDs:     params.KnowledgeIDs,
-				TagIDs:           params.TagIDs,
-				KnowledgeType:    knowledgeType,
-			})
+			for _, knowledgeIDBatch := range splitKnowledgeIDBatches(params.KnowledgeIDs) {
+				retrieveParams = append(retrieveParams, types.RetrieveParams{
+					Query:            params.QueryText,
+					Embedding:        queryEmbedding,
+					KnowledgeBaseIDs: kbIDs,
+					TopK:             matchCount,
+					Threshold:        params.VectorThreshold,
+					RetrieverType:    types.VectorRetrieverType,
+					KnowledgeIDs:     knowledgeIDBatch,
+					TagIDs:           params.TagIDs,
+					KnowledgeType:    knowledgeType,
+				})
+			}
 		}
 
 		// Document KBs use the default vector index; FAQ KBs use the FAQ
@@ -389,15 +409,17 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	if retrieveEngine.SupportRetriever(types.KeywordsRetrieverType) && !params.DisableKeywordsMatch &&
 		len(docKeywordKBIDs) > 0 {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
-		retrieveParams = append(retrieveParams, types.RetrieveParams{
-			Query:            params.QueryText,
-			KnowledgeBaseIDs: docKeywordKBIDs,
-			TopK:             matchCount,
-			Threshold:        params.KeywordThreshold,
-			RetrieverType:    types.KeywordsRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
-			TagIDs:           params.TagIDs,
-		})
+		for _, knowledgeIDBatch := range splitKnowledgeIDBatches(params.KnowledgeIDs) {
+			retrieveParams = append(retrieveParams, types.RetrieveParams{
+				Query:            params.QueryText,
+				KnowledgeBaseIDs: docKeywordKBIDs,
+				TopK:             matchCount,
+				Threshold:        params.KeywordThreshold,
+				RetrieverType:    types.KeywordsRetrieverType,
+				KnowledgeIDs:     knowledgeIDBatch,
+				TagIDs:           params.TagIDs,
+			})
+		}
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}
 

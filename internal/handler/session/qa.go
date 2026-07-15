@@ -33,6 +33,7 @@ type qaRequestContext struct {
 	knowledgeBaseIDs      []string
 	knowledgeIDs          []string
 	tagScopes             []types.TagScope
+	folderScopes          []types.FolderScope
 	tagIDs                []string
 	mcpServiceIDs         []string
 	skillNames            []string
@@ -66,6 +67,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		KnowledgeBaseIDs:   rc.knowledgeBaseIDs,
 		KnowledgeIDs:       rc.knowledgeIDs,
 		TagScopes:          rc.tagScopes,
+		FolderScopes:       rc.folderScopes,
 		MCPServiceIDs:      rc.mcpServiceIDs,
 		SkillNames:         rc.skillNames,
 		ImageURLs:          imageURLs,
@@ -136,7 +138,12 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+	folderScopes := mergeFolderScopes(request.FolderScopes, folderScopesFromMentionedItems(request.MentionedItems))
+	authorizationKBIDs := append([]string(nil), kbIDs...)
+	for _, scope := range folderScopes {
+		authorizationKBIDs = append(authorizationKBIDs, scope.KnowledgeBaseID)
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, authorizationKBIDs, knowledgeIDs); err != nil {
 		return nil, nil, err
 	}
 
@@ -274,6 +281,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		secutils.SanitizeForLogArray(kbIDs),
 		secutils.SanitizeForLogArray(knowledgeIDs),
 		secutils.SanitizeForLogArray(tagIDs),
+		folderScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
 		secutils.SanitizeForLogArray(skillNames),
 		request.WebSearchEnabled,
@@ -303,6 +311,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		knowledgeBaseIDs:      secutils.SanitizeForLogArray(kbIDs),
 		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
 		tagScopes:             tagScopes,
+		folderScopes:          folderScopes,
 		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
@@ -330,6 +339,7 @@ func buildMessageExecutionContext(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagIDs []string,
+	folderScopes []types.FolderScope,
 	mcpServiceIDs []string,
 	skillNames []string,
 	webSearchEnabled bool,
@@ -343,6 +353,7 @@ func buildMessageExecutionContext(
 		KnowledgeBaseIDs: knowledgeBaseIDs,
 		KnowledgeIDs:     knowledgeIDs,
 		TagIDs:           tagIDs,
+		FolderScopes:     folderScopes,
 		MCPServiceIDs:    mcpServiceIDs,
 		SkillNames:       skillNames,
 		WebSearchEnabled: webSearchEnabled,
@@ -376,12 +387,14 @@ func buildMessageExecutionContext(
 		KnowledgeBaseIDs    []string                        `json:"knowledge_base_ids,omitempty"`
 		KnowledgeIDs        []string                        `json:"knowledge_ids,omitempty"`
 		TagIDs              []string                        `json:"tag_ids,omitempty"`
+		FolderScopes        []types.FolderScope             `json:"folder_scopes,omitempty"`
 		ModelID             string                          `json:"model_id,omitempty"`
 	}{
 		QuestionSuggestions: snapshot.QuestionSuggestions,
 		KnowledgeBaseIDs:    knowledgeBaseIDs,
 		KnowledgeIDs:        knowledgeIDs,
 		TagIDs:              tagIDs,
+		FolderScopes:        folderScopes,
 		ModelID:             modelID,
 	}
 	if encoded, err := json.Marshal(hashInput); err == nil {
@@ -625,13 +638,18 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(knowledgeBaseIDs))
+	folderScopes := mergeFolderScopes(request.FolderScopes, folderScopesFromMentionedItems(request.MentionedItems))
 
-	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 && len(tagScopes) == 0 {
+	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 && len(tagScopes) == 0 && len(folderScopes) == 0 {
 		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, or tag scopes provided")
 		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, or scoped tag must be provided"))
 		return
 	}
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, knowledgeBaseIDs, request.KnowledgeIDs); err != nil {
+	authKBIDs := append([]string(nil), knowledgeBaseIDs...)
+	for _, scope := range folderScopes {
+		authKBIDs = append(authKBIDs, scope.KnowledgeBaseID)
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, authKBIDs, request.KnowledgeIDs); err != nil {
 		c.Error(err)
 		return
 	}
@@ -646,7 +664,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query, folderScopes)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -1020,6 +1038,7 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
 		KnowledgeIDs:     reqCtx.knowledgeIDs,
 		TagIDs:           reqCtx.tagIDs,
+		FolderScopes:     reqCtx.folderScopes,
 		MCPServiceIDs:    reqCtx.mcpServiceIDs,
 		SkillNames:       reqCtx.skillNames,
 		MentionedItems:   reqCtx.mentionedItems,

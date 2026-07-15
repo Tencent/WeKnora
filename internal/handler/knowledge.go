@@ -241,6 +241,14 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 	return false
 }
 
+func handleKnowledgeFolderScopeError(c *gin.Context, err error) bool {
+	if goerrors.Is(err, repository.ErrKnowledgeFolderScopeMismatch) {
+		c.Error(errors.NewBadRequestError("folder does not belong to this knowledge base"))
+		return true
+	}
+	return false
+}
+
 // enqueueKnowledgeListDelete enqueues an async batch-delete task for the
 // given knowledge IDs and returns the asynq task ID.
 func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
@@ -405,10 +413,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	channel := c.PostForm("channel")
 
 	// Create knowledge entry from the file
+	ctx = context.WithValue(ctx, types.KnowledgeFolderIDContextKey, c.PostForm("folder_id"))
 	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
+			return
+		}
+		if handleKnowledgeFolderScopeError(c, err) {
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -474,6 +486,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
 		ProcessConfig    *types.KnowledgeProcessOverrides `json:"process_config"`
+		FolderID         string                           `json:"folder_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse URL request", err)
@@ -501,12 +514,16 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	)
 
 	// Create knowledge entry from the URL
+	ctx = context.WithValue(ctx, types.KnowledgeFolderIDContextKey, req.FolderID)
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(
 		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagIDs, req.Channel, req.ProcessConfig,
 	)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "url") {
+			return
+		}
+		if handleKnowledgeFolderScopeError(c, err) {
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -568,8 +585,12 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 		return
 	}
 
+	ctx = context.WithValue(ctx, types.KnowledgeFolderIDContextKey, req.FolderID)
 	knowledge, err := h.kgService.CreateKnowledgeFromManual(ctx, kbID, &req, req.Channel)
 	if err != nil {
+		if handleKnowledgeFolderScopeError(c, err) {
+			return
+		}
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
 			return
@@ -953,6 +974,13 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		FileType:    c.Query("file_type"),
 		ParseStatus: c.Query("parse_status"),
 		Source:      c.Query("source"),
+	}
+	if folderID, ok := c.GetQuery("folder_id"); ok {
+		filter.FolderSet = true
+		if folderID != "root" {
+			filter.FolderID = folderID
+		}
+		filter.IncludeDescendants = c.Query("include_descendants") == "true"
 	}
 	if raw := c.Query("start_time"); raw != "" {
 		t, err := parseFilterTime(raw)

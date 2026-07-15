@@ -21,6 +21,19 @@ type createKnowledgeFileRepoStub struct {
 	createCalls      int
 	createErr        error
 	createdKnowledge *types.Knowledge
+	validateCalls    int
+	validateErr      error
+	checkCalls       int
+}
+
+func (r *createKnowledgeFileRepoStub) ValidateKnowledgeFolder(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	folderID string,
+) error {
+	r.validateCalls++
+	return r.validateErr
 }
 
 func (r *createKnowledgeFileRepoStub) CheckKnowledgeExists(
@@ -29,6 +42,7 @@ func (r *createKnowledgeFileRepoStub) CheckKnowledgeExists(
 	kbID string,
 	params *types.KnowledgeCheckParams,
 ) (bool, *types.Knowledge, error) {
+	r.checkCalls++
 	return false, nil, nil
 }
 
@@ -154,6 +168,42 @@ func TestCreateKnowledgeFromFileDoesNotPersistWhenStorageSaveFails(t *testing.T)
 	require.Nil(t, knowledge)
 	require.Equal(t, 1, fileSvc.saveCalls)
 	require.Zero(t, repo.createCalls)
+}
+
+func TestCreateKnowledgeFromFileRejectsInvalidFolderBeforeStorage(t *testing.T) {
+	t.Parallel()
+
+	folderErr := errors.New("folder belongs to another knowledge base")
+	repo := &createKnowledgeFileRepoStub{validateErr: folderErr}
+	fileSvc := &createKnowledgeFileServiceStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   fileSvc,
+		task:      task,
+	}
+	ctx := context.WithValue(newCreateKnowledgeFileContext(), types.KnowledgeFolderIDContextKey, "foreign-folder")
+
+	knowledge, err := svc.CreateKnowledgeFromFile(
+		ctx,
+		"kb-1",
+		newMultipartFileHeader(t, "doc.txt", "hello"),
+		nil,
+		nil,
+		"",
+		nil,
+		"",
+		nil,
+	)
+
+	require.ErrorIs(t, err, folderErr)
+	require.Nil(t, knowledge)
+	require.Equal(t, 1, repo.validateCalls)
+	require.Zero(t, repo.checkCalls)
+	require.Zero(t, fileSvc.saveCalls)
+	require.Zero(t, repo.createCalls)
+	require.Zero(t, task.calls)
 }
 
 func TestCreateKnowledgeFromFilePersistsStoredFilePathOnCreate(t *testing.T) {

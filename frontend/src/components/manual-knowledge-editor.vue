@@ -619,6 +619,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
       content: string
       status: string
       tag_ids?: string[]
+	  folder_id?: string
       process_config?: KnowledgeProcessOverrides
     } = {
       title: form.title.trim(),
@@ -628,6 +629,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
     if (tagIdsToUpload && tagIdsToUpload.length > 0) {
       payload.tag_ids = tagIdsToUpload
     }
+	if (mode.value === 'create') payload.folder_id = uiStore.manualEditorFolderId || ''
 
     if (targetStatus === 'publish') {
       let kbInfo: any

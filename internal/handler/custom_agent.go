@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -606,6 +607,32 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 			}
 		}
 	}
+	var folderScopes []types.FolderScope
+	if raw := strings.TrimSpace(c.Query("folder_scopes")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &folderScopes); err != nil {
+			c.Error(errors.NewBadRequestError("invalid folder_scopes"))
+			return
+		}
+	}
+	var folderIDs []string
+	if raw := strings.TrimSpace(c.Query("folder_ids")); raw != "" {
+		for _, id := range strings.Split(raw, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				folderIDs = append(folderIDs, trimmed)
+			}
+		}
+		if len(kbIDs) != 1 {
+			c.Error(errors.NewBadRequestError("folder_ids requires exactly one knowledge_base_id"))
+			return
+		}
+		folderScopes = append(folderScopes, types.FolderScope{
+			KnowledgeBaseID: kbIDs[0],
+			FolderIDs:       folderIDs,
+		})
+		// In this shorthand knowledge_base_ids identifies the folder's parent
+		// KB; it is not an additional whole-KB selection.
+		kbIDs = nil
+	}
 
 	limit := 6
 	if limitStr := c.Query("limit"); limitStr != "" {
@@ -617,7 +644,19 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagIDs: %v, limit: %d",
 		secutils.SanitizeForLog(id), kbIDs, tagIDs, limit)
 
-	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagIDs, limit)
+	var questions []types.SuggestedQuestion
+	var err error
+	if len(folderScopes) > 0 {
+		if svc, ok := h.service.(interface {
+			GetSuggestedQuestionsWithFolders(context.Context, string, []string, []string, []string, int, []types.FolderScope) ([]types.SuggestedQuestion, error)
+		}); ok {
+			questions, err = svc.GetSuggestedQuestionsWithFolders(ctx, id, kbIDs, knowledgeIDs, tagIDs, limit, folderScopes)
+		} else {
+			questions, err = h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagIDs, limit)
+		}
+	} else {
+		questions, err = h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagIDs, limit)
+	}
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,

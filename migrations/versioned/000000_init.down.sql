@@ -18,7 +18,15 @@ DROP INDEX IF EXISTS idx_sessions_tenant_id;
 -- Drop sessions table
 DROP TABLE IF EXISTS sessions;
 
+-- Drop document-folder hierarchy tables
+DROP INDEX IF EXISTS idx_kfc_descendant;
+DROP INDEX IF EXISTS idx_kfc_ancestor;
+DROP TABLE IF EXISTS knowledge_folder_closure;
+DROP INDEX IF EXISTS idx_knowledge_folders_parent;
+DROP TABLE IF EXISTS knowledge_folders;
+
 -- Drop indexes for knowledges
+DROP INDEX IF EXISTS idx_knowledges_folder;
 DROP INDEX IF EXISTS idx_knowledges_tenant_id;
 DROP INDEX IF EXISTS idx_knowledges_base_id;
 DROP INDEX IF EXISTS idx_knowledges_parse_status;

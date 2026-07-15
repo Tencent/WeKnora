@@ -5,6 +5,11 @@ import { getApiBaseUrl } from "@/utils/api-base";
 import { updateMyPreferences, type UserPreferences } from "@/api/auth";
 import { isAgentStreamAgentId } from "@/utils/agent-mode";
 import { loadAndReconcileSettings } from "@/stores/settingsStorage";
+import {
+  removeFolderSelection,
+  restoreFolderSelections,
+  serializeFolderScopes,
+} from "@/utils/knowledgeFolders";
 
 // 定义设置接口
 interface Settings {
@@ -17,6 +22,7 @@ interface Settings {
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
+  selectedFolders: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
   selectedMCPServices: string[];
   selectedSkills: string[];
   selectedTools?: string[];
@@ -87,6 +93,7 @@ const defaultSettings: Settings = {
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
+  selectedFolders: [],
   selectedMCPServices: [],
   selectedSkills: [],
   modelConfig: {
@@ -422,6 +429,17 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
+	addFolder(folder: { id: string; name: string; kbId: string; kbName?: string }) {
+	  if (!this.settings.selectedFolders) this.settings.selectedFolders = [];
+	  if (!this.settings.selectedFolders.some(item => item.id === folder.id && item.kbId === folder.kbId)) this.settings.selectedFolders.push(folder);
+	  localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+	},
+	removeFolder(folderId: string, kbId?: string) {
+	  this.settings.selectedFolders = removeFolderSelection(this.settings.selectedFolders || [], folderId, kbId);
+	  localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+	},
+	clearFolders() { this.settings.selectedFolders = []; localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings)); },
+
     addMCPService(serviceId: string) {
       if (!this.settings.selectedMCPServices) this.settings.selectedMCPServices = [];
       if (!this.settings.selectedMCPServices.includes(serviceId)) {
@@ -470,13 +488,17 @@ export const useSettingsStore = defineStore("settings", {
       const selectedKBs = this.getSelectedKnowledgeBases();
       const selectedFiles = this.getSelectedFiles();
       const tags = this.settings.selectedTags || [];
+      const folders = this.settings.selectedFolders || [];
       const tagIds = [...new Set(tags.map((t) => t.id).filter(Boolean))];
       const tagKbIds = [...new Set(tags.map((t) => t.kbId).filter(Boolean))];
+      // Folder KBs are carried only by folder_scopes. Adding them here would
+      // make a folder-only choice look like an explicit whole-KB selection.
       const kbIds = [...new Set([...selectedKBs, ...tagKbIds])];
       return {
         knowledge_base_ids: kbIds.length > 0 ? kbIds : undefined,
         knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
         tag_ids: tagIds.length > 0 ? tagIds : undefined,
+        folder_scopes: serializeFolderScopes(folders),
         limit,
       };
     },
@@ -499,6 +521,7 @@ export const useSettingsStore = defineStore("settings", {
       this.settings.selectedFiles = [];
       this.settings.selectedFileKbMap = {};
       this.settings.selectedTags = [];
+      this.settings.selectedFolders = [];
       this.settings.selectedMCPServices = [];
       this.settings.selectedSkills = [];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
@@ -579,6 +602,9 @@ export const useSettingsStore = defineStore("settings", {
           const existing = this.settings.selectedTags || [];
           this.settings.selectedTags = existing.filter(tag => state.tag_ids?.includes(tag.id));
         }
+        if (Array.isArray(state.mentioned_items) || Array.isArray(state.folder_scopes)) {
+          this.settings.selectedFolders = restoreFolderSelections(state.mentioned_items, state.folder_scopes);
+        }
         if (Array.isArray(state.mcp_service_ids)) {
           this.settings.selectedMCPServices = [...state.mcp_service_ids];
         } else if (Array.isArray(state.mentioned_items)) {
@@ -621,6 +647,7 @@ export interface SessionLastRequestStatePayload {
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
   tag_ids?: string[];
+  folder_scopes?: Array<{ knowledge_base_id: string; folder_ids: string[] }>;
   mcp_service_ids?: string[];
   skill_names?: string[];
   mentioned_items?: Array<{

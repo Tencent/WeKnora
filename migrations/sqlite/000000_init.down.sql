@@ -11,6 +11,7 @@ DROP TABLE IF EXISTS organizations;
 DROP TABLE IF EXISTS custom_agents;
 DROP TABLE IF EXISTS mcp_tool_approvals;
 DROP TABLE IF EXISTS mcp_services;
+DROP TABLE IF EXISTS knowledge_tag_relations;
 DROP TABLE IF EXISTS knowledge_tags;
 DROP TABLE IF EXISTS auth_tokens;
 DROP TABLE IF EXISTS audit_logs;

@@ -26,7 +26,7 @@ type History struct {
 type MentionedItem struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	Type      string `json:"type"`       // "kb", "file", "tag", "mcp", "skill"
+	Type      string `json:"type"`       // "kb", "file", "folder", "tag", "mcp", "skill"
 	KBType    string `json:"kb_type"`    // "document" or "faq" (only for kb type)
 	KBID      string `json:"kb_id"`      // Parent knowledge base for file/tag mentions
 	KBName    string `json:"kb_name"`    // Display name for parent KB
@@ -247,6 +247,7 @@ type MessageExecutionContext struct {
 	KnowledgeBaseIDs      []string                  `json:"knowledge_base_ids,omitempty"`
 	KnowledgeIDs          []string                  `json:"knowledge_ids,omitempty"`
 	TagIDs                []string                  `json:"tag_ids,omitempty"`
+	FolderScopes          []FolderScope             `json:"folder_scopes,omitempty"`
 	MCPServiceIDs         []string                  `json:"mcp_service_ids,omitempty"`
 	SkillNames            []string                  `json:"skill_names,omitempty"`
 	WebSearchEnabled      bool                      `json:"web_search_enabled"`

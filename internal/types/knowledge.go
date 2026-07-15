@@ -88,6 +88,12 @@ const (
 // KnowledgeListFilter aggregates optional filters for listing knowledge entries
 // under a knowledge base. Empty / zero fields mean "no filter on that dimension".
 type KnowledgeListFilter struct {
+	// FolderID filters by folder. When FolderSet is false, no folder filter is
+	// applied. An empty FolderID with FolderSet=true means the virtual root.
+	FolderID  string
+	FolderSet bool
+	// IncludeDescendants expands FolderID through knowledge_folder_closure.
+	IncludeDescendants bool
 	// TagIDs filters by multiple tags (OR semantics: match any of the given tags).
 	TagIDs []string
 	// Keyword performs a LIKE match on file_name / title when non-empty.
@@ -116,6 +122,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// FolderID is empty for the virtual root. A knowledge belongs to exactly one folder.
+	FolderID string `json:"folder_id" gorm:"type:varchar(36);not null;default:''"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge
@@ -211,6 +219,13 @@ type ManualKnowledgePayload struct {
 	TagIDs        []string                   `json:"tag_ids"`
 	Channel       string                     `json:"channel"`
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
+	FolderID      string                     `json:"folder_id,omitempty"`
+}
+
+// FolderScope limits retrieval to one or more recursive folder subtrees in a KB.
+type FolderScope struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	FolderIDs       []string `json:"folder_ids"`
 }
 
 // KnowledgeSearchScope defines a (tenant_id, knowledge_base_id) scope for knowledge search (e.g. own KBs + shared KBs).

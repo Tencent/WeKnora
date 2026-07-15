@@ -28,6 +28,10 @@ type messageSuggestionService struct {
 	customAgentService interfaces.CustomAgentService
 }
 
+type folderAwareKnowledgeSuggestionService interface {
+	GetKnowledgeSuggestedQuestionsWithFolders(ctx context.Context, agentID string, kbIDs, knowledgeIDs, tagIDs []string, limit int, folderScopes []types.FolderScope) ([]types.SuggestedQuestion, error)
+}
+
 func NewMessageSuggestionService(
 	repo interfaces.MessageSuggestionRepository,
 	messageService interfaces.MessageService,
@@ -349,14 +353,32 @@ func (s *messageSuggestionService) generateFromKnowledge(
 	if message.AgentTenantID != 0 {
 		knowledgeCtx = context.WithValue(knowledgeCtx, types.TenantIDContextKey, message.AgentTenantID)
 	}
-	candidates, err := s.customAgentService.GetKnowledgeSuggestedQuestions(
-		knowledgeCtx,
-		message.AgentID,
-		message.ExecutionContext.KnowledgeBaseIDs,
-		message.ExecutionContext.KnowledgeIDs,
-		message.ExecutionContext.TagIDs,
-		count,
-	)
+	var candidates []types.SuggestedQuestion
+	var err error
+	if len(message.ExecutionContext.FolderScopes) > 0 {
+		folderService, ok := s.customAgentService.(folderAwareKnowledgeSuggestionService)
+		if !ok {
+			return nil, errors.New("custom agent service does not support folder-scoped knowledge suggestions")
+		}
+		candidates, err = folderService.GetKnowledgeSuggestedQuestionsWithFolders(
+			knowledgeCtx,
+			message.AgentID,
+			message.ExecutionContext.KnowledgeBaseIDs,
+			message.ExecutionContext.KnowledgeIDs,
+			message.ExecutionContext.TagIDs,
+			count,
+			message.ExecutionContext.FolderScopes,
+		)
+	} else {
+		candidates, err = s.customAgentService.GetKnowledgeSuggestedQuestions(
+			knowledgeCtx,
+			message.AgentID,
+			message.ExecutionContext.KnowledgeBaseIDs,
+			message.ExecutionContext.KnowledgeIDs,
+			message.ExecutionContext.TagIDs,
+			count,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -5,7 +5,8 @@ type ContextKey string
 
 const (
 	// TenantIDContextKey is the context key for tenant ID
-	TenantIDContextKey ContextKey = "TenantID"
+	TenantIDContextKey          ContextKey = "TenantID"
+	KnowledgeFolderIDContextKey ContextKey = "KnowledgeFolderID"
 	// TenantInfoContextKey is the context key for tenant information
 	TenantInfoContextKey ContextKey = "TenantInfo"
 	// RequestIDContextKey is the context key for request ID

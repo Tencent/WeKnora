@@ -12,6 +12,7 @@ import (
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
+var ErrKnowledgeFolderScopeMismatch = errors.New("knowledge folder does not belong to knowledge base")
 
 // escapeLikeKeyword escapes SQL LIKE wildcards (%, _) in a keyword
 // so they are treated as literal characters.
@@ -36,7 +37,7 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount", "FolderID"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -50,8 +51,29 @@ func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 
 // CreateKnowledge creates knowledge
 func (r *knowledgeRepository) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
+	if err := r.ValidateKnowledgeFolder(ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, knowledge.FolderID); err != nil {
+		return err
+	}
 	err := r.db.WithContext(ctx).Create(knowledge).Error
 	return err
+}
+
+func (r *knowledgeRepository) ValidateKnowledgeFolder(
+	ctx context.Context, tenantID uint64, kbID, folderID string,
+) error {
+	if folderID == "" {
+		return nil
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&types.KnowledgeFolder{}).
+		Where("id = ? AND tenant_id = ? AND knowledge_base_id = ?", folderID, tenantID, kbID).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrKnowledgeFolderScopeMismatch
+	}
+	return nil
 }
 
 // GetKnowledgeByID gets knowledge
@@ -98,6 +120,13 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.
 func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) *gorm.DB {
+	if filter.FolderSet {
+		if filter.IncludeDescendants && filter.FolderID != "" {
+			query = query.Where("knowledges.folder_id IN (SELECT descendant_id FROM knowledge_folder_closure WHERE ancestor_id = ?)", filter.FolderID)
+		} else {
+			query = query.Where("knowledges.folder_id = ?", filter.FolderID)
+		}
+	}
 	if len(filter.TagIDs) > 0 {
 		query = query.Where(
 			"knowledges.id IN (SELECT knowledge_id FROM knowledge_tag_relations WHERE tag_id IN (?))",
@@ -191,6 +220,42 @@ func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledg
 		return nil
 	}
 	return r.db.Debug().WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
+}
+
+func (r *knowledgeRepository) UpdateKnowledgeFolderBatch(ctx context.Context, tenantID uint64, kbID string, knowledgeIDs []string, folderID string) (int64, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ?", tenantID, kbID, knowledgeIDs).Update("folder_id", folderID)
+	return result.RowsAffected, result.Error
+}
+
+func (r *knowledgeRepository) ListIDsByFolderIDs(ctx context.Context, tenantID uint64, kbID string, folderIDs []string) ([]string, error) {
+	folderIDs = uniqueStrings(folderIDs)
+	if len(folderIDs) == 0 {
+		return nil, nil
+	}
+	var folderCount int64
+	if err := r.db.WithContext(ctx).Model(&types.KnowledgeFolder{}).Where("tenant_id = ? AND knowledge_base_id = ? AND id IN ?", tenantID, kbID, folderIDs).Count(&folderCount).Error; err != nil {
+		return nil, err
+	}
+	if folderCount != int64(len(folderIDs)) {
+		return nil, ErrKnowledgeFolderScopeMismatch
+	}
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).Distinct("knowledges.id").Joins("JOIN knowledge_folder_closure c ON c.descendant_id = knowledges.folder_id").Where("knowledges.tenant_id = ? AND knowledges.knowledge_base_id = ? AND c.ancestor_id IN ?", tenantID, kbID, folderIDs).Pluck("knowledges.id", &ids).Error
+	return ids, err
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" {
+			if _, ok := seen[value]; !ok {
+				seen[value] = struct{}{}
+				result = append(result, value)
+			}
+		}
+	}
+	return result
 }
 
 // DeleteKnowledge deletes knowledge

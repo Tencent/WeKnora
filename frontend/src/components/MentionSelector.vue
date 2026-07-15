@@ -314,6 +314,7 @@ const fileItems = computed(() => props.items.filter(item => item.type === 'file'
 
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
+	{ type: 'folder', label: t('knowledgeFolder.folders'), icon: 'folder-open' },
   { type: 'tag', label: '标签', icon: 'tag' },
   { type: 'mcp', label: 'MCP', icon: 'tools' },
   { type: 'skill', label: 'Skills', icon: 'bookmark' },

@@ -301,8 +301,15 @@ func (s *sessionService) buildAgentConfig(
 		logger.Infof(ctx, "No knowledge bases specified for agent, running in pure agent mode")
 	}
 
+	// Folder scopes constrain agent-default KBs. A KB the user explicitly
+	// selected as a whole remains unrestricted, matching ordinary RAG.
+	fullKBs := fullKnowledgeBasesForFolderScopes(
+		agentConfig.KnowledgeBases,
+		req.KnowledgeBaseIDs,
+		req.FolderScopes,
+	)
 	// Build search targets using agent's tenant (handler has validated access for shared agent)
-	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, fullKBs, agentConfig.KnowledgeIDs, req.TagScopes, req.FolderScopes)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
@@ -314,6 +321,32 @@ func (s *sessionService) buildAgentConfig(
 	}
 
 	return agentConfig, nil
+}
+
+func fullKnowledgeBasesForFolderScopes(
+	resolvedKBIDs []string,
+	explicitWholeKBIDs []string,
+	folderScopes []types.FolderScope,
+) []string {
+	explicit := make(map[string]bool, len(explicitWholeKBIDs))
+	for _, kbID := range explicitWholeKBIDs {
+		if kbID != "" {
+			explicit[kbID] = true
+		}
+	}
+	constrained := make(map[string]bool, len(folderScopes))
+	for _, scope := range folderScopes {
+		if scope.KnowledgeBaseID != "" && !explicit[scope.KnowledgeBaseID] {
+			constrained[scope.KnowledgeBaseID] = true
+		}
+	}
+	result := make([]string, 0, len(resolvedKBIDs))
+	for _, kbID := range resolvedKBIDs {
+		if kbID != "" && !constrained[kbID] {
+			result = append(result, kbID)
+		}
+	}
+	return result
 }
 
 // applyPerRequestSkillScope narrows the agent's skill whitelist to the @Skill

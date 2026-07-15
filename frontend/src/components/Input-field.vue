@@ -7,7 +7,7 @@ import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useMenuStore } from '@/stores/menu';
-import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags, listKnowledgeFolders } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -42,6 +42,7 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
+import { filterFolderMentionKnowledgeBases } from '@/utils/knowledgeFolders';
 
 const route = useRoute();
 const router = useRouter();
@@ -505,6 +506,7 @@ const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
+const selectedFolders = computed(() => settingsStore.settings.selectedFolders || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
@@ -629,8 +631,9 @@ const allSelectedItems = computed(() => {
     description: tag.kbName || '',
     isAgentConfigured: false,
   }));
+	const folders = selectedFolders.value.map((folder:any) => ({ ...folder, type:'folder' as const, description:folder.kbName || '', isAgentConfigured:false }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...folders, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
@@ -641,6 +644,8 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeFile(item.id);
   } else if (item.type === 'tag') {
     settingsStore.removeTag(item.id, item.kbId);
+	} else if (item.type === 'folder') {
+	  settingsStore.removeFolder(item.id, item.kbId);
   } else if (item.type === 'mcp') {
     settingsStore.removeMCPService(item.id);
   } else if (item.type === 'skill') {
@@ -1157,6 +1162,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该空间下的知识库，否则使用本空间 + 共享给自己的
   let kbItems: any[] = [];
   let tagItems: MentionItem[] = [];
+	let folderItems: MentionItem[] = [];
   let mcpItems: MentionItem[] = [];
   let skillItems: MentionItem[] = [];
   if (!append) {
@@ -1268,6 +1274,17 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       };
     }));
     mentionGroupCounts.value.kb = kbItems.length;
+	try {
+	  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+	  const agentId = selectedAgentId.value;
+	  const folderKbs = filterFolderMentionKnowledgeBases(availableKbs, mentionAllowedKbIds.value);
+	  const folderResults = await Promise.all(folderKbs.map(async (kb:any) => {
+		const res:any = await listKnowledgeFolders(kb.id,{page:1,page_size:20,keyword:q.trim()||undefined,...(sourceTenantId&&agentId?{agent_id:agentId}:{})});
+		const payload=res?.data?.data||res?.data||[];
+		return (Array.isArray(payload)?payload:[]).map((folder:any)=>({id:folder.id,name:folder.name,type:'folder' as const,kbId:kb.id,kbName:kb.name,count:folder.total_knowledge_count,description:[...(folder.ancestors||[]).map((a:any)=>a.name),folder.name].join(' / ')}));
+	  }));
+	  folderItems=folderResults.flat();mentionGroupCounts.value.folder=folderItems.length;
+	} catch(e){console.error('[Mention] listKnowledgeFolders error:',e);folderItems=[];}
 
     const tagKeyword = q.trim();
     const tagSources = availableKbs;
@@ -1417,7 +1434,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
   } else {
-    mentionItems.value = [...kbItems, ...tagItems, ...mcpItems, ...skillItems, ...fileItems];
+    mentionItems.value = [...kbItems, ...folderItems, ...tagItems, ...mcpItems, ...skillItems, ...fileItems];
   }
   console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
 
@@ -1638,6 +1655,8 @@ const onMentionSelect = (item: any) => {
     if (item.kbId) {
       settingsStore.addTag({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
     }
+	} else if (item.type === 'folder') {
+	  if (item.kbId) settingsStore.addFolder({id:item.id,name:item.name,kbId:item.kbId,kbName:item.kbName});
   } else if (item.type === 'mcp') {
     settingsStore.addMCPService(item.id);
   } else if (item.type === 'skill') {
