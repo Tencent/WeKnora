@@ -22,5 +22,8 @@ DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS knowledges;
 DROP TABLE IF EXISTS knowledge_bases;
 DROP TABLE IF EXISTS storage_backends;
+DROP TABLE IF EXISTS resource_access_grants;
+DROP TABLE IF EXISTS resource_bindings;
+DROP TABLE IF EXISTS resources;
 DROP TABLE IF EXISTS models;
 DROP TABLE IF EXISTS tenants;

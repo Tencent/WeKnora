@@ -79,7 +79,11 @@ func stripImageXMLTags(s string) string {
 
 // storageSchemeRe matches both legacy provider:// URLs and canonical
 // storage://<backend-id>/provider:// URLs.
-var storageSchemeRe = regexp.MustCompile(`\b(?:storage://[0-9A-Za-z_-]+/)?(?:local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]+`)
+var storageSchemeRe = regexp.MustCompile(
+	`\b(?:resource://[0-9A-Za-z_-]+|` +
+		`(?:storage://[0-9A-Za-z_-]+/)?` +
+		`(?:local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]+)`,
+)
 
 // rewriteStorageURLs replaces all provider:// URLs in content with HTTP URLs
 // obtained from fileService.GetFileURL. URLs that are already HTTP or cannot
@@ -128,7 +132,7 @@ func rewriteStorageURLs(ctx context.Context, content string, resolver *imFileSer
 // incompleteURLSuffixRe matches a provider:// URL that reaches the end of the
 // string — it may continue in the next chunk.
 var incompleteURLSuffixRe = regexp.MustCompile(
-	`\b(?:storage|local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]*$`,
+	`\b(?:resource|storage|local|minio|s3|cos|tos|oss|obs|ks3)://[^\s)\]>"]*$`,
 )
 
 // findIncompleteStorageURL returns the byte offset of a potentially truncated
@@ -248,6 +252,9 @@ func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileSe
 }
 
 func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService {
+	if _, ok := types.ParseResourcePath(filePath); ok {
+		return r.defaultSvc
+	}
 	backendID, _, _ := types.ParseStorageBackendPath(filePath)
 	provider := types.ParseProviderScheme(filePath)
 	if provider == "" {

@@ -19,12 +19,35 @@ import (
 )
 
 type StorageBackendService struct {
-	repo interfaces.StorageBackendRepository
-	db   *gorm.DB
+	repo            interfaces.StorageBackendRepository
+	db              *gorm.DB
+	resourceCatalog interfaces.ResourceCatalog
 }
 
-func NewStorageBackendService(repo interfaces.StorageBackendRepository, db *gorm.DB) *StorageBackendService {
-	return &StorageBackendService{repo: repo, db: db}
+// NewStorageBackendService creates a storage backend service. The optional
+// catalog keeps focused tests compatible while production uses the explicit
+// constructor below.
+func NewStorageBackendService(
+	repo interfaces.StorageBackendRepository,
+	db *gorm.DB,
+	catalogs ...interfaces.ResourceCatalog,
+) *StorageBackendService {
+	service := &StorageBackendService{repo: repo, db: db}
+	if len(catalogs) > 0 {
+		service.resourceCatalog = catalogs[0]
+	}
+	return service
+}
+
+// NewStorageBackendServiceWithResources is the production DI constructor.
+// The variadic constructor above remains convenient for focused tests that do
+// not exercise resource registration.
+func NewStorageBackendServiceWithResources(
+	repo interfaces.StorageBackendRepository,
+	db *gorm.DB,
+	catalog interfaces.ResourceCatalog,
+) *StorageBackendService {
+	return NewStorageBackendService(repo, db, catalog)
 }
 
 func (s *StorageBackendService) Create(ctx context.Context, backend *types.StorageBackend) error {
@@ -76,6 +99,18 @@ func (s *StorageBackendService) Update(ctx context.Context, incoming *types.Stor
 				return err
 			}
 		}
+		if references == 0 {
+			if err := s.db.WithContext(ctx).Model(&types.StoredResource{}).
+				Where(
+					"tenant_id = ? AND storage_backend_id = ? AND state = ?",
+					incoming.TenantID,
+					incoming.ID,
+					types.ResourceStateActive,
+				).
+				Count(&references).Error; err != nil {
+				return err
+			}
+		}
 		if references > 0 {
 			return apperrors.NewBadRequestError("a default or bound storage backend cannot be disabled")
 		}
@@ -122,6 +157,15 @@ func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id 
 		}
 		if kbCount > 0 {
 			return apperrors.NewBadRequestError(fmt.Sprintf("storage backend still has %d knowledge base(s) bound to it", kbCount))
+		}
+		var resourceCount int64
+		if err := tx.Model(&types.StoredResource{}).
+			Where("tenant_id = ? AND storage_backend_id = ? AND state = ?", tenantID, id, types.ResourceStateActive).
+			Count(&resourceCount).Error; err != nil {
+			return err
+		}
+		if resourceCount > 0 {
+			return apperrors.NewBadRequestError(fmt.Sprintf("storage backend still has %d active resource(s)", resourceCount))
 		}
 		if backend.LegacyAlias {
 			return apperrors.NewBadRequestError("legacy storage backend cannot be deleted while old file paths may reference it")
@@ -247,12 +291,21 @@ func (s *StorageBackendService) ResolveFileService(ctx context.Context, tenant *
 		if err != nil {
 			return nil, provider, err
 		}
-		return filesvc.NewBackendScopedFileService(backend.ID, inner), provider, nil
+		scoped := filesvc.NewBackendScopedFileService(backend.ID, inner)
+		return filesvc.NewResourceCatalogFileService(scoped, s.resourceCatalog), provider, nil
 	}
 	if tenant == nil {
 		return nil, "", fmt.Errorf("workspace context missing")
 	}
-	return filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, localBaseDir)
+	inner, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(
+		provider,
+		tenant.StorageEngineConfig,
+		localBaseDir,
+	)
+	if err != nil {
+		return nil, resolvedProvider, err
+	}
+	return filesvc.NewResourceCatalogFileService(inner, s.resourceCatalog), resolvedProvider, nil
 }
 
 func validateStorageBackendEndpoint(backend *types.StorageBackend) error {
@@ -276,5 +329,7 @@ func validateStorageBackendEndpoint(backend *types.StorageBackend) error {
 	return nil
 }
 
-var _ interfaces.StorageBackendService = (*StorageBackendService)(nil)
-var _ interfaces.StorageBackendResolver = (*StorageBackendService)(nil)
+var (
+	_ interfaces.StorageBackendService  = (*StorageBackendService)(nil)
+	_ interfaces.StorageBackendResolver = (*StorageBackendService)(nil)
+)

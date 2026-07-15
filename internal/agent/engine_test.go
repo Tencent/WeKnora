@@ -24,16 +24,22 @@ type mockResponse struct {
 type mockChat struct {
 	mu        sync.Mutex
 	responses []mockResponse
+	calls     [][]chat.Message
 	callCount int
 }
 
-func (m *mockChat) ChatStream(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+func (m *mockChat) ChatStream(
+	_ context.Context,
+	messages []chat.Message,
+	_ *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.callCount >= len(m.responses) {
 		return nil, fmt.Errorf("unexpected ChatStream call #%d (only %d responses prepared)", m.callCount, len(m.responses))
 	}
 	resp := m.responses[m.callCount]
+	m.calls = append(m.calls, append([]chat.Message(nil), messages...))
 	m.callCount++
 
 	ch := make(chan types.StreamResponse, len(resp.chunks))
@@ -42,6 +48,25 @@ func (m *mockChat) ChatStream(_ context.Context, _ []chat.Message, _ *chat.ChatO
 	}
 	close(ch)
 	return ch, nil
+}
+
+func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "![image](res:0"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "001)", Done: true},
+	}}}}
+	engine := newTestEngine(t, model)
+	result, err := engine.streamLLMToEventBus(
+		context.Background(),
+		[]chat.Message{{Role: "tool", Content: "source=" + ref}},
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "![image]("+ref+")", result.Content)
+	require.Len(t, model.calls, 1)
+	require.Equal(t, "source=res:0001", model.calls[0][0].Content)
 }
 
 func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {
@@ -270,8 +295,10 @@ func TestStreamThinkingToEventBus_SplitsInlineThinkBlock(t *testing.T) {
 	mock := &mockChat{
 		responses: []mockResponse{
 			{chunks: []types.StreamResponse{
-				{ResponseType: types.ResponseTypeAnswer, Content: "<think>hidden reasoning</think>Visible answer.",
-					Done: true, FinishReason: "stop"},
+				{
+					ResponseType: types.ResponseTypeAnswer, Content: "<think>hidden reasoning</think>Visible answer.",
+					Done: true, FinishReason: "stop",
+				},
 			}},
 		},
 	}

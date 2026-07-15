@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/llmresource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -51,6 +52,8 @@ func (p *PluginChatCompletion) OnEvent(
 		"message_count": len(chatManage.History) + 2,
 	})
 	chatMessages := prepareMessagesWithHistory(chatManage)
+	resourceRefs := llmresource.NewRegistry()
+	chatMessages = resourceRefs.EncodeMessages(chatMessages)
 
 	// Call the chat model to generate response
 	pipelineInfo(ctx, "Completion", "model_call", map[string]interface{}{
@@ -64,6 +67,7 @@ func (p *PluginChatCompletion) OnEvent(
 		})
 		return ErrModelCall.WithError(err)
 	}
+	resourceRefs.DecodeResponse(chatResponse)
 
 	pipelineInfo(ctx, "Completion", "output", map[string]interface{}{
 		"answer_preview":    chatResponse.Content,

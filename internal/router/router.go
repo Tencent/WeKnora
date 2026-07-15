@@ -76,6 +76,7 @@ type RouterParams struct {
 	VectorStoreHandler           *handler.VectorStoreHandler
 	StorageBackendHandler        *handler.StorageBackendHandler
 	StorageBackendResolver       interfaces.StorageBackendResolver
+	ResourceCatalog              interfaces.ResourceCatalog
 	FAQHandler                   *handler.FAQHandler
 	TagHandler                   *handler.TagHandler
 	CustomAgentHandler           *handler.CustomAgentHandler
@@ -158,13 +159,26 @@ func NewRouter(params RouterParams) *gin.Engine {
 	RegisterIMRoutes(r, params.IMHandler)
 
 	// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
-	RegisterEmbedPublicRoutes(r, params.EmbedChannelHandler, params.EmbedChannelService, params.TenantService, params.RedisClient, params.FileService, params.StorageBackendResolver)
+	RegisterEmbedPublicRoutes(
+		r,
+		params.EmbedChannelHandler,
+		params.EmbedChannelService,
+		params.TenantService,
+		params.RedisClient,
+		params.FileService,
+		params.StorageBackendResolver,
+		params.ResourceCatalog,
+	)
+
+	// Short-lived capability URLs for IM and other clients that cannot attach
+	// WeKnora authentication headers.
+	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
-	serveFiles(r, params.FileService, params.StorageBackendResolver)
+	serveFilesWithResources(r, params.FileService, params.StorageBackendResolver, params.ResourceCatalog)
 
 	// Presigned file access: no auth required, signature-verified.
 	servePresignedFiles(r, params.TenantService, params.StorageBackendResolver)
@@ -219,7 +233,14 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// KB-scoped image proxy: lets tenants render images embedded in
 		// org-shared / agent-visible KB content, which the tenant-scoped
 		// /files route cannot serve because it enforces same-tenant paths.
-		serveKBScopedFiles(v1, rbacGuards, params.TenantService, params.FileService, params.StorageBackendResolver)
+		serveKBScopedFiles(
+			v1,
+			rbacGuards,
+			params.TenantService,
+			params.FileService,
+			params.StorageBackendResolver,
+			params.ResourceCatalog,
+		)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
@@ -1295,6 +1316,7 @@ func RegisterEmbedPublicRoutes(
 	redisClient *redis.Client,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalogs ...interfaces.ResourceCatalog,
 ) {
 	if embedHandler == nil || embedService == nil {
 		return
@@ -1322,7 +1344,7 @@ func RegisterEmbedPublicRoutes(
 		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
 		// injects the channel's tenant, and the handler enforces that the
 		// requested path belongs to that tenant.
-		embed.GET("/files", newFileServeHandler(fileService, storageResolver))
+		embed.GET("/files", newFileServeHandler(fileService, storageResolver, resourceCatalogs...))
 	}
 }
 
@@ -1500,7 +1522,8 @@ func serveFrontendStatic(r *gin.Engine) {
 			return
 		}
 		path := c.Request.URL.Path
-		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/swagger/") {
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/swagger/") ||
+			strings.HasPrefix(path, "/r/") || path == "/files" {
 			c.Next()
 			return
 		}
@@ -1542,7 +1565,15 @@ type getRouteRegistrar interface {
 // same handler backs both the authenticated /files route and the embed route
 // (where EmbedAuth injects the channel's tenant). Tenant ownership of the
 // requested path is enforced via ValidateStoragePathTenant either way.
-func newFileServeHandler(globalFileService interfaces.FileService, storageResolver interfaces.StorageBackendResolver) gin.HandlerFunc {
+func newFileServeHandler(
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalogs ...interfaces.ResourceCatalog,
+) gin.HandlerFunc {
+	var resourceCatalog interfaces.ResourceCatalog
+	if len(resourceCatalogs) > 0 {
+		resourceCatalog = resourceCatalogs[0]
+	}
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
 		baseDir = "/data/files"
@@ -1565,6 +1596,27 @@ func newFileServeHandler(globalFileService interfaces.FileService, storageResolv
 			return
 		}
 
+		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
+		if tenant == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
+			return
+		}
+		resourceResolved := false
+		if resourceCatalog != nil {
+			resolvedPath, resource, err := resourceCatalog.ResolvePath(c.Request.Context(), filePath)
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			if resource != nil {
+				if resource.TenantID != tenant.ID {
+					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible"})
+					return
+				}
+				filePath = resolvedPath
+				resourceResolved = true
+			}
+		}
 		backendID, innerPath, scoped := types.ParseStorageBackendPath(filePath)
 		providerPath := filePath
 		if scoped {
@@ -1572,16 +1624,21 @@ func newFileServeHandler(globalFileService interfaces.FileService, storageResolv
 		}
 		provider := types.ParseProviderScheme(providerPath)
 
-		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
-			return
-		}
-
-		if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
-			logger.Warnf(context.Background(), "[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v", tenant.ID, filePath, err)
-			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
-			return
+		// A registered resource's tenant is authoritative. Physical provider
+		// paths remain an internal locator and are not required to encode access
+		// control metadata (some cloud layouts contain other numeric segments).
+		if !resourceResolved {
+			if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
+				logger.Warnf(
+					context.Background(),
+					"[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v",
+					tenant.ID,
+					filePath,
+					err,
+				)
+				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+				return
+			}
 		}
 
 		var (
@@ -1636,15 +1693,115 @@ func newFileServeHandler(globalFileService interfaces.FileService, storageResolv
 }
 
 func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService, resolvers ...interfaces.StorageBackendResolver) {
-	logger.Infof(context.Background(), "[Router] Serving files from /files")
 	var storageResolver interfaces.StorageBackendResolver
 	if len(resolvers) > 0 {
 		storageResolver = resolvers[0]
 	}
+	serveFilesWithResources(r, globalFileService, storageResolver, nil)
+}
+
+func serveFilesWithResources(
+	r getRouteRegistrar,
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+) {
+	logger.Infof(context.Background(), "[Router] Serving files from /files")
 	// /files sits outside the /api/v1 APIKeyGate; storage paths cannot be
 	// attributed to a key's KB allow-list, so API keys are denied outright
 	// (embed routes use their own /embed/.../files handler).
-	r.GET("/files", middleware.DenyAPIKeyPrincipal(), newFileServeHandler(globalFileService, storageResolver))
+	r.GET(
+		"/files",
+		middleware.DenyAPIKeyPrincipal(),
+		newFileServeHandler(globalFileService, storageResolver, resourceCatalog),
+	)
+}
+
+// serveResourceGrants exposes short, revocable capability URLs for clients
+// such as IM platforms that cannot attach a WeKnora bearer/embed token.
+func serveResourceGrants(
+	r *gin.Engine,
+	resourceCatalog interfaces.ResourceCatalog,
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+) {
+	if resourceCatalog == nil || tenantService == nil {
+		return
+	}
+	handler := func(c *gin.Context) {
+		ctx := c.Request.Context()
+		resource, err := resourceCatalog.ResolveAccessGrant(ctx, c.Param("token"))
+		if err != nil || resource == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		tenant, err := tenantService.GetTenantByID(ctx, resource.TenantID)
+		if err != nil || tenant == nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		providerPath := resource.PhysicalPath
+		if _, inner, ok := types.ParseStorageBackendPath(providerPath); ok {
+			providerPath = inner
+		}
+		provider := types.ParseProviderScheme(providerPath)
+		var fileSvc interfaces.FileService
+		if storageResolver != nil {
+			fileSvc, _, err = storageResolver.ResolveFileService(
+				ctx,
+				tenant,
+				resource.StorageBackendID,
+				provider,
+				localStorageBaseDir(),
+			)
+		} else {
+			fileSvc = globalFileService
+		}
+		if err != nil || fileSvc == nil {
+			logger.Warnf(ctx, "[Router] resource grant storage resolution failed: resource_id=%s err=%v", resource.ID, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+		reader, err := fileSvc.GetFile(ctx, resource.PhysicalPath)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		defer func() { _ = reader.Close() }()
+
+		fileName := resource.OriginalName
+		if fileName == "" {
+			fileName = resource.PhysicalPath
+		}
+		contentType, inline := secutils.SafeContentTypeByFilename(fileName)
+		if resource.MimeType != "" && inline {
+			contentType = resource.MimeType
+		}
+		c.Header("Content-Type", contentType)
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Cache-Control", "private, max-age=300")
+		if !inline {
+			c.Header("Content-Disposition", "attachment")
+		}
+		c.Status(http.StatusOK)
+		if c.Request.Method != http.MethodHead {
+			if _, err := io.Copy(c.Writer, reader); err != nil {
+				logger.Warnf(ctx, "[Router] resource grant write failed: resource_id=%s err=%v", resource.ID, err)
+			}
+		}
+	}
+	r.GET("/r/:token", handler)
+	r.HEAD("/r/:token", handler)
+}
+
+func localStorageBaseDir() string {
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	if baseDir == "" {
+		baseDir = "/data/files"
+	}
+	return baseDir
 }
 
 // serveKBScopedFiles registers the KB-scoped file proxy used to render images
@@ -1665,6 +1822,7 @@ func serveKBScopedFiles(
 	tenantService interfaces.TenantService,
 	globalFileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalogs ...interfaces.ResourceCatalog,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving KB-scoped files from /knowledge-bases/:id/files")
 	// API keys are denied outright (as on /files): a signed URL's tenant/KB
@@ -1674,7 +1832,12 @@ func serveKBScopedFiles(
 		middleware.DenyAPIKeyPrincipal(),
 		g.Viewer(),
 		g.KBAccessRead("id"),
-		newKBScopedFileServeHandler(tenantService, globalFileService, storageResolver),
+		newKBScopedFileServeHandlerWithResources(
+			tenantService,
+			globalFileService,
+			storageResolver,
+			firstResourceCatalog(resourceCatalogs),
+		),
 	)
 }
 
@@ -1693,6 +1856,22 @@ func newKBScopedFileServeHandler(
 	if len(resolvers) > 0 {
 		storageResolver = resolvers[0]
 	}
+	return newKBScopedFileServeHandlerWithResources(tenantService, globalFileService, storageResolver, nil)
+}
+
+func firstResourceCatalog(catalogs []interfaces.ResourceCatalog) interfaces.ResourceCatalog {
+	if len(catalogs) == 0 {
+		return nil
+	}
+	return catalogs[0]
+}
+
+func newKBScopedFileServeHandlerWithResources(
+	tenantService interfaces.TenantService,
+	globalFileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+) gin.HandlerFunc {
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
 		baseDir = "/data/files"
@@ -1720,6 +1899,20 @@ func newKBScopedFileServeHandler(
 		if !ok || ownerTenantID == 0 {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 			return
+		}
+		if resourceCatalog != nil {
+			resolvedPath, resource, err := resourceCatalog.ResolvePath(ctx, filePath)
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			if resource != nil {
+				if resource.TenantID != ownerTenantID {
+					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: resource not accessible"})
+					return
+				}
+				filePath = resolvedPath
+			}
 		}
 
 		if err := secutils.ValidateKBScopedStoragePath(filePath, ownerTenantID); err != nil {

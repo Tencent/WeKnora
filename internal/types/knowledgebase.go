@@ -384,7 +384,7 @@ func ParseProviderScheme(filePath string) string {
 	if _, inner, ok := ParseStorageBackendPath(filePath); ok {
 		filePath = inner
 	}
-	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"} {
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs", "dummy"} {
 		if strings.HasPrefix(filePath, provider+"://") {
 			return provider
 		}
