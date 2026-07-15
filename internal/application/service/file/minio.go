@@ -146,9 +146,9 @@ func (s *minioFileService) GetFile(ctx context.Context, filePath string) (io.Rea
 	}
 	obj, err := s.client.GetObject(ctx, s.bucketName, objectName, minio.GetObjectOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file from MinIO: %w", err)
+		return nil, fmt.Errorf("failed to get file from MinIO: %w", normalizeObjectReadError(err))
 	}
-	return obj, nil
+	return normalizeObjectReadCloser(obj), nil
 }
 
 // DeleteFile deletes a file

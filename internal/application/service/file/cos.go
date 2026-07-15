@@ -132,9 +132,9 @@ func (s *cosFileService) GetFile(ctx context.Context, filePathUrl string) (io.Re
 	}
 	resp, err := s.client.Object.Get(ctx, objectName, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file from COS: %w", err)
+		return nil, fmt.Errorf("failed to get file from COS: %w", normalizeObjectReadError(err))
 	}
-	return resp.Body, nil
+	return normalizeObjectReadCloser(resp.Body), nil
 }
 
 // DeleteFile removes a file from COS storage

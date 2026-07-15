@@ -297,10 +297,10 @@ func (s *ossFileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 		Key:    oss.Ptr(objectName),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file from OSS: %w", err)
+		return nil, fmt.Errorf("failed to get file from OSS: %w", normalizeObjectReadError(err))
 	}
 
-	return resp.Body, nil
+	return normalizeObjectReadCloser(resp.Body), nil
 }
 
 // DeleteFile removes a file from OSS.

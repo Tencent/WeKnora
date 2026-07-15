@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/google/uuid"
 )
 
 // localFileService implements the FileService interface for local file system storage
@@ -231,14 +232,13 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Generate unique filename using timestamp
+	// A successful SaveBytes call must own a path no other call can reuse.
 	ext := filepath.Ext(safeName)
 	baseName := safeName[:len(safeName)-len(ext)]
-	uniqueFileName := fmt.Sprintf("%s_%d%s", baseName, time.Now().UnixNano(), ext)
+	uniqueFileName := fmt.Sprintf("%s_%s%s", baseName, uuid.New().String(), ext)
 	filePath := filepath.Join(dir, uniqueFileName)
 
-	// Write data to file
-	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+	if err := writeNewLocalObject(filePath, data); err != nil {
 		logger.Errorf(ctx, "Failed to write file: %v", err)
 		return "", fmt.Errorf("failed to write file: %w", err)
 	}
@@ -246,6 +246,27 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 	logger.Infof(ctx, "Bytes data saved successfully: %s", filePath)
 	relPath, _ := filepath.Rel(s.baseDir, filePath)
 	return localScheme + filepath.ToSlash(relPath), nil
+}
+
+func writeNewLocalObject(path string, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	written, writeErr := file.Write(data)
+	if writeErr == nil && written != len(data) {
+		writeErr = io.ErrShortWrite
+	}
+	closeErr := file.Close()
+	if writeErr != nil {
+		_ = os.Remove(path)
+		return writeErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(path)
+		return closeErr
+	}
+	return nil
 }
 
 // GetFileURL returns a download URL for the file.

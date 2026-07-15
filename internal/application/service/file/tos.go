@@ -277,9 +277,9 @@ func (s *tosFileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 		Key:    objectName,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file from TOS: %w", err)
+		return nil, fmt.Errorf("failed to get file from TOS: %w", normalizeObjectReadError(err))
 	}
-	return output.Content, nil
+	return normalizeObjectReadCloser(output.Content), nil
 }
 
 func (s *tosFileService) DeleteFile(ctx context.Context, filePath string) error {

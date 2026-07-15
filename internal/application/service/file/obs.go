@@ -190,10 +190,10 @@ func (s *obsFileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file from OBS: %w", err)
+		return nil, fmt.Errorf("failed to get file from OBS: %w", normalizeObjectReadError(err))
 	}
 
-	return output.Body, nil
+	return normalizeObjectReadCloser(output.Body), nil
 }
 
 func (s *obsFileService) DeleteFile(ctx context.Context, filePath string) error {

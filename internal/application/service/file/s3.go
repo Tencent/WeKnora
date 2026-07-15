@@ -244,10 +244,10 @@ func (s *s3FileService) GetFile(ctx context.Context, filePath string) (io.ReadCl
 		Key:    aws.String(objectName),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file from S3: %w", err)
+		return nil, fmt.Errorf("failed to get file from S3: %w", normalizeObjectReadError(err))
 	}
 
-	return resp.Body, nil
+	return normalizeObjectReadCloser(resp.Body), nil
 }
 
 // DeleteFile deletes a file

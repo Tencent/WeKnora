@@ -14,10 +14,13 @@ type FileService interface {
 	CheckConnectivity(ctx context.Context) error
 	// SaveFile saves a file.
 	SaveFile(ctx context.Context, file *multipart.FileHeader, tenantID uint64, knowledgeID string) (string, error)
-	// SaveBytes saves bytes data to a file and returns the file path.
+	// SaveBytes saves bytes data to a new independently deletable object and
+	// returns its unique path. Successful calls must never overwrite or reuse
+	// the path of any other successful SaveBytes call.
 	// If temp is true, the file will be saved to a temporary storage that may auto-expire.
 	SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error)
-	// GetFile retrieves a file.
+	// GetFile retrieves a file. Missing objects return an error wrapping fs.ErrNotExist,
+	// whether absence is detected here or by the returned reader.
 	GetFile(ctx context.Context, filePath string) (io.ReadCloser, error)
 	// GetFileURL returns a download URL for the file (if supported by the storage backend).
 	GetFileURL(ctx context.Context, filePath string) (string, error)

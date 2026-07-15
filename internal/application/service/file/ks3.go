@@ -224,10 +224,10 @@ func (s *ks3FileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 		Key:    ks3aws.String(objectKey),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file from KS3: %w", err)
+		return nil, fmt.Errorf("failed to get file from KS3: %w", normalizeObjectReadError(err))
 	}
 
-	return resp.Body, nil
+	return normalizeObjectReadCloser(resp.Body), nil
 }
 
 func (s *ks3FileService) DeleteFile(ctx context.Context, filePath string) error {

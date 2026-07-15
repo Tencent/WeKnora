@@ -11,6 +11,15 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+type obsStorageConfig struct {
+	endpoint   string
+	region     string
+	accessKey  string
+	secretKey  string
+	bucketName string
+	pathPrefix string
+}
+
 // NewFileServiceFromStorageConfig builds a provider-specific FileService from tenant storage config.
 // provider can be empty; in that case it falls back to sec.DefaultProvider.
 // Returns the resolved provider name together with the service.
@@ -103,44 +112,18 @@ func NewFileServiceFromStorageConfig(
 		return svc, p, err
 
 	case "obs":
-		obsEndpoint, obsRegion, obsAccessKey := "", "", ""
-		obsSecretKey, obsBucketName, obsPathPrefix := "", "", ""
-		if sec != nil && sec.OBS != nil {
-			obsEndpoint = strings.TrimSpace(sec.OBS.Endpoint)
-			obsRegion = strings.TrimSpace(sec.OBS.Region)
-			obsAccessKey = strings.TrimSpace(sec.OBS.AccessKey)
-			obsSecretKey = strings.TrimSpace(sec.OBS.SecretKey)
-			obsBucketName = strings.TrimSpace(sec.OBS.BucketName)
-			obsPathPrefix = strings.TrimSpace(sec.OBS.PathPrefix)
+		config, err := resolveOBSStorageConfig(sec)
+		if err != nil {
+			return nil, p, err
 		}
-		if obsEndpoint == "" {
-			obsEndpoint = strings.TrimSpace(os.Getenv("OBS_ENDPOINT"))
-		}
-		if obsRegion == "" {
-			obsRegion = strings.TrimSpace(os.Getenv("OBS_REGION"))
-		}
-		if obsAccessKey == "" {
-			obsAccessKey = strings.TrimSpace(os.Getenv("OBS_ACCESS_KEY"))
-		}
-		if obsSecretKey == "" {
-			obsSecretKey = strings.TrimSpace(os.Getenv("OBS_SECRET_KEY"))
-		}
-		if obsBucketName == "" {
-			obsBucketName = strings.TrimSpace(os.Getenv("OBS_BUCKET_NAME"))
-		}
-		if obsPathPrefix == "" {
-			obsPathPrefix = strings.TrimSpace(os.Getenv("OBS_PATH_PREFIX"))
-		}
-		if obsPathPrefix == "" {
-			obsPathPrefix = "weknora/"
-		}
-		if obsEndpoint == "" || obsAccessKey == "" || obsSecretKey == "" || obsBucketName == "" {
-			return nil, p, fmt.Errorf("incomplete obs config")
-		}
-		if obsRegion == "" {
-			obsRegion = "cn-north-4"
-		}
-		svc, err := NewObsFileService(obsEndpoint, obsRegion, obsAccessKey, obsSecretKey, obsBucketName, obsPathPrefix)
+		svc, err := NewObsFileService(
+			config.endpoint,
+			config.region,
+			config.accessKey,
+			config.secretKey,
+			config.bucketName,
+			config.pathPrefix,
+		)
 		return svc, p, err
 
 	case "oss":
@@ -181,4 +164,46 @@ func NewFileServiceFromStorageConfig(
 	default:
 		return nil, p, fmt.Errorf("unsupported provider %q", p)
 	}
+}
+
+func resolveOBSStorageConfig(sec *types.StorageEngineConfig) (obsStorageConfig, error) {
+	var config obsStorageConfig
+	if sec != nil && sec.OBS != nil {
+		config = obsStorageConfig{
+			endpoint:   strings.TrimSpace(sec.OBS.Endpoint),
+			region:     strings.TrimSpace(sec.OBS.Region),
+			accessKey:  strings.TrimSpace(sec.OBS.AccessKey),
+			secretKey:  strings.TrimSpace(sec.OBS.SecretKey),
+			bucketName: strings.TrimSpace(sec.OBS.BucketName),
+			pathPrefix: strings.TrimSpace(sec.OBS.PathPrefix),
+		}
+	}
+	if config.endpoint == "" {
+		config.endpoint = strings.TrimSpace(os.Getenv("OBS_ENDPOINT"))
+	}
+	if config.region == "" {
+		config.region = strings.TrimSpace(os.Getenv("OBS_REGION"))
+	}
+	if config.accessKey == "" {
+		config.accessKey = strings.TrimSpace(os.Getenv("OBS_ACCESS_KEY"))
+	}
+	if config.secretKey == "" {
+		config.secretKey = strings.TrimSpace(os.Getenv("OBS_SECRET_KEY"))
+	}
+	if config.bucketName == "" {
+		config.bucketName = strings.TrimSpace(os.Getenv("OBS_BUCKET_NAME"))
+	}
+	if config.pathPrefix == "" {
+		config.pathPrefix = strings.TrimSpace(os.Getenv("OBS_PATH_PREFIX"))
+	}
+	if config.endpoint == "" || config.accessKey == "" || config.secretKey == "" || config.bucketName == "" {
+		return obsStorageConfig{}, fmt.Errorf("incomplete obs config")
+	}
+	if config.region == "" {
+		config.region = "cn-north-4"
+	}
+	if config.pathPrefix == "" {
+		config.pathPrefix = "weknora/"
+	}
+	return config, nil
 }

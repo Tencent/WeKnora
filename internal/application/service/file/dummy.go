@@ -1,19 +1,23 @@
 package file
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"io"
+	"io/fs"
 	"mime/multipart"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 )
 
-// DummyFileService is a no-op implementation of the FileService interface
-// used for testing or when file storage is not required
-type DummyFileService struct{}
+// DummyFileService keeps byte objects in memory for tests and no-storage modes.
+type DummyFileService struct {
+	mu      sync.Mutex
+	objects map[string][]byte
+}
 
 // CheckConnectivity always succeeds for the dummy service.
 func (s *DummyFileService) CheckConnectivity(ctx context.Context) error {
@@ -22,7 +26,7 @@ func (s *DummyFileService) CheckConnectivity(ctx context.Context) error {
 
 // NewDummyFileService creates a new instance of DummyFileService
 func NewDummyFileService() interfaces.FileService {
-	return &DummyFileService{}
+	return &DummyFileService{objects: make(map[string][]byte)}
 }
 
 // SaveFile pretends to save a file but just returns a random UUID
@@ -33,19 +37,34 @@ func (s *DummyFileService) SaveFile(ctx context.Context,
 	return uuid.New().String(), nil
 }
 
-// GetFile always returns an error as dummy service doesn't store files
+// GetFile returns a cloned view of a byte object saved by SaveBytes.
 func (s *DummyFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
-	return nil, errors.New("not implemented")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, ok := s.objects[filePath]
+	if !ok {
+		return nil, fs.ErrNotExist
+	}
+	return io.NopCloser(bytes.NewReader(bytes.Clone(data))), nil
 }
 
-// DeleteFile is a no-op operation that always succeeds
 func (s *DummyFileService) DeleteFile(ctx context.Context, filePath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.objects, filePath)
 	return nil
 }
 
-// SaveBytes pretends to save bytes but just returns a random UUID
+// SaveBytes creates a uniquely owned in-memory object.
 func (s *DummyFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
-	return uuid.New().String(), nil
+	path := "dummy://" + uuid.New().String()
+	s.mu.Lock()
+	if s.objects == nil {
+		s.objects = make(map[string][]byte)
+	}
+	s.objects[path] = bytes.Clone(data)
+	s.mu.Unlock()
+	return path, nil
 }
 
 // CopyFile is a no-op for the dummy service: it logs a warning and returns the
