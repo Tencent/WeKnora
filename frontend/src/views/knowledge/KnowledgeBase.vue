@@ -43,6 +43,7 @@ import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import TagEditDialog from './components/TagEditDialog.vue';
+import KnowledgeFolderTree from './components/KnowledgeFolderTree.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
@@ -53,7 +54,7 @@ import {
   knowledgeNeedsStatusPolling,
   shouldRefreshWikiStatusAfterKnowledgePoll,
 } from './wikiStatusRefresh';
-import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
+import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress, setKnowledgeFolder, listKnowledgeFolders } from '@/api/knowledge-base';
 import { useI18n } from 'vue-i18n';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
@@ -297,7 +298,7 @@ const canMutateKnowledge = computed(() => {
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
-let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
+let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails, folderFilter, setFolderFilter } = useKnowledgeBase(kbId.value)
 
 const showKbDetailContextualGuide = computed(() => {
   return Boolean(kbId.value)
@@ -313,6 +314,12 @@ const onVisibleChange = (visible: boolean) => {
     moveMenuMode.value = 'normal';
   }
 };
+
+// Folder tree selection → set the shared folder filter and reload the list.
+function onFolderSelect(folderId: string) {
+  setFolderFilter(folderId);
+  loadKnowledgeFiles(kbId.value);
+}
 
 /** Per-knowledge cache: whether /spans has a real trace (see knowledgeSpansPayloadHasTrace). */
 const traceAvailableById = reactive<Record<string, boolean>>({});
@@ -1850,7 +1857,7 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-to-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1861,6 +1868,7 @@ const handleCardAction = (
   }
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-to-folder') return handleMoveToFolder(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
@@ -1868,7 +1876,7 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-to-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
@@ -1876,10 +1884,61 @@ const handleListAction = (
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'move-to-folder') return handleMoveToFolder(item);
   if (action === 'delete') return confirmDeleteKnowledge(idx, item);
   if (action === 'view-trace') return handleViewTrace(idx, item);
   if (action === 'batch-manage') return handleEnterBatchFromCard(item);
 };
+
+// --- Move a knowledge into a folder (folder picker dialog) ---
+const moveToFolderVisible = ref(false);
+const moveToFolderTarget = ref<KnowledgeCard | null>(null);
+const moveToFolderTree = ref<any[]>([]);
+const moveToFolderSelected = ref<string[]>(['__root__']);
+const moveToFolderLoading = ref(false);
+
+async function buildFolderTree(parentId: string): Promise<any[]> {
+  const res = await listKnowledgeFolders(kbId.value, parentId);
+  const body = res?.data !== undefined ? res.data : res;
+  const folders = Array.isArray(body?.folders) ? body.folders : [];
+  const nodes: any[] = [];
+  for (const f of folders) {
+    const children = f.has_children ? await buildFolderTree(String(f.id)) : [];
+    nodes.push({ value: String(f.id), label: String(f.name), children });
+  }
+  return nodes;
+}
+
+async function handleMoveToFolder(item: KnowledgeCard) {
+  moveToFolderTarget.value = item;
+  moveToFolderSelected.value = ['__root__'];
+  moveToFolderVisible.value = true;
+  moveToFolderLoading.value = true;
+  try {
+    const children = await buildFolderTree('');
+    moveToFolderTree.value = [{ value: '__root__', label: t('knowledgeBase.moveToFolderRoot'), children }];
+  } catch (e: any) {
+    MessagePlugin.error(t('knowledgeBase.folderLoadFailed'));
+  } finally {
+    moveToFolderLoading.value = false;
+  }
+}
+
+async function confirmMoveToFolder() {
+  const target = moveToFolderTarget.value;
+  if (!target) return;
+  const raw = moveToFolderSelected.value[0] || '__root__';
+  const folderId = raw === '__root__' ? '' : raw;
+  try {
+    await setKnowledgeFolder(kbId.value, target.id, folderId);
+    MessagePlugin.success(t('knowledgeBase.folderMoved'));
+    moveToFolderVisible.value = false;
+    moveToFolderTarget.value = null;
+    loadKnowledgeFiles(kbId.value);
+  } catch (e: any) {
+    MessagePlugin.error(e?.error?.message || e?.message || t('knowledgeBase.folderMoveFailed'));
+  }
+}
 
 // Clear selection on filter/tag/kb change to avoid acting on hidden items.
 watch(
@@ -2043,6 +2102,15 @@ async function createNewSession(value: string): Promise<void> {
         <div class="knowledge-main">
           <div class="tag-content">
             <div class="doc-card-area">
+              <KnowledgeFolderTree
+                v-if="!isFAQ"
+                class="doc-folder-tree"
+                :kb-id="kbId"
+                :can-edit="canEdit"
+                :selected-folder-id="folderFilter"
+                @select="onFolderSelect"
+              />
+              <div class="doc-card-main">
               <div class="doc-filter-bar">
                 <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
                   clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
@@ -2281,6 +2349,7 @@ async function createNewSession(value: string): Promise<void> {
                   :reparse-loading="batchReparsing" :visible="batchMode || selectedIds.size > 0"
                   @cancel="handleBatchCancel" @delete="confirmBatchDelete" @reparse="confirmBatchReparse" />
               </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2318,6 +2387,32 @@ async function createNewSession(value: string): Promise<void> {
     :is-faq="isFAQ"
     @changed="onTagManageChanged"
   />
+
+  <!-- 移动到文件夹 选择弹窗 -->
+  <t-dialog
+    v-model:visible="moveToFolderVisible"
+    :header="t('knowledgeBase.moveToFolderTitle')"
+    :confirm-btn="{ content: t('knowledgeBase.moveToFolderConfirm'), disabled: moveToFolderLoading }"
+    :cancel-btn="t('common.cancel')"
+    width="420px"
+    @confirm="confirmMoveToFolder"
+  >
+    <div class="move-to-folder-body">
+      <p class="move-to-folder-hint">
+        {{ t('knowledgeBase.moveToFolderBody', { name: moveToFolderTarget?.display_name || moveToFolderTarget?.file_name || moveToFolderTarget?.title || '' }) }}
+      </p>
+      <t-loading v-if="moveToFolderLoading" size="small" />
+      <t-tree
+        v-else
+        v-model:actived="moveToFolderSelected"
+        :data="moveToFolderTree"
+        hover
+        line
+        :keys="{ value: 'value', label: 'label', children: 'children' }"
+        class="move-to-folder-tree"
+      />
+    </div>
+  </t-dialog>
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
@@ -2658,10 +2753,44 @@ async function createNewSession(value: string): Promise<void> {
 .doc-card-area {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  gap: 12px;
   min-height: 0;
   position: relative;
   /* 作为批量工具栏悬浮的定位上下文 */
+}
+
+.doc-folder-tree {
+  flex: 0 0 240px;
+  width: 240px;
+  min-height: 0;
+}
+
+.doc-card-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.move-to-folder-body {
+  padding: 4px 0;
+}
+
+.move-to-folder-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  line-height: 20px;
+}
+
+.move-to-folder-tree {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  padding: 6px;
 }
 
 .doc-filter-bar {

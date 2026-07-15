@@ -14,6 +14,11 @@ import { useUIStore } from "@/stores/ui";
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
+// Shared folder filter for the knowledge list (one KB viewed at a time). The
+// folder tree sets this; getKnowled reads it so every list reload (including
+// DocumentListView scroll/pagination) honors the active folder.
+const knowledgeFolderFilter = ref<string>('');
+
 export default function (knowledgeBaseId?: string) {
   const usemenuStore = knowledgeStore();
   const route = useRoute();
@@ -57,7 +62,9 @@ export default function (knowledgeBaseId?: string) {
     if (!targetKbId) return Promise.resolve();
     const requestGeneration = query.page === 1 ? ++knowledgeListGeneration : knowledgeListGeneration;
 
-    return listKnowledgeFiles(targetKbId, query)
+    const listQuery: any = { ...query };
+    if (knowledgeFolderFilter.value) listQuery.folder_id = knowledgeFolderFilter.value;
+    return listKnowledgeFiles(targetKbId, listQuery)
       .then((result: any) => {
         if (requestGeneration !== knowledgeListGeneration) return;
 
@@ -255,5 +262,7 @@ export default function (knowledgeBaseId?: string) {
     getCardDetails,
     total,
     getfDetails,
+    folderFilter: knowledgeFolderFilter,
+    setFolderFilter: (id: string) => { knowledgeFolderFilter.value = id; },
   };
 }
