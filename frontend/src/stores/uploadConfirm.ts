@@ -15,6 +15,7 @@ export interface UploadConfirmReparseSource {
   knowledgeId: string
   fileName?: string
   fileType?: string
+  fileTypes?: string[]
   processOverrides?: KnowledgeProcessOverrides | null
 }
 

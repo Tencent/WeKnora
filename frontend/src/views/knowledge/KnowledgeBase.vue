@@ -419,6 +419,7 @@ const batchDeleting = ref(false);
 const batchReparsing = ref(false);
 // IDs submitted for async batch reparse; hold optimistic pending until the worker updates DB.
 const pendingReparseAck = ref<Set<string>>(new Set());
+const uploadConfirmStore = useUploadConfirmStore();
 
 const applyOptimisticBatchReparse = (ids: string[]) => {
   const idSet = new Set(ids);
@@ -470,9 +471,32 @@ const confirmBatchReparse = async () => {
   if (skipped > 0) {
     MessagePlugin.warning(t('knowledgeBase.batchReparseSkippedInFlight', { count: skipped }));
   }
+  let processConfig: KnowledgeProcessOverrides | undefined;
+  if (kbInfo.value) {
+    const fileTypes = Array.from(new Set(ids
+      .map((id) => cardList.value.find((c) => c.id === id)?.file_type || '')
+      .map((fileType) => fileType.replace(/^\./, '').toLowerCase())
+      .filter(Boolean)));
+    try {
+      const result = await uploadConfirmStore.open({
+        mode: 'reparse',
+        kbInfo: kbInfo.value,
+        reparse: {
+          knowledgeId: ids[0],
+          fileName: t('knowledgeBase.selectedCount', { count: ids.length }),
+          fileTypes,
+          processOverrides: null,
+        },
+      });
+      if (result.mode !== 'reparse') return;
+      processConfig = result.processConfig;
+    } catch {
+      return;
+    }
+  }
   batchReparsing.value = true;
   try {
-    const res: any = await batchReparseKnowledge(kbId.value, ids);
+    const res: any = await batchReparseKnowledge(kbId.value, ids, processConfig);
     if (res?.success) {
       MessagePlugin.success(t('knowledgeBase.batchReparseSuccess', { count: ids.length }));
       applyOptimisticBatchReparse(ids);
@@ -1521,8 +1545,6 @@ const ensureDocumentKbReady = () => {
 
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
-
-const uploadConfirmStore = useUploadConfirmStore();
 
 const getFolderUploadFileName = (file: File) => {
   const relativePath = (file as any).webkitRelativePath;

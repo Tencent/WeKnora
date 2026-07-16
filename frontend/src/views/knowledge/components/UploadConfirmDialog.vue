@@ -435,6 +435,10 @@ const batchFileExts = computed(() => {
     }
   }
   if (props.mode === 'reparse') {
+    for (const fileType of props.reparsePreview?.fileTypes || []) {
+      const ext = fileType.toLowerCase()
+      if (ext) set.add(ext)
+    }
     const ext = (props.reparsePreview?.fileType || '').toLowerCase()
     if (ext) set.add(ext)
   }
