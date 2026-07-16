@@ -68,7 +68,7 @@
     }
 
     &:active:not(:disabled) {
-        transform: scale(0.92);
+        background: var(--td-bg-color-secondarycontainer);
     }
 
     &:disabled {
@@ -114,63 +114,17 @@
     background: var(--td-bg-color-container);
     cursor: pointer;
     overflow: hidden;
-    transition:
-        background 0.25s @suggested-ease,
-        border-color 0.25s @suggested-ease,
-        box-shadow 0.25s @suggested-ease,
-        transform 0.2s @suggested-ease;
-
-    // 左侧主题色渐隐高光，hover 时淡入，营造柔和的呼吸感
-    &::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        background: linear-gradient(
-            105deg,
-            var(--td-brand-color-light) 0%,
-            transparent 55%
-        );
-        opacity: 0;
-        transition: opacity 0.25s @suggested-ease;
-        pointer-events: none;
-    }
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 
     &:not(.sq-card-skeleton):hover {
-        border-color: var(--td-brand-color-light-active, var(--td-brand-color));
-        background: var(--td-bg-color-container);
-        box-shadow: 0 3px 10px -8px rgba(0, 0, 0, 0.14);
-        transform: translateY(-1px);
-
-        &::before {
-            opacity: 0.45;
-        }
-    }
-
-    // 右侧引导箭头：默认隐藏并向左收起，hover 时滑入
-    &::after {
-        content: "›";
-        position: relative;
-        flex-shrink: 0;
-        margin-left: -2px;
-        font-size: 17px;
-        line-height: 1;
-        color: var(--td-brand-color);
-        opacity: 0;
-        transform: translateX(-6px);
-        transition:
-            opacity 0.25s @suggested-ease,
-            transform 0.25s @suggested-ease;
+        border-color: var(--td-brand-color);
+        background: var(--td-bg-color-container-hover);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     }
 
     &:not(.sq-card-skeleton):active {
-        transform: translateY(0) scale(0.99);
-        box-shadow: 0 2px 8px -6px rgba(0, 0, 0, 0.2);
-    }
-
-    &:not(.sq-card-skeleton):hover::after {
-        opacity: 1;
-        transform: translateX(0);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
     }
 
     &.sq-card-skeleton {
@@ -194,11 +148,6 @@
 
         &:nth-child(5n) {
             width: 210px;
-        }
-
-        &::before,
-        &::after {
-            display: none;
         }
 
         :deep(.t-skeleton) {
@@ -226,11 +175,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    transition: color 0.2s @suggested-ease;
-}
-
-.suggested-question-card:not(.sq-card-skeleton):hover .suggested-question-text {
-    color: var(--td-brand-color);
 }
 
 .suggested-question-badge {

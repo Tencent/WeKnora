@@ -120,18 +120,19 @@ const dismiss = () => {
   gap: 12px;
   width: 100%;
   padding: 9px 11px;
-  border: 1px solid transparent;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   text-align: left;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
 }
-.follow-ups__item { transition: border-color .2s, box-shadow .2s, transform .2s; }
 .follow-ups__item:hover {
   border-color: var(--td-brand-color);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, .12);
-  transform: translateY(-1px);
+  background: var(--td-bg-color-container-hover);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 .follow-ups__item:hover .t-icon { color: var(--td-brand-color); }
 .is-spinning { animation: spin 1s linear infinite; }
