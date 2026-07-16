@@ -25,6 +25,12 @@ import (
 )
 
 const (
+	vlmOCRDefaultPromptVersion     = "ocr-default-v1"
+	vlmOCRScannedPromptVersion     = "ocr-scanned-pdf-v1"
+	vlmCaptionPromptVersion        = "caption-v1"
+	vlmOCRCanonicalizerVersion     = "ocr-sanitizer-v1"
+	vlmCaptionCanonicalizerVersion = "caption-trim-space-v1"
+
 	vlmOCRPrompt = "<system_prompt>\n" +
 		"You are an OCR assistant. Your task is to extract all body text content from this document image and output in pure Markdown format.\n" +
 		"</system_prompt>\n\n" +
@@ -83,7 +89,8 @@ type ImageMultimodalService struct {
 
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
-	spanTracker SpanTracker
+	spanTracker   SpanTracker
+	artifactStore interfaces.ProcessingArtifactStore
 }
 
 func NewImageMultimodalService(
@@ -100,6 +107,7 @@ func NewImageMultimodalService(
 	fileSvc interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	spanTracker SpanTracker,
+	artifactStore interfaces.ProcessingArtifactStore,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:    chunkService,
@@ -115,6 +123,7 @@ func NewImageMultimodalService(
 		fileSvc:         fileSvc,
 		storageResolver: storageResolver,
 		spanTracker:     spanTracker,
+		artifactStore:   artifactStore,
 	}
 }
 
@@ -218,7 +227,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}()
 
-	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
+	vlmModel, vlmCfg, modelRevision, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
@@ -253,8 +262,10 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if payload.EnableOCR {
 		prompt := vlmOCRPrompt
+		promptVersion := vlmOCRDefaultPromptVersion
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
+			promptVersion = vlmOCRScannedPromptVersion
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 			imgOut["ocr_prompt"] = "scanned_pdf"
 		} else {
@@ -262,12 +273,27 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, cacheHit, ocrErr := predictVLMArtifact(ctx, s.artifactStore, vlmArtifactRequest{
+			tenantID:             payload.TenantID,
+			imageBytes:           imgBytes,
+			model:                vlmModel,
+			modelRevision:        modelRevision,
+			config:               vlmCfg,
+			prompt:               prompt,
+			promptVersion:        promptVersion,
+			resultKind:           vlmArtifactOCR,
+			canonicalizerVersion: vlmOCRCanonicalizerVersion,
+			canonicalize:         sanitizeOCRText,
+		})
 		if ocrErr != nil {
+			if errors.Is(ocrErr, errVLMArtifactStore) {
+				handleErr = fmt.Errorf("cache OCR result: %w", ocrErr)
+				return handleErr
+			}
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
-			ocrText = sanitizeOCRText(ocrText)
+			imgOut["ocr_cache_hit"] = cacheHit
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
@@ -280,53 +306,38 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
-	}
-
-	// Build child chunks for OCR and caption results
-	imageInfoJSON, _ := json.Marshal([]types.ImageInfo{imageInfo})
-	var newChunks []*types.Chunk
-
-	if imageInfo.OCRText != "" {
-		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        payload.TenantID,
-			KnowledgeID:     payload.KnowledgeID,
-			KnowledgeBaseID: payload.KnowledgeBaseID,
-			Content:         imageInfo.OCRText,
-			ChunkType:       types.ChunkTypeImageOCR,
-			ParentChunkID:   payload.ChunkID,
-			IsEnabled:       true,
-			Flags:           types.ChunkFlagRecommended,
-			ImageInfo:       string(imageInfoJSON),
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
+	if payload.EnableCaption {
+		captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
+		caption, cacheHit, capErr := predictVLMArtifact(ctx, s.artifactStore, vlmArtifactRequest{
+			tenantID:             payload.TenantID,
+			imageBytes:           imgBytes,
+			model:                vlmModel,
+			modelRevision:        modelRevision,
+			config:               vlmCfg,
+			prompt:               captionPrompt,
+			promptVersion:        vlmCaptionPromptVersion,
+			resultKind:           vlmArtifactCaption,
+			canonicalizerVersion: vlmCaptionCanonicalizerVersion,
+			canonicalize:         strings.TrimSpace,
 		})
+		if capErr != nil {
+			if errors.Is(capErr, errVLMArtifactStore) {
+				handleErr = fmt.Errorf("cache caption result: %w", capErr)
+				return handleErr
+			}
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else {
+			imgOut["caption_cache_hit"] = cacheHit
+			if caption != "" {
+				imageInfo.Caption = caption
+				imgOut["caption_chars"] = len([]rune(caption))
+				imgOut["caption_preview"] = previewText(caption, 200)
+			}
+		}
 	}
 
-	if imageInfo.Caption != "" {
-		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        payload.TenantID,
-			KnowledgeID:     payload.KnowledgeID,
-			KnowledgeBaseID: payload.KnowledgeBaseID,
-			Content:         imageInfo.Caption,
-			ChunkType:       types.ChunkTypeImageCaption,
-			ParentChunkID:   payload.ChunkID,
-			IsEnabled:       true,
-			Flags:           types.ChunkFlagRecommended,
-			ImageInfo:       string(imageInfoJSON),
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-		})
-	}
+	newChunks := buildImageMultimodalChunks(payload, imageInfo, time.Now())
 	imgOut["chunks_created"] = len(newChunks)
 
 	if len(newChunks) == 0 {
@@ -357,6 +368,50 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// all images are processed before triggering summary/question generation.
 	// Deferred finalize handles the parent knowledge counter.
 	return nil
+}
+
+func buildImageMultimodalChunks(
+	payload types.ImageMultimodalPayload,
+	imageInfo types.ImageInfo,
+	now time.Time,
+) []*types.Chunk {
+	imageInfoJSON, _ := json.Marshal([]types.ImageInfo{imageInfo})
+	var chunks []*types.Chunk
+
+	if imageInfo.OCRText != "" {
+		chunks = append(chunks, &types.Chunk{
+			ID:              uuid.New().String(),
+			TenantID:        payload.TenantID,
+			KnowledgeID:     payload.KnowledgeID,
+			KnowledgeBaseID: payload.KnowledgeBaseID,
+			Content:         imageInfo.OCRText,
+			ChunkType:       types.ChunkTypeImageOCR,
+			ParentChunkID:   payload.ChunkID,
+			IsEnabled:       true,
+			Flags:           types.ChunkFlagRecommended,
+			ImageInfo:       string(imageInfoJSON),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		})
+	}
+
+	if imageInfo.Caption != "" {
+		chunks = append(chunks, &types.Chunk{
+			ID:              uuid.New().String(),
+			TenantID:        payload.TenantID,
+			KnowledgeID:     payload.KnowledgeID,
+			KnowledgeBaseID: payload.KnowledgeBaseID,
+			Content:         imageInfo.Caption,
+			ChunkType:       types.ChunkTypeImageCaption,
+			ParentChunkID:   payload.ChunkID,
+			IsEnabled:       true,
+			Flags:           types.ChunkFlagRecommended,
+			ImageInfo:       string(imageInfoJSON),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		})
+	}
+	return chunks
 }
 
 // shouldDropOrphanedMultimodal reports whether the task should exit without
@@ -508,13 +563,17 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
 // supporting both new-style (ModelID) and legacy (inline BaseURL) configs.
 // Per-upload process_overrides on the knowledge entry take precedence over KB defaults.
-func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledgeID string) (vlm.VLM, types.VLMConfig, error) {
+func (s *ImageMultimodalService) resolveVLM(
+	ctx context.Context,
+	kbID string,
+	knowledgeID string,
+) (vlm.VLM, types.VLMConfig, string, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
-		return nil, types.VLMConfig{}, fmt.Errorf("get knowledge base %s: %w", kbID, err)
+		return nil, types.VLMConfig{}, "", fmt.Errorf("get knowledge base %s: %w", kbID, err)
 	}
 	if kb == nil {
-		return nil, types.VLMConfig{}, fmt.Errorf("knowledge base %s not found", kbID)
+		return nil, types.VLMConfig{}, "", fmt.Errorf("knowledge base %s not found", kbID)
 	}
 
 	var processOverrides *types.KnowledgeProcessOverrides
@@ -525,18 +584,25 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	}
 	vlmCfg := ResolveProcessConfig(kb, processOverrides).VLMConfig
 	if !vlmCfg.IsEnabled() {
-		return nil, types.VLMConfig{}, fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
+		return nil, types.VLMConfig{}, "", fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
 	}
 
 	// New-style: resolve model through ModelService
 	if vlmCfg.ModelID != "" {
+		modelConfig, err := s.modelService.GetModelByID(ctx, vlmCfg.ModelID)
+		if err != nil {
+			return nil, types.VLMConfig{}, "", err
+		}
+		if modelConfig == nil {
+			return nil, types.VLMConfig{}, "", fmt.Errorf("VLM model %s not found", vlmCfg.ModelID)
+		}
 		model, err := s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
-		return model, vlmCfg, err
+		return model, vlmCfg, modelConfig.UpdatedAt.UTC().Format(time.RFC3339Nano), err
 	}
 
 	// Legacy: create VLM from inline config
 	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
-	return model, vlmCfg, err
+	return model, vlmCfg, "", err
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
