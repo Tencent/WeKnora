@@ -44,4 +44,8 @@ func TestWithIMIdentity(t *testing.T) {
 	if principal.Type != types.PrincipalIMUser || principal.ID != "42:channel-1:feishu:open-id-1" {
 		t.Fatalf("Principal = %#v, want im_user for the external IM user", principal)
 	}
+
+	if !types.IsMCPOAuthNonInteractive(ctx) {
+		t.Fatal("IM context should mark MCP OAuth as non-interactive")
+	}
 }

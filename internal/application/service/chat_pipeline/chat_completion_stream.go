@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmresource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -55,6 +56,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	// Prepare base messages without history
 
 	chatMessages := prepareMessagesWithHistory(chatManage)
+	resourceRefs := llmresource.NewRegistry()
+	chatMessages = resourceRefs.EncodeMessages(chatMessages)
 	pipelineInfo(ctx, "Stream", "messages_ready", map[string]interface{}{
 		"message_count": len(chatMessages),
 		"system_prompt": chatMessages[0].Content,
@@ -105,6 +108,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	// The goroutine monitors ctx.Done() to avoid leaking when the context is cancelled
 	// and the upstream channel is not closed promptly.
 	go func() {
+		answerDecoder := llmresource.NewStreamDecoder(resourceRefs)
+		thinkingDecoder := llmresource.NewStreamDecoder(resourceRefs)
 		thinkingID := fmt.Sprintf("%s-thinking", uuid.New().String()[:8])
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
@@ -124,9 +129,34 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			thinkingOpen = false
 		}
 
+		// flushDecoders drains any alias suffix the stream decoders held back to
+		// bridge references split across provider chunks. Both the normal close
+		// and the cancellation path must call this, otherwise a resource
+		// reference in flight at teardown is silently dropped (and never
+		// persisted, since the assistant message is saved from these events).
+		flushDecoders := func() {
+			if tail := thinkingDecoder.Flush(); tail != "" {
+				_ = eventBus.Emit(ctx, types.Event{
+					ID:        thinkingID,
+					Type:      types.EventType(event.EventAgentThought),
+					SessionID: chatManage.SessionID,
+					Data:      event.AgentThoughtData{Content: tail},
+				})
+			}
+			if tail := answerDecoder.Flush(); tail != "" {
+				_ = eventBus.Emit(ctx, types.Event{
+					ID:        answerID,
+					Type:      types.EventType(event.EventAgentFinalAnswer),
+					SessionID: chatManage.SessionID,
+					Data:      event.AgentFinalAnswerData{Content: tail},
+				})
+			}
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
+				flushDecoders()
 				closeThinking()
 				pipelineInfo(ctx, "Stream", "context_cancelled", map[string]interface{}{
 					"session_id": chatManage.SessionID,
@@ -135,6 +165,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 			case response, ok := <-responseChan:
 				if !ok {
+					flushDecoders()
 					closeThinking()
 					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
 						"session_id": chatManage.SessionID,
@@ -161,6 +192,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeThinking {
+					response.Content = thinkingDecoder.Feed(response.Content)
 					if response.Content != "" {
 						thinkingOpen = true
 						eventBus.Emit(ctx, types.Event{
@@ -180,6 +212,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				}
 
 				if response.ResponseType == types.ResponseTypeAnswer {
+					response.Content = answerDecoder.Feed(response.Content)
 					closeThinking()
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,

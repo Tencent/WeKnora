@@ -212,7 +212,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, withDefaults } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRightIcon } from 'tdesign-icons-vue-next'
 import KBChunkingDebug from './KBChunkingDebug.vue'

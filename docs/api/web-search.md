@@ -4,15 +4,15 @@
 
 包含两组接口：
 - `/web-search/providers`：返回**可用的 provider 类型**（只读元数据）
-- `/web-search-providers/*`：当前租户**自定义保存**的 provider CRUD 与连通性测试
+- `/web-search-providers/*`：当前空间**自定义保存**的 provider CRUD 与连通性测试
 
 | 方法   | 路径                                  | 描述                                |
 | ------ | ------------------------------------- | ----------------------------------- |
 | GET    | `/web-search/providers`               | 获取网络搜索服务商类型列表           |
 | GET    | `/web-search-providers/types`         | 获取 Provider 类型元数据（含参数定义） |
 | POST   | `/web-search-providers/test`          | 使用原始凭证测试连通性（不落库）       |
-| POST   | `/web-search-providers`               | 创建租户级 Provider 配置             |
-| GET    | `/web-search-providers`               | 获取当前租户已保存的 Provider 列表     |
+| POST   | `/web-search-providers`               | 创建空间级 Provider 配置             |
+| GET    | `/web-search-providers`               | 获取当前空间已保存的 Provider 列表     |
 | GET    | `/web-search-providers/:id`           | 获取指定 Provider 详情               |
 | PUT    | `/web-search-providers/:id`           | 更新 Provider                       |
 | DELETE | `/web-search-providers/:id`           | 删除 Provider                       |
@@ -20,7 +20,7 @@
 
 ## GET `/web-search/providers` - 获取网络搜索服务商类型列表
 
-获取系统中可用的网络搜索服务商列表（系统级元数据，与租户无关）。
+获取系统中可用的网络搜索服务商列表（系统级元数据，与空间无关）。
 
 **请求**:
 
@@ -132,11 +132,11 @@ curl --location --request POST 'http://localhost:8080/api/v1/web-search-provider
 
 | 字段        | 类型    | 必填 | 说明                                       |
 | ----------- | ------- | ---- | ------------------------------------------ |
-| name        | string  | 是   | Provider 显示名（在租户内唯一友好名）       |
+| name        | string  | 是   | Provider 显示名（在空间内唯一友好名）       |
 | provider    | string  | 是   | Provider 类型（来自 `/web-search-providers/types`） |
 | description | string  | 否   | 备注                                       |
 | parameters  | object  | 否   | 凭证与参数                                 |
-| is_default  | boolean | 否   | 是否设为当前租户默认 Provider              |
+| is_default  | boolean | 否   | 是否设为当前空间默认 Provider              |
 
 **请求**:
 
@@ -174,7 +174,7 @@ curl --location 'http://localhost:8080/api/v1/web-search-providers' \
 
 ## GET `/web-search-providers` - 获取 Provider 列表
 
-返回当前租户已保存的所有 Provider。
+返回当前空间已保存的所有 Provider。
 
 **请求**:
 

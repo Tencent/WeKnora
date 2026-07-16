@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -13,11 +14,15 @@ import (
 // tuple is the only routing primitive the repository understands;
 // deduplication, batching, and retry policy live in the consumer.
 //
-// Concurrency model in this revision: PeekBatch does NOT take row
-// locks. Consumers are expected to enforce per-(scope_id) serialization
-// out-of-band (wiki ingest does this via Redis SetNX wiki:active:<kbID>).
-// The reserved `claimed_at` column lets a future revision adopt
-// pessimistic locking without a schema change.
+// Concurrency model: two consumption primitives coexist.
+//   - PeekBatch does NOT take row locks; consumers enforce per-(scope_id)
+//     serialization out-of-band (e.g. an external Redis lock). This is the
+//     original primitive and is still used by single-process (Lite) mode.
+//   - ClaimBatch DOES take row locks (SELECT ... FOR UPDATE SKIP LOCKED on
+//     Postgres) and marks rows with claimed_at, so multiple concurrent
+//     consumers of the same tuple pull DISJOINT rows without an external
+//     lock. This is what lets the wiki pipeline drop its exclusive per-KB
+//     batch lock and spread one KB's backlog across the whole worker pool.
 type TaskPendingOpsRepository interface {
 	// Enqueue inserts a single op. The caller fills in TenantID, TaskType,
 	// Scope, ScopeID, Op, DedupKey, Payload; ID, FailCount, EnqueuedAt
@@ -29,6 +34,29 @@ type TaskPendingOpsRepository interface {
 	// callers must DeleteByIDs once the ops have been processed (or
 	// IncrFailCount and leave them for the next pass).
 	PeekBatch(ctx context.Context, taskType, scope, scopeID string, limit int) ([]*types.TaskPendingOp, error)
+
+	// ClaimBatch atomically claims eligible rows for the tuple, grouped by
+	// dedup_key, and returns them with claimed_at set to now. `limit`
+	// counts DISTINCT dedup_keys (documents), NOT rows: ALL eligible rows
+	// sharing a chosen dedup_key are claimed together so a document with
+	// several queued ops is never split across two concurrent batches.
+	// A row is eligible when it is unclaimed (claimed_at IS NULL) or its
+	// claim is stale (claimed_at < staleBefore) — the latter recovers rows
+	// abandoned by a crashed worker. On Postgres the per-key anchor row is
+	// locked with FOR UPDATE SKIP LOCKED so concurrent claimers take
+	// disjoint key sets without blocking or double-claiming.
+	//
+	// Claimed rows are NOT removed: the consumer must DeleteByIDs on
+	// success, or ReleaseByIDs to hand a still-retryable row back to the
+	// pool (otherwise it stays claimed until staleBefore elapses).
+	ClaimBatch(ctx context.Context, taskType, scope, scopeID string, limit int, staleBefore time.Time) ([]*types.TaskPendingOp, error)
+
+	// ReleaseByIDs clears claimed_at (back to NULL) for the given rows so
+	// a claimed-but-not-consumed row becomes immediately eligible for the
+	// next ClaimBatch. No-op for empty input. Used by the wiki retry path
+	// to re-queue a transiently-failed op without waiting for its claim to
+	// go stale. Harmless on rows that were never claimed (Lite mode).
+	ReleaseByIDs(ctx context.Context, ids []int64) error
 
 	// DeleteByIDs removes the given rows. No-op for empty input. Used
 	// to consume a successfully-processed batch, and to drop ops that

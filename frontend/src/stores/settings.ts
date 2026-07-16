@@ -3,7 +3,8 @@ import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
 import { updateMyPreferences, type UserPreferences } from "@/api/auth";
-import { isAgentStreamAgentId, reconcileBuiltinAgentMode } from "@/utils/agent-mode";
+import { isAgentStreamAgentId } from "@/utils/agent-mode";
+import { loadAndReconcileSettings } from "@/stores/settingsStorage";
 
 // 定义设置接口
 interface Settings {
@@ -18,13 +19,14 @@ interface Settings {
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
   selectedMCPServices: string[];
   selectedSkills: string[];
+  selectedTools?: string[];
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
   webSearchEnabled: boolean;  // 网络搜索是否启用
   enableMemory: boolean;      // 是否开启记忆功能
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
-  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源租户 ID（用于后端 model/KB/MCP 解析）
+  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源空间 ID（用于后端 model/KB/MCP 解析）
   autoCheckUpdate?: boolean; // 是否自动检查并下载更新
 }
 
@@ -105,29 +107,14 @@ const defaultSettings: Settings = {
     selectedChatModelId: "",  // 用户当前选择的对话模型ID
   },
   selectedAgentId: BUILTIN_QUICK_ANSWER_ID,  // 默认选中快速问答模式
-  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源租户 ID
+  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源空间 ID
   autoCheckUpdate: true,
 };
-
-/** Keep builtin agent id and isAgentEnabled in sync after localStorage reload. */
-function loadAndReconcileSettings(): Settings {
-  const loaded = JSON.parse(
-    localStorage.getItem("WeKnora_settings") || JSON.stringify(defaultSettings),
-  ) as Settings;
-  loaded.selectedTags ||= [];
-  loaded.selectedMCPServices ||= [];
-  loaded.selectedSkills ||= loaded.selectedTools || [];
-  loaded.selectedFileKbMap ||= {};
-  if (reconcileBuiltinAgentMode(loaded)) {
-    localStorage.setItem("WeKnora_settings", JSON.stringify(loaded));
-  }
-  return loaded;
-}
 
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
     // 从本地存储加载设置，如果没有则使用默认设置
-    settings: loadAndReconcileSettings(),
+    settings: loadAndReconcileSettings(defaultSettings),
     // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
     // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
     _defaultsSnapshot: null as Settings | null,
@@ -191,7 +178,7 @@ export const useSettingsStore = defineStore("settings", {
 
     // 当前选中的智能体ID
     selectedAgentId: (state) => state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
-    // 共享智能体来源租户 ID（可选）
+    // 共享智能体来源空间 ID（可选）
     selectedAgentSourceTenantId: (state) => state.settings.selectedAgentSourceTenantId ?? null,
   },
 
@@ -373,7 +360,7 @@ export const useSettingsStore = defineStore("settings", {
     },
 
     // 从 /auth/me 或 /auth/login 返回的 user.preferences 同步到本地 settings。
-    // 调用方：authStore.setUser（每次登录 / 刷新 user / 切租户后都会触发）。
+    // 调用方：authStore.setUser（每次登录 / 刷新 user / 切空间后都会触发）。
     // 不写后端，纯本地状态 + localStorage 写入，避免把后端的值再原路 PUT 回去。
     hydrateFromUserPreferences(prefs: UserPreferences | undefined | null) {
       if (!prefs) return;

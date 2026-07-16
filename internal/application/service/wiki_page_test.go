@@ -6,6 +6,22 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func TestStripWikiInlineChunkCitations(t *testing.T) {
+	input := "[**橡皮障夹**](#)**钳**\n\n夹钳是用于夹持橡皮障夹的专用器械[c003]。手柄便于操作 [c003]。多个来源[c003, c1000]。"
+	want := "[**橡皮障夹**](#)**钳**\n\n夹钳是用于夹持橡皮障夹的专用器械。手柄便于操作。多个来源。"
+
+	if got := stripWikiInlineChunkCitations(input); got != want {
+		t.Fatalf("stripWikiInlineChunkCitations() = %q, want %q", got, want)
+	}
+}
+
+func TestStripWikiInlineChunkCitationsPreservesOrdinaryMarkdown(t *testing.T) {
+	input := "保留 [citation]、[C003]、[c12] 和 [[concept/c003|页面链接]]。"
+	if got := stripWikiInlineChunkCitations(input); got != input {
+		t.Fatalf("stripWikiInlineChunkCitations() changed ordinary Markdown: %q", got)
+	}
+}
+
 func TestParseOutLinks(t *testing.T) {
 	svc := &wikiPageService{}
 

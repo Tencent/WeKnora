@@ -42,12 +42,14 @@
           <slot name="footer-left" />
         </div>
         <div class="setting-drawer__footer-right">
-          <t-button theme="default" variant="outline" @click="handleCancel">
-            {{ cancelText || t('common.cancel') }}
-          </t-button>
-          <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
-            {{ confirmText || t('common.save') }}
-          </t-button>
+          <slot name="footer-right">
+            <t-button theme="default" variant="outline" @click="handleCancel">
+              {{ cancelText || t('common.cancel') }}
+            </t-button>
+            <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
+              {{ confirmText || t('common.save') }}
+            </t-button>
+          </slot>
         </div>
       </div>
     </template>

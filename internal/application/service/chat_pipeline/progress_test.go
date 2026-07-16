@@ -95,9 +95,46 @@ func TestRetrievalProgressEmitsSingleToolCallAndResult(t *testing.T) {
 	callData, ok := bus.events[0].Data.(event.AgentToolCallData)
 	require.True(t, ok)
 	assert.Equal(t, "knowledge_search", callData.ToolName)
+	assert.Equal(t, retrievalSourceKnowledge, callData.Arguments["search_source"])
 
 	resultData, ok := bus.events[1].Data.(event.AgentToolResultData)
 	require.True(t, ok)
 	assert.True(t, resultData.Success)
 	assert.Equal(t, 3, resultData.Data["count"])
+	assert.Equal(t, 3, resultData.Data["doc_count"])
+	assert.Equal(t, 0, resultData.Data["web_count"])
+	assert.Equal(t, retrievalSourceKnowledge, resultData.Data["search_source"])
+}
+
+func TestRetrievalProgressWebOnlySearchSource(t *testing.T) {
+	bus := &recordingEventBus{}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			SessionID:        "sess-web",
+			WebSearchEnabled: true,
+		},
+		PipelineContext: types.PipelineContext{EventBus: bus},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{
+				{ID: "w1", ChunkType: "web_search"},
+				{ID: "w2", KnowledgeSource: "web_search"},
+			},
+		},
+	}
+
+	start := time.Now()
+	progress := BeginRetrievalProgress(context.Background(), cm)
+	require.NotNil(t, progress)
+	EndRetrievalProgress(context.Background(), cm, progress, start, nil)
+
+	callData, ok := bus.events[0].Data.(event.AgentToolCallData)
+	require.True(t, ok)
+	assert.Equal(t, retrievalSourceWeb, callData.Arguments["search_source"])
+
+	resultData, ok := bus.events[1].Data.(event.AgentToolResultData)
+	require.True(t, ok)
+	assert.Equal(t, 2, resultData.Data["count"])
+	assert.Equal(t, 0, resultData.Data["doc_count"])
+	assert.Equal(t, 2, resultData.Data["web_count"])
+	assert.Equal(t, retrievalSourceWeb, resultData.Data["search_source"])
 }

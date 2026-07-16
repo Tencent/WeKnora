@@ -102,10 +102,17 @@
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
                 <div class="action-card" :class="{
                   'action-pending': event.pending,
-                  'action-error': event.success === false
-                }">
-                  <div class="action-header" @click="handleActionHeaderClick(event)"
-                    :class="{ 'no-results': !hasResults(event) }">
+                  'action-error': event.success === false,
+                  'reference-trigger': canOpenToolReferences(event)
+                }"
+                  :role="canOpenToolReferences(event) ? 'button' : undefined"
+                  :tabindex="canOpenToolReferences(event) ? 0 : undefined"
+                  @click="handleActionCardClick(event)"
+                  @keydown.enter="handleActionCardClick(event)"
+                  @keydown.space.prevent="handleActionCardClick(event)"
+                >
+                  <div class="action-header" @click.stop="handleActionHeaderClick(event)"
+                    :class="{ 'no-results': !hasActionResult(event) }">
                     <div class="action-title">
                       <t-icon v-if="event.tool_name" class="action-title-icon"
                         :name="getToolIconName(event.tool_name)" />
@@ -153,7 +160,7 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
-                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)"
+                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
                     <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
@@ -282,7 +289,8 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
-              <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
+              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
+                class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -298,6 +306,13 @@
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
+                <transition name="follow-up-toolbar-loading">
+                  <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                    aria-live="polite">
+                    <t-icon name="lightbulb" />
+                    <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
+                  </span>
+                </transition>
               </div>
             </div>
 
@@ -305,10 +320,17 @@
             <div v-else-if="event.type === 'tool_call'" class="tool-event">
               <div class="action-card" :class="{
                 'action-pending': event.pending,
-                'action-error': event.success === false
-              }">
-                <div class="action-header" @click="handleActionHeaderClick(event)"
-                  :class="{ 'no-results': !hasResults(event) }">
+                'action-error': event.success === false,
+                'reference-trigger': canOpenToolReferences(event)
+              }"
+                :role="canOpenToolReferences(event) ? 'button' : undefined"
+                :tabindex="canOpenToolReferences(event) ? 0 : undefined"
+                @click="handleActionCardClick(event)"
+                @keydown.enter="handleActionCardClick(event)"
+                @keydown.space.prevent="handleActionCardClick(event)"
+              >
+                <div class="action-header" @click.stop="handleActionHeaderClick(event)"
+                  :class="{ 'no-results': !hasActionResult(event) }">
                   <div class="action-title">
                     <t-icon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
                     <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
@@ -357,7 +379,7 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
-                <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)"
+                <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                   class="action-details">
                   <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
@@ -420,7 +442,13 @@
               || 1
           }) }}</span>
         </div>
-        <t-link theme="primary" hover="color" @click="navigateToWikiGraph">
+        <t-link
+          theme="primary"
+          hover="color"
+          :href="wikiGraphHref"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <template #prefixIcon><t-icon name="chart-bubble" /></template>
           {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
         </t-link>
@@ -442,9 +470,12 @@ import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import { countGrepDocuments } from '@/utils/grepResultsGroup';
+import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+import type { KnowledgeReferenceLike } from '@/utils/referenceSources';
+import { resolveCitationChunkId } from '@/utils/citationMarkdown';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -649,7 +680,8 @@ const wikiDrawerContent = computed(() => {
     return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
   });
 
-  return wrapChatMarkdownTables(marked.parse(preprocessed, { breaks: true, async: false }) as string);
+  const html = marked.parse(preprocessed, { breaks: true, async: false }) as string;
+  return sanitizeMarkdownHTML(wrapChatMarkdownTables(html));
 });
 
 watch(wikiDrawerContent, async () => {
@@ -672,15 +704,17 @@ const openWikiDrawer = async (kbId: string, slug: string) => {
   }
 };
 
-const navigateToWikiGraph = () => {
-  if (currentWikiKbId.value && wikiDrawerPage.value?.slug) {
-    wikiDrawerVisible.value = false;
-    try {
-      router.push(`/platform/knowledge-bases/${currentWikiKbId.value}?tab=graph&slug=${encodeURIComponent(wikiDrawerPage.value.slug)}`);
-    } catch (error) {
-      console.error('Failed to navigate to wiki graph:', error);
-    }
-  }
+const wikiGraphHref = computed(() => {
+  if (!currentWikiKbId.value || !wikiDrawerPage.value?.slug) return '';
+  return router.resolve({
+    path: `/platform/knowledge-bases/${currentWikiKbId.value}`,
+    query: { tab: 'graph', slug: wikiDrawerPage.value.slug },
+  }).href;
+});
+
+const openRouteInNewTab = (path: string) => {
+  const href = router.resolve(path).href;
+  window.open(href, '_blank', 'noopener,noreferrer');
 };
 
 const handleWikiDrawerClick = (e: MouseEvent) => {
@@ -719,6 +753,7 @@ interface SessionData {
   isAgentMode?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
+  [key: string]: unknown;
 }
 
 const props = defineProps<{
@@ -731,6 +766,7 @@ const props = defineProps<{
   embedSessionSig?: string;
   embedVisitorId?: string;
   ragMode?: boolean;
+  followUpLoading?: boolean;
 }>();
 
 const embedAuthProps = computed(() => ({
@@ -755,7 +791,232 @@ const {
   getKnowledgeReferences: () => props.session?.knowledge_references,
   embedChannelId: () => (props.embeddedMode ? props.embedChannelId : undefined),
   embedToken: () => (props.embeddedMode ? props.embedToken : undefined),
+  sessionId: () => props.sessionId,
 });
+
+const referencesDrawer = useChatReferencesDrawer();
+
+const openReferencesDrawer = (
+  highlight?: { url?: string; chunkId?: string },
+  refsOverride?: KnowledgeReferenceLike[] | null,
+) => {
+  const refs = refsOverride?.length ? refsOverride : props.session?.knowledge_references
+  if (!referencesDrawer || !refs?.length) return false
+  referencesDrawer.open({
+    references: refs,
+    highlight: highlight || null,
+    messageId: props.session?.id,
+  })
+  return true
+}
+
+const mergeDocumentReferences = (refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] => {
+  const merged = new Map<string, KnowledgeReferenceLike & { contentParts?: string[] }>();
+
+  for (const ref of refs) {
+    if (ref.chunk_type === 'web_search') continue;
+    const key = ref.knowledge_id || ref.knowledge_title || ref.id;
+    if (!key) continue;
+
+    const existing = merged.get(key);
+    const content = String(ref.content || '').trim();
+    if (!existing) {
+      merged.set(key, {
+        ...ref,
+        id: ref.knowledge_id || ref.id || key,
+        content,
+        contentParts: content ? [content] : [],
+      });
+      continue;
+    }
+
+    if (content && !existing.contentParts?.includes(content)) {
+      existing.contentParts = [...(existing.contentParts || []), content];
+      existing.content = existing.contentParts.slice(0, 3).join('\n\n');
+    }
+  }
+
+  return Array.from(merged.values()).map(({ contentParts, ...ref }) => ref);
+};
+
+const cleanToolOutputContent = (output: unknown): string => {
+  const raw = typeof output === 'string' ? output : '';
+  return raw
+    .replace(/<\/?knowledge_chunks[^>]*>/gi, '')
+    .replace(/<\/?chunk[^>]*>/gi, '')
+    .trim();
+};
+
+const getToolKnowledgeBaseId = (toolData: any): string | undefined => {
+  if (typeof toolData?.knowledge_base_id === 'string' && toolData.knowledge_base_id) {
+    return toolData.knowledge_base_id;
+  }
+  const kbIds = Array.isArray(toolData?.knowledge_base_ids) ? toolData.knowledge_base_ids : [];
+  if (kbIds.length === 1 && typeof kbIds[0] === 'string' && kbIds[0]) {
+    return kbIds[0];
+  }
+  return undefined;
+};
+
+const formatToolResultContent = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim();
+  if (value == null) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
+const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
+
+const getToolReferenceItems = (event: any): KnowledgeReferenceLike[] => {
+  if (!event || event.pending) return [];
+  const toolName = event.tool_name;
+  const toolData = event.tool_data;
+
+  if (isMcpTool(toolName)) {
+    const output = formatToolResultContent(event.output) || formatToolResultContent(toolData);
+    if (!output) return [];
+    return [{
+      id: event.tool_call_id || toolName,
+      chunk_type: 'tool_result',
+      knowledge_title: getToolTitle(event),
+      content: output,
+      metadata: {
+        title: getToolTitle(event),
+        source: getLocalizedToolName(toolName),
+        tool: String(toolName || ''),
+      },
+    }];
+  }
+
+  if (!toolData) return [];
+
+  if (toolName === 'web_search') {
+    const results = Array.isArray(toolData.results) ? toolData.results : [];
+    return results
+      .filter((item: any) => item?.url)
+      .map((item: any, index: number) => ({
+        id: item.url,
+        chunk_type: 'web_search',
+        knowledge_title: item.title || item.source || item.url,
+        content: item.snippet || item.content || '',
+        metadata: {
+          url: item.url,
+          title: item.title || '',
+          snippet: item.snippet || item.content || '',
+        },
+        chunk_index: item.result_index ?? index + 1,
+      }));
+  }
+
+  if (toolName === 'web_fetch') {
+    const results = Array.isArray(toolData.results) ? toolData.results : [];
+    return results
+      .filter((item: any) => item?.url)
+      .map((item: any, index: number) => ({
+        id: item.url,
+        chunk_type: 'web_search',
+        knowledge_title: item.url,
+        content: item.summary || item.raw_content || '',
+        metadata: {
+          url: item.url,
+          title: item.url,
+          snippet: item.summary || item.raw_content || '',
+        },
+        chunk_index: index + 1,
+      }));
+  }
+
+  if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
+    const results = Array.isArray(toolData.results) ? toolData.results : [];
+    const fallbackKnowledgeBaseId = getToolKnowledgeBaseId(toolData);
+    return mergeDocumentReferences(results
+      .filter((item: any) => item?.chunk_id || item?.knowledge_id)
+      .map((item: any, index: number) => ({
+        id: item.chunk_id || `${item.knowledge_id}-${item.result_index ?? index + 1}`,
+        knowledge_id: item.knowledge_id,
+        knowledge_title: item.faq_standard_question || item.knowledge_title,
+        knowledge_base_id: item.knowledge_base_id || fallbackKnowledgeBaseId,
+        chunk_index: item.result_index ?? index + 1,
+        chunk_type: item.chunk_type,
+        content: item.content || '',
+      })));
+  }
+
+  if (toolName === 'grep_chunks') {
+    const chunkResults = Array.isArray(toolData.chunk_results) ? toolData.chunk_results : [];
+    if (chunkResults.length) {
+      return groupGrepChunkResults(chunkResults)
+        .filter((group) => group.knowledge_id || group.title)
+        .map((group, index) => ({
+          id: group.knowledge_id || group.key,
+          knowledge_id: group.knowledge_id,
+          knowledge_title: group.title,
+          chunk_index: index + 1,
+          chunk_type: group.is_faq ? 'faq' : undefined,
+          content: group.chunks.map((chunk) => chunk.content).filter(Boolean).slice(0, 3).join('\n\n') || group.match_snippet || '',
+        }));
+    }
+
+    const knowledgeResults = Array.isArray(toolData.knowledge_results) ? toolData.knowledge_results : [];
+    return mergeDocumentReferences(knowledgeResults
+      .filter((item: any) => item?.knowledge_id)
+      .map((item: any, index: number) => ({
+        id: item.knowledge_id,
+        knowledge_id: item.knowledge_id,
+        knowledge_title: item.faq_question || item.knowledge_title,
+        knowledge_base_id: item.knowledge_base_id,
+        chunk_index: index + 1,
+        content: item.match_snippet || '',
+      })));
+  }
+
+  if (toolName === 'list_knowledge_chunks') {
+    const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
+    if (chunks.length) {
+      return mergeDocumentReferences(chunks
+        .filter((item: any) => item?.content)
+        .map((item: any, index: number) => ({
+          id: item.chunk_id || item.id || `${toolData.knowledge_id || 'doc'}-${index + 1}`,
+          knowledge_id: item.knowledge_id || toolData.knowledge_id,
+          knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id,
+          knowledge_base_id: item.knowledge_base_id || toolData.knowledge_base_id,
+          chunk_index: item.chunk_index ?? item.index ?? index + 1,
+          chunk_type: item.chunk_type || (toolData.faq_question ? 'faq' : undefined),
+          content: item.content || '',
+        })));
+    }
+
+    const output = cleanToolOutputContent(event.output);
+    if (!output) return [];
+    return [{
+      id: toolData.faq_id || toolData.knowledge_id || event.tool_call_id,
+      knowledge_id: toolData.knowledge_id,
+      knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id || getToolDescription(event),
+      knowledge_base_id: toolData.knowledge_base_id,
+      chunk_type: toolData.faq_question ? 'faq' : undefined,
+      content: output,
+    }];
+  }
+
+  return [];
+};
+
+const canOpenToolReferences = (event: any): boolean => getToolReferenceItems(event).length > 0;
+
+const openToolReferences = (event: any): boolean => {
+  const refs = getToolReferenceItems(event);
+  if (!referencesDrawer || !refs.length) return false;
+  referencesDrawer.toggle({
+    references: refs,
+    highlight: null,
+    messageId: props.session?.id,
+    sourceKey: `tool:${props.session?.id || 'session'}:${event.tool_call_id || event.event_id || event.tool_name || 'references'}`,
+  });
+  return true;
+};
 
 configureMarkedForChatMarkdown();
 
@@ -1460,14 +1721,39 @@ const toggleEvent = (eventId: string) => {
 };
 
 const handleActionHeaderClick = (event: any) => {
-  if (hasResults(event) && event.tool_call_id) {
+  if (canOpenToolReferences(event)) {
+    openToolReferences(event);
+    return;
+  }
+  if (hasExpandableResults(event) && event.tool_call_id) {
     toggleEvent(event.tool_call_id);
   }
+};
+
+const handleActionCardClick = (event: any) => {
+  if (!canOpenToolReferences(event)) return;
+  openToolReferences(event);
 };
 
 const isEventExpanded = (eventId: string): boolean => {
   return expandedEvents.value.has(eventId);
 };
+
+const isReferenceDrawerTool = (toolName?: string | null): boolean =>
+  isMcpTool(toolName) ||
+  toolName === 'search_knowledge' ||
+  toolName === 'knowledge_search' ||
+  toolName === 'web_search' ||
+  toolName === 'web_fetch' ||
+  toolName === 'grep_chunks' ||
+  toolName === 'list_knowledge_chunks';
+
+const hasExpandableResults = (event: any): boolean => {
+  if (isReferenceDrawerTool(event?.tool_name)) return false;
+  return hasResults(event);
+};
+
+const hasActionResult = (event: any): boolean => canOpenToolReferences(event) || hasExpandableResults(event);
 
 // Check if search/grep tools have results
 const hasResults = (event: any): boolean => {
@@ -1506,6 +1792,9 @@ const hasResults = (event: any): boolean => {
 // Delegated handlers for span-based citation clicks/keyboard
 const handleCitationActivate = (el: HTMLElement) => {
   const url = el.getAttribute('data-url');
+  if (url && openReferencesDrawer({ url })) {
+    return;
+  }
   if (!url) return;
   try {
     // @ts-ignore: Wails runtime check
@@ -1592,16 +1881,26 @@ const onRootClick = (e: Event) => {
     return;
   }
 
-  // Handle KB citation clicks -> navigate to KB detail page
+  // Handle KB citation clicks -> open references drawer when available
   const kbEl = target.closest?.('.citation-kb') as HTMLElement | null;
-  if (kbEl && kbEl.getAttribute('data-kb-id')) {
+  if (kbEl && kbEl.getAttribute('data-chunk-id')) {
     e.preventDefault();
     e.stopPropagation();
-    const kbId = kbEl.getAttribute('data-kb-id');
+    const rawChunkId = kbEl.getAttribute('data-chunk-id') || '';
+    const title = kbEl.getAttribute('data-doc') || '';
+    const kbId = kbEl.getAttribute('data-kb-id') || '';
+    const chunkId =
+      resolveCitationChunkId(
+        rawChunkId,
+        { doc: title, kbId },
+        props.session?.knowledge_references,
+      ) || rawChunkId;
+    if (openReferencesDrawer({ chunkId })) {
+      return;
+    }
     if (kbId) {
       try {
-        // Navigate to knowledge base detail page
-        router.push(`/platform/knowledge-bases/${kbId}`);
+        openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
       } catch (error) {
         console.error('Failed to navigate to knowledge base:', error);
       }
@@ -1617,7 +1916,7 @@ const onRootClick = (e: Event) => {
     const slug = wikiEl.getAttribute('data-slug');
 
     // Determine the relevant KB ID
-    const kbId = getKbIdForWiki(slug);
+    const kbId = getKbIdForWiki(slug || '');
 
     if (kbId && slug) {
       openWikiDrawer(kbId, slug);
@@ -1659,10 +1958,21 @@ const onRootKeydown = (e: KeyboardEvent) => {
   if (kbEl) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      const kbId = kbEl.getAttribute('data-kb-id');
+      const rawChunkId = kbEl.getAttribute('data-chunk-id') || '';
+      const title = kbEl.getAttribute('data-doc') || '';
+      const kbId = kbEl.getAttribute('data-kb-id') || '';
+      const chunkId =
+        resolveCitationChunkId(
+          rawChunkId,
+          { doc: title, kbId },
+          props.session?.knowledge_references,
+        ) || rawChunkId;
+      if (openReferencesDrawer({ chunkId })) {
+        return;
+      }
       if (kbId) {
         try {
-          router.push(`/platform/knowledge-bases/${kbId}`);
+          openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
         } catch (error) {
           console.error('Failed to navigate to knowledge base:', error);
         }
@@ -2440,6 +2750,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
       background: transparent;
     }
 
+    &.reference-trigger {
+      cursor: pointer;
+
+      &:hover {
+        .action-name,
+        .results-summary-text {
+          color: var(--td-text-color-primary);
+        }
+      }
+    }
+
     &.action-error {
       color: var(--td-error-color);
     }
@@ -2777,6 +3098,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 
 .search-results-summary-fixed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   padding: 2px 0 0 0;
   background: transparent;
   border-top: 0;

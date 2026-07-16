@@ -115,6 +115,29 @@ func TestDocsSearch_JSON(t *testing.T) {
 	assert.Contains(t, got, `"id":"d1"`)
 }
 
+// TestDocsSearch_JSON_EmitsTotalCount pins that search docs surfaces the
+// server's full match total as meta.total_count (server-side keyword filter, so
+// total is the real match count) — parity with doc/session/chunk list.
+func TestDocsSearch_JSON_EmitsTotalCount(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeDocsSearchSvc{
+		pages: map[int][]sdk.Knowledge{1: {{ID: "d1", Title: "match"}, {ID: "d2", Title: "match2"}}},
+		total: 9, // server reports 9 total matches; we display the first page
+	}
+	require.NoError(t, runDocsSearch(context.Background(),
+		&DocsSearchOptions{Query: "match", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: false},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	var env struct {
+		Meta struct {
+			Count      *int `json:"count"`
+			TotalCount *int `json:"total_count"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	require.NotNil(t, env.Meta.TotalCount, "search docs must emit meta.total_count")
+	assert.Equal(t, 9, *env.Meta.TotalCount)
+}
+
 func TestDocsSearch_NetworkError(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDocsSearchSvc{err: errors.New("HTTP error 404: kb not found")}

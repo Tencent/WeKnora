@@ -30,9 +30,14 @@
                     </div>
                     <div class="doc-group-actions" v-if="!embeddedMode && group.knowledgeBaseId" @click.stop>
                         <t-tooltip :content="$t('chat.navigateToDocument')">
-                            <span class="doc-group-navigate" @click="navigateToDocument(group)">
+                            <a
+                                class="doc-group-navigate"
+                                :href="getDocumentHref(group)"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
                                 <t-icon name="jump" size="14px" />
-                            </span>
+                            </a>
                         </t-tooltip>
                     </div>
                 </div>
@@ -55,14 +60,16 @@
     </div>
 </template>
 <script setup>
-import { defineProps, computed, ref, reactive } from "vue";
+import { computed, ref, reactive } from "vue";
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';
 import ContentPopup from './tool-results/ContentPopup.vue';
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 
 const router = useRouter();
 const { t } = useI18n();
+const referencesDrawer = useChatReferencesDrawer();
 
 const props = defineProps({
     content: {
@@ -91,6 +98,11 @@ const showReferBox = ref(false);
 const expandedGroups = reactive({});
 
 const referBoxSwitch = () => {
+    const refs = props.session?.knowledge_references;
+    if (referencesDrawer && refs?.length) {
+        referencesDrawer.open({ references: refs });
+        return;
+    }
     showReferBox.value = !showReferBox.value;
 };
 
@@ -139,6 +151,9 @@ const headerText = computed(() => {
     if (docCount > 0) {
         return t('chat.referencesDocCount', { count: docCount });
     }
+    if (webCount > 0) {
+        return t('chat.referencesWebCount', { count: webCount });
+    }
     return t('chat.referencesTitle', { count: total });
 });
 
@@ -155,16 +170,16 @@ const truncateContent = (content, maxLen) => {
     return text.slice(0, maxLen) + '...';
 };
 
-const navigateToDocument = (group) => {
-    if (!group.knowledgeBaseId) return;
+const getDocumentHref = (group) => {
+    if (!group.knowledgeBaseId) return '';
     const query = {};
     if (group.knowledgeId) {
         query.knowledge_id = group.knowledgeId;
     }
-    router.push({
+    return router.resolve({
         path: `/platform/knowledge-bases/${group.knowledgeBaseId}`,
         query
-    });
+    }).href;
 };
 
 const getWebSearchUrl = (item) => {
@@ -434,6 +449,7 @@ const getWebSearchDisplayText = (item) => {
             border-radius: 4px;
             color: var(--td-brand-color);
             cursor: pointer;
+            text-decoration: none;
             transition: all 0.15s ease;
 
             &:hover {

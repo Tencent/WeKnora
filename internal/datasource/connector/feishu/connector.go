@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -497,6 +498,10 @@ func parseFeishuConfig(config *types.DataSourceConfig) (*Config, error) {
 
 	if feishuConfig.AppID == "" || feishuConfig.AppSecret == "" {
 		return nil, fmt.Errorf("feishu app_id and app_secret are required")
+	}
+
+	if err := datasource.ValidateConnectorBaseURL(feishuConfig.GetBaseURL()); err != nil {
+		return nil, err
 	}
 
 	return &feishuConfig, nil

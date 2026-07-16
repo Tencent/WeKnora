@@ -8,7 +8,6 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps } from 'vue';
 import type { ThinkingData } from '@/types/tool-results';
 import { useI18n } from 'vue-i18n';
 
@@ -51,4 +50,3 @@ useI18n(); // ensure component reacts to locale changes if needed
   font-weight: 400;
 }
 </style>
-

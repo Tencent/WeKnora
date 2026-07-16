@@ -31,6 +31,10 @@ func EmptyTestResultsError(providerType string, provider any) error {
 		)
 	case types.WebSearchProviderTypeDuckDuckGo:
 		return fmt.Errorf("duckduckgo returned 0 results; verify network connectivity and proxy settings")
+	case types.WebSearchProviderTypeKeenable:
+		return fmt.Errorf(
+			"keenable returned 0 results; keyless requests are rate-limited, so verify network connectivity or set an API key to lift the cap",
+		)
 	default:
 		return fmt.Errorf("search returned 0 results, please verify your API key and configuration")
 	}

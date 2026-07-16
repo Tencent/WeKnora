@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	appconfig "github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmresource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -49,6 +50,7 @@ type AgentEngine struct {
 	memoryConsolidator   *agentmemory.Consolidator // Memory consolidator for LLM-powered summarization (optional)
 	lastUsage            types.TokenUsage          // Token usage from the most recent LLM call
 	lastSentMsgCount     int                       // Number of messages sent in the most recent LLM call
+	resourceRefs         *llmresource.Registry     // request-local aliases for durable resource references
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -83,6 +85,7 @@ func NewAgentEngine(
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
 		tokenEstimator:       tokenEst,
+		resourceRefs:         llmresource.NewRegistry(),
 	}
 
 	// Initialize memory consolidator if context window management is configured

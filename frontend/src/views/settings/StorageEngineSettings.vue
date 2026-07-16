@@ -113,7 +113,7 @@
         - color logo（如 MinIO/AWS）: 直接 <img>，保留品牌彩色
         - mono logo（mask-image）: 通过 ::before + currentColor 染色，颜色由
           .storage-engine-drawer--{id} :deep(.setting-drawer__header-icon) 决定
-        - 无 logo（local）: 渲染首字母作为 monogram
+        - 无 logo: 渲染首字母作为 monogram
       -->
       <template v-if="currentEngine" #headerIcon>
         <img
@@ -167,7 +167,7 @@
           :class="[
             'footer-test-message',
             currentCheckState.result.ok
-              ? (currentCheckState.result.bucket_created ? 'created' : 'success')
+              ? ((currentCheckState.result as { bucket_created?: boolean }).bucket_created ? 'created' : 'success')
               : 'error'
           ]"
           :title="currentCheckState.result.message"
@@ -1684,5 +1684,4 @@ onMounted(loadAll)
   color: #CE1126;
 }
 </style>
-
 

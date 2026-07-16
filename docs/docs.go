@@ -193,7 +193,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的所有智能体（包括内置智能体）",
+                "description": "获取当前空间的所有智能体（包括内置智能体）",
                 "consumes": [
                     "application/json"
                 ],
@@ -718,7 +718,7 @@ const docTemplate = `{
         },
         "/auth/auto-setup": {
             "post": {
-                "description": "Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程",
+                "description": "Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程",
                 "consumes": [
                     "application/json"
                 ],
@@ -825,7 +825,7 @@ const docTemplate = `{
         },
         "/auth/invitations/lookup": {
             "post": {
-                "description": "根据邀请链接中的 token 返回邀请上下文（租户名 / 角色 / 过期时间），\n供注册页展示。无认证；token 无效或被撤销返回 410。\n使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。",
+                "description": "根据邀请链接中的 token 返回邀请上下文（空间名 / 角色 / 过期时间），\n供注册页展示。无认证；token 无效或被撤销返回 410。\n使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。",
                 "consumes": [
                     "application/json"
                 ],
@@ -1226,7 +1226,7 @@ const docTemplate = `{
         },
         "/auth/register-by-invite": {
             "post": {
-                "description": "通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。\n注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应租户。",
+                "description": "通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。\n注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应空间。",
                 "consumes": [
                     "application/json"
                 ],
@@ -1283,7 +1283,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "为当前用户在目标租户重新签发访问令牌；要求该用户在目标租户存在 active 成员关系",
+                "description": "为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系",
                 "consumes": [
                     "application/json"
                 ],
@@ -1293,7 +1293,7 @@ const docTemplate = `{
                 "tags": [
                     "认证"
                 ],
-                "summary": "切换激活租户",
+                "summary": "切换激活空间",
                 "parameters": [
                     {
                         "description": "切换请求",
@@ -1327,7 +1327,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "无该租户成员关系",
+                        "description": "无该空间成员关系",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -3619,7 +3619,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）",
+                "description": "获取当前空间的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）",
                 "consumes": [
                     "application/json"
                 ],
@@ -3942,6 +3942,50 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "删除成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/{id}/duplicate": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "创建一个只包含设置的新知识库副本，不复制知识、FAQ 内容、分块、索引、Wiki 页面、分享或置顶状态",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "创建知识库副本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "源知识库 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "创建后的知识库副本",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -5732,7 +5776,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属租户查询（用于刷新后恢复共享知识库下的文件）",
+                "description": "根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的空间解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属空间查询（用于刷新后恢复共享知识库下的文件）",
                 "consumes": [
                     "application/json"
                 ],
@@ -5763,7 +5807,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "可选，共享智能体ID（用于按智能体租户批量拉取文件详情）",
+                        "description": "可选，共享智能体ID（用于按智能体空间批量拉取文件详情）",
                         "name": "agent_id",
                         "in": "query"
                     }
@@ -6196,7 +6240,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的租户解析",
+                "description": "批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析",
                 "consumes": [
                     "application/json"
                 ],
@@ -7617,7 +7661,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的所有MCP服务",
+                "description": "获取当前空间的所有MCP服务",
                 "consumes": [
                     "application/json"
                 ],
@@ -8654,7 +8698,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的所有模型",
+                "description": "获取当前空间的所有模型",
                 "consumes": [
                     "application/json"
                 ],
@@ -8779,7 +8823,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "检查当前租户的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存",
+                "description": "检查当前空间的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存",
                 "produces": [
                     "application/json"
                 ],
@@ -8958,7 +9002,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "获取当前租户所属的所有组织，并附带各空间内知识库/智能体数量",
+                "description": "获取当前空间所属的所有组织，并附带各空间内知识库/智能体数量",
                 "produces": [
                     "application/json"
                 ],
@@ -9658,7 +9702,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "获取组织的所有成员（按租户）",
+                "description": "获取组织的所有成员（按空间）",
                 "produces": [
                     "application/json"
                 ],
@@ -9692,7 +9736,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "更新组织成员（租户）的角色（需要管理员权限）",
+                "description": "更新组织成员（空间）的角色（需要管理员权限）",
                 "consumes": [
                     "application/json"
                 ],
@@ -9713,7 +9757,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "成员租户ID",
+                        "description": "成员空间ID",
                         "name": "tenant_id",
                         "in": "path",
                         "required": true
@@ -9750,7 +9794,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "从组织中移除成员租户（需要管理员权限）",
+                "description": "从组织中移除成员空间（需要管理员权限）",
                 "tags": [
                     "组织管理"
                 ],
@@ -9765,7 +9809,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "成员租户ID",
+                        "description": "成员空间ID",
                         "name": "tenant_id",
                         "in": "path",
                         "required": true
@@ -9848,14 +9892,14 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "搜索租户（排除已加入的租户）用于邀请加入组织；按租户去重，附带代表用户",
+                "description": "搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "组织管理"
                 ],
-                "summary": "搜索可邀请的租户",
+                "summary": "搜索可邀请的空间",
                 "parameters": [
                     {
                         "type": "string",
@@ -9866,7 +9910,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "搜索关键词（租户名、用户名或邮箱）",
+                        "description": "搜索关键词（空间名、用户名或邮箱）",
                         "name": "q",
                         "in": "query",
                         "required": true
@@ -10016,7 +10060,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前租户的会话列表，支持分页、关键字搜索、按来源/Agent 筛选",
+                "description": "获取当前空间的会话列表，支持分页、关键字搜索、按来源/Agent 筛选",
                 "consumes": [
                     "application/json"
                 ],
@@ -10133,7 +10177,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前租户的所有会话",
+                "description": "根据ID列表批量删除对话会话，或设置 delete_all=true 删除当前空间的所有会话",
                 "consumes": [
                     "application/json"
                 ],
@@ -10630,6 +10674,111 @@ const docTemplate = `{
                 }
             }
         },
+        "/sessions/{session_id}/messages/{message_id}/suggestions": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "获取回答后推荐问题",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "助手消息 ID",
+                        "name": "message_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "对已完成的助手消息异步生成或重新生成推荐问题；相同配置快照会复用持久化结果",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "确保生成回答后推荐问题",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "助手消息 ID",
+                        "name": "message_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "生成选项",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.EnsureMessageSuggestionsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/sessions/{session_id}/pin": {
             "post": {
                 "security": [
@@ -10726,6 +10875,49 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}/suggestion-events": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "记录曝光、点击或关闭事件",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会话"
+                ],
+                "summary": "上报推荐问题事件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "事件",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SuggestionEventRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     }
                 }
             }
@@ -10878,6 +11070,468 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List all storage backend instances for the current workspace, with credentials masked. The workspace default backend id is returned alongside the list.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "List storage backends",
+                "responses": {
+                    "200": {
+                        "description": "List of storage backends and default_storage_backend_id",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Register a new object/file storage instance for the current workspace. The configuration is validated and a connectivity test is run before the backend is persisted.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Create storage backend",
+                "parameters": [
+                    {
+                        "description": "Storage backend configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.storageBackendRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created storage backend",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request, validation, or connectivity test failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "A storage backend with this name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/test": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Test connectivity for the provided storage configuration without persisting it. Returns success=false with a sanitized error message on failure (the HTTP status stays 200).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Test storage backend with raw config",
+                "parameters": [
+                    {
+                        "description": "Storage backend configuration to test",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.storageBackendRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Connectivity test result (success, error)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or validation error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/types": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Return the storage provider types allowed by STORAGE_ALLOW_LIST for UI form generation (e.g. local, minio, cos, tos, s3, oss, ks3, obs).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "List allowed storage provider types",
+                "responses": {
+                    "200": {
+                        "description": "List of allowed storage provider types",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retrieve a single storage backend by ID for the current workspace. Credentials are masked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Get storage backend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Storage backend details",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Update a storage backend's mutable fields (name, credentials, status). Provider and physical location (endpoint, region, bucket, path prefix) are immutable; use storage migration to move data. Environment-sourced backends are read-only. Redacted secret placeholders preserve the stored credentials.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Update storage backend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated storage backend fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.storageBackendRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated storage backend",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Immutable field change, read-only backend, validation, or connectivity failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Soft-delete a storage backend. A backend that is the workspace default, still bound to knowledge bases, environment-sourced, or a legacy alias cannot be deleted.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Delete storage backend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deletion success",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Backend is default, bound, read-only, or legacy alias",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/{id}/default": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Mark a storage backend as the workspace default. Only an active backend can become the default. New knowledge bases without an explicit binding use the default.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Set default storage backend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default set successfully",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Backend is not active",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/{id}/test": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Test connectivity of an existing saved storage backend using its stored credentials. Returns success=false with a sanitized error message on failure (the HTTP status stays 200).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Test storage backend by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Connectivity test result (success, error)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -11104,31 +11758,127 @@ const docTemplate = `{
                 }
             }
         },
-        "/system/admin/settings": {
+        "/system/admin/runtime/queues": {
             "get": {
-                "description": "Return every row in the system_settings table (system-scope,\nnot tenant-scope). SystemAdmin only.",
+                "description": "返回各 asynq 队列的实时深度（pending/active/scheduled/retry 等）与 worker 并发配置，仅系统管理员可见",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统管理"
+                ],
+                "summary": "获取解析任务队列运行时状态",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.RuntimeQueuesResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/runtime/queues/{queue}/tasks": {
+            "get": {
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "System Admin"
                 ],
-                "summary": "List all system settings",
+                "summary": "List runtime queue tasks by state",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Queue name",
+                        "name": "queue",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "pending",
+                            "active",
+                            "scheduled",
+                            "retry",
+                            "archived",
+                            "completed"
+                        ],
+                        "type": "string",
+                        "description": "Task state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque continuation cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "list of settings",
+                        "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting"
-                            }
+                            "$ref": "#/definitions/internal_handler.RuntimeTasksResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/system/admin/runtime/queues/{queue}/tasks/{task_id}/actions/{action}": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Run a safe runtime task action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Queue name",
+                        "name": "queue",
+                        "in": "path",
+                        "required": true
                     },
-                    "403": {
-                        "description": "Forbidden: not a system admin",
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "cancel",
+                            "run_now",
+                            "delete"
+                        ],
+                        "type": "string",
+                        "description": "Action",
+                        "name": "action",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": true
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
                         }
                     }
                 }
@@ -11271,14 +12021,14 @@ const docTemplate = `{
         },
         "/system/admin/tenants/apply-default-storage-quota": {
             "post": {
-                "description": "Reads the current value of ` + "`" + `tenant.default_storage_quota_gb` + "`" + `\n(3-tier resolver: DB \u003e ENV \u003e default) and writes that many\nGiB into storage_quota for every row in tenants. Bypasses\nthe per-tenant PUT whitelist, which forbids storage_quota\nedits by Owners. SystemAdmin only.\nIdempotent — running twice with the same setting is a no-op.",
+                "description": "Reads the current value of ` + "`" + `tenant.default_storage_quota_gb` + "`" + `\n(3-tier resolver: DB \u003e ENV \u003e default) and writes that many\nGiB into storage_quota for every row in tenants. Bypasses\nthe per-workspace PUT whitelist, which forbids storage_quota\nedits by Owners. SystemAdmin only.\nIdempotent — running twice with the same setting is a no-op.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "System Admin"
                 ],
-                "summary": "Apply the default storage quota to every existing tenant",
+                "summary": "Apply the default storage quota to every existing workspace",
                 "responses": {
                     "200": {
                         "description": "{ affected: int64, quota_bytes: int64 }",
@@ -11289,6 +12039,62 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "DB write failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/users/reset-password": {
+            "post": {
+                "description": "Replace another user's local password and revoke all of their existing sessions (SystemAdmin only).\nA system administrator cannot reset their own password through this endpoint; self-service password change still requires the old password.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Reset another user's password",
+                "parameters": [
+                    {
+                        "description": "Password reset request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.ResetUserPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Password reset successfully",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request, weak password, or self reset",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: not a system admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11461,7 +12267,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "获取当前用户可访问的租户列表",
+                "description": "获取当前用户可访问的空间列表",
                 "consumes": [
                     "application/json"
                 ],
@@ -11469,12 +12275,12 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户列表",
+                "summary": "获取空间列表",
                 "responses": {
                     "200": {
-                        "description": "租户列表",
+                        "description": "空间列表",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11494,7 +12300,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "创建新的租户。任意已登录用户均可调用以建立自己的新工作区，\n调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样\n通过本接口创建任意租户。",
+                "description": "创建新的空间。任意已登录用户均可调用以建立自己的新工作区，\n调用方会被自动设为该空间的 Owner。跨空间超管仍可像以前一样\n通过本接口创建任意空间。\n当 tenant.auto_create_api_key（或 WEKNORA_TENANT_AUTO_CREATE_API_KEY）\n开启时，会自动创建一个 full_access API Key，并在响应体的 data.api_key 字段返回其明文 token。",
                 "consumes": [
                     "application/json"
                 ],
@@ -11502,12 +12308,12 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "创建租户",
+                "summary": "创建空间",
                 "parameters": [
                     {
-                        "description": "租户信息",
+                        "description": "空间信息",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -11518,7 +12324,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "201": {
-                        "description": "创建的租户",
+                        "description": "创建的空间（可选含 api_key）",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11540,7 +12346,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "获取系统中所有租户（需要跨租户访问权限）",
+                "description": "获取系统中所有空间（需要跨空间访问权限）",
                 "consumes": [
                     "application/json"
                 ],
@@ -11548,12 +12354,12 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取所有租户列表",
+                "summary": "获取所有空间列表",
                 "responses": {
                     "200": {
-                        "description": "所有租户列表",
+                        "description": "所有空间列表",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11586,7 +12392,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
                 "summary": "获取提示词模板",
                 "responses": {
@@ -11616,7 +12422,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取租户的网络搜索配置",
+                "description": "获取空间的网络搜索配置",
                 "consumes": [
                     "application/json"
                 ],
@@ -11624,9 +12430,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户网络搜索配置",
+                "summary": "获取空间网络搜索配置",
                 "responses": {
                     "200": {
                         "description": "网络搜索配置",
@@ -11654,7 +12460,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取租户级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
+                "description": "获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
                 "consumes": [
                     "application/json"
                 ],
@@ -11662,9 +12468,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户KV配置",
+                "summary": "获取空间KV配置",
                 "parameters": [
                     {
                         "type": "string",
@@ -11699,7 +12505,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "更新租户级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
+                "description": "更新空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
                 "consumes": [
                     "application/json"
                 ],
@@ -11707,9 +12513,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "更新租户KV配置",
+                "summary": "更新空间KV配置",
                 "parameters": [
                     {
                         "type": "string",
@@ -11755,7 +12561,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "分页搜索租户（需要跨租户访问权限）",
+                "description": "分页搜索空间（需要跨空间访问权限）",
                 "consumes": [
                     "application/json"
                 ],
@@ -11763,9 +12569,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "搜索租户",
+                "summary": "搜索空间",
                 "parameters": [
                     {
                         "type": "string",
@@ -11775,7 +12581,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "租户ID筛选",
+                        "description": "空间ID筛选",
                         "name": "tenant_id",
                         "in": "query"
                     },
@@ -11821,7 +12627,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据ID获取租户详情",
+                "description": "根据ID获取空间详情",
                 "consumes": [
                     "application/json"
                 ],
@@ -11829,13 +12635,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户详情",
+                "summary": "获取空间详情",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -11843,7 +12649,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "租户详情",
+                        "description": "空间详情",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11856,7 +12662,7 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "租户不存在",
+                        "description": "空间不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -11869,7 +12675,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "更新租户信息",
+                "description": "更新空间信息",
                 "consumes": [
                     "application/json"
                 ],
@@ -11877,19 +12683,19 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "更新租户",
+                "summary": "更新空间",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "租户信息",
+                        "description": "空间信息",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -11900,7 +12706,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "更新后的租户",
+                        "description": "更新后的空间",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -11920,7 +12726,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "删除指定的租户",
+                "description": "删除指定的空间",
                 "consumes": [
                     "application/json"
                 ],
@@ -11928,13 +12734,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "删除租户",
+                "summary": "删除空间",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -11957,56 +12763,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/tenants/{id}/api-key": {
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "为指定租户生成一个新的 API Key，旧 Key 立即失效",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "租户管理"
-                ],
-                "summary": "重置租户 API Key",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "租户ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "新生成的 API Key",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
-                        }
-                    },
-                    "403": {
-                        "description": "权限不足",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
-                        }
-                    }
-                }
-            }
-        },
         "/tenants/{id}/api-principal-config": {
             "get": {
                 "security": [
@@ -12022,13 +12778,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "获取租户 API Key 用户身份配置",
+                "summary": "获取空间 API Key 用户身份配置",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12070,13 +12826,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户管理"
+                    "空间管理"
                 ],
-                "summary": "更新租户 API Key 用户身份配置",
+                "summary": "更新空间 API Key 用户身份配置",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12114,6 +12870,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/tenants/{id}/api-principal-test-token": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "使用空间已保存的 HMAC 密钥签发短期外部用户 JWT（Owner）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "空间管理"
+                ],
+                "summary": "生成 API Playground 测试 JWT",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "空间ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "测试 Token 参数",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.apiPrincipalTestTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "短期 JWT",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/tenants/{id}/audit-log": {
             "get": {
                 "security": [
@@ -12124,18 +12939,18 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "返回该租户最近的审计事件，按 id 倒序。游标分页：将上次响应的 next_cursor 作为下一次请求的 after_id。",
+                "description": "返回该空间最近的审计事件，按 id 倒序。游标分页：将上次响应的 next_cursor 作为下一次请求的 after_id。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "审计日志"
                 ],
-                "summary": "获取租户审计日志",
+                "summary": "获取空间审计日志",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户ID",
+                        "description": "空间ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12194,18 +13009,18 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "按 tenant 列出待接受 / 历史邀请。query include_terminal=true 时附带 accepted/declined/revoked/expired。",
+                "description": "按空间列出待接受 / 历史邀请。query include_terminal=true 时附带 accepted/declined/revoked/expired。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "租户邀请"
+                    "空间邀请"
                 ],
-                "summary": "列出租户邀请",
+                "summary": "列出空间邀请",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12247,7 +13062,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Owner 通过邮箱邀请已注册用户加入当前租户；被邀请人需要在 /me/invitations 接受后才会成为成员。",
+                "description": "Owner 通过邮箱邀请已注册用户加入当前空间；被邀请人需要在 /me/invitations 接受后才会成为成员。",
                 "consumes": [
                     "application/json"
                 ],
@@ -12255,13 +13070,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户邀请"
+                    "空间邀请"
                 ],
-                "summary": "发出租户邀请",
+                "summary": "发出空间邀请",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12299,13 +13114,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户邀请"
+                    "空间邀请"
                 ],
                 "summary": "撤销待接受邀请",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12336,7 +13151,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前租户。\n链接持续有效，直到过期或被撤销。",
+                "description": "生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前空间。\n链接持续有效，直到过期或被撤销。",
                 "consumes": [
                     "application/json"
                 ],
@@ -12344,13 +13159,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户邀请"
+                    "空间邀请"
                 ],
                 "summary": "生成共享邀请链接",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12383,18 +13198,18 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "调用方主动退出当前租户。等价于以自己的 user_id 调 RemoveMember，",
+                "description": "调用方主动退出当前空间。等价于以自己的 user_id 调 RemoveMember，",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "退出当前租户",
+                "summary": "退出当前空间",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12418,18 +13233,18 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "分页返回当前租户内 active 成员（含每位成员的角色、邮箱、头像）；支持 q 按邮箱/用户名筛选",
+                "description": "分页返回当前空间内 active 成员（含每位成员的角色、邮箱、头像）；支持 q 按邮箱/用户名筛选",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "列出租户成员",
+                "summary": "列出空间成员",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12478,13 +13293,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "直接添加租户成员（直加路径）",
+                "summary": "直接添加空间成员（直加路径）",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12517,7 +13332,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Owner 修改某位成员在当前租户内的角色；不能将最后一位 Owner 降级",
+                "description": "Owner 修改某位成员在当前空间内的角色；不能将最后一位 Owner 降级",
                 "consumes": [
                     "application/json"
                 ],
@@ -12525,13 +13340,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "修改租户成员角色",
+                "summary": "修改空间成员角色",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12569,18 +13384,18 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Owner 将某位成员从当前租户中移除（软删除 tenant_members 行）；不能移除最后一位 Owner",
+                "description": "Owner 将某位成员从当前空间中移除（软删除 tenant_members 行）；不能移除最后一位 Owner",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "租户成员"
+                    "空间成员"
                 ],
-                "summary": "移除租户成员",
+                "summary": "移除空间成员",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "租户 ID",
+                        "description": "空间 ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -12606,7 +13421,7 @@ const docTemplate = `{
         },
         "/user/favorites": {
             "get": {
-                "description": "Lists this user's starred resources in the current tenant for a given type",
+                "description": "Lists this user's starred resources in the current workspace for a given type",
                 "tags": [
                     "User"
                 ],
@@ -12700,7 +13515,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "List all vector stores for the current tenant, including environment-configured and user-created stores",
+                "description": "List all vector stores for the current workspace, including environment-configured and user-created stores",
                 "produces": [
                     "application/json"
                 ],
@@ -12734,7 +13549,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "Create a new vector store configuration for the current tenant",
+                "description": "Create a new vector store configuration for the current workspace",
                 "consumes": [
                     "application/json"
                 ],
@@ -13498,7 +14313,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "保存 APPID/APPSECRET 到当前租户配置（不自动创建模型）",
+                "description": "保存 APPID/APPSECRET 到当前空间配置（不自动创建模型）",
                 "consumes": [
                     "application/json"
                 ],
@@ -13684,6 +14499,7 @@ const docTemplate = `{
                 2002,
                 2003,
                 2004,
+                2005,
                 2100,
                 2101,
                 2102,
@@ -13708,6 +14524,7 @@ const docTemplate = `{
                 "ErrTenantInactive",
                 "ErrTenantNameRequired",
                 "ErrTenantInvalidStatus",
+                "ErrTenantCreationDisabled",
                 "ErrAgentMissingThinkingModel",
                 "ErrAgentMissingAllowedTools",
                 "ErrAgentInvalidMaxIterations",
@@ -13812,6 +14629,26 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "integer"
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "waiting": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.APIPrincipalMode": {
             "type": "string",
             "enum": [
@@ -13900,7 +14737,12 @@ const docTemplate = `{
                 "opensearch.reindex_executed",
                 "system.setting_changed",
                 "system.admin_promoted",
-                "system.admin_revoked"
+                "system.admin_revoked",
+                "system.user_password_reset",
+                "system.queue_task_retried",
+                "system.queue_task_deleted",
+                "system.queue_task_run_now",
+                "system.queue_task_cancelled"
             ],
             "x-enum-varnames": [
                 "AuditActionMemberAdded",
@@ -13921,7 +14763,12 @@ const docTemplate = `{
                 "AuditActionOpenSearchReindexExecuted",
                 "AuditActionSystemSettingChanged",
                 "AuditActionSystemAdminPromoted",
-                "AuditActionSystemAdminRevoked"
+                "AuditActionSystemAdminRevoked",
+                "AuditActionSystemUserPasswordReset",
+                "AuditActionSystemQueueTaskRetried",
+                "AuditActionSystemQueueTaskDeleted",
+                "AuditActionSystemQueueTaskRunNow",
+                "AuditActionSystemQueueTaskCancelled"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.AuditLog": {
@@ -14002,6 +14849,12 @@ const docTemplate = `{
                 },
                 "secret_key": {
                     "type": "string"
+                },
+                "temp_bucket_name": {
+                    "type": "string"
+                },
+                "temp_region": {
+                    "type": "string"
                 }
             }
         },
@@ -14068,6 +14921,10 @@ const docTemplate = `{
                 },
                 "strategy": {
                     "description": "Strategy selects the adaptive chunking tier. Empty / \"legacy\" preserves\nthe historical recursive splitter; \"auto\" lets a profiler pick between\nheading-aware, heuristic and recursive tiers; \"heading\" / \"heuristic\" /\n\"recursive\" pin the tier explicitly.",
+                    "type": "string"
+                },
+                "table_metadata_instructions": {
+                    "description": "TableMetadataInstructions contains optional business guidance used when\ngenerating searchable summaries for CSV/Excel tables. The system-owned\noutput contract remains fixed; these instructions only add domain context.",
                     "type": "string"
                 },
                 "token_limit": {
@@ -14286,7 +15143,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "image_storage_provider": {
-                    "description": "Storage provider for image uploads: \"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\".\nEmpty means use the global/tenant default provider.",
+                    "description": "Storage provider for image uploads: \"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\".\nEmpty means use the global/workspace default provider.",
                     "type": "string"
                 },
                 "image_upload_enabled": {
@@ -14327,6 +15184,10 @@ const docTemplate = `{
                     "description": "===== Agent Mode Settings =====\nMaximum iterations for ReAct loop (only for agent type)",
                     "type": "integer"
                 },
+                "mcp_auth_wait_timeout": {
+                    "description": "MCPAuthWaitTimeout is how many seconds to wait for in-conversation OAuth\nauthorization before skipping. \u003c=0 uses the gate's configured timeout.",
+                    "type": "integer"
+                },
                 "mcp_selection_mode": {
                     "description": "MCP service selection mode: \"all\" = all enabled MCP services, \"selected\" = specific services, \"none\" = no MCP",
                     "type": "string"
@@ -14349,6 +15210,14 @@ const docTemplate = `{
                 "query_understand_model_id": {
                     "description": "Dedicated chat model ID for the query-understanding (rewrite + intent) step.\nWhen empty, the main conversation ModelID is used as a fallback.",
                     "type": "string"
+                },
+                "question_suggestions": {
+                    "description": "===== Conversation Question Suggestions =====\nQuestionSuggestions owns both the static/knowledge-backed prompts shown\nbefore the first user turn and the contextual follow-up questions shown\nafter a completed assistant answer.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig"
+                        }
+                    ]
                 },
                 "rerank_model_id": {
                     "description": "ReRank model ID for retrieval",
@@ -14389,13 +15258,6 @@ const docTemplate = `{
                     "description": "===== Skills Settings (only for smart-reasoning mode) =====\nSkills selection mode: \"all\" = all preloaded skills, \"selected\" = specific skills, \"none\" = no skills",
                     "type": "string"
                 },
-                "suggested_prompts": {
-                    "description": "===== Suggested Prompts =====\n推荐问题列表，用于在前端对话面板展示快捷提问",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
                 "supported_file_types": {
                     "description": "===== File Type Restriction Settings =====\nSupported file types for this agent (e.g., [\"csv\", \"xlsx\", \"xls\"])\nEmpty means all file types are supported\nWhen set, only files with matching extensions can be used with this agent",
                     "type": "array",
@@ -14424,7 +15286,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "vlm_model_id": {
-                    "description": "VLM model ID for image analysis (optional, falls back to tenant-level VLM)",
+                    "description": "VLM model ID for image analysis (optional, falls back to workspace-level VLM)",
                     "type": "string"
                 },
                 "web_fetch_enabled": {
@@ -14444,7 +15306,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "web_search_provider_id": {
-                    "description": "WebSearchProviderID references a specific WebSearchProviderEntity.\nIf empty, the tenant's default provider (is_default=true) is used.",
+                    "description": "WebSearchProviderID references a specific WebSearchProviderEntity.\nIf empty, the workspace's default provider (is_default=true) is used.",
                     "type": "string"
                 }
             }
@@ -14538,7 +15400,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID for multi-tenancy",
+                    "description": "Workspace ID for multi-workspace isolation",
                     "type": "integer"
                 },
                 "total_items_synced": {
@@ -14572,6 +15434,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.ExtractConfig": {
             "type": "object",
             "properties": {
+                "custom_instructions": {
+                    "description": "CustomInstructions adds domain-specific extraction guidance while the\nsystem keeps ownership of the structured graph output protocol.",
+                    "type": "string"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -14786,6 +15652,47 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.FollowUpSuggestionConfig": {
+            "type": "object",
+            "properties": {
+                "additional_instruction": {
+                    "type": "string"
+                },
+                "allow_regenerate": {
+                    "type": "boolean"
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "knowledge_fallback": {
+                    "type": "boolean"
+                },
+                "max_context_turns": {
+                    "type": "integer"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "suppress_on_fallback": {
+                    "type": "boolean"
+                },
+                "suppress_when_answer_asks_question": {
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.GraphNode": {
             "type": "object",
             "properties": {
@@ -14926,7 +15833,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "representative_user_id": {
-                    "description": "RepresentativeUserID identifies the user attached to the OTM row for\ndisplay/audit. Optional: when unset, the handler picks a stable default\n(the user from the legacy UserID field, or the tenant's owner).",
+                    "description": "RepresentativeUserID identifies the user attached to the OTM row for\ndisplay/audit. Optional: when unset, the handler picks a stable default\n(the user from the legacy UserID field, or the workspace's owner).",
                     "type": "string"
                 },
                 "role": {
@@ -14938,7 +15845,7 @@ const docTemplate = `{
                     ]
                 },
                 "tenant_id": {
-                    "description": "TenantID is the tenant to enrol as an org member. Preferred field.",
+                    "description": "TenantID is the workspace to enrol as an org member. Preferred field.",
                     "type": "integer"
                 },
                 "user_id": {
@@ -15135,7 +16042,7 @@ const docTemplate = `{
                     }
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "title": {
@@ -15180,11 +16087,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "creator_id": {
-                    "description": "CreatorID records the user ID of whoever originally created the KB.\nUsed by the tenant-level RBAC middleware to let Contributors edit\ntheir own KBs without granting them access to everyone else's.\nNullable for backward compatibility with rows created before the\nRBAC migration backfilled the column to the tenant Owner.",
+                    "description": "CreatorID records the user ID of whoever originally created the KB.\nUsed by the workspace-level RBAC middleware to let Contributors edit\ntheir own KBs without granting them access to everyone else's.\nNullable for backward compatibility with rows created before the\nRBAC migration backfilled the column to the workspace Owner.",
                     "type": "string"
                 },
                 "creator_name": {
-                    "description": "CreatorName 是 CreatorID 对应用户的展示名（username / email 等），\n仅在列表场景由 handler 批量回填，不落库；为空表示创建者无法解析（用户已删除、\nCreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs tenant 的二分。",
+                    "description": "CreatorName 是 CreatorID 对应用户的展示名（username / email 等），\n仅在列表场景由 handler 批量回填，不落库；为空表示创建者无法解析（用户已删除、\nCreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs workspace 的二分。",
                     "type": "string"
                 },
                 "deleted_at": {
@@ -15240,7 +16147,7 @@ const docTemplate = `{
                     ]
                 },
                 "is_pinned": {
-                    "description": "IsPinned and PinnedAt are computed per-caller from user_kb_pins\n(see migration 000050). They used to be stored on the row itself,\nwhich made pinning a tenant-wide ordering decision gated behind\nthe kb-edit RBAC guard. The columns are still present in legacy\nschemas for rollback safety but are no longer read or written by\nthe application — both fields are tagged ` + "`" + `gorm:\"-\"` + "`" + ` so GORM\nignores them on every CRUD call and the list handler stamps them\nafter enriching with the caller's pin set.",
+                    "description": "IsPinned and PinnedAt are computed per-caller from user_kb_pins\n(see migration 000050). They used to be stored on the row itself,\nwhich made pinning a workspace-wide ordering decision gated behind\nthe kb-edit RBAC guard. The columns are still present in legacy\nschemas for rollback safety but are no longer read or written by\nthe application — both fields are tagged ` + "`" + `gorm:\"-\"` + "`" + ` so GORM\nignores them on every CRUD call and the list handler stamps them\nafter enriching with the caller's pin set.",
                     "type": "boolean"
                 },
                 "is_processing": {
@@ -15279,6 +16186,10 @@ const docTemplate = `{
                     "description": "ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)",
                     "type": "integer"
                 },
+                "storage_backend_id": {
+                    "description": "StorageBackendID binds this KB to one concrete storage instance. The\nlegacy provider field remains readable during migration only.",
+                    "type": "string"
+                },
                 "storage_config": {
                     "description": "Deprecated: legacy COS config column. Kept for backward compatibility with old data.",
                     "allOf": [
@@ -15288,7 +16199,7 @@ const docTemplate = `{
                     ]
                 },
                 "storage_provider_config": {
-                    "description": "Storage provider config (new): only stores provider selection; credentials from tenant StorageEngineConfig",
+                    "description": "Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageProviderConfig"
@@ -15300,7 +16211,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "type": {
@@ -15312,7 +16223,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "vector_store_id": {
-                    "description": "VectorStoreID references the VectorStore this knowledge base is bound to.\nWhen nil, the KB falls back to the tenant's effective engines derived from\nthe RETRIEVE_DRIVER environment variable (env store flow).\nThis field is set once at creation time and must not be modified afterwards;\nenforcement lives at the GORM layer (` + "`" + `\u003c-:create` + "`" + `) plus the service-layer\nKB update path, which omits this field from its update DTO.",
+                    "description": "VectorStoreID references the VectorStore this knowledge base is bound to.\nWhen nil, the KB falls back to the workspace's effective engines derived from\nthe RETRIEVE_DRIVER environment variable (env store flow).\nThis field is set once at creation time and must not be modified afterwards;\nenforcement lives at the GORM layer (` + "`" + `\u003c-:create` + "`" + `) plus the service-layer\nKB update path, which omits this field from its update DTO.",
                     "type": "string"
                 },
                 "vlm_config": {
@@ -15502,7 +16413,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "parser_engine_overrides": {
-                    "description": "ParserEngineOverrides passes key-value configuration to docreader parsers\n(e.g. pdf_force_scanned=true). Merged with tenant-level overrides in the\nparse pipeline; per-upload values take priority on conflict.",
+                    "description": "ParserEngineOverrides passes key-value configuration to docreader parsers\n(e.g. pdf_force_scanned=true). Merged with workspace-level overrides in the\nparse pipeline; per-upload values take priority on conflict.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -15554,7 +16465,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "updated_at": {
@@ -15641,7 +16552,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "active_tenant": {
-                    "description": "ActiveTenant is the tenant whose ID is encoded in the issued JWT;\nfuture requests are scoped to it until the client calls /auth/switch-tenant.\nDefaults to the user's home tenant on a fresh login.",
+                    "description": "ActiveTenant is the workspace whose ID is encoded in the issued JWT;\nfuture requests are scoped to it until the client calls /auth/switch-tenant.\nDefaults to the user's home workspace on a fresh login.",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
@@ -15649,7 +16560,7 @@ const docTemplate = `{
                     ]
                 },
                 "memberships": {
-                    "description": "Memberships lists every tenant the user can authenticate into,\nalong with their role in each. Always populated (length 1 for users\nwho only belong to their home tenant) so frontends can render a\ntenant switcher without a follow-up request. Serialised without\nomitempty so the field is always present as a JSON array (possibly\nempty) — the \"always populated\" contract relies on the server side\nguaranteeing a non-nil slice.",
+                    "description": "Memberships lists every workspace the user can authenticate into,\nalong with their role in each. Always populated (length 1 for users\nwho only belong to their home workspace) so frontends can render a\nworkspace switcher without a follow-up request. Serialised without\nomitempty so the field is always present as a JSON array (possibly\nempty) — the \"always populated\" contract relies on the server side\nguaranteeing a non-nil slice.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Membership"
@@ -15792,7 +16703,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "is_builtin": {
-                    "description": "Whether this is a builtin MCP service (visible to all tenants)",
+                    "description": "Whether this is a builtin MCP service (visible to all workspaces)",
                     "type": "boolean"
                 },
                 "name": {
@@ -15988,6 +16899,10 @@ const docTemplate = `{
                     "description": "Agent total execution duration in milliseconds (from query start to answer start)",
                     "type": "integer"
                 },
+                "agent_id": {
+                    "description": "AgentID is the agent used for this individual assistant turn. Unlike the\nsession's last_request_state it remains stable when users switch agents.",
+                    "type": "string"
+                },
                 "agent_steps": {
                     "description": "Agent execution steps (only for assistant messages generated by agent)\nThis contains the detailed reasoning process and tool calls made by the agent\nStored for user history display, but NOT included in LLM context to avoid redundancy",
                     "type": "array",
@@ -16058,6 +16973,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem"
                     }
+                },
+                "model_id": {
+                    "description": "ModelID is the requested/effective chat model binding captured for this\nturn. It is useful for reproducibility and suggestion generation.",
+                    "type": "string"
                 },
                 "request_id": {
                     "description": "Request identifier for tracking API requests",
@@ -16185,6 +17104,10 @@ const docTemplate = `{
                 "interface_type": {
                     "type": "string"
                 },
+                "max_concurrency": {
+                    "description": "MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /\nenrichment) calls to THIS specific model, keyed by model ID and shared\nacross all replicas. 0 (the default) means \"fall back to the\nprocess-wide model.max_concurrency\". Interactive user-facing calls are\nnever gated. Only chat / vlm / embedding honour this (see limiter.Gate).",
+                    "type": "integer"
+                },
                 "parameter_size": {
                     "description": "Ollama model parameter size (e.g., \"7B\", \"13B\", \"70B\")",
                     "type": "string"
@@ -16216,6 +17139,7 @@ const docTemplate = `{
                 "siliconflow",
                 "jina",
                 "openrouter",
+                "requesty",
                 "nvidia",
                 "novita",
                 "azure_openai"
@@ -16235,6 +17159,7 @@ const docTemplate = `{
                 "ModelSourceOpenAI": "OpenAI model",
                 "ModelSourceOpenRouter": "OpenRouter model",
                 "ModelSourceRemote": "Remote model",
+                "ModelSourceRequesty": "Requesty model",
                 "ModelSourceSiliconFlow": "SiliconFlow model",
                 "ModelSourceVolcengine": "Volcengine model",
                 "ModelSourceZhipu": "Zhipu model"
@@ -16254,6 +17179,7 @@ const docTemplate = `{
                 "SiliconFlow model",
                 "Jina AI model",
                 "OpenRouter model",
+                "Requesty model",
                 "NVIDIA model",
                 "Novita AI model",
                 "Azure OpenAI model"
@@ -16273,6 +17199,7 @@ const docTemplate = `{
                 "ModelSourceSiliconFlow",
                 "ModelSourceJina",
                 "ModelSourceOpenRouter",
+                "ModelSourceRequesty",
                 "ModelSourceNvidia",
                 "ModelSourceNovita",
                 "ModelSourceAzureOpenAI"
@@ -16498,7 +17425,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "owner_tenant_id": {
-                    "description": "OwnerTenantID is the persisted owner tenant of the organization\n(Plan 3, migration 000046). Frontend uses this to identify the\n\"owner row\" in the tenant-keyed members list — comparing\nmember.tenant_id against owner_tenant_id is the post-Plan-3\nequivalent of the old member.user_id == owner_id check.",
+                    "description": "OwnerTenantID is the persisted owner workspace of the organization\n(Plan 3, migration 000046). Frontend uses this to identify the\n\"owner row\" in the workspace-keyed members list — comparing\nmember.tenant_id against owner_tenant_id is the post-Plan-3\nequivalent of the old member.user_id == owner_id check.",
                     "type": "integer"
                 },
                 "pending_join_request_count": {
@@ -16628,11 +17555,83 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig": {
             "type": "object",
             "properties": {
+                "custom_instructions": {
+                    "description": "CustomInstructions describes the intended audience or question style.\nIt is appended to the stable system question-generation template.",
+                    "type": "string"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
                 "question_count": {
                     "description": "Number of questions to generate per chunk (default: 3, max: 10)",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig": {
+            "type": "object",
+            "properties": {
+                "follow_ups": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FollowUpSuggestionConfig"
+                },
+                "starters": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.QueueStat": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "integer"
+                },
+                "archived": {
+                    "type": "integer"
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "latency_ms": {
+                    "description": "LatencyMs is the age of the oldest pending task, in milliseconds.",
+                    "type": "integer"
+                },
+                "memory_usage_bytes": {
+                    "description": "MemoryUsageBytes is the approximate Redis memory the queue occupies.",
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "paused": {
+                    "description": "Paused reports whether the queue is paused (tasks not consumed).",
+                    "type": "boolean"
+                },
+                "pending": {
+                    "type": "integer"
+                },
+                "pool": {
+                    "description": "Pool is the independent worker pool that drains this queue.",
+                    "type": "string"
+                },
+                "processed": {
+                    "description": "Processed / Failed are today's counters (reset daily).",
+                    "type": "integer"
+                },
+                "retry": {
+                    "type": "integer"
+                },
+                "scheduled": {
+                    "type": "integer"
+                },
+                "size": {
+                    "description": "Size is the total number of tasks in the queue (pending + active +\nscheduled + retry + aggregating + archived).",
+                    "type": "integer"
+                },
+                "weight": {
+                    "description": "Weight is the queue's scheduling weight inside its pool.",
                     "type": "integer"
                 }
             }
@@ -16911,6 +17910,127 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction": {
+            "type": "string",
+            "enum": [
+                "cancel",
+                "run_now",
+                "delete"
+            ],
+            "x-enum-varnames": [
+                "RuntimeTaskActionCancel",
+                "RuntimeTaskActionRunNow",
+                "RuntimeTaskActionDelete"
+            ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo": {
+            "type": "object",
+            "properties": {
+                "allowed_actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction"
+                    }
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "data_source_id": {
+                    "type": "string"
+                },
+                "deadline": {
+                    "type": "string"
+                },
+                "enqueued_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_orphaned": {
+                    "type": "boolean"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_count": {
+                    "type": "integer"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "last_failed_at": {
+                    "type": "string"
+                },
+                "max_retry": {
+                    "type": "integer"
+                },
+                "next_process_at": {
+                    "type": "string"
+                },
+                "queue": {
+                    "type": "string"
+                },
+                "retried": {
+                    "type": "integer"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "source_kb_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "state": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState"
+                },
+                "sync_log_id": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_kb_id": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "worker": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskState": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "active",
+                "scheduled",
+                "retry",
+                "archived",
+                "completed"
+            ],
+            "x-enum-varnames": [
+                "RuntimeTaskPending",
+                "RuntimeTaskActive",
+                "RuntimeTaskScheduled",
+                "RuntimeTaskRetry",
+                "RuntimeTaskArchived",
+                "RuntimeTaskCompleted"
+            ]
+        },
         "github_com_Tencent_WeKnora_internal_types.S3EngineConfig": {
             "type": "object",
             "properties": {
@@ -17136,7 +18256,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "title": {
@@ -17147,7 +18267,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user_id": {
-                    "description": "UserID is the owner of the session. Empty for legacy rows (visible at\ntenant level) and for IM-created sessions that do not map to a WeKnora user.",
+                    "description": "UserID is the owner scope for this session. WeKnora user UUIDs, API\nexternal-user principals, and embed visitor principals all use this column.",
                     "type": "string"
                 }
             }
@@ -17217,6 +18337,70 @@ const docTemplate = `{
                 },
                 "permission": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.StorageBackendConfig": {
+            "type": "object",
+            "properties": {
+                "access_key_id": {
+                    "type": "string"
+                },
+                "app_id": {
+                    "type": "string"
+                },
+                "bucket_name": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "force_path_style": {
+                    "type": "boolean"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "path_prefix": {
+                    "type": "string"
+                },
+                "region": {
+                    "type": "string"
+                },
+                "secret_access_key": {
+                    "type": "string"
+                },
+                "temp_bucket_name": {
+                    "type": "string"
+                },
+                "temp_region": {
+                    "type": "string"
+                },
+                "use_ssl": {
+                    "type": "boolean"
+                },
+                "use_temp_bucket": {
+                    "type": "boolean"
                 }
             }
         },
@@ -17332,6 +18516,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.SuggestionAttribution": {
+            "type": "object",
+            "properties": {
+                "question_id": {
+                    "type": "string"
+                },
+                "suggestion_set_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.SyncLog": {
             "type": "object",
             "properties": {
@@ -17395,7 +18590,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID",
+                    "description": "Workspace ID",
                     "type": "integer"
                 },
                 "updated_at": {
@@ -17480,16 +18675,18 @@ const docTemplate = `{
                 },
                 "secret_key": {
                     "type": "string"
+                },
+                "temp_bucket_name": {
+                    "type": "string"
+                },
+                "temp_region": {
+                    "type": "string"
                 }
             }
         },
         "github_com_Tencent_WeKnora_internal_types.Tenant": {
             "type": "object",
             "properties": {
-                "api_key": {
-                    "description": "API key",
-                    "type": "string"
-                },
                 "business": {
                     "description": "Business",
                     "type": "string"
@@ -17503,7 +18700,7 @@ const docTemplate = `{
                     ]
                 },
                 "context_config": {
-                    "description": "Global Context configuration for this tenant (default for all sessions)",
+                    "description": "Global Context configuration for this workspace (default for all sessions)",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextConfig"
@@ -17521,6 +18718,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CredentialsConfig"
                         }
                     ]
+                },
+                "default_storage_backend_id": {
+                    "description": "DefaultStorageBackendID is the workspace default concrete storage instance.",
+                    "type": "string"
                 },
                 "deleted_at": {
                     "description": "Deletion time",
@@ -17591,7 +18792,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "web_search_config": {
-                    "description": "Global WebSearch configuration for this tenant",
+                    "description": "Global WebSearch configuration for this workspace",
                     "allOf": [
                         {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchConfig"
@@ -17759,7 +18960,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "can_access_all_tenants": {
-                    "description": "Whether the user can access all tenants (cross-tenant access)",
+                    "description": "Whether the user can access all workspaces (cross-workspace access)",
                     "type": "boolean"
                 },
                 "created_at": {
@@ -17787,7 +18988,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "is_system_admin": {
-                    "description": "Whether the user is a system administrator (independent of tenant roles)",
+                    "description": "Whether the user is a system administrator (independent of workspace roles)",
                     "type": "boolean"
                 },
                 "preferences": {
@@ -17807,7 +19008,7 @@ const docTemplate = `{
                     ]
                 },
                 "tenant_id": {
-                    "description": "Tenant ID that the user belongs to",
+                    "description": "Workspace ID that the user belongs to",
                     "type": "integer"
                 },
                 "updated_at": {
@@ -17866,7 +19067,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "last_active_tenant_id": {
-                    "description": "LastActiveTenantID remembers the last tenant the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home tenant. Login / RefreshToken validate that\nthe tenant still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred tenant id.",
+                    "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
                     "type": "integer"
                 }
             }
@@ -17880,6 +19081,14 @@ const docTemplate = `{
                 },
                 "base_url": {
                     "description": "Base URL",
+                    "type": "string"
+                },
+                "custom_instructions": {
+                    "description": "CustomInstructions adds KB-specific image interpretation guidance without\nreplacing the system-owned OCR and Markdown output contract.",
+                    "type": "string"
+                },
+                "description_language": {
+                    "description": "DescriptionLanguage controls the language used for generated image\ncaptions. Empty means follow the document/request language.",
                     "type": "string"
                 },
                 "enabled": {
@@ -17980,7 +19189,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "is_default": {
-                    "description": "Whether this is the default provider for the tenant",
+                    "description": "Whether this is the default provider for the workspace",
                     "type": "boolean"
                 },
                 "name": {
@@ -18004,7 +19213,7 @@ const docTemplate = `{
                     ]
                 },
                 "tenant_id": {
-                    "description": "Tenant ID for scoping",
+                    "description": "Workspace ID for scoping",
                     "type": "integer"
                 },
                 "updated_at": {
@@ -18049,7 +19258,8 @@ const docTemplate = `{
                 "tavily",
                 "ollama",
                 "baidu",
-                "searxng"
+                "searxng",
+                "keenable"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBing",
@@ -18058,12 +19268,17 @@ const docTemplate = `{
                 "WebSearchProviderTypeTavily",
                 "WebSearchProviderTypeOllama",
                 "WebSearchProviderTypeBaidu",
-                "WebSearchProviderTypeSearxng"
+                "WebSearchProviderTypeSearxng",
+                "WebSearchProviderTypeKeenable"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WikiConfig": {
             "type": "object",
             "properties": {
+                "content_instructions": {
+                    "description": "ContentInstructions controls tone, structure and emphasis for generated\nsummary/entity/index prose. Citation and merge rules remain system-owned.",
+                    "type": "string"
+                },
                 "extraction_granularity": {
                     "description": "ExtractionGranularity controls how many candidate slugs Pass 0 extracts\nper document. Empty / unknown value is treated as WikiExtractionStandard.",
                     "allOf": [
@@ -18072,16 +19287,24 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "extraction_instructions": {
+                    "description": "ExtractionInstructions tells candidate extraction which domain concepts\nto emphasize without replacing the stable JSON/citation protocol.",
+                    "type": "string"
+                },
                 "ingest_batch_size": {
-                    "description": "IngestBatchSize controls how many pending ops a single batch\nprocesses before scheduling a follow-up. 0 falls back to the\nhard-coded default (5). Operators on large KBs (4w+ docs) can\nraise this to 10–20 to amortize the lock-acquire / index-rebuild\noverhead across more documents per round.",
+                    "description": "IngestBatchSize controls how many pending ops a single batch claims and\nprocesses before scheduling a follow-up. 0 falls back to the hard-coded\ndefault (5). Larger batches amortize per-batch setup and let more docs\nshare the batch-internal Map/Reduce fan-out; smaller batches spread a\nKB's backlog across more concurrent batches (finer scheduling grain).",
                     "type": "integer"
                 },
                 "ingest_map_parallel": {
-                    "description": "IngestMapParallel sets the errgroup limit for the Map phase\n(per-document extraction + summary + chunk citation). 0 falls\nback to 10. Bound by the LLM provider's concurrency limit and\nthe worker's outbound HTTP pool.",
+                    "description": "IngestMapParallel sets the errgroup limit for the Map phase\n(per-document extraction + summary + chunk citation) WITHIN one batch.\n0 falls back to 10. Bound by the LLM provider's concurrency limit and\nthe worker's outbound HTTP pool. Remember it multiplies with the number\nof concurrent batches (IngestMaxInflight).",
+                    "type": "integer"
+                },
+                "ingest_max_inflight": {
+                    "description": "IngestMaxInflight caps how many ingest batches for THIS KB may run\nconcurrently in the shared wiki worker pool (standard/Redis mode\nonly). 0 falls back to the hard-coded default (4). Since Phase 3\nremoved the exclusive per-KB lock, one KB's backlog could otherwise\nmonopolize the whole pool during a bulk import and starve other KBs;\nthis knob trades a single KB's peak throughput for cross-KB fairness.\nSet it \u003e= the wiki pool size to effectively disable the cap.",
                     "type": "integer"
                 },
                 "ingest_reduce_parallel": {
-                    "description": "IngestReduceParallel sets the errgroup limit for the Reduce phase\n(per-slug page write). 0 falls back to 10. Bound by the same\nLLM concurrency / HTTP pool considerations as the Map phase,\nplus DB connection pool size.",
+                    "description": "IngestReduceParallel sets the errgroup limit for the Reduce phase\n(per-slug page write) WITHIN one batch. 0 falls back to 10. Bound by the\nsame LLM concurrency / HTTP pool considerations as the Map phase, plus\nDB connection pool size. Same multiplier caveat as IngestMapParallel.",
                     "type": "integer"
                 },
                 "max_pages_per_ingest": {
@@ -18415,7 +19638,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant scope, mirrored from the enclosing knowledge base.",
+                    "description": "Workspace scope, mirrored from the enclosing knowledge base.",
                     "type": "integer"
                 }
             }
@@ -18554,7 +19777,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "tenant_id": {
-                    "description": "Tenant ID for multi-tenant isolation",
+                    "description": "Workspace ID for multi-workspace isolation",
                     "type": "integer"
                 },
                 "title": {
@@ -18835,6 +20058,14 @@ const docTemplate = `{
                     "items": {
                         "type": "integer"
                     }
+                }
+            }
+        },
+        "internal_handler.EnsureMessageSuggestionsRequest": {
+            "type": "object",
+            "properties": {
+                "regenerate": {
+                    "type": "boolean"
                 }
             }
         },
@@ -19216,6 +20447,9 @@ const docTemplate = `{
                             "description": "Strategy / TokenLimit / Languages use pointer types so the\nhandler can distinguish \"field absent in payload\" (no change)\nfrom \"field present with empty/zero value\" (clear / disable).\nWithout that distinction, users could set strategy=\"auto\" once\nbut never reset it back to legacy / unset.",
                             "type": "string"
                         },
+                        "tableMetadataInstructions": {
+                            "type": "string"
+                        },
                         "tokenLimit": {
                             "type": "integer"
                         }
@@ -19241,6 +20475,9 @@ const docTemplate = `{
                     "description": "知识图谱配置",
                     "type": "object",
                     "properties": {
+                        "customInstructions": {
+                            "type": "string"
+                        },
                         "enabled": {
                             "type": "boolean"
                         },
@@ -19271,6 +20508,9 @@ const docTemplate = `{
                     "description": "问题生成配置",
                     "type": "object",
                     "properties": {
+                        "customInstructions": {
+                            "type": "string"
+                        },
                         "enabled": {
                             "type": "boolean"
                         },
@@ -19278,6 +20518,9 @@ const docTemplate = `{
                             "type": "integer"
                         }
                     }
+                },
+                "storageBackendId": {
+                    "type": "string"
                 },
                 "storageProvider": {
                     "description": "存储引擎选择（\"local\" | \"minio\" | \"cos\"），影响文档上传与文档内图片存储，参数从全局设置读取",
@@ -19592,6 +20835,21 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.ResetUserPasswordRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "new_password"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "new_password": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.RevokeSystemAdminRequest": {
             "type": "object",
             "required": [
@@ -19600,6 +20858,104 @@ const docTemplate = `{
             "properties": {
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.RuntimeQueuesResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "model_limiter_available": {
+                    "type": "boolean"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat"
+                    }
+                },
+                "parse_concurrency": {
+                    "description": "compatibility alias for upstream_concurrency",
+                    "type": "integer"
+                },
+                "pools": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.RuntimeWorkerPool"
+                    }
+                },
+                "queues": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QueueStat"
+                    }
+                },
+                "timestamp": {
+                    "type": "integer"
+                },
+                "upstream_concurrency": {
+                    "type": "integer"
+                },
+                "wiki_concurrency": {
+                    "description": "compatibility field",
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler.RuntimeTasksResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "next_cursor": {
+                    "type": "string"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo"
+                    }
+                }
+            }
+        },
+        "internal_handler.RuntimeWorkerPool": {
+            "description": "Return every row in the system_settings table (system-scope, not workspace-scoped). SystemAdmin only.",
+            "type": "object",
+            "properties": {
+                "active": {
+                    "description": "live workers assigned to this pool",
+                    "type": "integer"
+                },
+                "cluster_capacity": {
+                    "description": "sum of live server concurrency",
+                    "type": "integer"
+                },
+                "concurrency": {
+                    "description": "configured per instance",
+                    "type": "integer"
+                },
+                "instances": {
+                    "description": "live asynq server heartbeats",
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "queue_count": {
+                    "type": "integer"
+                },
+                "utilization": {
+                    "description": "Active / ClusterCapacity",
+                    "type": "number"
                 }
             }
         },
@@ -19689,7 +21045,25 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
-                    "description": "\"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\"",
+                    "description": "\"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\", \"obs\"",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.SuggestionEventRequest": {
+            "type": "object",
+            "required": [
+                "event_type",
+                "suggestion_set_id"
+            ],
+            "properties": {
+                "event_type": {
+                    "type": "string"
+                },
+                "question_id": {
+                    "type": "string"
+                },
+                "suggestion_set_id": {
                     "type": "string"
                 }
             }
@@ -19917,6 +21291,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.apiPrincipalTestTokenRequest": {
+            "type": "object",
+            "properties": {
+                "expires_in_seconds": {
+                    "type": "integer"
+                },
+                "external_user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.auditLogListResponse": {
             "type": "object",
             "properties": {
@@ -20067,6 +21452,27 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.storageBackendRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "provider"
+            ],
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackendConfig"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.updateLastFAQImportResultDisplayStatusRequest": {
             "type": "object",
             "required": [
@@ -20100,7 +21506,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "last_active_tenant_id": {
-                    "description": "LastActiveTenantID lets the SPA persist \"after a fresh login,\ndrop me back into this workspace\" across devices. Send a positive\ntenant id to set / replace, or 0 to clear. Membership is validated\nat next login, not here. Nil = field omitted from the PATCH and\nstays untouched.",
+                    "description": "LastActiveTenantID lets the SPA persist \"after a fresh login,\ndrop me back into this workspace\" across devices. Send a positive\nworkspace id to set / replace, or 0 to clear. Membership is validated\nat next login, not here. Nil = field omitted from the PATCH and\nstays untouched.",
                     "type": "integer"
                 }
             }
@@ -20133,7 +21539,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "agent_id": {
-                    "description": "Selected custom agent ID (backend resolves shared agent and its tenant from share relation)",
+                    "description": "Selected custom agent ID (backend resolves shared agent and its workspace from share relation)",
                     "type": "string"
                 },
                 "attachment_uploads": {
@@ -20200,6 +21606,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "suggestion_attribution": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SuggestionAttribution"
                 },
                 "summary_model_id": {
                     "description": "Optional summary model ID for this request (overrides session default)",
@@ -20322,9 +21731,23 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "mentioned_items": {
+                    "description": "Optional scoped tag mentions",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
+                    }
+                },
                 "query": {
                     "description": "Query text to search for",
                     "type": "string"
+                },
+                "tag_ids": {
+                    "description": "Tag IDs for filtering within a single KB",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -20356,7 +21779,7 @@ const docTemplate = `{
     },
     "securityDefinitions": {
         "ApiKeyAuth": {
-            "description": "租户身份认证：输入 sk- 开头的 API Key",
+            "description": "空间身份认证：输入 sk- 开头的 API Key",
             "type": "apiKey",
             "name": "X-API-Key",
             "in": "header"

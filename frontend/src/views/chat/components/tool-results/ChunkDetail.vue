@@ -35,7 +35,6 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps } from 'vue';
 import type { ChunkDetailData } from '@/types/tool-results';
 import { useI18n } from 'vue-i18n';
 
@@ -91,4 +90,3 @@ code {
   gap: 8px;
 }
 </style>
-

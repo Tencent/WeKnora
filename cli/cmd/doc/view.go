@@ -52,6 +52,7 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, docViewFields...)
+	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "fetch one document's metadata by id",
 		RequiredFlags: []string{"<doc-id> (positional)"},

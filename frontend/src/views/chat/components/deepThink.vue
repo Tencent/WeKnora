@@ -24,7 +24,7 @@
     </div>
 </template>
 <script setup>
-import { watch, ref, defineProps, onMounted, nextTick } from 'vue';
+import { watch, ref, onMounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 const isFold = ref(false)

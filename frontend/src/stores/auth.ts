@@ -12,7 +12,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useOrganizationStore } from '@/stores/organization'
 
-/** 登出时丢弃 Pinia 内的租户级资源缓存，避免 SPA 重登复用上一账号数据。 */
+/** 登出时丢弃 Pinia 内的空间级资源缓存，避免 SPA 重登复用上一账号数据。 */
 function clearSessionResourceCaches() {
   useChatResourcesStore().invalidate()
   useEditorResourcesStore().invalidate()
@@ -52,6 +52,12 @@ export const useAuthStore = defineStore('auth', () => {
   // (vs SSE) is fine — the count is checked rarely and a 1-2 minute
   // staleness window is acceptable for an inbox indicator.
   const pendingInvitationCount = ref<number>(0)
+  // Authoritative deployment capability returned by /auth/me. Defaults to
+  // false (fail-closed): we hide the "create workspace" affordance until
+  // /auth/me confirms the deployment allows it, so an invitation-only
+  // deployment never briefly flashes a create action the backend would
+  // then reject with 403/2005.
+  const canCreateTenant = ref(false)
 
   // 计算属性
   const isLoggedIn = computed(() => {
@@ -59,7 +65,7 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const hasValidTenant = computed(() => {
-    return !!tenant.value && !!tenant.value.api_key
+    return !!tenant.value && !!tenant.value.id
   })
 
   const currentTenantId = computed(() => {
@@ -173,7 +179,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const effectiveTenantId = computed(() => {
-    // 如果选择了其他租户，使用选择的租户ID，否则使用用户默认租户ID
+    // 如果选择了其他空间，使用选择的空间ID，否则使用用户默认空间ID
     return selectedTenantId.value || (tenant.value?.id ? Number(tenant.value.id) : null)
   })
 
@@ -199,10 +205,14 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  const setTenant = (tenantData: TenantInfo) => {
+  const setTenant = (tenantData: TenantInfo | null) => {
     tenant.value = tenantData
-    // 保存到localStorage
-    localStorage.setItem('weknora_tenant', JSON.stringify(tenantData))
+    if (tenantData) {
+      localStorage.setItem('weknora_tenant', JSON.stringify(tenantData))
+    } else {
+      localStorage.removeItem('weknora_tenant')
+      setSelectedTenant(null, null)
+    }
   }
 
   const setToken = (tokenValue: string) => {
@@ -303,6 +313,10 @@ export const useAuthStore = defineStore('auth', () => {
     pendingInvitationCount.value = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
   }
 
+  const setCanCreateTenant = (allowed: boolean) => {
+    canCreateTenant.value = allowed
+  }
+
   // fetchPendingInvitationCount hits the dedicated /me/invitations/
   // pending-count endpoint and updates the store. Errors are
   // swallowed — the badge degrades to its last-known value instead
@@ -342,7 +356,6 @@ export const useAuthStore = defineStore('auth', () => {
         setTenant({
           id: String(tenantSnapshot.id) || '',
           name: tenantSnapshot.name || '',
-          api_key: tenantSnapshot.api_key || '',
           owner_id: tenantSnapshot.owner_id || u.id || '',
           description: tenantSnapshot.description,
           status: tenantSnapshot.status,
@@ -352,11 +365,18 @@ export const useAuthStore = defineStore('auth', () => {
           created_at: tenantSnapshot.created_at || new Date().toISOString(),
           updated_at: tenantSnapshot.updated_at || new Date().toISOString(),
         })
+      } else {
+        setTenant(null)
       }
 
       const list = response.data?.memberships
       if (Array.isArray(list)) {
         setMemberships(list)
+      }
+
+      const createCapability = response.data?.capabilities?.can_create_tenant
+      if (typeof createCapability === 'boolean') {
+        setCanCreateTenant(createCapability)
       }
 
       return true
@@ -391,6 +411,7 @@ export const useAuthStore = defineStore('auth', () => {
     allTenants.value = []
     memberships.value = []
     pendingInvitationCount.value = 0
+    canCreateTenant.value = false
     clearSessionResourceCaches()
 
     // 清空localStorage
@@ -513,6 +534,7 @@ export const useAuthStore = defineStore('auth', () => {
     allTenants,
     memberships,
     pendingInvitationCount,
+    canCreateTenant,
 
     // 计算属性
     isLoggedIn,
@@ -538,6 +560,7 @@ export const useAuthStore = defineStore('auth', () => {
     setAllTenants,
     setMemberships,
     setPendingInvitationCount,
+    setCanCreateTenant,
     fetchPendingInvitationCount,
     refreshFromAuthMe,
     getSelectedTenant,

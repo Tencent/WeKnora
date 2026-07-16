@@ -1,5 +1,9 @@
 <template>
-    <div class="chat" :class="{ 'is-embedded': embeddedMode, 'is-sidebar-collapsed': uiStore.sidebarCollapsed }">
+    <div class="chat" :class="{
+        'is-embedded': embeddedMode,
+        'is-sidebar-collapsed': uiStore.sidebarCollapsed,
+        'has-references-panel': referencesDrawerVisible,
+    }">
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                 <!-- 消息列表骨架屏 -->
@@ -79,7 +83,17 @@
                     <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
                         <botmsg :content="session.content" :session="session" :session-id="session_id"
                             :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
-                            :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
+                            :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
+                            :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)">
+                        </botmsg>
+                        <FollowUpSuggestions v-if="!session.suggestionsDismissed"
+                            :suggestion-set="session.suggestionSet"
+                            :loading="session.suggestionLoading"
+                            :allow-regenerate="session.suggestionSet?.allow_regenerate"
+                            @select="(item) => handleFollowUpSelect(session, item)"
+                            @regenerate="loadFollowUpSuggestions(session, true, true)"
+                            @impression="(set) => recordSuggestionEvent(session, set, 'impression')"
+                            @dismiss="(set) => dismissSuggestions(session, set)" />
                     </div>
                 </div>
                 <div v-if="showGlobalTypingIndicator"
@@ -107,10 +121,11 @@
     <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
         :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
+    <ChatReferencesDrawer />
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
-import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, defineProps, computed } from 'vue';
+import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed } from 'vue';
 import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
@@ -128,6 +143,17 @@ import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCrea
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler';
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
+import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
+import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
+import {
+    ensureMessageSuggestions,
+    getMessageSuggestions,
+    recordMessageSuggestionEvent,
+} from '@/api/message-suggestion';
+import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+
+const referencesDrawer = provideChatReferencesDrawer();
+const { visible: referencesDrawerVisible } = referencesDrawer;
 
 const props = defineProps({
     session_id: { type: String, default: '' },
@@ -242,6 +268,8 @@ const suggestedQuestions = ref([]);
 const suggestedQuestionsLoading = ref(false);
 let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
+let pendingSuggestionAttribution = null;
+let pendingSuggestionKnowledgeBaseIds = [];
 
 const cancelSuggestedQuestionsFetch = () => {
     suggestedQuestionsFetchId++;
@@ -297,6 +325,57 @@ const handleSuggestedQuestionClick = (question) => {
     } else {
         sendMsg(question);
     }
+};
+
+const resolveAssistantMessageId = (message) => message?.id || message?.assistant_message_id;
+
+const loadFollowUpSuggestions = async (message, ensure = false, regenerate = false) => {
+    const messageId = resolveAssistantMessageId(message);
+    const targetSessionId = session_id.value;
+    if (!messageId || !targetSessionId || message.suggestionsDismissed) return;
+    message.suggestionLoading = true;
+    try {
+        let response = ensure
+            ? await ensureMessageSuggestions(targetSessionId, messageId, regenerate)
+            : await getMessageSuggestions(targetSessionId, messageId);
+        let set = response?.data;
+        for (let attempt = 0; set?.status === 'generating' && attempt < 120; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            if (session_id.value !== targetSessionId || message.suggestionsDismissed) return;
+            response = await getMessageSuggestions(targetSessionId, messageId);
+            set = response?.data;
+        }
+        message.suggestionSet = set?.status === 'ready' ? set : null;
+    } catch (error) {
+        if (ensure) console.warn('[FollowUpSuggestions] Failed to generate:', error);
+        message.suggestionSet = null;
+    } finally {
+        message.suggestionLoading = false;
+    }
+};
+
+const recordSuggestionEvent = (message, set, eventType, questionId = '') => {
+    if (!set?.id) return;
+    void recordMessageSuggestionEvent(session_id.value, set.id, eventType, questionId).catch(() => undefined);
+};
+
+const handleFollowUpSelect = (message, item) => {
+    recordSuggestionEvent(message, message.suggestionSet, 'click', item.id);
+    pendingSuggestionAttribution = {
+        suggestion_set_id: message.suggestionSet.id,
+        question_id: item.id,
+    };
+    // Knowledge-backed follow-ups are generated from a specific KB. Keep that
+    // authorized retrieval anchor for the immediate next request; model-backed
+    // suggestions intentionally do not inherit transient @file/@tag/MCP/Skill scope.
+    pendingSuggestionKnowledgeBaseIds = [...new Set(item.knowledge_base_ids || [])];
+    if (inputFieldRef.value?.triggerSend) inputFieldRef.value.triggerSend(item.text);
+    else sendMsg(item.text);
+};
+
+const dismissSuggestions = (message, set) => {
+    message.suggestionsDismissed = true;
+    recordSuggestionEvent(message, set, 'dismiss');
 };
 
 // 防抖包装，切换知识库/文件时300ms内不重复请求
@@ -456,6 +535,11 @@ const {
     scrollContainer,
     debug: import.meta.env.DEV,
     onAfterMsgList: async () => {
+        for (const message of messagesList) {
+            if (message.role === 'assistant' && message.is_completed && message.suggestionSet === undefined) {
+                void loadFollowUpSuggestions(message, false);
+            }
+        }
         const lastMessage = messagesList[messagesList.length - 1];
         if (lastMessage && !lastMessage.is_completed) {
             isReplying.value = true;
@@ -496,6 +580,9 @@ const {
     onAgentChunkBound: (message) => {
         attachStreamDebugToMessage(message);
         pendingStreamDebug.value = null;
+    },
+    onTurnComplete: (message) => {
+        void loadFollowUpSuggestions(message, true);
     },
 });
 
@@ -636,6 +723,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const sidebarFileIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedFiles || []);
     const kbIdSet = new Set(sidebarKbIds);
     const fileIdSet = new Set(sidebarFileIds);
+    for (const kbId of pendingSuggestionKnowledgeBaseIds) {
+        if (kbId) kbIdSet.add(kbId);
+    }
     for (const item of mentionedItems || []) {
         if (!item?.id) continue;
         if (item.type === 'kb' && !kbIdSet.has(item.id)) {
@@ -658,6 +748,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const requestMcpServiceIds = agentEnabled ? mcpServiceIds : [];
     const requestSkillNames = agentEnabled ? skillNames : [];
 
+    const suggestionAttribution = pendingSuggestionAttribution;
+    pendingSuggestionAttribution = null;
+    pendingSuggestionKnowledgeBaseIds = [];
     await startStream({
         session_id: session_id.value,
         knowledge_base_ids: kbIds,
@@ -674,6 +767,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
         query: value,
+        suggestion_attribution: suggestionAttribution || undefined,
         method: 'POST',
         url: endpoint,
     });
@@ -826,6 +920,7 @@ onMounted(async () => {
 })
 const clearData = () => {
     stopStream();
+    referencesDrawer.close();
     isReplying.value = false;
     fullContent.value = '';
     // Stop any IM-reply recovery poll for the session we're leaving/switching.
@@ -877,6 +972,19 @@ onBeforeRouteUpdate((to, from, next) => {
         min-width: 100%;
         padding: 0;
         overflow-x: hidden;
+    }
+
+    &:not(.is-embedded) {
+        @media (min-width: 960px) {
+            transition: padding-right 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+        }
+    }
+
+    &.has-references-panel:not(.is-embedded) {
+        @media (min-width: 960px) {
+            padding-right: 420px;
+            box-sizing: border-box;
+        }
     }
 
     &.is-embedded :deep(.answers-input) {
@@ -1015,13 +1123,12 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .input-container {
     min-height: 115px;
-    // Keep the input visible when messages overflow: without flex-shrink: 0
-    // a tall .chat_scroll_box can squeeze this container down to 0 height.
     flex-shrink: 0;
     margin: 0 auto;
     width: 100%;
     max-width: 800px;
     box-sizing: border-box;
+    position: relative;
 
     &.is-embedded {
         max-width: 100%;

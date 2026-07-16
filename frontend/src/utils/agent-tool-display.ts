@@ -1,5 +1,7 @@
 import type { ComposerTranslation } from 'vue-i18n'
 
+export type RetrievalSearchSource = 'knowledge' | 'web' | 'mixed'
+
 function collectQueryStrings(value: unknown): string[] {
   if (value == null) return []
 
@@ -71,6 +73,44 @@ export function getWikiPageText(args: unknown): string {
   return Array.from(new Set(slugs)).join('、')
 }
 
+export function getRetrievalSearchSource(
+  args: unknown,
+  toolData?: Record<string, unknown> | null,
+): RetrievalSearchSource {
+  const fromArgs =
+    args && typeof args === 'object'
+      ? String((args as Record<string, unknown>).search_source || '')
+      : ''
+  const fromData = toolData ? String(toolData.search_source || '') : ''
+  const source = (fromData || fromArgs).trim()
+  if (source === 'web' || source === 'mixed') {
+    return source
+  }
+  return 'knowledge'
+}
+
+function getRetrievalStatusKeys(source: RetrievalSearchSource, failed: boolean) {
+  if (source === 'web') {
+    return failed
+      ? { pending: 'agentStream.ragPipeline.searchingWeb', pendingWithQuery: 'agentStream.ragPipeline.searchingWebWithQuery', done: 'agentStream.toolStatus.webSearch', doneFailed: 'agentStream.toolStatus.webSearchFailed' }
+      : { pending: 'agentStream.ragPipeline.searchingWeb', pendingWithQuery: 'agentStream.ragPipeline.searchingWebWithQuery', done: 'agentStream.toolStatus.webSearch', doneFailed: 'agentStream.toolStatus.webSearchFailed' }
+  }
+  if (source === 'mixed') {
+    return {
+      pending: 'agentStream.ragPipeline.searchingMixed',
+      pendingWithQuery: 'agentStream.ragPipeline.searchingMixedWithQuery',
+      done: 'agentStream.toolStatus.searchMixed',
+      doneFailed: 'agentStream.toolStatus.searchMixedFailed',
+    }
+  }
+  return {
+    pending: 'agentStream.ragPipeline.searching',
+    pendingWithQuery: 'agentStream.ragPipeline.searchingWithQuery',
+    done: 'agentStream.toolStatus.searchKb',
+    doneFailed: 'agentStream.toolStatus.searchKbFailed',
+  }
+}
+
 export function getKnowledgeSearchSummaryHtml(
   t: ComposerTranslation,
   toolData: Record<string, unknown> | null | undefined,
@@ -81,12 +121,28 @@ export function getKnowledgeSearchSummaryHtml(
   const count = (Array.isArray(results) ? results.length : 0) || Number(toolData.count) || 0
   if (count === 0) return t('agentStream.search.noResults')
 
+  const searchSource = getRetrievalSearchSource(null, toolData)
+  const webCount = Number(toolData.web_count) || 0
+  const docCount = Number(toolData.doc_count) || 0
+
+  if (searchSource === 'web' || (webCount > 0 && docCount === 0)) {
+    return t('agentStream.search.webResults', { count: `<strong>${count}</strong>` })
+  }
+
   const kbCounts = toolData.kb_counts
   const kbCount = kbCounts && typeof kbCounts === 'object' ? Object.keys(kbCounts).length : 0
   if (kbCount > 0) {
     return t('agentStream.search.foundResultsFromFiles', {
       count: `<strong>${count}</strong>`,
       files: `<strong>${kbCount}</strong>`,
+    })
+  }
+
+  if (searchSource === 'mixed' && docCount > 0 && webCount > 0) {
+    return t('agentStream.search.foundMixedResults', {
+      count: `<strong>${count}</strong>`,
+      docCount: `<strong>${docCount}</strong>`,
+      webCount: `<strong>${webCount}</strong>`,
     })
   }
 
@@ -115,15 +171,15 @@ export function getRagPipelineStepTitle(t: ComposerTranslation, event: RagPipeli
   }
 
   if (toolName === 'knowledge_search' || toolName === 'search_knowledge') {
+    const searchSource = getRetrievalSearchSource(event.arguments, event.tool_data)
+    const labels = getRetrievalStatusKeys(searchSource, event.success === false)
     if (pending) {
       return query
-        ? t('agentStream.ragPipeline.searchingWithQuery', { query })
-        : t('agentStream.ragPipeline.searching')
+        ? t(labels.pendingWithQuery, { query })
+        : t(labels.pending)
     }
 
-    const baseTitle = event.success === false
-      ? t('agentStream.toolStatus.searchKbFailed')
-      : t('agentStream.toolStatus.searchKb')
+    const baseTitle = event.success === false ? t(labels.doneFailed) : t(labels.done)
     return query ? `${baseTitle}：「${query}」` : baseTitle
   }
 

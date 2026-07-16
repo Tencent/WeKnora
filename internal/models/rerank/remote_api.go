@@ -56,13 +56,16 @@ func NewOpenAIReranker(config *RerankerConfig) (*OpenAIReranker, error) {
 	if url := config.BaseURL; url != "" {
 		baseURL = url
 	}
+	if err := validateRerankBaseURL(baseURL); err != nil {
+		return nil, err
+	}
 
 	return &OpenAIReranker{
 		modelName: config.ModelName,
 		modelID:   config.ModelID,
 		apiKey:    apiKey,
 		baseURL:   baseURL,
-		client:    &http.Client{},
+		client:    newRerankHTTPClient(0),
 	}, nil
 }
 

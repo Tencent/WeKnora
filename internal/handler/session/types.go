@@ -46,7 +46,7 @@ type CreateKnowledgeQARequest struct {
 	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // Selected knowledge base ID for this request
 	KnowledgeIds     []string               `json:"knowledge_ids"`                         // Selected knowledge ID for this request
 	AgentEnabled     bool                   `json:"agent_enabled"`                         // Whether agent mode is enabled for this request
-	AgentID          string                 `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its tenant from share relation)
+	AgentID          string                 `json:"agent_id"`                              // Selected custom agent ID (backend resolves shared agent and its workspace from share relation)
 	WebSearchEnabled bool                   `json:"web_search_enabled"`                    // Whether web search is enabled for this request
 	SummaryModelID   string                 `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
 	MCPServiceIDs    []string               `json:"mcp_service_ids"`                       // Per-request MCP services selected via @mention
@@ -65,10 +65,11 @@ type CreateKnowledgeQARequest struct {
 	//           user's personal memory setting doesn't leak into a widget
 	//           context; older clients that still send a literal bool also
 	//           land here (back-compat).
-	EnableMemory      *bool              `json:"enable_memory,omitempty"`
-	Images            []ImageAttachment  `json:"images"`                       // Attached images for multimodal chat
-	AttachmentUploads []AttachmentUpload `json:"attachment_uploads,omitempty"` // Attached files (documents, audio, etc.)
-	Channel           string             `json:"channel"`                      // Source channel: "web", "api", "im", etc.
+	EnableMemory          *bool                        `json:"enable_memory,omitempty"`
+	Images                []ImageAttachment            `json:"images"`                       // Attached images for multimodal chat
+	AttachmentUploads     []AttachmentUpload           `json:"attachment_uploads,omitempty"` // Attached files (documents, audio, etc.)
+	Channel               string                       `json:"channel"`                      // Source channel: "web", "api", "im", etc.
+	SuggestionAttribution *types.SuggestionAttribution `json:"suggestion_attribution,omitempty"`
 }
 
 // AttachmentUpload represents a file attachment upload from the client
@@ -80,10 +81,12 @@ type AttachmentUpload struct {
 
 // SearchKnowledgeRequest defines the request structure for searching knowledge without LLM summarization
 type SearchKnowledgeRequest struct {
-	Query            string   `json:"query"              binding:"required"` // Query text to search for
-	KnowledgeBaseID  string   `json:"knowledge_base_id"`                     // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
-	KnowledgeIDs     []string `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
+	Query            string                 `json:"query"              binding:"required"` // Query text to search for
+	KnowledgeBaseID  string                 `json:"knowledge_base_id"`                     // Single knowledge base ID (for backward compatibility)
+	KnowledgeBaseIDs []string               `json:"knowledge_base_ids"`                    // IDs of knowledge bases to search (multi-KB support)
+	KnowledgeIDs     []string               `json:"knowledge_ids"`                         // IDs of specific knowledge (files) to search
+	TagIDs           []string               `json:"tag_ids"`                               // Tag IDs for filtering within a single KB
+	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
 }
 
 // StopSessionRequest represents the stop session request

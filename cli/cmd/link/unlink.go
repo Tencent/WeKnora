@@ -79,6 +79,9 @@ is present anywhere in the parent chain.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor: "Remove the .weknora/project.yaml KB binding from the current directory tree. No flags required; walks up from cwd to find the link.",
 		Output:  "envelope.data has project_link_path of the removed file",
+		Examples: []string{
+			"weknora unlink",
+		},
 	})
 	return cmd
 }

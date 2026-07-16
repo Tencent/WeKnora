@@ -135,6 +135,28 @@
                         <p class="form-tip granularity-hint">{{ granularityHint }}</p>
                       </div>
 
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.contentInstructionsLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.contentInstructionsTip') }}</p>
+                        <t-textarea
+                          v-model="formData.wikiConfig.contentInstructions"
+                          :placeholder="$t('knowledgeEditor.wiki.contentInstructionsPlaceholder')"
+                          :maxlength="4000"
+                          :autosize="{ minRows: 3, maxRows: 8 }"
+                        />
+                      </div>
+
+                      <div v-if="!isFAQ && formData.indexingStrategy.wikiEnabled" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.wiki.extractionInstructionsLabel') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.wiki.extractionInstructionsTip') }}</p>
+                        <t-textarea
+                          v-model="formData.wikiConfig.extractionInstructions"
+                          :placeholder="$t('knowledgeEditor.wiki.extractionInstructionsPlaceholder')"
+                          :maxlength="4000"
+                          :autosize="{ minRows: 3, maxRows: 8 }"
+                        />
+                      </div>
+
                       <div class="form-item" data-guide="kb-create-name">
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.nameLabel') }}</label>
                         <t-input 
@@ -232,8 +254,10 @@
                 <!-- 存储引擎 -->
                 <div v-if="!isFAQ && formData && currentSection === 'storage'" class="section">
                   <KBStorageSettings
+                    :storage-backend-id="formData.storageBackendId"
                     :storage-provider="formData.storageProvider"
                     :has-files="mode === 'edit' && hasFiles"
+                    @update:storage-backend-id="handleStorageBackendUpdate"
                     @update:storage-provider="handleStorageProviderUpdate"
                   />
                 </div>
@@ -287,6 +311,34 @@
                             @add-model="handleAddVLLMModel"
                             :placeholder="$t('knowledgeEditor.advanced.multimodal.vllmPlaceholder')"
                           />
+                        </div>
+                      </div>
+
+                      <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+                        <div class="setting-info">
+                          <label>{{ $t('knowledgeEditor.advanced.multimodal.descriptionLanguageLabel') }}</label>
+                          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.descriptionLanguageDescription') }}</p>
+                        </div>
+                        <div class="setting-control">
+                          <t-select v-model="formData.multimodalConfig.descriptionLanguage" clearable
+                            :placeholder="$t('knowledgeEditor.advanced.multimodal.descriptionLanguageAuto')">
+                            <t-option value="Chinese" :label="$t('language.zhCN')" />
+                            <t-option value="English" :label="$t('language.enUS')" />
+                            <t-option value="Korean" :label="$t('language.koKR')" />
+                            <t-option value="Russian" :label="$t('language.ruRU')" />
+                          </t-select>
+                        </div>
+                      </div>
+
+                      <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical">
+                        <div class="setting-info">
+                          <label>{{ $t('knowledgeEditor.advanced.multimodal.customInstructionsLabel') }}</label>
+                          <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.customInstructionsDescription') }}</p>
+                        </div>
+                        <div class="setting-control setting-control-full">
+                          <t-textarea v-model="formData.multimodalConfig.customInstructions"
+                            :placeholder="$t('knowledgeEditor.advanced.multimodal.customInstructionsPlaceholder')"
+                            :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
                         </div>
                       </div>
                     </div>
@@ -356,7 +408,9 @@
                     :question-generation="formData.questionGenerationConfig"
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
                     :all-models="allModels"
+                    :table-metadata-instructions="formData.chunkingConfig.tableMetadataInstructions"
                     @update:question-generation="handleQuestionGenerationUpdate"
+                    @update:table-metadata-instructions="(value: string) => { if (formData) formData.chunkingConfig.tableMetadataInstructions = value }"
                   />
                 </div>
 
@@ -656,12 +710,16 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       // New KBs default to the adaptive auto-strategy. User can change in the UI.
       strategy: 'auto' as string,
       tokenLimit: 0,
-      languages: [] as string[]
+      languages: [] as string[],
+      tableMetadataInstructions: ''
     },
+    storageBackendId: '' as string,
     storageProvider: '' as string,
     multimodalConfig: {
       enabled: false,
-      vllmModelId: ''
+      vllmModelId: '',
+      descriptionLanguage: '',
+      customInstructions: ''
     },
     asrConfig: {
       enabled: false,
@@ -680,16 +738,20 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
         node1: string
         node2: string
         type: string
-      }>
+      }>,
+      customInstructions: ''
     },
     questionGenerationConfig: {
       enabled: true,
-      questionCount: 3
+      questionCount: 3,
+      customInstructions: ''
     },
     wikiConfig: {
       synthesisModelId: '',
       maxPagesPerIngest: 0,
       extractionGranularity: 'standard' as 'focused' | 'standard' | 'exhaustive',
+      contentInstructions: '',
+      extractionInstructions: '',
     },
     indexingStrategy: {
       vectorEnabled: true,
@@ -770,12 +832,16 @@ const loadKBData = async () => {
         // The user has to actively pick a value to opt in to the new tiers.
         strategy: kb.chunking_config?.strategy || '',
         tokenLimit: kb.chunking_config?.token_limit || 0,
-        languages: kb.chunking_config?.languages || []
+        languages: kb.chunking_config?.languages || [],
+        tableMetadataInstructions: kb.chunking_config?.table_metadata_instructions || ''
       },
+      storageBackendId: (kb.storage_backend_id || '') as string,
       storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
         enabled: !!kb.vlm_config?.enabled,
-        vllmModelId: kb.vlm_config?.model_id || ''
+        vllmModelId: kb.vlm_config?.model_id || '',
+        descriptionLanguage: kb.vlm_config?.description_language || '',
+        customInstructions: kb.vlm_config?.custom_instructions || ''
       },
       asrConfig: {
         enabled: !!kb.asr_config?.enabled,
@@ -790,11 +856,13 @@ const loadKBData = async () => {
           name: node.name,
           attributes: node.attributes || []
         })),
-        relations: kb.extract_config?.relations || []
+        relations: kb.extract_config?.relations || [],
+        customInstructions: kb.extract_config?.custom_instructions || ''
       },
       questionGenerationConfig: {
         enabled: kb.question_generation_config?.enabled || false,
-        questionCount: kb.question_generation_config?.question_count || 3
+        questionCount: kb.question_generation_config?.question_count || 3,
+        customInstructions: kb.question_generation_config?.custom_instructions || ''
       },
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
@@ -805,6 +873,8 @@ const loadKBData = async () => {
             ? kb.wiki_config.extraction_granularity
             : 'standard'
         ) as 'focused' | 'standard' | 'exhaustive',
+        contentInstructions: kb.wiki_config?.content_instructions || '',
+        extractionInstructions: kb.wiki_config?.extraction_instructions || '',
       },
       indexingStrategy: {
         vectorEnabled: kb.indexing_strategy?.vector_enabled ?? true,
@@ -953,22 +1023,35 @@ const handleAddWikiModel = () => {
 
 const handleStorageProviderUpdate = (value: string) => {
   if (formData.value) {
-    formData.value.storageProvider = value || tenantDefaultStorageProvider.value || 'local'
+    formData.value.storageProvider = props.mode === 'create'
+      ? editorResources.resolveUsableStorageProvider(value || tenantDefaultStorageProvider.value)
+      : (value || tenantDefaultStorageProvider.value || 'local')
+  }
+}
+
+const handleStorageBackendUpdate = (value: string) => {
+  if (formData.value) {
+    formData.value.storageBackendId = value
   }
 }
 
 async function loadTenantDefaultStorageProvider(force = false) {
   try {
     await editorResources.ensureStorageEngine(force)
-    tenantDefaultStorageProvider.value = editorResources.storageConfig?.default_provider || 'local'
+    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider(
+      editorResources.storageConfig?.default_provider,
+    )
   } catch {
-    tenantDefaultStorageProvider.value = 'local'
+    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider()
   }
 }
 
 /** Resolved storage provider for create payload (never silently default to local before tenant config loads). */
 function resolvedStorageProvider(): string {
   const explicit = formData.value?.storageProvider?.trim()
+  if (props.mode === 'create') {
+    return editorResources.resolveUsableStorageProvider(explicit || tenantDefaultStorageProvider.value)
+  }
   if (explicit) return explicit
   return tenantDefaultStorageProvider.value || 'local'
 }
@@ -1067,6 +1150,7 @@ const buildSubmitData = () => {
       strategy: formData.value.chunkingConfig.strategy ?? '',
       token_limit: formData.value.chunkingConfig.tokenLimit ?? 0,
       languages: formData.value.chunkingConfig.languages ?? [],
+      table_metadata_instructions: formData.value.chunkingConfig.tableMetadataInstructions || '',
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
@@ -1089,7 +1173,9 @@ const buildSubmitData = () => {
     enabled: formData.value.multimodalConfig.enabled,
     model_id: formData.value.multimodalConfig.enabled
       ? (formData.value.multimodalConfig.vllmModelId || '')
-      : ''
+      : '',
+    description_language: formData.value.multimodalConfig.descriptionLanguage || '',
+    custom_instructions: formData.value.multimodalConfig.customInstructions || ''
   }
 
   // 添加ASR语音识别配置
@@ -1101,8 +1187,11 @@ const buildSubmitData = () => {
     language: formData.value.asrConfig?.language || ''
   }
 
-  // 存储引擎：仅传 provider，参数从全局设置读取
-  // Write to storage_provider_config (authoritative) + storage_config (legacy dual-write)
+  // storage_backend_id is authoritative. Keep provider projection for old clients
+  // and for rolling upgrades where a node has not picked up the new schema yet.
+  if (formData.value.storageBackendId) {
+    data.storage_backend_id = formData.value.storageBackendId
+  }
   const storageProvider = resolvedStorageProvider()
   data.storage_provider_config = {
     provider: storageProvider
@@ -1118,7 +1207,14 @@ const buildSubmitData = () => {
   if (formData.value.questionGenerationConfig?.enabled) {
     data.question_generation_config = {
       enabled: true,
-      question_count: formData.value.questionGenerationConfig.questionCount || 3
+      question_count: formData.value.questionGenerationConfig.questionCount || 3,
+      custom_instructions: formData.value.questionGenerationConfig.customInstructions || ''
+    }
+  } else {
+    data.question_generation_config = {
+      enabled: false,
+      question_count: 3,
+      custom_instructions: formData.value.questionGenerationConfig?.customInstructions || ''
     }
   }
 
@@ -1136,6 +1232,8 @@ const buildSubmitData = () => {
       synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
       max_pages_per_ingest: formData.value.wikiConfig?.maxPagesPerIngest || 0,
       extraction_granularity: formData.value.wikiConfig?.extractionGranularity || 'standard',
+      content_instructions: formData.value.wikiConfig?.contentInstructions || '',
+      extraction_instructions: formData.value.wikiConfig?.extractionInstructions || '',
     }
   }
 
@@ -1157,7 +1255,8 @@ const buildSubmitData = () => {
       text: formData.value.nodeExtractConfig.text || '',
       tags: formData.value.nodeExtractConfig.tags || [],
       nodes: formData.value.nodeExtractConfig.nodes || [],
-      relations: formData.value.nodeExtractConfig.relations || []
+      relations: formData.value.nodeExtractConfig.relations || [],
+      custom_instructions: formData.value.nodeExtractConfig.customInstructions || ''
     }
   }
 
@@ -1233,6 +1332,8 @@ const doSubmit = async () => {
           synthesis_model_id: formData.value.modelConfig?.wikiSynthesisModelId || '',
           max_pages_per_ingest: formData.value.wikiConfig.maxPagesPerIngest || 0,
           extraction_granularity: formData.value.wikiConfig.extractionGranularity || 'standard',
+          content_instructions: formData.value.wikiConfig.contentInstructions || '',
+          extraction_instructions: formData.value.wikiConfig.extractionInstructions || '',
         }
       }
       if (formData.value.type !== 'faq') {
@@ -1268,22 +1369,26 @@ const doSubmit = async () => {
           // payload to let users reset back to defaults.
           strategy: formData.value?.chunkingConfig.strategy ?? '',
           tokenLimit: formData.value?.chunkingConfig.tokenLimit ?? 0,
-          languages: formData.value?.chunkingConfig.languages ?? []
+          languages: formData.value?.chunkingConfig.languages ?? [],
+          tableMetadataInstructions: formData.value?.chunkingConfig.tableMetadataInstructions ?? ''
         },
         multimodal: {
           enabled: !!data.vlm_config?.enabled
         },
+        storageBackendId: formData.value?.storageBackendId || '',
         storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || 'local',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
           text: data.extract_config?.text || '',
           tags: data.extract_config?.tags || [],
           nodes: data.extract_config?.nodes || [],
-          relations: data.extract_config?.relations || []
+          relations: data.extract_config?.relations || [],
+          customInstructions: data.extract_config?.custom_instructions || ''
         },
         questionGeneration: {
           enabled: data.question_generation_config?.enabled || false,
-          questionCount: data.question_generation_config?.question_count || 3
+          questionCount: data.question_generation_config?.question_count || 3,
+          customInstructions: data.question_generation_config?.custom_instructions || ''
         }
       }
 
@@ -1385,14 +1490,14 @@ watch(() => props.visible, async (newVal) => {
       currentSection.value = uiStore.kbEditorInitialSection
     }
     
-    // 加载模型列表与租户默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
+    // 加载模型列表与空间默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
     await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
     
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {
       await loadKBData()
     } else {
-      // 创建模式：初始化空表单，并预填租户默认存储引擎
+      // 创建模式：初始化空表单，并预填空间默认存储引擎
       formData.value = initFormData(props.initialType || 'document')
       formData.value.storageProvider = tenantDefaultStorageProvider.value
       hasFiles.value = false
@@ -1896,4 +2001,3 @@ watch(
   }
 }
 </style>
-

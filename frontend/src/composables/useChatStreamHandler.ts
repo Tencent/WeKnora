@@ -13,6 +13,7 @@ export interface UseChatStreamHandlerOptions {
   isAgentStreamSession: () => boolean
   scrollToBottom: (force?: boolean) => void
   onReplyComplete?: (content: string) => void
+  onTurnComplete?: (message: ChatMessage) => void
   onError?: (message: string) => void
   /** Main chat: keep the last incomplete message reactive for continue-stream. */
   preserveIncompleteStreamReactive?: boolean
@@ -42,6 +43,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     isAgentStreamSession,
     scrollToBottom,
     onReplyComplete,
+    onTurnComplete,
     onError,
     preserveIncompleteStreamReactive = false,
     isFirstEnter,
@@ -259,7 +261,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     const events: ChatMessage[] = []
 
     if (agentSteps && Array.isArray(agentSteps) && agentSteps.length > 0) {
-      agentSteps.forEach((step: ChatMessage) => {
+      agentSteps.forEach((rawStep) => {
+        const step = rawStep as ChatMessage
         const stepTimestamp = step.timestamp ? new Date(String(step.timestamp)).getTime() : 0
         const toolCalls = step.tool_calls
         const hasToolCalls = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0
@@ -807,6 +810,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         isReplying.value = false
         message.is_completed = true
         onReplyComplete?.(String(message.content || ''))
+        onTurnComplete?.(message)
         fullContent.value = ''
         currentAssistantMessageId.value = ''
         if (message.agentEventStream) {
@@ -1002,6 +1006,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       currentAssistantMessageId.value = ''
     }
     updateAssistantSession(obj)
+    if (data.done) {
+      const completed = resolveActiveAssistantMessage(data) || obj
+      onTurnComplete?.(completed)
+    }
   }
 
   return {

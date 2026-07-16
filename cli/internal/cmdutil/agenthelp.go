@@ -31,6 +31,12 @@ type AgentHelp struct {
 	Warnings      []string `json:"warnings,omitempty"`
 }
 
+// agentHelpAnnotation stores the marshaled AgentHelp on the command so the
+// `weknora schema` command can introspect any command's contract without
+// invoking its help func (and toggling WEKNORA_AGENT_HELP). Shares the
+// annotations map with SetRisk (distinct keys).
+const agentHelpAnnotation = "weknora.agent_help"
+
 // SetAgentHelp attaches agent-targeted help metadata to a command.
 //
 // Routing:
@@ -39,7 +45,17 @@ type AgentHelp struct {
 //   - Otherwise (human help path): if cmd has risk annotations from SetRisk,
 //     prepend "Risk: <action> (<level>)" line; then render the normal human
 //     help via origHelp; then append the "AI agents:" Warnings block.
+//
+// The AgentHelp is also recorded as a JSON annotation so `weknora schema` can
+// surface it as a first-class, discoverable command (not only via the
+// WEKNORA_AGENT_HELP env toggle on --help).
 func SetAgentHelp(cmd *cobra.Command, ah AgentHelp) {
+	if b, err := json.Marshal(ah); err == nil {
+		if cmd.Annotations == nil {
+			cmd.Annotations = make(map[string]string)
+		}
+		cmd.Annotations[agentHelpAnnotation] = string(b)
+	}
 	origHelp := cmd.HelpFunc()
 	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
 		if os.Getenv("WEKNORA_AGENT_HELP") == "1" {
@@ -62,6 +78,22 @@ func SetAgentHelp(cmd *cobra.Command, ah AgentHelp) {
 			}
 		}
 	})
+}
+
+// AgentHelpFor returns the AgentHelp registered on cmd via SetAgentHelp.
+// ok is false when the command carries none (e.g. cobra-generated subtrees).
+func AgentHelpFor(cmd *cobra.Command) (ah AgentHelp, ok bool) {
+	if cmd.Annotations == nil {
+		return ah, false
+	}
+	raw, present := cmd.Annotations[agentHelpAnnotation]
+	if !present {
+		return ah, false
+	}
+	if err := json.Unmarshal([]byte(raw), &ah); err != nil {
+		return ah, false
+	}
+	return ah, true
 }
 
 func emitAgentHelp(w io.Writer, ah AgentHelp) {

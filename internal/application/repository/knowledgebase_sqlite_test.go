@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     pinned_at DATETIME NULL,
     asr_config TEXT,
     vector_store_id VARCHAR(36),
+    storage_backend_id VARCHAR(36),
     wiki_config TEXT,
     indexing_strategy TEXT,
     creator_id VARCHAR(36),

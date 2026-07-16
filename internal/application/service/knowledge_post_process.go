@@ -433,7 +433,8 @@ func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.C
 		return false
 	}
 
-	task := asynq.NewTask(types.TypeSummaryGeneration, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
+	task := asynq.NewTask(types.TypeSummaryGeneration, payloadBytes,
+		asynq.Queue(types.QueueSummary), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
 		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue summary generation for %s: %v", payload.KnowledgeID, err)
 		return false
@@ -528,7 +529,8 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 			continue
 		}
 
-		task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes, asynq.Queue(types.QueueQuestion), asynq.MaxRetry(3))
+		task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes,
+			asynq.Queue(types.QueueQuestion), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 		if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue question generation batch %d for %s: %v", batchIndex-1, payload.KnowledgeID, err)
 			continue

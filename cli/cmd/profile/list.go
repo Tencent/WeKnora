@@ -78,7 +78,7 @@ func runList(fopts *cmdutil.FormatOptions) error {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 
 	if fopts.WantsJSON() {
-		meta := &output.Meta{Count: len(entries)}
+		meta := &output.Meta{Count: output.IntPtr(len(entries))}
 		return fopts.Emit(iostreams.IO.Out, entries, meta)
 	}
 	if len(entries) == 0 {

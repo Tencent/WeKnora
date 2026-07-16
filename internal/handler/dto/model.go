@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"context"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -28,8 +29,8 @@ type ModelResponse struct {
 	Status      types.ModelStatus  `json:"status"`
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
-	// Per-field "configured?" map. Omitted for builtin models (no
-	// per-tenant credentials). See MCPServiceResponse.Credentials.
+	// Per-field "configured?" map. Omitted for builtin models unless the
+	// caller is a system administrator. See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
 }
 
@@ -46,6 +47,7 @@ type ModelParametersDTO struct {
 	ExtraConfig         map[string]string         `json:"extra_config,omitempty"`
 	CustomHeaders       map[string]string         `json:"custom_headers,omitempty"`
 	SupportsVision      bool                      `json:"supports_vision"`
+	MaxConcurrency      int                       `json:"max_concurrency,omitempty"`
 	AppID               string                    `json:"app_id,omitempty"`
 }
 
@@ -53,7 +55,7 @@ type ModelParametersDTO struct {
 //
 // Builtin models are shared across tenants — strip BaseURL (which can leak
 // the tenant's private endpoint) and any non-shared parameters.
-func NewModelResponse(m *types.Model) *ModelResponse {
+func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 	if m == nil {
 		return nil
 	}
@@ -66,9 +68,16 @@ func NewModelResponse(m *types.Model) *ModelResponse {
 		ExtraConfig:         m.Parameters.ExtraConfig,
 		CustomHeaders:       m.Parameters.CustomHeaders,
 		SupportsVision:      m.Parameters.SupportsVision,
+		MaxConcurrency:      m.Parameters.MaxConcurrency,
 		AppID:               m.Parameters.AppID,
 	}
-	if m.IsBuiltin {
+	canManageBuiltin := m.IsBuiltin && types.IsSystemAdminFromContext(ctx)
+	if !CanViewIntegrationSecrets(ctx) && !canManageBuiltin {
+		params.ExtraConfig = nil
+		params.CustomHeaders = nil
+		params.BaseURL = ""
+	}
+	if m.IsBuiltin && !canManageBuiltin {
 		// Builtin: strip everything that could reveal per-tenant config.
 		// EmbeddingParameters and ParameterSize / Provider / InterfaceType /
 		// SupportsVision are intentionally preserved (they describe the
@@ -79,7 +88,7 @@ func NewModelResponse(m *types.Model) *ModelResponse {
 		params.AppID = ""
 	}
 	var creds map[string]CredentialFieldMetadata
-	if !m.IsBuiltin {
+	if !m.IsBuiltin || canManageBuiltin {
 		creds = map[string]CredentialFieldMetadata{
 			"api_key":    {Configured: m.Parameters.APIKey != ""},
 			"app_secret": {Configured: m.Parameters.AppSecret != ""},
@@ -104,10 +113,10 @@ func NewModelResponse(m *types.Model) *ModelResponse {
 }
 
 // NewModelResponses is the slice convenience wrapper.
-func NewModelResponses(models []*types.Model) []*ModelResponse {
+func NewModelResponses(ctx context.Context, models []*types.Model) []*ModelResponse {
 	out := make([]*ModelResponse, 0, len(models))
 	for _, m := range models {
-		out = append(out, NewModelResponse(m))
+		out = append(out, NewModelResponse(ctx, m))
 	}
 	return out
 }

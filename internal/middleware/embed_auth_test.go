@@ -161,14 +161,6 @@ func (f *fakeTenantService) ListTenants(ctx context.Context) ([]*types.Tenant, e
 	return nil, nil
 }
 
-func (f *fakeTenantService) UpdateAPIKey(ctx context.Context, id uint64) (string, error) {
-	return "", nil
-}
-
-func (f *fakeTenantService) ExtractTenantIDFromAPIKey(apiKey string) (uint64, error) {
-	return 0, nil
-}
-
 func (f *fakeTenantService) ListAllTenants(ctx context.Context) ([]*types.Tenant, error) {
 	return nil, nil
 }

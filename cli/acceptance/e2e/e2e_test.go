@@ -91,20 +91,40 @@ func TestRAGFullLoop(t *testing.T) {
 	}
 	t.Logf("search returned %d results", len(results))
 
-	// 5. chat --format json → bare {answer, references, ...} object
-	var chat struct {
-		Answer     string           `json:"answer"`
-		References []map[string]any `json:"references"`
+	// 5. chat --format json → bounded answer-event envelope (--reference for citations)
+	var chatEnv struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Events []struct {
+				ResponseType        string `json:"response_type"`
+				Content             string `json:"content"`
+				KnowledgeReferences []struct {
+					ChunkID string `json:"chunk_id"`
+				} `json:"knowledge_references"`
+			} `json:"events"`
+			SessionID string `json:"session_id"`
+		} `json:"data"`
 	}
-	runJSONInto(t, bin, env, &chat, "chat", "summarize the document briefly", "--kb", created.ID, "--format", "json")
-	if strings.TrimSpace(chat.Answer) == "" {
+	runJSONInto(t, bin, env, &chatEnv, "chat", "summarize the document briefly", "--kb", created.ID, "--format", "json", "--reference")
+	if !chatEnv.OK {
+		t.Fatal("chat ok=false")
+	}
+	var answer strings.Builder
+	refCount := 0
+	for _, ev := range chatEnv.Data.Events {
+		if ev.ResponseType == "answer" {
+			answer.WriteString(ev.Content)
+		}
+		refCount += len(ev.KnowledgeReferences)
+	}
+	if strings.TrimSpace(answer.String()) == "" {
 		t.Fatalf("chat returned empty answer")
 	}
-	t.Logf("chat answer (%d chars), %d references", len(chat.Answer), len(chat.References))
-	if len(chat.References) == 0 {
+	t.Logf("chat answer (%d chars), %d reference indexes", len(answer.String()), refCount)
+	if refCount == 0 {
 		// Soft warning - some servers may not surface references for every
 		// question, but the demo flow is supposed to.
-		t.Logf("warning: chat returned 0 references (server may have a different config)")
+		t.Logf("warning: chat returned 0 reference indexes (server may have a different config)")
 	}
 }
 

@@ -80,7 +80,10 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 			time.Sleep(delay)
 		}
 
-		ctx := context.Background()
+		// Tag as a background worker execution so the per-model concurrency
+		// governor throttles Lite-mode ingestion/enrichment LLM calls, mirroring
+		// the asynq backgroundTaskMiddleware in the Redis path.
+		ctx := types.WithBackgroundTask(context.Background())
 		start := time.Now()
 		logger.Infof(ctx, "[SyncTask] Executing task type=%s id=%s", task.Type(), taskID)
 
@@ -146,5 +149,6 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeKnowledgePostProcess, params.KnowledgePostProcess.Handle)
 	params.Executor.RegisterHandler(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
 	params.Executor.RegisterHandler(types.TypeWikiIngest, params.WikiIngest.Handle)
+	params.Executor.RegisterHandler(types.TypeWikiFinalize, params.WikiIngest.Handle)
 	logger.Infof(context.Background(), "[SyncTask] All task handlers registered (Lite mode, no Redis)")
 }

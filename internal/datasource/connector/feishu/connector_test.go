@@ -6,13 +6,21 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestMain(m *testing.M) {
+	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+	os.Exit(m.Run())
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // Fake Feishu API server
@@ -374,13 +382,13 @@ func TestParseFeishuConfig(t *testing.T) {
 			Credentials: map[string]interface{}{
 				"app_id":     "id1",
 				"app_secret": "sec1",
-				"base_url":   "https://custom.example.com",
+				"base_url":   "https://open.feishu.cn",
 			},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if cfg.AppID != "id1" || cfg.AppSecret != "sec1" || cfg.BaseURL != "https://custom.example.com" {
+		if cfg.AppID != "id1" || cfg.AppSecret != "sec1" || cfg.BaseURL != "https://open.feishu.cn" {
 			t.Errorf("unexpected config: %+v", cfg)
 		}
 	})

@@ -90,8 +90,6 @@ type Tenant struct {
 	Name string `yaml:"name"                json:"name"`
 	// Description
 	Description string `yaml:"description"         json:"description"`
-	// API key
-	APIKey string `yaml:"api_key"             json:"api_key"`
 	// Status
 	Status string `yaml:"status"              json:"status"              gorm:"default:'active'"`
 	// Retriever engines
@@ -102,9 +100,9 @@ type Tenant struct {
 	StorageQuota int64 `yaml:"storage_quota"       json:"storage_quota"       gorm:"default:10737418240"`
 	// Storage used (Bytes)
 	StorageUsed int64 `yaml:"storage_used"        json:"storage_used"        gorm:"default:0"`
-	// Global Context configuration for this tenant (default for all sessions)
+	// Global Context configuration for this workspace (default for all sessions)
 	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
-	// Global WebSearch configuration for this tenant
+	// Global WebSearch configuration for this workspace
 	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:jsonb"`
 	// Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.
 	ParserEngineConfig *ParserEngineConfig `yaml:"parser_engine_config" json:"parser_engine_config" gorm:"type:jsonb"`
@@ -112,6 +110,8 @@ type Tenant struct {
 	Credentials *CredentialsConfig `yaml:"credentials" json:"credentials" gorm:"type:jsonb"`
 	// Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.
 	StorageEngineConfig *StorageEngineConfig `yaml:"storage_engine_config" json:"storage_engine_config" gorm:"type:jsonb"`
+	// DefaultStorageBackendID is the workspace default concrete storage instance.
+	DefaultStorageBackendID *string `yaml:"default_storage_backend_id" json:"default_storage_backend_id,omitempty" gorm:"column:default_storage_backend_id;type:varchar(36)"`
 	// Chat history config: knowledge base configuration for indexing and searching chat messages via vector search
 	ChatHistoryConfig *ChatHistoryConfig `yaml:"chat_history_config" json:"chat_history_config" gorm:"type:jsonb"`
 	// Retrieval config: global search/retrieval parameters shared by knowledge search and message search
@@ -144,31 +144,6 @@ func (t *Tenant) BeforeCreate(tx *gorm.DB) error {
 	if t.RetrieverEngines.Engines == nil {
 		t.RetrieverEngines.Engines = []RetrieverEngineParams{}
 	}
-	return nil
-}
-
-// BeforeSave encrypts APIKey before persisting to database.
-// Uses tx.Statement.SetColumn to avoid polluting the in-memory struct.
-func (t *Tenant) BeforeSave(tx *gorm.DB) error {
-	if key := utils.GetAESKey(); key != nil && t.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(t.APIKey, key); err == nil {
-			tx.Statement.SetColumn("api_key", encrypted)
-		}
-	}
-	return nil
-}
-
-// AfterFind decrypts APIKey after loading from database.
-// Legacy plaintext (without enc:v1: prefix) is returned as-is. When the value
-// is encrypted but SYSTEM_AES_KEY is missing/rotated and the data cannot be
-// decrypted, the error is propagated so the read fails loudly instead of
-// returning ciphertext to callers.
-func (t *Tenant) AfterFind(tx *gorm.DB) error {
-	decrypted, err := utils.DecryptStoredSecret(t.APIKey)
-	if err != nil {
-		return fmt.Errorf("decrypt tenants.api_key (id=%d): %w", t.ID, err)
-	}
-	t.APIKey = decrypted
 	return nil
 }
 
@@ -505,22 +480,26 @@ type MinIOEngineConfig struct {
 
 // COSEngineConfig is for Tencent Cloud COS.
 type COSEngineConfig struct {
-	SecretID   string `json:"secret_id"`
-	SecretKey  string `json:"secret_key"`
-	Region     string `json:"region"`
-	BucketName string `json:"bucket_name"`
-	AppID      string `json:"app_id"`
-	PathPrefix string `json:"path_prefix"`
+	SecretID       string `json:"secret_id"`
+	SecretKey      string `json:"secret_key"`
+	Region         string `json:"region"`
+	BucketName     string `json:"bucket_name"`
+	AppID          string `json:"app_id"`
+	PathPrefix     string `json:"path_prefix"`
+	TempBucketName string `json:"temp_bucket_name"`
+	TempRegion     string `json:"temp_region"`
 }
 
 // TOSEngineConfig is for Volcengine TOS (火山引擎对象存储).
 type TOSEngineConfig struct {
-	Endpoint   string `json:"endpoint"`
-	Region     string `json:"region"`
-	AccessKey  string `json:"access_key"`
-	SecretKey  string `json:"secret_key"`
-	BucketName string `json:"bucket_name"`
-	PathPrefix string `json:"path_prefix"`
+	Endpoint       string `json:"endpoint"`
+	Region         string `json:"region"`
+	AccessKey      string `json:"access_key"`
+	SecretKey      string `json:"secret_key"`
+	BucketName     string `json:"bucket_name"`
+	PathPrefix     string `json:"path_prefix"`
+	TempBucketName string `json:"temp_bucket_name"`
+	TempRegion     string `json:"temp_region"`
 }
 
 // S3EngineConfig is for AWS S3 and S3-compatible object storage.

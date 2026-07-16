@@ -81,6 +81,7 @@ exactly to guard against unintended deletes.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete a knowledge base and all its contents",
 		RequiredFlags: []string{"<kb-id> (positional)"},
+		Output:        "envelope.data is {id, deleted:true}",
 		Examples: []string{
 			"weknora kb delete kb_abc -y",
 			"weknora kb delete kb_abc -y --format json",
@@ -94,7 +95,7 @@ exactly to guard against unintended deletes.`,
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "knowledge base", id, "kb.delete", "weknora kb delete "+id+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "knowledge base", id, "kb.delete", []string{"weknora", "kb", "delete", id, "-y"}); err != nil {
 		return err
 	}
 

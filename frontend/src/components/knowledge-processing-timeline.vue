@@ -4,6 +4,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse, getKnowledgeDetails } from '@/api/knowledge-base/index'
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace'
+import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
 interface SpanNode {
@@ -373,8 +374,13 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       }
       for (const stage of data.value.trace?.children || []) autoExpand(stage)
       expandedRows.value = expanded
-      const traceStatus = data.value.trace?.status || data.value.parse_status || 'running'
-      attemptStatuses.set(data.value.attempt, traceStatus)
+      const latestAttempt = data.value.latest_attempt || data.value.attempt || 0
+      const tabStatus = resolveTimelineHeaderStatus({
+        parseStatus: data.value.parse_status,
+        traceStatus: data.value.trace?.status,
+        isLatestAttempt: data.value.attempt === latestAttempt,
+      }) || 'running'
+      attemptStatuses.set(data.value.attempt, tabStatus)
       ensureAttemptStatuses()
       emit('update:hasSpans', knowledgeSpansPayloadHasTrace(data.value))
     } else {
@@ -411,7 +417,11 @@ function ensureAttemptStatuses() {
     getKnowledgeSpans(props.knowledgeId, n)
       .then((res: any) => {
         if (res?.success && res.data?.trace) {
-          attemptStatuses.set(n, res.data.trace.status || res.data.parse_status || 'running')
+          attemptStatuses.set(n, resolveTimelineHeaderStatus({
+            parseStatus: res.data.parse_status,
+            traceStatus: res.data.trace?.status,
+            isLatestAttempt: n === latest,
+          }) || 'running')
         }
       })
       .catch(() => { })
@@ -1128,36 +1138,18 @@ const viewingLatestAttempt = computed<boolean>(() => {
   return active === latest
 })
 
-// Project the knowledge-level parse_status onto the trace-span status
-// vocabulary localizedStatus() speaks, so the header badge reads the
-// same whether it comes from the root span or from parse_status.
-// 'finalizing' keeps its own label ("优化中") to match the doc card.
-function parseStatusToTraceStatus(s?: string): string {
-  switch (s) {
-    case 'completed':
-      return 'done'
-    case 'processing':
-      return 'running'
-    case 'finalizing':
-      return 'finalizing'
-    default:
-      return s || ''
-  }
-}
-
 // The authoritative status for the header badge. During the async
 // post-pipeline window (summary / question / graph / wiki), the latest
 // attempt's ROOT span closes — so trace.status reads 'done' — while
-// those subspans keep running and the row is still 'finalizing'.
-// Trusting trace.status there flashes "已完成" mid-wiki even though the
-// doc card (and LIVE badge) still say "优化中". Prefer parse_status while
-// it is non-terminal on the latest attempt so all three agree.
+// those subspans can still be running or can later make the knowledge fail.
+// The latest knowledge row is therefore authoritative for ALL statuses,
+// including terminal ones. Historical attempts keep their own root status.
 const headerStatus = computed(() => {
-  const parseStatus = data.value?.parse_status
-  if (viewingLatestAttempt.value && isPolling(parseStatus)) {
-    return parseStatusToTraceStatus(parseStatus)
-  }
-  return data.value?.trace?.status || parseStatusToTraceStatus(parseStatus)
+  return resolveTimelineHeaderStatus({
+    parseStatus: data.value?.parse_status,
+    traceStatus: data.value?.trace?.status,
+    isLatestAttempt: viewingLatestAttempt.value,
+  })
 })
 
 const headerStatusText = computed(() => {
@@ -1181,6 +1173,10 @@ const headerStatusTheme = computed(() => {
       return 'default'
   }
 })
+
+const showLastError = computed(() =>
+  Boolean(data.value?.last_error && data.value?.parse_status === 'failed'),
+)
 
 const stagesStatDisplay = computed(() => {
   const total = stages.value.length
@@ -1228,14 +1224,15 @@ const primaryHeadTitle = computed(() => props.docTitle || t('knowledgeStages.tit
 watch(
   [
     () => totalMs.value,
-    () => data.value?.parse_status,
+    () => headerStatus.value,
     () => currentStageIndex.value,
     () => currentStageLabel.value,
+    () => stages.value.length,
   ],
   () => {
     emit('update:summary', {
       totalMs: totalMs.value,
-      status: data.value?.trace?.status || data.value?.parse_status || '',
+      status: headerStatus.value,
       stageIndex: currentStageIndex.value,
       stageTotal: stages.value.length,
       stageLabel: currentStageLabel.value,
@@ -1486,6 +1483,22 @@ const processConfigLines = computed<string[]>(() => {
                 }}</span>
             </button>
           </div>
+
+          <div v-if="showLastError && data?.last_error" class="kp-last-error" role="alert">
+            <div class="kp-last-error-bar" />
+            <div class="kp-last-error-body">
+              <div class="kp-last-error-row">
+                <span class="kp-last-error-glyph">!</span>
+                <span class="kp-last-error-title">{{ localizedErrorTitle(data.last_error.error_code) }}</span>
+                <span v-if="data.last_error.error_code" class="kp-last-error-code kp-mono">{{ data.last_error.error_code
+                  }}</span>
+              </div>
+              <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
+              <div v-if="data.last_error.error_message" class="kp-last-error-raw kp-mono">{{
+                data.last_error.error_message }}
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ============== BODY (Waterfall) ============== -->
@@ -1587,22 +1600,6 @@ const processConfigLines = computed<string[]>(() => {
                   </template>
                 </div>
               </div>
-            </div>
-
-            <div v-if="data?.last_error && data?.parse_status === 'failed'" class="kp-last-error">
-            <div class="kp-last-error-bar" />
-            <div class="kp-last-error-body">
-              <div class="kp-last-error-row">
-                <span class="kp-last-error-glyph">!</span>
-                <span class="kp-last-error-title">{{ localizedErrorTitle(data.last_error.error_code) }}</span>
-                <span v-if="data.last_error.error_code" class="kp-last-error-code kp-mono">{{ data.last_error.error_code
-                  }}</span>
-              </div>
-              <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
-              <div v-if="data.last_error.error_message" class="kp-last-error-raw kp-mono">{{
-                data.last_error.error_message }}
-              </div>
-            </div>
             </div>
             </div>
           </template>
@@ -2058,7 +2055,7 @@ const processConfigLines = computed<string[]>(() => {
   transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-.kp-attempt:hover {
+.kp-attempt:not(.kp-attempt-active):hover {
   background: var(--td-bg-color-secondarycontainer);
   border-color: var(--td-text-color-placeholder);
   color: var(--td-text-color-primary);
@@ -2070,7 +2067,14 @@ const processConfigLines = computed<string[]>(() => {
   border-color: var(--td-brand-color);
 }
 
-.kp-attempt-active .kp-attempt-glyph {
+.kp-attempt-active:hover {
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+  border-color: var(--td-brand-color);
+}
+
+.kp-attempt-active .kp-attempt-glyph,
+.kp-attempt-active:hover .kp-attempt-glyph {
   color: var(--td-text-color-anti) !important;
 }
 
@@ -2614,9 +2618,9 @@ const processConfigLines = computed<string[]>(() => {
   background: var(--td-text-color-placeholder);
 }
 
-/* Last error block */
+/* Last error block — pinned in the header so long trace trees don't bury it */
 .kp-last-error {
-  margin: 14px 20px 4px;
+  margin: 10px 0 0;
   display: flex;
   background: var(--td-error-color-light);
   border-radius: var(--td-radius-medium);

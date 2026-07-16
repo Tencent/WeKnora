@@ -8,6 +8,28 @@ import { get, post, put, del } from "../../utils/request";
 // 'custom'       : 完全自定义（不应用预设）
 export type AgentType = 'rag-qa' | 'wiki-qa' | 'hybrid-rag-wiki' | 'data-analysis' | 'custom';
 
+export interface QuestionSuggestionConfig {
+  starters: {
+    enabled: boolean;
+    mode: 'curated' | 'knowledge' | 'hybrid';
+    items: string[];
+    count: number;
+  };
+  follow_ups: {
+    enabled: boolean;
+    mode: 'generated' | 'knowledge' | 'hybrid';
+    count: number;
+    model_id?: string;
+    additional_instruction?: string;
+    categories: Array<'clarify' | 'deepen' | 'action'>;
+    max_context_turns: number;
+    suppress_on_fallback: boolean;
+    suppress_when_answer_asks_question: boolean;
+    knowledge_fallback: boolean;
+    allow_regenerate: boolean;
+  };
+}
+
 export interface CustomAgentConfig {
   // ===== 基础设置 =====
   agent_mode?: 'quick-answer' | 'smart-reasoning';  // 运行模式：quick-answer=RAG模式, smart-reasoning=ReAct Agent模式
@@ -33,6 +55,9 @@ export interface CustomAgentConfig {
   // MCP服务选择模式：all=全部启用的MCP服务, selected=指定服务, none=不使用MCP
   mcp_selection_mode?: 'all' | 'selected' | 'none';
   mcp_services?: string[];          // 选择的MCP服务ID列表
+  // 对话中触发 OAuth 授权时的等待超时（秒）：到点后自动跳过授权提示。
+  // <=0 时使用服务端默认超时。仅对使用 OAuth 的 MCP 服务生效。
+  mcp_auth_wait_timeout?: number;
 
   // ===== Skills设置（仅Agent模式）=====
   // Skills选择模式：all=全部预装, selected=指定, none=不使用
@@ -89,7 +114,7 @@ export interface CustomAgentConfig {
 
   // ===== 已废弃字段（保留兼容）=====
   welcome_message?: string;
-  suggested_prompts?: string[];
+  question_suggestions?: QuestionSuggestionConfig;
 }
 
 // 智能体
@@ -138,7 +163,7 @@ export const BUILTIN_AGENT_NORMAL_ID = BUILTIN_QUICK_ANSWER_ID;
 export const BUILTIN_AGENT_AGENT_ID = BUILTIN_SMART_REASONING_ID;
 
 // 获取智能体列表（包括内置智能体）
-// disabled_own_agent_ids: 当前租户在对话下拉中停用的「我的」智能体 ID，仅影响本租户
+// disabled_own_agent_ids: 当前空间在对话下拉中停用的「我的」智能体 ID，仅影响本空间
 export function listAgents(params?: {
   /**
    * Optional creator filter; mirrors listKnowledgeBases. Built-in agents

@@ -16,11 +16,14 @@ export interface ChunkingConfigOverride {
   strategy?: string
   token_limit?: number
   languages?: string[]
+  table_metadata_instructions?: string
 }
 
 export interface VLMConfigOverride {
   enabled?: boolean
   model_id?: string
+  description_language?: string
+  custom_instructions?: string
 }
 
 export interface ASRConfigOverride {
@@ -32,6 +35,7 @@ export interface ASRConfigOverride {
 export interface QuestionGenerationConfigOverride {
   enabled?: boolean
   question_count?: number
+  custom_instructions?: string
 }
 
 export interface GraphNodeOverride {
@@ -51,6 +55,7 @@ export interface ExtractConfigOverride {
   tags?: string[]
   nodes?: GraphNodeOverride[]
   relations?: GraphRelationOverride[]
+  custom_instructions?: string
 }
 
 export interface KnowledgeProcessOverrides {

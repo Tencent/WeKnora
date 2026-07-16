@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -20,30 +21,31 @@ import (
 
 // qaRequestContext holds all the common data needed for QA requests
 type qaRequestContext struct {
-	ctx               context.Context
-	c                 *gin.Context
-	sessionID         string
-	requestID         string
-	receivedAt        time.Time // Wall-clock time the handler started processing the request
-	query             string
-	session           *types.Session
-	customAgent       *types.CustomAgent
-	assistantMessage  *types.Message
-	knowledgeBaseIDs  []string
-	knowledgeIDs      []string
-	tagScopes         []types.TagScope
-	tagIDs            []string
-	mcpServiceIDs     []string
-	skillNames        []string
-	summaryModelID    string
-	webSearchEnabled  bool
-	enableMemory      bool // Whether memory feature is enabled
-	mentionedItems    types.MentionedItems
-	effectiveTenantID uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
-	images            []ImageAttachment        // Uploaded images with analysis text
-	userMessageID     string                   // Created user message ID (populated after createUserMessage)
-	channel           string                   // Source channel: "web", "api", "im", etc.
-	attachments       types.MessageAttachments // Processed file attachments
+	ctx                   context.Context
+	c                     *gin.Context
+	sessionID             string
+	requestID             string
+	receivedAt            time.Time // Wall-clock time the handler started processing the request
+	query                 string
+	session               *types.Session
+	customAgent           *types.CustomAgent
+	assistantMessage      *types.Message
+	knowledgeBaseIDs      []string
+	knowledgeIDs          []string
+	tagScopes             []types.TagScope
+	tagIDs                []string
+	mcpServiceIDs         []string
+	skillNames            []string
+	summaryModelID        string
+	webSearchEnabled      bool
+	enableMemory          bool // Whether memory feature is enabled
+	mentionedItems        types.MentionedItems
+	effectiveTenantID     uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
+	images                []ImageAttachment        // Uploaded images with analysis text
+	userMessageID         string                   // Created user message ID (populated after createUserMessage)
+	channel               string                   // Source channel: "web", "api", "im", etc.
+	attachments           types.MessageAttachments // Processed file attachments
+	suggestionAttribution *types.SuggestionAttribution
 
 	// Snapshot of the request fields needed to persist the input-bar state
 	// for session restoration. Kept verbatim from the request so we record
@@ -102,6 +104,11 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		logger.Error(ctx, "Query content is empty")
 		return nil, nil, errors.NewBadRequestError("Query content cannot be empty")
 	}
+	if h.suggestionService != nil && request.SuggestionAttribution != nil {
+		if err := h.suggestionService.ValidateAttribution(ctx, sessionID, request.Query, request.SuggestionAttribution); err != nil {
+			return nil, nil, errors.NewBadRequestError("invalid suggestion attribution")
+		}
+	}
 
 	// SSRF protection: strip client-supplied URL/Caption fields from image attachments.
 	// The URL field must only be populated server-side by saveImageAttachments; an
@@ -129,6 +136,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+		return nil, nil, err
+	}
 
 	// The built-in wiki fixer is invoked from a KB page, not from a tenant's
 	// regular agent picker. When the KB is shared, run it in the source tenant
@@ -247,14 +257,27 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	//      had memory enabled in practice, keep that behaviour.
 	enableMemory := h.resolveEnableMemory(ctx, request.EnableMemory)
 
-	tagScopes := mergeTagScopesFromRequestIDs(
-		tagScopesFromMentionedItems(request.MentionedItems),
-		dedupRequestStrings(request.TagIDs),
-		secutils.SanitizeForLogArray(kbIDs),
-	)
+	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
+	requestTagIDs := dedupRequestStrings(request.TagIDs)
+	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(kbIDs)); err != nil {
+		return nil, nil, errors.NewBadRequestError(err.Error())
+	}
+	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
 	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
+	executionContext, agentID, agentTenantID, modelID := buildMessageExecutionContext(
+		ctx,
+		customAgent,
+		effectiveTenantID,
+		request.SummaryModelID,
+		secutils.SanitizeForLogArray(kbIDs),
+		secutils.SanitizeForLogArray(knowledgeIDs),
+		secutils.SanitizeForLogArray(tagIDs),
+		secutils.SanitizeForLogArray(mcpServiceIDs),
+		secutils.SanitizeForLogArray(skillNames),
+		request.WebSearchEnabled,
+	)
 
 	// Build request context
 	reqCtx := &qaRequestContext{
@@ -267,31 +290,106 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		session:     session,
 		customAgent: customAgent,
 		assistantMessage: &types.Message{
-			SessionID:   sessionID,
-			Role:        "assistant",
-			RequestID:   c.GetString(types.RequestIDContextKey.String()),
-			IsCompleted: false,
-			Channel:     request.Channel,
+			SessionID:        sessionID,
+			Role:             "assistant",
+			RequestID:        c.GetString(types.RequestIDContextKey.String()),
+			IsCompleted:      false,
+			Channel:          request.Channel,
+			AgentID:          agentID,
+			AgentTenantID:    agentTenantID,
+			ModelID:          modelID,
+			ExecutionContext: executionContext,
 		},
-		knowledgeBaseIDs:  secutils.SanitizeForLogArray(kbIDs),
-		knowledgeIDs:      secutils.SanitizeForLogArray(knowledgeIDs),
-		tagScopes:         tagScopes,
-		tagIDs:            secutils.SanitizeForLogArray(tagIDs),
-		mcpServiceIDs:     secutils.SanitizeForLogArray(mcpServiceIDs),
-		skillNames:        secutils.SanitizeForLogArray(skillNames),
-		summaryModelID:    secutils.SanitizeForLog(request.SummaryModelID),
-		webSearchEnabled:  request.WebSearchEnabled,
-		enableMemory:      enableMemory,
-		mentionedItems:    convertMentionedItems(request.MentionedItems),
-		effectiveTenantID: effectiveTenantID,
-		images:            request.Images,
-		channel:           request.Channel,
-		attachments:       processedAttachments,
-		reqAgentEnabled:   request.AgentEnabled,
-		reqAgentID:        request.AgentID,
+		knowledgeBaseIDs:      secutils.SanitizeForLogArray(kbIDs),
+		knowledgeIDs:          secutils.SanitizeForLogArray(knowledgeIDs),
+		tagScopes:             tagScopes,
+		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
+		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
+		skillNames:            secutils.SanitizeForLogArray(skillNames),
+		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
+		webSearchEnabled:      request.WebSearchEnabled,
+		enableMemory:          enableMemory,
+		mentionedItems:        convertMentionedItems(request.MentionedItems),
+		effectiveTenantID:     effectiveTenantID,
+		images:                request.Images,
+		channel:               request.Channel,
+		attachments:           processedAttachments,
+		suggestionAttribution: request.SuggestionAttribution,
+		reqAgentEnabled:       request.AgentEnabled,
+		reqAgentID:            request.AgentID,
 	}
 
 	return reqCtx, &request, nil
+}
+
+func buildMessageExecutionContext(
+	ctx context.Context,
+	agent *types.CustomAgent,
+	effectiveTenantID uint64,
+	modelOverride string,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+	tagIDs []string,
+	mcpServiceIDs []string,
+	skillNames []string,
+	webSearchEnabled bool,
+) (types.MessageExecutionContext, string, uint64, string) {
+	locale, ok := types.LanguageFromContext(ctx)
+	if !ok {
+		locale = types.DefaultLanguage()
+	}
+
+	snapshot := types.MessageExecutionContext{
+		KnowledgeBaseIDs: knowledgeBaseIDs,
+		KnowledgeIDs:     knowledgeIDs,
+		TagIDs:           tagIDs,
+		MCPServiceIDs:    mcpServiceIDs,
+		SkillNames:       skillNames,
+		WebSearchEnabled: webSearchEnabled,
+		Locale:           locale,
+	}
+	if agent == nil {
+		return snapshot, "", effectiveTenantID, modelOverride
+	}
+
+	modelID := modelOverride
+	if modelID == "" {
+		modelID = agent.Config.ModelID
+	}
+	agentTenantID := effectiveTenantID
+	if agentTenantID == 0 {
+		agentTenantID = agent.TenantID
+	}
+
+	// Marshal/unmarshal gives the snapshot independent backing slices, so a
+	// later agent edit cannot mutate an in-flight message context.
+	if agent.Config.QuestionSuggestions != nil {
+		if encoded, err := json.Marshal(agent.Config.QuestionSuggestions); err == nil {
+			var suggestions types.QuestionSuggestionConfig
+			if json.Unmarshal(encoded, &suggestions) == nil {
+				snapshot.QuestionSuggestions = &suggestions
+			}
+		}
+	}
+	hashInput := struct {
+		QuestionSuggestions *types.QuestionSuggestionConfig `json:"question_suggestions,omitempty"`
+		KnowledgeBaseIDs    []string                        `json:"knowledge_base_ids,omitempty"`
+		KnowledgeIDs        []string                        `json:"knowledge_ids,omitempty"`
+		TagIDs              []string                        `json:"tag_ids,omitempty"`
+		ModelID             string                          `json:"model_id,omitempty"`
+	}{
+		QuestionSuggestions: snapshot.QuestionSuggestions,
+		KnowledgeBaseIDs:    knowledgeBaseIDs,
+		KnowledgeIDs:        knowledgeIDs,
+		TagIDs:              tagIDs,
+		ModelID:             modelID,
+	}
+	if encoded, err := json.Marshal(hashInput); err == nil {
+		hash := sha256.Sum256(encoded)
+		snapshot.AgentConfigHash = fmt.Sprintf("%x", hash[:])
+	}
+
+	return snapshot, agent.ID, agentTenantID, modelID
 }
 
 // resolveEnableMemory decides whether the memory pipeline runs for this
@@ -519,22 +617,36 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		}
 	}
 
-	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 {
-		logger.Error(ctx, "No knowledge base IDs or knowledge IDs provided")
-		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids or knowledge_ids must be provided"))
+	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
+	requestTagIDs := dedupRequestStrings(request.TagIDs)
+	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(knowledgeBaseIDs)); err != nil {
+		logger.Error(ctx, err.Error())
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(knowledgeBaseIDs))
+
+	if len(knowledgeBaseIDs) == 0 && len(request.KnowledgeIDs) == 0 && len(tagScopes) == 0 {
+		logger.Error(ctx, "No knowledge base IDs, knowledge IDs, or tag scopes provided")
+		c.Error(errors.NewBadRequestError("At least one knowledge_base_id, knowledge_base_ids, knowledge_ids, or scoped tag must be provided"))
+		return
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, knowledgeBaseIDs, request.KnowledgeIDs); err != nil {
+		c.Error(err)
 		return
 	}
 
 	logger.Infof(
 		ctx,
-		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, query: %s",
+		"Knowledge search request, knowledge base IDs: %v, knowledge IDs: %v, tag scopes: %d, query: %s",
 		secutils.SanitizeForLogArray(knowledgeBaseIDs),
 		secutils.SanitizeForLogArray(request.KnowledgeIDs),
+		len(tagScopes),
 		secutils.SanitizeForLog(request.Query),
 	)
 
 	// Directly call knowledge retrieval service without LLM summarization
-	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, request.Query)
+	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, tagScopes, request.Query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -670,7 +782,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	}
 
 	// Create user message
-	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), reqCtx.attachments, reqCtx.channel)
+	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), reqCtx.attachments, reqCtx.channel, reqCtx.suggestionAttribution)
 	if err != nil {
 		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -946,4 +1058,13 @@ func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
 	bgCtx := context.WithoutCancel(ctx)
 	go h.messageService.IndexMessageToKB(bgCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
+	if userQuery != "" && h.suggestionService != nil {
+		go func() {
+			if _, err := h.suggestionService.EnsureFollowUps(
+				bgCtx, assistantMessage.SessionID, assistantMessage.ID, false,
+			); err != nil {
+				logger.Warnf(bgCtx, "follow-up suggestion generation failed for message %s: %v", assistantMessage.ID, err)
+			}
+		}()
+	}
 }

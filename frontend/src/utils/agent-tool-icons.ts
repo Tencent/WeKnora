@@ -1,9 +1,15 @@
 /** TDesign icon names for agent / RAG pipeline tool steps. */
-export function getAgentToolIconName(toolName: string): string {
+export function getAgentToolIconName(
+  toolName: string,
+  searchSource?: 'knowledge' | 'web' | 'mixed',
+): string {
   if (toolName === 'thinking') {
     return 'ai-search'
   }
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
+    if (searchSource === 'web') {
+      return 'internet'
+    }
     return 'data-search'
   }
   if (toolName === 'wiki_search') {

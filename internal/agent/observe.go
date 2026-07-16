@@ -58,8 +58,19 @@ type responseVerdict struct {
 	step         types.AgentStep
 }
 
+// isNaturalStopFinishReason reports whether a provider finish reason means the
+// assistant has ended its message without requesting more tool work.
+func isNaturalStopFinishReason(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "stop", "end_turn", "stop_sequence":
+		return true
+	default:
+		return false
+	}
+}
+
 // analyzeResponse inspects the LLM response for stop conditions:
-//   - finish_reason == "stop" with no tool calls → agent is done (natural stop)
+//   - natural finish reason with no tool calls → agent is done (natural stop)
 //   - finish_reason == "content_filter" with no tool calls → agent is done (content filtered)
 //
 // The agent ends a turn by stopping naturally with its answer as plain
@@ -114,8 +125,8 @@ func (e *AgentEngine) analyzeResponse(
 		}
 	}
 
-	// Case 1: LLM stopped naturally without requesting any tool calls
-	if response.FinishReason == "stop" && len(response.ToolCalls) == 0 {
+	// Case 1: LLM stopped naturally without requesting any tool calls.
+	if isNaturalStopFinishReason(response.FinishReason) && len(response.ToolCalls) == 0 {
 		// Strip <think>…</think> blocks that some models embed in content
 		// (DeepSeek, Qwen, etc.) before processing or displaying.
 		response.Content = agenttools.StripThinkBlocks(response.Content)
@@ -413,6 +424,13 @@ func (e *AgentEngine) appendToolResults(
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
+	if stepContainsMarkdownImage(step) {
+		// Keep the requirement at system priority even when a custom Agent prompt
+		// replaces the built-in template. Appending it once, when image-bearing
+		// evidence first appears, also avoids burdening text-only turns.
+		messages = appendAgentRetrievedImageRequirement(messages)
+	}
+
 	// Add assistant message with tool calls (if any)
 	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
 		assistantMsg := chat.Message{

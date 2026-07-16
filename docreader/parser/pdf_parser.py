@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import statistics
+import threading
 
 from docreader.config import CONFIG
 from docreader.models.document import Document
@@ -29,6 +30,17 @@ from docreader.parser.base_parser import BaseParser
 from docreader.parser.concurrency import parser_worker_limit
 
 logger = logging.getLogger(__name__)
+
+# pdfium (the C library behind pypdfium2) is process-global and NOT
+# thread-safe: two gRPC worker threads parsing PDFs at the same time corrupt
+# its shared state and can deadlock the whole process indefinitely (observed
+# as requests stuck in "Parsing document with PDFParser" forever, taking down
+# all subsequent uploads too). Every pdfium touch — text extraction, page
+# rendering, image extraction — must be serialized behind this single global
+# lock. Concurrent PDF uploads are then processed one at a time instead of
+# hanging. Non-PDF parsers (docx, xlsx, ...) are unaffected and still run
+# concurrently across the gRPC thread pool.
+_PDFIUM_LOCK = threading.Lock()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -1313,7 +1325,11 @@ class PDFScannedParser(BaseParser):
         )
 
         try:
-            with parser_worker_limit("pdf_render", CONFIG.pdf_render_max_workers):
+            # pdfium lock first, then the render worker limit — same order as
+            # PDFParser._route so the two never deadlock against each other.
+            with _PDFIUM_LOCK, parser_worker_limit(
+                "pdf_render", CONFIG.pdf_render_max_workers
+            ):
                 pdf = pdfium.PdfDocument(content)
                 try:
                     page_count = len(pdf)
@@ -1413,6 +1429,14 @@ class PDFParser(BaseParser):
             ).parse_into_text(content)
 
     def _route(self, content: bytes) -> Document:
+        # Serialize all pdfium work: see _PDFIUM_LOCK. Holding it for the whole
+        # route (both the text pass and the render pass) is what prevents the
+        # concurrent-upload deadlock; the trailing markdown assembly is cheap
+        # pure-Python so keeping it inside the lock costs nothing meaningful.
+        with _PDFIUM_LOCK:
+            return self._route_locked(content)
+
+    def _route_locked(self, content: bytes) -> Document:
         import pypdfium2 as pdfium
         import pypdfium2.raw as pdfium_r
 

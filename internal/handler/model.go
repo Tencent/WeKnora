@@ -77,7 +77,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 
@@ -118,7 +118,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponse(model),
+		"data":    dto.NewModelResponse(ctx, model),
 	})
 }
 
@@ -163,13 +163,13 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponse(model),
+		"data":    dto.NewModelResponse(ctx, model),
 	})
 }
 
 // ListModels godoc
 // @Summary      获取模型列表
-// @Description  获取当前租户的所有模型
+// @Description  获取当前空间的所有模型
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
@@ -186,7 +186,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
+		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 
@@ -201,7 +201,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponses(models),
+		"data":    dto.NewModelResponses(ctx, models),
 	})
 }
 
@@ -615,6 +615,12 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	newParams.AppSecret = storedAppSecret
 	// Preserve backend-managed fields not sent by the frontend either.
 	newParams.ParameterSize = model.Parameters.ParameterSize
+	if newParams.InterfaceType == "" {
+		newParams.InterfaceType = model.Parameters.InterfaceType
+	}
+	if newParams.AppID == "" {
+		newParams.AppID = model.Parameters.AppID
+	}
 	if newParams.ExtraConfig == nil {
 		newParams.ExtraConfig = model.Parameters.ExtraConfig
 	}
@@ -625,6 +631,10 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -634,7 +644,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewModelResponse(model),
+		"data":    dto.NewModelResponse(ctx, model),
 	})
 }
 
