@@ -485,6 +485,9 @@ export const useSettingsStore = defineStore("settings", {
     selectAgent(agentId: string, sourceTenantId?: string | null) {
       this.settings.selectedAgentId = agentId;
       this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
+      // 智能体配置只决定是否具备网络搜索能力，不替用户决定是否在本轮使用。
+      // 每次选择智能体都默认关闭，之后只能由用户从输入框主动开启。
+      this.settings.webSearchEnabled = false;
       // 根据智能体类型自动切换 Agent 模式
       if (agentId === BUILTIN_QUICK_ANSWER_ID) {
         this.settings.isAgentEnabled = false;

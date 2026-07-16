@@ -221,7 +221,7 @@ const agentKBSelectionMode = computed(() => {
 // 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
 const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
-// 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
+// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置；网络搜索由用户主动开启
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
   if (settingsStore._isApplyingSessionState) return;
@@ -2124,16 +2124,8 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
   settingsStore.selectAgent(agent.id, sourceTenantId);
   settingsStore.toggleAgent(!!isAgentType);
 
-  // 同步智能体的配置状态（含内置、自定义、共享智能体）：模型、网络搜索、知识库由 watch 同步
-  // 1. 同步网络搜索状态
-  const agentWebSearch = agent.config?.web_search_enabled;
-  if (agentWebSearch !== undefined) {
-    settingsStore.toggleWebSearch(agentWebSearch);
-  } else if (agent.is_builtin) {
-    // 内置智能体未配置时保留当前用户设置
-  }
-
-  // 2. 同步模型（选中的对话模型随智能体切换，含共享智能体）
+  // 同步模型（选中的对话模型随智能体切换，含共享智能体）。
+  // 网络搜索已由 selectAgent 重置为关闭，智能体配置只控制该开关是否可用。
   const agentModel = agent.config?.model_id;
   if (agentModel && agentModel.trim() !== '') {
     selectedModelId.value = agentModel;
