@@ -180,6 +180,19 @@ helm install weknora ./helm \
 | `frontend.image.repository` | Image repository | `wechatopenai/weknora-ui` |
 | `frontend.image.tag` | Image tag | `latest` |
 
+### Primary Database
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `app.database.driver` | Primary SQL driver (`postgres` or `mysql`) | `postgres` |
+| `app.database.host` | Primary SQL database host | `postgres` |
+| `app.database.port` | Primary SQL database port | `5432` |
+
+For external MySQL, set `app.database.driver=mysql`, configure its host and
+port, set `postgresql.enabled=false`, and choose Qdrant or another external
+professional vector backend for `app.env.RETRIEVE_DRIVER`. MySQL is not a retrieval backend. Credentials continue to come
+from `secrets.dbUser`, `secrets.dbPassword`, and `secrets.dbName`.
+
 ### PostgreSQL (ParadeDB)
 
 | Parameter | Description | Default |

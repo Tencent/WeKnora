@@ -42,7 +42,7 @@ services:
     networks:
       - WeKnora-network-dev
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u${DB_USER} -p${DB_PASSWORD} --silent"]
+      test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_PASSWORD" mysqladmin ping -h 127.0.0.1 -u"$$MYSQL_USER" --silent']
       interval: 10s
       timeout: 10s
       retries: 10

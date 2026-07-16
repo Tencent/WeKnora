@@ -257,6 +257,8 @@ WeKnora serves as the core technology framework for the [WeChat Dialog Open Plat
 
 Troubleshooting FAQ: [Troubleshooting FAQ](./docs/QA.md)
 
+MySQL primary database: [使用 MySQL 作为底层数据库](./docs/使用MySQL数据库.md)
+
 Detailed API documentation is available at: [API Docs](./docs/api/README.md)
 
 Product plans and upcoming features: [Roadmap](./docs/ROADMAP.md)

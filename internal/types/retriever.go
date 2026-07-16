@@ -24,9 +24,6 @@ const (
 	// official product name and matches the value used in
 	// retrieverEngineMapping / GetVectorStoreTypes once activation lands.
 	OpenSearchRetrieverEngineType RetrieverEngineType = "opensearch"
-	// MySQLRetrieverEngineType identifies the MySQL JSON-backed retriever.
-	// It uses JSON functions for cosine similarity and FULLTEXT INDEX for keyword search.
-	MySQLRetrieverEngineType RetrieverEngineType = "mysql"
 )
 
 // RetrieverType represents the type of retriever

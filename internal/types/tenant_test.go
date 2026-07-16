@@ -18,16 +18,3 @@ func TestRetrieverEngineMappingIncludesTencentVectorDBHybridCapabilities(t *test
 		RetrieverEngineType: TencentVectorDBRetrieverEngineType,
 	})
 }
-
-func TestRetrieverEngineMappingIncludesMySQLHybridCapabilities(t *testing.T) {
-	mapping := GetRetrieverEngineMapping()
-
-	assert.Contains(t, mapping["mysql"], RetrieverEngineParams{
-		RetrieverType:       KeywordsRetrieverType,
-		RetrieverEngineType: MySQLRetrieverEngineType,
-	})
-	assert.Contains(t, mapping["mysql"], RetrieverEngineParams{
-		RetrieverType:       VectorRetrieverType,
-		RetrieverEngineType: MySQLRetrieverEngineType,
-	})
-}

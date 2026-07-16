@@ -1,4 +1,4 @@
-﻿// Package container implements dependency injection container setup
+// Package container implements dependency injection container setup
 // Provides centralized configuration for services, repositories, and handlers
 // This package is responsible for wiring up all dependencies and ensuring proper lifecycle management
 package container
@@ -43,7 +43,6 @@ import (
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
-	mysqlRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/mysql"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
@@ -484,8 +483,7 @@ func must(err error) {
 
 // initLangfuse initializes the Langfuse ingestion client.
 // Configuration is read from LANGFUSE_* environment variables (see
-// docs/langfuse.md). Returns a disabled manager if credentials are absent —
-// never an error — so deployments that don't use Langfuse are unaffected.
+// docs/langfuse.md). Returns a disabled manager if credentials are absent 閳?// never an error 閳?so deployments that don't use Langfuse are unaffected.
 func initLangfuse() (*langfuse.Manager, error) {
 	cfg := langfuse.LoadConfigFromEnv()
 	return langfuse.Init(cfg)
@@ -501,7 +499,7 @@ const defaultModelMaxConcurrency = 32
 // resolveModelMaxConcurrency reads the per-model background concurrency limit
 // from system settings / env, defaulting to defaultModelMaxConcurrency when
 // unset. A configured value of 0 (or negative) is honoured and disables the
-// governor — that is the supported way to turn throttling off via config/env.
+// governor 閳?that is the supported way to turn throttling off via config/env.
 func resolveModelMaxConcurrency(ss interfaces.SystemSettingService) int {
 	if ss == nil {
 		return defaultModelMaxConcurrency
@@ -562,7 +560,7 @@ func initRedisClient() (*redis.Client, error) {
 
 	_, err = client.Ping(context.Background()).Result()
 	if err != nil {
-		return nil, fmt.Errorf("连接Redis失败: %w", err)
+		return nil, fmt.Errorf("鏉╃偞甯碦edis婢惰精瑙? %w", err)
 	}
 
 	return client, nil
@@ -626,21 +624,40 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_NAME"),
 		)
 	case "mysql":
-		dbPort := os.Getenv("DB_PORT")
+		dbHost := strings.TrimSpace(os.Getenv("DB_HOST"))
+		if dbHost == "" {
+			dbHost = "localhost"
+		}
+		dbPort := strings.TrimSpace(os.Getenv("DB_PORT"))
 		if dbPort == "" {
 			dbPort = "3306"
 		}
-		hostPort := net.JoinHostPort(os.Getenv("DB_HOST"), dbPort)
+		dbUser := strings.TrimSpace(os.Getenv("DB_USER"))
+		if dbUser == "" {
+			return nil, fmt.Errorf("DB_USER is required for DB_DRIVER=mysql")
+		}
+		dbName := strings.TrimSpace(os.Getenv("DB_NAME"))
+		if dbName == "" {
+			return nil, fmt.Errorf("DB_NAME is required for DB_DRIVER=mysql")
+		}
+		hostPort := net.JoinHostPort(strings.Trim(dbHost, "[]"), dbPort)
 
 		gormCfg := gomysql.NewConfig()
-		gormCfg.User = os.Getenv("DB_USER")
+		gormCfg.User = dbUser
 		gormCfg.Passwd = os.Getenv("DB_PASSWORD")
 		gormCfg.Net = "tcp"
 		gormCfg.Addr = hostPort
-		gormCfg.DBName = os.Getenv("DB_NAME")
+		gormCfg.DBName = dbName
 		gormCfg.ParseTime = true
 		gormCfg.Loc = time.UTC
+		gormCfg.Collation = "utf8mb4_unicode_ci"
+		gormCfg.Timeout = envDuration("DB_CONNECT_TIMEOUT", 10*time.Second)
+		gormCfg.ReadTimeout = envDuration("DB_READ_TIMEOUT", 30*time.Second)
+		gormCfg.WriteTimeout = envDuration("DB_WRITE_TIMEOUT", 30*time.Second)
 		gormCfg.Params = map[string]string{"charset": "utf8mb4"}
+		if tlsMode := strings.TrimSpace(os.Getenv("DB_TLS_MODE")); tlsMode != "" {
+			gormCfg.TLSConfig = tlsMode
+		}
 		dialector = gormmysql.Open(gormCfg.FormatDSN())
 
 		migrateQuery := url.Values{}
@@ -648,19 +665,22 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		migrateQuery.Set("loc", "UTC")
 		migrateQuery.Set("multiStatements", "true")
 		migrateQuery.Set("parseTime", "true")
+		if tlsMode := strings.TrimSpace(os.Getenv("DB_TLS_MODE")); tlsMode != "" {
+			migrateQuery.Set("tls", tlsMode)
+		}
 		migrateDSN = fmt.Sprintf(
 			"mysql://%s@tcp(%s)/%s?%s",
-			url.UserPassword(os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD")).String(),
+			url.UserPassword(dbUser, os.Getenv("DB_PASSWORD")).String(),
 			hostPort,
-			url.PathEscape(os.Getenv("DB_NAME")),
+			url.PathEscape(dbName),
 			migrateQuery.Encode(),
 		)
 
 		logger.Infof(context.Background(), "DB Config: driver=mysql user=%s host=%s port=%s dbname=%s",
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_HOST"),
+			dbUser,
+			dbHost,
 			dbPort,
-			os.Getenv("DB_NAME"),
+			dbName,
 		)
 	case "sqlite":
 		dbPath := os.Getenv("DB_PATH")
@@ -727,12 +747,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
-			logger.Warnf(context.Background(), "Database migration failed: %v", err)
-			logger.Warnf(
-				context.Background(),
-				"Continuing with application startup. Please run migrations manually if needed.",
-			)
+			if strings.EqualFold(strings.TrimSpace(os.Getenv("MIGRATION_FAILURE_MODE")), "warn") {
+				logger.Warnf(context.Background(), "Database migration failed; continuing because MIGRATION_FAILURE_MODE=warn: %v", err)
+			} else {
+				return nil, fmt.Errorf("database migration failed: %w", err)
+			}
 		}
 
 		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
@@ -755,34 +774,48 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	// Configure connection pool parameters
+	// Configure connection pool parameters.
 	if os.Getenv("DB_DRIVER") == "sqlite" {
 		// SQLite only supports one concurrent writer even in WAL mode.
-		// Limiting to a single open connection serialises all DB access and
-		// prevents "database is locked" errors from concurrent goroutines.
 		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
 	} else {
-		sqlDB.SetMaxIdleConns(10)
+		maxOpen := envInt("DB_MAX_OPEN_CONNS", 50)
+		maxIdle := envInt("DB_MAX_IDLE_CONNS", 10)
+		if maxIdle > maxOpen {
+			maxIdle = maxOpen
+		}
+		sqlDB.SetMaxOpenConns(maxOpen)
+		sqlDB.SetMaxIdleConns(maxIdle)
 	}
-	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
+	sqlDB.SetConnMaxLifetime(envDuration("DB_CONN_MAX_LIFETIME", 10*time.Minute))
+	sqlDB.SetConnMaxIdleTime(envDuration("DB_CONN_MAX_IDLE_TIME", 5*time.Minute))
 
 	return db, nil
 }
 
-func buildMySQLRetrieverDSN(host string, port int, username, password, database string) string {
-	cfg := gomysql.NewConfig()
-	cfg.User = username
-	cfg.Passwd = password
-	cfg.Net = "tcp"
-	cfg.Addr = fmt.Sprintf("%s:%d", host, port)
-	cfg.DBName = database
-	cfg.ParseTime = true
-	cfg.Loc = time.Local
-	cfg.InterpolateParams = true
-	cfg.Params = map[string]string{
-		"charset": "utf8mb4",
+func envDuration(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
 	}
-	return cfg.FormatDSN()
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func envInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 // resolveStorageProviderPending replaces the "__pending_env__" sentinel in
@@ -810,7 +843,7 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
 	} else if result.RowsAffected > 0 {
-		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
+		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider 閳?%s", result.RowsAffected, storageType)
 	}
 
 	// Sync PostgreSQL sequences with actual MAX values to prevent duplicate key
@@ -829,7 +862,7 @@ func resolveStorageProviderPending(db *gorm.DB) {
 // The table, columns and indexes are created by the SQL migrations
 // (migrations/versioned/000068 for Postgres, migrations/sqlite/000000_init for
 // SQLite); this step only handles data that cannot be expressed portably in
-// SQL: environment snapshots, JSON→config mapping, AES-encrypted credentials,
+// SQL: environment snapshots, JSON閳妽onfig mapping, AES-encrypted credentials,
 // UUID generation and the per-startup refresh of env-backed aliases.
 // The migration is idempotent: one legacy_alias row per tenant/provider.
 func migrateLegacyStorageBackends(db *gorm.DB) {
@@ -1007,8 +1040,8 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 			os.Getenv("TOS_SECRET_KEY"),
 			os.Getenv("TOS_BUCKET_NAME"),
 			os.Getenv("TOS_PATH_PREFIX"),
-			os.Getenv("TOS_TEMP_BUCKET_NAME"), // 可选：临时桶名称（桶需配置生命周期规则自动过期）
-			os.Getenv("TOS_TEMP_REGION"),      // 可选：临时桶 region，默认与主桶相同
+			os.Getenv("TOS_TEMP_BUCKET_NAME"), // optional temporary bucket
+			os.Getenv("TOS_TEMP_REGION"),      // optional temporary bucket region
 		)
 	case "s3":
 		if os.Getenv("S3_ENDPOINT") == "" ||
@@ -1101,6 +1134,19 @@ func initRetrieveEngineRegistry(
 ) (interfaces.RetrieveEngineRegistry, error) {
 	registry := retriever.NewRetrieveEngineRegistry()
 	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
+	for i := range retrieveDriver {
+		retrieveDriver[i] = strings.TrimSpace(retrieveDriver[i])
+	}
+	if slices.Contains(retrieveDriver, "mysql") {
+		return nil, fmt.Errorf("RETRIEVE_DRIVER=mysql is not supported: MySQL is a business database only; use qdrant, milvus, weaviate, doris, opensearch, or another external vector database")
+	}
+	primaryDriver := strings.ToLower(strings.TrimSpace(os.Getenv("DB_DRIVER")))
+	if db != nil && db.Dialector != nil {
+		primaryDriver = strings.ToLower(db.Dialector.Name())
+	}
+	if primaryDriver == "mysql" && (len(retrieveDriver) == 0 || (len(retrieveDriver) == 1 && retrieveDriver[0] == "")) {
+		return nil, fmt.Errorf("DB_DRIVER=mysql requires RETRIEVE_DRIVER to reference an external professional vector database, for example qdrant")
+	}
 	log := logger.GetLogger(context.Background())
 	// Audit sink for OpenSearch driver events (index created / reindex). Driver
 	// events fire under a tenant-scoped ctx at indexing time; the env-path
@@ -1330,8 +1376,7 @@ func initRetrieveEngineRegistry(
 	if slices.Contains(retrieveDriver, "doris") {
 		dorisAddr := os.Getenv("DORIS_ADDR")
 		if dorisAddr == "" {
-			// docker-compose 默认服务名 + Doris FE MySQL 端口
-			dorisAddr = "doris-fe:9030"
+			// docker-compose 姒涙顓婚張宥呭閸?+ Doris FE MySQL 缁旑垰褰?			dorisAddr = "doris-fe:9030"
 		}
 		dorisDatabase := os.Getenv("DORIS_DATABASE")
 		if dorisDatabase == "" {
@@ -1374,51 +1419,6 @@ func initRetrieveEngineRegistry(
 			}
 		}
 	}
-	if slices.Contains(retrieveDriver, "mysql") {
-		mysqlHost := os.Getenv("MYSQL_HOST")
-		if mysqlHost == "" {
-			mysqlHost = "localhost"
-		}
-		mysqlPort := 3306
-		if portStr := os.Getenv("MYSQL_PORT"); portStr != "" {
-			if port, err := strconv.Atoi(portStr); err == nil {
-				mysqlPort = port
-			}
-		}
-		mysqlUsername := os.Getenv("MYSQL_USERNAME")
-		if mysqlUsername == "" {
-			mysqlUsername = "root"
-		}
-		mysqlPassword := os.Getenv("MYSQL_PASSWORD")
-		mysqlDatabase := os.Getenv("MYSQL_DATABASE")
-		if mysqlDatabase == "" {
-			mysqlDatabase = "weknora"
-		}
-
-		dsn := buildMySQLRetrieverDSN(mysqlHost, mysqlPort, mysqlUsername, mysqlPassword, mysqlDatabase)
-		mysqlDB, err := sql.Open("mysql", dsn)
-		if err != nil {
-			log.Errorf("Create mysql client failed: %v", err)
-		} else {
-			mysqlDB.SetMaxOpenConns(20)
-			mysqlDB.SetMaxIdleConns(5)
-			mysqlDB.SetConnMaxLifetime(time.Hour)
-
-			mysqlRepository := mysqlRepo.NewMysqlRetrieveEngineRepository(
-				mysqlDB, mysqlHost, mysqlPort, mysqlUsername, mysqlPassword, mysqlDatabase,
-				&types.IndexConfig{CollectionPrefix: os.Getenv("MYSQL_TABLE_PREFIX")},
-			)
-			if err := registry.Register(
-				retriever.NewKVHybridRetrieveEngine(
-					mysqlRepository, types.MySQLRetrieverEngineType,
-				),
-			); err != nil {
-				log.Errorf("Register mysql retrieve engine failed: %v", err)
-			} else {
-				log.Infof("Register mysql retrieve engine success: %s:%d db=%s", mysqlHost, mysqlPort, mysqlDatabase)
-			}
-		}
-	}
 	if slices.Contains(retrieveDriver, "tencent_vectordb") {
 		addr := os.Getenv("TENCENT_VECTORDB_ADDR")
 		username := os.Getenv("TENCENT_VECTORDB_USERNAME")
@@ -1450,7 +1450,7 @@ func initRetrieveEngineRegistry(
 			}
 		}
 	}
-	// ─── DB store registration (byStoreID) ───
+	// 閳光偓閳光偓閳光偓 DB store registration (byStoreID) 閳光偓閳光偓閳光偓
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
 		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink)
 	}
@@ -1731,7 +1731,7 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 // cleanup. This is the safety net that recovers any knowledge stuck in
 // "processing" past a configurable threshold (see HousekeepingService for
 // rationale). Best-effort: a startup error is logged but does NOT abort the
-// container — the rest of the system stays usable.
+// container 閳?the rest of the system stays usable.
 func startHousekeepingService(svc *service.HousekeepingService, cleaner interfaces.ResourceCleaner) {
 	if svc == nil {
 		return

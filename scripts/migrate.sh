@@ -79,14 +79,7 @@ append_query_param() {
 # If DB_URL is already set in .env, use it and normalize required local defaults.
 # Otherwise, construct it from individual components.
 if [ -n "$DB_URL" ]; then
-    if [ "$DB_DRIVER" = "postgres" ]; then
-        if [[ "$DB_URL" != *"sslmode="* ]]; then
-            DB_URL="$(append_query_param "$DB_URL" "sslmode=disable")"
-        elif [[ "$DB_URL" == *"sslmode=require"* ]] || [[ "$DB_URL" == *"sslmode=prefer"* ]]; then
-            DB_URL="${DB_URL//sslmode=require/sslmode=disable}"
-            DB_URL="${DB_URL//sslmode=prefer/sslmode=disable}"
-        fi
-    elif [ "$DB_DRIVER" = "mysql" ]; then
+    if [ "$DB_DRIVER" = "mysql" ]; then
         if [[ "$DB_URL" != *"charset="* ]]; then
             DB_URL="$(append_query_param "$DB_URL" "charset=utf8mb4")"
         fi
@@ -106,7 +99,8 @@ else
     ENCODED_DB_NAME=$(urlencode "$DB_NAME")
     case "$DB_DRIVER" in
         postgres)
-            DB_URL="postgres://${ENCODED_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${ENCODED_DB_NAME}?sslmode=disable"
+            DB_SSL_MODE=${DB_SSL_MODE:-disable}
+            DB_URL="postgres://${ENCODED_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${ENCODED_DB_NAME}?sslmode=${DB_SSL_MODE}"
             ;;
         mysql)
             DB_URL="mysql://${ENCODED_USER}:${ENCODED_PASSWORD}@tcp(${DB_HOST}:${DB_PORT})/${ENCODED_DB_NAME}?charset=utf8mb4&multiStatements=true&parseTime=true&loc=UTC"
@@ -122,14 +116,13 @@ fi
 case "$1" in
     up)
         echo "Running migrations up..."
-        echo "DB_URL: ${DB_URL}"
         echo "DB_DRIVER: ${DB_DRIVER}"
         echo "DB_USER: ${DB_USER}"
-        echo "DB_PASSWORD: ${DB_PASSWORD}"
         echo "DB_HOST: ${DB_HOST}"
         echo "DB_PORT: ${DB_PORT}"
         echo "DB_NAME: ${DB_NAME}"
         echo "MIGRATIONS_DIR: ${MIGRATIONS_DIR}"
+        echo "Connection credentials and DSN are intentionally redacted"
         migrate -path "${MIGRATIONS_DIR}" -database "${DB_URL}" up
         ;;
     down)

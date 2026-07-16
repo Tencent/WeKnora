@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -32,6 +33,24 @@ func caseInsensitiveLikeCondition(db *gorm.DB, expr string) string {
 	return fmt.Sprintf("LOWER(%s) LIKE LOWER(?)", expr)
 }
 
+func caseInsensitiveSearchCondition(db *gorm.DB, expr string) string {
+	switch dialectName(db) {
+	case "postgres":
+		return expr + " ~* ?"
+	case "mysql":
+		return fmt.Sprintf("REGEXP_LIKE(COALESCE(%s, ''), ?, 'i')", expr)
+	default:
+		return fmt.Sprintf("LOWER(COALESCE(%s, '')) LIKE LOWER(?) ESCAPE '\\'", expr)
+	}
+}
+
+func caseInsensitiveSearchArg(db *gorm.DB, query string) string {
+	if isSQLite(db) {
+		return "%" + escapeLikePattern(query) + "%"
+	}
+	return query
+}
+
 func jsonTextExpr(db *gorm.DB, column, path string) string {
 	switch dialectName(db) {
 	case "postgres":
@@ -41,6 +60,28 @@ func jsonTextExpr(db *gorm.DB, column, path string) string {
 	default:
 		return fmt.Sprintf("json_extract(%s, '$.%s')", column, path)
 	}
+}
+
+func jsonTextKeyExpr(db *gorm.DB, column string) string {
+	switch dialectName(db) {
+	case "postgres":
+		return column + "->>?"
+	case "mysql":
+		return "JSON_UNQUOTE(JSON_EXTRACT(" + column + ", ?))"
+	default:
+		return "json_extract(" + column + ", ?)"
+	}
+}
+
+func jsonTextKeyArg(db *gorm.DB, key string) string {
+	if isPostgres(db) {
+		return key
+	}
+	raw, err := json.Marshal(key)
+	if err != nil {
+		return "$." + key
+	}
+	return "$." + string(raw)
 }
 
 func jsonTextCastExpr(db *gorm.DB, column string) string {

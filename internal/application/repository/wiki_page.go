@@ -972,21 +972,10 @@ func escapeLikePattern(s string) string {
 	return replacer.Replace(s)
 }
 
-// Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
-// The query is interpreted as a PostgreSQL regular expression (via ~*).
-//
-// Results are ranked by where the query hit, highest-relevance first:
-//
-//	title    hit → rank 4 (most obvious intent: user typed what the page is called)
-//	slug     hit → rank 3 (url-like identifiers, direct jump)
-//	summary  hit → rank 2 (short authored abstract)
-//	content  hit → rank 1 (body mention — often surfaces unrelated pages whose
-//	                       prose merely mentions the query as trivia)
-//
-// Without this ranking, a user searching for "王新" on a 4万-page wiki will
-// see pages like "华为" or "Index" ahead of the actual 王新 page just
-// because they mention 王新 in their body and were updated more recently.
-// updated_at stays as the tiebreaker so same-rank ties stay deterministic.
+// Search performs a case-insensitive search on wiki pages within a knowledge base.
+// PostgreSQL and MySQL use their native regular-expression operators. SQLite,
+// which has no REGEXP function by default, uses an escaped substring match.
+// Results are ranked by title, slug, summary, then content.
 func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
 	if limit <= 0 {
 		limit = 10
@@ -995,22 +984,22 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
-	// CASE expression is evaluated per-row during SELECT; we order by the
-	// alias so the DB only computes the rank once. Parameterized four
-	// times with the same regex to avoid coupling to GORM's positional
-	// arg rewriting quirks.
-	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
-		"ELSE 0 END AS match_rank"
+	searchArg := caseInsensitiveSearchArg(r.db, query)
+	titleMatch := caseInsensitiveSearchCondition(r.db, "title")
+	slugMatch := caseInsensitiveSearchCondition(r.db, "slug")
+	summaryMatch := caseInsensitiveSearchCondition(r.db, "summary")
+	contentMatch := caseInsensitiveSearchCondition(r.db, "content")
+	rankExpr := fmt.Sprintf(
+		"CASE WHEN %s THEN 4 WHEN %s THEN 3 WHEN %s THEN 2 WHEN %s THEN 1 ELSE 0 END AS match_rank",
+		titleMatch, slugMatch, summaryMatch, contentMatch,
+	)
+	filterExpr := fmt.Sprintf("(%s OR %s OR %s OR %s)", titleMatch, contentMatch, summaryMatch, slugMatch)
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
-			kbID, query, query, query, query).
+		Select("*, "+rankExpr, searchArg, searchArg, searchArg, searchArg).
+		Where("knowledge_base_id = ? AND "+filterExpr,
+			kbID, searchArg, searchArg, searchArg, searchArg).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).

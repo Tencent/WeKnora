@@ -1,0 +1,53 @@
+# MySQL primary-database override.
+# Usage with bundled Qdrant: docker compose -f docker-compose.yml -f docker-compose.mysql.yml --profile qdrant up -d
+services:
+  app:
+    environment:
+      - DB_DRIVER=mysql
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-weknora}
+      - DB_PASSWORD=${DB_PASSWORD:-weknora}
+      - DB_NAME=${DB_NAME:-WeKnora}
+      - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-qdrant}
+    depends_on: !override
+      redis:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+      docreader:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    container_name: WeKnora-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-weknora_root}
+      MYSQL_DATABASE: ${DB_NAME:-WeKnora}
+      MYSQL_USER: ${DB_USER:-weknora}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-weknora}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_PASSWORD" mysqladmin ping -h 127.0.0.1 -u"$$MYSQL_USER" --silent']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+
+  # Keep the default Compose behavior unchanged for PostgreSQL users, while
+  # making PostgreSQL opt-in when this MySQL override is selected.
+  postgres:
+    profiles:
+      - postgres-primary
+
+volumes:
+  mysql-data:

@@ -55,8 +55,9 @@ func scopeCustomAgentsByModelID(db *gorm.DB, modelID string) *gorm.DB {
 				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.rerank_model_id')) = ? OR "+
 				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.vlm_model_id')) = ? OR "+
 				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.asr_model_id')) = ? OR "+
-				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.query_understand_model_id')) = ?",
-			modelID, modelID, modelID, modelID, modelID,
+				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.query_understand_model_id')) = ? OR "+
+				"JSON_UNQUOTE(JSON_EXTRACT(config, '$.question_suggestions.follow_ups.model_id')) = ?",
+			modelID, modelID, modelID, modelID, modelID, modelID,
 		)
 	}
 	return db.Where(

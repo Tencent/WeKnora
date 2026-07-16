@@ -23,7 +23,6 @@ import (
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
-	mysqlRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/mysql"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
@@ -78,8 +77,6 @@ func createEngineServiceFromStore(
 		return createTencentVectorDBEngine(store)
 	case types.OpenSearchRetrieverEngineType:
 		return createOpenSearchEngine(ctx, store, auditSink)
-	case types.MySQLRetrieverEngineType:
-		return createMySQLEngine(store)
 	default:
 		return nil, fmt.Errorf("unsupported engine type: %s", store.EngineType)
 	}
@@ -310,58 +307,6 @@ func hostFromAddr(addr string) string {
 		return addr[:i]
 	}
 	return addr
-}
-
-func createMySQLEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
-	cc := store.ConnectionConfig
-	addr := strings.TrimSpace(cc.Addr)
-	if addr == "" {
-		addr = "localhost:3306"
-	}
-	database := strings.TrimSpace(cc.Database)
-	if database == "" {
-		database = "weknora"
-	}
-	username := strings.TrimSpace(cc.Username)
-	if username == "" {
-		username = "root"
-	}
-
-	mc := mysql.NewConfig()
-	mc.User = username
-	mc.Passwd = cc.Password
-	mc.Net = "tcp"
-	mc.Addr = addr
-	mc.DBName = database
-	mc.Params = map[string]string{"charset": "utf8mb4"}
-	mc.ParseTime = true
-	mc.Loc = time.UTC
-	mc.InterpolateParams = true
-
-	db, err := sql.Open("mysql", mc.FormatDSN())
-	if err != nil {
-		return nil, fmt.Errorf("create mysql client: %w", err)
-	}
-	db.SetMaxOpenConns(20)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(time.Hour)
-
-	host, port := splitMySQLAddr(addr)
-	repo := mysqlRepo.NewMysqlRetrieveEngineRepository(
-		db, host, port, username, cc.Password, database, &store.IndexConfig,
-	)
-	return retriever.NewKVHybridRetrieveEngine(repo, types.MySQLRetrieverEngineType), nil
-}
-
-func splitMySQLAddr(addr string) (string, int) {
-	host := hostFromAddr(addr)
-	port := 3306
-	if i := strings.LastIndex(addr, ":"); i > 0 {
-		if p, err := strconv.Atoi(addr[i+1:]); err == nil {
-			port = p
-		}
-	}
-	return host, port
 }
 
 func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {

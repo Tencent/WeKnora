@@ -184,8 +184,7 @@ func isKnownEngineType(t types.RetrieverEngineType) bool {
 		types.SQLiteRetrieverEngineType,
 		types.InfinityRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
-		types.DorisRetrieverEngineType,
-		types.MySQLRetrieverEngineType:
+		types.DorisRetrieverEngineType:
 		return true
 	}
 	return false

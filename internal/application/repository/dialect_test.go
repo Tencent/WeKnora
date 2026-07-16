@@ -88,3 +88,27 @@ func TestDialectHelpersTimeAndRandom(t *testing.T) {
 		t.Fatalf("mysql random = %q", got)
 	}
 }
+
+func TestDialectHelpersSearchConditions(t *testing.T) {
+	if got := caseInsensitiveSearchCondition(dbWithDialect("postgres"), "title"); got != "title ~* ?" {
+		t.Fatalf("postgres search = %q", got)
+	}
+	if got := caseInsensitiveSearchCondition(dbWithDialect("mysql"), "title"); got != "REGEXP_LIKE(COALESCE(title, ''), ?, 'i')" {
+		t.Fatalf("mysql search = %q", got)
+	}
+	if got := caseInsensitiveSearchArg(dbWithDialect("sqlite"), "a%b"); got != "%a\\%b%" {
+		t.Fatalf("sqlite search arg = %q", got)
+	}
+}
+
+func TestDialectHelpersParameterizedJSONKeys(t *testing.T) {
+	if got := jsonTextKeyExpr(dbWithDialect("postgres"), "metadata"); got != "metadata->>?" {
+		t.Fatalf("postgres json key expr = %q", got)
+	}
+	if got := jsonTextKeyExpr(dbWithDialect("mysql"), "metadata"); got != "JSON_UNQUOTE(JSON_EXTRACT(metadata, ?))" {
+		t.Fatalf("mysql json key expr = %q", got)
+	}
+	if got := jsonTextKeyArg(dbWithDialect("mysql"), "provider.name"); got != "$.\"provider.name\"" {
+		t.Fatalf("mysql json key arg = %q", got)
+	}
+}

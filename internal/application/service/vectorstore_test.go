@@ -682,15 +682,6 @@ func TestTestConnection_DorisMissingAddr(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestTestConnection_MySQLMissingAddr(t *testing.T) {
-	repo := &mockVectorStoreRepo{}
-	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
-
-	_, err := svc.TestConnection(context.Background(), types.MySQLRetrieverEngineType,
-		types.ConnectionConfig{})
-	require.Error(t, err)
-}
-
 // ---------------------------------------------------------------------------
 // validateConnectionConfig tests
 // ---------------------------------------------------------------------------
@@ -790,24 +781,6 @@ func TestValidateConnectionConfig(t *testing.T) {
 			name:       "doris missing database",
 			engineType: types.DorisRetrieverEngineType,
 			config:     types.ConnectionConfig{Addr: "doris-fe:9030"},
-			wantError:  true,
-		},
-		{
-			name:       "mysql valid",
-			engineType: types.MySQLRetrieverEngineType,
-			config:     types.ConnectionConfig{Addr: "mysql:3306", Database: "weknora"},
-			wantError:  false,
-		},
-		{
-			name:       "mysql missing addr",
-			engineType: types.MySQLRetrieverEngineType,
-			config:     types.ConnectionConfig{Database: "weknora"},
-			wantError:  true,
-		},
-		{
-			name:       "mysql missing database",
-			engineType: types.MySQLRetrieverEngineType,
-			config:     types.ConnectionConfig{Addr: "mysql:3306"},
 			wantError:  true,
 		},
 	}

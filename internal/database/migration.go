@@ -334,20 +334,35 @@ func migrationSourceForDSN(dsn string) string {
 func migrationDSNFromEnv() (string, error) {
 	switch os.Getenv("DB_DRIVER") {
 	case "mysql":
-		dbPort := os.Getenv("DB_PORT")
+		dbHost := strings.TrimSpace(os.Getenv("DB_HOST"))
+		if dbHost == "" {
+			dbHost = "localhost"
+		}
+		dbPort := strings.TrimSpace(os.Getenv("DB_PORT"))
 		if dbPort == "" {
 			dbPort = "3306"
+		}
+		dbUser := strings.TrimSpace(os.Getenv("DB_USER"))
+		if dbUser == "" {
+			return "", fmt.Errorf("DB_USER is required for DB_DRIVER=mysql")
+		}
+		dbName := strings.TrimSpace(os.Getenv("DB_NAME"))
+		if dbName == "" {
+			return "", fmt.Errorf("DB_NAME is required for DB_DRIVER=mysql")
 		}
 		query := url.Values{}
 		query.Set("charset", "utf8mb4")
 		query.Set("loc", "UTC")
 		query.Set("multiStatements", "true")
 		query.Set("parseTime", "true")
+		if tlsMode := strings.TrimSpace(os.Getenv("DB_TLS_MODE")); tlsMode != "" {
+			query.Set("tls", tlsMode)
+		}
 		return fmt.Sprintf(
 			"mysql://%s@tcp(%s)/%s?%s",
-			url.UserPassword(os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD")).String(),
-			net.JoinHostPort(os.Getenv("DB_HOST"), dbPort),
-			url.PathEscape(os.Getenv("DB_NAME")),
+			url.UserPassword(dbUser, os.Getenv("DB_PASSWORD")).String(),
+			net.JoinHostPort(strings.Trim(dbHost, "[]"), dbPort),
+			url.PathEscape(dbName),
 			query.Encode(),
 		), nil
 	case "sqlite":

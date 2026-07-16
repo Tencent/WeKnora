@@ -57,7 +57,7 @@ CREATE TABLE knowledge_bases (
     tenant_id BIGINT NOT NULL,
     type VARCHAR(32) NOT NULL DEFAULT 'document',
     is_temporary BOOLEAN NOT NULL DEFAULT FALSE,
-    creator_id VARCHAR(36) NOT NULL DEFAULT '',
+    creator_id VARCHAR(36) NULL,
     chunking_config JSON NOT NULL,
     image_processing_config JSON NOT NULL,
     embedding_model_id VARCHAR(64) NOT NULL,
@@ -125,7 +125,7 @@ CREATE TABLE sessions (
     max_rounds INT NOT NULL DEFAULT 5,
     enable_rewrite BOOLEAN NOT NULL DEFAULT TRUE,
     fallback_strategy VARCHAR(255) NOT NULL DEFAULT 'fixed',
-    fallback_response TEXT NOT NULL,
+    fallback_response TEXT NOT NULL DEFAULT ('很抱歉，我暂时无法回答这个问题。'),
     keyword_threshold DOUBLE NOT NULL DEFAULT 0.5,
     vector_threshold DOUBLE NOT NULL DEFAULT 0.5,
     rerank_model_id VARCHAR(64),
@@ -133,7 +133,7 @@ CREATE TABLE sessions (
     rerank_top_k INT NOT NULL DEFAULT 10,
     rerank_threshold DOUBLE NOT NULL DEFAULT 0.65,
     summary_model_id VARCHAR(64),
-    summary_parameters JSON NOT NULL,
+    summary_parameters JSON NOT NULL DEFAULT (JSON_OBJECT()),
     agent_config JSON NULL,
     context_config JSON NULL,
     agent_id VARCHAR(36),
@@ -154,14 +154,14 @@ CREATE TABLE messages (
     session_id VARCHAR(36) NOT NULL,
     role VARCHAR(50) NOT NULL,
     content TEXT NOT NULL,
-    rendered_content TEXT,
+    rendered_content TEXT NOT NULL DEFAULT (''),
     knowledge_references JSON NOT NULL DEFAULT (JSON_ARRAY()),
     agent_steps JSON NULL,
     mentioned_items JSON NULL DEFAULT (JSON_ARRAY()),
     images JSON NULL DEFAULT (JSON_ARRAY()),
     attachments JSON NULL DEFAULT (JSON_ARRAY()),
     is_completed BOOLEAN NOT NULL DEFAULT FALSE,
-    is_fallback BOOLEAN NOT NULL DEFAULT FALSE,
+    is_fallback BOOLEAN NULL DEFAULT FALSE,
     channel VARCHAR(50) NOT NULL DEFAULT '',
     agent_duration_ms BIGINT DEFAULT 0,
     knowledge_id VARCHAR(36),
@@ -178,7 +178,7 @@ CREATE TABLE chunks (
     tenant_id BIGINT NOT NULL,
     knowledge_base_id VARCHAR(36) NOT NULL,
     knowledge_id VARCHAR(36) NOT NULL,
-    tag_id VARCHAR(36) NOT NULL DEFAULT '',
+    tag_id VARCHAR(36) NULL,
     content TEXT NOT NULL,
     chunk_index INT NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -329,7 +329,8 @@ CREATE TABLE knowledge_tags (
     color VARCHAR(32),
     sort_order INT NOT NULL DEFAULT 0,
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    deleted_at DATETIME(3) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE UNIQUE INDEX idx_knowledge_tags_kb_name ON knowledge_tags(tenant_id, knowledge_base_id, name);
 CREATE INDEX idx_knowledge_tags_kb ON knowledge_tags(tenant_id, knowledge_base_id);
@@ -372,8 +373,8 @@ CREATE TABLE mcp_tool_approvals (
     service_id VARCHAR(36) NOT NULL,
     tool_name VARCHAR(512) NOT NULL,
     require_approval BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     UNIQUE KEY idx_mcp_tool_approvals_tenant_svc_tool (tenant_id, service_id, tool_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_mcp_tool_approvals_service_id ON mcp_tool_approvals(service_id);
@@ -385,8 +386,8 @@ CREATE TABLE mcp_oauth_clients (
     client_id VARCHAR(512) NOT NULL,
     client_secret TEXT,
     redirect_uri VARCHAR(1024),
-    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     UNIQUE KEY idx_mcp_oauth_clients_tenant_svc (tenant_id, service_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_mcp_oauth_clients_service_id ON mcp_oauth_clients(service_id);
@@ -402,8 +403,8 @@ CREATE TABLE mcp_oauth_tokens (
     refresh_token TEXT,
     token_type VARCHAR(32),
     expires_at DATETIME(3) NULL,
-    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     UNIQUE KEY idx_mcp_oauth_tokens_tenant_principal_svc (tenant_id, principal_type, principal_id, service_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_mcp_oauth_tokens_service_id ON mcp_oauth_tokens(service_id);
@@ -457,8 +458,8 @@ CREATE TABLE organization_tenant_members (
     role VARCHAR(32) NOT NULL DEFAULT 'viewer',
     representative_user_id VARCHAR(36) NOT NULL DEFAULT '',
     joined_at DATETIME(3),
-    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     UNIQUE KEY idx_org_tenant_members_unique (organization_id, tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_org_tenant_members_by_tenant ON organization_tenant_members(tenant_id);
@@ -538,8 +539,8 @@ CREATE TABLE im_channel_sessions (
     thread_id VARCHAR(128) NOT NULL DEFAULT '',
     status VARCHAR(20) NOT NULL DEFAULT 'active',
     metadata JSON NULL DEFAULT (JSON_OBJECT()),
-    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     deleted_at DATETIME(3) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_channel_lookup ON im_channel_sessions(platform, user_id, chat_id, tenant_id, deleted_at);
@@ -561,8 +562,8 @@ CREATE TABLE im_channels (
     knowledge_base_id VARCHAR(36) DEFAULT '',
     bot_identity VARCHAR(255) NOT NULL DEFAULT '',
     session_mode VARCHAR(20) NOT NULL DEFAULT 'user',
-    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     deleted_at DATETIME(3) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_im_channels_tenant ON im_channels(tenant_id);
@@ -577,7 +578,7 @@ CREATE TABLE embed_channels (
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     publish_token VARCHAR(64) NOT NULL DEFAULT '',
     allowed_origins JSON NOT NULL DEFAULT (JSON_ARRAY()),
-    welcome_message TEXT,
+    welcome_message TEXT NOT NULL DEFAULT (''),
     rate_limit_per_minute INT NOT NULL DEFAULT 30,
     rate_limit_per_day INT NOT NULL DEFAULT 10000,
     primary_color VARCHAR(32) NOT NULL DEFAULT '',
@@ -591,8 +592,8 @@ CREATE TABLE embed_channels (
     default_locale VARCHAR(16) NOT NULL DEFAULT '',
     webhook_url VARCHAR(512) NOT NULL DEFAULT '',
     webhook_secret VARCHAR(128) NOT NULL DEFAULT '',
-    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
-    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     deleted_at DATETIME(3) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE INDEX idx_embed_channels_tenant ON embed_channels(tenant_id);
@@ -689,8 +690,8 @@ CREATE TABLE wiki_pages (
     title VARCHAR(512) NOT NULL DEFAULT '',
     page_type VARCHAR(32) NOT NULL DEFAULT 'summary',
     status VARCHAR(32) NOT NULL DEFAULT 'published',
-    content TEXT,
-    summary TEXT,
+    content TEXT NOT NULL DEFAULT (''),
+    summary TEXT NOT NULL DEFAULT (''),
     parent_slug VARCHAR(255) NOT NULL DEFAULT '',
     folder_id VARCHAR(36) NOT NULL DEFAULT '',
     category_path JSON NULL DEFAULT (JSON_ARRAY()),
@@ -740,7 +741,7 @@ CREATE TABLE wiki_page_issues (
     knowledge_base_id VARCHAR(36) NOT NULL,
     slug VARCHAR(255) NOT NULL,
     issue_type VARCHAR(50) NOT NULL,
-    description TEXT,
+    description TEXT NOT NULL,
     suspected_knowledge_ids JSON NULL,
     status VARCHAR(20) DEFAULT 'pending' NOT NULL,
     reported_by VARCHAR(100) NOT NULL,
@@ -759,8 +760,8 @@ CREATE TABLE wiki_log_entries (
     knowledge_base_id VARCHAR(36) NOT NULL,
     action VARCHAR(32) NOT NULL,
     knowledge_id VARCHAR(36) NOT NULL DEFAULT '',
-    doc_title TEXT,
-    summary TEXT,
+    doc_title TEXT NOT NULL DEFAULT (''),
+    summary TEXT NOT NULL DEFAULT (''),
     pages_affected JSON NOT NULL DEFAULT (JSON_ARRAY()),
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -791,7 +792,7 @@ CREATE TABLE task_dead_letters (
     scope_id VARCHAR(64) NOT NULL,
     related_id VARCHAR(64) NOT NULL DEFAULT '',
     payload JSON NOT NULL,
-    last_error TEXT,
+    last_error TEXT NOT NULL DEFAULT (''),
     fail_count INT NOT NULL,
     failed_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -805,7 +806,7 @@ CREATE TABLE system_settings (
     value JSON NOT NULL,
     value_type VARCHAR(16) NOT NULL,
     category VARCHAR(32) NOT NULL,
-    description TEXT,
+    description TEXT NOT NULL DEFAULT (''),
     is_secret BOOLEAN NOT NULL DEFAULT FALSE,
     requires_restart BOOLEAN NOT NULL DEFAULT FALSE,
     last_modified_by VARCHAR(36) NOT NULL DEFAULT '',

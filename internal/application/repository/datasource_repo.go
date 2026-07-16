@@ -299,9 +299,12 @@ func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, retentionDays in
 	if retentionDays <= 0 {
 		retentionDays = 30
 	}
-	// Delete logs older than the retention period
+	// Compute the cutoff in Go instead of relying on dialect-specific
+	// INTERVAL syntax. The timestamp comparison is portable across PostgreSQL,
+	// MySQL, and SQLite and remains parameterized.
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
 	if err := r.db.WithContext(ctx).
-		Where("started_at < NOW() - INTERVAL ? DAY", retentionDays).
+		Where("started_at < ?", cutoff).
 		Delete(&types.SyncLog{}).Error; err != nil {
 		return err
 	}

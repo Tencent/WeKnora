@@ -105,7 +105,6 @@ func TestEngineAwareNormalizer_UnitInterval(t *testing.T) {
 		types.InfinityRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
 		types.DorisRetrieverEngineType,
-		types.MySQLRetrieverEngineType,
 	} {
 		for _, tc := range cases {
 			got := n.Normalize(context.Background(), tc.score,

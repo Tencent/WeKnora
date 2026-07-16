@@ -79,12 +79,9 @@ type ScoreNormalizer interface {
 //	  - Doris — driver runs `inner_product_approximate` against
 //	    L2-normalized embeddings (or legacy `(1 - cosine_distance_approximate)`),
 //	    which equals raw cosine ∈ [-1, 1]. Same IR caveat.
-//	  - MySQL — driver computes cosine similarity from JSON array components
-//	    directly; under the same L2-normalized IR workload this follows the
-//	    observed [0, 1] envelope.
 //
 // IR-normalization caveat (applies to pgvector, sqlite-vec, Qdrant,
-// TencentVectorDB, Doris, MySQL): modern RAG embeddings are L2-normalized
+// TencentVectorDB, Doris): modern RAG embeddings are L2-normalized
 // positive-component unit vectors (sentence-transformers, BGE, OpenAI
 // text-embedding-3, Cohere, E5, etc.) that empirically keep cosine in
 // [0, 1]. Theoretical [-1, 1] inputs would clamp to 0 below — silent
@@ -140,15 +137,14 @@ func (EngineAwareNormalizer) Normalize(
 		types.QdrantRetrieverEngineType,
 		types.InfinityRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
-		types.DorisRetrieverEngineType,
-		types.MySQLRetrieverEngineType:
+		types.DorisRetrieverEngineType:
 		// Already in [0, 1] when the value reaches us. See struct godoc
 		// above for the per-engine derivation: Elasticsearch's Lucene
 		// script_score non-negative invariant; OpenSearch's k-NN plugin
 		// SpaceType.COSINESIMIL.scoreTranslation pre-translation;
 		// Weaviate's certainty intrinsic; and the IR-normalization
 		// caveat covering pgvector / sqlite-vec / Qdrant /
-		// TencentVectorDB / Doris / MySQL (theoretical [-1, 1] but observed
+		// TencentVectorDB / Doris (theoretical [-1, 1] but observed
 		// [0, 1] for L2-normalized positive-component IR embeddings).
 		//
 		// ElasticFaiss and Infinity are dead enum references — their

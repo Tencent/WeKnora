@@ -220,8 +220,18 @@ start_services() {
             PROFILES="--profile mysql"
             ENABLED_SERVICES="mysql"
             COMPOSE_SERVICES="mysql redis docreader"
-            if printf ',%s,' "${RETRIEVE_DRIVER:-}" | grep -q ',postgres,'; then
-                log_warning "DB_DRIVER=mysql cannot be used with RETRIEVE_DRIVER=postgres; use mysql/qdrant/milvus/weaviate/doris/tencent_vectordb/elasticsearch_v8 instead."
+            if [ -z "${RETRIEVE_DRIVER:-}" ]; then
+                log_error "DB_DRIVER=mysql requires an external vector database; set RETRIEVE_DRIVER=qdrant (recommended) or another supported external backend."
+                return 1
+            fi
+            if printf ',%s,' "${RETRIEVE_DRIVER:-}" | grep -Eq ',(postgres|mysql),'; then
+                log_error "MySQL is business-database-only: RETRIEVE_DRIVER must use qdrant/milvus/weaviate/doris/tencent_vectordb/elasticsearch_v8/opensearch."
+                return 1
+            fi
+            if printf ',%s,' "${RETRIEVE_DRIVER:-}" | grep -q ',qdrant,'; then
+                PROFILES="$PROFILES --profile qdrant"
+                ENABLED_SERVICES="$ENABLED_SERVICES qdrant"
+                COMPOSE_SERVICES="$COMPOSE_SERVICES qdrant"
             fi
             ;;
         *)

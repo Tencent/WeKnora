@@ -83,6 +83,87 @@ detect_compose_cmd() {
 	return 1
 }
 
+# MySQL's Compose override uses the !override YAML tag, introduced in
+# Docker Compose 2.24.4. Keep PostgreSQL compatible with older clients, but
+# fail with a clear message instead of handing MySQL mode to Compose v1 or an
+# older v2 plugin that cannot parse the file.
+compose_version_at_least() {
+	local raw="${1#v}" required_major="$2" required_minor="$3" required_patch="$4"
+	local major minor patch
+	IFS=. read -r major minor patch _ <<< "$raw"
+	major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
+	patch=${patch%%[!0-9]*}
+	patch=${patch:-0}
+	if (( major != required_major )); then
+		(( major > required_major ))
+	elif (( minor != required_minor )); then
+		(( minor > required_minor ))
+	else
+		(( patch >= required_patch ))
+	fi
+}
+
+# Build the Compose file list from DB_DRIVER. PostgreSQL keeps the historical
+# single-file path; MySQL adds the production override that disables the
+# bundled PostgreSQL service and starts MySQL instead.
+COMPOSE_FILE_ARGS=()
+COMPOSE_PROFILE_ARGS=()
+configure_compose_files() {
+	COMPOSE_FILE_ARGS=(-f "$PROJECT_ROOT/docker-compose.yml")
+	COMPOSE_PROFILE_ARGS=()
+	local driver="${DB_DRIVER:-}"
+	if [ -z "$driver" ] && [ -f "$PROJECT_ROOT/.env" ]; then
+		driver=$(grep -E '^DB_DRIVER=' "$PROJECT_ROOT/.env" | tail -1 | cut -d= -f2- | tr -d '\r')
+	fi
+	if [ "$driver" = "mysql" ]; then
+		local retriever="${RETRIEVE_DRIVER:-}"
+		if [ -z "$retriever" ] && [ -f "$PROJECT_ROOT/.env" ]; then
+			retriever=$(grep -E '^RETRIEVE_DRIVER=' "$PROJECT_ROOT/.env" | tail -1 | cut -d= -f2- | tr -d '\r')
+		fi
+		if [ -z "$retriever" ]; then
+			log_error "DB_DRIVER=mysql requires an external vector database; set RETRIEVE_DRIVER=qdrant (recommended)."
+			return 1
+		fi
+		if printf ',%s,' "$retriever" | grep -Eq ',(postgres|mysql),'; then
+			log_error "MySQL is business-database-only; RETRIEVE_DRIVER must be qdrant or another external professional vector database."
+			return 1
+		fi
+		if printf ',%s,' "$retriever" | grep -q ',qdrant,'; then
+			local qdrant_host="${QDRANT_HOST:-}"
+			if [ -z "$qdrant_host" ] && [ -f "$PROJECT_ROOT/.env" ]; then
+				qdrant_host=$(grep -E '^QDRANT_HOST=' "$PROJECT_ROOT/.env" | tail -1 | cut -d= -f2- | tr -d '\r')
+			fi
+			if [ -z "$qdrant_host" ] || [ "$qdrant_host" = "qdrant" ]; then
+				COMPOSE_PROFILE_ARGS+=(--profile qdrant)
+			fi
+		fi
+		if [ "$DOCKER_COMPOSE_BIN" != "docker" ] || [ "$DOCKER_COMPOSE_SUBCMD" != "compose" ]; then
+			log_error "MySQL mode requires Docker Compose 2.24.4 or newer; docker-compose v1 is unsupported."
+			return 1
+		fi
+		local compose_version
+		compose_version=$(docker compose version --short 2>/dev/null)
+		if ! compose_version_at_least "$compose_version" 2 24 4; then
+			log_error "MySQL mode requires Docker Compose 2.24.4 or newer (found ${compose_version:-unknown})."
+			return 1
+		fi
+		COMPOSE_FILE_ARGS+=(-f "$PROJECT_ROOT/docker-compose.mysql.yml")
+	fi
+}
+
+compose_cmd() {
+	configure_compose_files || return 1
+	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD "${COMPOSE_FILE_ARGS[@]}" "${COMPOSE_PROFILE_ARGS[@]}" "$@"
+}
+
+primary_database_service() {
+	if [ "${DB_DRIVER:-postgres}" = "mysql" ]; then
+		echo mysql
+	else
+		echo postgres
+	fi
+}
+
 # 检查并创建.env文件
 check_env_file() {
     log_info "检查环境变量配置..."
@@ -325,7 +406,7 @@ ensure_sandbox_image() {
 
     # 后台拉取，不阻塞主流程
     (
-        if PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD --profile sandbox pull sandbox 2>/dev/null; then
+        if PLATFORM=$PLATFORM compose_cmd --profile sandbox pull sandbox 2>/dev/null; then
             log_success "沙箱镜像拉取完成: $sandbox_image"
         else
             log_warning "沙箱镜像拉取失败，Agent Skills 功能可能不可用"
@@ -364,11 +445,11 @@ start_docker() {
 	if [ "$NO_PULL" = true ]; then
 		# 不拉取镜像，使用本地镜像
 		log_info "跳过镜像拉取，使用本地镜像..."
-		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build -d
+		PLATFORM=$PLATFORM compose_cmd up --build -d
 	else
 		# 拉取最新镜像
 		log_info "拉取最新镜像..."
-		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --pull always -d
+		PLATFORM=$PLATFORM compose_cmd up --pull always -d
 	fi
     if [ $? -ne 0 ]; then
         log_error "Docker容器启动失败"
@@ -379,7 +460,7 @@ start_docker() {
 
     # 显示容器状态
     log_info "当前容器状态:"
-	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps
+	compose_cmd ps
 
     # 预拉取Sandbox镜像（Agent Skills 执行所需，仅拉取不启动）
     ensure_sandbox_image
@@ -402,7 +483,7 @@ stop_docker() {
     cd "$PROJECT_ROOT"
     
     # 停止所有容器
-	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD down --remove-orphans
+	compose_cmd down --remove-orphans
     if [ $? -ne 0 ]; then
         log_error "Docker容器停止失败"
         return 1
@@ -427,7 +508,7 @@ list_containers() {
     
     # 列出所有容器
     printf "%b\n" "${BLUE}当前正在运行的容器:${NC}"
-	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps --services | sort
+	compose_cmd ps --services | sort
     
     return 0
 }
@@ -456,7 +537,7 @@ pull_images() {
     
     # 拉取所有镜像
     log_info "拉取所有服务的最新镜像..."
-	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD pull
+	PLATFORM=$PLATFORM compose_cmd pull
     if [ $? -ne 0 ]; then
         log_error "镜像拉取失败"
         return 1
@@ -464,7 +545,7 @@ pull_images() {
 
     # 拉取 sandbox 镜像（sandbox 在 profile 中，需要单独拉取）
     log_info "拉取沙箱镜像..."
-    PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD --profile sandbox pull sandbox 2>/dev/null || \
+    PLATFORM=$PLATFORM compose_cmd --profile sandbox pull sandbox 2>/dev/null || \
         log_warning "沙箱镜像拉取失败（非必需，跳过）"
 
     log_success "所有镜像已成功拉取到最新版本"
@@ -501,7 +582,7 @@ restart_container() {
     cd "$PROJECT_ROOT"
     
     # 检查容器是否存在
-	if ! "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps --services | grep -q "^$container_name$"; then
+	if ! compose_cmd ps --services | grep -q "^$container_name$"; then
         log_error "容器 '$container_name' 不存在或未运行"
         echo "可用的容器有:"
         list_containers
@@ -510,14 +591,14 @@ restart_container() {
     
     # 构建并重启容器
     log_info "正在重新构建容器 '$container_name'..."
-	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD build "$container_name"
+	PLATFORM=$PLATFORM compose_cmd build "$container_name"
     if [ $? -ne 0 ]; then
         log_error "容器 '$container_name' 构建失败"
         return 1
     fi
     
     log_info "正在重启容器 '$container_name'..."
-	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up -d --no-deps "$container_name"
+	PLATFORM=$PLATFORM compose_cmd up -d --no-deps "$container_name"
     if [ $? -ne 0 ]; then
         log_error "容器 '$container_name' 重启失败"
         return 1
@@ -751,7 +832,7 @@ else
             printf "%b\n" "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
             echo ""
             log_info "正在持续输出容器日志（按 Ctrl+C 退出日志，容器不会停止）..."
-            "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader postgres --since=10s -f
+            compose_cmd logs app docreader "$(primary_database_service)" --since=10s -f
         else
             log_error "部分服务启动失败，请检查日志并修复问题"
         fi
@@ -764,7 +845,7 @@ else
         printf "%b\n" "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
         echo ""
         log_info "正在持续输出容器日志（按 Ctrl+C 退出日志，容器不会停止）..."
-        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader postgres --since=10s -f
+        compose_cmd logs app docreader "$(primary_database_service)" --since=10s -f
     fi
 fi
 

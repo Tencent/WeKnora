@@ -239,6 +239,8 @@ WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心
 
 常见问题排查：[常见问题排查](./docs/QA.md)
 
+MySQL 主数据库：[使用 MySQL 作为底层数据库](./docs/使用MySQL数据库.md)
+
 详细接口说明请参考：[API 文档](./docs/api/README.md)
 
 产品规划与计划：[路线图 (Roadmap)](./docs/ROADMAP.md)
