@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // cubeMockServer emulates the subset of Cube endpoints the Go SDK talks to on
@@ -391,6 +393,35 @@ func stubScript(t *testing.T, body string) string {
 	return p
 }
 
+// newTestSessionBoundManager wires SessionBoundManager against cubeMockServer
+// with the same test config every case uses. Session-scoped calls need a
+// tenant in context; ctxWithTenant supplies one.
+func newTestSessionBoundManager(t *testing.T, mock *cubeMockServer) *SessionBoundManager {
+	t.Helper()
+	cfg := testConfig(t, mock)
+	client, err := NewCubeRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("NewCubeRemoteClient: %v", err)
+	}
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:  cfg,
+		Client:  client,
+		Store:   NewMemorySessionSandboxBindingStore(),
+		Checker: PermissiveSessionExistenceChecker{},
+	})
+	if err != nil {
+		t.Fatalf("NewSessionBoundManager: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	return mgr
+}
+
+// ctxWithTenant returns a background context with the tenant ID a
+// session-scoped operation needs.
+func ctxWithTenant(tenantID uint64) context.Context {
+	return context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
+}
+
 func TestCubeClient_Health(t *testing.T) {
 	mock := newCubeMockServer(t)
 	client := newCubeClient(testConfig(t, mock))
@@ -399,15 +430,21 @@ func TestCubeClient_Health(t *testing.T) {
 	}
 }
 
-func TestCubeSandbox_ExecuteEphemeral_Success(t *testing.T) {
+func TestCubeSandbox_ExecuteEphemeralViaManager(t *testing.T) {
+	// Empty SessionID drives the manager's stateless RemoteSandbox path:
+	// a fresh sandbox is allocated, the script runs, and the sandbox is
+	// torn down. This replaces the old CubeSandbox ephemeral test — the
+	// same wire behaviour now flows through SessionBoundManager +
+	// RemoteSandbox + CubeRemoteClient without any Cube-specific type
+	// escaping past the adapter.
 	mock := newCubeMockServer(t)
 	mock.SetExecutor(func(_, cmd string, args []string) (string, string, int) {
 		return fmt.Sprintf("ran %s %v\n", cmd, args), "", 0
 	})
-	sb := NewCubeSandbox(testConfig(t, mock))
+	mgr := newTestSessionBoundManager(t, mock)
 
 	script := stubScript(t, "print('hi')\n")
-	result, err := sb.Execute(context.Background(), &ExecuteConfig{
+	result, err := mgr.Execute(context.Background(), &ExecuteConfig{
 		Script:         script,
 		SkipValidation: true,
 	})
@@ -417,14 +454,9 @@ func TestCubeSandbox_ExecuteEphemeral_Success(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d (stderr=%q err=%q stdout=%q)", result.ExitCode, result.Stderr, result.Error, result.Stdout)
 	}
-	// The SDK wraps the actual interpreter call inside `/bin/bash -l -c`, so
-	// the outer cmd we see in the mock is /bin/bash. We only care that the
-	// intended interpreter ("python3") did show up somewhere in the joined
-	// command line — this survives future SDK refactors of the wrapper shape.
 	if !strings.Contains(result.Stdout, "python3") {
 		t.Fatalf("stdout does not mention python3: %q", result.Stdout)
 	}
-	// Ephemeral => sandbox must be killed exactly once.
 	if got := mock.killCount.Load(); got != 1 {
 		t.Fatalf("expected 1 kill, got %d", got)
 	}
@@ -438,18 +470,13 @@ func TestSessionBoundManager_ReusesSandboxAcrossExecutes(t *testing.T) {
 	mock.SetExecutor(func(_, _ string, _ []string) (string, string, int) {
 		return "ok\n", "", 0
 	})
-	cfg := testConfig(t, mock)
-	cfg.CubeIdleTTL = time.Minute // avoid reaper races in test
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	mgr := newTestSessionBoundManager(t, mock)
+	ctx := ctxWithTenant(42)
 
 	script := stubScript(t, "print('hi')\n")
 
 	for i := 0; i < 3; i++ {
-		result, err := mgr.Execute(context.Background(), &ExecuteConfig{
+		result, err := mgr.Execute(ctx, &ExecuteConfig{
 			Script:         script,
 			SessionID:      "sess-A",
 			SkipValidation: true,
@@ -472,13 +499,8 @@ func TestSessionBoundManager_ReusesSandboxAcrossExecutes(t *testing.T) {
 
 func TestSessionBoundManager_ConcurrentInputStagingCreatesOneSandbox(t *testing.T) {
 	mock := newCubeMockServer(t)
-	cfg := testConfig(t, mock)
-	cfg.CubeIdleTTL = time.Minute
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	mgr := newTestSessionBoundManager(t, mock)
+	ctx := ctxWithTenant(42)
 
 	const workers = 12
 	var wg sync.WaitGroup
@@ -488,7 +510,7 @@ func TestSessionBoundManager_ConcurrentInputStagingCreatesOneSandbox(t *testing.
 		go func(index int) {
 			defer wg.Done()
 			filePath := fmt.Sprintf("%s/hash-%d/input.txt", SessionInputRoot, index)
-			errs <- mgr.WriteSessionInputFile(context.Background(), "sess-concurrent", filePath, []byte("input"))
+			errs <- mgr.WriteSessionInputFile(ctx, "sess-concurrent", filePath, []byte("input"))
 		}(i)
 	}
 	wg.Wait()
@@ -506,17 +528,12 @@ func TestSessionBoundManager_ConcurrentInputStagingCreatesOneSandbox(t *testing.
 func TestSessionBoundManager_DifferentSessionsGetDifferentSandboxes(t *testing.T) {
 	mock := newCubeMockServer(t)
 	mock.SetExecutor(func(_, _ string, _ []string) (string, string, int) { return "ok", "", 0 })
-	cfg := testConfig(t, mock)
-	cfg.CubeIdleTTL = time.Minute
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	mgr := newTestSessionBoundManager(t, mock)
+	ctx := ctxWithTenant(42)
 
 	script := stubScript(t, "print('hi')\n")
 	for _, sid := range []string{"sess-A", "sess-B", "sess-C"} {
-		if _, err := mgr.Execute(context.Background(), &ExecuteConfig{
+		if _, err := mgr.Execute(ctx, &ExecuteConfig{
 			Script:         script,
 			SessionID:      sid,
 			SkipValidation: true,
@@ -532,37 +549,30 @@ func TestSessionBoundManager_DifferentSessionsGetDifferentSandboxes(t *testing.T
 func TestSessionBoundManager_DestroySessionCleansUp(t *testing.T) {
 	mock := newCubeMockServer(t)
 	mock.SetExecutor(func(_, _ string, _ []string) (string, string, int) { return "ok", "", 0 })
-	cfg := testConfig(t, mock)
-	cfg.CubeIdleTTL = time.Minute
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	mgr := newTestSessionBoundManager(t, mock)
+	ctx := ctxWithTenant(42)
 
 	script := stubScript(t, "print('hi')\n")
-	if _, err := mgr.Execute(context.Background(), &ExecuteConfig{
+	if _, err := mgr.Execute(ctx, &ExecuteConfig{
 		Script:         script,
 		SessionID:      "sess-A",
 		SkipValidation: true,
 	}); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	// Type-assertion path mirrors the one in sessionService.destroyBoundSandbox.
 	destroyer, ok := any(mgr).(interface {
 		DestroySession(context.Context, string) error
 	})
 	if !ok {
 		t.Fatalf("SessionBoundManager should expose DestroySession")
 	}
-	if err := destroyer.DestroySession(context.Background(), "sess-A"); err != nil {
+	if err := destroyer.DestroySession(ctx, "sess-A"); err != nil {
 		t.Fatalf("DestroySession: %v", err)
 	}
 	if got := mock.killCount.Load(); got != 1 {
 		t.Fatalf("expected 1 kill after DestroySession, got %d", got)
 	}
-	// Deleting again is a no-op.
-	if err := destroyer.DestroySession(context.Background(), "sess-A"); err != nil {
+	if err := destroyer.DestroySession(ctx, "sess-A"); err != nil {
 		t.Fatalf("DestroySession idempotent: %v", err)
 	}
 }
@@ -578,7 +588,16 @@ func TestSessionBoundManager_FallbackWhenCubeDown(t *testing.T) {
 	cfg.CubeTemplate = "tpl"
 	cfg.CubeHTTPTimeout = 200 * time.Millisecond
 
-	mgr, err := NewSessionBoundManager(cfg)
+	client, err := NewCubeRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("NewCubeRemoteClient: %v", err)
+	}
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:  cfg,
+		Client:  client,
+		Store:   NewMemorySessionSandboxBindingStore(),
+		Checker: PermissiveSessionExistenceChecker{},
+	})
 	if err != nil {
 		t.Fatalf("expected fallback to succeed, got %v", err)
 	}
@@ -590,13 +609,7 @@ func TestSessionBoundManager_FallbackWhenCubeDown(t *testing.T) {
 func TestSessionBoundManager_EphemeralWhenNoSessionID(t *testing.T) {
 	mock := newCubeMockServer(t)
 	mock.SetExecutor(func(_, _ string, _ []string) (string, string, int) { return "ok", "", 0 })
-	cfg := testConfig(t, mock)
-	cfg.CubeIdleTTL = time.Minute
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	mgr := newTestSessionBoundManager(t, mock)
 
 	script := stubScript(t, "print('hi')\n")
 	// No SessionID -> each call must create+kill its own sandbox.

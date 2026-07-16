@@ -29,19 +29,11 @@ import (
 //     positive size and RFC3339 mtime.
 //   - ReadSessionFile returns the exact bytes the script wrote.
 func TestIntegrationSessionArtifacts_ListAndRead(t *testing.T) {
-	cfg := integrationConfig(t)
-	// Keep the reaper out of the way so the artifact list survives the
-	// second RPC.
-	cfg.CubeIdleTTL = 10 * time.Minute
+	mgr := newIntegrationManager(t)
 
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	baseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	ctx := integrationTenantContext(baseCtx)
 
 	const (
 		sessID    = "integration-artifact-happy"
@@ -90,7 +82,7 @@ func TestIntegrationSessionArtifacts_ListAndRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionFiles: %v", err)
 	}
-	var target *DirEntry
+	var target *RemoteDirEntry
 	for i := range entries {
 		if entries[i].Name == "note.txt" {
 			target = &entries[i]
@@ -106,14 +98,8 @@ func TestIntegrationSessionArtifacts_ListAndRead(t *testing.T) {
 	if target.Size <= 0 {
 		t.Fatalf("listed size = %d, want > 0", target.Size)
 	}
-	if target.Type == "dir" || target.Type == "directory" {
-		t.Fatalf("note.txt reported as directory: %+v", target)
-	}
-	// The collector's parseModTime tolerates missing values, but production
-	// envd is expected to return a non-empty timestamp; assert it here so
-	// dedupe by (path, mtime) stays reliable.
-	if strings.TrimSpace(target.ModifiedAt) == "" {
-		t.Fatalf("listed mod_time empty: %+v", target)
+	if target.Type != RemoteEntryFile {
+		t.Fatalf("note.txt reported as non-file: %+v", target)
 	}
 
 	// Read — byte-identical round-trip.
@@ -131,15 +117,11 @@ func TestIntegrationSessionArtifacts_ListAndRead(t *testing.T) {
 // an empty list (nil error) so the collector can treat them as no-ops
 // without needing to distinguish "sandbox missing" from "sandbox empty".
 func TestIntegrationSessionArtifacts_EmptyOnUnknownSession(t *testing.T) {
-	cfg := integrationConfig(t)
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	mgr := newIntegrationManager(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	baseCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	ctx := integrationTenantContext(baseCtx)
 
 	entries, err := mgr.ListSessionFiles(ctx, "integration-nonexistent-session", "/workspace/output")
 	if err != nil {

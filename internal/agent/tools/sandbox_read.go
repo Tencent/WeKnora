@@ -28,6 +28,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -181,7 +182,7 @@ func (t *ReadSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 			Error:   fmt.Sprintf("file not found: %s", clean),
 		}, nil
 	}
-	if stat.Type == "dir" || stat.Type == "directory" {
+	if stat.Type == sandbox.RemoteEntryDir {
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("path is a directory, not a file: %s", clean),

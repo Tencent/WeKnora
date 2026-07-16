@@ -201,10 +201,11 @@ type RemoteExecResult struct {
 
 // RemoteDirEntry describes one entry inside a directory listing.
 type RemoteDirEntry struct {
-	Name string
-	Path string
-	Type RemoteDirEntryType
-	Size int64
+	Name    string
+	Path    string
+	Type    RemoteDirEntryType
+	Size    int64
+	ModTime time.Time
 }
 
 // RemoteDirEntryType is the coordinator-facing entry kind.
@@ -312,4 +313,17 @@ type RemoteSandboxClient interface {
 	MakeDir(ctx context.Context, handle RemoteSandboxHandle, path string) error
 	Remove(ctx context.Context, handle RemoteSandboxHandle, path string) error
 	Stat(ctx context.Context, handle RemoteSandboxHandle, path string) (*RemoteStatEntry, error)
+}
+
+// cloneMetadata returns a shallow copy of source. Nil input returns nil so
+// callers can distinguish "explicitly empty" from "not set".
+func cloneMetadata(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
