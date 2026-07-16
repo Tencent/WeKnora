@@ -5936,6 +5936,7 @@ export default {
       authWaitTimeout: 'Authentication Wait Timeout (s)',
       authWaitTimeoutDesc: 'Maximum seconds to wait for you to complete OAuth authentication when prompted during a conversation; the prompt is skipped after it elapses (only affects OAuth MCP services).',
       authWaitTimeoutPlaceholder: 'Default 600 seconds',
+      unavailableService: 'Unavailable service',
     },
     llmCallTimeout: {
       label: "LLM Call Timeout",

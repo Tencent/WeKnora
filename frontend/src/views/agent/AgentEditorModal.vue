@@ -1189,7 +1189,7 @@
                     </div>
 
                     <!-- 选择指定 MCP 服务 -->
-                    <div v-if="mcpSelectionMode === 'selected' && mcpOptions.length > 0" class="setting-row">
+                    <div v-if="mcpSelectionMode === 'selected' && showMcpServiceSelect" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.mcp.selectLabel') }}</label>
                         <p class="desc">{{ $t('agentEditor.mcp.selectDesc') }}</p>
@@ -1197,7 +1197,8 @@
                       <div class="setting-control">
                         <t-select v-model="formData.config.mcp_services" multiple
                           :placeholder="$t('agentEditor.mcp.selectPlaceholder')" filterable>
-                          <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label" />
+                          <t-option v-for="mcp in mcpOptions" :key="mcp.value" :value="mcp.value" :label="mcp.label"
+                            :disabled="mcp.disabled" />
                         </t-select>
                       </div>
                     </div>
@@ -1641,7 +1642,6 @@ import {
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
-import { type MCPService } from '@/api/mcp-service';
 import { type SkillInfo } from '@/api/skill';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import { type StorageEngineStatusItem, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
@@ -1817,7 +1817,43 @@ const agentTypePresets = ref<AgentTypePreset[]>([]);
 // Agent 系统提示词模板缓存（用于切换智能体类型时根据 system_prompt_id 解析出实际文本填入）
 const agentSystemPromptTemplates = ref<PromptTemplate[]>([]);
 const intentPromptTemplates = ref<PromptTemplate[]>([]);
-const mcpOptions = ref<{ label: string; value: string }[]>([]);
+type McpSelectOption = { label: string; value: string; disabled?: boolean };
+
+const mcpOptions = computed<McpSelectOption[]>(() => {
+  const services = editorResources.mcpServices || [];
+  const selectedIds = new Set(formData.value.config.mcp_services || []);
+  const serviceById = new Map(services.map((mcp) => [mcp.id, mcp]));
+  const options: McpSelectOption[] = [];
+
+  for (const mcp of services) {
+    if (mcp.enabled) {
+      options.push({ label: mcp.name, value: mcp.id });
+    }
+  }
+
+  for (const id of selectedIds) {
+    const mcp = serviceById.get(id);
+    if (mcp && !mcp.enabled) {
+      options.push({
+        label: `${mcp.name} (${t('mcpSettings.disabled')})`,
+        value: mcp.id,
+        disabled: true,
+      });
+    } else if (!mcp) {
+      options.push({
+        label: t('agentEditor.mcp.unavailableService'),
+        value: id,
+        disabled: true,
+      });
+    }
+  }
+
+  return options;
+});
+
+const showMcpServiceSelect = computed(() =>
+  mcpOptions.value.length > 0 || (formData.value.config.mcp_services?.length ?? 0) > 0,
+);
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
@@ -3293,10 +3329,6 @@ const loadDependencies = async () => {
       .map((shared: any) => mapKbToOption(shared.knowledge_base, true, shared.org_name));
     kbOptions.value = [...myKbs, ...sharedKbs];
 
-    mcpOptions.value = editorResources.mcpServices
-      .filter((mcp: MCPService) => mcp.enabled)
-      .map((mcp: MCPService) => ({ label: mcp.name, value: mcp.id }));
-
     skillsAvailable.value = editorResources.skillsAvailable;
     skillOptions.value = editorResources.skills;
 
@@ -4606,8 +4638,10 @@ const handleSave = async () => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 24px;
   padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
+  min-width: 0;
 
   &:last-child {
     border-bottom: none;
@@ -4665,9 +4699,10 @@ const handleSave = async () => {
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 55%;
-  padding-right: 24px;
+  flex: 0 0 42%;
+  max-width: 42%;
+  min-width: 0;
+  padding-right: 0;
 
   &.full-width {
     max-width: 100%;
@@ -4711,15 +4746,18 @@ const handleSave = async () => {
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 360px;
+  flex: 1 1 58%;
+  min-width: 0;
+  max-width: 58%;
   display: flex;
   justify-content: flex-end;
   align-items: flex-start;
+  overflow: hidden;
 
   &.setting-control-full {
     width: 100%;
     min-width: 100%;
+    max-width: 100%;
     justify-content: flex-start;
   }
 
@@ -4728,6 +4766,22 @@ const handleSave = async () => {
   :deep(.t-input),
   :deep(.t-textarea) {
     width: 100%;
+    min-width: 0;
+  }
+
+  :deep(.t-select-input) {
+    min-width: 0;
+  }
+
+  :deep(.t-select .t-tag) {
+    max-width: 160px;
+  }
+
+  :deep(.t-select .t-tag__text) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   :deep(.t-input-number) {
