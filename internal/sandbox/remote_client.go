@@ -230,9 +230,9 @@ type RemoteStatEntry struct {
 // supports natively. SessionBoundManager reads this to skip provider-specific
 // paths (e.g. metadata-based recovery) on backends that do not support them.
 //
-// Missing capabilities never cause a failure by themselves; the manager
-// falls back to less-optimal but always-correct behaviour (e.g. rely on the
-// binding store instead of scanning provider metadata).
+// Missing metadata/list capabilities use less-optimal but correct behaviour
+// (rely on the binding store instead of scanning provider metadata).
+// SupportsReconnect is required for persistent session lifecycle management.
 type RemoteSandboxCapabilities struct {
 	// SupportsReconnect is true when Connect can recover an operable handle
 	// from a provider-scoped sandbox ID after a WeKnora process restart.
@@ -265,7 +265,7 @@ type RemoteSandboxCapabilities struct {
 // RemoteError whose Kind is RemoteErrorKindTimeout when the deadline elapsed
 // server-side, or the wrapped ctx.Err() otherwise.
 type RemoteSandboxClient interface {
-	// Provider identifies the backend. Used by binding schema v2 to detect
+	// Provider identifies the backend. Used by the binding schema to detect
 	// provider mismatches after a mode switch.
 	Provider() RemoteProvider
 

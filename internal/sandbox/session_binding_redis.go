@@ -148,7 +148,12 @@ func (s *RedisSessionSandboxBindingStore) WithLifecycleLock(
 		s.lockKey(key),
 		s.lockLease,
 		s.lockRenewInterval,
-		fn,
+		func(lockCtx context.Context) error {
+			return fn(withLifecycleOwnershipContext(
+				lockCtx,
+				redislock.OwnershipContext(lockCtx),
+			))
+		},
 	)
 }
 

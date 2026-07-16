@@ -1,0 +1,596 @@
+package sandbox
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	remoteMetadataTenantID       = "weknora_tenant_id"
+	remoteMetadataSessionID      = "weknora_session_id"
+	remoteMetadataBindingVersion = "weknora_binding_version"
+	remoteMetadataProvider       = "weknora_provider"
+)
+
+// ErrSandboxSessionDeleted reports that the owning WeKnora session no longer
+// exists. Callers must not execute work with the returned nil handle.
+var ErrSandboxSessionDeleted = errors.New("sandbox session no longer exists")
+
+// SessionExistenceChecker checks the tenant-scoped durable session record.
+type SessionExistenceChecker interface {
+	SessionExists(context.Context, SessionSandboxKey) (bool, error)
+}
+
+// remoteSessionLifecycle coordinates one provider's persistent sandboxes using
+// an authoritative binding store. It contains no provider-native types.
+type remoteSessionLifecycle struct {
+	client         RemoteSandboxClient
+	bindings       SessionSandboxBindingStore
+	sessionChecker SessionExistenceChecker
+	createRequest  RemoteCreateRequest
+	cleanupTimeout time.Duration
+	now            func() time.Time
+}
+
+func newRemoteSessionLifecycle(
+	client RemoteSandboxClient,
+	bindings SessionSandboxBindingStore,
+	sessionChecker SessionExistenceChecker,
+	createRequest RemoteCreateRequest,
+	cleanupTimeout time.Duration,
+) (*remoteSessionLifecycle, error) {
+	if client == nil {
+		return nil, errors.New("remote sandbox client is required")
+	}
+	if bindings == nil {
+		return nil, errors.New("session sandbox binding store is required")
+	}
+	if sessionChecker == nil {
+		return nil, errors.New("session existence checker is required")
+	}
+	if !isRemoteProvider(client.Provider()) {
+		return nil, fmt.Errorf("unsupported remote sandbox provider %q", client.Provider())
+	}
+	if !client.Capabilities().SupportsReconnect {
+		return nil, fmt.Errorf("remote sandbox provider %q does not support reconnect", client.Provider())
+	}
+	if strings.TrimSpace(createRequest.TemplateID) == "" {
+		return nil, errors.New("remote sandbox template ID is required")
+	}
+	if cleanupTimeout <= 0 {
+		return nil, errors.New("remote sandbox cleanup timeout must be positive")
+	}
+	createRequest.Metadata = cloneMetadata(createRequest.Metadata)
+	createRequest.EnvVars = cloneMetadata(createRequest.EnvVars)
+	return &remoteSessionLifecycle{
+		client:         client,
+		bindings:       bindings,
+		sessionChecker: sessionChecker,
+		createRequest:  createRequest,
+		cleanupTimeout: cleanupTimeout,
+		now:            time.Now,
+	}, nil
+}
+
+// Resolve returns the current provider's sandbox for key, creating or
+// recovering one under the distributed lifecycle lock when necessary.
+func (l *remoteSessionLifecycle) Resolve(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (RemoteSandboxHandle, error) {
+	if err := key.Validate(); err != nil {
+		return nil, err
+	}
+
+	var handle RemoteSandboxHandle
+	err := l.bindings.WithLifecycleLock(ctx, key, func(lockCtx context.Context) error {
+		resolved, err := l.resolveLocked(lockCtx, key)
+		if err != nil {
+			return err
+		}
+		handle = resolved
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve remote sandbox for session: %w", err)
+	}
+	if handle == nil {
+		return nil, errors.New("resolve remote sandbox returned no handle")
+	}
+	return handle, nil
+}
+
+// Destroy removes the bound remote sandbox and then compare-deletes its
+// binding. It is idempotent for absent and already-deleted sandboxes.
+func (l *remoteSessionLifecycle) Destroy(
+	ctx context.Context,
+	key SessionSandboxKey,
+) error {
+	if err := key.Validate(); err != nil {
+		return err
+	}
+	err := l.bindings.WithLifecycleLock(ctx, key, func(lockCtx context.Context) error {
+		binding, err := l.readBinding(lockCtx, key)
+		if err != nil || binding == nil {
+			return err
+		}
+		return l.destroyBindingLocked(lockCtx, key, *binding)
+	})
+	if err != nil {
+		return fmt.Errorf("destroy remote sandbox for session: %w", err)
+	}
+	return nil
+}
+
+func (l *remoteSessionLifecycle) resolveLocked(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (RemoteSandboxHandle, error) {
+	binding, err := l.readBinding(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	exists, err := l.sessionChecker.SessionExists(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("check owning session: %w", err)
+	}
+	if !exists {
+		if binding != nil {
+			err = l.destroyBindingLocked(ctx, key, *binding)
+		}
+		return nil, errors.Join(ErrSandboxSessionDeleted, err)
+	}
+
+	if binding != nil && binding.Provider != l.client.Provider() {
+		deleted, err := l.bindings.DeleteIfMatch(
+			ctx,
+			key,
+			binding.Provider,
+			binding.SandboxID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("delete mismatched provider binding: %w", err)
+		}
+		if !deleted {
+			return nil, errors.New("mismatched provider binding changed during replacement")
+		}
+		binding = nil
+	}
+
+	if binding != nil {
+		handle, replace, err := l.connectBinding(ctx, *binding)
+		if err != nil {
+			return nil, err
+		}
+		if !replace {
+			return handle, nil
+		}
+		deleted, err := l.bindings.DeleteIfMatch(
+			ctx,
+			key,
+			binding.Provider,
+			binding.SandboxID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("delete terminal sandbox binding: %w", err)
+		}
+		if !deleted {
+			return nil, errors.New("terminal sandbox binding changed during replacement")
+		}
+	}
+
+	recovered, ok, err := l.recoverOwnedSandbox(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return recovered, nil
+	}
+	return l.createAndBind(ctx, key)
+}
+
+func (l *remoteSessionLifecycle) connectBinding(
+	ctx context.Context,
+	binding SessionSandboxBinding,
+) (RemoteSandboxHandle, bool, error) {
+	summary, err := l.client.Get(ctx, binding.SandboxID)
+	if err != nil {
+		if CanReplaceRemoteBinding(err) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("get bound remote sandbox: %w", err)
+	}
+	if summary == nil {
+		return nil, false, errors.New("remote sandbox Get returned nil summary")
+	}
+	if summary.ID != binding.SandboxID {
+		return nil, false, fmt.Errorf(
+			"remote sandbox Get returned ID %q for binding %q",
+			summary.ID,
+			binding.SandboxID,
+		)
+	}
+	if summary.State == RemoteStateTerminal {
+		return nil, true, nil
+	}
+
+	handle, err := l.client.Connect(ctx, binding.SandboxID)
+	if err != nil {
+		if CanReplaceRemoteBinding(err) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("connect bound remote sandbox: %w", err)
+	}
+	if err := l.validateHandle(handle, binding.SandboxID); err != nil {
+		return nil, false, err
+	}
+	return handle, false, nil
+}
+
+func (l *remoteSessionLifecycle) recoverOwnedSandbox(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (RemoteSandboxHandle, bool, error) {
+	capabilities := l.client.Capabilities()
+	if !capabilities.SupportsMetadata || !capabilities.SupportsListSandboxes {
+		return nil, false, nil
+	}
+
+	metadata := l.metadata(key)
+	summaries, err := l.client.List(ctx, RemoteListFilter{Metadata: metadata})
+	if err != nil {
+		return nil, false, fmt.Errorf("list owned remote sandboxes: %w", err)
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		left, right := summaries[i], summaries[j]
+		if left.StartedAt.Equal(right.StartedAt) {
+			return left.ID < right.ID
+		}
+		if left.StartedAt.IsZero() {
+			return false
+		}
+		if right.StartedAt.IsZero() {
+			return true
+		}
+		return left.StartedAt.Before(right.StartedAt)
+	})
+
+	for _, summary := range summaries {
+		if summary.ID == "" || summary.State == RemoteStateTerminal {
+			continue
+		}
+		if !metadataMatches(summary.Metadata, metadata) {
+			return nil, false, fmt.Errorf(
+				"remote provider returned sandbox %q outside metadata filter",
+				summary.ID,
+			)
+		}
+		handle, err := l.client.Connect(ctx, summary.ID)
+		if err != nil {
+			if CanReplaceRemoteBinding(err) {
+				continue
+			}
+			return nil, false, fmt.Errorf("connect owned remote sandbox: %w", err)
+		}
+		if err := l.validateHandle(handle, summary.ID); err != nil {
+			return nil, false, err
+		}
+		if err := l.cleanupOwnedDuplicates(ctx, summaries, summary.ID, metadata); err != nil {
+			return nil, false, err
+		}
+		templateID := summary.TemplateID
+		if templateID == "" {
+			templateID = l.createRequest.TemplateID
+		}
+		binding := l.newBinding(key, summary.ID, templateID, summary.StartedAt)
+		created, err := l.bindings.Create(ctx, key, binding)
+		if err != nil {
+			return nil, false, fmt.Errorf("bind owned remote sandbox: %w", err)
+		}
+		if created {
+			return handle, true, nil
+		}
+		winner, err := l.connectWinner(ctx, key)
+		if err != nil {
+			return nil, false, err
+		}
+		return winner, true, nil
+	}
+	return nil, false, nil
+}
+
+func (l *remoteSessionLifecycle) createAndBind(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (RemoteSandboxHandle, error) {
+	request := l.createRequest
+	request.Metadata = nil
+	if l.client.Capabilities().SupportsMetadata {
+		request.Metadata = cloneMetadata(l.createRequest.Metadata)
+		if request.Metadata == nil {
+			request.Metadata = make(map[string]string)
+		}
+		for metadataKey, value := range l.metadata(key) {
+			request.Metadata[metadataKey] = value
+		}
+	}
+	request.EnvVars = cloneMetadata(l.createRequest.EnvVars)
+
+	handle, err := l.client.Create(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("create remote sandbox: %w", err)
+	}
+	if err := l.validateHandle(handle, ""); err != nil {
+		return nil, errors.Join(err, l.cleanupCreated(ctx, handle))
+	}
+
+	exists, checkErr := l.sessionChecker.SessionExists(ctx, key)
+	if checkErr != nil {
+		return nil, errors.Join(
+			fmt.Errorf("recheck owning session: %w", checkErr),
+			l.cleanupCreated(ctx, handle),
+		)
+	}
+	if !exists {
+		return nil, errors.Join(ErrSandboxSessionDeleted, l.cleanupCreated(ctx, handle))
+	}
+
+	binding := l.newBinding(
+		key,
+		handle.ID(),
+		request.TemplateID,
+		l.now().UTC(),
+	)
+	created, bindErr := l.bindings.Create(ctx, key, binding)
+	if bindErr != nil {
+		return nil, errors.Join(
+			fmt.Errorf("create sandbox binding: %w", bindErr),
+			l.cleanupCreated(ctx, handle),
+		)
+	}
+	if created {
+		return handle, nil
+	}
+
+	winner, winnerErr := l.readBinding(ctx, key)
+	if winnerErr != nil {
+		// The authoritative winner is unknown, so deleting this sandbox could
+		// destroy the resource another coordinator just bound.
+		return nil, fmt.Errorf("read winning sandbox binding: %w", winnerErr)
+	}
+	if winner != nil &&
+		winner.Provider == l.client.Provider() &&
+		winner.SandboxID == handle.ID() {
+		return handle, nil
+	}
+	if cleanupErr := l.cleanupCreated(ctx, handle); cleanupErr != nil {
+		return nil, fmt.Errorf("cleanup losing remote sandbox: %w", cleanupErr)
+	}
+	if winner == nil {
+		return nil, errors.New("sandbox binding create lost without a winner")
+	}
+	return l.connectKnownWinner(ctx, *winner)
+}
+
+func (l *remoteSessionLifecycle) connectWinner(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (RemoteSandboxHandle, error) {
+	winner, err := l.readBinding(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if winner == nil {
+		return nil, errors.New("sandbox binding create lost without a winner")
+	}
+	return l.connectKnownWinner(ctx, *winner)
+}
+
+func (l *remoteSessionLifecycle) connectKnownWinner(
+	ctx context.Context,
+	winner SessionSandboxBinding,
+) (RemoteSandboxHandle, error) {
+	if winner.Provider != l.client.Provider() {
+		return nil, fmt.Errorf(
+			"sandbox binding winner uses provider %q, current provider is %q",
+			winner.Provider,
+			l.client.Provider(),
+		)
+	}
+	handle, replace, err := l.connectBinding(ctx, winner)
+	if err != nil {
+		return nil, err
+	}
+	if replace {
+		return nil, errors.New("sandbox binding winner is already terminal")
+	}
+	return handle, nil
+}
+
+func (l *remoteSessionLifecycle) cleanupOwnedDuplicates(
+	ctx context.Context,
+	summaries []RemoteSandboxSummary,
+	selectedID string,
+	metadata map[string]string,
+) error {
+	for _, candidate := range summaries {
+		if candidate.ID == "" ||
+			candidate.ID == selectedID ||
+			candidate.State == RemoteStateTerminal {
+			continue
+		}
+		if !metadataMatches(candidate.Metadata, metadata) {
+			return fmt.Errorf(
+				"remote provider returned sandbox %q outside metadata filter",
+				candidate.ID,
+			)
+		}
+		if err := l.cleanupSandboxID(ctx, candidate.ID); err != nil {
+			return fmt.Errorf(
+				"delete duplicate owned remote sandbox %q: %w",
+				candidate.ID,
+				err,
+			)
+		}
+	}
+	return nil
+}
+
+func (l *remoteSessionLifecycle) destroyBindingLocked(
+	ctx context.Context,
+	key SessionSandboxKey,
+	binding SessionSandboxBinding,
+) error {
+	if binding.Provider == l.client.Provider() {
+		err := l.client.Delete(ctx, binding.SandboxID)
+		if err != nil && !CanReplaceRemoteBinding(err) {
+			return fmt.Errorf("delete remote sandbox: %w", err)
+		}
+	}
+
+	deleted, err := l.bindings.DeleteIfMatch(
+		ctx,
+		key,
+		binding.Provider,
+		binding.SandboxID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete sandbox binding: %w", err)
+	}
+	if deleted {
+		return nil
+	}
+	current, err := l.readBinding(ctx, key)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return nil
+	}
+	return errors.New("sandbox binding changed during destroy")
+}
+
+func (l *remoteSessionLifecycle) readBinding(
+	ctx context.Context,
+	key SessionSandboxKey,
+) (*SessionSandboxBinding, error) {
+	binding, err := l.bindings.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("get sandbox binding: %w", err)
+	}
+	if binding == nil {
+		return nil, nil
+	}
+	if err := binding.Validate(key); err != nil {
+		return nil, fmt.Errorf("validate sandbox binding: %w", err)
+	}
+	return binding, nil
+}
+
+func (l *remoteSessionLifecycle) cleanupCreated(
+	parent context.Context,
+	handle RemoteSandboxHandle,
+) error {
+	if handle == nil || handle.ID() == "" {
+		return errors.New("cannot clean up remote sandbox without an ID")
+	}
+	return l.cleanupSandboxID(parent, handle.ID())
+}
+
+func (l *remoteSessionLifecycle) cleanupSandboxID(
+	parent context.Context,
+	sandboxID string,
+) error {
+	cleanupCtx, cancel := context.WithTimeout(
+		lifecycleOwnershipContext(parent),
+		l.cleanupTimeout,
+	)
+	defer cancel()
+	err := l.client.Delete(cleanupCtx, sandboxID)
+	if err != nil && !CanReplaceRemoteBinding(err) {
+		return err
+	}
+	return nil
+}
+
+func (l *remoteSessionLifecycle) validateHandle(
+	handle RemoteSandboxHandle,
+	expectedID string,
+) error {
+	if handle == nil {
+		return errors.New("remote sandbox client returned nil handle")
+	}
+	if strings.TrimSpace(handle.ID()) == "" {
+		return errors.New("remote sandbox client returned handle without ID")
+	}
+	if expectedID != "" && handle.ID() != expectedID {
+		return fmt.Errorf(
+			"remote sandbox handle ID %q does not match expected %q",
+			handle.ID(),
+			expectedID,
+		)
+	}
+	if handle.Provider() != l.client.Provider() {
+		return fmt.Errorf(
+			"remote sandbox handle provider %q does not match client %q",
+			handle.Provider(),
+			l.client.Provider(),
+		)
+	}
+	return nil
+}
+
+func (l *remoteSessionLifecycle) newBinding(
+	key SessionSandboxKey,
+	sandboxID string,
+	templateID string,
+	createdAt time.Time,
+) SessionSandboxBinding {
+	if createdAt.IsZero() {
+		createdAt = l.now().UTC()
+	}
+	return SessionSandboxBinding{
+		Version:    SessionSandboxBindingVersion,
+		Provider:   l.client.Provider(),
+		TenantID:   key.TenantID,
+		SessionID:  key.SessionID,
+		SandboxID:  sandboxID,
+		TemplateID: templateID,
+		CreatedAt:  createdAt.UTC(),
+	}
+}
+
+func (l *remoteSessionLifecycle) metadata(key SessionSandboxKey) map[string]string {
+	return map[string]string{
+		remoteMetadataTenantID:       strconv.FormatUint(key.TenantID, 10),
+		remoteMetadataSessionID:      key.SessionID,
+		remoteMetadataBindingVersion: strconv.Itoa(SessionSandboxBindingVersion),
+		remoteMetadataProvider:       string(l.client.Provider()),
+	}
+}
+
+func cloneMetadata(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func metadataMatches(candidate, required map[string]string) bool {
+	for key, value := range required {
+		if candidate[key] != value {
+			return false
+		}
+	}
+	return true
+}

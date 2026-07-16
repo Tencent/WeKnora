@@ -184,3 +184,54 @@ func TestWithRenewableLockReportsOwnershipLossAtRelease(t *testing.T) {
 	require.Contains(t, err.Error(), "ownership lost")
 	require.Equal(t, "replacement", client.Get(context.Background(), key).Val())
 }
+
+func TestOwnershipContextSurvivesCallerCancellation(t *testing.T) {
+	client, _ := newTokenLockTestClient(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	err := redislock.WithRenewableLock(
+		ctx,
+		client,
+		"lock:caller-cancel",
+		time.Minute,
+		20*time.Second,
+		func(lockCtx context.Context) error {
+			ownershipCtx := redislock.OwnershipContext(lockCtx)
+			cancel()
+			require.ErrorIs(t, lockCtx.Err(), context.Canceled)
+			select {
+			case <-ownershipCtx.Done():
+				t.Fatal("caller cancellation must not imply lock ownership loss")
+			default:
+			}
+			return nil
+		},
+	)
+
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestOwnershipContextCancelsWhenRenewalLosesOwnership(t *testing.T) {
+	client, _ := newTokenLockTestClient(t)
+	key := "lock:ownership-context"
+
+	err := redislock.WithRenewableLock(
+		context.Background(),
+		client,
+		key,
+		100*time.Millisecond,
+		10*time.Millisecond,
+		func(lockCtx context.Context) error {
+			ownershipCtx := redislock.OwnershipContext(lockCtx)
+			require.NoError(t, client.Set(context.Background(), key, "replacement", time.Minute).Err())
+			select {
+			case <-ownershipCtx.Done():
+				return nil
+			case <-time.After(time.Second):
+				return errors.New("ownership context was not cancelled")
+			}
+		},
+	)
+
+	require.ErrorIs(t, err, redislock.ErrLockOwnershipLost)
+}
