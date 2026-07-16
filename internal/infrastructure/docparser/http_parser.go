@@ -85,6 +85,11 @@ func (p *HTTPDocumentReader) base() string {
 	return p.baseURL
 }
 
+// ArtifactIdentity identifies the current remote parser endpoint for cache invalidation.
+func (p *HTTPDocumentReader) ArtifactIdentity() string {
+	return "http:" + p.base()
+}
+
 func (p *HTTPDocumentReader) Reconnect(addr string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

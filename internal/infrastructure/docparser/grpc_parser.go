@@ -96,6 +96,13 @@ func (p *GRPCDocumentReader) IsConnected() bool {
 	return p.conn != nil
 }
 
+// ArtifactIdentity identifies the current remote parser endpoint for cache invalidation.
+func (p *GRPCDocumentReader) ArtifactIdentity() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return "grpc:" + p.addr
+}
+
 func (p *GRPCDocumentReader) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

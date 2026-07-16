@@ -3146,6 +3146,7 @@ func (s *knowledgeService) convert(
 	if isURL {
 		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
 	}
+	parserEngine = normalizeDocReaderArtifactEngine(parserEngine)
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
@@ -3190,7 +3191,22 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
-	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	sourcePath := payload.FilePath
+	if payload.FileURL != "" {
+		// FileURL imports are downloaded into temporary storage and must not
+		// outlive the source fetch semantics through the parse cache.
+		sourcePath = ""
+	}
+	result, cacheHit, err := readDocReaderArtifact(ctx, s.artifactStore, docReaderArtifactRequest{
+		tenantID:   payload.TenantID,
+		sourcePath: sourcePath,
+		read: func(callCtx context.Context, callReq *types.ReadRequest) (*types.ReadResult, error) {
+			return s.callDocReaderWithTimeout(callCtx, reader, callReq)
+		},
+		readerIdentity: docReaderArtifactReaderIdentity(reader),
+		renderVersion:  docReaderArtifactRenderVersionV1,
+		readRequest:    req,
+	})
 	if err != nil {
 		// Distinguish DocReader timeout (a knowable user-facing
 		// failure) from generic read errors so the UI can suggest
@@ -3215,9 +3231,10 @@ func (s *knowledgeService) convert(
 		return nil, nil
 	}
 	docOutput := types.JSONMap{
-		"text_length":  len(result.MarkdownContent),
-		"images_found": len(result.ImageRefs),
-		"is_audio":     result.IsAudio,
+		"text_length":         len(result.MarkdownContent),
+		"images_found":        len(result.ImageRefs),
+		"is_audio":            result.IsAudio,
+		"docreader_cache_hit": cacheHit,
 	}
 	if pages := result.Metadata["pages"]; pages != "" {
 		docOutput["pages"] = pages
