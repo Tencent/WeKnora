@@ -58,9 +58,10 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			if searchutil.MarkdownImageRegex.MatchString(toolCall.Result.Output) {
 				hasRetrievedImage = true
 			}
+			modelOutput := e.sourceRefs.ModelOutput(toolCall.Result)
 			messages = append(messages, chat.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, toolCall.Result.Output),
+				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, modelOutput),
 			})
 			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
 				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
@@ -79,7 +80,7 @@ User question: %s
 
 Requirements:
 1. Answer based on the actually retrieved content
-2. Cite sources by document title or name; never expose chunk_id, knowledge_id, tool names, or other internal identifiers
+2. Cite supporting knowledge chunks and web pages only with their supplied compact form: <ref id="cN"/> or <ref id="wN"/>
 3. Organize the answer in a structured format
 4. If information is insufficient, honestly state so
 5. IMPORTANT: Respond in the same language as the user's question

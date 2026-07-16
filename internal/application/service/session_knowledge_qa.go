@@ -10,6 +10,7 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -971,7 +972,8 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Start streaming response
-	responseChan, err := chatModel.ChatStream(ctx, buildFallbackMessages(chatManage, promptContent), opt)
+	fallbackMessages, sourceRefs := prepareFallbackMessages(chatManage, promptContent)
+	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)
 		s.handleFixedFallback(ctx, chatManage)
@@ -985,7 +987,21 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Start goroutine to consume stream and emit events
-	go s.consumeFallbackStream(ctx, chatManage, responseChan)
+	go s.consumeFallbackStream(ctx, chatManage, responseChan, sourceRefs)
+}
+
+func prepareFallbackMessages(
+	chatManage *types.ChatManage,
+	promptContent string,
+) ([]chat.Message, *llmreference.Registry) {
+	messages := buildFallbackMessages(chatManage, promptContent)
+	refs := llmreference.NewRegistry()
+	if len(messages) > 0 && messages[0].Role == "system" {
+		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt
+	} else {
+		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(llmreference.ProtocolPrompt)}}, messages...)
+	}
+	return refs.EncodeMessages(messages), refs
 }
 
 func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) []chat.Message {
@@ -1118,15 +1134,21 @@ func (s *sessionService) consumeFallbackStream(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	responseChan <-chan types.StreamResponse,
+	sourceRefs *llmreference.Registry,
 ) {
 	fallbackID := generateEventID("fallback")
 	eventBus := chatManage.EventBus
 	var finalContent string
 	streamCompleted := false
+	refExpander := llmreference.NewStreamExpander(sourceRefs)
 
 	for response := range responseChan {
 		// Emit event for each answer chunk
 		if response.ResponseType == types.ResponseTypeAnswer {
+			response.Content = refExpander.Feed(response.Content)
+			if response.Done {
+				response.Content += refExpander.Flush()
+			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
 				ID:        fallbackID,
