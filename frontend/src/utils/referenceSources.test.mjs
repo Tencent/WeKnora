@@ -85,6 +85,42 @@ test('resolveReferenceHighlightKey matches web url', () => {
   assert.equal(key, 'web:https://news.example.com/post')
 })
 
+test('resolveReferenceHighlightKey matches any chunk merged into a document item', () => {
+  const refs = [
+    {
+      id: 'chunk-1',
+      chunk_ids: ['chunk-1', 'chunk-2'],
+      knowledge_id: 'doc-1',
+      knowledge_title: 'Policy',
+    },
+  ]
+
+  assert.equal(
+    resolveReferenceHighlightKey(refs, { chunkId: 'chunk-2' }),
+    'doc:doc-1',
+  )
+})
+
+test('resolveReferenceHighlightKey falls back to document title and knowledge base', () => {
+  const refs = [
+    {
+      id: 'available-chunk',
+      knowledge_id: 'doc-1',
+      knowledge_title: 'Claude Sonnet 5.md',
+      knowledge_base_id: 'kb-1',
+    },
+  ]
+
+  assert.equal(
+    resolveReferenceHighlightKey(refs, {
+      chunkId: 'cited-chunk-missing-from-legacy-replay',
+      documentTitle: 'Claude Sonnet 5.md',
+      knowledgeBaseId: 'kb-1',
+    }),
+    'doc:doc-1',
+  )
+})
+
 test('normalizeReferenceUrl trims trailing slash', () => {
   assert.equal(
     normalizeReferenceUrl('https://example.com/path/'),

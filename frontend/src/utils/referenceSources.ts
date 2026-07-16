@@ -275,6 +275,8 @@ export function buildReferenceList(
 export type ReferenceHighlightTarget = {
   url?: string
   chunkId?: string
+  documentTitle?: string
+  knowledgeBaseId?: string
   key?: string
 }
 
@@ -306,6 +308,22 @@ export function resolveReferenceHighlightKey(
         (item.kind === 'web' && (item.chunkId === raw || item.url === raw)),
     )
     if (hit) return hit.key
+  }
+
+  // Defensive fallback for historical/partially streamed Agent messages whose
+  // tool replay payload no longer contains the exact cited chunk. The public
+  // citation still carries the full document title and KB id, which identify
+  // the same document-level drawer card.
+  if (target.documentTitle) {
+    const title = target.documentTitle.trim().toLowerCase()
+    const candidates = items.filter(
+      (item) => item.kind === 'document' && item.title.trim().toLowerCase() === title,
+    )
+    const scoped = target.knowledgeBaseId
+      ? candidates.find((item) => item.knowledgeBaseId === target.knowledgeBaseId)
+      : undefined
+    if (scoped) return scoped.key
+    if (candidates.length === 1) return candidates[0].key
   }
 
   return null

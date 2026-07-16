@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body" :disabled="!useOverlay">
-    <Transition name="references-panel">
+    <Transition name="references-panel" @after-enter="handlePanelAfterEnter">
       <aside
         v-if="visible"
         class="chat-references-panel"
@@ -157,6 +157,7 @@ const listElement = ref<HTMLElement | null>(null)
 const itemElements = new Map<string, HTMLElement>()
 const expandedKeys = reactive(new Set<string>())
 const pointerDownSelectionText = ref('')
+const panelEntered = ref(false)
 
 const visible = computed(() => drawer?.visible.value ?? false)
 const references = computed(() => drawer?.references.value ?? [])
@@ -267,24 +268,52 @@ function getDocumentHref(item: ReferenceListItem) {
 }
 
 async function scrollToHighlight() {
+  if (!panelEntered.value) return
   const key = activeHighlightKey.value
   if (!key) return
   await nextTick()
   const el = itemElements.get(key)
-  if (!el) return
-  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  const container = listElement.value
+  if (!el || !container) return
+
+  // Keep citation positioning inside the drawer. Native element scrolling may
+  // also adjust the outer chat viewport while the fixed panel is still
+  // entering, which makes the conversation column visibly jump sideways.
+  const itemRect = el.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  let nextTop: number | null = null
+  if (itemRect.top < containerRect.top) {
+    nextTop = container.scrollTop + itemRect.top - containerRect.top - 8
+  } else if (itemRect.bottom > containerRect.bottom) {
+    nextTop = container.scrollTop + itemRect.bottom - containerRect.bottom + 8
+  }
+  if (nextTop !== null) {
+    container.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
+  }
+}
+
+function handlePanelAfterEnter() {
+  panelEntered.value = true
+  void scrollToHighlight()
 }
 
 watch(activeHighlightKey, () => {
   void scrollToHighlight()
 })
 
+// A user may click the same citation again after manually scrolling the drawer
+// away from its card. The resolved key does not change in that case, but the
+// highlight target object does, so replay the scroll for every activation.
+watch(highlight, () => {
+  void scrollToHighlight()
+})
+
 watch(visible, (open) => {
   if (!open) {
+    panelEntered.value = false
     expandedKeys.clear()
     return
   }
-  void scrollToHighlight()
 })
 </script>
 
