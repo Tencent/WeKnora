@@ -41,11 +41,19 @@ func (f *stagingFileService) CopyFile(context.Context, string, uint64, string) (
 	panic("unexpected CopyFile")
 }
 
+// stagingSandboxManager is a test double that satisfies both the Manager
+// contract and the SessionCapabilityProvider capability accessor. It stores
+// in-memory files so a staging test can round-trip attachments without a
+// real sandbox.
 type stagingSandboxManager struct {
 	sandboxType sandbox.SandboxType
 	files       map[string][]byte
 	writes      []string
 	removes     []string
+
+	// disableFiles lets a test simulate a manager that advertises no
+	// session filesystem capability (e.g. Local fallback engaged).
+	disableFiles bool
 }
 
 func (m *stagingSandboxManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
@@ -54,6 +62,24 @@ func (m *stagingSandboxManager) Execute(context.Context, *sandbox.ExecuteConfig)
 func (m *stagingSandboxManager) Cleanup(context.Context) error { return nil }
 func (m *stagingSandboxManager) GetSandbox() sandbox.Sandbox   { return nil }
 func (m *stagingSandboxManager) GetType() sandbox.SandboxType  { return m.sandboxType }
+
+func (m *stagingSandboxManager) SessionShellExecutor() sandbox.SessionShellExecutor { return nil }
+func (m *stagingSandboxManager) SessionFileStore() sandbox.SessionFileStore {
+	if m.disableFiles {
+		return nil
+	}
+	return m
+}
+
+func (m *stagingSandboxManager) EnsureSessionDir(context.Context, string, string) error {
+	return nil
+}
+func (m *stagingSandboxManager) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
+	panic("unexpected StatSessionFile")
+}
+func (m *stagingSandboxManager) ReadSessionFile(context.Context, string, string) ([]byte, error) {
+	panic("unexpected ReadSessionFile")
+}
 func (m *stagingSandboxManager) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
 	entries := make([]sandbox.RemoteDirEntry, 0, len(m.files))
 	for filePath, content := range m.files {
@@ -118,8 +144,14 @@ func TestStageSessionAttachmentsReconcilesAndSkipsExisting(t *testing.T) {
 	assert.Equal(t, 1, fileService.getCalls[attachment.URL])
 }
 
-func TestStageSessionAttachmentsDoesNotTouchNonCubeBackends(t *testing.T) {
-	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeLocal}
+func TestStageSessionAttachmentsSkipsWhenNoFilesystemCapability(t *testing.T) {
+	// disableFiles=true simulates any manager without a session filesystem
+	// capability (Local/Docker/Disabled DefaultManager, or a
+	// SessionBoundManager whose remote provider fell back to Local).
+	manager := &stagingSandboxManager{
+		sandboxType:  sandbox.SandboxTypeLocal,
+		disableFiles: true,
+	}
 	service := &agentService{sandboxMgr: manager, fileService: &stagingFileService{}}
 
 	staged, err := service.stageSessionAttachments(context.Background(), "session-1", types.MessageAttachments{{
