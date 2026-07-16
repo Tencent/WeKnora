@@ -42,6 +42,7 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import type { MentionItem, MentionItemType, MentionRequestItem } from '@/types/mention';
+import { SvgIcon } from '@/components/icons';
 
 const route = useRoute();
 const router = useRouter();
@@ -2461,8 +2462,12 @@ defineExpose({
               <t-icon v-else :name="getMentionIcon(item)" />
             </span>
             <span v-if="item.org_name" class="mention-chip__org-badge">
-              <img :src="getImgSrc(item.type === 'file' ? 'organization-grey.svg' : 'organization-green.svg')"
-                class="mention-chip__org-img" alt="" aria-hidden="true" />
+              <SvgIcon
+                name="organization"
+                :variant="item.type === 'file' ? 'grey' : 'green'"
+                :size="10"
+                class="mention-chip__org-img"
+              />
             </span>
           </span>
           <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>

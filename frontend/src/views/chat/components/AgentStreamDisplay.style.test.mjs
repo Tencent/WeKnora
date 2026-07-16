@@ -15,8 +15,9 @@ test('agent steps use compact muted timeline styling', () => {
   assert.match(source, /overflow-y:\s*visible/)
   assert.match(source, /\.tree-root \.action-name\s*\{[\s\S]*font-size:\s*14px/)
   assert.match(source, /\.tree-child \.action-title-icon\s*\{[\s\S]*position:\s*absolute/)
-  assert.match(source, /function maskIconStyle\(src: string, size = 18\)/)
-  assert.match(source, /\.icon-mask\s*\{[\s\S]*background-color:\s*var\(--agent-step-icon-color\)/)
+  assert.match(source, /SvgIcon name="agent"/)
+  assert.match(source, /SvgIcon name="thinking"/)
+  assert.doesNotMatch(source, /function maskIconStyle\(src: string, size = 18\)/)
   assert.doesNotMatch(source, /\.action-title \.action-title-icon,\s*\n\s*\.icon-mask\s*\{/)
 })
 
