@@ -1267,13 +1267,27 @@ watch(answerFullyRendered, (ready) => {
   });
 });
 
-// Only render a placeholder before the agent has produced any visible step or
-// answer. Once real activity exists it carries its own pending state, and once
-// answer text starts the stream itself is sufficient feedback.
+// Whether any currently visible step is actively pending (a running tool, or a
+// blocking approval/OAuth prompt). A pending step shimmers on its own, so we
+// don't stack a placeholder on top of it.
+const hasPendingStreamingActivity = computed(() => {
+  return displayEvents.value.some((event: any) => {
+    if (!event) return false;
+    if (event.pending === true) return true;
+    return event.type === 'tool_approval_required' || event.type === 'mcp_oauth_required';
+  });
+});
+
+// Before any answer text appears, keep a native timeline placeholder whenever
+// nothing is currently pending. This covers both the initial wait (no events
+// yet) and the gap between rounds — the previous tool finished but the model
+// has not emitted the next step/answer — which would otherwise show a static,
+// feedback-less timeline. Once a real pending step exists it carries its own
+// shimmer, and once answer text starts the stream itself is enough feedback.
 const showAgentActivityIndicator = computed(() => {
   if (isConversationDone.value) return false;
   if (props.ragMode || hasAnswerStarted.value) return false;
-  return displayEvents.value.length === 0;
+  return !hasPendingStreamingActivity.value;
 });
 
 const isStreamingTimelineEvent = (event: any): boolean => {
@@ -2624,6 +2638,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
+// While streaming, the last timeline step is `tree-child-last` (margin-bottom: 0)
+// and the answer streams in directly beneath it. Give the answer breathing room
+// so it does not collide with the final tool row.
+.event-item.tree-child + .event-item.event-answer {
+  margin-top: 16px;
+}
+
 // ============ Tree View ============
 .tree-container {
   margin: 0 0 16px;
@@ -2974,16 +2995,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes pulse {
 
   0%,
@@ -3271,12 +3282,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
     overflow-x: auto;
     border: 1px solid var(--td-component-stroke);
     line-height: 1.5;
-  }
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
   }
 }
 

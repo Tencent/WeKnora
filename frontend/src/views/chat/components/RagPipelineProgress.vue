@@ -64,14 +64,7 @@
                   <span class="action-name">{{ t('agent.think') }}</span>
                 </div>
               </div>
-              <div v-if="thinkingPending && !thinkingContent" class="thinking-loading">
-                <div class="loading-typing">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </div>
-              <div v-else-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+              <div v-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
                 {{ thinkingContent }}
               </div>
             </div>
@@ -166,14 +159,7 @@
                     <span class="action-name">{{ t('agent.think') }}</span>
                   </div>
                 </div>
-                <div v-if="thinkingPending && !thinkingContent" class="thinking-loading">
-                  <div class="loading-typing">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                </div>
-                <div v-else-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
+                <div v-if="thinkingContent && thinkingExpanded" class="thinking-detail-content">
                   {{ thinkingContent }}
                 </div>
               </div>
@@ -658,10 +644,6 @@ watch(thinkingExpanded, (expanded) => {
 }
 
 .rag-thinking-step {
-  .thinking-loading {
-    padding: 4px 0 0;
-  }
-
   .thinking-detail-content {
     margin-top: 4px;
     padding: 0;

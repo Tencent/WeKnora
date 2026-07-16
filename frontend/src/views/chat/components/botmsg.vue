@@ -414,10 +414,6 @@ onBeforeUnmount(() => {
     margin-left: 16px;
 }
 
-.thinking-loading {
-    padding: 8px 0;
-}
-
 .img_loading {
     background: var(--td-bg-color-container-hover);
     height: 230px;

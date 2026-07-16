@@ -91,9 +91,11 @@ test('pending tool rows do not render an extra axis dot', () => {
   assert.doesNotMatch(source, /&\.action-pending\s*\{[\s\S]*&::after/)
 })
 
-test('agent mode only shows a native timeline placeholder before visible activity', () => {
+test('agent mode shows a native placeholder before answer whenever nothing is pending', () => {
   assert.match(source, /if \(isConversationDone\.value\) return false/)
-  assert.match(source, /return displayEvents\.value\.length === 0/)
+  assert.match(source, /return !hasPendingStreamingActivity\.value/)
+  assert.match(source, /const hasPendingStreamingActivity = computed/)
+  assert.match(source, /event\.type === 'tool_approval_required' \|\| event\.type === 'mcp_oauth_required'/)
   assert.match(source, /class="action-card action-pending"/)
   assert.match(source, /t\('chat\.thinkingAlt'\)/)
   assert.match(source, /chat-timeline-loading\.less/)

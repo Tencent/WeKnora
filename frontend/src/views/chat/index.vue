@@ -1253,7 +1253,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
 @media (prefers-reduced-motion: reduce) {
     .chat-global-wait__spinner {
-        animation-duration: 1.8s;
+        animation: none;
     }
 }
 
