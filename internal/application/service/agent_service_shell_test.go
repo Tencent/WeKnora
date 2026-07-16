@@ -9,39 +9,65 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type shellCapableSandboxManager struct {
-	typ sandbox.SandboxType
+// capableManager is a test double that lets each case declare which
+// session-scoped capabilities the sandbox manager currently advertises.
+// It mirrors the real SessionCapabilityProvider contract SessionBoundManager
+// implements, without pulling in the full manager wiring.
+type capableManager struct {
+	typ   sandbox.SandboxType
+	shell sandbox.SessionShellExecutor
+	files sandbox.SessionFileStore
 }
 
-func (m *shellCapableSandboxManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
+func (m *capableManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
 	return &sandbox.ExecuteResult{}, nil
 }
-func (m *shellCapableSandboxManager) Cleanup(context.Context) error { return nil }
-func (m *shellCapableSandboxManager) GetSandbox() sandbox.Sandbox   { return nil }
-func (m *shellCapableSandboxManager) GetType() sandbox.SandboxType  { return m.typ }
-func (m *shellCapableSandboxManager) ExecShellCommand(
-	context.Context,
-	string,
-	string,
-	string,
-	time.Duration,
-	map[string]string,
+func (m *capableManager) Cleanup(context.Context) error { return nil }
+func (m *capableManager) GetSandbox() sandbox.Sandbox   { return nil }
+func (m *capableManager) GetType() sandbox.SandboxType  { return m.typ }
+func (m *capableManager) SessionShellExecutor() sandbox.SessionShellExecutor {
+	return m.shell
+}
+func (m *capableManager) SessionFileStore() sandbox.SessionFileStore {
+	return m.files
+}
+
+// stubShellExecutor records ExecShellCommand calls so a test can assert the
+// registered tool actually dispatches through it.
+type stubShellExecutor struct{ called bool }
+
+func (s *stubShellExecutor) ExecShellCommand(
+	context.Context, string, string, string, time.Duration, map[string]string,
 ) (*sandbox.ExecuteResult, error) {
+	s.called = true
 	return &sandbox.ExecuteResult{}, nil
 }
 
-func TestCubeShellExecutorRejectsNonCubeBackends(t *testing.T) {
-	for _, typ := range []sandbox.SandboxType{
-		sandbox.SandboxTypeLocal,
-		sandbox.SandboxTypeDocker,
-		sandbox.SandboxTypeDisabled,
-	} {
-		executor, ok := cubeShellExecutor(&shellCapableSandboxManager{typ: typ})
-		assert.False(t, ok, "backend %s must not expose shell_exec", typ)
-		assert.Nil(t, executor)
-	}
+func TestSessionSandboxShellExecutorReturnsNilWithoutCapability(t *testing.T) {
+	// Managers that don't implement SessionCapabilityProvider (Local /
+	// Docker / Disabled DefaultManager) must never surface shell_exec.
+	nonCapable := &capableManager{typ: sandbox.SandboxTypeLocal}
+	assert.Nil(t, sessionSandboxShellExecutor(nonCapable))
+	assert.Nil(t, sessionSandboxFileStore(nonCapable))
+	assert.Nil(t, sessionSandboxShellExecutor(nil))
+}
 
-	executor, ok := cubeShellExecutor(&shellCapableSandboxManager{typ: sandbox.SandboxTypeCube})
-	assert.True(t, ok)
-	assert.NotNil(t, executor)
+func TestSessionSandboxShellExecutorReturnsNilWhenProviderRefuses(t *testing.T) {
+	// A provider that advertises capabilities but is currently unable to
+	// honour them (e.g. SessionBoundManager after Local fallback) returns
+	// nil from the accessor. The tool layer must respect that.
+	m := &capableManager{typ: sandbox.SandboxTypeCube}
+	assert.Nil(t, sessionSandboxShellExecutor(m))
+	assert.Nil(t, sessionSandboxFileStore(m))
+}
+
+func TestSessionSandboxShellExecutorReturnsCapability(t *testing.T) {
+	exec := &stubShellExecutor{}
+	m := &capableManager{typ: sandbox.SandboxTypeCube, shell: exec}
+	got := sessionSandboxShellExecutor(m)
+	assert.NotNil(t, got)
+	if _, err := got.ExecShellCommand(context.Background(), "sid", "echo", "", 0, nil); err != nil {
+		t.Fatalf("dispatch through capability: %v", err)
+	}
+	assert.True(t, exec.called)
 }

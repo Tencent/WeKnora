@@ -272,21 +272,18 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 		artifactOutputEnvVar:  outputDir,
 		artifactHistoryEnvVar: ArtifactOutputDir(),
 	}
-	if m.sandboxMgr.GetType() == sandbox.SandboxTypeCube {
+	// SessionFileStore advertises the "sandbox provides per-session file
+	// storage" capability. When present we can safely expose the input
+	// staging directory and pre-materialise the output directory; when
+	// absent (Local/Docker or fallback), stateless backends materialise
+	// directories on their own during script execution.
+	fileStore := sessionFileStoreFromManager(m.sandboxMgr)
+	if fileStore != nil {
 		env[sessionInputEnvVar] = sandbox.SessionInputRoot
-	}
-
-	// Best-effort pre-create the output directory inside the sandbox. When
-	// the underlying manager exposes EnsureSessionDir (Cube backend today),
-	// we call it so the script can write to $WEKNORA_SKILL_OUTPUT_DIR
-	// unconditionally without a mkdir -p prelude. Errors are logged but
-	// never fatal: script execution proceeds regardless, and the script is
-	// free to create the directory itself.
-	if ensurer, ok := m.sandboxMgr.(interface {
-		EnsureSessionDir(context.Context, string, string) error
-	}); ok && sessionID != "" {
-		if err := ensurer.EnsureSessionDir(ctx, sessionID, outputDir); err != nil {
-			logger.Warnf(ctx, "[Tool][ExecuteScript] pre-create output dir %s failed: %v", outputDir, err)
+		if sessionID != "" {
+			if err := fileStore.EnsureSessionDir(ctx, sessionID, outputDir); err != nil {
+				logger.Warnf(ctx, "[Tool][ExecuteScript] pre-create output dir %s failed: %v", outputDir, err)
+			}
 		}
 	}
 
@@ -301,6 +298,17 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 
 	// Execute in sandbox
 	return m.sandboxMgr.Execute(ctx, config)
+}
+
+// sessionFileStoreFromManager returns the sandbox manager's effective
+// session filesystem capability, or nil when the backend cannot expose one.
+// Isolated in a helper so callers stay free of provider-specific branches.
+func sessionFileStoreFromManager(mgr sandbox.Manager) sandbox.SessionFileStore {
+	provider, ok := mgr.(sandbox.SessionCapabilityProvider)
+	if !ok || provider == nil {
+		return nil
+	}
+	return provider.SessionFileStore()
 }
 
 // GetSkillInfo returns detailed information about a skill
