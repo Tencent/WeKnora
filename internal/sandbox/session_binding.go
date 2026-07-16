@@ -88,7 +88,28 @@ type SessionSandboxBindingStore interface {
 		RemoteProvider,
 		string,
 	) (bool, error)
+	// WithLifecycleLock passes fn a request context carrying a separate
+	// ownership context. The ownership context survives caller cancellation
+	// but is canceled when exclusive lock ownership is lost.
 	WithLifecycleLock(context.Context, SessionSandboxKey, func(context.Context) error) error
+}
+
+type lifecycleOwnershipContextKey struct{}
+
+func withLifecycleOwnershipContext(
+	ctx context.Context,
+	ownershipCtx context.Context,
+) context.Context {
+	return context.WithValue(ctx, lifecycleOwnershipContextKey{}, ownershipCtx)
+}
+
+func lifecycleOwnershipContext(ctx context.Context) context.Context {
+	if ownershipCtx, ok := ctx.Value(lifecycleOwnershipContextKey{}).(context.Context); ok {
+		return ownershipCtx
+	}
+	// Unknown store implementations fail safe by retaining request/lock
+	// cancellation rather than detaching destructive cleanup.
+	return ctx
 }
 
 type memoryLifecycleLock struct {
@@ -216,7 +237,7 @@ func (s *MemorySessionSandboxBindingStore) WithLifecycleLock(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return fn(ctx)
+	return fn(withLifecycleOwnershipContext(ctx, context.WithoutCancel(ctx)))
 }
 
 func (s *MemorySessionSandboxBindingStore) dropMemoryLifecycleLockUser(
