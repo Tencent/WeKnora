@@ -299,14 +299,17 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		output += fmt.Sprintf("  🆔 chunk_id: %s\n\n", result.ID)
 
 		formattedResults = append(formattedResults, map[string]interface{}{
-			"result_index":    i + 1,
-			"chunk_id":        result.ID,
-			"content":         result.Content,
-			"score":           result.Score,
-			"relevance_level": relevanceLevel,
-			"knowledge_id":    result.KnowledgeID,
-			"knowledge_title": result.KnowledgeTitle,
-			"match_type":      FormatMatchType(result.MatchType),
+			"result_index":      i + 1,
+			"chunk_id":          result.ID,
+			"content":           result.Content,
+			"score":             result.Score,
+			"relevance_level":   relevanceLevel,
+			"knowledge_id":      result.KnowledgeID,
+			"knowledge_base_id": result.KnowledgeBaseID,
+			"knowledge_title":   result.KnowledgeTitle,
+			"chunk_index":       result.ChunkIndex,
+			"chunk_type":        string(result.ChunkType),
+			"match_type":        FormatMatchType(result.MatchType),
 		})
 	}
 

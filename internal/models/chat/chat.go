@@ -168,5 +168,8 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 	if providerName == provider.ProviderAnthropic {
 		return NewAnthropicChat(config)
 	}
+	if providerName == provider.ProviderOpenAICodex {
+		return NewCodexChat(config)
+	}
 	return NewRemoteAPIChat(config)
 }

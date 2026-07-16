@@ -94,6 +94,23 @@ export function resolveCitationChunkId(
 
   const doc = (attrs.doc || '').trim()
   const kbId = (attrs.kbId || '').trim()
+  const num = parseInt(raw, 10)
+
+  if (!Number.isNaN(num) && String(num) === raw) {
+    const scopedByDoc = list.filter(
+      (r) =>
+        (!kbId || r.knowledge_base_id === kbId) &&
+        (!doc ||
+          docTitlesMatch(doc, r.knowledge_title || '') ||
+          docTitlesMatch(doc, r.knowledge_filename || '')),
+    )
+    const byDocChunkIndex = scopedByDoc.find(
+      (r) => r.chunk_index === num || r.chunk_index === num - 1,
+    )
+    if (byDocChunkIndex?.id) return byDocChunkIndex.id
+    const byScopedPosition = scopedByDoc[num - 1]
+    if (byScopedPosition?.id) return byScopedPosition.id
+  }
 
   if (doc) {
     const byDoc = list.find(
@@ -118,7 +135,6 @@ export function resolveCitationChunkId(
     if (hit?.id) return hit.id
   }
 
-  const num = parseInt(raw, 10)
   if (!Number.isNaN(num) && String(num) === raw) {
     const byPos = list[num - 1]
     if (byPos?.id) return byPos.id
