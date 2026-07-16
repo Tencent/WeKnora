@@ -68,10 +68,7 @@ func TestE2E_RealAPI(t *testing.T) {
 		t.Fatalf("FetchAll failed: %v", err)
 	}
 	for _, item := range items {
-		preview := string(item.Content)
-		if len(preview) > 60 {
-			preview = preview[:60] + "..."
-		}
+		preview := truncate(string(item.Content), 60) // rune-safe
 		if errMsg, ok := item.Metadata["error"]; ok && errMsg != "" {
 			t.Logf("item FAILED: id=%s title=%q err=%s", item.ExternalID, item.Title, errMsg)
 			continue

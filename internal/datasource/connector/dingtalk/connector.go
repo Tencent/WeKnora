@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -111,14 +112,98 @@ func (c *Connector) ListResources(
 	return resources, nil
 }
 
-// ResolveResourceAncestors returns an empty set: the DingTalk wiki node API
-// does not expose a parent pointer, so a lazily-loaded picker cannot reveal
-// pre-existing deep selections without re-walking the tree. Selections still
-// sync correctly; they just start collapsed in the picker.
+// ResolveResourceAncestors returns, for each selected node, the resource IDs of
+// every ancestor whose children the lazily-loaded picker must expand to reveal
+// it. The DingTalk node API has no parent pointer, so ancestry is recovered by
+// walking each referenced workspace from its root node and recording the path;
+// the walk stops once every requested node is located. It is best-effort: a
+// listing error along the way just leaves that branch collapsed.
 func (c *Connector) ResolveResourceAncestors(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]string, error) {
-	return []string{}, nil
+	dingConfig, err := parseDingTalkConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	client := NewClient(dingConfig)
+
+	// Group the target node IDs by workspace. Bare-workspace selections are
+	// top-level in the picker and have nothing above them to reveal.
+	targetsByWorkspace := make(map[string]map[string]bool)
+	for _, rid := range resourceIDs {
+		workspaceID, nodeID := parseNodeResourceID(rid)
+		if workspaceID == "" || nodeID == "" {
+			continue
+		}
+		if targetsByWorkspace[workspaceID] == nil {
+			targetsByWorkspace[workspaceID] = make(map[string]bool)
+		}
+		targetsByWorkspace[workspaceID][nodeID] = true
+	}
+
+	seen := make(map[string]bool)
+	ancestors := make([]string, 0)
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ancestors = append(ancestors, id)
+		}
+	}
+
+	for workspaceID, targets := range targetsByWorkspace {
+		ws, err := client.GetWorkspace(ctx, workspaceID)
+		if err != nil {
+			logger.Warnf(ctx, "[DingTalk] resolve ancestors: get workspace %s: %v", workspaceID, err)
+			continue
+		}
+
+		// BFS from the root's direct children (whose picker parent is the bare
+		// workspace ID), carrying each node's ancestor chain down the tree.
+		type queued struct {
+			node  wikiNode
+			chain []string
+		}
+		top, err := client.ListNodes(ctx, ws.RootNodeID)
+		if err != nil {
+			logger.Warnf(ctx, "[DingTalk] resolve ancestors: list root of %s: %v", workspaceID, err)
+			continue
+		}
+		queue := make([]queued, 0, len(top))
+		for _, n := range top {
+			queue = append(queue, queued{node: n, chain: []string{workspaceID}})
+		}
+
+		visited := make(map[string]bool)
+		remaining := len(targets)
+		for len(queue) > 0 && remaining > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			if visited[cur.node.NodeID] {
+				continue
+			}
+			visited[cur.node.NodeID] = true
+
+			if targets[cur.node.NodeID] {
+				for _, a := range cur.chain {
+					add(a)
+				}
+				remaining--
+			}
+			if cur.node.HasChildren {
+				children, err := client.ListNodes(ctx, cur.node.NodeID)
+				if err != nil {
+					logger.Warnf(ctx, "[DingTalk] resolve ancestors: list children of %s: %v", cur.node.NodeID, err)
+					continue
+				}
+				childChain := append(append([]string{}, cur.chain...), makeNodeResourceID(workspaceID, cur.node.NodeID))
+				for _, ch := range children {
+					queue = append(queue, queued{node: ch, chain: childChain})
+				}
+			}
+		}
+	}
+
+	return ancestors, nil
 }
 
 // FetchAll performs a full sync of all documents from the specified resources.
@@ -150,7 +235,8 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 					Title:            node.Name,
 					SourceResourceID: resourceID,
 					Metadata: map[string]string{
-						"error": err.Error(),
+						"error":   err.Error(),
+						"channel": types.ChannelDingtalk,
 					},
 				})
 				continue
@@ -210,30 +296,42 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 			}
 		}
 
+		prevTimes := prevCursor.ResourceNodeTimes[resourceID] // may be nil; reads are safe
 		currentNodes := make(map[string]bool)
 		for _, node := range nodes {
 			currentNodes[node.NodeID] = true
 			tsStr := strconv.FormatInt(node.ModifiedTimestamp, 10)
-			newCursor.ResourceNodeTimes[resourceID][node.NodeID] = tsStr
 
-			if prevTimes, ok := prevCursor.ResourceNodeTimes[resourceID]; ok {
-				if prevTS, exists := prevTimes[node.NodeID]; exists && prevTS == tsStr {
-					continue // unchanged
-				}
+			if prevTS, exists := prevTimes[node.NodeID]; exists && prevTS == tsStr {
+				// Unchanged: keep the cursor entry as-is.
+				newCursor.ResourceNodeTimes[resourceID][node.NodeID] = tsStr
+				continue
 			}
 
 			item, err := c.fetchNodeContent(ctx, client, node, resourceID)
 			if err != nil {
+				// Do NOT advance the cursor for a node whose fetch failed;
+				// otherwise the next run would treat it as unchanged and never
+				// retry, silently dropping its content forever. Preserve the
+				// previous value (if any) so deletion detection keeps its
+				// baseline while the mismatch forces a retry next run.
+				if prevTS, ok := prevTimes[node.NodeID]; ok {
+					newCursor.ResourceNodeTimes[resourceID][node.NodeID] = prevTS
+				}
 				changedItems = append(changedItems, types.FetchedItem{
 					ExternalID:       node.NodeID,
 					Title:            node.Name,
 					SourceResourceID: resourceID,
 					Metadata: map[string]string{
-						"error": err.Error(),
+						"error":   err.Error(),
+						"channel": types.ChannelDingtalk,
 					},
 				})
 				continue
 			}
+			// Success (item may be nil for non-exportable nodes): record the
+			// new timestamp so subsequent syncs skip it until it changes again.
+			newCursor.ResourceNodeTimes[resourceID][node.NodeID] = tsStr
 			if item != nil {
 				changedItems = append(changedItems, *item)
 			}
@@ -284,7 +382,18 @@ func (c *Connector) listResourceNodes(ctx context.Context, client *Client, resou
 		return []wikiNode{root}, nil
 	}
 	descendants, err := client.ListNodesRecursive(ctx, nodeID)
-	return append([]wikiNode{root}, descendants...), err
+	result := append([]wikiNode{root}, descendants...)
+	if err != nil {
+		var partialErr *partialNodeListError
+		if !errors.As(err, &partialErr) {
+			// The first-level children listing failed outright. Degrade to a
+			// partial error (carrying the selected root) instead of a fatal one
+			// so FetchAll/FetchIncremental still sync the root and continue with
+			// other resources, rather than aborting the entire sync.
+			return result, &partialNodeListError{Failures: []nodeListFailure{{Node: root, Err: err}}}
+		}
+	}
+	return result, err
 }
 
 // fetchNodeContent fetches the content of a single wiki node and converts it

@@ -8,9 +8,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 )
@@ -108,9 +110,19 @@ func (c *Client) getAccessToken(ctx context.Context) (string, error) {
 	}
 
 	c.tokenCache = result.AccessToken
+	// Refresh proactively before expiry. Guard against a missing/short expireIn:
+	// without this a zero value would mark the token expired immediately and make
+	// every request re-fetch it, and a short TTL would be used up to its exact
+	// expiry with no margin (racy 401s).
 	ttl := time.Duration(result.ExpireIn) * time.Second
-	if ttl > 5*time.Minute {
-		ttl -= 5 * time.Minute
+	const tokenMargin = 5 * time.Minute
+	switch {
+	case ttl <= 0:
+		ttl = 30 * time.Minute
+	case ttl > tokenMargin:
+		ttl -= tokenMargin
+	default:
+		ttl /= 2
 	}
 	c.tokenExpAt = time.Now().Add(ttl)
 
@@ -168,11 +180,23 @@ func (c *Client) resolveAdminUnionID(ctx context.Context) (string, error) {
 			adminResp.ErrCode, adminResp.ErrMsg)
 	}
 
+	// Prefer the primary admin (sys_level == 1). listadmin's ordering is not
+	// guaranteed, so picking Result[0] blindly can resolve a different admin
+	// (with different wiki visibility) from run to run; the primary admin is
+	// unique and stable.
+	adminUserID := adminResp.Result[0].UserID
+	for _, a := range adminResp.Result {
+		if a.SysLevel == 1 {
+			adminUserID = a.UserID
+			break
+		}
+	}
+
 	userURL := fmt.Sprintf("%s/topapi/v2/user/get?access_token=%s",
 		c.legacyBaseURL, url.QueryEscape(tokenResp.AccessToken))
 	var userResp userGetResponse
 	if err := c.doLegacyRequest(ctx, http.MethodPost, userURL,
-		map[string]string{"userid": adminResp.Result[0].UserID}, &userResp); err != nil {
+		map[string]string{"userid": adminUserID}, &userResp); err != nil {
 		return "", fmt.Errorf("get admin user: %w", err)
 	}
 	if userResp.ErrCode != 0 || userResp.Result.UnionID == "" {
@@ -197,19 +221,25 @@ func (c *Client) doLegacyRequest(ctx context.Context, method, fullURL string, bo
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		// The URL carries appkey/appsecret/access_token in its query string; a
+		// *url.Error embeds the full URL, so redact before surfacing.
+		return fmt.Errorf("create request: %s", redactSecrets(err.Error()))
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("execute request: %w", err)
+		// Transport failures (DNS/timeout/refused) return a *url.Error whose
+		// message contains the full URL including the secret query params. This
+		// error propagates into data_sources.error_message and HTTP responses,
+		// so it must be redacted here.
+		return fmt.Errorf("execute request: %s", redactSecrets(err.Error()))
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
+		return fmt.Errorf("read response body: %s", redactSecrets(err.Error()))
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("legacy api error: status=%d body=%s", resp.StatusCode, truncate(string(respBody), 500))
@@ -290,8 +320,12 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 // maxPages bounds pagination loops as a safety net against a server that
-// keeps returning the same nextToken.
-const maxPages = 200
+// keeps returning the same nextToken. pageSize requests a larger page than the
+// server default to cut the number of round-trips.
+const (
+	maxPages = 200
+	pageSize = 50
+)
 
 // ListWorkspaces returns all knowledge bases (知识库) accessible to the operator.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]workspace, error) {
@@ -303,7 +337,8 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]workspace, error) {
 	var all []workspace
 	nextToken := ""
 	for page := 0; page < maxPages; page++ {
-		path := "/v2.0/wiki/workspaces?operatorId=" + url.QueryEscape(operatorID)
+		path := fmt.Sprintf("/v2.0/wiki/workspaces?maxResults=%d&operatorId=%s",
+			pageSize, url.QueryEscape(operatorID))
 		if nextToken != "" {
 			path += "&nextToken=" + url.QueryEscape(nextToken)
 		}
@@ -315,13 +350,16 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]workspace, error) {
 		all = append(all, resp.Workspaces...)
 
 		if resp.NextToken == "" || resp.NextToken == nextToken {
-			break
+			logger.Infof(ctx, "[DingTalk] ListWorkspaces: total %d workspaces", len(all))
+			return all, nil
 		}
 		nextToken = resp.NextToken
 	}
 
-	logger.Infof(ctx, "[DingTalk] ListWorkspaces: total %d workspaces", len(all))
-	return all, nil
+	// Never terminated: return an error rather than a silently-truncated list,
+	// which FetchIncremental would otherwise mistake for a complete listing and
+	// treat every un-listed node as deleted.
+	return nil, fmt.Errorf("list workspaces: exceeded %d pages (possible pagination loop)", maxPages)
 }
 
 // GetWorkspace returns metadata (including the root node ID) for one knowledge base.
@@ -354,8 +392,8 @@ func (c *Client) ListNodes(ctx context.Context, parentNodeID string) ([]wikiNode
 	var all []wikiNode
 	nextToken := ""
 	for page := 0; page < maxPages; page++ {
-		path := fmt.Sprintf("/v2.0/wiki/nodes?parentNodeId=%s&operatorId=%s",
-			url.QueryEscape(parentNodeID), url.QueryEscape(operatorID))
+		path := fmt.Sprintf("/v2.0/wiki/nodes?parentNodeId=%s&maxResults=%d&operatorId=%s",
+			url.QueryEscape(parentNodeID), pageSize, url.QueryEscape(operatorID))
 		if nextToken != "" {
 			path += "&nextToken=" + url.QueryEscape(nextToken)
 		}
@@ -367,11 +405,14 @@ func (c *Client) ListNodes(ctx context.Context, parentNodeID string) ([]wikiNode
 		all = append(all, resp.Nodes...)
 
 		if resp.NextToken == "" || resp.NextToken == nextToken {
-			break
+			return all, nil
 		}
 		nextToken = resp.NextToken
 	}
-	return all, nil
+
+	// Never terminated: fail loudly instead of returning a truncated listing
+	// that FetchIncremental would treat as complete (spurious deletions).
+	return nil, fmt.Errorf("list nodes under %s: exceeded %d pages (possible pagination loop)", parentNodeID, maxPages)
 }
 
 // GetNode returns metadata for a single wiki node.
@@ -397,10 +438,17 @@ func (c *Client) GetNode(ctx context.Context, nodeID string) (wikiNode, error) {
 func (c *Client) ListNodesRecursive(ctx context.Context, parentNodeID string) ([]wikiNode, error) {
 	var all []wikiNode
 	var failures []nodeListFailure
+	// visited guards against cycles (e.g. shortcut nodes surfacing an ancestor
+	// as a child) that would otherwise recurse until the stack overflows.
+	visited := make(map[string]bool)
 	var walk func(nodes []wikiNode)
 
 	walk = func(nodes []wikiNode) {
 		for _, node := range nodes {
+			if visited[node.NodeID] {
+				continue
+			}
+			visited[node.NodeID] = true
 			all = append(all, node)
 			if !node.HasChildren {
 				continue
@@ -472,12 +520,23 @@ func (c *Client) SubmitExportTask(ctx context.Context, dentryUUID, targetFormat 
 	return resp.TaskID, resp.DownloadURL, nil
 }
 
-// QueryExportTask polls an export task. Returns the downloadUrl when ready
-// (empty while the task is still running).
-func (c *Client) QueryExportTask(ctx context.Context, taskID string) (string, error) {
+// exportFailureStatuses are the terminal failure states of an export task.
+// Everything else (including undocumented in-flight states) is treated as
+// "still running" and polled until the URL arrives or the timeout fires — the
+// documented status vocabulary is not guaranteed stable, and DingTalk's own
+// tooling keeps polling on unknown statuses rather than failing fast.
+var exportFailureStatuses = map[string]bool{
+	"FAILED": true, "FAIL": true, "ERROR": true,
+	"ABORTED": true, "CANCELED": true, "CANCELLED": true,
+}
+
+// QueryExportTask polls an export task. Returns (downloadUrl, status): the URL
+// is empty while the task is still running, and a terminal failure status
+// returns an error.
+func (c *Client) QueryExportTask(ctx context.Context, taskID string) (string, string, error) {
 	operatorID, err := c.GetOperatorID(ctx)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	path := fmt.Sprintf("/v2.0/doc/me/export/task/query?taskId=%s&operatorId=%s",
@@ -485,20 +544,15 @@ func (c *Client) QueryExportTask(ctx context.Context, taskID string) (string, er
 
 	var resp exportQueryResponse
 	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
-		return "", fmt.Errorf("query export task: %w", err)
+		return "", "", fmt.Errorf("query export task: %w", err)
 	}
 	if resp.DownloadURL != "" {
-		return resp.DownloadURL, nil
+		return resp.DownloadURL, resp.Status, nil
 	}
-
-	switch strings.ToUpper(resp.Status) {
-	case "", "RUNNING", "PROCESSING", "INIT", "PENDING":
-		return "", nil // not ready yet
-	case "SUCCESS", "FINISHED":
-		return "", nil // succeeded but URL missing; keep polling defensively
-	default:
-		return "", fmt.Errorf("export task failed: status=%s", resp.Status)
+	if exportFailureStatuses[strings.ToUpper(resp.Status)] {
+		return "", resp.Status, fmt.Errorf("export task failed: status=%s", resp.Status)
 	}
+	return "", resp.Status, nil // not ready yet
 }
 
 // ExportMarkdown is a high-level helper that exports a document node to
@@ -511,23 +565,32 @@ func (c *Client) ExportMarkdown(ctx context.Context, dentryUUID string) ([]byte,
 
 	if downloadURL == "" {
 		deadline := time.Now().Add(exportTimeout)
-		for time.Now().Before(deadline) {
+		lastStatus := ""
+		// Poll immediately, then sleep only between retries — most exports are
+		// ready within a poll or two, so an up-front sleep would add a fixed
+		// floor per document.
+		for {
+			url, status, qerr := c.QueryExportTask(ctx, taskID)
+			if qerr != nil {
+				return nil, qerr
+			}
+			if url != "" {
+				downloadURL = url
+				break
+			}
+			lastStatus = status
+
+			if !time.Now().Before(deadline) {
+				// Include the last observed status so a stuck-but-terminal state
+				// (e.g. SUCCESS with no URL) is diagnosable, not masked.
+				return nil, fmt.Errorf("export task timed out after %s (taskId=%s, lastStatus=%q)",
+					exportTimeout, taskID, lastStatus)
+			}
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-time.After(exportPollInterval):
 			}
-
-			downloadURL, err = c.QueryExportTask(ctx, taskID)
-			if err != nil {
-				return nil, err
-			}
-			if downloadURL != "" {
-				break
-			}
-		}
-		if downloadURL == "" {
-			return nil, fmt.Errorf("export task timed out after %s (taskId=%s)", exportTimeout, taskID)
 		}
 	}
 
@@ -562,12 +625,29 @@ func (c *Client) downloadURL(ctx context.Context, fullURL string) ([]byte, error
 
 // --- Helpers ---
 
-// truncate truncates a string to maxLen and appends "..." if truncated.
+// secretQueryParamRE matches sensitive query parameters (appkey/appsecret/
+// access_token) so their values can be redacted out of error strings.
+var secretQueryParamRE = regexp.MustCompile(`(?i)(appsecret|access_token|appkey)=[^&\s"']+`)
+
+// redactSecrets replaces the values of sensitive query parameters with ***.
+// DingTalk's legacy API takes credentials in the URL query string, which Go's
+// *url.Error embeds verbatim in transport-error messages.
+func redactSecrets(s string) string {
+	return secretQueryParamRE.ReplaceAllString(s, "$1=***")
+}
+
+// truncate truncates a string to at most maxLen bytes and appends "..." if
+// truncated, backing off to a UTF-8 rune boundary so multi-byte characters
+// (e.g. CJK error bodies) are never split into invalid UTF-8.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	cut := s[:maxLen]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + "..."
 }
 
 // maskToken renders a token safe for logs.

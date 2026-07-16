@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -30,6 +31,10 @@ type fakeState struct {
 	// syncExport makes the export submit response carry the downloadUrl
 	// directly (no polling round-trip).
 	syncExport bool
+
+	// failExport[dentryUuid]=true makes the export submit for that document
+	// return a 500, simulating a transient export failure.
+	failExport map[string]bool
 }
 
 func (s *fakeState) findNode(nodeID string) (wikiNode, bool) {
@@ -116,12 +121,19 @@ func fakeDingTalk(state *fakeState) (*httptest.Server, *Config) {
 			DentryUUID string `json:"dentryUuid"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		resp := exportSubmitResponse{TaskID: "task-" + body.DentryUUID}
 		state.mu.Lock()
-		if state.syncExport {
+		failing := state.failExport[body.DentryUUID]
+		sync := state.syncExport
+		state.mu.Unlock()
+		if failing {
+			w.WriteHeader(http.StatusInternalServerError)
+			writeJSON(w, apiError{Code: "ServiceUnavailable", Message: "export failed"})
+			return
+		}
+		resp := exportSubmitResponse{TaskID: "task-" + body.DentryUUID}
+		if sync {
 			resp.DownloadURL = server.URL + "/download/" + body.DentryUUID
 		}
-		state.mu.Unlock()
 		writeJSON(w, resp)
 	})
 	mux.HandleFunc("/v2.0/doc/me/export/task/query", func(w http.ResponseWriter, r *http.Request) {
@@ -476,5 +488,125 @@ func TestSanitizeFileName(t *testing.T) {
 		if r != '汉' {
 			t.Fatalf("sanitizeFileName produced invalid rune %q", r)
 		}
+	}
+}
+
+func TestResolveResourceAncestors(t *testing.T) {
+	server, cfg := fakeDingTalk(defaultState())
+	defer server.Close()
+
+	// doc2 is nested under folder1; revealing it requires expanding the
+	// workspace and folder1.
+	ancestors, err := NewConnector().ResolveResourceAncestors(
+		context.Background(), configFor(cfg), []string{"ws1:doc2"})
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors failed: %v", err)
+	}
+
+	got := map[string]bool{}
+	for _, a := range ancestors {
+		got[a] = true
+	}
+	if !got["ws1"] || !got["ws1:folder1"] {
+		t.Fatalf("expected ancestors [ws1, ws1:folder1], got %v", ancestors)
+	}
+	// The target itself must not be included, only its ancestors.
+	if got["ws1:doc2"] {
+		t.Fatalf("ancestors must not contain the target node itself: %v", ancestors)
+	}
+
+	// A top-level node has only the workspace as its ancestor.
+	ancestors, err = NewConnector().ResolveResourceAncestors(
+		context.Background(), configFor(cfg), []string{"ws1:doc1"})
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(doc1) failed: %v", err)
+	}
+	if len(ancestors) != 1 || ancestors[0] != "ws1" {
+		t.Fatalf("expected [ws1] for top-level node, got %v", ancestors)
+	}
+}
+
+// TestFetchIncremental_RetryOnFailedExport locks in the fix that a node whose
+// export fails is NOT committed to the cursor as up-to-date, so it is retried
+// on the next sync instead of being silently dropped forever.
+func TestFetchIncremental_RetryOnFailedExport(t *testing.T) {
+	state := defaultState()
+	state.failExport = map[string]bool{"doc1": true} // doc1 export fails on first sync
+	server, cfg := fakeDingTalk(state)
+	defer server.Close()
+
+	connector := NewConnector()
+	dsConfig := configFor(cfg)
+	dsConfig.ResourceIDs = []string{"ws1"}
+
+	// First sync: doc1 fails (error item), doc2 succeeds.
+	items, cursor, err := connector.FetchIncremental(context.Background(), dsConfig, nil)
+	if err != nil {
+		t.Fatalf("first FetchIncremental failed: %v", err)
+	}
+	var doc1Failed bool
+	for _, item := range items {
+		if item.ExternalID == "doc1" && item.Metadata["error"] != "" {
+			doc1Failed = true
+		}
+	}
+	if !doc1Failed {
+		t.Fatalf("expected doc1 to be an error item on first sync, got %+v", items)
+	}
+
+	// Recover: export now succeeds.
+	state.mu.Lock()
+	state.failExport = nil
+	state.mu.Unlock()
+
+	// Second sync: doc1 MUST be retried (not skipped as unchanged) because its
+	// failed fetch was never committed to the cursor. doc2 stays unchanged.
+	items, _, err = connector.FetchIncremental(context.Background(), dsConfig, cursor)
+	if err != nil {
+		t.Fatalf("second FetchIncremental failed: %v", err)
+	}
+	var doc1Synced bool
+	for _, item := range items {
+		if item.ExternalID == "doc1" {
+			if item.Metadata["error"] != "" {
+				t.Fatalf("doc1 still failing on retry: %+v", item)
+			}
+			if string(item.Content) != "# markdown of doc1" {
+				t.Fatalf("doc1 retry content wrong: %q", item.Content)
+			}
+			doc1Synced = true
+		}
+		if item.ExternalID == "doc2" {
+			t.Fatalf("doc2 should be unchanged on second sync, but was re-fetched")
+		}
+	}
+	if !doc1Synced {
+		t.Fatalf("doc1 was NOT retried after its export recovered (silently skipped) — items: %+v", items)
+	}
+}
+
+func TestTruncateRuneSafe(t *testing.T) {
+	// 10 three-byte runes = 30 bytes; truncating at 20 bytes must not split a rune.
+	s := strings.Repeat("汉", 10)
+	got := truncate(s, 20)
+	if !utf8.ValidString(strings.TrimSuffix(got, "...")) {
+		t.Fatalf("truncate produced invalid UTF-8: %q", got)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("expected truncation marker, got %q", got)
+	}
+}
+
+func TestRedactSecrets(t *testing.T) {
+	in := `Get "https://oapi.dingtalk.com/gettoken?appkey=dingXXX&appsecret=TOPSECRET": dial tcp: timeout`
+	got := redactSecrets(in)
+	if strings.Contains(got, "TOPSECRET") || strings.Contains(got, "dingXXX") {
+		t.Fatalf("redactSecrets leaked a credential: %q", got)
+	}
+	if !strings.Contains(got, "appsecret=***") || !strings.Contains(got, "appkey=***") {
+		t.Fatalf("redactSecrets did not redact as expected: %q", got)
+	}
+	if !strings.Contains(got, "dial tcp: timeout") {
+		t.Fatalf("redactSecrets mangled the non-secret part: %q", got)
 	}
 }
