@@ -74,24 +74,16 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		m.sandbox = NewLocalSandbox(m.config)
 		return nil
 
-	case SandboxTypeCube:
-		// The Cube backend needs a proper Session-aware manager to preserve
-		// state across executions; DefaultManager only exposes stateless
-		// semantics. NewManagerFromType routes SandboxTypeCube requests to
-		// SessionBoundManager instead of arriving here. We keep the branch
-		// for defensive completeness: fall back to an ephemeral Cube backend
-		// that behaves like the other stateless sandboxes.
-		cubeSandbox := NewCubeSandbox(m.config)
-		if cubeSandbox.IsAvailable(ctx) {
-			m.sandbox = cubeSandbox
-			return nil
-		}
-		if m.config.FallbackEnabled {
-			log.Printf("[sandbox] cube api unavailable, falling back to local")
-			m.sandbox = NewLocalSandbox(m.config)
-			return nil
-		}
-		return ErrCubeUnavailable
+	case SandboxTypeCube, SandboxTypeE2B:
+		// Session-scoped remote backends are only reachable through
+		// SessionBoundManager, which owns the authoritative binding.
+		// DefaultManager exposes stateless semantics that cannot preserve
+		// per-session state, so we refuse the construction and let
+		// NewManagerFromType route the caller to NewSessionBoundManager.
+		return fmt.Errorf(
+			"sandbox: %s backend must be constructed via NewSessionBoundManager",
+			m.config.Type,
+		)
 
 	default:
 		return fmt.Errorf("unknown sandbox type: %s", m.config.Type)
@@ -278,7 +270,16 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 	}
 
 	if sType == SandboxTypeCube {
-		return NewSessionBoundManager(config)
+		client, err := NewCubeRemoteClient(config)
+		if err != nil {
+			return nil, fmt.Errorf("sandbox: build Cube client: %w", err)
+		}
+		return NewSessionBoundManager(SessionBoundManagerConfig{
+			Config:  config,
+			Client:  client,
+			Store:   NewMemorySessionSandboxBindingStore(),
+			Checker: PermissiveSessionExistenceChecker{},
+		})
 	}
 	return NewManager(config)
 }

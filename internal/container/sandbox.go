@@ -73,7 +73,21 @@ func newSandboxManager() sandbox.Manager {
 
 	case "cube":
 		cfg := buildCubeSandboxConfig()
-		m, err := sandbox.NewSessionBoundManager(cfg)
+		client, err := sandbox.NewCubeRemoteClient(cfg)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to build Cube sandbox client: %v (falling back to disabled)", err)
+			return sandbox.NewDisabledManager()
+		}
+		// TODO: task 8 wires a Redis-backed binding store and a real session
+		// existence checker. Until then the process-local memory store keeps
+		// single-instance deployments correct; multi-instance deployments
+		// must not run this branch in production without Redis.
+		m, err := sandbox.NewSessionBoundManager(sandbox.SessionBoundManagerConfig{
+			Config:  cfg,
+			Client:  client,
+			Store:   sandbox.NewMemorySessionSandboxBindingStore(),
+			Checker: sandbox.PermissiveSessionExistenceChecker{},
+		})
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize Cube sandbox: %v (falling back to disabled)", err)
 			return sandbox.NewDisabledManager()

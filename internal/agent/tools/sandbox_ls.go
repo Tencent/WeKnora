@@ -29,6 +29,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -45,8 +46,8 @@ import (
 // dependency on internal/application/service (which is a higher layer)
 // and mirrors the pattern used by ArtifactCollector.SandboxArtifactSource.
 type SandboxFileSource interface {
-	ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.DirEntry, error)
-	StatSessionFile(ctx context.Context, sessionID, path string) (*sandbox.StatEntry, error)
+	ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.RemoteDirEntry, error)
+	StatSessionFile(ctx context.Context, sessionID, path string) (*sandbox.RemoteStatEntry, error)
 	ReadSessionFile(ctx context.Context, sessionID, path string) ([]byte, error)
 }
 
@@ -221,7 +222,7 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 		b.WriteString(":\n\n")
 		for _, e := range entries {
 			b.WriteString(fmt.Sprintf("- %s (size=%d, modified=%s)\n",
-				e.Path, e.Size, e.ModifiedAt))
+				e.Path, e.Size, formatSandboxModTime(e.ModTime)))
 		}
 	}
 
@@ -232,7 +233,7 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 			"name":        e.Name,
 			"path":        e.Path,
 			"size":        e.Size,
-			"modified_at": e.ModifiedAt,
+			"modified_at": formatSandboxModTime(e.ModTime),
 		})
 	}
 
@@ -256,6 +257,16 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 // Cleanup releases any resources.
 func (t *ListSandboxFilesTool) Cleanup(ctx context.Context) error {
 	return nil
+}
+
+// formatSandboxModTime renders a mod time in the RFC3339 shape the tool has
+// historically emitted. Zero times render as the empty string so LLM output
+// stays visually clean.
+func formatSandboxModTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // resolveSessionID pulls the session ID out of the tool exec context (set

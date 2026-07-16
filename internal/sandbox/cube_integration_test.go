@@ -27,6 +27,8 @@ import (
 	"time"
 
 	cubesandbox "github.com/tencentcloud/CubeSandbox/sdk/go"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
@@ -393,18 +395,18 @@ func TestIntegrationCubeClient_FilesystemOps(t *testing.T) {
 // SessionBoundManager)
 // -----------------------------------------------------------------------------
 
-// TestIntegrationCubeSandbox_EphemeralExecute exercises the public
-// NewCubeSandbox path — same code path DefaultManager uses. The MicroVM is
-// created and torn down inside Execute, exactly like Docker/Local sandboxes
-// behave.
-func TestIntegrationCubeSandbox_EphemeralExecute(t *testing.T) {
-	sb := NewCubeSandbox(integrationConfig(t))
+// TestIntegrationRemoteSandbox_EphemeralExecute exercises the empty-SessionID
+// path through SessionBoundManager: the manager allocates a fresh MicroVM,
+// runs the script, and tears it down — same wire behaviour Docker/Local
+// sandboxes present per Execute.
+func TestIntegrationRemoteSandbox_EphemeralExecute(t *testing.T) {
+	mgr := newIntegrationManager(t)
 	script := writeIntegrationScript(t, "hello.py", "print('weknora-integration-hi')\n")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	result, err := sb.Execute(ctx, &ExecuteConfig{
+	result, err := mgr.Execute(ctx, &ExecuteConfig{
 		Script:         script,
 		SkipValidation: true,
 	})
@@ -424,18 +426,11 @@ func TestIntegrationCubeSandbox_EphemeralExecute(t *testing.T) {
 // same SessionID must hit the same MicroVM, so packages installed / files
 // created by the first call are visible to the second.
 func TestIntegrationSessionBoundManager_StatePersistsAcrossExecutes(t *testing.T) {
-	cfg := integrationConfig(t)
-	// Keep idle TTL long enough that the reaper won't interfere with the
-	// two-step scenario below.
-	cfg.CubeIdleTTL = 10 * time.Minute
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	mgr := newIntegrationManager(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	baseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	ctx := integrationTenantContext(baseCtx)
 
 	first := writeIntegrationScript(t, "write.py", strings.Join([]string{
 		"with open('/tmp/weknora-session-marker', 'w') as f:",
@@ -493,16 +488,11 @@ func TestIntegrationSessionBoundManager_StatePersistsAcrossExecutes(t *testing.T
 // TestIntegrationSessionBoundManager_DestroySession asserts that
 // DestroySession actually reaches CubeAPI and cleans the MicroVM up.
 func TestIntegrationSessionBoundManager_DestroySession(t *testing.T) {
-	cfg := integrationConfig(t)
-	cfg.CubeIdleTTL = 10 * time.Minute
-	mgr, err := NewSessionBoundManager(cfg)
-	if err != nil {
-		t.Fatalf("NewSessionBoundManager: %v", err)
-	}
-	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	mgr := newIntegrationManager(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	baseCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
+	ctx := integrationTenantContext(baseCtx)
 
 	script := writeIntegrationScript(t, "touch.py", "print('destroy-me')\n")
 	if _, err := mgr.Execute(ctx, &ExecuteConfig{
@@ -537,4 +527,34 @@ func safeStderr(r *ExecuteResult) string {
 		return ""
 	}
 	return r.Stderr
+}
+
+// newIntegrationManager wires a SessionBoundManager against the live Cube
+// deployment described by integrationConfig. Every integration test uses this
+// helper so provider adapter, binding store, and existence checker stay in
+// one place.
+func newIntegrationManager(t *testing.T) *SessionBoundManager {
+	t.Helper()
+	cfg := integrationConfig(t)
+	client, err := NewCubeRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("NewCubeRemoteClient: %v", err)
+	}
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:  cfg,
+		Client:  client,
+		Store:   NewMemorySessionSandboxBindingStore(),
+		Checker: PermissiveSessionExistenceChecker{},
+	})
+	if err != nil {
+		t.Fatalf("NewSessionBoundManager: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Cleanup(context.Background()) })
+	return mgr
+}
+
+// integrationTenantContext supplies the tenant ID SessionBoundManager needs
+// when resolving session-scoped operations.
+func integrationTenantContext(parent context.Context) context.Context {
+	return context.WithValue(parent, types.TenantIDContextKey, uint64(1))
 }

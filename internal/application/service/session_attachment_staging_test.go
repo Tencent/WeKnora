@@ -54,10 +54,10 @@ func (m *stagingSandboxManager) Execute(context.Context, *sandbox.ExecuteConfig)
 func (m *stagingSandboxManager) Cleanup(context.Context) error { return nil }
 func (m *stagingSandboxManager) GetSandbox() sandbox.Sandbox   { return nil }
 func (m *stagingSandboxManager) GetType() sandbox.SandboxType  { return m.sandboxType }
-func (m *stagingSandboxManager) ListSessionFiles(context.Context, string, string) ([]sandbox.DirEntry, error) {
-	entries := make([]sandbox.DirEntry, 0, len(m.files))
+func (m *stagingSandboxManager) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
+	entries := make([]sandbox.RemoteDirEntry, 0, len(m.files))
 	for filePath, content := range m.files {
-		entries = append(entries, sandbox.DirEntry{Path: filePath, Size: int64(len(content)), Type: "file"})
+		entries = append(entries, sandbox.RemoteDirEntry{Path: filePath, Size: int64(len(content)), Type: sandbox.RemoteEntryFile})
 	}
 	return entries, nil
 }

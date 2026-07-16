@@ -22,7 +22,7 @@ import (
 // responses. Concrete tests populate `entries` (one map per session) and
 // `contents` (one map per absolute path).
 type fakeSandboxSource struct {
-	entries  map[string][]sandbox.DirEntry
+	entries  map[string][]sandbox.RemoteDirEntry
 	contents map[string][]byte
 
 	listErr error
@@ -32,7 +32,7 @@ type fakeSandboxSource struct {
 	readCalls []string
 }
 
-func (f *fakeSandboxSource) ListSessionFiles(_ context.Context, sessionID, _ string) ([]sandbox.DirEntry, error) {
+func (f *fakeSandboxSource) ListSessionFiles(_ context.Context, sessionID, _ string) ([]sandbox.RemoteDirEntry, error) {
 	f.listCalls++
 	if f.listErr != nil {
 		return nil, f.listErr
@@ -118,10 +118,10 @@ func newTestCollector(src *fakeSandboxSource, store *fakeStore, fs *fakeFileServ
 func TestArtifactCollector_CollectsNewFiles(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{
-		entries: map[string][]sandbox.DirEntry{
+		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: "file", Size: 4, ModifiedAt: "2026-07-10T10:20:33Z"},
-				{Name: "summary.txt", Path: "/workspace/output/summary.txt", Type: "file", Size: 3, ModifiedAt: "2026-07-10T10:20:34Z"},
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+				{Name: "summary.txt", Path: "/workspace/output/summary.txt", Type: sandbox.RemoteEntryFile, Size: 3, ModTime: mustParseTime("2026-07-10T10:20:34Z")},
 			},
 		},
 		contents: map[string][]byte{
@@ -164,9 +164,9 @@ func TestArtifactCollector_SkipsAlreadyKnown(t *testing.T) {
 	ctx := context.Background()
 	mod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
 	src := &fakeSandboxSource{
-		entries: map[string][]sandbox.DirEntry{
+		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: "file", Size: 4, ModifiedAt: "2026-07-10T10:20:33Z"},
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
 			},
 		},
 		contents: map[string][]byte{
@@ -198,10 +198,10 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 	ctx := context.Background()
 	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
 	src := &fakeSandboxSource{
-		entries: map[string][]sandbox.DirEntry{
+		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
 				// Same path as the known set, but a *newer* mtime — must be re-attached.
-				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: "file", Size: 4, ModifiedAt: "2026-07-10T10:21:00Z"},
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
 			},
 		},
 		contents: map[string][]byte{
@@ -229,10 +229,10 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 func TestArtifactCollector_SkipsOversize(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{
-		entries: map[string][]sandbox.DirEntry{
+		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "huge.bin", Path: "/workspace/output/huge.bin", Type: "file", Size: 1024, ModifiedAt: "2026-07-10T10:20:33Z"},
-				{Name: "ok.txt", Path: "/workspace/output/ok.txt", Type: "file", Size: 3, ModifiedAt: "2026-07-10T10:20:34Z"},
+				{Name: "huge.bin", Path: "/workspace/output/huge.bin", Type: sandbox.RemoteEntryFile, Size: 1024, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+				{Name: "ok.txt", Path: "/workspace/output/ok.txt", Type: sandbox.RemoteEntryFile, Size: 3, ModTime: mustParseTime("2026-07-10T10:20:34Z")},
 			},
 		},
 		contents: map[string][]byte{
@@ -260,9 +260,9 @@ func TestArtifactCollector_SkipsOversizeAfterRead(t *testing.T) {
 	// enforce the cap against the actual bytes too.
 	ctx := context.Background()
 	src := &fakeSandboxSource{
-		entries: map[string][]sandbox.DirEntry{
+		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "lying.bin", Path: "/workspace/output/lying.bin", Type: "file", Size: 4, ModifiedAt: "2026-07-10T10:20:33Z"},
+				{Name: "lying.bin", Path: "/workspace/output/lying.bin", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
 			},
 		},
 		contents: map[string][]byte{
@@ -330,10 +330,10 @@ func TestArtifactCollector_UploadFailureIsPerFile(t *testing.T) {
 	// files should still be persisted, matching the best-effort contract.
 	ctx := context.Background()
 	src := &fakeSandboxSource{
-		entries: map[string][]sandbox.DirEntry{
+		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				{Name: "a.txt", Path: "/workspace/output/a.txt", Type: "file", Size: 1, ModifiedAt: "2026-07-10T10:20:33Z"},
-				{Name: "b.txt", Path: "/workspace/output/b.txt", Type: "file", Size: 1, ModifiedAt: "2026-07-10T10:20:34Z"},
+				{Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile, Size: 1, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+				{Name: "b.txt", Path: "/workspace/output/b.txt", Type: sandbox.RemoteEntryFile, Size: 1, ModTime: mustParseTime("2026-07-10T10:20:34Z")},
 			},
 		},
 		contents: map[string][]byte{
@@ -358,13 +358,13 @@ func TestArtifactCollector_UploadFailureIsPerFile(t *testing.T) {
 func TestArtifactCollector_FiltersDirectories(t *testing.T) {
 	ctx := context.Background()
 	src := &fakeSandboxSource{
-		entries: map[string][]sandbox.DirEntry{
+		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
 				// The production ListSessionFiles never yields dirs, but the
 				// collector must defensively skip anything with Type=="dir"
 				// so alternate SandboxArtifactSource impls stay safe.
-				{Name: "sub", Path: "/workspace/output/sub", Type: "dir", Size: 0, ModifiedAt: "2026-07-10T10:20:33Z"},
-				{Name: "a.txt", Path: "/workspace/output/a.txt", Type: "file", Size: 1, ModifiedAt: "2026-07-10T10:20:34Z"},
+				{Name: "sub", Path: "/workspace/output/sub", Type: sandbox.RemoteEntryDir, Size: 0, ModTime: mustParseTime("2026-07-10T10:20:33Z")},
+				{Name: "a.txt", Path: "/workspace/output/a.txt", Type: sandbox.RemoteEntryFile, Size: 1, ModTime: mustParseTime("2026-07-10T10:20:34Z")},
 			},
 		},
 		contents: map[string][]byte{
@@ -384,25 +384,18 @@ func TestArtifactCollector_FiltersDirectories(t *testing.T) {
 	}
 }
 
-func TestParseModTime_Fallbacks(t *testing.T) {
-	// Values envd has been observed to emit or that legacy sandbox builds
-	// may still produce. All must decode; malformed values must yield zero.
-	cases := map[string]bool{
-		"":                        true, // empty → zero (ok)
-		"2026-07-10T10:20:30Z":    false,
-		"2026-07-10T10:20:30.5Z":  false,
-		"2026-07-10T10:20:30":     false, // no zone
-		"not-a-timestamp":         true,  // zero
+// mustParseTime parses an RFC3339 timestamp for test data. It fails the
+// program on error because test fixtures should never contain malformed
+// timestamps.
+func mustParseTime(raw string) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339, raw)
 	}
-	for raw, wantZero := range cases {
-		got := parseModTime(raw)
-		if wantZero && !got.IsZero() {
-			t.Fatalf("parseModTime(%q) = %s, want zero", raw, got)
-		}
-		if !wantZero && got.IsZero() {
-			t.Fatalf("parseModTime(%q) = zero, want non-zero", raw)
-		}
+	if err != nil {
+		panic("mustParseTime: " + err.Error())
 	}
+	return t
 }
 
 // bytesN returns a byte slice of length n filled with 'x'. Kept local to
