@@ -4,11 +4,12 @@
       <div class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch" />
         <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span />
-              <span />
-              <span />
+          <div class="action-card action-pending">
+            <div class="action-header no-results">
+              <div class="action-title">
+                <t-icon class="action-title-icon" name="lightbulb" />
+                <span class="action-name">{{ t('chat.thinkingAlt') }}</span>
+              </div>
             </div>
           </div>
         </div>

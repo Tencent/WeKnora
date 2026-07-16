@@ -34,14 +34,6 @@
                 <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML">
                 </div>
             </div>
-            <!-- Streaming indicator (non-Agent mode) -->
-            <div v-if="hasActualContent && !session.is_completed" class="loading-indicator">
-                <div class="loading-typing">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-            </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
             <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
@@ -424,53 +416,6 @@ onBeforeUnmount(() => {
 
 .thinking-loading {
     padding: 8px 0;
-}
-
-.loading-indicator {
-    padding: 8px 0;
-}
-
-.loading-typing {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    span {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--td-brand-color);
-        animation: typingBounce 1.4s ease-in-out infinite;
-        // Composite the dots so the bounce stays smooth and ghost-free while the
-        // answer relayouts each streamed token.
-        will-change: transform;
-        backface-visibility: hidden;
-
-        &:nth-child(1) {
-            animation-delay: 0s;
-        }
-
-        &:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-
-        &:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-    }
-}
-
-@keyframes typingBounce {
-
-    0%,
-    60%,
-    100% {
-        transform: translate3d(0, 0, 0);
-    }
-
-    30% {
-        transform: translate3d(0, -6px, 0);
-    }
 }
 
 .img_loading {

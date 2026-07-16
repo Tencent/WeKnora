@@ -97,13 +97,9 @@
                             @dismiss="(set) => dismissSuggestions(session, set)" />
                     </div>
                 </div>
-                <div v-if="showGlobalTypingIndicator"
-                    style="height: 41px;display: flex;align-items: center;padding-left: 4px;">
-                    <div class="loading-typing">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                    </div>
+                <div v-if="showGlobalTypingIndicator" class="chat-global-wait" role="status"
+                    :aria-label="t('chat.thinkingAlt')">
+                    <span class="chat-global-wait__spinner" aria-hidden="true"></span>
                 </div>
             </div>
         </div>
@@ -1231,43 +1227,33 @@ onBeforeRouteUpdate((to, from, next) => {
         margin-left: 16px;
     }
 
-    .loading-typing {
+    .chat-global-wait {
         display: flex;
         align-items: center;
-        gap: 4px;
+        min-height: 28px;
+        padding-left: 4px;
+    }
 
-        span {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--td-text-color-placeholder);
-            animation: typingBounce 1.4s ease-in-out infinite;
-
-            &:nth-child(1) {
-                animation-delay: 0s;
-            }
-
-            &:nth-child(2) {
-                animation-delay: 0.2s;
-            }
-
-            &:nth-child(3) {
-                animation-delay: 0.4s;
-            }
-        }
+    .chat-global-wait__spinner {
+        width: 12px;
+        height: 12px;
+        box-sizing: border-box;
+        border: 1.5px solid var(--td-component-stroke);
+        border-top-color: var(--td-text-color-secondary);
+        border-radius: 50%;
+        animation: chatGlobalWaitSpin 0.8s linear infinite;
     }
 }
 
-@keyframes typingBounce {
-
-    0%,
-    60%,
-    100% {
-        transform: translateY(0);
+@keyframes chatGlobalWaitSpin {
+    to {
+        transform: rotate(360deg);
     }
+}
 
-    30% {
-        transform: translateY(-8px);
+@media (prefers-reduced-motion: reduce) {
+    .chat-global-wait__spinner {
+        animation-duration: 1.8s;
     }
 }
 

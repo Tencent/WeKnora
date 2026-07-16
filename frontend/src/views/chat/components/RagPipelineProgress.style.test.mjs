@@ -47,8 +47,10 @@ test('rag pipeline opens references from search steps and the drawer composable'
   assert.match(source, /handleStepClick/)
 })
 
-test('rag pipeline keeps loading inside the thinking step instead of orphan dots', () => {
+test('rag pipeline uses a native pending step and keeps later loading inside the thinking step', () => {
   assert.match(source, /showPrePipelineWait/)
+  assert.match(source, /class="action-card action-pending"/)
+  assert.match(source, /t\('chat\.thinkingAlt'\)/)
   assert.match(source, /showThinkingStep/)
   assert.match(source, /thinking-loading/)
   assert.match(source, /hasThinkingEvent/)

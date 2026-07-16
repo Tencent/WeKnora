@@ -58,9 +58,10 @@ test('tool rows use line icon names instead of legacy asset masks', () => {
   assert.doesNotMatch(source, /getToolIcon\(event\.tool_name\)/)
 })
 
-test('rag mode delegates pre-answer loading to pipeline and keeps dots while answer streams', () => {
-  assert.match(source, /if \(props\.ragMode\) return hasAnswerStarted\.value/)
+test('rag mode delegates pre-answer loading to pipeline and adds no row after answer starts', () => {
+  assert.match(source, /if \(props\.ragMode \|\| hasAnswerStarted\.value\) return false/)
   assert.match(source, /v-if="!ragMode \|\| displayEvents\.length > 0 \|\| showAgentActivityIndicator"/)
+  assert.doesNotMatch(source, /ChatActivityIndicator/)
 })
 
 test('rag mode keeps model thinking out of the answer stream component', () => {
@@ -90,9 +91,10 @@ test('pending tool rows do not render an extra axis dot', () => {
   assert.doesNotMatch(source, /&\.action-pending\s*\{[\s\S]*&::after/)
 })
 
-test('agent mode keeps gray timeline dots for the full turn', () => {
+test('agent mode only shows a native timeline placeholder before visible activity', () => {
   assert.match(source, /if \(isConversationDone\.value\) return false/)
-  assert.match(source, /if \(props\.ragMode\) return false/)
-  assert.match(source, /return true;\s*\}\);/)
+  assert.match(source, /return displayEvents\.value\.length === 0/)
+  assert.match(source, /class="action-card action-pending"/)
+  assert.match(source, /t\('chat\.thinkingAlt'\)/)
   assert.match(source, /chat-timeline-loading\.less/)
 })

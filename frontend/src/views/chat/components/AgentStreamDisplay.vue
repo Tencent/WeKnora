@@ -419,11 +419,12 @@
       <div v-if="showAgentActivityIndicator" class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch"></div>
         <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span></span>
-              <span></span>
-              <span></span>
+          <div class="action-card action-pending">
+            <div class="action-header no-results">
+              <div class="action-title">
+                <t-icon class="action-title-icon" name="lightbulb" />
+                <span class="action-name">{{ t('chat.thinkingAlt') }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -1266,11 +1267,13 @@ watch(answerFullyRendered, (ready) => {
   });
 });
 
-// Agent: dots until the turn completes. RAG: pipeline dots before answer; answer stream dots after.
+// Only render a placeholder before the agent has produced any visible step or
+// answer. Once real activity exists it carries its own pending state, and once
+// answer text starts the stream itself is sufficient feedback.
 const showAgentActivityIndicator = computed(() => {
   if (isConversationDone.value) return false;
-  if (props.ragMode) return hasAnswerStarted.value;
-  return true;
+  if (props.ragMode || hasAnswerStarted.value) return false;
+  return displayEvents.value.length === 0;
 });
 
 const isStreamingTimelineEvent = (event: any): boolean => {
@@ -1649,7 +1652,7 @@ const displayEvents = computed(() => {
 
   // While the conversation is still running, keep the same lightweight tool-log
   // surface as the completed tree. Raw thinking narration is noisy during
-  // streaming; the active state is represented by the compact activity dots.
+  // streaming; real tool rows carry their own pending state.
   if (!isConversationDone.value) {
     return result.filter((e: any) => {
       if (e.type === 'thinking') return false;
@@ -2577,13 +2580,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   &.is-embedded {
     margin-bottom: 0;
-
-    .loading-indicator {
-      height: 41px;
-      padding: 0 0 0 4px;
-      margin-top: 0;
-      animation: none;
-    }
   }
 }
 
@@ -2978,22 +2974,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
-// Loading 动画关键帧
-@keyframes dotBounce {
-
-  0%,
-  80%,
-  100% {
-    transform: scale(1);
-    opacity: 0.6;
-  }
-
-  40% {
-    transform: scale(1.3);
-    opacity: 1;
-  }
-}
-
 @keyframes spin {
   0% {
     transform: rotate(0deg);
@@ -3015,32 +2995,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   50% {
     transform: scale(1.5);
     opacity: 0.3;
-  }
-}
-
-@keyframes typingBounce {
-
-  0%,
-  60%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  30% {
-    transform: translate3d(0, -5px, 0);
-  }
-}
-
-@keyframes wave {
-
-  0%,
-  40%,
-  100% {
-    transform: scaleY(0.4);
-  }
-
-  20% {
-    transform: scaleY(1);
   }
 }
 
@@ -3317,115 +3271,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
     overflow-x: auto;
     border: 1px solid var(--td-component-stroke);
     line-height: 1.5;
-  }
-}
-
-.loading-indicator {
-  display: flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0;
-  margin-top: 0;
-  position: relative;
-  animation: fadeInUp 0.3s ease-out;
-
-  // 方案1: 三个跳动的圆点
-  .loading-dots {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-
-    span {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--td-brand-color);
-      animation: dotBounce 1.4s ease-in-out infinite;
-
-      &:nth-child(1) {
-        animation-delay: -0.32s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: -0.16s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0s;
-      }
-    }
-  }
-
-  // 打字机效果
-  .loading-typing {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    span {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: var(--td-text-color-placeholder);
-      animation: typingBounce 1.4s ease-in-out infinite;
-      // Composite each dot so the bounce stays smooth and ghost-free while the
-      // streaming answer relayouts every token.
-      will-change: transform;
-      backface-visibility: hidden;
-
-      &:nth-child(1) {
-        animation-delay: 0s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: 0.2s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0.4s;
-      }
-    }
-  }
-
-  // 方案5: 波浪线
-  .loading-wave {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-
-    span {
-      width: 3px;
-      height: 16px;
-      background: var(--td-brand-color);
-      border-radius: 2px;
-      animation: wave 1.2s ease-in-out infinite;
-
-      &:nth-child(1) {
-        animation-delay: 0s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: 0.1s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0.2s;
-      }
-
-      &:nth-child(4) {
-        animation-delay: 0.3s;
-      }
-
-      &:nth-child(5) {
-        animation-delay: 0.4s;
-      }
-    }
-  }
-
-  .botanswer_loading_gif {
-    width: 24px;
-    height: 18px;
-    margin-left: 0;
   }
 }
 
