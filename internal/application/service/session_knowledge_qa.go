@@ -718,7 +718,14 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 			chatpipeline.EndQueryUnderstandProgress(stageCtx, chatManage, understandProgress, understandStart, err)
 			understandProgress = nil
 		}
-		if retrievalProgress != nil && eventType == lastRetrievalStage {
+		// Close the consolidated retrieval progress window as soon as retrieval
+		// is done: either the planned last retrieval stage completed, or a
+		// retrieval stage short-circuited the pipeline (ErrSearchNothing or a
+		// hard error). The early returns below (fallback / stage_failed) would
+		// otherwise skip EndRetrievalProgress, leaving the "knowledge_search"
+		// tool_call pending — so the frontend keeps spinning on "正在检索知识库"
+		// forever even though the fallback answer has already streamed.
+		if retrievalProgress != nil && chatpipeline.ShouldCloseRetrievalProgress(eventType, lastRetrievalStage, err) {
 			chatpipeline.EndRetrievalProgress(stageCtx, chatManage, retrievalProgress, retrievalStart, err)
 			retrievalProgress = nil
 		}
@@ -982,10 +989,29 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 }
 
 func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) []chat.Message {
-	messages := make([]chat.Message, 0, len(chatManage.History)*2+1)
+	messages := make([]chat.Message, 0, len(chatManage.History)*2+2)
+
+	// The model-fallback prompt is a system-style instruction (KB document
+	// listing + "use general knowledge when nothing matched" guidance). Carry
+	// it in the system role so the LLM input keeps a proper system message
+	// instead of starting with a bare user turn. We deliberately do NOT reuse
+	// the RAG summary system prompt (SummaryConfig.Prompt) here: that template
+	// forbids prior knowledge ("reply ONLY based on retrieved information"),
+	// which directly contradicts the fallback's purpose.
+	if strings.TrimSpace(promptContent) != "" {
+		messages = append(messages, chat.Message{Role: "system", Content: promptContent})
+	}
+
 	messages = chatpipeline.AppendHistoryMessages(messages, chatManage.History)
 
-	userMsg := chat.Message{Role: "user", Content: promptContent}
+	// End on the user's actual question so generation is prompted by a user
+	// turn (the query is also embedded in the system instruction above, but a
+	// trailing user message keeps the chat shape valid for all providers).
+	query := chatManage.Query
+	if rq := strings.TrimSpace(chatManage.RewriteQuery); rq != "" {
+		query = rq
+	}
+	userMsg := chat.Message{Role: "user", Content: query}
 	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
 		userMsg.Images = chatManage.Images
 	}

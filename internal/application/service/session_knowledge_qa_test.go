@@ -139,11 +139,16 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 
 	svc.handleModelFallback(context.Background(), cm)
 
-	require.Len(t, chatModel.lastMessages, 3)
-	assert.Equal(t, "user", chatModel.lastMessages[0].Role)
-	assert.Equal(t, "先介绍一下 WeKnora", chatModel.lastMessages[0].Content)
-	assert.Equal(t, "assistant", chatModel.lastMessages[1].Role)
-	assert.Equal(t, "WeKnora 是一个知识库问答系统。", chatModel.lastMessages[1].Content)
-	assert.Equal(t, "user", chatModel.lastMessages[2].Role)
-	assert.Contains(t, chatModel.lastMessages[2].Content, "现在还能继续讲吗？")
+	// Corrected fallback shape: a system message carries the fallback
+	// instruction, history is replayed in the middle, and the turn ends on the
+	// user's question. Previously the system message was dropped entirely.
+	require.Len(t, chatModel.lastMessages, 4)
+	assert.Equal(t, "system", chatModel.lastMessages[0].Role)
+	assert.Contains(t, chatModel.lastMessages[0].Content, "Answer the latest user question")
+	assert.Equal(t, "user", chatModel.lastMessages[1].Role)
+	assert.Equal(t, "先介绍一下 WeKnora", chatModel.lastMessages[1].Content)
+	assert.Equal(t, "assistant", chatModel.lastMessages[2].Role)
+	assert.Equal(t, "WeKnora 是一个知识库问答系统。", chatModel.lastMessages[2].Content)
+	assert.Equal(t, "user", chatModel.lastMessages[3].Role)
+	assert.Contains(t, chatModel.lastMessages[3].Content, "现在还能继续讲吗？")
 }

@@ -1146,10 +1146,63 @@ func (h *Handler) resolveTemporaryAttachments(streamCtx *sseStreamContext, reqCt
 		attachments = filtered
 	}
 	reqCtx.attachments = append(reqCtx.attachments, attachments...)
+	// Persist the freshly selected content back onto the stored user message.
+	// The message was created with metadata-only attachment entries (content is
+	// selected here, after the SSE stream is live), so without this write a
+	// later Agent-mode turn rebuilds history from the Attachments column and
+	// sees empty attachments (see buildUserHistoryMessage in agent_history.go).
+	h.persistResolvedAttachmentContent(ctx, reqCtx, attachments)
 	if reqCtx.customAgent != nil && reqCtx.customAgent.Config.ImageUploadEnabled {
 		for _, imageURL := range temporaryResult.ImageURLs {
 			reqCtx.images = append(reqCtx.images, ImageAttachment{URL: imageURL})
 		}
+	}
+}
+
+// persistResolvedAttachmentContent writes the parsed content of pre-uploaded
+// attachments back onto the stored user message so multi-turn history can
+// replay it. Entries are matched by their temporary-document ID; only those
+// present on the message are enriched. Failures are logged but never bubble up
+// — losing the write only degrades follow-up context, it must not fail the turn.
+func (h *Handler) persistResolvedAttachmentContent(
+	ctx context.Context, reqCtx *qaRequestContext, resolved types.MessageAttachments,
+) {
+	if reqCtx.userMessageID == "" || len(resolved) == 0 {
+		return
+	}
+	// Detach from the request/stream lifetime and pin the session tenant so a
+	// user-triggered stop (which cancels asyncCtx) does not drop the write.
+	updateCtx := context.WithValue(
+		context.WithoutCancel(ctx), types.TenantIDContextKey, reqCtx.session.TenantID,
+	)
+	msg, err := h.messageService.GetMessage(updateCtx, reqCtx.sessionID, reqCtx.userMessageID)
+	if err != nil || msg == nil {
+		logger.Warnf(updateCtx, "persist attachment content: load user message %s failed: %v",
+			reqCtx.userMessageID, err)
+		return
+	}
+	byID := make(map[string]types.MessageAttachment, len(resolved))
+	for _, att := range resolved {
+		if att.ID != "" {
+			byID[att.ID] = att
+		}
+	}
+	changed := false
+	for i := range msg.Attachments {
+		if msg.Attachments[i].ID == "" {
+			continue
+		}
+		if enriched, ok := byID[msg.Attachments[i].ID]; ok {
+			msg.Attachments[i] = enriched
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	if err := h.messageService.UpdateMessage(updateCtx, msg); err != nil {
+		logger.Warnf(updateCtx, "persist attachment content: update user message %s failed: %v",
+			reqCtx.userMessageID, err)
 	}
 }
 
