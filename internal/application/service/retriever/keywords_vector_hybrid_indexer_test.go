@@ -20,10 +20,12 @@ type capturingEmbedder struct {
 	embedding.Embedder
 	text       string
 	batchTexts []string
+	document   bool
 }
 
 func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	e.text = text
+	e.document, _ = ctx.Value(types.EmbedDocumentContextKey).(bool)
 	return []float32{1}, nil
 }
 
@@ -33,6 +35,7 @@ func (e *capturingEmbedder) BatchEmbedWithPool(
 	texts []string,
 ) ([][]float32, error) {
 	e.batchTexts = append([]string(nil), texts...)
+	e.document, _ = ctx.Value(types.EmbedDocumentContextKey).(bool)
 	embeddings := make([][]float32, len(texts))
 	for i := range texts {
 		embeddings[i] = []float32{1}
@@ -98,6 +101,9 @@ func TestIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 		t.Fatalf("Index returned error: %v", err)
 	}
 	assertImagePayloadRemoved(t, embedder.text, payload)
+	if !embedder.document {
+		t.Fatal("Index must mark document embedding context")
+	}
 }
 
 func TestBatchIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
@@ -118,6 +124,9 @@ func TestBatchIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 		t.Fatalf("expected one embedding input, got %d", len(embedder.batchTexts))
 	}
 	assertImagePayloadRemoved(t, embedder.batchTexts[0], payload)
+	if !embedder.document {
+		t.Fatal("BatchIndex must mark document embedding context")
+	}
 }
 
 func TestBatchIndexTruncatesOversizedEmbeddingInput(t *testing.T) {

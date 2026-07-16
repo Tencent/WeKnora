@@ -30,6 +30,7 @@ type modelService struct {
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
+	artifactStore interfaces.ProcessingArtifactStore
 }
 
 // NewModelService creates a new model service instance
@@ -39,6 +40,7 @@ func NewModelService(repo interfaces.ModelRepository,
 	ollamaService *ollama.OllamaService,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
+	artifactStore interfaces.ProcessingArtifactStore,
 ) interfaces.ModelService {
 	return &modelService{
 		repo:          repo,
@@ -47,6 +49,7 @@ func NewModelService(repo interfaces.ModelRepository,
 		ollamaService: ollamaService,
 		pooler:        pooler,
 		tenantService: tenantService,
+		artifactStore: artifactStore,
 	}
 }
 
@@ -433,7 +436,16 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 	}
 
 	logger.Info(ctx, "Embedding model initialized successfully")
-	return embedder, nil
+	revision, err := embeddingModelRevision(model)
+	if err != nil {
+		return nil, err
+	}
+	return newEmbeddingArtifactEmbedder(
+		embedder,
+		s.artifactStore,
+		types.MustTenantIDFromContext(ctx),
+		revision,
+	), nil
 }
 
 // GetEmbeddingModelForTenant retrieves and initializes an embedding model for a specific tenant
@@ -481,7 +493,16 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 	}
 
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
-	return embedder, nil
+	revision, err := embeddingModelRevision(model)
+	if err != nil {
+		return nil, err
+	}
+	return newEmbeddingArtifactEmbedder(
+		embedder,
+		s.artifactStore,
+		tenantID,
+		revision,
+	), nil
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance

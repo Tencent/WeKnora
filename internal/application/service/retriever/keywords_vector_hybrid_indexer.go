@@ -95,7 +95,8 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		embedCtx := context.WithValue(ctx, types.EmbedDocumentContextKey, true)
+		embedding, err := embedder.Embed(embedCtx, sanitizeForEmbedding(ctx, indexInfo.Content))
 		if err != nil {
 			return err
 		}
@@ -115,11 +116,12 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
+		embedCtx := context.WithValue(ctx, types.EmbedDocumentContextKey, true)
 		var contentList []string
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
+		embeddings, err := batchEmbedWithBackoff(embedCtx, embedder, contentList)
 		if err != nil {
 			return err
 		}
