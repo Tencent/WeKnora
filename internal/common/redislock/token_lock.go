@@ -15,6 +15,11 @@ import (
 
 const releaseTimeout = 5 * time.Second
 
+// ErrLockOwnershipLost means exclusive ownership can no longer be guaranteed.
+var ErrLockOwnershipLost = errors.New("redis lock ownership lost")
+
+type ownershipContextKey struct{}
+
 var (
 	releaseScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) == ARGV[1] then
@@ -29,6 +34,19 @@ end
 return 0
 `)
 )
+
+// OwnershipContext returns a context that is canceled only when lock
+// ownership is lost, not when the request context is canceled. Outside a
+// renewable-lock callback it falls back to a cancellation-detached context.
+func OwnershipContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	if ownershipCtx, ok := ctx.Value(ownershipContextKey{}).(context.Context); ok {
+		return ownershipCtx
+	}
+	return context.WithoutCancel(ctx)
+}
 
 // NewToken returns a random owner token suitable for compare-and-* scripts.
 func NewToken() (string, error) {
@@ -155,12 +173,15 @@ func WithRenewableLock(
 		return err
 	}
 
-	lockCtx, cancelLock := context.WithCancel(ctx)
+	lockCtx, cancelLock := context.WithCancelCause(ctx)
+	ownershipCtx, cancelOwnership := context.WithCancelCause(context.Background())
+	lockCtx = context.WithValue(lockCtx, ownershipContextKey{}, ownershipCtx)
 	renewCtx, stopRenewal := context.WithCancel(context.WithoutCancel(ctx))
 	renewResult := make(chan error, 1)
 	go renewLoop(
 		renewCtx,
 		cancelLock,
+		cancelOwnership,
 		client,
 		key,
 		token,
@@ -172,13 +193,14 @@ func WithRenewableLock(
 	defer func() {
 		stopRenewal()
 		renewErr := <-renewResult
-		cancelLock()
+		cancelLock(nil)
+		cancelOwnership(nil)
 
 		releaseCtx, cancelRelease := context.WithTimeout(context.Background(), releaseTimeout)
 		released, releaseErr := Release(releaseCtx, client, key, token)
 		cancelRelease()
 		if releaseErr == nil && !released && renewErr == nil {
-			releaseErr = fmt.Errorf("redis lock ownership lost for %q", key)
+			releaseErr = fmt.Errorf("%w for %q", ErrLockOwnershipLost, key)
 		}
 
 		resultErr = errors.Join(resultErr, renewErr, ctx.Err(), releaseErr)
@@ -190,7 +212,8 @@ func WithRenewableLock(
 
 func renewLoop(
 	ctx context.Context,
-	cancelLock context.CancelFunc,
+	cancelLock context.CancelCauseFunc,
+	cancelOwnership context.CancelCauseFunc,
 	client redis.UniversalClient,
 	key string,
 	token string,
@@ -213,13 +236,17 @@ func renewLoop(
 					result <- nil
 					return
 				}
-				cancelLock()
-				result <- err
+				ownershipErr := fmt.Errorf("%w: %w", ErrLockOwnershipLost, err)
+				cancelOwnership(ownershipErr)
+				cancelLock(ownershipErr)
+				result <- ownershipErr
 				return
 			}
 			if !renewed {
-				cancelLock()
-				result <- fmt.Errorf("redis lock ownership lost for %q", key)
+				ownershipErr := fmt.Errorf("%w for %q", ErrLockOwnershipLost, key)
+				cancelOwnership(ownershipErr)
+				cancelLock(ownershipErr)
+				result <- ownershipErr
 				return
 			}
 		}
