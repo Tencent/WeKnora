@@ -13,20 +13,20 @@ import (
 )
 
 type fakeSandboxFileSource struct {
-	stat      *sandbox.StatEntry
+	stat      *sandbox.RemoteStatEntry
 	statErr   error
 	data      []byte
 	readErr   error
-	entries   []sandbox.DirEntry
+	entries   []sandbox.RemoteDirEntry
 	statCalls int
 	readCalls int
 }
 
-func (f *fakeSandboxFileSource) ListSessionFiles(context.Context, string, string) ([]sandbox.DirEntry, error) {
+func (f *fakeSandboxFileSource) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
 	return f.entries, nil
 }
 
-func (f *fakeSandboxFileSource) StatSessionFile(context.Context, string, string) (*sandbox.StatEntry, error) {
+func (f *fakeSandboxFileSource) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
 	f.statCalls++
 	return f.stat, f.statErr
 }
@@ -42,7 +42,7 @@ func sandboxFileTestContext() context.Context {
 
 func TestReadSandboxFileRefusesOversizeBeforeRead(t *testing.T) {
 	source := &fakeSandboxFileSource{
-		stat: &sandbox.StatEntry{Path: "/workspace/output/large.txt", Type: "file", Size: maxReadSandboxMaxBytes + 1},
+		stat: &sandbox.RemoteStatEntry{Path: "/workspace/output/large.txt", Type: sandbox.RemoteEntryFile, Size: maxReadSandboxMaxBytes + 1},
 		data: []byte("must not be read"),
 	}
 
@@ -63,7 +63,7 @@ func TestReadSandboxFileRefusesOversizeBeforeRead(t *testing.T) {
 func TestReadSandboxFileReturnsSmallTextOnlyInOutput(t *testing.T) {
 	content := []byte("hello sandbox\n")
 	source := &fakeSandboxFileSource{
-		stat: &sandbox.StatEntry{Path: "/workspace/output/report.txt", Type: "file", Size: int64(len(content))},
+		stat: &sandbox.RemoteStatEntry{Path: "/workspace/output/report.txt", Type: sandbox.RemoteEntryFile, Size: int64(len(content))},
 		data: content,
 	}
 
@@ -83,7 +83,7 @@ func TestReadSandboxFileReturnsSmallTextOnlyInOutput(t *testing.T) {
 func TestReadSandboxFileSuppressesBinaryWithoutBase64(t *testing.T) {
 	content := []byte{0xff, 0x00, 0x01}
 	source := &fakeSandboxFileSource{
-		stat: &sandbox.StatEntry{Path: "/workspace/output/image.bin", Type: "file", Size: int64(len(content))},
+		stat: &sandbox.RemoteStatEntry{Path: "/workspace/output/image.bin", Type: sandbox.RemoteEntryFile, Size: int64(len(content))},
 		data: content,
 	}
 
@@ -102,12 +102,12 @@ func TestReadSandboxFileSuppressesBinaryWithoutBase64(t *testing.T) {
 }
 
 func TestListSandboxFilesHardCapsEntries(t *testing.T) {
-	entries := make([]sandbox.DirEntry, 600)
+	entries := make([]sandbox.RemoteDirEntry, 600)
 	for i := range entries {
-		entries[i] = sandbox.DirEntry{
+		entries[i] = sandbox.RemoteDirEntry{
 			Name: fmt.Sprintf("%03d.txt", i),
 			Path: fmt.Sprintf("/workspace/output/%03d.txt", i),
-			Type: "file",
+			Type: sandbox.RemoteEntryFile,
 		}
 	}
 	source := &fakeSandboxFileSource{entries: entries}

@@ -575,17 +575,6 @@ func (l *remoteSessionLifecycle) metadata(key SessionSandboxKey) map[string]stri
 	}
 }
 
-func cloneMetadata(source map[string]string) map[string]string {
-	if source == nil {
-		return nil
-	}
-	result := make(map[string]string, len(source))
-	for key, value := range source {
-		result[key] = value
-	}
-	return result
-}
-
 func metadataMatches(candidate, required map[string]string) bool {
 	for key, value := range required {
 		if candidate[key] != value {

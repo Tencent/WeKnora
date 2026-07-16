@@ -35,7 +35,7 @@ import (
 // collector needs. SessionBoundManager satisfies it in production; tests
 // use a fake to drive the diff logic without a real sandbox.
 type SandboxArtifactSource interface {
-	ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.DirEntry, error)
+	ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.RemoteDirEntry, error)
 	ReadSessionFile(ctx context.Context, sessionID, path string) ([]byte, error)
 }
 
@@ -239,13 +239,13 @@ func (c *ArtifactCollector) maybePersist(
 	ctx context.Context,
 	sessionID string,
 	tenantID uint64,
-	entry sandbox.DirEntry,
+	entry sandbox.RemoteDirEntry,
 	known map[string]struct{},
 ) (types.MessageArtifact, bool) {
 	// Only files reach here (SessionBoundManager.listFilesRecursive filters
 	// directories), but we defensively double-check so callers passing an
 	// alternate SandboxArtifactSource don't break the assumption.
-	if entry.Type == "dir" || entry.Type == "directory" {
+	if entry.Type != sandbox.RemoteEntryFile {
 		return types.MessageArtifact{}, false
 	}
 	if entry.Path == "" || entry.Name == "" {
@@ -257,7 +257,7 @@ func (c *ArtifactCollector) maybePersist(
 		return types.MessageArtifact{}, false
 	}
 
-	modTime := parseModTime(entry.ModifiedAt)
+	modTime := entry.ModTime
 	key := artifactKey(entry.Path, modTime)
 	if _, seen := known[key]; seen {
 		return types.MessageArtifact{}, false
@@ -309,24 +309,6 @@ func artifactKey(path string, mod time.Time) string {
 		return path + "\x00"
 	}
 	return path + "\x00" + mod.UTC().Format(time.RFC3339Nano)
-}
-
-// parseModTime tolerates envd's mixed timestamp formats. Empty or malformed
-// values are treated as zero-time, matching the "unknown mtime" semantics in
-// the design doc (a same-path file with an unknown mtime is considered a
-// fresh artifact each turn).
-func parseModTime(raw string) time.Time {
-	if raw == "" {
-		return time.Time{}
-	}
-	// envd currently emits RFC3339; guard against future format churn by
-	// falling back through common variants.
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05Z07:00", "2006-01-02T15:04:05"} {
-		if t, err := time.Parse(layout, raw); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
 }
 
 // safeFileName strips slashes and backslashes from the original name before

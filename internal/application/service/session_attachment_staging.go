@@ -15,7 +15,7 @@ import (
 )
 
 type sessionInputFileStore interface {
-	ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.DirEntry, error)
+	ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.RemoteDirEntry, error)
 	WriteSessionInputFile(ctx context.Context, sessionID, filePath string, content []byte) error
 	RemoveSessionInputPath(ctx context.Context, sessionID, targetPath string) error
 }
@@ -51,7 +51,7 @@ func (s *agentService) stageSessionAttachments(
 	if err != nil {
 		return nil, fmt.Errorf("list staged session inputs: %w", err)
 	}
-	existing := make(map[string]sandbox.DirEntry, len(existingEntries))
+	existing := make(map[string]sandbox.RemoteDirEntry, len(existingEntries))
 	for _, entry := range existingEntries {
 		existing[path.Clean(entry.Path)] = entry
 	}

@@ -337,10 +337,11 @@ func (c *CubeRemoteClient) ListDir(
 	result := make([]RemoteDirEntry, 0, len(entries))
 	for _, entry := range entries {
 		result = append(result, RemoteDirEntry{
-			Name: entry.Name,
-			Path: entry.Path,
-			Type: cubeRemoteEntryType(entry.Type),
-			Size: entry.Size,
+			Name:    entry.Name,
+			Path:    entry.Path,
+			Type:    cubeRemoteEntryType(entry.Type),
+			Size:    entry.Size,
+			ModTime: cubeModTime(entry.ModifiedAt),
 		})
 	}
 	return result, nil
