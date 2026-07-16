@@ -3969,6 +3969,7 @@ export default {
     attachmentUploadTooltip: 'Загрузить вложение (документы, аудио и т.д.)',
     attachmentWithCount: 'Загружено файлов: {count}',
     attachmentTooMany: 'Максимум {max} файлов',
+    attachmentTotalTooMany: 'Изображений и вложений вместе не более {max}',
     attachmentTooLarge: 'Файл {name} превышает лимит {max} МБ',
     attachmentTypeNotSupported: 'Неподдерживаемый тип файла: {name}',
 	attachmentUploading: 'Загрузка {progress}%',

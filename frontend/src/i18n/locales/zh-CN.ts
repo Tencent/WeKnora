@@ -1063,6 +1063,7 @@ export default {
     attachmentUploadTooltip: "上传附件（文档、音频等）",
     attachmentWithCount: "已上传 {count} 个附件",
     attachmentTooMany: "最多上传 {max} 个附件",
+    attachmentTotalTooMany: "图片和附件合计最多 {max} 个",
     attachmentTooLarge: "文件 {name} 超过 {max}MB 限制",
     attachmentTypeNotSupported: "不支持的文件类型：{name}",
 	attachmentUploading: "上传中 {progress}%",

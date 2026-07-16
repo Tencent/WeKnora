@@ -1874,6 +1874,19 @@ const createSession = async (val: string) => {
     return;
   }
 
+  // Images and non-embedded attachments both travel to the backend as
+  // `attachment_ids`, which enforces a combined cap (MaxTemporaryAttachmentsPerMessage).
+  // The per-picker limits (5 images / 5 attachments) are independent, so guard the
+  // merged total here to avoid a late 400 after the files are already uploaded.
+  const MAX_TOTAL_ATTACHMENTS = 5;
+  const combinedAttachmentCount =
+    uploadedImages.value.length +
+    uploadedAttachments.value.filter(item => item.status !== 'failed').length;
+  if (combinedAttachmentCount > MAX_TOTAL_ATTACHMENTS) {
+    MessagePlugin.warning(t('chat.attachmentTotalTooMany', { max: MAX_TOTAL_ATTACHMENTS }));
+    return;
+  }
+
   if (!chatResources.isFresh('models')) {
     await loadChatModels()
   }
@@ -2152,6 +2165,17 @@ const clearvalue = () => {
   // otherwise TDesign's autosize will call getComputedStyle on a non-Element.
   if (!getTextareaEl()) return;
   query.value = "";
+}
+
+// Drop any pending images/attachments and stop their status polling. Used when
+// switching sessions: leftover documentIds belong to the previous session, so
+// keeping them would make polling 404 (falsely marking them failed) or send IDs
+// the new session does not own ("attachment ... not found in this session").
+const clearPendingUploads = () => {
+  uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
+  uploadedImages.value = [];
+  attachmentUploadRef.value?.clear();
+  uploadedAttachments.value = [];
 }
 
 const onKeydown = (val: string, event: { e: { preventDefault(): unknown; keyCode: number; shiftKey: any; ctrlKey: any; }; }) => {
@@ -2433,6 +2457,7 @@ const handleStop = async () => {
 
 onBeforeRouteUpdate((to, from, next) => {
   clearvalue()
+  clearPendingUploads()
   next()
 })
 

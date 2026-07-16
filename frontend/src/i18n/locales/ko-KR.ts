@@ -1055,6 +1055,7 @@ export default {
     attachmentUploadTooltip: "첨부 파일 업로드 (문서, 오디오 등)",
     attachmentWithCount: "{count}개 파일 업로드됨",
     attachmentTooMany: "최대 {max}개 파일까지 업로드 가능합니다",
+    attachmentTotalTooMany: "이미지와 첨부 파일은 합쳐서 최대 {max}개까지 가능합니다",
     attachmentTooLarge: "파일 {name}이(가) {max}MB 제한을 초과합니다",
     attachmentTypeNotSupported: "지원하지 않는 파일 형식: {name}",
 	attachmentUploading: "업로드 중 {progress}%",

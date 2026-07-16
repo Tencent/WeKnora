@@ -3298,6 +3298,7 @@ export default {
     attachmentUploadTooltip: 'Upload attachment (documents, audio, etc.)',
     attachmentWithCount: '{count} attachment(s) uploaded',
     attachmentTooMany: 'Maximum {max} attachments allowed',
+    attachmentTotalTooMany: 'Images and attachments combined can be at most {max}',
     attachmentTooLarge: 'File {name} exceeds {max}MB limit',
     attachmentTypeNotSupported: 'Unsupported file type: {name}',
 	attachmentUploading: 'Uploading {progress}%',

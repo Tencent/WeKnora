@@ -73,8 +73,13 @@ func (m *MessageImages) Scan(value interface{}) error {
 
 // MessageAttachment represents a file attachment in a chat message
 type MessageAttachment struct {
-	ID             string `json:"id,omitempty"`              // Temporary document ID for session-scoped uploads
-	URL            string `json:"url"`                       // Storage URL (provider://path)
+	ID string `json:"id,omitempty"` // Temporary document ID for session-scoped uploads
+	// URL is the internal storage handle (provider://path / resource://...). It is
+	// an internal locator only: previews are served via the session-scoped
+	// attachment endpoints, so this handle must never reach the client. Kept out
+	// of both JSON responses and DB serialization to avoid leaking a cross-session
+	// downloadable reference (see /files tenant-only check).
+	URL            string `json:"-"`                         // Storage URL (provider://path)
 	FileName       string `json:"file_name"`                 // Original filename
 	FileType       string `json:"file_type"`                 // File extension (e.g., ".pdf", ".docx")
 	FileSize       int64  `json:"file_size"`                 // File size in bytes
