@@ -22,6 +22,8 @@ const (
 	// SessionID share the same MicroVM instance and preserve installed packages,
 	// created files, running services, etc.
 	SandboxTypeCube SandboxType = "cube"
+	// SandboxTypeE2B uses E2B's hosted MicroVM sandbox service.
+	SandboxTypeE2B SandboxType = "e2b"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
 )
