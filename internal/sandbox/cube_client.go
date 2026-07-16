@@ -73,6 +73,7 @@ type SandboxInfo struct {
 	ClientID    string
 	Domain      string
 	EnvdVersion string
+	Metadata    map[string]string
 
 	sb *cubesandbox.Sandbox
 }
@@ -92,6 +93,7 @@ type SandboxSummary struct {
 	State      string
 	CPUCount   int
 	MemoryMB   int
+	Metadata   map[string]string
 }
 
 // CommandResult is the aggregated output of one RunCommand call. Killed is
@@ -328,11 +330,21 @@ func (c *cubeClient) Health(ctx context.Context) error {
 
 // CreateSandbox provisions a new sandbox and returns its metadata.
 func (c *cubeClient) CreateSandbox(ctx context.Context, templateID string, ttl time.Duration) (*SandboxInfo, error) {
-	if templateID == "" {
-		return nil, errors.New("cube api: templateID is required")
-	}
 	if ttl <= 0 {
 		ttl = DefaultCubeSandboxTTL
+	}
+	return c.createRemoteSandbox(ctx, cubeCreateRequest{
+		TemplateID: templateID,
+		Timeout:    cubesandbox.DurationPtr(ttl),
+	})
+}
+
+func (c *cubeClient) createRemoteSandbox(
+	ctx context.Context,
+	request cubeCreateRequest,
+) (*SandboxInfo, error) {
+	if request.TemplateID == "" {
+		return nil, errors.New("cube api: templateID is required")
 	}
 	// Explicitly opt this sandbox into public internet egress. Cube honours
 	// two independent switches here and both must be on for
@@ -353,12 +365,22 @@ func (c *cubeClient) CreateSandbox(ctx context.Context, templateID string, ttl t
 	allowInternet := true
 	allowPublicTraffic := true
 	opts := cubesandbox.CreateOptions{
-		TemplateID:          templateID,
-		Timeout:             cubesandbox.DurationPtr(ttl),
+		TemplateID:          request.TemplateID,
+		Timeout:             request.Timeout,
+		EnvVars:             cloneMetadata(request.EnvVars),
+		Metadata:            cloneMetadata(request.Metadata),
 		AllowInternetAccess: &allowInternet,
 		Network: cubesandbox.NetworkOptions{
 			AllowPublicTraffic: &allowPublicTraffic,
 		},
+	}
+	if request.OnTimeout != "" {
+		opts.Extra = map[string]any{
+			"lifecycle": map[string]any{
+				"onTimeout":  string(request.OnTimeout),
+				"autoResume": request.AutoResume,
+			},
+		}
 	}
 	sb, err := c.sdk.Create(ctx, opts)
 	if err != nil {
@@ -366,6 +388,31 @@ func (c *cubeClient) CreateSandbox(ctx context.Context, templateID string, ttl t
 	}
 	if sb == nil || sb.SandboxID == "" {
 		return nil, errors.New("cube api: create sandbox: empty sandboxID")
+	}
+	domain := sb.Domain
+	if domain == "" {
+		domain = c.sandboxDomain
+	}
+	return &SandboxInfo{
+		ID:          sb.SandboxID,
+		ClientID:    sb.ClientID,
+		Domain:      domain,
+		EnvdVersion: sb.EnvdVersion,
+		Metadata:    cloneMetadata(request.Metadata),
+		sb:          sb,
+	}, nil
+}
+
+func (c *cubeClient) connectSandbox(
+	ctx context.Context,
+	sandboxID string,
+) (*SandboxInfo, error) {
+	if strings.TrimSpace(sandboxID) == "" {
+		return nil, errors.New("cube api: sandboxID is required")
+	}
+	sb, err := c.reattach(ctx, sandboxID)
+	if err != nil {
+		return nil, err
 	}
 	domain := sb.Domain
 	if domain == "" {
@@ -391,17 +438,22 @@ func (c *cubeClient) KillSandbox(ctx context.Context, sandboxID string) error {
 	if sandboxID == "" {
 		return nil
 	}
+	err := c.deleteSandbox(ctx, sandboxID)
+	if isSDKNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+func (c *cubeClient) deleteSandbox(ctx context.Context, sandboxID string) error {
+	if strings.TrimSpace(sandboxID) == "" {
+		return errors.New("cube api: sandboxID required for delete")
+	}
 	sb, err := c.reattach(ctx, sandboxID)
 	if err != nil {
-		if isSDKNotFound(err) {
-			return nil
-		}
 		return fmt.Errorf("cube api: kill sandbox %s: %w", sandboxID, err)
 	}
 	if err := sb.Kill(ctx); err != nil {
-		if isSDKNotFound(err) {
-			return nil
-		}
 		return fmt.Errorf("cube api: kill sandbox %s: %w", sandboxID, err)
 	}
 	return nil
@@ -973,6 +1025,7 @@ func summaryFromSDK(in cubesandbox.SandboxInfo) SandboxSummary {
 		State:      in.State,
 		CPUCount:   in.CPUCount,
 		MemoryMB:   in.MemoryMB,
+		Metadata:   cloneMetadata(in.Metadata),
 	}
 	if in.EndAt != nil {
 		out.EndAt = *in.EndAt
