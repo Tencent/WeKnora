@@ -14,12 +14,6 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-type sessionInputFileStore interface {
-	ListSessionFiles(ctx context.Context, sessionID, dir string) ([]sandbox.RemoteDirEntry, error)
-	WriteSessionInputFile(ctx context.Context, sessionID, filePath string, content []byte) error
-	RemoveSessionInputPath(ctx context.Context, sessionID, targetPath string) error
-}
-
 type stagedSessionAttachment struct {
 	Name     string
 	FileType string
@@ -27,20 +21,42 @@ type stagedSessionAttachment struct {
 	Path     string
 }
 
+// sessionSandboxFileStore returns the manager's effective session filesystem
+// capability, or nil when the backend cannot support it. Centralised so
+// callers never resurrect a Cube-specific type check.
+func sessionSandboxFileStore(mgr sandbox.Manager) sandbox.SessionFileStore {
+	provider, ok := mgr.(sandbox.SessionCapabilityProvider)
+	if !ok || provider == nil {
+		return nil
+	}
+	return provider.SessionFileStore()
+}
+
+// sessionSandboxShellExecutor is the shell-execution counterpart of
+// sessionSandboxFileStore.
+func sessionSandboxShellExecutor(mgr sandbox.Manager) sandbox.SessionShellExecutor {
+	provider, ok := mgr.(sandbox.SessionCapabilityProvider)
+	if !ok || provider == nil {
+		return nil
+	}
+	return provider.SessionShellExecutor()
+}
+
 // stageSessionAttachments reconciles /workspace/input with the durable
-// attachment inventory. It is Cube-only; other backends retain prompt-extracted
+// attachment inventory. It is gated on the sandbox manager advertising a
+// session filesystem capability; other backends retain prompt-extracted
 // attachment content and never receive host file paths.
 func (s *agentService) stageSessionAttachments(
 	ctx context.Context,
 	sessionID string,
 	attachments types.MessageAttachments,
 ) ([]stagedSessionAttachment, error) {
-	if s == nil || s.sandboxMgr == nil || s.sandboxMgr.GetType() != sandbox.SandboxTypeCube {
+	if s == nil {
 		return nil, nil
 	}
-	store, ok := s.sandboxMgr.(sessionInputFileStore)
-	if !ok {
-		return nil, fmt.Errorf("cube sandbox does not support session input staging")
+	store := sessionSandboxFileStore(s.sandboxMgr)
+	if store == nil {
+		return nil, nil
 	}
 	if s.fileService == nil && len(attachments) > 0 {
 		return nil, fmt.Errorf("file service is unavailable for session input staging")

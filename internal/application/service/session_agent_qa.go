@@ -12,7 +12,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -144,11 +143,14 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
-	// Reconcile all durable session attachments into the current Cube before
-	// the model can request shell or skill execution. The durable storage URL,
-	// not the ephemeral sandbox path, remains the source of truth.
+	// Reconcile all durable session attachments into the session's remote
+	// sandbox before the model can request shell or skill execution. The
+	// durable storage URL — not the ephemeral sandbox path — remains the
+	// source of truth. Gated on the sandbox manager advertising a session
+	// filesystem capability so provider-neutral wiring (Cube today, E2B
+	// tomorrow) drops in without touching this call site.
 	var stagedAttachments []stagedSessionAttachment
-	if s.sandboxMgr != nil && s.sandboxMgr.GetType() == sandbox.SandboxTypeCube {
+	if sessionSandboxFileStore(s.sandboxMgr) != nil {
 		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
 		if loadErr != nil {
 			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
@@ -157,7 +159,7 @@ func (s *sessionService) AgentQA(
 			stageSessionAttachments(context.Context, string, types.MessageAttachments) ([]stagedSessionAttachment, error)
 		})
 		if !ok {
-			return errors.New("agent service does not support Cube attachment staging")
+			return errors.New("agent service does not support session attachment staging")
 		}
 		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, sessionAttachments)
 		if err != nil {

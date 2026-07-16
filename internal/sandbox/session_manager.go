@@ -412,6 +412,25 @@ func (m *SessionBoundManager) ExecShellCommand(
 	return remoteExecuteResult(execResult, execErr, duration), nil
 }
 
+// SessionShellExecutor advertises the shell-execution capability while a
+// real remote backend is active. Returns nil after Local fallback engages so
+// the tool layer refuses to run shell commands on the host machine.
+func (m *SessionBoundManager) SessionShellExecutor() SessionShellExecutor {
+	if m == nil || m.remoteDisabled() {
+		return nil
+	}
+	return m
+}
+
+// SessionFileStore advertises the session-scoped filesystem capability while
+// a real remote backend is active. Returns nil after Local fallback engages.
+func (m *SessionBoundManager) SessionFileStore() SessionFileStore {
+	if m == nil || m.remoteDisabled() {
+		return nil
+	}
+	return m
+}
+
 // Cleanup marks the manager closed. Session sandboxes are not force-deleted
 // here: their lifecycle is authoritative in the binding store and would
 // leak to any other WeKnora replica if this replica reaped them on shutdown.
@@ -604,6 +623,12 @@ func effectiveHTTPTimeout(cfg *Config) time.Duration {
 	}
 	return DefaultCubeHTTPTimeout
 }
+
+var (
+	_ SessionCapabilityProvider = (*SessionBoundManager)(nil)
+	_ SessionShellExecutor      = (*SessionBoundManager)(nil)
+	_ SessionFileStore          = (*SessionBoundManager)(nil)
+)
 
 // PermissiveSessionExistenceChecker accepts every session. It is safe in
 // deployments where WeKnora's own DestroySession is the only session-delete
