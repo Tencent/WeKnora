@@ -585,8 +585,8 @@ func approxTextContentRunes(md string) int {
 
 func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantID uint64, sessionID string, documentIDs []string, query string) (*types.TemporaryDocumentPromptResult, error) {
 	result := &types.TemporaryDocumentPromptResult{}
-	if len(documentIDs) > 5 {
-		return nil, fmt.Errorf("a message can use at most 5 attachments")
+	if len(documentIDs) > types.MaxTemporaryAttachmentsPerMessage {
+		return nil, fmt.Errorf("a message can use at most %d attachments", types.MaxTemporaryAttachmentsPerMessage)
 	}
 	perDocumentBudget := temporaryDocumentPromptBudget
 	if len(documentIDs) > 0 {

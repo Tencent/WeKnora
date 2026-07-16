@@ -259,9 +259,13 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	var attachmentIDs []string
 	var attachmentMetas types.MessageAttachments
 	if len(request.AttachmentIDs) > 0 {
-		tenantID := c.GetUint64(types.TenantIDContextKey.String())
-		attachmentMetas = make(types.MessageAttachments, 0, len(request.AttachmentIDs))
-		for _, id := range request.AttachmentIDs {
+		normalizedIDs, normErr := normalizeTemporaryAttachmentIDs(request.AttachmentIDs)
+		if normErr != nil {
+			return nil, nil, errors.NewBadRequestError(normErr.Error())
+		}
+		tenantID := session.TenantID
+		attachmentMetas = make(types.MessageAttachments, 0, len(normalizedIDs))
+		for _, id := range normalizedIDs {
 			doc, getErr := h.temporaryDocuments.Get(ctx, tenantID, sessionID, id)
 			if getErr != nil || doc == nil {
 				return nil, nil, errors.NewBadRequestError(
@@ -279,7 +283,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 				FileType: doc.FileType, FileSize: doc.FileSize,
 			})
 		}
-		attachmentIDs = request.AttachmentIDs
+		attachmentIDs = normalizedIDs
 	}
 
 	// Resolve enable_memory:
@@ -1070,7 +1074,9 @@ func (h *Handler) resolveTemporaryAttachments(streamCtx *sseStreamContext, reqCt
 	}
 	ctx := streamCtx.asyncCtx
 	sessionID := reqCtx.sessionID
-	tenantID := reqCtx.c.GetUint64(types.TenantIDContextKey.String())
+	// Prefer the session's tenant over gin.Context: this runs in an async
+	// goroutine after the HTTP handler may have returned.
+	tenantID := reqCtx.session.TenantID
 
 	start := time.Now()
 	var toolCallID string
@@ -1204,6 +1210,28 @@ func (h *Handler) persistResolvedAttachmentContent(
 		logger.Warnf(updateCtx, "persist attachment content: update user message %s failed: %v",
 			reqCtx.userMessageID, err)
 	}
+}
+
+// normalizeTemporaryAttachmentIDs rejects oversized ID lists before any DB
+// lookup, then returns a deduplicated, order-preserving list of non-empty IDs.
+func normalizeTemporaryAttachmentIDs(ids []string) ([]string, error) {
+	if len(ids) > types.MaxTemporaryAttachmentsPerMessage {
+		return nil, fmt.Errorf("a message can use at most %d attachments", types.MaxTemporaryAttachmentsPerMessage)
+	}
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 // hasPendingAttachments reports whether any of the given documents is still
