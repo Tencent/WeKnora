@@ -174,6 +174,70 @@ func TestProcessingArtifactRepositoryScopesByFullKey(t *testing.T) {
 	}
 }
 
+func TestProcessingArtifactRepositoryBatchPutAndGetPreservesWinners(t *testing.T) {
+	db, _ := setupProcessingArtifactTestDBs(t)
+	repo := NewProcessingArtifactRepository(db)
+	batchRepo, ok := repo.(interface {
+		GetMany(context.Context, []types.ProcessingArtifactKey) (
+			map[types.ProcessingArtifactKey]*types.ProcessingArtifact, error,
+		)
+		PutManyIfAbsent(context.Context, []*types.ProcessingArtifact) error
+	})
+	require.True(t, ok)
+
+	winner := processingArtifact(7, "embedding.vector", 1, strings.Repeat("1", 64), "winner")
+	created, err := repo.PutIfAbsent(context.Background(), winner)
+	require.NoError(t, err)
+	require.True(t, created)
+
+	loser := processingArtifact(7, "embedding.vector", 1, strings.Repeat("1", 64), "loser")
+	loser.ContentSHA256 = strings.Repeat("b", 64)
+	otherTenant := processingArtifact(8, "embedding.vector", 1, strings.Repeat("1", 64), "tenant-eight")
+	otherStage := processingArtifact(7, "vlm.markdown", 1, strings.Repeat("2", 64), "other-stage")
+	require.NoError(t, batchRepo.PutManyIfAbsent(
+		context.Background(),
+		[]*types.ProcessingArtifact{loser, otherTenant, otherStage},
+	))
+
+	missing := types.ProcessingArtifactKey{
+		TenantID: 7, Stage: "embedding.vector", KeyVersion: 1,
+		InputFingerprint: strings.Repeat("f", 64),
+	}
+	got, err := batchRepo.GetMany(context.Background(), []types.ProcessingArtifactKey{
+		artifactKey(winner), artifactKey(otherTenant), artifactKey(otherStage), missing,
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	assert.Equal(t, []byte("winner"), got[artifactKey(winner)].Payload)
+	assert.Equal(t, []byte("tenant-eight"), got[artifactKey(otherTenant)].Payload)
+	assert.Equal(t, []byte("other-stage"), got[artifactKey(otherStage)].Payload)
+	assert.NotContains(t, got, missing)
+}
+
+func TestProcessingArtifactRepositoryGetManyChunksLargeInputs(t *testing.T) {
+	db, _ := setupProcessingArtifactTestDBs(t)
+	repo := NewProcessingArtifactRepository(db)
+	batchRepo, ok := repo.(interface {
+		GetMany(context.Context, []types.ProcessingArtifactKey) (
+			map[types.ProcessingArtifactKey]*types.ProcessingArtifact, error,
+		)
+	})
+	require.True(t, ok)
+
+	keys := make([]types.ProcessingArtifactKey, 33_000)
+	for i := range keys {
+		keys[i] = types.ProcessingArtifactKey{
+			TenantID:         7,
+			Stage:            "embedding.vector",
+			KeyVersion:       1,
+			InputFingerprint: fmt.Sprintf("%064x", i),
+		}
+	}
+	got, err := batchRepo.GetMany(context.Background(), keys)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
 func TestProcessingArtifactDeleteByIDRequiresTenant(t *testing.T) {
 	db, _ := setupProcessingArtifactTestDBs(t)
 	repo := NewProcessingArtifactRepository(db)

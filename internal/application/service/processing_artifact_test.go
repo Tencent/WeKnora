@@ -414,6 +414,91 @@ func TestProcessingArtifactStoreKeepsSmallValuesInline(t *testing.T) {
 	assert.Equal(t, want, again)
 }
 
+func TestProcessingArtifactStoreBatchOperationsPreserveCanonicalValues(t *testing.T) {
+	state := newProcessingArtifactTestStore(t)
+	batchStore, ok := state.store.(interface {
+		GetMany(context.Context, []types.ProcessingArtifactKey) (
+			map[types.ProcessingArtifactKey][]byte, error,
+		)
+		PutManyIfAbsent(context.Context, map[types.ProcessingArtifactKey][]byte) (
+			map[types.ProcessingArtifactKey][]byte, error,
+		)
+	})
+	require.True(t, ok)
+
+	winnerKey := processingArtifactServiceKey(t, "batch-winner")
+	newKey := processingArtifactServiceKey(t, "batch-new")
+	missingKey := processingArtifactServiceKey(t, "batch-missing")
+	_, created, err := state.store.PutIfAbsent(context.Background(), winnerKey, []byte("winner"))
+	require.NoError(t, err)
+	require.True(t, created)
+
+	canonical, err := batchStore.PutManyIfAbsent(context.Background(), map[types.ProcessingArtifactKey][]byte{
+		winnerKey: []byte("loser"),
+		newKey:    []byte("new-value"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("winner"), canonical[winnerKey])
+	assert.Equal(t, []byte("new-value"), canonical[newKey])
+
+	got, err := batchStore.GetMany(
+		context.Background(),
+		[]types.ProcessingArtifactKey{winnerKey, newKey, missingKey},
+	)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, []byte("winner"), got[winnerKey])
+	assert.Equal(t, []byte("new-value"), got[newKey])
+	assert.NotContains(t, got, missingKey)
+}
+
+func TestProcessingArtifactStoreBatchRepairsCorruptWinner(t *testing.T) {
+	state := newProcessingArtifactTestStore(t)
+	batchStore := state.store.(interfaces.ProcessingArtifactBatchStore)
+	key := processingArtifactServiceKey(t, "batch-corrupt-winner")
+	seedProcessingArtifact(
+		t,
+		state.repository,
+		key,
+		[]byte("corrupt"),
+		"",
+		int64(len("corrupt")),
+		artifactSHA([]byte("different")),
+	)
+
+	canonical, err := batchStore.PutManyIfAbsent(context.Background(), map[types.ProcessingArtifactKey][]byte{
+		key: []byte("replacement"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("replacement"), canonical[key])
+
+	artifact, err := state.repository.Get(context.Background(), key)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("replacement"), artifact.Payload)
+	assert.Equal(t, artifactSHA([]byte("replacement")), artifact.ContentSHA256)
+}
+
+func TestProcessingArtifactStoreBatchFallsBackForLargeValues(t *testing.T) {
+	state := newProcessingArtifactTestStore(t)
+	batchStore := state.store.(interfaces.ProcessingArtifactBatchStore)
+	key := processingArtifactServiceKey(t, "batch-large-value")
+	value := bytes.Repeat([]byte("x"), ProcessingArtifactInlineLimit+1)
+
+	canonical, err := batchStore.PutManyIfAbsent(context.Background(), map[types.ProcessingArtifactKey][]byte{
+		key: value,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, value, canonical[key])
+
+	artifact, err := state.repository.Get(context.Background(), key)
+	require.NoError(t, err)
+	assert.Nil(t, artifact.Payload)
+	assert.NotEmpty(t, artifact.ObjectPath)
+	saves, deletes, _ := state.files.snapshot()
+	assert.Len(t, saves, 1)
+	assert.Empty(t, deletes)
+}
+
 func TestProcessingArtifactStoreKeepsEmptyValueInline(t *testing.T) {
 	testStore := newProcessingArtifactTestStore(t)
 	key := processingArtifactServiceKey(t, "empty-inline")

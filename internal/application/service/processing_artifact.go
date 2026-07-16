@@ -28,6 +28,13 @@ type processingArtifactStore struct {
 	newFileService   processingArtifactFileServiceFactory
 }
 
+type processingArtifactBatchRepository interface {
+	GetMany(ctx context.Context, keys []types.ProcessingArtifactKey) (
+		map[types.ProcessingArtifactKey]*types.ProcessingArtifact, error,
+	)
+	PutManyIfAbsent(ctx context.Context, artifacts []*types.ProcessingArtifact) error
+}
+
 type processingArtifactFileServiceFactory func(
 	provider string,
 	storageConfig *types.StorageEngineConfig,
@@ -78,6 +85,45 @@ func (s *processingArtifactStore) Get(
 		return nil, false, fmt.Errorf("get processing artifact manifest: %w", err)
 	}
 	return s.readArtifact(ctx, key, artifact)
+}
+
+func (s *processingArtifactStore) GetMany(
+	ctx context.Context,
+	keys []types.ProcessingArtifactKey,
+) (map[types.ProcessingArtifactKey][]byte, error) {
+	result := make(map[types.ProcessingArtifactKey][]byte, len(keys))
+	batchRepository, ok := s.repository.(processingArtifactBatchRepository)
+	if !ok {
+		for _, key := range keys {
+			value, hit, err := s.Get(ctx, key)
+			if err != nil {
+				return nil, err
+			}
+			if hit {
+				result[key] = value
+			}
+		}
+		return result, nil
+	}
+
+	artifacts, err := batchRepository.GetMany(ctx, keys)
+	if err != nil {
+		return nil, fmt.Errorf("get processing artifact manifests: %w", err)
+	}
+	for _, key := range keys {
+		artifact, ok := artifacts[key]
+		if !ok {
+			continue
+		}
+		value, hit, err := s.readArtifact(ctx, key, artifact)
+		if err != nil {
+			return nil, err
+		}
+		if hit {
+			result[key] = value
+		}
+	}
+	return result, nil
 }
 
 func (s *processingArtifactStore) PutIfAbsent(
@@ -166,6 +212,91 @@ func (s *processingArtifactStore) PutIfAbsent(
 		"processing artifact contention did not converge after %d attempts",
 		processingArtifactPutAttempts,
 	)
+}
+
+func (s *processingArtifactStore) PutManyIfAbsent(
+	ctx context.Context,
+	values map[types.ProcessingArtifactKey][]byte,
+) (map[types.ProcessingArtifactKey][]byte, error) {
+	result := make(map[types.ProcessingArtifactKey][]byte, len(values))
+	batchRepository, ok := s.repository.(processingArtifactBatchRepository)
+	if !ok {
+		return s.putManySequential(ctx, values)
+	}
+
+	inlineValues := make(map[types.ProcessingArtifactKey][]byte, len(values))
+	artifacts := make([]*types.ProcessingArtifact, 0, len(values))
+	for key, value := range values {
+		if len(value) > ProcessingArtifactInlineLimit {
+			canonical, _, err := s.PutIfAbsent(ctx, key, value)
+			if err != nil {
+				return nil, err
+			}
+			result[key] = canonical
+			continue
+		}
+
+		candidate := cloneProcessingArtifactValue(value)
+		inlineValues[key] = candidate
+		artifacts = append(artifacts, &types.ProcessingArtifact{
+			TenantID:         key.TenantID,
+			Stage:            key.Stage,
+			KeyVersion:       key.KeyVersion,
+			InputFingerprint: key.InputFingerprint,
+			Payload:          cloneProcessingArtifactValue(candidate),
+			ContentSHA256:    processingArtifactSHA256(candidate),
+			SizeBytes:        int64(len(candidate)),
+		})
+	}
+	if len(artifacts) == 0 {
+		return result, nil
+	}
+	if err := batchRepository.PutManyIfAbsent(ctx, artifacts); err != nil {
+		return nil, fmt.Errorf("put processing artifact manifests: %w", err)
+	}
+
+	keys := make([]types.ProcessingArtifactKey, 0, len(inlineValues))
+	for key := range inlineValues {
+		keys = append(keys, key)
+	}
+	winners, err := batchRepository.GetMany(ctx, keys)
+	if err != nil {
+		return nil, fmt.Errorf("get winning processing artifact manifests: %w", err)
+	}
+	for key, candidate := range inlineValues {
+		winner, ok := winners[key]
+		if ok {
+			canonical, hit, readErr := s.readArtifact(ctx, key, winner)
+			if readErr != nil {
+				return nil, readErr
+			}
+			if hit {
+				result[key] = canonical
+				continue
+			}
+		}
+		canonical, _, putErr := s.PutIfAbsent(ctx, key, candidate)
+		if putErr != nil {
+			return nil, putErr
+		}
+		result[key] = canonical
+	}
+	return result, nil
+}
+
+func (s *processingArtifactStore) putManySequential(
+	ctx context.Context,
+	values map[types.ProcessingArtifactKey][]byte,
+) (map[types.ProcessingArtifactKey][]byte, error) {
+	result := make(map[types.ProcessingArtifactKey][]byte, len(values))
+	for key, value := range values {
+		canonical, _, err := s.PutIfAbsent(ctx, key, value)
+		if err != nil {
+			return nil, err
+		}
+		result[key] = canonical
+	}
+	return result, nil
 }
 
 func (s *processingArtifactStore) readArtifact(

@@ -18,3 +18,13 @@ type ProcessingArtifactStore interface {
 		canonical []byte, created bool, err error,
 	)
 }
+
+type ProcessingArtifactBatchStore interface {
+	ProcessingArtifactStore
+	GetMany(ctx context.Context, keys []types.ProcessingArtifactKey) (
+		values map[types.ProcessingArtifactKey][]byte, err error,
+	)
+	PutManyIfAbsent(ctx context.Context, values map[types.ProcessingArtifactKey][]byte) (
+		canonical map[types.ProcessingArtifactKey][]byte, err error,
+	)
+}

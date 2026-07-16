@@ -29,6 +29,8 @@ const (
 	SessionTenantIDContextKey ContextKey = "SessionTenantID"
 	// EmbedQueryContextKey is the context key for embedding query text
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
+	// EmbedDocumentContextKey marks text that will be persisted in a retrieval index.
+	EmbedDocumentContextKey ContextKey = "EmbedDocument"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
 	// EmbedVisitorContextKey is the anonymous visitor id for embed OAuth isolation.
