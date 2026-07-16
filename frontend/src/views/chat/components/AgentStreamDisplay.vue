@@ -782,6 +782,10 @@ const props = defineProps<{
   followUpLoading?: boolean;
 }>();
 
+const emit = defineEmits<{
+  (event: 'render-complete-change', ready: boolean): void;
+}>();
+
 const embedAuthProps = computed(() => ({
   embeddedMode: props.embeddedMode,
   embedChannelId: props.embedChannelId,
@@ -1257,6 +1261,7 @@ const answerFullyRendered = computed(
   () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
+  emit('render-complete-change', ready);
   if (!ready) return;
   // Clear before this reactive update renders, so a source that returned 404
   // mid-stream gets one real final-attempt <img> node instead of remaining
@@ -1265,7 +1270,7 @@ watch(answerFullyRendered, (ready) => {
   nextTick(async () => {
     await hydrateProtectedFileImages(rootElement.value);
   });
-});
+}, { immediate: true });
 
 // Whether any currently visible step is actively pending (a running tool, or a
 // blocking approval/OAuth prompt). A pending step shimmers on its own, so we
