@@ -151,8 +151,19 @@ func loadAndProcessHistory(
 				h.Query = message.Content
 			}
 			h.CreateAt = message.CreatedAt
-			if desc := extractImageCaptions(message.Images); desc != "" && message.RenderedContent == "" {
-				h.Query += "\n\n[用户上传图片内容]\n" + desc
+			// When RenderedContent is absent (e.g. the pure-chat, non-RAG path
+			// and the search-nothing fallback path never persist it), replay the
+			// previous turn's image captions and attachment content from the
+			// stored message so the model retains a textual reference to them.
+			// When RenderedContent is present it already carries this
+			// augmentation, so we must not double-append.
+			if message.RenderedContent == "" {
+				if desc := extractImageCaptions(message.Images); desc != "" {
+					h.Query += "\n\n[用户上传图片内容]\n" + desc
+				}
+				if len(message.Attachments) > 0 {
+					h.Query += message.Attachments.BuildPrompt()
+				}
 			}
 		} else {
 			h.Answer = regThinkTags.ReplaceAllString(message.Content, "")
