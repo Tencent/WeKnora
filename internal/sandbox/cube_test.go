@@ -43,7 +43,9 @@ type cubeMockServer struct {
 	mu         sync.Mutex
 	sandboxes  map[string]bool // sandboxID -> alive?
 	files      map[string]map[string][]byte
+	metadata   map[string]map[string]string
 	execScript func(sandboxID, cmd string, args []string) (stdout, stderr string, exitCode int)
+	createBody map[string]any
 
 	createCount atomic.Int32
 	killCount   atomic.Int32
@@ -56,6 +58,7 @@ func newCubeMockServer(t *testing.T) *cubeMockServer {
 		sandboxDomain: "cube.app",
 		sandboxes:     map[string]bool{},
 		files:         map[string]map[string][]byte{},
+		metadata:      map[string]map[string]string{},
 	}
 	m.server = httptest.NewServer(http.HandlerFunc(m.handle))
 	t.Cleanup(m.server.Close)
@@ -170,10 +173,22 @@ func (m *cubeMockServer) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	body, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(body, &req)
+	var createBody map[string]any
+	_ = json.Unmarshal(body, &createBody)
 	id := fmt.Sprintf("sbx-%d", time.Now().UnixNano())
 	m.mu.Lock()
 	m.sandboxes[id] = true
 	m.files[id] = map[string][]byte{}
+	m.createBody = createBody
+	if raw, ok := createBody["metadata"].(map[string]any); ok {
+		converted := make(map[string]string, len(raw))
+		for k, v := range raw {
+			if s, ok := v.(string); ok {
+				converted[k] = s
+			}
+		}
+		m.metadata[id] = converted
+	}
 	m.mu.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"templateID":  req.TemplateID,
@@ -188,7 +203,7 @@ func (m *cubeMockServer) handleList(w http.ResponseWriter) {
 	m.mu.Lock()
 	items := make([]map[string]any, 0, len(m.sandboxes))
 	for id := range m.sandboxes {
-		items = append(items, map[string]any{
+		item := map[string]any{
 			"templateID":  "tpl-test",
 			"sandboxID":   id,
 			"clientID":    "test-client",
@@ -196,7 +211,11 @@ func (m *cubeMockServer) handleList(w http.ResponseWriter) {
 			"domain":      m.sandboxDomain,
 			"startedAt":   time.Now().UTC().Format(time.RFC3339),
 			"state":       "running",
-		})
+		}
+		if md, ok := m.metadata[id]; ok && len(md) > 0 {
+			item["metadata"] = md
+		}
+		items = append(items, item)
 	}
 	m.mu.Unlock()
 	writeJSON(w, http.StatusOK, items)
