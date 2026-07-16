@@ -563,7 +563,7 @@ onUnmounted(() => {
   position: fixed;
   inset: 0;
   z-index: 1100;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(from var(--td-text-color-primary) r g b / 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -585,7 +585,7 @@ onUnmounted(() => {
   max-height: calc(100vh - 40px);
   background: var(--td-bg-color-container);
   border-radius: 12px;
-  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--td-shadow-2);
   overflow: hidden;
   display: flex;
   flex-direction: column;

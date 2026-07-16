@@ -180,11 +180,11 @@ const headerTitle = computed(() => {
 
     &.created {
       color: var(--td-success-color);
-      background: rgba(0, 168, 112, 0.1);
+      background: var(--td-success-color-light);
     }
     &.updated {
       color: var(--td-brand-color);
-      background: rgba(7, 192, 95, 0.1);
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     }
     &.renamed {
       color: var(--td-warning-color);
@@ -212,13 +212,13 @@ const headerTitle = computed(() => {
 
   &.created {
     color: var(--td-success-color);
-    background: rgba(0, 168, 112, 0.1);
-    border: 1px solid rgba(0, 168, 112, 0.2);
+    background: var(--td-success-color-light);
+    border: 1px solid color-mix(in srgb, var(--td-success-color) 20%, transparent);
   }
   &.updated {
     color: var(--td-brand-color);
-    background: rgba(7, 192, 95, 0.1);
-    border: 1px solid rgba(7, 192, 95, 0.2);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--td-brand-color) 20%, transparent);
   }
   &.renamed {
     color: var(--td-warning-color);
@@ -253,7 +253,7 @@ const headerTitle = computed(() => {
     border-bottom: 1px solid @card-border;
   }
   &.diff-new {
-    background: rgba(0, 168, 112, 0.06);
+    background: color-mix(in srgb, var(--td-success-color) 6%, transparent);
     color: var(--td-success-color);
   }
 }
