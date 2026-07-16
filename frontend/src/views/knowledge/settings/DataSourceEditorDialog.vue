@@ -18,6 +18,8 @@ import {
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
+import { getDataSourceSelectionDefaults } from './datasourceDefaults'
+import { getCredentialFieldRenderKind } from './datasourceFieldRendering'
 import { getDatasourceIconUrl } from './datasourceIcons'
 
 const props = defineProps<{
@@ -44,6 +46,7 @@ const credentialsConfigured = ref(false)
 // Remove actions. Toggling Replace reveals the credential inputs so the
 // user can type a new set. Untoggling discards anything typed.
 const replaceCredentialsMode = ref(false)
+const visibleSecretTextareas = ref<Record<string, boolean>>({})
 
 // Whether the credential input section is interactive right now. In create
 // mode it's always shown; in edit mode only when the user opted in to
@@ -102,6 +105,7 @@ async function confirmRemoveCredentials() {
 function cancelReplaceCredentials() {
   replaceCredentialsMode.value = false
   pendingRemoveCredentials.value = false
+  visibleSecretTextareas.value = {}
   form.value.config.credentials = {}
   rssAuthHeaders.value = []
   testResult.value = credentialsConfigured.value ? 'success' : ''
@@ -162,8 +166,16 @@ function needsConnectionTest(): boolean {
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
   replaceCredentialsMode.value = true
+  visibleSecretTextareas.value = {}
   testResult.value = ''
   testErrorMsg.value = ''
+}
+
+function toggleSecretTextarea(fieldKey: string) {
+  visibleSecretTextareas.value = {
+    ...visibleSecretTextareas.value,
+    [fieldKey]: !visibleSecretTextareas.value[fieldKey],
+  }
 }
 
 // Form data
@@ -405,6 +417,24 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
     ],
   },
+  {
+    type: 'wecom_chat_archive',
+    available: true,
+    docUrl: 'https://developer.work.weixin.qq.com/document/path/91360',
+    permissionDocUrl: 'https://developer.work.weixin.qq.com/document/path/91360',
+    permissionPageUrl: 'https://work.weixin.qq.com/wework_admin/frame#apps',
+    requiredPermissions: [
+      '会话内容存档授权范围',
+      '会话内容存档 Secret',
+      '会话内容存档私钥',
+    ],
+    fields: [
+      { key: 'corp_id', labelKey: 'datasource.field.corpId', placeholder: 'wwxxxx' },
+      { key: 'secret', labelKey: 'datasource.field.wecomSecret', placeholder: '', secret: true },
+      { key: 'private_key_version', labelKey: 'datasource.field.privateKeyVersion', placeholder: '1' },
+      { key: 'private_key', labelKey: 'datasource.field.privateKey', placeholder: '-----BEGIN PRIVATE KEY-----', secret: true, multiline: true, hintKey: 'datasource.field.privateKeyHint' },
+    ],
+  },
 ])
 
 
@@ -429,6 +459,7 @@ watch(visible, async (v) => {
   tempDsId.value = ''
   prereqExpanded.value = false
   pendingRemoveCredentials.value = false
+  visibleSecretTextareas.value = {}
   resources.value = []
   selectedResourceIds.value = []
   expandedResourceIds.value = new Set()
@@ -513,9 +544,18 @@ watch(
 
 function selectType(def: ConnectorDef) {
   if (!def.available) return
+  const defaults = getDataSourceSelectionDefaults(def.type)
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
+  visibleSecretTextareas.value = {}
+  form.value.config.resource_ids = defaults.resourceIds
+  selectedResourceIds.value = defaults.resourceIds
+  form.value.config.settings = defaults.settings
+  form.value.sync_schedule = defaults.syncSchedule
+  form.value.sync_mode = defaults.syncMode
+  form.value.conflict_strategy = defaults.conflictStrategy
+  form.value.sync_deletions = defaults.syncDeletions
   rssAuthHeaders.value = []
   step.value = 1
 }
@@ -1247,8 +1287,33 @@ const drawerConfirmText = computed(() => {
               <label class="form-label" :class="{ required: !field.optional }">
                 {{ t(field.labelKey) }}
               </label>
+              <div
+                v-if="getCredentialFieldRenderKind(field) === 'secret-textarea'"
+                class="secret-textarea-field"
+              >
+                <t-textarea
+                  v-show="visibleSecretTextareas[field.key]"
+                  v-model="form.config.credentials[field.key]"
+                  :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+                  :autosize="{ minRows: 2, maxRows: 6 }"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <div v-show="!visibleSecretTextareas[field.key]" class="secret-textarea-mask">
+                  {{ form.config.credentials[field.key] ? '********' : field.placeholder || t('credential.inputPlaceholder') }}
+                </div>
+                <t-button
+                  class="secret-textarea-toggle"
+                  size="small"
+                  variant="text"
+                  theme="primary"
+                  @click="toggleSecretTextarea(field.key)"
+                >
+                  {{ visibleSecretTextareas[field.key] ? t('embed.hideToken') : t('embed.revealToken') }}
+                </t-button>
+              </div>
               <t-textarea
-                v-if="field.multiline"
+                v-else-if="getCredentialFieldRenderKind(field) === 'textarea'"
                 v-model="form.config.credentials[field.key]"
                 :placeholder="field.placeholder || t('credential.inputPlaceholder')"
                 :autosize="{ minRows: 2, maxRows: 6 }"
@@ -1259,7 +1324,7 @@ const drawerConfirmText = computed(() => {
                 v-else
                 v-model="form.config.credentials[field.key]"
                 :placeholder="field.placeholder || t('credential.inputPlaceholder')"
-                :type="field.secret ? 'password' : 'text'"
+                :type="getCredentialFieldRenderKind(field) === 'password' ? 'password' : 'text'"
                 autocomplete="off"
                 spellcheck="false"
               >
@@ -1859,6 +1924,25 @@ const drawerConfirmText = computed(() => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+.secret-textarea-field {
+  position: relative;
+}
+
+.secret-textarea-mask {
+  min-height: 58px;
+  padding: 8px 12px;
+  border: 1px solid var(--td-border-level-2-color);
+  border-radius: var(--td-radius-default);
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-container);
+  line-height: 22px;
+}
+
+.secret-textarea-toggle {
+  margin-top: 4px;
+  padding-left: 0;
 }
 
 .status-icon {

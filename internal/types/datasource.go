@@ -14,18 +14,19 @@ import (
 // Data source types and constants
 const (
 	// Connector types
-	ConnectorTypeFeishu      = "feishu"
-	ConnectorTypeNotion      = "notion"
-	ConnectorTypeConfluence  = "confluence"
-	ConnectorTypeYuque       = "yuque"
-	ConnectorTypeGitHub      = "github"
-	ConnectorTypeGoogleDrive = "google_drive"
-	ConnectorTypeOneDrive    = "onedrive"
-	ConnectorTypeDingTalk    = "dingtalk"
-	ConnectorTypeWebCrawler  = "web_crawler"
-	ConnectorTypeSlack       = "slack"
-	ConnectorTypeIMAP        = "imap"
-	ConnectorTypeRSS         = "rss"
+	ConnectorTypeFeishu           = "feishu"
+	ConnectorTypeNotion           = "notion"
+	ConnectorTypeConfluence       = "confluence"
+	ConnectorTypeYuque            = "yuque"
+	ConnectorTypeGitHub           = "github"
+	ConnectorTypeGoogleDrive      = "google_drive"
+	ConnectorTypeOneDrive         = "onedrive"
+	ConnectorTypeDingTalk         = "dingtalk"
+	ConnectorTypeWebCrawler       = "web_crawler"
+	ConnectorTypeSlack            = "slack"
+	ConnectorTypeIMAP             = "imap"
+	ConnectorTypeRSS              = "rss"
+	ConnectorTypeWeComChatArchive = "wecom_chat_archive"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"

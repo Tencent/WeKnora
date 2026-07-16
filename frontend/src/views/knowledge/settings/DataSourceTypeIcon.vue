@@ -21,6 +21,8 @@ function fallbackText(type: string) {
       return 'N'
     case 'yuque':
       return 'Y'
+    case 'wecom_chat_archive':
+      return '企'
     default:
       return type.slice(0, 1).toUpperCase() || '?'
   }
