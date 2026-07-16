@@ -79,6 +79,16 @@ export interface CustomAgentConfig {
   image_storage_provider?: string;   // 图片存储提供商
   audio_upload_enabled?: boolean;    // 是否启用音频上传/ASR转录（默认: false）
   asr_model_id?: string;            // ASR模型ID（音频转录用）
+  // 附件图片理解 / 扫描件 OCR 开关（默认: false，开启会增加解析耗时）
+  attachment_image_understanding?: boolean;
+  // 扫描件 OCR 最大页数（0 = 使用全局默认 WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES）
+  attachment_ocr_max_pages?: number;
+  // 单轮问答等待附件解析完成的最长时间（秒，0 = 使用全局默认 WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC）
+  attachment_parse_wait_timeout_sec?: number;
+
+  // ===== 聊天附件解析引擎策略 =====
+  // 按文件类型选择解析引擎；优先级：请求 parser_engine > 智能体规则 > 租户规则 > auto
+  chat_parser_engine_rules?: { file_types: string[]; engine: string }[];
 
   // ===== 文件类型限制 =====
   // 支持的文件类型（如 ["csv", "xlsx", "xls"]）

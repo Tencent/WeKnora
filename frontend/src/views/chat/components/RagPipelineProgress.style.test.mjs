@@ -85,3 +85,9 @@ test('rag pipeline auto-scrolls capped thinking detail while streaming', () => {
   assert.match(source, /scrollThinkingDetailToBottom/)
   assert.match(source, /watch\(thinkingContent[\s\S]*scrollThinkingDetailToBottom/)
 })
+
+test('rag pipeline includes attachment prep steps on the timeline', () => {
+  assert.match(source, /RAG_TIMELINE_TOOL_NAMES/)
+  assert.match(source, /getAttachmentParsingSummaryHtml/)
+  assert.match(source, /isAttachmentTool/)
+})

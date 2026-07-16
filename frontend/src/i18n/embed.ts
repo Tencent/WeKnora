@@ -227,6 +227,13 @@ const messages = {
       "attachmentTooMany": "最多上传 {max} 个附件",
       "attachmentTooLarge": "文件 {name} 超过 {max}MB 限制",
       "attachmentTypeNotSupported": "不支持的文件类型：{name}",
+	  "attachmentUploading": "上传中 {progress}%",
+	  "attachmentParsing": "正在解析",
+	  "attachmentReady": "解析完成",
+	  "attachmentUploadFailed": "附件上传失败",
+	  "attachmentParseFailed": "附件解析失败",
+	  "attachmentStillProcessing": "附件 {name} 仍在解析，请稍候",
+	  "attachmentParseTimeout": "附件解析时间过长，请稍后重试",
       "copySuccess": "已复制到剪贴板",
       "copyFailed": "复制失败",
       "emptyContentWarning": "当前回答为空",
@@ -375,6 +382,11 @@ const messages = {
         "chunkRange": "已加载 {fetched} / {total} 个分块",
         "page": "第 {page} 页，每页 {pageSize} 个"
       },
+      "attachmentParsing": {
+        "parsedSummary": "已解析 {count} 个附件",
+        "parsedWithSkipped": "已解析 {parsed} 个附件，{skipped} 个未完成已跳过",
+        "noneReady": "没有可用的已解析附件"
+      },
       "ragPipeline": {
         "understanding": "正在理解问题...",
         "understandDone": "已完成问题理解",
@@ -410,6 +422,9 @@ const messages = {
         "imageAnalyzing": "正在查看图片内容...",
         "imageAnalysisDone": "已查看图片内容",
         "imageAnalysisFailed": "图片内容查看失败",
+        "attachmentParsing": "正在解析附件...",
+        "attachmentParsingDone": "已解析附件",
+        "attachmentParsingFailed": "附件解析失败",
         "queryUnderstanding": "正在理解问题...",
         "queryUnderstandDone": "已完成问题理解",
         "called": "调用 {name}",
@@ -703,6 +718,13 @@ const messages = {
       "attachmentTooMany": "Maximum {max} attachments allowed",
       "attachmentTooLarge": "File {name} exceeds {max}MB limit",
       "attachmentTypeNotSupported": "Unsupported file type: {name}",
+	  "attachmentUploading": "Uploading {progress}%",
+	  "attachmentParsing": "Parsing",
+	  "attachmentReady": "Ready",
+	  "attachmentUploadFailed": "Attachment upload failed",
+	  "attachmentParseFailed": "Attachment parsing failed",
+	  "attachmentStillProcessing": "Attachment {name} is still being parsed",
+	  "attachmentParseTimeout": "Attachment parsing timed out. Please try again later.",
       "copySuccess": "Copied to clipboard",
       "copyFailed": "Copy failed",
       "emptyContentWarning": "Content is empty",
@@ -851,6 +873,11 @@ const messages = {
         "chunkRange": "Loaded {fetched} / {total} chunks",
         "page": "Page {page}, {pageSize} per page"
       },
+      "attachmentParsing": {
+        "parsedSummary": "Parsed {count} attachment(s)",
+        "parsedWithSkipped": "Parsed {parsed} attachment(s), {skipped} skipped (still processing)",
+        "noneReady": "No parsed attachments available"
+      },
       "ragPipeline": {
         "understanding": "Understanding query...",
         "understandDone": "Query understood",
@@ -886,6 +913,9 @@ const messages = {
         "imageAnalyzing": "Viewing image content...",
         "imageAnalysisDone": "Image content viewed",
         "imageAnalysisFailed": "Image viewing failed",
+        "attachmentParsing": "Parsing attachments...",
+        "attachmentParsingDone": "Attachments parsed",
+        "attachmentParsingFailed": "Attachment parsing failed",
         "queryUnderstanding": "Understanding query...",
         "queryUnderstandDone": "Query understood",
         "called": "Called {name}",

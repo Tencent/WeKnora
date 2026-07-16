@@ -693,7 +693,7 @@
                   </div>
                 </div>
 
-                <!-- 多模态配置 -->
+                <!-- 附件上传 -->
                 <div v-show="currentSection === 'multimodal'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('agentEditor.imageUpload.sectionTitle') }}</h2>
@@ -701,7 +701,7 @@
                   </div>
 
                   <div class="settings-group">
-                    <!-- 图片上传（多模态） -->
+                    <!-- 图片上传 -->
                     <div class="setting-row" data-guide="agent-create-multimodal">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.label') }}</label>
@@ -724,6 +724,31 @@
                           @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
                           @add-model="handleAddModel('vllm')"
                           :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')" />
+                      </div>
+                    </div>
+
+                    <!-- 附件图片理解 / 扫描件 OCR（图片上传启用时） -->
+                    <div v-if="formData.config.image_upload_enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.imageUpload.imageUnderstandingLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.imageUpload.imageUnderstandingDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.attachment_image_understanding" />
+                      </div>
+                    </div>
+
+                    <!-- 扫描件 OCR 最大页数（开启附件图片理解时） -->
+                    <div v-if="formData.config.image_upload_enabled && formData.config.attachment_image_understanding"
+                      class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.imageUpload.ocrMaxPagesLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.imageUpload.ocrMaxPagesDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.attachment_ocr_max_pages" :min="0" :max="64"
+                          :step="1" theme="normal" style="width: 160px;"
+                          :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
                       </div>
                     </div>
 
@@ -777,6 +802,33 @@
                           @add-model="handleAddModel('asr')"
                           :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')" />
                       </div>
+                    </div>
+
+                    <!-- 单轮等待附件解析超时（秒） -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.chatParser.waitTimeoutLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.chatParser.waitTimeoutDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number v-model="formData.config.attachment_parse_wait_timeout_sec" :min="0" :max="600"
+                          :step="10" theme="normal" style="width: 160px;"
+                          :placeholder="$t('agentEditor.imageUpload.useGlobalDefault')" />
+                      </div>
+                    </div>
+
+                    <!-- 聊天附件解析策略 -->
+                    <div class="parser-policy-block">
+                      <div class="parser-policy-block__header">
+                        <label>{{ $t('agentEditor.chatParser.label') }}</label>
+                        <p class="desc">{{ $t('agentEditor.chatParser.desc') }}</p>
+                      </div>
+                      <KBParserSettings
+                        embedded
+                        :parser-engine-rules="formData.config.chat_parser_engine_rules"
+                        :relevant-extensions="CHAT_PARSER_EXTENSIONS"
+                        @update:parser-engine-rules="(val: any) => formData.config.chat_parser_engine_rules = val"
+                      />
                     </div>
 
                   </div>
@@ -1601,6 +1653,7 @@ import { useEditorResourcesStore } from '@/stores/editorResources';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
+import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
@@ -1610,6 +1663,13 @@ import {
   type RequirementMissKind,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
+
+// File extensions offered in the agent-level chat attachment parsing policy.
+const CHAT_PARSER_EXTENSIONS = [
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'epub', 'mhtml',
+  'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'yaml', 'yml', 'log',
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp',
+];
 
 const uiStore = useUIStore();
 const authStore = useAuthStore();
@@ -2200,10 +2260,18 @@ const defaultFormData = {
     // 编辑既有 agent 时会被 agent 自己保存的 agent_type 覆盖。
     agent_type: 'rag-qa' as AgentType,
     system_prompt_id: '' as string,
-    // 图片上传/多模态设置
+    // 附件上传设置
     image_upload_enabled: false,
     vlm_model_id: '',
     image_storage_provider: '',
+    // 附件图片理解 / 扫描件 OCR 开关（默认关闭，避免解析耗时增加）
+    attachment_image_understanding: false,
+    // 扫描件 OCR 最大页数（0 = 使用全局默认）
+    attachment_ocr_max_pages: 0,
+    // 单轮问答等待附件解析完成的最长时间（秒，0 = 使用全局默认）
+    attachment_parse_wait_timeout_sec: 0,
+    // 聊天附件解析引擎策略（按文件类型选引擎）
+    chat_parser_engine_rules: [] as ParserEngineRule[],
     // 文件类型限制
     supported_file_types: [] as string[],
     // 数据分析阶段开关（默认关闭，避免在普通问答上多一次 LLM 调用生成 SQL）
@@ -2822,6 +2890,10 @@ watch(() => props.visible, async (val) => {
       }
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
+      if (!agentData.config.chat_parser_engine_rules) agentData.config.chat_parser_engine_rules = [];
+      // 附件解析调优字段：旧数据缺省时置 0（表示使用全局默认）
+      if (agentData.config.attachment_ocr_max_pages == null) agentData.config.attachment_ocr_max_pages = 0;
+      if (agentData.config.attachment_parse_wait_timeout_sec == null) agentData.config.attachment_parse_wait_timeout_sec = 0;
 
       // 兼容旧数据：如果没有 agent_mode 字段，根据 allowed_tools 推断
       if (!agentData.config.agent_mode) {
@@ -4504,6 +4576,30 @@ const handleSave = async () => {
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+.parser-policy-block {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &__header {
+    margin-bottom: 12px;
+
+    label {
+      display: block;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--td-text-color-primary);
+      margin-bottom: 4px;
+    }
+
+    .desc {
+      margin: 0;
+      font-size: 13px;
+      color: var(--td-text-color-secondary);
+      line-height: 1.5;
+    }
+  }
 }
 
 .setting-row {

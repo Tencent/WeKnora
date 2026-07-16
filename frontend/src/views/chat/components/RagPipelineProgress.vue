@@ -209,7 +209,8 @@ import {
   getRagPipelineStepTitle,
   getRetrievalSearchSource,
 } from '@/utils/agent-tool-display'
-import { RAG_PIPELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
+import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay'
+import { RAG_TIMELINE_TOOL_NAMES } from '@/utils/rag-pipeline-history'
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { buildReferenceSections } from '@/utils/referenceSources'
 
@@ -275,7 +276,7 @@ const steps = computed(() => {
       return (
         event.type === 'tool_call' &&
         typeof event.tool_name === 'string' &&
-        RAG_PIPELINE_TOOL_NAMES.has(event.tool_name)
+        RAG_TIMELINE_TOOL_NAMES.has(event.tool_name)
       )
     })
     .map((event) => {
@@ -287,13 +288,16 @@ const steps = computed(() => {
           : null
 
       const isSearchTool = toolName === 'knowledge_search' || toolName === 'search_knowledge'
+      const isAttachmentTool = toolName === 'attachment_parsing' || toolName === 'image_analysis'
       const searchSource = isSearchTool
         ? getRetrievalSearchSource(event.arguments, toolData)
         : undefined
-      const summaryHtml =
-        !pending && isSearchTool && toolData
-          ? getKnowledgeSearchSummaryHtml(t, toolData)
-          : ''
+      let summaryHtml = ''
+      if (!pending && isSearchTool && toolData) {
+        summaryHtml = getKnowledgeSearchSummaryHtml(t, toolData)
+      } else if (!pending && isAttachmentTool) {
+        summaryHtml = getAttachmentParsingSummaryHtml(t, event)
+      }
       const canOpenReferences = !pending && isSearchTool && hasReferences.value
 
       return {

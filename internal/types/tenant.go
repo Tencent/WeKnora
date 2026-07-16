@@ -302,8 +302,11 @@ func (c *CredentialsConfig) Scan(value interface{}) error {
 // ParserEngineConfig holds tenant-level overrides for document parser engines (e.g. MinerU endpoint, API key).
 // These values take precedence over environment variables when parsing documents.
 type ParserEngineConfig struct {
-	MinerUEndpoint string `json:"mineru_endpoint"` // MinerU 自建服务端点
-	MinerUAPIKey   string `json:"mineru_api_key"`  // MinerU 云 API Key
+	// ChatParserEngineRules selects parser engines for session-scoped chat
+	// documents. Knowledge bases keep their own rules in ChunkingConfig.
+	ChatParserEngineRules []ParserEngineRule `json:"chat_parser_engine_rules,omitempty"`
+	MinerUEndpoint        string             `json:"mineru_endpoint"` // MinerU 自建服务端点
+	MinerUAPIKey          string             `json:"mineru_api_key"`  // MinerU 云 API Key
 
 	// MinerU 自建解析参数
 	MinerUModel         string `json:"mineru_model,omitempty"`          // backend: pipeline, vlm-*, hybrid-*
@@ -337,6 +340,21 @@ type ParserEngineConfig struct {
 	PaddleOCRVLCloudModel               string `json:"paddleocr_vl_cloud_model,omitempty"` // e.g. PaddleOCR-VL-1.6
 	PaddleOCRVLCloudUseSealRecognition  *bool  `json:"paddleocr_vl_cloud_use_seal_recognition,omitempty"`
 	PaddleOCRVLCloudUseChartRecognition *bool  `json:"paddleocr_vl_cloud_use_chart_recognition,omitempty"`
+}
+
+func (c *ParserEngineConfig) ResolveChatParserEngine(fileType string) string {
+	if c == nil {
+		return ""
+	}
+	fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
+	for _, rule := range c.ChatParserEngineRules {
+		for _, candidate := range rule.FileTypes {
+			if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(candidate)), ".") == fileType {
+				return strings.TrimSpace(rule.Engine)
+			}
+		}
+	}
+	return ""
 }
 
 // ToOverridesMap returns a map suitable for ParserEngineOverrides in parse requests.

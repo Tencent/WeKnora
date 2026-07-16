@@ -64,9 +64,17 @@ test('rag mode delegates pre-answer loading to pipeline and keeps dots while ans
 })
 
 test('rag mode keeps model thinking out of the answer stream component', () => {
-  assert.match(source, /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer'/)
+  const displayEventsBlock = source.slice(
+    source.indexOf('const displayEvents = computed'),
+    source.indexOf('// Get unique key for event'),
+  )
+  assert.match(displayEventsBlock, /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer'/)
   assert.doesNotMatch(
-    source,
+    displayEventsBlock,
+    /attachment_parsing/,
+  )
+  assert.doesNotMatch(
+    displayEventsBlock,
     /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer' \|\| e\.type === 'thinking'/,
   )
 })

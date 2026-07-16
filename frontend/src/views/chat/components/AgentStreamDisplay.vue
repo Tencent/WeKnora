@@ -160,6 +160,11 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
+                  <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
+                    class="search-results-summary-fixed attachment-parsing-summary">
+                    <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
+                  </div>
+
                   <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
                     <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
@@ -379,6 +384,11 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
+                <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
+                  class="search-results-summary-fixed attachment-parsing-summary">
+                  <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
+                </div>
+
                 <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                   class="action-details">
                   <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
@@ -472,6 +482,7 @@ import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
+import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import type { KnowledgeReferenceLike } from '@/utils/referenceSources';
@@ -538,6 +549,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   todo_write: 'agentStream.tools.todoWrite',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
+  attachment_parsing: 'agentStream.tools.attachmentParsing',
   image_analysis: 'agentStream.tools.imageAnalysis',
   query_understand: 'agentStream.tools.queryUnderstand',
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
@@ -1629,8 +1641,8 @@ const displayEvents = computed(() => {
 
   const result = buildFullEventList(stream);
 
-  // Quick-answer RAG: pipeline steps and model thinking live in RagPipelineProgress;
-  // here we only render the final answer stream.
+  // Quick-answer RAG: pipeline steps (including attachment prep) live in
+  // RagPipelineProgress; this component only renders the answer stream.
   if (props.ragMode) {
     return result.filter((e: any) => e.type === 'answer');
   }
@@ -1782,6 +1794,11 @@ const hasResults = (event: any): boolean => {
 
   // list_knowledge_chunks: summary is inline below the header (no expandable body)
   if (toolName === 'list_knowledge_chunks') {
+    return false;
+  }
+
+  // Attachment parsing and image analysis: compact inline status only
+  if (toolName === 'attachment_parsing' || toolName === 'image_analysis') {
     return false;
   }
 
@@ -2274,11 +2291,18 @@ const getKnowledgeChunksSummary = (toolData: any): string => {
   return getKnowledgeChunksSummaryHtml(t, toolData);
 };
 
+const getAttachmentParsingSummary = (event: any): string => {
+  return getAttachmentParsingSummaryHtml(t, event);
+};
+
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
+    }
+    if (event.tool_name === 'attachment_parsing') {
+      return t('agentStream.toolStatus.attachmentParsing');
     }
     if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
@@ -2389,6 +2413,9 @@ const getToolDescription = (event: any): string => {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
     }
+    if (event.tool_name === 'attachment_parsing') {
+      return t('agentStream.toolStatus.attachmentParsing');
+    }
     if (event.tool_name === 'query_understand') {
       return t('agentStream.toolStatus.queryUnderstanding');
     }
@@ -2418,6 +2445,8 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.updateTodos') : t('agentStream.toolStatus.updateTodosFailed');
   } else if (toolName === 'image_analysis') {
     return success ? t('agentStream.toolStatus.imageAnalysisDone') : t('agentStream.toolStatus.imageAnalysisFailed');
+  } else if (toolName === 'attachment_parsing') {
+    return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
   } else {

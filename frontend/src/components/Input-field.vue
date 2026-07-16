@@ -1849,6 +1849,21 @@ const createSession = async (val: string) => {
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
+  // Only block while the file is still uploading (no document ID yet). Once
+  // uploaded, sending is allowed even if parsing is still in progress: the
+  // backend shows a "parsing attachment" step on the timeline and waits.
+  const pendingAttachment = uploadedAttachments.value.find(item =>
+    item.status === 'uploading'
+  );
+  if (pendingAttachment) {
+    MessagePlugin.warning(t('chat.attachmentStillProcessing', { name: pendingAttachment.name }));
+    return;
+  }
+  const failedAttachment = uploadedAttachments.value.find(item => item.status === 'failed');
+  if (failedAttachment) {
+    MessagePlugin.error(failedAttachment.error || t('chat.attachmentParseFailed'));
+    return;
+  }
 
   // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
   if (props.embeddedMode) {
@@ -2446,7 +2461,8 @@ defineExpose({
       </div>
 
       <!-- 附件列表区域 (由 AttachmentUpload 组件渲染) -->
-      <AttachmentUpload ref="attachmentUploadRef" :max-files="5" :max-size="20"
+      <AttachmentUpload ref="attachmentUploadRef" :max-files="5"
+        :session-id="sessionId" :agent-id="selectedAgentId"
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->

@@ -68,6 +68,7 @@ type CreateKnowledgeQARequest struct {
 	EnableMemory          *bool                        `json:"enable_memory,omitempty"`
 	Images                []ImageAttachment            `json:"images"`                       // Attached images for multimodal chat
 	AttachmentUploads     []AttachmentUpload           `json:"attachment_uploads,omitempty"` // Attached files (documents, audio, etc.)
+	AttachmentIDs         []string                     `json:"attachment_ids,omitempty"`     // Pre-uploaded session-scoped document IDs
 	Channel               string                       `json:"channel"`                      // Source channel: "web", "api", "im", etc.
 	SuggestionAttribution *types.SuggestionAttribution `json:"suggestion_attribution,omitempty"`
 }

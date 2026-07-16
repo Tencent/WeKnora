@@ -232,6 +232,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewVectorStoreRepository))
 	must(container.Provide(repository.NewStorageBackendRepository))
 	must(container.Provide(repository.NewResourceRepository))
+	must(container.Provide(repository.NewTemporaryDocumentRepository))
 	must(container.Provide(service.NewResourceCatalog))
 	// TenantStoreOwnership adapter used by the retriever factory functions
 	// to verify that a resolved VectorStore belongs to the caller's tenant.
@@ -302,6 +303,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// worker pool against one provider, so install an in-process governor.
 		must(container.Invoke(registerLiteModelConcurrencyLimiter))
 	}
+	must(container.Provide(service.NewTemporaryDocumentService))
+	must(container.Invoke(startTemporaryDocumentCleanup))
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
@@ -1617,6 +1620,31 @@ func startHousekeepingService(svc *service.HousekeepingService, cleaner interfac
 	}
 	cleaner.RegisterWithName("KnowledgeHousekeeping", func() error {
 		svc.Stop()
+		return nil
+	})
+}
+
+// startTemporaryDocumentCleanup removes expired session attachments and their
+// extracted images. The durable expiry timestamp is the source of truth; the
+// ticker only controls how quickly storage is reclaimed.
+func startTemporaryDocumentCleanup(svc interfaces.TemporaryDocumentService, cleaner interfaces.ResourceCleaner) {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := svc.CleanupExpired(context.Background()); err != nil {
+					logger.Warnf(context.Background(), "[TemporaryDocument] cleanup failed: %v", err)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("TemporaryDocumentCleanup", func() error {
+		close(stop)
 		return nil
 	})
 }

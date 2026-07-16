@@ -18,6 +18,7 @@ DROP TABLE IF EXISTS tenant_members;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS chunks;
 DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS temporary_documents;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS knowledges;
 DROP TABLE IF EXISTS knowledge_bases;

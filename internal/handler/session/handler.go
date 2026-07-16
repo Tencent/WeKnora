@@ -31,6 +31,7 @@ type Handler struct {
 	modelService         interfaces.ModelService // Service for model management (VLM access)
 	userService          interfaces.UserService  // Service for resolving per-user preferences (e.g. enable_memory default)
 	attachmentProcessor  *AttachmentProcessor    // Processor for file attachments
+	temporaryDocuments   interfaces.TemporaryDocumentService
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -51,6 +52,7 @@ func NewHandler(
 	userService interfaces.UserService,
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
+	temporaryDocuments interfaces.TemporaryDocumentService,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
@@ -67,6 +69,7 @@ func NewHandler(
 		storageResolver:      storageResolver,
 		modelService:         modelService,
 		userService:          userService,
+		temporaryDocuments:   temporaryDocuments,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
