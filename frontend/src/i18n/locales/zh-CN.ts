@@ -2157,6 +2157,8 @@ export default {
       placeholderHint: "输入 {'{{'} 触发自动补全",
       temperature: "温度",
       thinking: "思考模式",
+      citationEnabled: "输出来源引用",
+      citationEnabledDesc: "在最终回答中展示知识库和网页来源；关闭后仍会正常检索和使用证据",
       welcomeMessage: "欢迎消息",
       welcomeMessagePlaceholder: "选择该智能体时显示的欢迎消息",
       suggestedPrompts: "推荐问题",

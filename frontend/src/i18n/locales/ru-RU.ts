@@ -890,6 +890,8 @@ export default {
       placeholderHint: "Type {'{{'} to trigger autocomplete",
       temperature: 'Temperature',
       thinking: 'Thinking Mode',
+      citationEnabled: 'Показывать ссылки на источники',
+      citationEnabledDesc: 'Показывать источники базы знаний и веб-страниц в итоговом ответе; поиск продолжает работать и при отключении',
       welcomeMessage: 'Welcome Message',
       welcomeMessagePlaceholder: 'Message displayed when this agent is selected',
       suggestedPrompts: 'Suggested Prompts',

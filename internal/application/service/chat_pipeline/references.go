@@ -11,18 +11,20 @@ import (
 
 // prepareMessagesWithReferences replaces the pipeline's positional context IDs
 // with request-local chunk references in the copy sent to the model. Persisted
-// rendered_content and the public citation contract remain unchanged.
+// rendered_content remains unchanged; public citations are expanded only when
+// the request's agent setting enables them.
 func prepareMessagesWithReferences(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 ) ([]chat.Message, *llmreference.Registry) {
-	refs := llmreference.NewRegistry()
+	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
+	refs := llmreference.NewRegistry(citationsEnabled)
 	if chatManage == nil {
 		return nil, refs
 	}
 	messages := prepareMessagesWithHistory(chatManage)
 	if len(messages) > 0 {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt
+		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt(citationsEnabled)
 	}
 	if len(chatManage.MergeResult) == 0 || len(messages) == 0 {
 		return messages, refs

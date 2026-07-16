@@ -52,6 +52,31 @@ type stubModelService struct {
 	modelsByID map[string]*types.Model
 }
 
+func TestEmitKnowledgeReferencesEventHonorsCitationSetting(t *testing.T) {
+	bus := event.NewEventBus()
+	emitted := 0
+	bus.On(event.EventAgentReferences, func(context.Context, event.Event) error {
+		emitted++
+		return nil
+	})
+	disabled := false
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{CitationEnabled: &disabled},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{{ID: "chunk-1"}},
+		},
+		PipelineContext: types.PipelineContext{EventBus: bus.AsEventBusInterface()},
+	}
+
+	emitKnowledgeReferencesEvent(context.Background(), cm)
+	require.Zero(t, emitted)
+
+	enabled := true
+	cm.CitationEnabled = &enabled
+	emitKnowledgeReferencesEvent(context.Background(), cm)
+	require.Equal(t, 1, emitted)
+}
+
 func (s *stubModelService) CreateModel(context.Context, *types.Model) error {
 	return nil
 }

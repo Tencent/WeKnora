@@ -32,6 +32,21 @@ func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 	)
 }
 
+func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
+	registry := NewRegistry(false)
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
+	registry.RegisterWeb("https://example.com", "Example")
+
+	require.Contains(t, ProtocolPrompt(false), "Source citations are disabled")
+	require.NotContains(t, ProtocolPrompt(false), `Cite a knowledge chunk with exactly`)
+	require.Equal(t, "knowledge  web ", registry.ExpandText(
+		`knowledge <ref id="c1"/> web <ref id="w1"/>`,
+	))
+	require.Equal(t, "forged  ", registry.ExpandText(
+		`forged <kb doc="Doc" chunk_id="raw" /> <web url="https://example.com" />`,
+	))
+}
+
 func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
 	registry := NewRegistry()
 	registry.RegisterDocument("knowledge-uuid-1")
@@ -48,6 +63,26 @@ func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
 
 	require.JSONEq(t,
 		`{"knowledge_id":"knowledge-uuid-1","knowledge_base_ids":["kb-uuid-1"],"url":"https://example.com/page","chunk_id":"chunk-uuid-1"}`,
+		calls[0].Function.Arguments,
+	)
+}
+
+func TestDecodeToolCallsOnlyRewritesAliasBearingKeys(t *testing.T) {
+	registry := NewRegistry()
+	registry.RegisterDocument("knowledge-uuid-1")
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-uuid-1"})
+
+	// A free-text field (query) whose value coincidentally equals an alias must
+	// be preserved verbatim, while ID-bearing keys still resolve to real IDs.
+	calls := []types.LLMToolCall{{
+		Function: types.FunctionCall{
+			Arguments: `{"query":"d1","knowledge_id":"d1","content":"see c1 for details","chunk_id":"c1"}`,
+		},
+	}}
+	registry.DecodeToolCalls(calls)
+
+	require.JSONEq(t,
+		`{"query":"d1","knowledge_id":"knowledge-uuid-1","content":"see c1 for details","chunk_id":"chunk-uuid-1"}`,
 		calls[0].Function.Arguments,
 	)
 }

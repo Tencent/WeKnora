@@ -75,7 +75,7 @@ Avoid:
 
 ## Output
 Returns chunks ranked by semantic similarity, reranked when applicable.  
-Each chunk has a short cN source ID and belongs to a dN document ID. Results represent conceptual relevance, not literal keyword overlap. Use dN for document-level follow-up tool calls and cN for chunk citations.`,
+Each chunk has a short cN source ID and belongs to a dN document ID. Results represent conceptual relevance, not literal keyword overlap. Use dN for document-level follow-up tool calls.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {

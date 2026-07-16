@@ -2158,6 +2158,8 @@ export default {
       placeholderHint: "{'{{'} 입력 시 자동완성",
       temperature: "온도",
       thinking: "사고 모델",
+      citationEnabled: "출처 인용 표시",
+      citationEnabledDesc: "최종 답변에 지식베이스와 웹 출처를 표시합니다. 꺼도 검색과 근거 활용은 계속 작동합니다.",
       welcomeMessage: "환영 메시지",
       welcomeMessagePlaceholder: "에이전트 선택 시 표시되는 환영 메시지",
       suggestedPrompts: "추천 질문",

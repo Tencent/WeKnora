@@ -125,6 +125,9 @@ type CustomAgentConfig struct {
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
+	// Whether final answers include knowledge/web source citations. Nil defaults to true
+	// so agents saved before this option was introduced keep their existing behavior.
+	CitationEnabled *bool `yaml:"citation_enabled" json:"citation_enabled"`
 
 	// ===== Agent Mode Settings =====
 	// Maximum iterations for ReAct loop (only for agent type)
@@ -516,6 +519,12 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.Thinking == nil {
 		disabled := false
 		a.Config.Thinking = &disabled
+	}
+	// Keep citations enabled for existing agents whose persisted config predates
+	// this field. An explicit false is always preserved.
+	if a.Config.CitationEnabled == nil {
+		enabled := true
+		a.Config.CitationEnabled = &enabled
 	}
 }
 

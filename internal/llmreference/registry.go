@@ -18,17 +18,32 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-const ProtocolPrompt = `
+const sourceAliasProtocolPrompt = `
 
-## Source reference protocol (system-owned)
-Retrieved knowledge chunks and web pages carry short source IDs.
-- Cite a knowledge chunk with exactly: <ref id="cN"/>
-- Cite a web page with exactly: <ref id="wN"/>
-- Copy only IDs that appeared in the supplied context or tool results.
-- dN identifies a document and bN identifies a knowledge base for tool calls; they are not citable.
-- Never put raw chunk IDs, knowledge IDs, knowledge-base IDs, or source URLs in citations; never output <kb> or <web> tags yourself. This does not change separate instructions to preserve retrieved Markdown image URLs.
-- These rules supersede any earlier, saved, or custom prompt instructions that ask for raw IDs, raw source URLs, or model-authored <kb>/<web> citations.
-- Keep each <ref/> inline on the same line as the claim it supports.`
+## Source handling protocol (system-owned)
+Retrieved content uses request-local source handles: cN identifies a knowledge chunk, wN a web page, dN a document, and bN a knowledge base.
+- Use dN and bN only as tool arguments when a tool requests a document or knowledge base.
+- Never reveal raw chunk IDs, knowledge IDs, knowledge-base IDs, or private source handles in user-visible output. This does not change separate instructions to preserve retrieved Markdown image URLs.`
+
+const citationEnabledProtocolPrompt = `
+- Source citations are enabled for this answer. Cite a knowledge chunk with exactly <ref id="cN"/> and a web page with exactly <ref id="wN"/>.
+- Copy only cN/wN handles that appeared in supplied context or tool results. Never cite dN/bN.
+- Never output <kb> or <web> tags yourself; the system expands valid <ref/> tags after generation.
+- Keep each <ref/> inline on the same line as the claim it supports. Do not group citations at the end.
+- These rules supersede earlier, saved, or custom prompt instructions about citation syntax.`
+
+const citationDisabledProtocolPrompt = `
+- Source citations are disabled for this answer. Do not output <ref>, <kb>, <web>, raw source URLs, or source-handle citations.
+- These rules supersede earlier, saved, or custom prompt instructions that require source citations.`
+
+// ProtocolPrompt returns the internal, non-user-editable source protocol for a
+// model call. Citation formatting stays out of custom and template prompts.
+func ProtocolPrompt(citationsEnabled bool) string {
+	if citationsEnabled {
+		return sourceAliasProtocolPrompt + citationEnabledProtocolPrompt
+	}
+	return sourceAliasProtocolPrompt + citationDisabledProtocolPrompt
+}
 
 type ChunkReference struct {
 	Alias           string
@@ -51,6 +66,8 @@ type WebReference struct {
 type Registry struct {
 	mu sync.RWMutex
 
+	citationsEnabled bool
+
 	chunkByID    map[string]*ChunkReference
 	chunkByAlias map[string]*ChunkReference
 	docToAlias   map[string]string
@@ -61,16 +78,21 @@ type Registry struct {
 	webByAlias   map[string]*WebReference
 }
 
-func NewRegistry() *Registry {
+func NewRegistry(citationsEnabled ...bool) *Registry {
+	enabled := true
+	if len(citationsEnabled) > 0 {
+		enabled = citationsEnabled[0]
+	}
 	return &Registry{
-		chunkByID:    make(map[string]*ChunkReference),
-		chunkByAlias: make(map[string]*ChunkReference),
-		docToAlias:   make(map[string]string),
-		aliasToDoc:   make(map[string]string),
-		kbToAlias:    make(map[string]string),
-		aliasToKB:    make(map[string]string),
-		webByURL:     make(map[string]*WebReference),
-		webByAlias:   make(map[string]*WebReference),
+		citationsEnabled: enabled,
+		chunkByID:        make(map[string]*ChunkReference),
+		chunkByAlias:     make(map[string]*ChunkReference),
+		docToAlias:       make(map[string]string),
+		aliasToDoc:       make(map[string]string),
+		kbToAlias:        make(map[string]string),
+		aliasToKB:        make(map[string]string),
+		webByURL:         make(map[string]*WebReference),
+		webByAlias:       make(map[string]*WebReference),
 	}
 }
 
@@ -398,7 +420,7 @@ func (r *Registry) decodeJSON(raw string, encode bool) string {
 	if err := json.Unmarshal([]byte(raw), &value); err != nil {
 		return raw
 	}
-	value = r.walkJSON(value, encode)
+	value = r.walkJSON("", value, encode)
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return raw
@@ -406,13 +428,34 @@ func (r *Registry) decodeJSON(raw string, encode bool) string {
 	return string(encoded)
 }
 
-func (r *Registry) walkJSON(value interface{}, encode bool) interface{} {
+// decodableKeys mirrors the ID-bearing keys recognized by
+// registerToolArgumentValue. Alias -> real substitution on decode is restricted
+// to these keys so that free-text values (e.g. a grep/search query that happens
+// to equal "d1") are never rewritten into internal identifiers.
+var decodableKeys = map[string]struct{}{
+	"chunk_id": {}, "faq_id": {}, "chunk_ids": {}, "faq_ids": {},
+	"knowledge_id": {}, "knowledge_ids": {}, "suspected_knowledge_ids": {}, "source_refs": {},
+	"knowledge_base": {}, "knowledge_base_id": {}, "knowledge_base_ids": {}, "kb_id": {}, "kb_ids": {},
+	"url": {}, "urls": {},
+}
+
+func (r *Registry) walkJSON(key string, value interface{}, encode bool) interface{} {
 	switch typed := value.(type) {
 	case string:
 		if encode {
+			// Encode matches on exact real identifiers (UUIDs/URLs), which do
+			// not collide with prose, so it stays key-agnostic.
 			if alias := r.aliasForRealValue(typed); alias != "" {
 				return alias
 			}
+			return typed
+		}
+		// Decode only ID-bearing keys, and only when the value is alias-shaped,
+		// so ordinary strings that coincidentally equal an alias are preserved.
+		if _, ok := decodableKeys[strings.ToLower(key)]; !ok {
+			return typed
+		}
+		if !shortSourceAliasRE.MatchString(strings.TrimSpace(typed)) {
 			return typed
 		}
 		if real := r.realForAlias(typed); real != "" {
@@ -421,11 +464,11 @@ func (r *Registry) walkJSON(value interface{}, encode bool) interface{} {
 		return typed
 	case []interface{}:
 		for i := range typed {
-			typed[i] = r.walkJSON(typed[i], encode)
+			typed[i] = r.walkJSON(key, typed[i], encode)
 		}
 	case map[string]interface{}:
-		for key, item := range typed {
-			typed[key] = r.walkJSON(item, encode)
+		for childKey, item := range typed {
+			typed[childKey] = r.walkJSON(childKey, item, encode)
 		}
 	}
 	return value
@@ -546,6 +589,9 @@ func (r *Registry) ExpandText(text string) string {
 	// by the model, then create canonical tags solely from registered aliases.
 	text = modelKBTagRE.ReplaceAllString(text, "")
 	text = modelWebTagRE.ReplaceAllString(text, "")
+	if !r.citationsEnabled {
+		return refCandidateRE.ReplaceAllString(text, "")
+	}
 	return refCandidateRE.ReplaceAllStringFunc(text, func(tag string) string {
 		match := refTagRE.FindStringSubmatch(tag)
 		if len(match) != 2 {

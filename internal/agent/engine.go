@@ -88,7 +88,7 @@ func NewAgentEngine(
 		systemPromptTemplate: systemPromptTemplate,
 		tokenEstimator:       tokenEst,
 		resourceRefs:         llmresource.NewRegistry(),
-		sourceRefs:           llmreference.NewRegistry(),
+		sourceRefs:           llmreference.NewRegistry(config.CitationsEnabled()),
 	}
 
 	// Initialize memory consolidator if context window management is configured
@@ -125,7 +125,7 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
-	return strings.TrimRight(prompt, " \t\r\n") + llmreference.ProtocolPrompt
+	return strings.TrimRight(prompt, " \t\r\n") + llmreference.ProtocolPrompt(e.config.CitationsEnabled())
 }
 
 // NewAgentEngineWithSkills creates a new agent engine with skills support

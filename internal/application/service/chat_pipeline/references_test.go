@@ -30,7 +30,7 @@ func TestPrepareMessagesWithReferencesUsesChunkCentricContext(t *testing.T) {
 
 	messages, refs := prepareMessagesWithReferences(context.Background(), manage)
 	require.Len(t, messages, 2)
-	require.Contains(t, messages[0].Content, "Source reference protocol")
+	require.Contains(t, messages[0].Content, "Source handling protocol")
 	require.Contains(t, messages[1].Content, `<document id="d1" kb="b1" title="Doc">`)
 	require.Contains(t, messages[1].Content, `<chunk id="c1" index="1" view="full">`)
 	require.Contains(t, messages[1].Content, `<chunk id="c2" index="2" view="full">`)
@@ -110,7 +110,30 @@ func TestPrepareMessagesWithReferencesCompactsHistoryWithoutCurrentRetrieval(t *
 
 	messages, refs := prepareMessagesWithReferences(context.Background(), manage)
 	messages = refs.EncodeMessages(messages)
-	require.Contains(t, messages[0].Content, "Source reference protocol")
+	require.Contains(t, messages[0].Content, "Source handling protocol")
 	require.Contains(t, messages[2].Content, `<ref id="w1"/>`)
 	require.NotContains(t, messages[2].Content, "https://example.com/old")
+}
+
+func TestPrepareMessagesWithReferencesSuppressesCitationsWhenDisabled(t *testing.T) {
+	disabled := false
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query:           "question",
+			CitationEnabled: &disabled,
+			SummaryConfig:   types.SummaryConfig{Prompt: "custom system prompt"},
+		},
+		PipelineState: types.PipelineState{
+			UserContent: "question",
+			MergeResult: []*types.SearchResult{{
+				ID: "chunk-1", KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1", KnowledgeTitle: "Doc", Content: "evidence",
+			}},
+		},
+	}
+
+	messages, refs := prepareMessagesWithReferences(context.Background(), manage)
+	require.Contains(t, messages[0].Content, "Source citations are disabled")
+	require.Contains(t, messages[1].Content, `<chunk id="c1"`)
+	require.NotContains(t, messages[1].Content, "chunk-1")
+	require.Equal(t, "answer ", refs.ExpandText(`answer <ref id="c1"/>`))
 }

@@ -995,11 +995,12 @@ func prepareFallbackMessages(
 	promptContent string,
 ) ([]chat.Message, *llmreference.Registry) {
 	messages := buildFallbackMessages(chatManage, promptContent)
-	refs := llmreference.NewRegistry()
+	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
+	refs := llmreference.NewRegistry(citationsEnabled)
 	if len(messages) > 0 && messages[0].Role == "system" {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt
+		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt(citationsEnabled)
 	} else {
-		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(llmreference.ProtocolPrompt)}}, messages...)
+		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(llmreference.ProtocolPrompt(citationsEnabled))}}, messages...)
 	}
 	return refs.EncodeMessages(messages), refs
 }
@@ -1184,7 +1185,7 @@ func (s *sessionService) consumeFallbackStream(
 // `references` SSE event. Must run before CHAT_COMPLETION_STREAM so citations
 // arrive while the connection is still open (complete closes the stream).
 func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatManage) {
-	if chatManage == nil || chatManage.EventBus == nil || len(chatManage.MergeResult) == 0 {
+	if chatManage == nil || !chatManage.CitationsEnabled() || chatManage.EventBus == nil || len(chatManage.MergeResult) == 0 {
 		return
 	}
 	logger.Infof(ctx, "Emitting references event with %d results (pre-answer)", len(chatManage.MergeResult))
@@ -1204,6 +1205,9 @@ func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatMan
 func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *types.ChatManage, content string) {
 	if chatManage.EventBus == nil {
 		return
+	}
+	if !chatManage.CitationsEnabled() {
+		content = llmreference.NewRegistry(false).ExpandText(content)
 	}
 
 	fallbackID := generateEventID("fallback")

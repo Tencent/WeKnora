@@ -229,6 +229,7 @@ func (s *sessionService) buildAgentConfig(
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
+		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,

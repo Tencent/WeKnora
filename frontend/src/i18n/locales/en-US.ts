@@ -1071,6 +1071,8 @@ export default {
       placeholderHint: "Type {'{{'} to trigger autocomplete",
       temperature: 'Temperature',
       thinking: 'Thinking Mode',
+      citationEnabled: 'Show Source Citations',
+      citationEnabledDesc: 'Show knowledge-base and web sources in final answers; retrieval and grounding still work when disabled',
       welcomeMessage: 'Welcome Message',
       welcomeMessagePlaceholder: 'Message displayed when this agent is selected',
       suggestedPrompts: 'Suggested Prompts',

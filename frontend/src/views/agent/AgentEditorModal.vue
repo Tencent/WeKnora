@@ -620,6 +620,17 @@
                       </div>
                     </div>
 
+                    <!-- 来源引用 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.citationEnabled') }}</label>
+                        <p class="desc">{{ $t('agent.editor.citationEnabledDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.citation_enabled" />
+                      </div>
+                    </div>
+
                     <!-- ReRank 模型（启用知识库或 knowledge_search 工具时显示） -->
                     <div
                       v-if="showRerankModelField"
@@ -2274,6 +2285,7 @@ const defaultFormData = {
     temperature: 0.7,
     max_completion_tokens: 2048,
     thinking: false, // 默认禁用思考模式
+    citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
     llm_call_timeout: 120,  // 120 seconds
