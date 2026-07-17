@@ -957,19 +957,20 @@ func (r *chunkRepository) FAQChunkDiff(
 }
 
 // ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.
-// Filter by kbIDs and/or knowledgeIDs (OR relationship). At least one must be non-empty.
+// Filter by explicitly selected kbIDs, knowledgeIDs, and/or FAQ tagIDs (OR relationship).
 // Returns up to `limit` chunks sorted by updated_at descending.
 func (r *chunkRepository) ListRecommendedFAQChunks(
 	ctx context.Context,
 	tenantID uint64,
 	kbIDs []string,
 	knowledgeIDs []string,
+	tagIDs []string,
 	limit int,
 ) ([]*types.Chunk, error) {
 	if limit <= 0 {
 		limit = 10
 	}
-	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 {
+	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 && len(tagIDs) == 0 {
 		return nil, nil
 	}
 	var chunks []*types.Chunk
@@ -977,12 +978,21 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 		Select("id, knowledge_id, knowledge_base_id, chunk_type, metadata, flags, updated_at").
 		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ? AND flags & ? != 0",
 			tenantID, types.ChunkTypeFAQ, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true, int(types.ChunkFlagRecommended))
-	if len(knowledgeIDs) > 0 {
-		// 指定了具体知识文档，直接按 knowledge_id 过滤（忽略 kbIDs）
-		query = query.Where("knowledge_id IN ?", knowledgeIDs)
-	} else {
-		query = query.Where("knowledge_base_id IN ?", kbIDs)
+	var scopeClauses []string
+	var scopeArgs []interface{}
+	if len(kbIDs) > 0 {
+		scopeClauses = append(scopeClauses, "knowledge_base_id IN ?")
+		scopeArgs = append(scopeArgs, kbIDs)
 	}
+	if len(knowledgeIDs) > 0 {
+		scopeClauses = append(scopeClauses, "knowledge_id IN ?")
+		scopeArgs = append(scopeArgs, knowledgeIDs)
+	}
+	if len(tagIDs) > 0 {
+		scopeClauses = append(scopeClauses, "tag_id IN ?")
+		scopeArgs = append(scopeArgs, tagIDs)
+	}
+	query = query.Where("("+strings.Join(scopeClauses, " OR ")+")", scopeArgs...)
 
 	orderClause := "RANDOM()"
 	if r.db.Dialector.Name() == "mysql" {

@@ -307,10 +307,16 @@ type SuggestedQuestion struct {
 
 // SuggestedQuestionsRequest represents the options for getting suggested questions
 type SuggestedQuestionsRequest struct {
-	KnowledgeBaseIDs []string // Optional: override agent's KB scope
-	KnowledgeIDs     []string // Optional: limit to specific knowledge items
-	TagIDs           []string // Optional: limit to knowledge items under these tags
-	Limit            int      // Optional: max questions to return (default 6)
+	KnowledgeBaseIDs []string                    // Optional: override agent's KB scope
+	KnowledgeIDs     []string                    // Optional: limit to specific knowledge items
+	TagScopes        []SuggestedQuestionTagScope // Optional: limit to tags within their parent KBs
+	Limit            int                         // Optional: max questions to return (default 6)
+}
+
+// SuggestedQuestionTagScope preserves the KB-local identity of tag IDs.
+type SuggestedQuestionTagScope struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	TagIDs          []string `json:"tag_ids"`
 }
 
 // SuggestedQuestionsResponse represents the API response for suggested questions
@@ -337,8 +343,12 @@ func (c *Client) GetSuggestedQuestions(ctx context.Context, agentID string, requ
 		if len(request.KnowledgeIDs) > 0 {
 			query.Set("knowledge_ids", strings.Join(request.KnowledgeIDs, ","))
 		}
-		if len(request.TagIDs) > 0 {
-			query.Set("tag_ids", strings.Join(request.TagIDs, ","))
+		if len(request.TagScopes) > 0 {
+			encoded, err := json.Marshal(request.TagScopes)
+			if err != nil {
+				return nil, fmt.Errorf("marshal tag scopes: %w", err)
+			}
+			query.Set("tag_scopes", string(encoded))
 		}
 		if request.Limit > 0 {
 			query.Set("limit", strconv.Itoa(request.Limit))

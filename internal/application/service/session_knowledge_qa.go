@@ -158,8 +158,11 @@ func (s *sessionService) KnowledgeQA(
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
-	// Determine pipeline based on knowledge bases availability and web search setting
-	hasKB := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
+	// Determine pipeline based on the effective knowledge retrieval scope and
+	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
+	// empty but produce SearchTargets, so the unified targets must participate in
+	// this decision or the request is incorrectly downgraded to pure chat.
+	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
 	needsRAG := hasKB || req.WebSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
 
@@ -541,10 +544,11 @@ func (s *sessionService) buildSearchTargets(
 				kbTenant = tenantID // fallback
 			}
 			targets = append(targets, &types.SearchTarget{
-				Type:            types.SearchTargetTypeKnowledge,
-				KnowledgeBaseID: kbID,
-				TenantID:        kbTenant,
-				KnowledgeIDs:    kidList,
+				Type:                    types.SearchTargetTypeKnowledge,
+				KnowledgeBaseID:         kbID,
+				TenantID:                kbTenant,
+				KnowledgeIDs:            kidList,
+				DisableRecallThresholds: true,
 			})
 		}
 	}
@@ -574,25 +578,28 @@ func (s *sessionService) buildSearchTargets(
 				continue
 			}
 			targets = append(targets, &types.SearchTarget{
-				Type:              types.SearchTargetTypeKnowledge,
-				KnowledgeBaseID:   kbID,
-				TenantID:          kbTenant,
-				KnowledgeIDs:      tagKnowledgeIDs,
-				DisableDirectLoad: true,
+				Type:                    types.SearchTargetTypeKnowledge,
+				KnowledgeBaseID:         kbID,
+				TenantID:                kbTenant,
+				KnowledgeIDs:            tagKnowledgeIDs,
+				ScopeTagIDs:             append([]string(nil), tagIDs...),
+				DisableRecallThresholds: true,
 			})
 			continue
 		}
 
 		target := &types.SearchTarget{
-			Type:            types.SearchTargetTypeKnowledgeBase,
-			KnowledgeBaseID: kbID,
-			TenantID:        kbTenant,
-			TagIDs:          append([]string(nil), tagIDs...),
+			Type:                    types.SearchTargetTypeKnowledgeBase,
+			KnowledgeBaseID:         kbID,
+			TenantID:                kbTenant,
+			TagIDs:                  append([]string(nil), tagIDs...),
+			ScopeTagIDs:             append([]string(nil), tagIDs...),
+			DisableRecallThresholds: true,
 		}
 		if len(explicitKnowledgeIDs) > 0 {
 			target.Type = types.SearchTargetTypeKnowledge
 			target.KnowledgeIDs = explicitKnowledgeIDs
-			target.DisableDirectLoad = true
+			target.DisableRecallThresholds = true
 		}
 		targets = append(targets, target)
 	}

@@ -50,10 +50,11 @@ func agentHasKnowledgeScope(config *types.AgentConfig) bool {
 	if config == nil {
 		return false
 	}
-	if len(config.KnowledgeBases) > 0 || len(config.KnowledgeIDs) > 0 {
-		return true
-	}
-	return len(config.SearchTargets) > 0
+	return types.HasKnowledgeRetrievalScope(
+		config.SearchTargets,
+		config.KnowledgeBases,
+		config.KnowledgeIDs,
+	)
 }
 
 // knowledgeBaseIDsForPrompt returns KB IDs to show in runtime_context metadata.
