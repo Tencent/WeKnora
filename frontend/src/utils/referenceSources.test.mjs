@@ -128,6 +128,53 @@ test('normalizeReferenceUrl trims trailing slash', () => {
   )
 })
 
+test('buildReferenceList uses domain instead of raw url title', () => {
+  const items = buildReferenceList([
+    {
+      id: 'http://bj.bendibao.com/xiuxian/202671/384250.shtm',
+      chunk_type: 'web_search',
+      knowledge_title: 'http://bj.bendibao.com/xiuxian/202671/384250.shtm',
+      metadata: {
+        url: 'http://bj.bendibao.com/xiuxian/202671/384250.shtm',
+        snippet: '根据提供的网页内容...',
+      },
+      content: '根据提供的网页内容...',
+    },
+  ])
+
+  assert.equal(items[0].title, 'bj.bendibao.com')
+  assert.equal(items[0].domain, 'bj.bendibao.com')
+})
+
+test('buildReferenceList prefers metadata title for web references', () => {
+  const items = buildReferenceList([
+    {
+      id: 'https://example.com/post',
+      chunk_type: 'web_search',
+      knowledge_title: 'https://example.com/post',
+      metadata: {
+        url: 'https://example.com/post',
+        title: 'Example headline',
+        snippet: 'snippet text',
+      },
+    },
+  ])
+
+  assert.equal(items[0].title, 'Example headline')
+})
+
+test('formatReferenceSnippet strips markdown noise from preview text', async () => {
+  const { formatReferenceSnippet } = await import('./referenceSources.ts')
+  assert.equal(
+    formatReferenceSnippet('... [Free Online Lectures](https://example.com) **Everything I Know**'),
+    'Free Online Lectures Everything I Know',
+  )
+  assert.equal(
+    formatReferenceSnippet('![Logo](local://image.jpg) Summary text'),
+    'Summary text',
+  )
+})
+
 test('getDomainFromUrl strips www prefix', () => {
   assert.equal(getDomainFromUrl('https://www.example.com/x'), 'example.com')
 })

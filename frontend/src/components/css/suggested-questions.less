@@ -1,5 +1,17 @@
 @suggested-ease: cubic-bezier(0.16, 1, 0.3, 1);
 
+// Shared hover for starter / follow-up suggestion chips.
+.suggestion-chip-hover() {
+    border-color: color-mix(in srgb, var(--td-text-color-primary) 10%, var(--td-component-stroke));
+    background: color-mix(in srgb, var(--td-text-color-primary) 4%, var(--td-bg-color-container));
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.suggestion-chip-active() {
+    background: color-mix(in srgb, var(--td-text-color-primary) 6%, var(--td-bg-color-container));
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
 .suggested-questions-container {
     display: flex;
     flex-direction: column;
@@ -118,13 +130,11 @@
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 
     &:not(.sq-card-skeleton):hover {
-        border-color: var(--td-brand-color);
-        background: var(--td-bg-color-container-hover);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        .suggestion-chip-hover();
     }
 
     &:not(.sq-card-skeleton):active {
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+        .suggestion-chip-active();
     }
 
     &.sq-card-skeleton {
