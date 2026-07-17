@@ -154,6 +154,10 @@ onUnmounted(() => {
 })
 const missingStorageEngine = computed(() => {
   if (!kbInfo.value || isFAQ.value) return false
+  // storage_backend_id is authoritative; storage_provider_config.provider is a
+  // compatibility projection for older clients. Either being present means the
+  // KB has a bound storage instance and uploads should not be blocked.
+  if (kbInfo.value.storage_backend_id) return false
   const spc = kbInfo.value.storage_provider_config
   return !spc || !spc.provider
 })
@@ -780,7 +784,10 @@ const onTagManageChanged = (payload?: { deletedTagId?: string }) => {
       await loadKnowledgeFiles(kbId.value);
       await loadTags(kbId.value, true);
     })();
+    return;
   }
+  resetPage();
+  loadKnowledgeFiles(kbId.value);
 };
 
 const handleKnowledgeTagChange = async (knowledgeId: string, tagIds: string[]) => {

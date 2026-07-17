@@ -41,7 +41,7 @@ func NewWikiReplaceTextTool(wikiPageService interfaces.WikiPageService, kbIDs []
 					"source_refs": {
 						"type": "array",
 						"items": {"type": "string"},
-						"description": "An optional list of source knowledge IDs (UUIDs only) that justify this change. If provided, these will COMPLETELY REPLACE the existing source_refs of the page."
+						"description": "An optional list of short dN source document IDs that justify this change. If provided, these will COMPLETELY REPLACE the existing source_refs of the page."
 					}
 				},
 				"required": ["slug", "old_text", "new_text"]

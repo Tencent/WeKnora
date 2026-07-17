@@ -81,6 +81,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
+	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -231,6 +232,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(registerWebSearchProviders))
 	must(container.Provide(repository.NewWebSearchProviderRepository))
 	must(container.Provide(repository.NewVectorStoreRepository))
+	must(container.Provide(repository.NewStorageBackendRepository))
+	must(container.Provide(repository.NewResourceRepository))
+	must(container.Provide(repository.NewTemporaryDocumentRepository))
+	must(container.Provide(service.NewResourceCatalog))
 	// TenantStoreOwnership adapter used by the retriever factory functions
 	// to verify that a resolved VectorStore belongs to the caller's tenant.
 	must(container.Provide(retriever.NewVectorStoreRepoOwnership))
@@ -247,6 +252,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		return sr, nil
 	}))
 	must(container.Provide(service.NewVectorStoreService))
+	must(container.Provide(service.NewStorageBackendServiceWithResources))
+	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendService { return s }))
+	must(container.Provide(func(s *service.StorageBackendService) interfaces.StorageBackendResolver { return s }))
 
 	// Agent service layer (requires event bus, web search service)
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
@@ -297,6 +305,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// worker pool against one provider, so install an in-process governor.
 		must(container.Invoke(registerLiteModelConcurrencyLimiter))
 	}
+	must(container.Provide(service.NewTemporaryDocumentService))
+	must(container.Invoke(startTemporaryDocumentCleanup))
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
@@ -361,6 +371,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewWebSearchHandler))
 	must(container.Provide(handler.NewWebSearchProviderHandler))
 	must(container.Provide(handler.NewVectorStoreHandler))
+	must(container.Provide(handler.NewStorageBackendHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
 	must(container.Provide(service.NewSkillService))
@@ -409,23 +420,46 @@ func BuildContainer(container *dig.Container) *dig.Container {
 // disk bytes requires rebuilding the FileService from that tenant's storage
 // config. The owning tenant is parsed from the URL's first path segment, which
 // correctly handles cross-tenant shared resources (e.g. shared KB images).
-func registerChatLocalImageResolver(tenantRepo interfaces.TenantRepository) {
+func registerChatLocalImageResolver(
+	tenantRepo interfaces.TenantRepository,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+) {
 	chat.LocalImageResolver = func(storageURL string) ([]byte, bool) {
-		tenantID := secutils.ParseTenantIDFromStoragePath(storageURL)
+		ctx := context.Background()
+		physicalPath, resource, err := resourceCatalog.ResolvePath(ctx, storageURL)
+		if err != nil {
+			return nil, false
+		}
+		tenantID := secutils.ParseTenantIDFromStoragePath(physicalPath)
+		if resource != nil {
+			tenantID = resource.TenantID
+		}
 		if tenantID == 0 {
 			return nil, false
 		}
-		ctx := context.Background()
 		tenant, err := tenantRepo.GetTenantByID(ctx, tenantID)
 		if err != nil || tenant == nil {
 			return nil, false
 		}
 		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-		fileSvc, _, err := file.NewFileServiceFromStorageConfig("local", tenant.StorageEngineConfig, baseDir)
+		backendID, inner, scoped := types.ParseStorageBackendPath(physicalPath)
+		if resource != nil && resource.StorageBackendID != "" {
+			backendID = resource.StorageBackendID
+		}
+		providerPath := physicalPath
+		if scoped {
+			providerPath = inner
+		}
+		provider := types.ParseProviderScheme(providerPath)
+		if provider == "" {
+			provider = "local"
+		}
+		fileSvc, _, err := storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
 		if err != nil {
 			return nil, false
 		}
-		rc, err := fileSvc.GetFile(ctx, storageURL)
+		rc, err := fileSvc.GetFile(ctx, physicalPath)
 		if err != nil {
 			return nil, false
 		}
@@ -668,6 +702,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// The SQL migration marks KBs that have documents but no provider with "__pending_env__";
 		// we replace that with the actual STORAGE_TYPE from the environment.
 		resolveStorageProviderPending(db)
+		migrateLegacyStorageBackends(db)
 
 		// Post-migration: declarative built-in models from config/builtin_models.yaml (optional).
 		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.ConfigDir()); err != nil {
@@ -726,6 +761,96 @@ func resolveStorageProviderPending(db *gorm.DB) {
 	resetPendingTasks(db)
 }
 
+// migrateLegacyStorageBackends backfills the storage_backends table from each
+// workspace's legacy StorageEngineConfig (or environment defaults) and binds
+// existing knowledge bases to the resulting backend.
+//
+// The table, columns and indexes are created by the SQL migrations
+// (migrations/versioned/000068 for Postgres, migrations/sqlite/000000_init for
+// SQLite); this step only handles data that cannot be expressed portably in
+// SQL: environment snapshots, JSON→config mapping, AES-encrypted credentials,
+// UUID generation and the per-startup refresh of env-backed aliases.
+// The migration is idempotent: one legacy_alias row per tenant/provider.
+func migrateLegacyStorageBackends(db *gorm.DB) {
+	var tenants []*types.Tenant
+	if err := db.Find(&tenants).Error; err != nil {
+		logger.Warnf(context.Background(), "Failed to load workspaces for storage backend migration: %v", err)
+		return
+	}
+	for _, tenant := range tenants {
+		legacy := tenant.StorageEngineConfig
+		defaultProvider := ""
+		if legacy != nil {
+			defaultProvider = strings.ToLower(strings.TrimSpace(legacy.DefaultProvider))
+		}
+		if defaultProvider == "" {
+			defaultProvider = strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+		}
+		if defaultProvider == "" {
+			defaultProvider = "local"
+		}
+
+		backendIDs := make(map[string]string)
+		for _, provider := range storageallowlist.Supported() {
+			var existing types.StorageBackend
+			err := db.Where("tenant_id = ? AND provider = ? AND legacy_alias = ?", tenant.ID, provider, true).First(&existing).Error
+			if err == nil {
+				// Environment-backed aliases are snapshots, not user-owned config.
+				// Refresh them at every startup so credential rotation does not
+				// leave the persisted resolver on stale values. If the workspace
+				// later gains an explicit legacy config, promote the alias to user
+				// source and stop automatic refreshes.
+				if existing.Source == types.StorageBackendSourceEnv {
+					desired := types.StorageBackendFromLegacy(tenant.ID, provider, legacy)
+					if desired == nil && provider == defaultProvider {
+						desired = types.StorageBackendFromEnvironment(tenant.ID)
+					}
+					if desired != nil && desired.Provider == provider {
+						_ = db.Model(&types.StorageBackend{}).Where("id = ?", existing.ID).Updates(map[string]interface{}{
+							"name": desired.Name, "config": desired.Config, "source": desired.Source, "status": desired.Status, "updated_at": time.Now(),
+						}).Error
+					}
+				}
+				backendIDs[provider] = existing.ID
+				continue
+			}
+			backend := types.StorageBackendFromLegacy(tenant.ID, provider, legacy)
+			if backend == nil && provider == defaultProvider {
+				backend = types.StorageBackendFromEnvironment(tenant.ID)
+			}
+			if backend == nil {
+				continue
+			}
+			if err := db.Create(backend).Error; err != nil {
+				logger.Warnf(context.Background(), "Failed to migrate %s storage for workspace %d: %v", provider, tenant.ID, err)
+				continue
+			}
+			backendIDs[provider] = backend.ID
+		}
+		if tenant.DefaultStorageBackendID == nil {
+			if id := backendIDs[defaultProvider]; id != "" {
+				if err := db.Model(&types.Tenant{}).Where("id = ?", tenant.ID).Update("default_storage_backend_id", id).Error; err != nil {
+					logger.Warnf(context.Background(), "Failed to set default storage backend for workspace %d: %v", tenant.ID, err)
+				}
+			}
+		}
+
+		var kbs []*types.KnowledgeBase
+		if err := db.Where("tenant_id = ? AND storage_backend_id IS NULL", tenant.ID).Find(&kbs).Error; err != nil {
+			continue
+		}
+		for _, kb := range kbs {
+			provider := kb.GetStorageProvider()
+			if provider == "" {
+				provider = defaultProvider
+			}
+			if id := backendIDs[provider]; id != "" {
+				_ = db.Model(&types.KnowledgeBase{}).Where("id = ? AND storage_backend_id IS NULL", kb.ID).Update("storage_backend_id", id).Error
+			}
+		}
+	}
+}
+
 // syncSequences ensures PostgreSQL sequences for auto-increment columns (seq_id)
 // are at least as high as the current MAX value in each table. This is needed
 // because older code assigned seq_id via application-level MAX()+1, which could
@@ -761,7 +886,15 @@ func syncSequences(db *gorm.DB) {
 // Returns:
 //   - Configured file service implementation
 //   - Error if initialization fails
-func initFileService(cfg *config.Config) (interfaces.FileService, error) {
+func initFileService(cfg *config.Config, catalog interfaces.ResourceCatalog) (interfaces.FileService, error) {
+	inner, err := initRawFileService(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return file.NewResourceCatalogFileService(inner, catalog), nil
+}
+
+func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 	storageType := strings.TrimSpace(os.Getenv("STORAGE_TYPE"))
 	if storageType == "" {
 		storageType = "local"
@@ -1420,7 +1553,9 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 // in its own subpackage to keep this file focused on wiring.
 func registerIMAdapterFactories(imService *imPkg.Service) {
 	imService.RegisterAdapterFactory("wecom", wecom.NewFactory())
-	imService.RegisterAdapterFactory("feishu", feishu.NewFactory())
+	imService.RegisterAdapterFactory("feishu", feishu.NewFactory(feishu.RegionFeishu))
+	// Lark is Feishu's international cloud: same adapter, different host/tenant.
+	imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark))
 	imService.RegisterAdapterFactory("slack", slack.NewFactory())
 	imService.RegisterAdapterFactory("telegram", telegram.NewFactory())
 	imService.RegisterAdapterFactory("dingtalk", dingtalk.NewFactory())
@@ -1441,8 +1576,12 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
-	if err := registry.Register(feishuConnector.NewConnector()); err != nil {
+	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionFeishu)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
+	}
+	// Lark is Feishu's international cloud: same connector, different host/tenant.
+	if err := registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark connector: %w", err))
 	}
 	if err := registry.Register(notionConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
@@ -1490,6 +1629,31 @@ func startHousekeepingService(svc *service.HousekeepingService, cleaner interfac
 	}
 	cleaner.RegisterWithName("KnowledgeHousekeeping", func() error {
 		svc.Stop()
+		return nil
+	})
+}
+
+// startTemporaryDocumentCleanup removes expired session attachments and their
+// extracted images. The durable expiry timestamp is the source of truth; the
+// ticker only controls how quickly storage is reclaimed.
+func startTemporaryDocumentCleanup(svc interfaces.TemporaryDocumentService, cleaner interfaces.ResourceCleaner) {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := svc.CleanupExpired(context.Background()); err != nil {
+					logger.Warnf(context.Background(), "[TemporaryDocument] cleanup failed: %v", err)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("TemporaryDocumentCleanup", func() error {
+		close(stop)
 		return nil
 	})
 }

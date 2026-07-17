@@ -380,17 +380,6 @@ func isAttributableReference(ref *types.SearchResult) bool {
 	return true
 }
 
-func truncateRunes(s string, maxRunes int) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
-		return s
-	}
-	return string(runes[:maxRunes])
-}
-
 func floatEqual(a, b float64) bool {
 	return math.Abs(a-b) < 0.0000001
 }

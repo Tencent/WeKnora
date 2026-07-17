@@ -235,6 +235,11 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 }
 
 func validateImageMultimodalConfig(ctx context.Context, kb *types.KnowledgeBase) error {
+	// Concrete backends are validated and connectivity-tested when registered.
+	// The checks below only apply to unmigrated provider-only bindings.
+	if kb != nil && kb.StorageBackendID != nil && strings.TrimSpace(*kb.StorageBackendID) != "" {
+		return nil
+	}
 	provider := kb.GetStorageProvider()
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {

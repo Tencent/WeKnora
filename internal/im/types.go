@@ -170,9 +170,11 @@ func (ch *IMChannel) computeBotIdentity() string {
 				return "wecom:wh:" + corpID + ":" + agentID
 			}
 		}
-	case "feishu":
+	// Feishu and Lark app_ids live in separate clouds and never collide, so the
+	// platform prefix keeps the same app_id on both from looking like one bot.
+	case "feishu", "lark":
 		if appID := str("app_id"); appID != "" {
-			return "feishu:" + appID
+			return ch.Platform + ":" + appID
 		}
 	case "telegram":
 		if botToken := str("bot_token"); botToken != "" {

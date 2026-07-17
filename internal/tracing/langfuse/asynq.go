@@ -7,20 +7,24 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
+	"go.opentelemetry.io/otel/propagation"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
-// InjectTracing stamps the current trace/span ids (and a best-effort
+// InjectTracing stamps the current W3C traceparent (plus a best-effort
 // user/session label) from ctx onto the given payload, provided the payload
 // embeds types.TracingContext (and thus implements LangfuseTracingCarrier).
 //
-// Safe to call unconditionally: when Langfuse is disabled or no trace is
-// present on ctx, it writes a zero-valued TracingContext — which round-trips
-// through JSON as absent fields and therefore costs nothing.
+// The traceparent is produced by propagator.Inject from the active OTel span
+// context (the HTTP root span opened by GinMiddleware). The asynq worker
+// re-extracts it so worker-side spans are children of the same trace —
+// giving LiteFuse one stitched tree across the HTTP request and the async
+// processing. This also makes a sop3 run's traceparent propagate through to
+// any asynq jobs WeKnora enqueues while serving sop3's agent-chat call.
 //
-// Call sites live at every asynq.NewTask creation point. We deliberately
-// keep the API synchronous and mutating (rather than returning a new payload
-// copy) so that existing enqueue code needs only a single added line just
-// before json.Marshal, minimizing review surface and the risk of regressions.
+// Safe to call unconditionally: when Langfuse is disabled or no span is
+// present on ctx, it writes a zero-valued TracingContext — which round-trips
+// through JSON as absent fields and costs nothing.
 func InjectTracing(ctx context.Context, carrier types.LangfuseTracingCarrier) {
 	if carrier == nil {
 		return
@@ -30,11 +34,13 @@ func InjectTracing(ctx context.Context, carrier types.LangfuseTracingCarrier) {
 		return
 	}
 	tc := types.TracingContext{}
+	c := propagation.MapCarrier{}
+	propagator.Inject(ctx, c)
+	tc.LangfuseTraceparent = c["traceparent"]
+	// Backward-compat: keep LangfuseTraceID = the W3C trace id for any legacy
+	// reader. LangfuseParentObservationID is no longer used by the OTLP path.
 	if trace, ok := TraceFromContext(ctx); ok && trace != nil {
 		tc.LangfuseTraceID = trace.ID
-	}
-	if obs, ok := parentObservationFromCtx(ctx); ok {
-		tc.LangfuseParentObservationID = obs
 	}
 	tc.LangfuseUserID = userIDFromCtx(ctx)
 	tc.LangfuseSessionID = sessionIDFromCtx(ctx)
@@ -59,23 +65,20 @@ func peekTracingContext(payload []byte) types.TracingContext {
 
 // AsynqMiddleware is the worker-side counterpart of GinMiddleware. It:
 //
-//  1. Parses any tracing ids embedded in the task payload and either
-//     resumes the originating trace (so the Langfuse UI stitches the HTTP
-//     request and the async processing into one tree), or — for tasks that
-//     came from a scheduled job with no originating HTTP request — creates
-//     a standalone trace tagged with the task type.
+//  1. Extracts the W3C traceparent stamped onto the task payload by
+//     InjectTracing and resumes the originating trace (so the Langfuse UI
+//     stitches the HTTP request and the async processing into one tree). For
+//     scheduled jobs with no upstream trace it opens a standalone trace named
+//     after the task type.
 //
 //  2. Opens a SPAN around the handler execution so every child generation
-//     (embedding / VLM / chat / rerank / ASR) auto-attaches to it via
-//     parentObservationId.
+//     (embedding / VLM / chat / rerank / ASR) auto-attaches to it.
 //
 //  3. Enriches the span with asynq's own metadata: task id, queue, retry
 //     count, payload size.
 //
-// When the manager is disabled it degrades to a pass-through; failure of
-// the Langfuse path never blocks task execution.
-//
-// Register it once in router/task.go via mux.Use.
+// When the manager is disabled it degrades to a pass-through; failure of the
+// Langfuse path never blocks task execution. Register once via mux.Use.
 func AsynqMiddleware() asynq.MiddlewareFunc {
 	return func(next asynq.Handler) asynq.Handler {
 		return asynq.HandlerFunc(func(ctx context.Context, task *asynq.Task) error {
@@ -99,15 +102,16 @@ func AsynqMiddleware() asynq.MiddlewareFunc {
 				"payload_bytes": len(task.Payload()),
 			}
 
-			// If the upstream enqueuer stamped a trace id onto the payload,
-			// we graft under that trace. Otherwise (scheduled jobs, legacy
-			// in-flight tasks that predate this code, tests, etc.) we start
-			// a standalone trace named after the task type so at least the
-			// worker-side work is observable.
+			// If the upstream enqueuer stamped a traceparent, resume that trace
+			// (worker spans become children of the HTTP trace). Otherwise start
+			// a standalone trace named after the task type.
 			var trace *Trace
 			shouldFinishTrace := false
-			if tc.LangfuseTraceID != "" {
-				ctx, trace = mgr.ResumeTrace(ctx, tc.LangfuseTraceID, tc.LangfuseParentObservationID)
+			if tc.LangfuseTraceparent != "" {
+				ctx = propagator.Extract(ctx, propagation.MapCarrier{"traceparent": tc.LangfuseTraceparent})
+				if sc := oteltrace.SpanContextFromContext(ctx); sc.IsValid() {
+					ctx = withTrace(ctx, &Trace{ID: sc.TraceID().String(), manager: mgr})
+				}
 			} else {
 				ctx, trace = mgr.StartTrace(ctx, TraceOptions{
 					Name:      "asynq." + task.Type(),
@@ -153,15 +157,9 @@ func AsynqMiddleware() asynq.MiddlewareFunc {
 
 // spanInputFromPayload surfaces a compact, human-readable summary of the
 // task payload for the Langfuse "Input" pane. We deliberately do NOT send
-// the full JSON blob because:
-//
-//   - Manual/text-ingest payloads can be many kilobytes of prose;
-//   - FAQ import payloads embed the full entry list;
-//   - Document-process payloads contain file URLs that, while small, may
-//     include presigned query strings that rotate (adding diff noise).
-//
-// Instead we preview the first ~1KB verbatim, which matches what Langfuse
-// itself would display and keeps ingestion bandwidth predictable.
+// the full JSON blob because manual/text-ingest payloads can be many
+// kilobytes and FAQ import payloads embed the full entry list. Instead we
+// preview the first ~1KB verbatim.
 func spanInputFromPayload(payload []byte) interface{} {
 	const preview = 1024
 	if len(payload) == 0 {
@@ -177,7 +175,7 @@ func spanInputFromPayload(payload []byte) interface{} {
 }
 
 // userIDFromCtx mirrors middleware.extractUserID but accepts a raw context
-// (no gin.Context) so both HTTP and asynq paths can share the same fallback
+// (no gin.Context) so both HTTP and asynq paths share the same fallback
 // logic: explicit UserID → tenant:<id> → empty.
 func userIDFromCtx(ctx context.Context) string {
 	if v, ok := ctx.Value(types.UserIDContextKey).(string); ok && v != "" {

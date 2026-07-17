@@ -377,6 +377,10 @@ definitions:
         type: string
       secret_key:
         type: string
+      temp_bucket_name:
+        type: string
+      temp_region:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ChatHistoryConfig:
     properties:
@@ -589,9 +593,45 @@ definitions:
       asr_model_id:
         description: ASR model ID for audio transcription (optional)
         type: string
+      attachment_image_understanding:
+        description: |-
+          AttachmentImageUnderstanding enables VLM OCR fallback for image-only /
+          scanned documents (PDF/PPT whose pages are images). Disabled by default
+          because it materially increases parse latency; only triggers when the
+          extracted text is below a threshold and a VLM model is configured.
+        type: boolean
+      attachment_ocr_max_pages:
+        description: |-
+          AttachmentOCRMaxPages caps how many pages of a scanned / image-only
+          document this agent sends to the VLM for OCR. 0 falls back to the global
+          default (WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES). More pages means higher
+          coverage but slower parsing and more VLM cost.
+        type: integer
+      attachment_parse_wait_timeout_sec:
+        description: |-
+          AttachmentParseWaitTimeoutSec bounds, in seconds, how long a chat turn
+          waits for this agent's still-parsing attachments before proceeding with
+          only the finished ones. 0 falls back to the global default
+          (WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC).
+        type: integer
       audio_upload_enabled:
         description: 'Whether audio upload (ASR transcription) is enabled for this
           agent (default: false)'
+        type: boolean
+      chat_parser_engine_rules:
+        description: |-
+          ===== Chat Attachment Parsing Settings =====
+          ChatParserEngineRules selects parser engines for session-scoped chat
+          attachments by file type. Takes precedence over the tenant-level
+          ParserEngineConfig.ChatParserEngineRules; an explicit per-request
+          parser_engine still overrides both.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
+        type: array
+      citation_enabled:
+        description: |-
+          Whether final answers include knowledge/web source citations. Nil defaults to true
+          so agents saved before this option was introduced keep their existing behavior.
         type: boolean
       context_template:
         description: Context template for normal mode (how to format retrieved chunks)
@@ -1461,6 +1501,11 @@ definitions:
         description: ShareCount indicates the number of organizations this knowledge
           base is shared with (not stored in database)
         type: integer
+      storage_backend_id:
+        description: |-
+          StorageBackendID binds this KB to one concrete storage instance. The
+          legacy provider field remains readable during migration only.
+        type: string
       storage_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.StorageConfig'
@@ -1909,7 +1954,7 @@ definitions:
     type: integer
     x-enum-comments:
       MatchTypeDataAnalysis: 数据分析匹配类型
-      MatchTypeDirectLoad: 直接加载匹配类型
+      MatchTypeDirectLoad: 'Deprecated: reserved to preserve serialized enum values'
       MatchTypeParentChunk: 父Chunk匹配类型
       MatchTypeRelationChunk: 关系Chunk匹配类型
       MatchTypeWebSearch: 网络搜索匹配类型
@@ -1922,7 +1967,7 @@ definitions:
     - 关系Chunk匹配类型
     - ""
     - 网络搜索匹配类型
-    - 直接加载匹配类型
+    - 'Deprecated: reserved to preserve serialized enum values'
     - 数据分析匹配类型
     x-enum-varnames:
     - MatchTypeEmbedding
@@ -2062,6 +2107,9 @@ definitions:
       content:
         description: Extracted text content (for small text files)
         type: string
+      content_mode:
+        description: full or selected_chunks
+        type: string
       file_name:
         description: Original filename
         type: string
@@ -2071,15 +2119,24 @@ definitions:
       file_type:
         description: File extension (e.g., ".pdf", ".docx")
         type: string
+      id:
+        description: Temporary document ID for session-scoped uploads
+        type: string
       is_truncated:
         description: Whether content was truncated
         type: boolean
       line_count:
         description: Total line count (for text files)
         type: integer
-      url:
-        description: Storage URL (provider://path)
-        type: string
+      selected_chunks:
+        description: Chunks included in this message prompt
+        type: integer
+      token_count:
+        description: Approximate tokens in the parsed document
+        type: integer
+      total_chunks:
+        description: Total parsed chunks
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageImage:
     properties:
@@ -2407,6 +2464,13 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.ParserEngineConfig:
     properties:
+      chat_parser_engine_rules:
+        description: |-
+          ChatParserEngineRules selects parser engines for session-scoped chat
+          documents. Knowledge bases keep their own rules in ChunkingConfig.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
+        type: array
       mineru_api_key:
         description: MinerU 云 API Key
         type: string
@@ -2882,6 +2946,10 @@ definitions:
         type: array
       query_text:
         type: string
+      scope_tag_ids:
+        items:
+          type: string
+        type: array
       skip_context_enrichment:
         description: |-
           SkipContextEnrichment skips fetching parent, nearby, and relation chunks
@@ -3079,6 +3147,35 @@ definitions:
         type: array
       mode:
         type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.StorageBackendConfig:
+    properties:
+      access_key_id:
+        type: string
+      app_id:
+        type: string
+      bucket_name:
+        type: string
+      endpoint:
+        type: string
+      force_path_style:
+        type: boolean
+      mode:
+        type: string
+      path_prefix:
+        type: string
+      region:
+        type: string
+      secret_access_key:
+        type: string
+      temp_bucket_name:
+        type: string
+      temp_region:
+        type: string
+      use_ssl:
+        type: boolean
+      use_temp_bucket:
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.StorageConfig:
     properties:
@@ -3292,6 +3389,10 @@ definitions:
         type: string
       secret_key:
         type: string
+      temp_bucket_name:
+        type: string
+      temp_region:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.Tenant:
     properties:
@@ -3316,6 +3417,10 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CredentialsConfig'
         description: 'Credentials config: third-party provider credentials (e.g. WeKnoraCloud
           AppID/AppSecret)'
+      default_storage_backend_id:
+        description: DefaultStorageBackendID is the workspace default concrete storage
+          instance.
+        type: string
       deleted_at:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
@@ -4651,6 +4756,8 @@ definitions:
           questionCount:
             type: integer
         type: object
+      storageBackendId:
+        type: string
       storageProvider:
         description: 存储引擎选择（"local" | "minio" | "cos"），影响文档上传与文档内图片存储，参数从全局设置读取
         type: string
@@ -5024,7 +5131,7 @@ definitions:
         description: short description for UI
         type: string
       name:
-        description: '"local", "minio", "cos", "tos", "s3", "oss", "ks3"'
+        description: '"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"'
         type: string
     type: object
   internal_handler.SuggestionEventRequest:
@@ -5295,6 +5402,20 @@ definitions:
           type: string
         type: array
     type: object
+  internal_handler.storageBackendRequest:
+    properties:
+      config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackendConfig'
+      name:
+        type: string
+      provider:
+        type: string
+      status:
+        type: string
+    required:
+    - name
+    - provider
+    type: object
   internal_handler.updateLastFAQImportResultDisplayStatusRequest:
     properties:
       display_status:
@@ -5346,6 +5467,11 @@ definitions:
         description: Selected custom agent ID (backend resolves shared agent and its
           workspace from share relation)
         type: string
+      attachment_ids:
+        description: Pre-uploaded session-scoped document IDs
+        items:
+          type: string
+        type: array
       attachment_uploads:
         description: Attached files (documents, audio, etc.)
         items:
@@ -5880,6 +6006,10 @@ paths:
       - description: 知识ID列表（逗号分隔），限定到具体文档
         in: query
         name: knowledge_ids
+        type: string
+      - description: 带知识库归属的标签范围（JSON）
+        in: query
+        name: tag_scopes
         type: string
       - description: 返回数量上限（默认6）
         in: query
@@ -12553,6 +12683,314 @@ paths:
       summary: 获取预装Skills列表
       tags:
       - Skills
+  /storage-backends:
+    get:
+      description: List all storage backend instances for the current workspace, with
+        credentials masked. The workspace default backend id is returned alongside
+        the list.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of storage backends and default_storage_backend_id
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List storage backends
+      tags:
+      - StorageBackend
+    post:
+      consumes:
+      - application/json
+      description: Register a new object/file storage instance for the current workspace.
+        The configuration is validated and a connectivity test is run before the backend
+        is persisted.
+      parameters:
+      - description: Storage backend configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.storageBackendRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created storage backend
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request, validation, or connectivity test failure
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: A storage backend with this name already exists
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Create storage backend
+      tags:
+      - StorageBackend
+  /storage-backends/{id}:
+    delete:
+      description: Soft-delete a storage backend. A backend that is the workspace
+        default, still bound to knowledge bases, environment-sourced, or a legacy
+        alias cannot be deleted.
+      parameters:
+      - description: Storage backend ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Deletion success
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Backend is default, bound, read-only, or legacy alias
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Storage backend not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Delete storage backend
+      tags:
+      - StorageBackend
+    get:
+      description: Retrieve a single storage backend by ID for the current workspace.
+        Credentials are masked.
+      parameters:
+      - description: Storage backend ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Storage backend details
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Storage backend not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Get storage backend
+      tags:
+      - StorageBackend
+    put:
+      consumes:
+      - application/json
+      description: Update a storage backend's mutable fields (name, credentials, status).
+        Provider and physical location (endpoint, region, bucket, path prefix) are
+        immutable; use storage migration to move data. Environment-sourced backends
+        are read-only. Redacted secret placeholders preserve the stored credentials.
+      parameters:
+      - description: Storage backend ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated storage backend fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.storageBackendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated storage backend
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Immutable field change, read-only backend, validation, or connectivity
+            failure
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Storage backend not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Update storage backend
+      tags:
+      - StorageBackend
+  /storage-backends/{id}/default:
+    put:
+      description: Mark a storage backend as the workspace default. Only an active
+        backend can become the default. New knowledge bases without an explicit binding
+        use the default.
+      parameters:
+      - description: Storage backend ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Default set successfully
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Backend is not active
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Storage backend not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Set default storage backend
+      tags:
+      - StorageBackend
+  /storage-backends/{id}/test:
+    post:
+      description: Test connectivity of an existing saved storage backend using its
+        stored credentials. Returns success=false with a sanitized error message on
+        failure (the HTTP status stays 200).
+      parameters:
+      - description: Storage backend ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Connectivity test result (success, error)
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Storage backend not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Test storage backend by ID
+      tags:
+      - StorageBackend
+  /storage-backends/test:
+    post:
+      consumes:
+      - application/json
+      description: Test connectivity for the provided storage configuration without
+        persisting it. Returns success=false with a sanitized error message on failure
+        (the HTTP status stays 200).
+      parameters:
+      - description: Storage backend configuration to test
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.storageBackendRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Connectivity test result (success, error)
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request or validation error
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Test storage backend with raw config
+      tags:
+      - StorageBackend
+  /storage-backends/types:
+    get:
+      description: Return the storage provider types allowed by STORAGE_ALLOW_LIST
+        for UI form generation (e.g. local, minio, cos, tos, s3, oss, ks3, obs).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of allowed storage provider types
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List allowed storage provider types
+      tags:
+      - StorageBackend
   /system/admin/audit-log:
     get:
       description: 返回 system-scope（tenant_id=0）的审计事件，覆盖 system.setting_changed / system.admin_promoted

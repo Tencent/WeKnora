@@ -9,6 +9,24 @@ import (
 	"gorm.io/gorm"
 )
 
+const storageBackendScheme = "storage://"
+
+func BuildStorageBackendPath(backendID, providerPath string) string {
+	return storageBackendScheme + strings.TrimSpace(backendID) + "/" + providerPath
+}
+
+func ParseStorageBackendPath(path string) (backendID, providerPath string, ok bool) {
+	if !strings.HasPrefix(path, storageBackendScheme) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(path, storageBackendScheme)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 // KnowledgeBaseType represents the type of the knowledge base
 const (
 	// KnowledgeBaseTypeDocument represents the document knowledge base type
@@ -71,6 +89,9 @@ type KnowledgeBase struct {
 	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
 	// Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
+	// StorageBackendID binds this KB to one concrete storage instance. The
+	// legacy provider field remains readable during migration only.
+	StorageBackendID *string `yaml:"storage_backend_id" json:"storage_backend_id,omitempty" gorm:"column:storage_backend_id;type:varchar(36);default:null"`
 	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
 	StorageConfig StorageConfig `yaml:"-" json:"storage_config" gorm:"column:cos_config;type:json"`
 	// VectorStoreID references the VectorStore this knowledge base is bound to.
@@ -317,6 +338,27 @@ func (kb *KnowledgeBase) SetStorageProvider(provider string) {
 	kb.StorageProviderConfig = &StorageProviderConfig{Provider: provider}
 }
 
+// SharesStorageBackendWith compares concrete instance bindings first. Provider
+// comparison is only a compatibility fallback for rows not yet backfilled.
+func (kb *KnowledgeBase) SharesStorageBackendWith(other *KnowledgeBase, defaultBackendID, defaultProvider string) bool {
+	if kb == nil || other == nil {
+		return false
+	}
+	effectiveID := func(candidate *KnowledgeBase) string {
+		if candidate.StorageBackendID != nil {
+			if id := strings.TrimSpace(*candidate.StorageBackendID); id != "" {
+				return id
+			}
+		}
+		return strings.TrimSpace(defaultBackendID)
+	}
+	leftID, rightID := effectiveID(kb), effectiveID(other)
+	if leftID != "" || rightID != "" {
+		return leftID != "" && leftID == rightID
+	}
+	return kb.EffectiveStorageProvider(defaultProvider) == other.EffectiveStorageProvider(defaultProvider)
+}
+
 // InferStorageFromFilePath deduces the storage provider from a file path format.
 // Used as a safety fallback when the KB's configured provider doesn't match the data.
 // Supports provider:// scheme (local://, minio://, cos://, tos://),
@@ -339,7 +381,10 @@ func InferStorageFromFilePath(filePath string) string {
 // e.g. "minio://bucket/key" → "minio", "local://tenant/file.pdf" → "local"
 // Returns "" if the path does not use a known provider scheme.
 func ParseProviderScheme(filePath string) string {
-	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"} {
+	if _, inner, ok := ParseStorageBackendPath(filePath); ok {
+		filePath = inner
+	}
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs", "dummy"} {
 		if strings.HasPrefix(filePath, provider+"://") {
 			return provider
 		}

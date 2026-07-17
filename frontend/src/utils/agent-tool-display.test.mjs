@@ -76,3 +76,14 @@ test('getRagPipelineStepTitle uses web labels when search_source is web', () => 
   })
   assert.equal(title, 'agentStream.toolStatus.webSearch')
 })
+
+test('getRagPipelineStepTitle uses attachment parsing labels', () => {
+  assert.equal(
+    getRagPipelineStepTitle(t, { tool_name: 'attachment_parsing', pending: true }),
+    'agentStream.toolStatus.attachmentParsing',
+  )
+  assert.equal(
+    getRagPipelineStepTitle(t, { tool_name: 'attachment_parsing', pending: false, success: true }),
+    'agentStream.toolStatus.attachmentParsingDone',
+  )
+})

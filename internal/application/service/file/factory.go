@@ -82,14 +82,14 @@ func NewFileServiceFromStorageConfig(
 		if pathPrefix == "" {
 			pathPrefix = "weknora"
 		}
-		svc, err := NewCosFileService(sec.COS.BucketName, sec.COS.Region, sec.COS.SecretID, sec.COS.SecretKey, pathPrefix)
+		svc, err := NewCosFileServiceWithTempBucket(sec.COS.BucketName, sec.COS.Region, sec.COS.SecretID, sec.COS.SecretKey, pathPrefix, sec.COS.TempBucketName, sec.COS.TempRegion)
 		return svc, p, err
 
 	case "tos":
 		if sec == nil || sec.TOS == nil || sec.TOS.Endpoint == "" || sec.TOS.Region == "" || sec.TOS.AccessKey == "" || sec.TOS.SecretKey == "" || sec.TOS.BucketName == "" {
 			return nil, p, fmt.Errorf("incomplete tos config")
 		}
-		svc, err := NewTosFileService(sec.TOS.Endpoint, sec.TOS.Region, sec.TOS.AccessKey, sec.TOS.SecretKey, sec.TOS.BucketName, sec.TOS.PathPrefix)
+		svc, err := NewTosFileServiceWithTempBucket(sec.TOS.Endpoint, sec.TOS.Region, sec.TOS.AccessKey, sec.TOS.SecretKey, sec.TOS.BucketName, sec.TOS.PathPrefix, sec.TOS.TempBucketName, sec.TOS.TempRegion)
 		return svc, p, err
 	case "s3":
 		if sec == nil || sec.S3 == nil || sec.S3.Endpoint == "" || sec.S3.Region == "" || sec.S3.AccessKey == "" || sec.S3.SecretKey == "" || sec.S3.BucketName == "" {
@@ -99,16 +99,38 @@ func NewFileServiceFromStorageConfig(
 		if pathPrefix == "" {
 			pathPrefix = "weknora/"
 		}
-		svc, err := NewS3FileService(sec.S3.Endpoint, sec.S3.AccessKey, sec.S3.SecretKey, sec.S3.BucketName, sec.S3.Region, pathPrefix)
+		svc, err := NewS3FileServiceWithOptions(sec.S3.Endpoint, sec.S3.AccessKey, sec.S3.SecretKey, sec.S3.BucketName, sec.S3.Region, pathPrefix, sec.S3.ForcePathStyle)
 		return svc, p, err
 
 	case "obs":
-		obsEndpoint := strings.TrimSpace(os.Getenv("OBS_ENDPOINT"))
-		obsRegion := strings.TrimSpace(os.Getenv("OBS_REGION"))
-		obsAccessKey := strings.TrimSpace(os.Getenv("OBS_ACCESS_KEY"))
-		obsSecretKey := strings.TrimSpace(os.Getenv("OBS_SECRET_KEY"))
-		obsBucketName := strings.TrimSpace(os.Getenv("OBS_BUCKET_NAME"))
-		obsPathPrefix := strings.TrimSpace(os.Getenv("OBS_PATH_PREFIX"))
+		obsEndpoint, obsRegion, obsAccessKey := "", "", ""
+		obsSecretKey, obsBucketName, obsPathPrefix := "", "", ""
+		if sec != nil && sec.OBS != nil {
+			obsEndpoint = strings.TrimSpace(sec.OBS.Endpoint)
+			obsRegion = strings.TrimSpace(sec.OBS.Region)
+			obsAccessKey = strings.TrimSpace(sec.OBS.AccessKey)
+			obsSecretKey = strings.TrimSpace(sec.OBS.SecretKey)
+			obsBucketName = strings.TrimSpace(sec.OBS.BucketName)
+			obsPathPrefix = strings.TrimSpace(sec.OBS.PathPrefix)
+		}
+		if obsEndpoint == "" {
+			obsEndpoint = strings.TrimSpace(os.Getenv("OBS_ENDPOINT"))
+		}
+		if obsRegion == "" {
+			obsRegion = strings.TrimSpace(os.Getenv("OBS_REGION"))
+		}
+		if obsAccessKey == "" {
+			obsAccessKey = strings.TrimSpace(os.Getenv("OBS_ACCESS_KEY"))
+		}
+		if obsSecretKey == "" {
+			obsSecretKey = strings.TrimSpace(os.Getenv("OBS_SECRET_KEY"))
+		}
+		if obsBucketName == "" {
+			obsBucketName = strings.TrimSpace(os.Getenv("OBS_BUCKET_NAME"))
+		}
+		if obsPathPrefix == "" {
+			obsPathPrefix = strings.TrimSpace(os.Getenv("OBS_PATH_PREFIX"))
+		}
 		if obsPathPrefix == "" {
 			obsPathPrefix = "weknora/"
 		}

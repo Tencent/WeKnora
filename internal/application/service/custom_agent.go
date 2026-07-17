@@ -471,10 +471,10 @@ func (s *customAgentService) GetSuggestedQuestions(
 	agentID string,
 	kbIDs []string,
 	knowledgeIDs []string,
-	tagIDs []string,
+	tagScopes []types.TagScope,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
-	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, true)
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, limit, true)
 }
 
 func (s *customAgentService) GetKnowledgeSuggestedQuestions(
@@ -482,10 +482,10 @@ func (s *customAgentService) GetKnowledgeSuggestedQuestions(
 	agentID string,
 	kbIDs []string,
 	knowledgeIDs []string,
-	tagIDs []string,
+	tagScopes []types.TagScope,
 	limit int,
 ) ([]types.SuggestedQuestion, error) {
-	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagIDs, limit, false)
+	return s.getSuggestedQuestions(ctx, agentID, kbIDs, knowledgeIDs, tagScopes, limit, false)
 }
 
 func (s *customAgentService) getSuggestedQuestions(
@@ -493,7 +493,7 @@ func (s *customAgentService) getSuggestedQuestions(
 	agentID string,
 	kbIDs []string,
 	knowledgeIDs []string,
-	tagIDs []string,
+	tagScopes []types.TagScope,
 	limit int,
 	includeCurated bool,
 ) ([]types.SuggestedQuestion, error) {
@@ -504,7 +504,8 @@ func (s *customAgentService) getSuggestedQuestions(
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
 		return nil, err
 	}
-	if err := types.AuthorizeTenantAPIKeyOptionalTagIDs(ctx, tagIDs); err != nil {
+	scopeTagIDs := flattenTagScopeIDs(tagScopes)
+	if err := types.AuthorizeTenantAPIKeyOptionalTagIDs(ctx, scopeTagIDs); err != nil {
 		return nil, err
 	}
 
@@ -520,7 +521,8 @@ func (s *customAgentService) getSuggestedQuestions(
 		return nil, err
 	}
 
-	var result []types.SuggestedQuestion
+	var curated []types.SuggestedQuestion
+	starterMode := types.SuggestionModeKnowledge
 
 	if includeCurated {
 		suggestionConfig := agent.Config.QuestionSuggestions
@@ -530,6 +532,7 @@ func (s *customAgentService) getSuggestedQuestions(
 		if limit > suggestionConfig.Starters.Count {
 			limit = suggestionConfig.Starters.Count
 		}
+		starterMode = suggestionConfig.Starters.Mode
 		// Add curated agent prompts first (highest priority).
 		if suggestionConfig.Starters.Mode == types.SuggestionModeCurated ||
 			suggestionConfig.Starters.Mode == types.SuggestionModeHybrid {
@@ -537,35 +540,37 @@ func (s *customAgentService) getSuggestedQuestions(
 				if strings.TrimSpace(prompt) == "" {
 					continue
 				}
-				result = append(result, types.SuggestedQuestion{
+				curated = append(curated, types.SuggestedQuestion{
 					Question: prompt,
 					Source:   "agent_config",
 				})
 			}
 		}
 		if suggestionConfig.Starters.Mode == types.SuggestionModeCurated {
-			return s.truncateQuestions(result, limit), nil
+			return s.truncateQuestions(curated, limit), nil
 		}
 	}
 
-	if len(tagIDs) > 0 {
-		resolved, err := s.resolveKnowledgeIDsFromTags(ctx, tenantID, tagIDs)
+	resolvedTags := resolvedSuggestionTagScopes{}
+	if len(scopeTagIDs) > 0 {
+		var err error
+		resolvedTags, err = s.resolveSuggestionTagScopes(ctx, tenantID, tagScopes)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"agent_id": agentID,
-				"tag_ids":  tagIDs,
+				"agent_id":      agentID,
+				"scope_tag_ids": scopeTagIDs,
 			})
-			return s.truncateQuestions(result, limit), nil
+			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 		}
-		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolved)
-		if len(knowledgeIDs) == 0 {
-			return s.truncateQuestions(result, limit), nil
+		knowledgeIDs = mergeUniqueStrings(knowledgeIDs, resolvedTags.KnowledgeIDs)
+		if len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 {
+			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 		}
 	}
 
 	// 2. Determine knowledge base scope
 	effectiveKBIDs := kbIDs
-	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 {
+	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 {
 		// Use agent's KB configuration
 		switch agent.Config.KBSelectionMode {
 		case "all":
@@ -575,7 +580,7 @@ func (s *customAgentService) getSuggestedQuestions(
 					"agent_id": agentID,
 				})
 				// Return what we have so far (agent_config suggestions)
-				return s.truncateQuestions(result, limit), nil
+				return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 			}
 			// Honor the agent's implicit/explicit capability requirements so
 			// e.g. a quick-answer (RAG-only) agent doesn't surface wiki-only
@@ -593,12 +598,16 @@ func (s *customAgentService) getSuggestedQuestions(
 			effectiveKBIDs = agent.Config.KnowledgeBases
 		case "none":
 			// No KB access, return agent_config suggestions only
-			return s.truncateQuestions(result, limit), nil
+			return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 		default:
 			// Default to agent's configured KBs
 			effectiveKBIDs = agent.Config.KnowledgeBases
 		}
 	}
+	// Match the chat retrieval target semantics: a tag scope narrows its parent
+	// KB even when that KB is present in the agent's preselected KB list. Other
+	// explicitly selected KBs remain additive.
+	effectiveKBIDs = excludeSuggestionStrings(effectiveKBIDs, resolvedTags.KnowledgeBaseIDs)
 
 	filteredKBIDs, err := types.FilterKnowledgeBasesForTenantAPIKeyScope(ctx, kbIDs, effectiveKBIDs)
 	if err != nil {
@@ -606,20 +615,17 @@ func (s *customAgentService) getSuggestedQuestions(
 	}
 	effectiveKBIDs = filteredKBIDs
 
-	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 {
-		return s.truncateQuestions(result, limit), nil
+	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 && len(resolvedTags.TagIDsByTenant) == 0 {
+		return finalizeStarterSuggestions(curated, nil, starterMode, limit), nil
 	}
 
 	// Deduplicate questions we've already collected
 	seen := make(map[string]bool)
-	for _, q := range result {
+	for _, q := range curated {
 		seen[q.Question] = true
 	}
 
-	remaining := limit - len(result)
-	if remaining <= 0 {
-		return s.truncateQuestions(result, limit), nil
-	}
+	remaining := limit
 
 	// 3. Collect candidate chunks from both FAQ and Document KBs,
 	//    grouped by knowledge_id for diversity.
@@ -641,16 +647,21 @@ func (s *customAgentService) getSuggestedQuestions(
 	// rows live under that tenant. Without this grouping a caller in tenant A
 	// querying a KB shared from tenant B would hit `tenant_id = A` and get zero
 	// rows back — the symptom is "suggested questions never appear for shared KBs".
-	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, tenantID, queryKBIDs)
+	scopeKBIDs := mergeUniqueStrings(queryKBIDs, resolvedTags.KnowledgeBaseIDs)
+	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, tenantID, scopeKBIDs)
 	// Always keep the caller's tenant in the iteration so knowledge_ids-only
 	// requests (no kbIDs) still execute one query under the caller's tenant.
-	if len(queryKBIDs) == 0 {
+	if len(scopeKBIDs) == 0 {
 		kbGroups[tenantID] = nil
 	}
 
 	// Collect FAQ recommended chunks
 	for groupTenantID, groupKBIDs := range kbGroups {
-		faqChunks, err := s.chunkRepo.ListRecommendedFAQChunks(ctx, groupTenantID, groupKBIDs, queryKnowledgeIDs, fetchLimit)
+		explicitGroupKBIDs := intersectSuggestionStrings(groupKBIDs, queryKBIDs)
+		groupTagIDs := resolvedTags.TagIDsByTenant[groupTenantID]
+		faqChunks, err := s.chunkRepo.ListRecommendedFAQChunks(
+			ctx, groupTenantID, explicitGroupKBIDs, queryKnowledgeIDs, groupTagIDs, fetchLimit,
+		)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"agent_id":  agentID,
@@ -677,7 +688,8 @@ func (s *customAgentService) getSuggestedQuestions(
 
 	// Collect Document chunks with generated questions
 	for groupTenantID, groupKBIDs := range kbGroups {
-		docChunks, err := s.chunkRepo.ListRecentDocumentChunksWithQuestions(ctx, groupTenantID, groupKBIDs, queryKnowledgeIDs, fetchLimit)
+		explicitGroupKBIDs := intersectSuggestionStrings(groupKBIDs, queryKBIDs)
+		docChunks, err := s.chunkRepo.ListRecentDocumentChunksWithQuestions(ctx, groupTenantID, explicitGroupKBIDs, queryKnowledgeIDs, fetchLimit)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"agent_id":  agentID,
@@ -703,11 +715,10 @@ func (s *customAgentService) getSuggestedQuestions(
 		}
 	}
 
-	// Collect Wiki pages as a fallback source. This covers Wiki-only KBs where no
-	// document chunks carry AI-generated questions (question_generation is skipped
-	// when the KB does not need an embedding model). knowledge_id filter is
-	// intentionally ignored here because wiki pages are authored at the KB level
-	// and are not 1:1 with source knowledge items.
+	// Collect Wiki pages as a fallback source, but only for KBs the caller selected
+	// explicitly. A tag's parent KB is merely an ownership boundary; widening a
+	// tag-only scope to arbitrary Wiki pages would make the suggestions unanswerable
+	// inside the user's selected range.
 	//
 	// Skip entirely for quick-answer (RAG-only) agents: those can't ever
 	// retrieve a wiki page, so surfacing wiki-derived suggestions would lure
@@ -715,10 +726,11 @@ func (s *customAgentService) getSuggestedQuestions(
 	// context. Smart-reasoning agents that opt in to wiki tools keep this.
 	if agent.Config.AgentMode != types.AgentModeQuickAnswer && s.wikiPageRepo != nil {
 		for groupTenantID, groupKBIDs := range kbGroups {
-			if len(groupKBIDs) == 0 {
+			explicitGroupKBIDs := intersectSuggestionStrings(groupKBIDs, queryKBIDs)
+			if len(explicitGroupKBIDs) == 0 {
 				continue
 			}
-			wikiPages, err := s.wikiPageRepo.ListRecentForSuggestions(ctx, groupTenantID, groupKBIDs, fetchLimit)
+			wikiPages, err := s.wikiPageRepo.ListRecentForSuggestions(ctx, groupTenantID, explicitGroupKBIDs, fetchLimit)
 			if err != nil {
 				logger.ErrorWithFields(ctx, err, map[string]interface{}{
 					"agent_id":  agentID,
@@ -757,17 +769,18 @@ func (s *customAgentService) getSuggestedQuestions(
 	})
 
 	// Round-robin pick one question from each document in turn.
+	knowledgeResult := make([]types.SuggestedQuestion, 0, limit)
 	offsets := make(map[string]int, len(bucketKeys))
-	for len(result) < limit {
+	for len(knowledgeResult) < limit {
 		picked := false
 		for _, key := range bucketKeys {
-			if len(result) >= limit {
+			if len(knowledgeResult) >= limit {
 				break
 			}
 			qs := buckets[key]
 			idx := offsets[key]
 			if idx < len(qs) {
-				result = append(result, qs[idx])
+				knowledgeResult = append(knowledgeResult, qs[idx])
 				offsets[key] = idx + 1
 				picked = true
 			}
@@ -777,52 +790,188 @@ func (s *customAgentService) getSuggestedQuestions(
 		}
 	}
 
-	return s.truncateQuestions(result, limit), nil
+	return finalizeStarterSuggestions(curated, knowledgeResult, starterMode, limit), nil
 }
 
-func (s *customAgentService) resolveKnowledgeIDsFromTags(
+type resolvedSuggestionTagScopes struct {
+	KnowledgeBaseIDs []string
+	KnowledgeIDs     []string
+	TagIDsByTenant   map[uint64][]string
+}
+
+// resolveSuggestionTagScopes keeps tag ownership separate from whole-KB
+// selection. Document tags become concrete knowledge IDs; FAQ tags remain
+// chunk tag filters. Scoped inputs also let shared-KB tags resolve against the
+// source tenant that owns the tag and chunk rows.
+func (s *customAgentService) resolveSuggestionTagScopes(
 	ctx context.Context,
-	tenantID uint64,
-	tagIDs []string,
-) ([]string, error) {
-	if len(tagIDs) == 0 || s.tagRepo == nil || s.knowledgeRepo == nil {
-		return nil, nil
+	callerTenantID uint64,
+	tagScopes []types.TagScope,
+) (resolvedSuggestionTagScopes, error) {
+	result := resolvedSuggestionTagScopes{TagIDsByTenant: make(map[uint64][]string)}
+	if len(tagScopes) == 0 || s.tagRepo == nil || s.knowledgeRepo == nil || s.kbService == nil {
+		return result, nil
 	}
-	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, tagIDs)
-	if err != nil {
-		return nil, err
-	}
-	if len(tags) == 0 {
-		return nil, nil
-	}
+
 	byKB := make(map[string][]string)
-	for _, tag := range tags {
-		byKB[tag.KnowledgeBaseID] = append(byKB[tag.KnowledgeBaseID], tag.ID)
+	for _, scope := range tagScopes {
+		if scope.KnowledgeBaseID == "" {
+			continue
+		}
+		for _, tagID := range scope.TagIDs {
+			if tagID == "" {
+				continue
+			}
+			byKB[scope.KnowledgeBaseID] = append(byKB[scope.KnowledgeBaseID], tagID)
+		}
 	}
-	return mergeKnowledgeIDsFromTagGroups(ctx, s.knowledgeRepo, tenantID, byKB)
+	if len(byKB) == 0 {
+		return result, nil
+	}
+
+	kbIDs := make([]string, 0, len(byKB))
+	for kbID := range byKB {
+		kbIDs = append(kbIDs, kbID)
+	}
+	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, callerTenantID, kbIDs)
+	for tenantID, groupKBIDs := range kbGroups {
+		for _, kbID := range groupKBIDs {
+			requested := mergeUniqueStrings(nil, byKB[kbID])
+			tags, err := s.tagRepo.GetByIDs(ctx, tenantID, requested)
+			if err != nil {
+				return result, err
+			}
+			requestedSet := make(map[string]bool, len(requested))
+			for _, id := range requested {
+				requestedSet[id] = true
+			}
+			validTagIDs := make([]string, 0, len(tags))
+			for _, tag := range tags {
+				if tag != nil && tag.KnowledgeBaseID == kbID && requestedSet[tag.ID] {
+					validTagIDs = append(validTagIDs, tag.ID)
+				}
+			}
+			if len(validTagIDs) == 0 {
+				continue
+			}
+
+			result.KnowledgeBaseIDs = mergeUniqueStrings(result.KnowledgeBaseIDs, []string{kbID})
+			result.TagIDsByTenant[tenantID] = mergeUniqueStrings(result.TagIDsByTenant[tenantID], validTagIDs)
+			knowledgeIDs, err := s.knowledgeRepo.ListIDsByTagIDs(ctx, tenantID, kbID, validTagIDs)
+			if err != nil {
+				return result, err
+			}
+			result.KnowledgeIDs = mergeUniqueStrings(result.KnowledgeIDs, knowledgeIDs)
+		}
+	}
+	return result, nil
 }
 
-func mergeKnowledgeIDsFromTagGroups(
-	ctx context.Context,
-	knowledgeRepo interfaces.KnowledgeRepository,
-	tenantID uint64,
-	byKB map[string][]string,
-) ([]string, error) {
-	seen := make(map[string]bool)
-	var out []string
-	for kbID, ids := range byKB {
-		kids, err := knowledgeRepo.ListIDsByTagIDs(ctx, tenantID, kbID, ids)
-		if err != nil {
-			return nil, err
-		}
-		for _, kid := range kids {
-			if !seen[kid] {
-				seen[kid] = true
-				out = append(out, kid)
-			}
+func flattenTagScopeIDs(scopes []types.TagScope) []string {
+	var ids []string
+	for _, scope := range scopes {
+		ids = mergeUniqueStrings(ids, scope.TagIDs)
+	}
+	return ids
+}
+
+func intersectSuggestionStrings(values, allowed []string) []string {
+	if len(values) == 0 || len(allowed) == 0 {
+		return nil
+	}
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		allowedSet[value] = true
+	}
+	var result []string
+	for _, value := range values {
+		if value != "" && allowedSet[value] {
+			result = append(result, value)
 		}
 	}
-	return out, nil
+	return result
+}
+
+func excludeSuggestionStrings(values, excluded []string) []string {
+	if len(values) == 0 || len(excluded) == 0 {
+		return values
+	}
+	excludedSet := make(map[string]bool, len(excluded))
+	for _, value := range excluded {
+		excludedSet[value] = true
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" && !excludedSet[value] {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func finalizeStarterSuggestions(
+	curated []types.SuggestedQuestion,
+	knowledge []types.SuggestedQuestion,
+	mode string,
+	limit int,
+) []types.SuggestedQuestion {
+	if limit <= 0 {
+		return []types.SuggestedQuestion{}
+	}
+	switch mode {
+	case types.SuggestionModeCurated:
+		return truncateSuggestedQuestions(curated, limit)
+	case types.SuggestionModeHybrid:
+		return mergeHybridStarterSuggestions(curated, knowledge, limit)
+	default:
+		return truncateSuggestedQuestions(knowledge, limit)
+	}
+}
+
+// mergeHybridStarterSuggestions prioritizes curated starters while reserving
+// about one third of visible slots for scope-aware knowledge questions.
+func mergeHybridStarterSuggestions(
+	curated []types.SuggestedQuestion,
+	knowledge []types.SuggestedQuestion,
+	limit int,
+) []types.SuggestedQuestion {
+	if limit <= 0 {
+		return []types.SuggestedQuestion{}
+	}
+	knowledgeSlots := 0
+	if limit > 1 {
+		knowledgeSlots = (limit + 1) / 3
+	}
+	curatedSlots := limit - knowledgeSlots
+	result := make([]types.SuggestedQuestion, 0, limit)
+	seen := make(map[string]bool, limit)
+	appendFrom := func(items []types.SuggestedQuestion, max int) {
+		added := 0
+		for _, item := range items {
+			if len(result) == limit || (max >= 0 && added == max) {
+				return
+			}
+			key := strings.ToLower(strings.TrimSpace(item.Question))
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			result = append(result, item)
+			added++
+		}
+	}
+	appendFrom(curated, curatedSlots)
+	appendFrom(knowledge, knowledgeSlots)
+	appendFrom(curated, -1)
+	appendFrom(knowledge, -1)
+	return result
+}
+
+func truncateSuggestedQuestions(questions []types.SuggestedQuestion, limit int) []types.SuggestedQuestion {
+	if len(questions) > limit {
+		return questions[:limit]
+	}
+	return questions
 }
 
 func mergeUniqueStrings(base, extra []string) []string {

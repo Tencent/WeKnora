@@ -202,10 +202,18 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages, pinSession, unpinSession, updateSession } from "@/api/chat/index";
+import { getSessionsList, batchDelSessions, deleteAllSessions } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { listAllIMChannels } from '@/api/agent/index';
 import SessionSidebarRow from './SessionSidebarRow.vue';
+import {
+    clearSession,
+    removeSession,
+    renameSession,
+    SESSION_MUTATION_EVENT,
+    setSessionPinned,
+    type SessionMutationDetail,
+} from './sessionMutations';
 import SessionSourceFilter from './SessionSourceFilter.vue';
 import {
     SIDEBAR_BUCKET_PAGE_SIZE,
@@ -255,6 +263,7 @@ const chatResources = useChatResourcesStore();
 // visually consistent with the channels admin view.
 import wecomLogo from '@/assets/img/im/wecom.svg';
 import feishuLogo from '@/assets/img/im/feishu.svg';
+import larkLogo from '@/assets/img/im/lark.svg';
 import slackLogo from '@/assets/img/im/slack.svg';
 import telegramLogo from '@/assets/img/im/telegram.svg';
 import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
@@ -265,6 +274,7 @@ import qqbotLogo from '@/assets/img/im/qqbot.png';
 const PLATFORM_LOGO: Record<string, string> = {
     wecom: wecomLogo,
     feishu: feishuLogo,
+    lark: larkLogo,
     slack: slackLogo,
     telegram: telegramLogo,
     dingtalk: dingtalkLogo,
@@ -607,7 +617,7 @@ const buildSessionMenuOptions = (item: any) => {
         options.push({
             content: t('menu.unpin'),
             value: 'unpin',
-            prefixIcon: () => h(TIcon, { name: 'pin', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin-filled', size: '16px' }),
         });
     } else {
         options.push({
@@ -642,19 +652,8 @@ const updateSessionInBuckets = (
 
 const renameSessionTitle = async (item: any, title: string) => {
     try {
-        const res: any = await updateSession(item.id, {
-            title,
-            description: item.description || '',
-        });
-        if (res && res.success) {
-            updateSessionInBuckets(item.id, {
-                title: res.data?.title || title,
-                isNoTitle: false,
-            });
-            MessagePlugin.success(t('menu.renameSessionSuccess'));
-        } else {
-            MessagePlugin.error(t('menu.renameSessionFailed'));
-        }
+        await renameSession(item.id, title, item.description || '');
+        MessagePlugin.success(t('menu.renameSessionSuccess'));
     } catch {
         MessagePlugin.error(t('menu.renameSessionFailed'));
     }
@@ -664,17 +663,7 @@ const togglePin = (item: any, pin: boolean) => {
     if (pinningIds.value.has(item.id)) return;
     pinningIds.value.add(item.id);
 
-    const call = pin ? pinSession(item.id) : unpinSession(item.id);
-    call.then((res: any) => {
-        if (res && res.success) {
-            updateSessionInBuckets(item.id, {
-                is_pinned: pin,
-                pinned_at: pin ? new Date().toISOString() : null,
-            });
-        } else {
-            MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
-        }
-    }).catch(() => {
+    setSessionPinned(item.id, pin).catch(() => {
         MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
     }).finally(() => {
         pinningIds.value.delete(item.id);
@@ -682,33 +671,15 @@ const togglePin = (item: any, pin: boolean) => {
 };
 
 const clearMessages = (item: any) => {
-    clearSessionMessages(item.id).then((res: any) => {
-        if (res && res.success) {
-            MessagePlugin.success(t('menu.clearMessagesSuccess'));
-            if (item.id === route.params.chatid) {
-                window.dispatchEvent(new CustomEvent('session-messages-cleared', { detail: { sessionId: item.id } }));
-            }
-        } else {
-            MessagePlugin.error(t('menu.clearMessagesFailed'));
-        }
+    clearSession(item.id).then(() => {
+        MessagePlugin.success(t('menu.clearMessagesSuccess'));
     }).catch(() => {
         MessagePlugin.error(t('menu.clearMessagesFailed'));
     });
 };
 
 const delCard = (item: any) => {
-    delSession(item.id).then((res: any) => {
-        if (res && (res as any).success) {
-            sessionBuckets.value = removeSessionFromBuckets(sessionBuckets.value, item.id);
-            syncMenuStoreFromBuckets();
-
-            if (item.id == route.params.chatid) {
-                router.push('/platform/creatChat');
-            }
-        } else {
-            MessagePlugin.error(t('chat.deleteSessionFailed'));
-        }
-    })
+    removeSession(item.id).catch(() => MessagePlugin.error(t('chat.deleteSessionFailed')))
 }
 
 
@@ -962,10 +933,22 @@ const loadSessionOriginMeta = async () => {
     }
 };
 
-const handleSessionTitleUpdated = (event: Event) => {
-    const detail = (event as CustomEvent<{ sessionId?: string; title?: string }>).detail;
-    if (!detail?.sessionId || !detail.title) return;
-    updateSessionInBuckets(detail.sessionId, { title: detail.title, isNoTitle: false });
+const handleSessionMutation = (event: Event) => {
+    const detail = (event as CustomEvent<SessionMutationDetail>).detail;
+    if (!detail?.sessionId) return;
+    if (detail.patch) {
+        updateSessionInBuckets(detail.sessionId, {
+            ...detail.patch,
+            ...(detail.patch.title ? { isNoTitle: false } : {}),
+        });
+    }
+    if (detail.removed) {
+        sessionBuckets.value = removeSessionFromBuckets(sessionBuckets.value, detail.sessionId);
+        syncMenuStoreFromBuckets();
+        if (detail.sessionId === route.params.chatid) {
+            router.push('/platform/creatChat');
+        }
+    }
 };
 
 onMounted(async () => {
@@ -975,7 +958,7 @@ onMounted(async () => {
         currentSecondpath.value = `chat/${route.params.chatid}`;
     }
 
-    window.addEventListener('session-title-updated', handleSessionTitleUpdated);
+    window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
 
     isLiteEdition.value = authStore.isLiteMode
     getSystemInfo().then(res => {
@@ -1001,7 +984,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-    window.removeEventListener('session-title-updated', handleSessionTitleUpdated);
+    window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
 });
 
 watch([() => route.name, () => route.params], (newvalue, oldvalue) => {

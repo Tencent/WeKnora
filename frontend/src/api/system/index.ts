@@ -71,7 +71,7 @@ export interface ParserEngineInfo {
   UnavailableReason?: string
 }
 
-/** 解析引擎配置（引擎相关存空间；docreader 地址由环境变量配置） */
+/** 解析引擎配置（引擎连接参数存空间；聊天附件解析策略在智能体中配置） */
 export interface ParserEngineConfig {
   docreader_addr?: string
   docreader_transport?: string

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -561,6 +562,7 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Param        id                  path      string  true   "智能体ID"
 // @Param        knowledge_base_ids  query     string  false  "知识库ID列表（逗号分隔），覆盖智能体默认配置"
 // @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
+// @Param        tag_scopes          query     string  false  "带知识库归属的标签范围（JSON）"
 // @Param        limit               query     int     false  "返回数量上限（默认6）"
 // @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
 // @Failure      400                 {object}  errors.AppError         "请求参数错误"
@@ -598,12 +600,11 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	var tagIDs []string
-	if tagIDsStr := strings.TrimSpace(c.Query("tag_ids")); tagIDsStr != "" {
-		for _, id := range strings.Split(tagIDsStr, ",") {
-			if trimmed := strings.TrimSpace(id); trimmed != "" {
-				tagIDs = append(tagIDs, trimmed)
-			}
+	var tagScopes []types.TagScope
+	if raw := strings.TrimSpace(c.Query("tag_scopes")); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &tagScopes); err != nil {
+			c.Error(errors.NewBadRequestError("tag_scopes must be valid JSON"))
+			return
 		}
 	}
 
@@ -614,10 +615,10 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		}
 	}
 
-	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagIDs: %v, limit: %d",
-		secutils.SanitizeForLog(id), kbIDs, tagIDs, limit)
+	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, tagScopes: %d, limit: %d",
+		secutils.SanitizeForLog(id), kbIDs, len(tagScopes), limit)
 
-	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagIDs, limit)
+	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, tagScopes, limit)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,

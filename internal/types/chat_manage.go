@@ -30,6 +30,9 @@ type PipelineRequest struct {
 	FallbackStrategy FallbackStrategy `json:"fallback_strategy"`
 	FallbackResponse string           `json:"fallback_response"`
 	FallbackPrompt   string           `json:"fallback_prompt"`
+	// CitationEnabled controls only final knowledge/web source citations. Nil
+	// defaults to true for requests and agents created before this option existed.
+	CitationEnabled *bool `json:"citation_enabled,omitempty"`
 
 	// Rewrite parameters
 	EnableRewrite        bool   `json:"enable_rewrite"`
@@ -71,6 +74,11 @@ type PipelineRequest struct {
 	WebFetchEnabled     bool   `json:"-"` // Auto-fetch full page content for web search results after rerank
 	WebFetchTopN        int    `json:"-"` // Max pages to fetch (default 3)
 	Language            string `json:"-"`
+}
+
+// CitationsEnabled returns the effective citation setting for this request.
+func (c *PipelineRequest) CitationsEnabled() bool {
+	return c == nil || c.CitationEnabled == nil || *c.CitationEnabled
 }
 
 // QueryIntent represents the classified intent of a user query.
@@ -167,13 +175,16 @@ func (c *ChatManage) Clone() *ChatManage {
 			copy(kidsCopy, t.KnowledgeIDs)
 			tagIDsCopy := make([]string, len(t.TagIDs))
 			copy(tagIDsCopy, t.TagIDs)
+			scopeTagIDsCopy := make([]string, len(t.ScopeTagIDs))
+			copy(scopeTagIDsCopy, t.ScopeTagIDs)
 			searchTargets[i] = &SearchTarget{
-				Type:              t.Type,
-				KnowledgeBaseID:   t.KnowledgeBaseID,
-				TenantID:          t.TenantID,
-				KnowledgeIDs:      kidsCopy,
-				TagIDs:            tagIDsCopy,
-				DisableDirectLoad: t.DisableDirectLoad,
+				Type:                    t.Type,
+				KnowledgeBaseID:         t.KnowledgeBaseID,
+				TenantID:                t.TenantID,
+				KnowledgeIDs:            kidsCopy,
+				TagIDs:                  tagIDsCopy,
+				ScopeTagIDs:             scopeTagIDsCopy,
+				DisableRecallThresholds: t.DisableRecallThresholds,
 			}
 		}
 	}
@@ -210,6 +221,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			FallbackStrategy:         c.FallbackStrategy,
 			FallbackResponse:         c.FallbackResponse,
 			FallbackPrompt:           c.FallbackPrompt,
+			CitationEnabled:          c.CitationEnabled,
 			EnableRewrite:            c.EnableRewrite,
 			EnableQueryExpansion:     c.EnableQueryExpansion,
 			RewritePromptSystem:      c.RewritePromptSystem,

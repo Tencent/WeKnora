@@ -14,7 +14,10 @@ import (
 // Data source types and constants
 const (
 	// Connector types
-	ConnectorTypeFeishu      = "feishu"
+	ConnectorTypeFeishu = "feishu"
+	// ConnectorTypeLark is Feishu's international edition (open.larksuite.com).
+	// It shares the Feishu connector; only the API host and tenant differ.
+	ConnectorTypeLark        = "lark"
 	ConnectorTypeNotion      = "notion"
 	ConnectorTypeConfluence  = "confluence"
 	ConnectorTypeYuque       = "yuque"

@@ -183,5 +183,19 @@ export function getRagPipelineStepTitle(t: ComposerTranslation, event: RagPipeli
     return query ? `${baseTitle}：「${query}」` : baseTitle
   }
 
+  if (toolName === 'attachment_parsing') {
+    if (pending) return t('agentStream.toolStatus.attachmentParsing')
+    return event.success === false
+      ? t('agentStream.toolStatus.attachmentParsingFailed')
+      : t('agentStream.toolStatus.attachmentParsingDone')
+  }
+
+  if (toolName === 'image_analysis') {
+    if (pending) return t('agentStream.toolStatus.imageAnalyzing')
+    return event.success === false
+      ? t('agentStream.toolStatus.imageAnalysisFailed')
+      : t('agentStream.toolStatus.imageAnalysisDone')
+  }
+
   return ''
 }

@@ -28,9 +28,11 @@ type Handler struct {
 	agentShareService      interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 	kbShareService         interfaces.KBShareService       // Service for resolving shared KB permissions
 	fileService            interfaces.FileService          // Service for file storage (image uploads)
-	modelService           interfaces.ModelService         // Service for model management (VLM access)
-	userService            interfaces.UserService          // Service for resolving per-user preferences (e.g. enable_memory default)
-	attachmentProcessor    *AttachmentProcessor            // Processor for file attachments
+	storageResolver        interfaces.StorageBackendResolver
+	modelService           interfaces.ModelService // Service for model management (VLM access)
+	userService            interfaces.UserService  // Service for resolving per-user preferences (e.g. enable_memory default)
+	attachmentProcessor    *AttachmentProcessor    // Processor for file attachments
+	temporaryDocuments     interfaces.TemporaryDocumentService
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -47,10 +49,12 @@ func NewHandler(
 	agentShareService interfaces.AgentShareService,
 	kbShareService interfaces.KBShareService,
 	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
 	modelService interfaces.ModelService,
 	userService interfaces.UserService,
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
+	temporaryDocuments interfaces.TemporaryDocumentService,
 ) *Handler {
 	return &Handler{
 		sessionService:         sessionService,
@@ -65,8 +69,10 @@ func NewHandler(
 		agentShareService:      agentShareService,
 		kbShareService:         kbShareService,
 		fileService:            fileService,
+		storageResolver:        storageResolver,
 		modelService:           modelService,
 		userService:            userService,
+		temporaryDocuments:     temporaryDocuments,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

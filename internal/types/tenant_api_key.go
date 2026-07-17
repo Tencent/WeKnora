@@ -60,10 +60,16 @@ const (
 	// bases or agents, nor destructive KB clears, and the key's
 	// knowledge_base_ids allow-list still bounds every write.
 	APIKeyCapabilityIngest APIKeyCapability = "ingest"
-	// APIKeyCapabilityManageKnowledgeBases lets a scoped key manage existing
-	// knowledge-base metadata/configuration within its allowed KB scope. It is
-	// separate from ingest: uploading or editing KB contents does not imply
-	// permission to rename, reconfigure, or delete the KB itself.
+	// APIKeyCapabilityManageKnowledgeBases lets a scoped key manage the full
+	// knowledge-base lifecycle: create, copy, duplicate, rename/reconfigure,
+	// and delete. For operations that target an existing KB (copy/duplicate
+	// source, update, delete) the key's allowed KB scope still bounds which
+	// KBs it may touch; create has no source to bound against, so a
+	// scope-restricted key may add a new KB to its tenant (same-tenant, no
+	// cross-tenant reach — the new KB simply falls outside the key's
+	// allow-list and stays unmanageable by it). It is separate from ingest:
+	// uploading or editing KB contents does not imply permission to manage
+	// the KB itself.
 	APIKeyCapabilityManageKnowledgeBases APIKeyCapability = "manage_kbs"
 	// APIKeyCapabilityManageAgents lets a key create/read/update/delete/copy
 	// agents. Agent config can carry sensitive model/MCP bindings, so this is
@@ -91,6 +97,14 @@ const (
 	// APIKeyCapabilityManageVectorStores lets a key manage retrieval
 	// infrastructure such as vector stores, parser engines, and storage checks.
 	APIKeyCapabilityManageVectorStores APIKeyCapability = "manage_vector_stores"
+	// APIKeyCapabilityManageStorageBackends lets a key manage object/file
+	// storage backend instances (e.g. S3-compatible or local file storage):
+	// their CRUD lifecycle, connectivity tests, and the tenant default
+	// selection. It is separate from manage_vector_stores because storage
+	// backends are the file-persistence layer (holding object-store
+	// credentials and user-controllable endpoints) rather than retrieval
+	// infrastructure.
+	APIKeyCapabilityManageStorageBackends APIKeyCapability = "manage_storage_backends"
 	// APIKeyCapabilityManageWebSearch lets a key manage tenant web-search
 	// provider configurations and credentials.
 	APIKeyCapabilityManageWebSearch APIKeyCapability = "manage_web_search"
@@ -142,6 +156,8 @@ func NormalizeAPIKeyCapability(c APIKeyCapability) APIKeyCapability {
 		return APIKeyCapabilityManageChannels
 	case APIKeyCapabilityManageVectorStores:
 		return APIKeyCapabilityManageVectorStores
+	case APIKeyCapabilityManageStorageBackends:
+		return APIKeyCapabilityManageStorageBackends
 	case APIKeyCapabilityManageWebSearch:
 		return APIKeyCapabilityManageWebSearch
 	case APIKeyCapabilityRunEvaluations:

@@ -645,6 +645,7 @@ const API_KEY_CAPABILITIES: TenantAPIKeyCapability[] = [
   'manage_datasources',
   'manage_models',
   'manage_vector_stores',
+  'manage_storage_backends',
   'manage_web_search',
   'manage_channels',
   'run_evaluations',
@@ -699,6 +700,7 @@ const apiKeyCapabilityGroups: ApiKeyCapabilityGroup[] = [
     capabilities: [
       { value: 'manage_models', labelKey: 'integrations.api.capabilityManageModels', hintKey: 'integrations.api.capabilityManageModelsHint' },
       { value: 'manage_vector_stores', labelKey: 'integrations.api.capabilityManageVectorStores', hintKey: 'integrations.api.capabilityManageVectorStoresHint' },
+      { value: 'manage_storage_backends', labelKey: 'integrations.api.capabilityManageStorageBackends', hintKey: 'integrations.api.capabilityManageStorageBackendsHint' },
       { value: 'manage_web_search', labelKey: 'integrations.api.capabilityManageWebSearch', hintKey: 'integrations.api.capabilityManageWebSearchHint' },
       { value: 'manage_channels', labelKey: 'integrations.api.capabilityManageChannels', hintKey: 'integrations.api.capabilityManageChannelsHint' },
       { value: 'run_evaluations', labelKey: 'integrations.api.capabilityRunEvaluations', hintKey: 'integrations.api.capabilityRunEvaluationsHint' },
@@ -786,6 +788,7 @@ function keyCapabilityLabels(key: TenantAPIKey): string[] {
     manage_datasources: t('integrations.api.capabilityManageDatasources'),
     manage_channels: t('integrations.api.capabilityManageChannels'),
     manage_vector_stores: t('integrations.api.capabilityManageVectorStores'),
+    manage_storage_backends: t('integrations.api.capabilityManageStorageBackends'),
     manage_web_search: t('integrations.api.capabilityManageWebSearch'),
     run_evaluations: t('integrations.api.capabilityRunEvaluations'),
     manage_members: t('integrations.api.capabilityManageMembers'),
