@@ -593,9 +593,45 @@ definitions:
       asr_model_id:
         description: ASR model ID for audio transcription (optional)
         type: string
+      attachment_image_understanding:
+        description: |-
+          AttachmentImageUnderstanding enables VLM OCR fallback for image-only /
+          scanned documents (PDF/PPT whose pages are images). Disabled by default
+          because it materially increases parse latency; only triggers when the
+          extracted text is below a threshold and a VLM model is configured.
+        type: boolean
+      attachment_ocr_max_pages:
+        description: |-
+          AttachmentOCRMaxPages caps how many pages of a scanned / image-only
+          document this agent sends to the VLM for OCR. 0 falls back to the global
+          default (WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES). More pages means higher
+          coverage but slower parsing and more VLM cost.
+        type: integer
+      attachment_parse_wait_timeout_sec:
+        description: |-
+          AttachmentParseWaitTimeoutSec bounds, in seconds, how long a chat turn
+          waits for this agent's still-parsing attachments before proceeding with
+          only the finished ones. 0 falls back to the global default
+          (WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC).
+        type: integer
       audio_upload_enabled:
         description: 'Whether audio upload (ASR transcription) is enabled for this
           agent (default: false)'
+        type: boolean
+      chat_parser_engine_rules:
+        description: |-
+          ===== Chat Attachment Parsing Settings =====
+          ChatParserEngineRules selects parser engines for session-scoped chat
+          attachments by file type. Takes precedence over the tenant-level
+          ParserEngineConfig.ChatParserEngineRules; an explicit per-request
+          parser_engine still overrides both.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
+        type: array
+      citation_enabled:
+        description: |-
+          Whether final answers include knowledge/web source citations. Nil defaults to true
+          so agents saved before this option was introduced keep their existing behavior.
         type: boolean
       context_template:
         description: Context template for normal mode (how to format retrieved chunks)
@@ -1918,7 +1954,7 @@ definitions:
     type: integer
     x-enum-comments:
       MatchTypeDataAnalysis: 数据分析匹配类型
-      MatchTypeDirectLoad: 直接加载匹配类型
+      MatchTypeDirectLoad: 'Deprecated: reserved to preserve serialized enum values'
       MatchTypeParentChunk: 父Chunk匹配类型
       MatchTypeRelationChunk: 关系Chunk匹配类型
       MatchTypeWebSearch: 网络搜索匹配类型
@@ -1931,7 +1967,7 @@ definitions:
     - 关系Chunk匹配类型
     - ""
     - 网络搜索匹配类型
-    - 直接加载匹配类型
+    - 'Deprecated: reserved to preserve serialized enum values'
     - 数据分析匹配类型
     x-enum-varnames:
     - MatchTypeEmbedding
@@ -2071,6 +2107,9 @@ definitions:
       content:
         description: Extracted text content (for small text files)
         type: string
+      content_mode:
+        description: full or selected_chunks
+        type: string
       file_name:
         description: Original filename
         type: string
@@ -2080,15 +2119,24 @@ definitions:
       file_type:
         description: File extension (e.g., ".pdf", ".docx")
         type: string
+      id:
+        description: Temporary document ID for session-scoped uploads
+        type: string
       is_truncated:
         description: Whether content was truncated
         type: boolean
       line_count:
         description: Total line count (for text files)
         type: integer
-      url:
-        description: Storage URL (provider://path)
-        type: string
+      selected_chunks:
+        description: Chunks included in this message prompt
+        type: integer
+      token_count:
+        description: Approximate tokens in the parsed document
+        type: integer
+      total_chunks:
+        description: Total parsed chunks
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageImage:
     properties:
@@ -2416,6 +2464,13 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.ParserEngineConfig:
     properties:
+      chat_parser_engine_rules:
+        description: |-
+          ChatParserEngineRules selects parser engines for session-scoped chat
+          documents. Knowledge bases keep their own rules in ChunkingConfig.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
+        type: array
       mineru_api_key:
         description: MinerU 云 API Key
         type: string
@@ -2891,6 +2946,10 @@ definitions:
         type: array
       query_text:
         type: string
+      scope_tag_ids:
+        items:
+          type: string
+        type: array
       skip_context_enrichment:
         description: |-
           SkipContextEnrichment skips fetching parent, nearby, and relation chunks
@@ -5408,6 +5467,11 @@ definitions:
         description: Selected custom agent ID (backend resolves shared agent and its
           workspace from share relation)
         type: string
+      attachment_ids:
+        description: Pre-uploaded session-scoped document IDs
+        items:
+          type: string
+        type: array
       attachment_uploads:
         description: Attached files (documents, audio, etc.)
         items:

@@ -15092,8 +15092,31 @@ const docTemplate = `{
                     "description": "ASR model ID for audio transcription (optional)",
                     "type": "string"
                 },
+                "attachment_image_understanding": {
+                    "description": "AttachmentImageUnderstanding enables VLM OCR fallback for image-only /\nscanned documents (PDF/PPT whose pages are images). Disabled by default\nbecause it materially increases parse latency; only triggers when the\nextracted text is below a threshold and a VLM model is configured.",
+                    "type": "boolean"
+                },
+                "attachment_ocr_max_pages": {
+                    "description": "AttachmentOCRMaxPages caps how many pages of a scanned / image-only\ndocument this agent sends to the VLM for OCR. 0 falls back to the global\ndefault (WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES). More pages means higher\ncoverage but slower parsing and more VLM cost.",
+                    "type": "integer"
+                },
+                "attachment_parse_wait_timeout_sec": {
+                    "description": "AttachmentParseWaitTimeoutSec bounds, in seconds, how long a chat turn\nwaits for this agent's still-parsing attachments before proceeding with\nonly the finished ones. 0 falls back to the global default\n(WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC).",
+                    "type": "integer"
+                },
                 "audio_upload_enabled": {
                     "description": "Whether audio upload (ASR transcription) is enabled for this agent (default: false)",
+                    "type": "boolean"
+                },
+                "chat_parser_engine_rules": {
+                    "description": "===== Chat Attachment Parsing Settings =====\nChatParserEngineRules selects parser engines for session-scoped chat\nattachments by file type. Takes precedence over the tenant-level\nParserEngineConfig.ChatParserEngineRules; an explicit per-request\nparser_engine still overrides both.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
+                    }
+                },
+                "citation_enabled": {
+                    "description": "Whether final answers include knowledge/web source citations. Nil defaults to true\nso agents saved before this option was introduced keep their existing behavior.",
                     "type": "boolean"
                 },
                 "context_template": {
@@ -16819,7 +16842,7 @@ const docTemplate = `{
             ],
             "x-enum-comments": {
                 "MatchTypeDataAnalysis": "数据分析匹配类型",
-                "MatchTypeDirectLoad": "直接加载匹配类型",
+                "MatchTypeDirectLoad": "Deprecated: reserved to preserve serialized enum values",
                 "MatchTypeParentChunk": "父Chunk匹配类型",
                 "MatchTypeRelationChunk": "关系Chunk匹配类型",
                 "MatchTypeWebSearch": "网络搜索匹配类型"
@@ -16833,7 +16856,7 @@ const docTemplate = `{
                 "关系Chunk匹配类型",
                 "",
                 "网络搜索匹配类型",
-                "直接加载匹配类型",
+                "Deprecated: reserved to preserve serialized enum values",
                 "数据分析匹配类型"
             ],
             "x-enum-varnames": [
@@ -17009,6 +17032,10 @@ const docTemplate = `{
                     "description": "Extracted text content (for small text files)",
                     "type": "string"
                 },
+                "content_mode": {
+                    "description": "full or selected_chunks",
+                    "type": "string"
+                },
                 "file_name": {
                     "description": "Original filename",
                     "type": "string"
@@ -17021,6 +17048,10 @@ const docTemplate = `{
                     "description": "File extension (e.g., \".pdf\", \".docx\")",
                     "type": "string"
                 },
+                "id": {
+                    "description": "Temporary document ID for session-scoped uploads",
+                    "type": "string"
+                },
                 "is_truncated": {
                     "description": "Whether content was truncated",
                     "type": "boolean"
@@ -17029,9 +17060,17 @@ const docTemplate = `{
                     "description": "Total line count (for text files)",
                     "type": "integer"
                 },
-                "url": {
-                    "description": "Storage URL (provider://path)",
-                    "type": "string"
+                "selected_chunks": {
+                    "description": "Chunks included in this message prompt",
+                    "type": "integer"
+                },
+                "token_count": {
+                    "description": "Approximate tokens in the parsed document",
+                    "type": "integer"
+                },
+                "total_chunks": {
+                    "description": "Total parsed chunks",
+                    "type": "integer"
                 }
             }
         },
@@ -17456,6 +17495,13 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.ParserEngineConfig": {
             "type": "object",
             "properties": {
+                "chat_parser_engine_rules": {
+                    "description": "ChatParserEngineRules selects parser engines for session-scoped chat\ndocuments. Knowledge bases keep their own rules in ChunkingConfig.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
+                    }
+                },
                 "mineru_api_key": {
                     "description": "MinerU 云 API Key",
                     "type": "string"
@@ -18105,6 +18151,12 @@ const docTemplate = `{
                 },
                 "query_text": {
                     "type": "string"
+                },
+                "scope_tag_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "skip_context_enrichment": {
                     "description": "SkipContextEnrichment skips fetching parent, nearby, and relation chunks\nin processSearchResults. Used by the chat pipeline where context assembly\nis handled separately in the merge stage.",
@@ -21547,6 +21599,13 @@ const docTemplate = `{
                 "agent_id": {
                     "description": "Selected custom agent ID (backend resolves shared agent and its workspace from share relation)",
                     "type": "string"
+                },
+                "attachment_ids": {
+                    "description": "Pre-uploaded session-scoped document IDs",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "attachment_uploads": {
                     "description": "Attached files (documents, audio, etc.)",
