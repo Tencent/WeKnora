@@ -20,6 +20,9 @@ type Trace struct {
 	ID      string
 	span    trace.Span
 	manager *Manager
+	// metadata holds the metadata set at StartTrace so Finish can merge (not
+	// overwrite) the finish-time metadata into it before serializing.
+	metadata map[string]interface{}
 }
 
 // Generation represents a single model invocation (LLM / embedding / VLM / ASR).
@@ -29,6 +32,9 @@ type Generation struct {
 	manager *Manager
 	model   string
 	name    string
+	// autoTrace is a non-nil root trace this generation implicitly opened
+	// because ctx carried none; Finish must End it so the root is exported.
+	autoTrace *Trace
 }
 
 // Span represents a logical unit of work that isn't itself an LLM call — for
@@ -40,6 +46,12 @@ type Span struct {
 	span    trace.Span
 	manager *Manager
 	name    string
+	// metadata holds the metadata set at StartSpan so Finish can merge (not
+	// overwrite) the finish-time metadata into it before serializing.
+	metadata map[string]interface{}
+	// autoTrace is a non-nil root trace this span implicitly opened because
+	// ctx carried none; Finish must End it so the root is exported.
+	autoTrace *Trace
 }
 
 // TraceOptions configures a new trace.
@@ -110,20 +122,24 @@ func (m *Manager) StartTrace(ctx context.Context, opts TraceOptions) (context.Co
 		attrs = append(attrs, jsonAttr(attrTraceTags, opts.Tags))
 	}
 	ctx, span := m.tracer.Start(ctx, name, trace.WithTimestamp(time.Now()), trace.WithAttributes(attrs...))
-	t := &Trace{ID: span.SpanContext().TraceID().String(), span: span, manager: m}
+	t := &Trace{ID: span.SpanContext().TraceID().String(), span: span, manager: m, metadata: opts.Metadata}
 	return withTrace(ctx, t), t
 }
 
-// Finish updates the trace with its final output. Safe to call on a disabled
-// trace (no-op). The trace's metadata attribute (request_id, http.method,
-// etc.) is set once at StartTrace and left untouched here — overwriting it
-// with the finish metadata would lose the open's correlation fields.
+// Finish updates the trace with its final output and merges any finish-time
+// metadata into the metadata set at StartTrace. Safe to call on a disabled
+// trace (no-op). Finish keys are merged on top of the open-time correlation
+// fields (request_id, http.method, etc.) rather than overwriting them, so
+// both the open's correlation and the finish outcome survive.
 func (t *Trace) Finish(output interface{}, metadata map[string]interface{}) {
-	_ = metadata
 	if t == nil || t.manager == nil || !t.manager.Enabled() || t.span == nil {
 		return
 	}
-	t.span.SetAttributes(jsonAttr(attrTraceOutput, output))
+	attrs := []attribute.KeyValue{jsonAttr(attrTraceOutput, output)}
+	if merged := mergeMetadata(t.metadata, metadata); merged != nil {
+		attrs = append(attrs, jsonAttr(attrTraceMetadata, merged))
+	}
+	t.span.SetAttributes(attrs...)
 	t.span.End()
 }
 
@@ -188,10 +204,12 @@ func (m *Manager) StartSpan(ctx context.Context, opts SpanOptions) (context.Cont
 		return ctx, &Span{manager: m}
 	}
 	ctx = m.reestablishParentSpan(ctx)
+	var autoTrace *Trace
 	if _, ok := traceFromCtx(ctx); !ok {
 		// No active trace: open a shallow root so the span isn't orphaned.
-		newCtx, _ := m.StartTrace(ctx, TraceOptions{Name: opts.Name})
-		ctx = newCtx
+		// Hold the handle so Finish can End it — otherwise the root span is
+		// never exported and this span's parent points at a missing span.
+		ctx, autoTrace = m.StartTrace(ctx, TraceOptions{Name: opts.Name})
 	}
 	attrs := []attribute.KeyValue{
 		attribute.String(attrObsType, obsTypeSpan),
@@ -199,23 +217,39 @@ func (m *Manager) StartSpan(ctx context.Context, opts SpanOptions) (context.Cont
 		jsonAttr(attrObsMetadata, opts.Metadata),
 	}
 	ctx, span := m.tracer.Start(ctx, opts.Name, trace.WithTimestamp(time.Now()), trace.WithAttributes(attrs...))
-	return ctx, &Span{ID: span.SpanContext().SpanID().String(), span: span, manager: m, name: opts.Name}
+	return ctx, &Span{
+		ID:        span.SpanContext().SpanID().String(),
+		span:      span,
+		manager:   m,
+		name:      opts.Name,
+		metadata:  opts.Metadata,
+		autoTrace: autoTrace,
+	}
 }
 
 // Finish updates a span with its final output, extra metadata and any error.
-// A non-nil err marks the span as ERROR. The span's metadata attribute is set
-// once at StartSpan and left untouched here.
+// A non-nil err marks the span as ERROR. Finish-time metadata is merged on top
+// of the metadata set at StartSpan (finish keys win) rather than discarded, so
+// fields only known at completion (outcome, duration_ms, tool_calls, …) are
+// reported. If this span implicitly opened a root trace, that root is ended
+// last so it is exported.
 func (s *Span) Finish(output interface{}, metadata map[string]interface{}, err error) {
-	_ = metadata
 	if s == nil || s.manager == nil || !s.manager.Enabled() || s.span == nil {
 		return
 	}
-	s.span.SetAttributes(jsonAttr(attrObsOutput, output))
+	attrs := []attribute.KeyValue{jsonAttr(attrObsOutput, output)}
+	if merged := mergeMetadata(s.metadata, metadata); merged != nil {
+		attrs = append(attrs, jsonAttr(attrObsMetadata, merged))
+	}
+	s.span.SetAttributes(attrs...)
 	if err != nil {
 		s.span.RecordError(err)
 		s.span.SetStatus(codes.Error, err.Error())
 	}
 	s.span.End()
+	if s.autoTrace != nil {
+		s.autoTrace.Finish(nil, nil)
+	}
 }
 
 // StartGeneration opens a generation observation under the trace carried by
@@ -226,9 +260,12 @@ func (m *Manager) StartGeneration(ctx context.Context, opts GenerationOptions) (
 		return ctx, &Generation{manager: m, model: opts.Model, name: opts.Name}
 	}
 	ctx = m.reestablishParentSpan(ctx)
+	var autoTrace *Trace
 	if _, ok := traceFromCtx(ctx); !ok {
-		newCtx, _ := m.StartTrace(ctx, TraceOptions{Name: opts.Name})
-		ctx = newCtx
+		// No active trace: open a root so the generation isn't orphaned, and
+		// hold the handle so Finish can End it (otherwise the root span never
+		// gets exported and this generation's parent points at nothing).
+		ctx, autoTrace = m.StartTrace(ctx, TraceOptions{Name: opts.Name})
 	}
 	attrs := []attribute.KeyValue{
 		attribute.String(attrObsType, obsTypeGeneration),
@@ -239,11 +276,12 @@ func (m *Manager) StartGeneration(ctx context.Context, opts GenerationOptions) (
 	}
 	ctx, span := m.tracer.Start(ctx, opts.Name, trace.WithTimestamp(time.Now()), trace.WithAttributes(attrs...))
 	g := &Generation{
-		ID:      span.SpanContext().SpanID().String(),
-		span:    span,
-		manager: m,
-		model:   opts.Model,
-		name:    opts.Name,
+		ID:        span.SpanContext().SpanID().String(),
+		span:      span,
+		manager:   m,
+		model:     opts.Model,
+		name:      opts.Name,
+		autoTrace: autoTrace,
 	}
 	return ctx, g
 }
@@ -264,6 +302,9 @@ func (g *Generation) Finish(output interface{}, usage *TokenUsage, err error) {
 		g.span.SetStatus(codes.Error, err.Error())
 	}
 	g.span.End()
+	if g.autoTrace != nil {
+		g.autoTrace.Finish(nil, nil)
+	}
 }
 
 // MarkCompletionStart records the time at which the first token was received
@@ -273,6 +314,25 @@ func (g *Generation) MarkCompletionStart(t time.Time) {
 		return
 	}
 	g.span.SetAttributes(attribute.String(attrObsCompletionStart, isoTime(t)))
+}
+
+// mergeMetadata combines the metadata captured when an observation opened
+// with the metadata supplied at Finish. Finish keys win on conflict (they
+// reflect the final outcome), while open-time keys (correlation fields such
+// as request_id / http.method) are preserved. Returns nil when both inputs
+// are empty so callers can skip writing an empty attribute.
+func mergeMetadata(start, finish map[string]interface{}) map[string]interface{} {
+	if len(start) == 0 && len(finish) == 0 {
+		return nil
+	}
+	merged := make(map[string]interface{}, len(start)+len(finish))
+	for k, v := range start {
+		merged[k] = v
+	}
+	for k, v := range finish {
+		merged[k] = v
+	}
+	return merged
 }
 
 // jsonAttr serializes v to a compact JSON string and wraps it as a string

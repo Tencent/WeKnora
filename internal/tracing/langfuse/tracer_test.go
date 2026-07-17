@@ -167,6 +167,117 @@ func TestManager_FullRoundTrip(t *testing.T) {
 	t.Fatal("generation span not exported")
 }
 
+// TestSpan_FinishMetadataMerged verifies that metadata supplied at Finish is
+// merged into (not discarded, nor overwriting) the metadata set at StartSpan.
+// Regression guard: several call sites only know key fields (outcome,
+// duration_ms, …) at completion and rely on Finish metadata being reported.
+func TestSpan_FinishMetadataMerged(t *testing.T) {
+	m, exp := newTestManager(t)
+
+	ctx, tr := m.StartTrace(context.Background(), TraceOptions{Name: "root"})
+	_, span := m.StartSpan(ctx, SpanOptions{
+		Name:     "work",
+		Metadata: map[string]interface{}{"stage": "ingest", "task_type": "manual"},
+	})
+	span.Finish("out", map[string]interface{}{"outcome": "success", "duration_ms": 42}, nil)
+	tr.Finish(nil, nil)
+
+	for _, s := range exp.GetSpans() {
+		if s.Name != "work" {
+			continue
+		}
+		meta := spanAttr(s.Attributes, attrObsMetadata)
+		for _, want := range []string{`"stage":"ingest"`, `"task_type":"manual"`, `"outcome":"success"`, `"duration_ms":42`} {
+			if !strings.Contains(meta, want) {
+				t.Errorf("span metadata %q missing %q", meta, want)
+			}
+		}
+		return
+	}
+	t.Fatal("work span not exported")
+}
+
+// TestTrace_FinishMetadataMerged verifies the same merge behaviour on a trace:
+// open-time correlation fields (request_id) survive alongside finish outcome.
+func TestTrace_FinishMetadataMerged(t *testing.T) {
+	m, exp := newTestManager(t)
+
+	_, tr := m.StartTrace(context.Background(), TraceOptions{
+		Name:     "root",
+		Metadata: map[string]interface{}{"request_id": "req-1"},
+	})
+	tr.Finish("done", map[string]interface{}{"status": 200})
+
+	for _, s := range exp.GetSpans() {
+		if s.Name != "root" {
+			continue
+		}
+		meta := spanAttr(s.Attributes, attrTraceMetadata)
+		if !strings.Contains(meta, `"request_id":"req-1"`) || !strings.Contains(meta, `"status":200`) {
+			t.Errorf("trace metadata %q missing merged fields", meta)
+		}
+		return
+	}
+	t.Fatal("root span not exported")
+}
+
+// TestStartGeneration_AutoRootExported guards the regression where a
+// generation started with no active trace auto-opened a root span that was
+// never ended and therefore never exported — leaving the generation's parent
+// dangling. After the fix the auto root is exported and shares the trace id.
+func TestStartGeneration_AutoRootExported(t *testing.T) {
+	m, exp := newTestManager(t)
+
+	_, gen := m.StartGeneration(context.Background(), GenerationOptions{Name: "llm", Model: "m"})
+	gen.Finish("out", nil, nil)
+
+	var root, generation tracetest.SpanStub
+	for _, s := range exp.GetSpans() {
+		switch spanType(s) {
+		case obsTypeTrace:
+			root = s
+		case obsTypeGeneration:
+			generation = s
+		}
+	}
+	if root.Name == "" {
+		t.Fatal("auto-created root trace span was not exported")
+	}
+	if generation.Name == "" {
+		t.Fatal("generation span was not exported")
+	}
+	if generation.SpanContext.TraceID() != root.SpanContext.TraceID() {
+		t.Errorf("generation trace id %s != root trace id %s", generation.SpanContext.TraceID(), root.SpanContext.TraceID())
+	}
+	if generation.Parent.SpanID() != root.SpanContext.SpanID() {
+		t.Errorf("generation parent %s != root span %s (dangling parent)", generation.Parent.SpanID(), root.SpanContext.SpanID())
+	}
+}
+
+// TestStartSpan_AutoRootExported is the span counterpart of the above.
+func TestStartSpan_AutoRootExported(t *testing.T) {
+	m, exp := newTestManager(t)
+
+	_, span := m.StartSpan(context.Background(), SpanOptions{Name: "orphan"})
+	span.Finish("out", nil, nil)
+
+	var sawRoot, sawSpan bool
+	for _, s := range exp.GetSpans() {
+		switch spanType(s) {
+		case obsTypeTrace:
+			sawRoot = true
+		case obsTypeSpan:
+			sawSpan = true
+		}
+	}
+	if !sawRoot {
+		t.Error("auto-created root trace span was not exported")
+	}
+	if !sawSpan {
+		t.Error("span was not exported")
+	}
+}
+
 // TestTraceparentPropagation is the sop3 correlation core test: an incoming
 // W3C traceparent (as injected by an upstream caller like sop3) is extracted,
 // and the WeKnora root span inherits the upstream trace id — so in LiteFuse

@@ -23,8 +23,6 @@ const (
 	attrObsInput           = "langfuse.observation.input"
 	attrObsOutput          = "langfuse.observation.output"
 	attrObsMetadata        = "langfuse.observation.metadata"
-	attrObsLevel           = "langfuse.observation.level"
-	attrObsStatusMessage   = "langfuse.observation.status_message"
 	attrObsModel           = "langfuse.observation.model.name"
 	attrObsModelParams     = "langfuse.observation.model.parameters"
 	attrObsUsageDetails    = "langfuse.observation.usage_details"

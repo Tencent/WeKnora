@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -92,10 +91,10 @@ func Init(cfg Config) (*Manager, error) {
 			trace.WithInstrumentationVersion(langfuseScopeVersion),
 			trace.WithInstrumentationAttributes(attribute.String("public_key", cfg.PublicKey)),
 		)
-		// Make the W3C propagator available to any OTel-aware HTTP client
-		// in the process. Harmless to set globally; extraction/injection in
-		// this package use the package-level `propagator` directly.
-		otel.SetTextMapPropagator(propagator)
+		// Extraction/injection in this package use the package-level
+		// `propagator` directly, so we deliberately do NOT call
+		// otel.SetTextMapPropagator here — mutating global OTel state could
+		// interfere with any other OTel instrumentation in the process.
 	}
 
 	globalMu.Lock()
