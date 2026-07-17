@@ -1,5 +1,5 @@
 <template>
-  <header class="chat-header" :class="{ 'is-editing': titleEditing }">
+  <header class="chat-header" :class="{ 'is-editing': titleEditing, 'is-docked': hasReferencesPanel }">
     <form
       v-if="titleEditing"
       class="chat-header__edit"
@@ -139,6 +139,7 @@ type MenuMode = 'menu' | 'clear' | 'delete'
 
 const props = defineProps<{
   session: ChatHeaderSession | null
+  hasReferencesPanel?: boolean
 }>()
 
 const { t } = useI18n()
@@ -386,6 +387,33 @@ function handleMenuClick(data: { value: string }): void {
   &.is-editing {
     max-width: min(360px, calc(100% - 24px));
     padding: 2px;
+  }
+
+  @media (min-width: 960px) {
+    &.is-docked {
+      position: relative;
+      top: auto;
+      left: auto;
+      align-self: stretch;
+      z-index: 5;
+      flex-shrink: 0;
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 10px 12px;
+      border-radius: 0;
+      border-bottom: 1px solid var(--td-component-stroke);
+      background: var(--td-bg-color-container);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-sizing: border-box;
+      transition: border-color 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+
+      &.is-editing {
+        max-width: none;
+        padding: 8px 12px;
+      }
+    }
   }
 }
 

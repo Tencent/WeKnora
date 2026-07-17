@@ -4,7 +4,7 @@
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
     }">
-        <ChatHeader v-if="!embeddedMode" :session="currentSession" />
+        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                 <!-- 消息列表骨架屏 -->
@@ -1063,6 +1063,10 @@ onBeforeRouteUpdate((to, from, next) => {
         @media (min-width: 960px) {
             padding-right: 420px;
             box-sizing: border-box;
+
+            .chat_scroll_box {
+                padding-top: 0;
+            }
         }
     }
 
