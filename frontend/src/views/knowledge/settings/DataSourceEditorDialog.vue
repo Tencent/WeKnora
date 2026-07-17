@@ -369,6 +369,23 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com/',
+    permissionDocUrl: 'https://open.dingtalk.com/',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'Wiki.Workspace.Read',
+      'Wiki.Node.Read',
+      'Storage.File.Read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: 'dingxxxxxxxx' },
+      { key: 'client_secret', labelKey: 'datasource.field.clientSecret', placeholder: '', secret: true },
+      { key: 'operator_id', labelKey: 'datasource.field.operatorId', placeholder: 'unionId', hintKey: 'datasource.field.operatorIdHint' },
+    ],
+  },
+  {
     type: 'notion',
     available: true,
     docUrl: 'https://www.notion.so/my-integrations',
@@ -870,15 +887,18 @@ const selectedResourceCount = computed(() => {
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
 
 function resourceIconName(r: Resource): string {
-  if (r.has_children) return 'folder'
   switch (r.type) {
     case 'wiki_space':
       return 'root-list'
     case 'book':
       return 'book'
     case 'doc_category':
+    case 'folder':
       return 'folder-open'
+    case 'document':
+      return 'file'
     default:
+      if (r.has_children) return 'folder'
       return 'file'
   }
 }
@@ -900,6 +920,8 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  folder: 'datasource.resourceType.folder',
+  document: 'datasource.resourceType.document',
 }
 
 function resourceTypeLabel(type: string): string {
@@ -1396,7 +1418,7 @@ const drawerConfirmText = computed(() => {
             rel="noopener"
             class="doc-link"
           >
-            {{ t('datasource.permissionDocLink') }}
+            {{ t(`datasource.permissionDocLink_${form.type}`, t('datasource.permissionDocLink')) }}
             <t-icon name="link" class="link-icon" />
           </a>
         </div>
