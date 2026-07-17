@@ -130,6 +130,36 @@ func TestSessionModeConstants(t *testing.T) {
 	}
 }
 
+// BotIdentity carries a unique index, so Feishu and Lark channels must never
+// derive the same identity — otherwise a Lark bot would be rejected as a
+// duplicate of an unrelated Feishu bot that happens to share an app_id.
+func TestComputeBotIdentity_FeishuAndLarkAreDistinct(t *testing.T) {
+	const creds = `{"app_id":"cli_a1b2c3","app_secret":"s"}`
+
+	feishu := &IMChannel{Platform: "feishu", Credentials: []byte(creds)}
+	lark := &IMChannel{Platform: "lark", Credentials: []byte(creds)}
+
+	feishuID := feishu.computeBotIdentity()
+	larkID := lark.computeBotIdentity()
+
+	if feishuID != "feishu:cli_a1b2c3" {
+		t.Errorf("feishu identity = %q, want %q", feishuID, "feishu:cli_a1b2c3")
+	}
+	if larkID != "lark:cli_a1b2c3" {
+		t.Errorf("lark identity = %q, want %q", larkID, "lark:cli_a1b2c3")
+	}
+	if feishuID == larkID {
+		t.Errorf("feishu and lark share identity %q", feishuID)
+	}
+}
+
+func TestComputeBotIdentity_LarkWithoutAppID(t *testing.T) {
+	ch := &IMChannel{Platform: "lark", Credentials: []byte(`{"app_secret":"s"}`)}
+	if got := ch.computeBotIdentity(); got != "" {
+		t.Errorf("identity = %q, want empty when app_id is missing", got)
+	}
+}
+
 func TestChannelSessionThreadIDField(t *testing.T) {
 	cs := ChannelSession{
 		Platform: "slack",

@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -162,6 +164,37 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 	})
 }
 
+func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *testing.T) {
+	engine := &AgentEngine{}
+	prior := []chat.Message{
+		{Role: "system", Content: "Custom agent prompt."},
+		{Role: "user", Content: "解释流程"},
+	}
+	step := types.AgentStep{
+		ToolCalls: []types.ToolCall{{
+			ID:   "call-image",
+			Name: "knowledge_search",
+			Result: &types.ToolResult{
+				Success: true,
+				Output:  "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)",
+			},
+		}},
+	}
+
+	out := engine.appendToolResults(prior, step)
+	require.Len(t, out, 4)
+	assert.Contains(t, out[0].Content, "Custom agent prompt.")
+	assert.Contains(t, out[0].Content, agentRetrievedImageRequirementMarker)
+	assert.Contains(t, out[0].Content, "MUST include at least one relevant Markdown image")
+	assert.Contains(t, out[0].Content, "ASCII half-width parentheses")
+	assert.Equal(t, "tool", out[3].Role)
+	assert.Contains(t, out[3].Content, "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
+
+	// A later image-bearing step must not duplicate the system requirement.
+	out = engine.appendToolResults(out, step)
+	assert.Equal(t, 1, strings.Count(out[0].Content, agentRetrievedImageRequirementMarker))
+}
+
 func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 	block := buildRuntimeContextBlock(
 		"sess-1",
@@ -237,6 +270,38 @@ func TestRenderUserTurnContent_IncludesScopeBlocks(t *testing.T) {
 	assert.Contains(t, out, "<runtime_context")
 	assert.Contains(t, out, "<must_use>")
 	assert.Contains(t, out, "hello")
+}
+
+func TestBuildMessagesWithLLMContextRegistersBoundScopeBeforeFirstModelCall(t *testing.T) {
+	engine := &AgentEngine{
+		sourceRefs: llmreference.NewRegistry(),
+		knowledgeBasesInfo: []*KnowledgeBaseInfo{{
+			ID:   "kb-real-id",
+			Name: "Docs",
+			RecentDocs: []RecentDocInfo{{
+				ChunkID:         "chunk-real-id",
+				KnowledgeID:     "doc-real-id",
+				KnowledgeBaseID: "kb-real-id",
+				Title:           "Guide",
+			}},
+		}},
+		selectedDocs: []*SelectedDocumentInfo{{
+			KnowledgeID:     "selected-doc-real-id",
+			KnowledgeBaseID: "kb-real-id",
+			Title:           "Selected",
+		}},
+	}
+
+	messages := engine.buildMessagesWithLLMContext("system", "question", "session", nil, nil)
+	require.Len(t, messages, 2)
+	userContent := messages[1].Content
+	assert.Contains(t, userContent, `knowledge_base id="b1"`)
+	assert.Contains(t, userContent, `knowledge_id="d1"`)
+	assert.Contains(t, userContent, `knowledge_id="d2"`)
+	assert.Equal(t, "c1", engine.sourceRefs.ChunkAlias("chunk-real-id"))
+	assert.NotContains(t, userContent, "kb-real-id")
+	assert.NotContains(t, userContent, "chunk-real-id")
+	assert.NotContains(t, userContent, "doc-real-id")
 }
 
 func TestBuildMustUseBlock_MultiWordServicePrefix(t *testing.T) {

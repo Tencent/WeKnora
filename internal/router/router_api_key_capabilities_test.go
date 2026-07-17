@@ -182,44 +182,38 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 	}
 }
 
-func TestKnowledgeBaseCreateRouteRequiresFullAccessForAPIKeys(t *testing.T) {
+func TestKnowledgeBaseLifecycleRoutesDeclareManageCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
 	v1 := gin.New().Group("/api/v1")
 
 	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
 
-	// Creating a KB is open to full-access keys (tenant-wide authority),
-	// matching KB update/delete, but carries no capability so scoped keys
-	// stay denied.
-	policy := mustLookupAPIKeyPolicy(t, g, http.MethodPost, "/api/v1/knowledge-bases")
-	if !policy.RequireFullAccess {
-		t.Fatal("KB create should require full access for API keys")
-	}
-	if len(policy.Capabilities) != 0 {
-		t.Fatalf("KB create must not be granted by any capability: %#v", policy.Capabilities)
-	}
-}
-
-func TestKnowledgeBaseCopyRoutesRemainDefaultDenyForAPIKeys(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	g := &rbacGuards{}
-	v1 := gin.New().Group("/api/v1")
-
-	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
-
+	// The whole KB lifecycle (create/copy/duplicate/update/delete) shares one
+	// policy tier: manage_kbs OR full-access. create/copy/duplicate produce a
+	// new KB but are still KB-management operations, so manage_kbs admits them
+	// (the allow-list bounds copy/duplicate/update/delete downstream; ingest
+	// must never grant any of these).
 	cases := []struct {
 		method string
 		path   string
 	}{
+		{http.MethodPost, "/api/v1/knowledge-bases"},
 		{http.MethodPost, "/api/v1/knowledge-bases/copy"},
 		{http.MethodPost, "/api/v1/knowledge-bases/:id/duplicate"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			if _, ok := g.apiKeyAuthorizer.Lookup(tc.method, tc.path); ok {
-				t.Fatalf("route should remain default-deny for API keys: %s %s", tc.method, tc.path)
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityManageKnowledgeBases) {
+				t.Fatalf("policy capabilities = %#v, want manage_kbs", policy.Capabilities)
+			}
+			if policyHasCapability(policy, types.APIKeyCapabilityIngest) {
+				t.Fatalf("KB lifecycle route must not be granted by ingest: %#v", policy.Capabilities)
 			}
 		})
 	}
@@ -279,6 +273,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
+	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterEmbedChannelRoutes(v1, &handler.EmbedChannelHandler{}, g)
 	RegisterIMChannelRoutes(v1, &handler.IMHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
@@ -296,6 +291,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
+		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
 		{http.MethodGet, "/api/v1/embed-channels", types.APIKeyCapabilityManageChannels},
 		{http.MethodGet, "/api/v1/im-channels", types.APIKeyCapabilityManageChannels},
 		{http.MethodGet, "/api/v1/datasource", types.APIKeyCapabilityManageDataSources},
@@ -432,6 +428,25 @@ func TestChunkerPreviewRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
 	}
 	if !policyHasCapability(policy, types.APIKeyCapabilityIngest) {
 		t.Fatalf("policy capabilities = %#v, want ingest", policy.Capabilities)
+	}
+}
+
+func TestKBCloneProgressRouteRequiresRetrieveOrManageKbsCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterKnowledgeBaseRoutes(v1, &handler.KnowledgeBaseHandler{}, g)
+
+	policy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/knowledge-bases/copy/progress/:task_id")
+	if !policy.RequireFullAccess {
+		t.Fatal("policy should require full access without a matching capability")
+	}
+	if !policyHasCapability(policy, types.APIKeyCapabilityRetrieve) {
+		t.Fatalf("policy capabilities = %#v, want retrieve", policy.Capabilities)
+	}
+	if !policyHasCapability(policy, types.APIKeyCapabilityManageKnowledgeBases) {
+		t.Fatalf("policy capabilities = %#v, want manage_kbs", policy.Capabilities)
 	}
 }
 

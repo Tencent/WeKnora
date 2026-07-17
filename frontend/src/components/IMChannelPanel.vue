@@ -295,11 +295,11 @@
               </template>
             </template>
 
-            <!-- Feishu credentials -->
-            <template v-if="formData.platform === 'feishu'">
+            <!-- Feishu / Lark credentials — same fields, different open platform -->
+            <template v-if="formData.platform === 'feishu' || formData.platform === 'lark'">
               <div class="platform-link-hint">
-                <a href="https://open.feishu.cn/" target="_blank" rel="noopener noreferrer" class="doc-link">
-                  {{ $t('agentEditor.im.feishuConsole') }}
+                <a :href="openPlatformConsole.url" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t(openPlatformConsole.labelKey) }}
                   <t-icon name="link" class="link-icon" />
                 </a>
                 <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
@@ -538,6 +538,7 @@ import SettingDrawer from '@/components/settings/SettingDrawer.vue';
 import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue';
 import wecomLogo from '@/assets/img/im/wecom.svg';
 import feishuLogo from '@/assets/img/im/feishu.svg';
+import larkLogo from '@/assets/img/im/lark.svg';
 import slackLogo from '@/assets/img/im/slack.svg';
 import telegramLogo from '@/assets/img/im/telegram.svg';
 import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
@@ -550,6 +551,7 @@ type IMPlatform = IMChannel['platform'];
 const PLATFORM_LOGO: Record<string, string> = {
   wecom: wecomLogo,
   feishu: feishuLogo,
+  lark: larkLogo,
   slack: slackLogo,
   telegram: telegramLogo,
   dingtalk: dingtalkLogo,
@@ -600,6 +602,7 @@ const drawerConfirmText = computed(() =>
 const platformOptions = computed(() => ([
   { value: 'wecom' as IMPlatform, label: t('agentEditor.im.wecom'), logo: wecomLogo },
   { value: 'feishu' as IMPlatform, label: t('agentEditor.im.feishu'), logo: feishuLogo },
+  { value: 'lark' as IMPlatform, label: t('agentEditor.im.lark'), logo: larkLogo },
   { value: 'slack' as IMPlatform, label: t('agentEditor.im.slack'), logo: slackLogo },
   { value: 'telegram' as IMPlatform, label: t('agentEditor.im.telegram'), logo: telegramLogo },
   { value: 'dingtalk' as IMPlatform, label: t('agentEditor.im.dingtalk'), logo: dingtalkLogo },
@@ -607,6 +610,14 @@ const platformOptions = computed(() => ([
   { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
   { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
 ]));
+
+// Feishu and Lark are the same product on separate clouds, so each has its own
+// open platform console. Bots must be created on the one matching the channel.
+const openPlatformConsole = computed(() =>
+  formData.value.platform === 'lark'
+    ? { url: 'https://open.larksuite.com/', labelKey: 'agentEditor.im.larkConsole' }
+    : { url: 'https://open.feishu.cn/', labelKey: 'agentEditor.im.feishuConsole' },
+);
 
 const drawerTitle = computed(() => {
   if (editingChannel.value) {
@@ -708,7 +719,7 @@ function resolvedChannelName(): string {
 }
 
 function platformSupportsThread(platform: string): boolean {
-  return ['slack', 'mattermost', 'feishu', 'telegram'].includes(platform);
+  return ['slack', 'mattermost', 'feishu', 'lark', 'telegram'].includes(platform);
 }
 
 watch(

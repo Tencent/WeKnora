@@ -21,12 +21,13 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo interfaces.TenantRepository // Repository for tenant data operations
+	repo        interfaces.TenantRepository // Repository for tenant data operations
+	storageRepo interfaces.StorageBackendRepository
 }
 
 // NewTenantService creates a new tenant service instance
-func NewTenantService(repo interfaces.TenantRepository) interfaces.TenantService {
-	return &tenantService{repo: repo}
+func NewTenantService(repo interfaces.TenantRepository, storageRepo interfaces.StorageBackendRepository) interfaces.TenantService {
+	return &tenantService{repo: repo, storageRepo: storageRepo}
 }
 
 // CreateTenant creates a new tenant
@@ -60,9 +61,42 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 		})
 		return nil, err
 	}
+	if err := s.createDefaultStorageBackend(ctx, tenant); err != nil {
+		// No related rows exist yet, so rolling the tenant back is safe and
+		// avoids leaving a workspace that cannot bind new knowledge bases.
+		_ = s.repo.DeleteTenant(ctx, tenant.ID)
+		return nil, err
+	}
 
 	logger.Infof(ctx, "Tenant created successfully, ID: %d, name: %s", tenant.ID, tenant.Name)
 	return tenant, nil
+}
+
+func (s *tenantService) createDefaultStorageBackend(ctx context.Context, tenant *types.Tenant) error {
+	if s.storageRepo == nil || tenant == nil {
+		return nil
+	}
+	provider := ""
+	if tenant.StorageEngineConfig != nil {
+		provider = tenant.StorageEngineConfig.DefaultProvider
+	}
+	backend := types.StorageBackendFromLegacy(tenant.ID, provider, tenant.StorageEngineConfig)
+	if backend == nil {
+		backend = types.StorageBackendFromEnvironment(tenant.ID)
+	}
+	if backend == nil {
+		return errors.New("no supported default storage backend is configured")
+	}
+	backend.LegacyAlias = true
+	if err := s.storageRepo.Create(ctx, backend); err != nil {
+		return err
+	}
+	tenant.DefaultStorageBackendID = &backend.ID
+	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
+		_ = s.storageRepo.Delete(ctx, tenant.ID, backend.ID)
+		return err
+	}
+	return nil
 }
 
 // GetTenantByID retrieves a tenant by their ID

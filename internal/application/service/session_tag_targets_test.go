@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -89,6 +90,7 @@ func knowledgeBelongsToKB(knowledges []*types.Knowledge, knowledgeID string, kbI
 
 func newTagTargetSessionService() *sessionService {
 	return &sessionService{
+		cfg: &config.Config{},
 		knowledgeBaseService: &tagTargetKnowledgeBaseService{
 			kbs: map[string]*types.KnowledgeBase{
 				"doc-kb": {ID: "doc-kb", TenantID: 100, Type: types.KnowledgeBaseTypeDocument},
@@ -108,6 +110,41 @@ func newTagTargetSessionService() *sessionService {
 			},
 		},
 	}
+}
+
+func TestBuildAgentConfig_TagOnlyScopePreservesRetrievalTarget(t *testing.T) {
+	svc := newTagTargetSessionService()
+	agent := &types.CustomAgent{
+		ID:       "agent-1",
+		TenantID: 100,
+		Config: types.CustomAgentConfig{
+			AgentMode:           types.AgentModeSmartReasoning,
+			KBSelectionMode:     "all",
+			WebSearchProviderID: "provider-1",
+		},
+	}
+	req := &types.QARequest{
+		Session:     &types.Session{ID: "session-1", TenantID: 100},
+		CustomAgent: agent,
+		TagScopes: []types.TagScope{
+			{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}},
+		},
+	}
+
+	agentConfig, err := svc.buildAgentConfig(
+		tagTargetContext(),
+		req,
+		&types.Tenant{ID: 100},
+		100,
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, agentConfig.KnowledgeBases)
+	require.Len(t, agentConfig.SearchTargets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledge, agentConfig.SearchTargets[0].Type)
+	assert.ElementsMatch(t, []string{"doc-1", "doc-3"}, agentConfig.SearchTargets[0].KnowledgeIDs)
+	assert.ElementsMatch(t, []string{"doc-1", "doc-3"}, agentConfig.KnowledgeIDs)
+	assert.True(t, agentHasKnowledgeScope(agentConfig))
 }
 
 func tagTargetContext() context.Context {
@@ -131,7 +168,26 @@ func TestBuildSearchTargets_DocumentTagScopeResolvesKnowledgeIDs(t *testing.T) {
 	assert.Equal(t, "doc-kb", targets[0].KnowledgeBaseID)
 	assert.ElementsMatch(t, []string{"doc-1", "doc-3"}, targets[0].KnowledgeIDs)
 	assert.Empty(t, targets[0].TagIDs)
-	assert.True(t, targets[0].DisableDirectLoad)
+	assert.ElementsMatch(t, []string{"tag-a"}, targets[0].ScopeTagIDs)
+	assert.True(t, targets[0].DisableRecallThresholds)
+}
+
+func TestBuildSearchTargets_ExplicitKnowledgeScopeDisablesRecallThresholds(t *testing.T) {
+	svc := newTagTargetSessionService()
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		nil,
+		[]string{"doc-1"},
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
+	assert.Equal(t, []string{"doc-1"}, targets[0].KnowledgeIDs)
+	assert.True(t, targets[0].DisableRecallThresholds)
 }
 
 func TestBuildSearchTargets_DocumentTagScopeIntersectsExplicitKnowledgeIDs(t *testing.T) {
@@ -149,7 +205,8 @@ func TestBuildSearchTargets_DocumentTagScopeIntersectsExplicitKnowledgeIDs(t *te
 	require.Len(t, targets, 1)
 	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
 	assert.Equal(t, []string{"doc-3"}, targets[0].KnowledgeIDs)
-	assert.True(t, targets[0].DisableDirectLoad)
+	assert.ElementsMatch(t, []string{"tag-a"}, targets[0].ScopeTagIDs)
+	assert.True(t, targets[0].DisableRecallThresholds)
 }
 
 func TestBuildSearchTargets_FAQTagScopeKeepsIndexTagFilter(t *testing.T) {
@@ -168,7 +225,8 @@ func TestBuildSearchTargets_FAQTagScopeKeepsIndexTagFilter(t *testing.T) {
 	assert.Equal(t, types.SearchTargetTypeKnowledgeBase, targets[0].Type)
 	assert.Equal(t, "faq-kb", targets[0].KnowledgeBaseID)
 	assert.ElementsMatch(t, []string{"tag-a", "tag-b"}, targets[0].TagIDs)
-	assert.False(t, targets[0].DisableDirectLoad)
+	assert.ElementsMatch(t, []string{"tag-a", "tag-b"}, targets[0].ScopeTagIDs)
+	assert.True(t, targets[0].DisableRecallThresholds)
 }
 
 func TestBuildSearchTargets_FullKBWithTagScopeSkipsFullKBTarget(t *testing.T) {
@@ -215,7 +273,24 @@ func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) 
 	require.Len(t, targets, 1)
 	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
 	assert.ElementsMatch(t, []string{"doc-1", "doc-3"}, targets[0].KnowledgeIDs)
-	assert.True(t, targets[0].DisableDirectLoad)
+	assert.True(t, targets[0].DisableRecallThresholds)
+}
+
+func TestMergeResolvedTagKnowledgeIDs_OnlyIncludesTagScopedTargets(t *testing.T) {
+	got := mergeResolvedTagKnowledgeIDs(
+		[]string{"existing-doc"},
+		types.SearchTargets{
+			{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "tag-kb", KnowledgeIDs: []string{"tag-doc-1", "tag-doc-2"}},
+			{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "other-kb", KnowledgeIDs: []string{"other-doc"}},
+			{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "faq-kb", TagIDs: []string{"faq-tag"}},
+		},
+		[]types.TagScope{
+			{KnowledgeBaseID: "tag-kb", TagIDs: []string{"tag-a"}},
+			{KnowledgeBaseID: "faq-kb", TagIDs: []string{"faq-tag"}},
+		},
+	)
+
+	assert.ElementsMatch(t, []string{"existing-doc", "tag-doc-1", "tag-doc-2"}, got)
 }
 
 type tagTargetKnowledgeServiceWithError struct {

@@ -1055,21 +1055,19 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 					"cross-store cloning is not yet supported"))
 			return
 		}
-		// Pre-flight defense 3: storage backend must match — only meaningful
-		// when the tenant has a StorageEngineConfig. Without it,
-		// resolveFileService ignores per-KB provider pins and routes ALL KBs to
-		// the global storage service, so a clone can never span two real
-		// backends and the pins must NOT be used to reject (false positive).
-		// When a tenant config exists, pins are honored, so reject a genuine
-		// cross-backend clone before enqueueing.
-		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil && tenant.StorageEngineConfig != nil {
-			tenantDefault := tenant.StorageEngineConfig.DefaultProvider
-			srcProvider := sourceKB.EffectiveStorageProvider(tenantDefault)
-			dstProvider := targetKB.EffectiveStorageProvider(tenantDefault)
-			if srcProvider != "" && dstProvider != "" && srcProvider != dstProvider {
+		// Pre-flight defense 3: compare concrete instance IDs, not just the
+		// provider type (COS-A and COS-B are different physical stores).
+		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
+			defaultID, defaultProvider := "", ""
+			if tenant.DefaultStorageBackendID != nil {
+				defaultID = *tenant.DefaultStorageBackendID
+			}
+			if tenant.StorageEngineConfig != nil {
+				defaultProvider = tenant.StorageEngineConfig.DefaultProvider
+			}
+			if !sourceKB.SharesStorageBackendWith(targetKB, defaultID, defaultProvider) {
 				c.Error(apperrors.NewBadRequestError(
-					"source and target knowledge bases use different storage backends (" +
-						srcProvider + " vs " + dstProvider + "); cross-storage-backend cloning is not supported"))
+					"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported"))
 				return
 			}
 		}

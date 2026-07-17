@@ -31,7 +31,7 @@ If neither query nor range is provided, it returns the beginning of the document
   "properties": {
     "knowledge_id": {
       "type": "string",
-      "description": "The ID of the source document to read"
+      "description": "The short dN source document ID from the <sources> block"
     },
     "query": {
       "type": "string",
@@ -96,15 +96,9 @@ func enrichChunkContent(c *types.Chunk) string {
 		if err := json.Unmarshal([]byte(c.ImageInfo), &imgInfos); err == nil && len(imgInfos) > 0 {
 			var imgBuilder strings.Builder
 			for _, img := range imgInfos {
-				if img.URL != "" {
-					imgBuilder.WriteString(fmt.Sprintf("\n<image url=\"%s\">\n", img.URL))
-					if img.Caption != "" {
-						imgBuilder.WriteString(fmt.Sprintf("<caption>%s</caption>\n", img.Caption))
-					}
-					if img.OCRText != "" {
-						imgBuilder.WriteString(fmt.Sprintf("<ocr_text>%s</ocr_text>\n", img.OCRText))
-					}
-					imgBuilder.WriteString("</image>")
+				if imageMarkdown := searchutil.BuildImageInfoMarkdownWithURL(img.URL, &img); imageMarkdown != "" {
+					imgBuilder.WriteString("\n")
+					imgBuilder.WriteString(imageMarkdown)
 				}
 			}
 			content += imgBuilder.String()
@@ -163,16 +157,31 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	pageSize := 100
 	page := 1
 	if hasRange {
-		page = (params.StartChunkIndex - 1) / pageSize + 1
+		page = (params.StartChunkIndex-1)/pageSize + 1
 	}
 
 	var chunksOutput strings.Builder
+	formattedChunks := make([]map[string]interface{}, 0)
 	totalChunks := int64(0)
 	reachedMax := false
 
 	var prevChunk *types.Chunk
 	var forceOutputNext bool
 	outputtedIndices := make(map[int]bool)
+	appendFormattedChunk := func(chunk *types.Chunk, content string) {
+		if chunk == nil {
+			return
+		}
+		formattedChunks = append(formattedChunks, map[string]interface{}{
+			"chunk_id":        chunk.ID,
+			"chunk_index":     chunk.ChunkIndex,
+			"chunk_type":      chunk.ChunkType,
+			"content":         content,
+			"knowledge_id":    knowledgeID,
+			"knowledge_base":  knowledge.KnowledgeBaseID,
+			"knowledge_title": knowledge.Title,
+		})
+	}
 
 	for {
 		pagination := &types.Pagination{
@@ -219,6 +228,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					break
 				}
 				fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"range\">\n%s\n</chunk>\n", chunkNum, chunkContent)
+				appendFormattedChunk(c, chunkContent)
 				matchCount++
 				continue
 			}
@@ -238,6 +248,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 					if prevChunk != nil && !outputtedIndices[prevChunk.ChunkIndex] {
 						prevContent := enrichChunkContent(prevChunk)
 						fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"context_before\">\n%s\n</chunk>\n", prevChunk.ChunkIndex+1, prevContent)
+						appendFormattedChunk(prevChunk, prevContent)
 						outputtedIndices[prevChunk.ChunkIndex] = true
 					}
 				}
@@ -248,6 +259,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 						matchAttr = ` type="match"`
 					}
 					fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\"%s>\n%s\n</chunk>\n", c.ChunkIndex+1, matchAttr, chunkContent)
+					appendFormattedChunk(c, chunkContent)
 					outputtedIndices[c.ChunkIndex] = true
 				}
 
@@ -257,6 +269,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 			} else if forceOutputNext {
 				if !outputtedIndices[c.ChunkIndex] {
 					fmt.Fprintf(&chunksOutput, "<chunk index=\"%d\" type=\"context_after\">\n%s\n</chunk>\n", c.ChunkIndex+1, chunkContent)
+					appendFormattedChunk(c, chunkContent)
 					outputtedIndices[c.ChunkIndex] = true
 				}
 				forceOutputNext = false
@@ -293,7 +306,7 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 	}
 
 	sb.WriteString(fmt.Sprintf("<total_chunks>%d</total_chunks>\n</metadata>\n", totalChunks))
-	
+
 	if matchCount > 0 {
 		sb.WriteString(fmt.Sprintf("<chunks count=\"%d\">\n", matchCount))
 		sb.WriteString(chunksOutput.String())
@@ -318,5 +331,16 @@ func (t *wikiReadSourceDocTool) Execute(ctx context.Context, args json.RawMessag
 
 	sb.WriteString("</source_document>")
 
-	return &types.ToolResult{Success: true, Output: sb.String()}, nil
+	return &types.ToolResult{
+		Success: true,
+		Output:  sb.String(),
+		Data: map[string]interface{}{
+			"display_type":    "knowledge_chunks_list",
+			"knowledge_id":    knowledgeID,
+			"knowledge_title": knowledge.Title,
+			"total_chunks":    totalChunks,
+			"fetched_chunks":  len(formattedChunks),
+			"chunks":          formattedChunks,
+		},
+	}, nil
 }

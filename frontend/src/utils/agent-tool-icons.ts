@@ -33,6 +33,9 @@ export function getAgentToolIconName(
   if (toolName === 'image_analysis' || toolName === 'query_understand') {
     return 'ai-search'
   }
+  if (toolName === 'attachment_parsing') {
+    return 'attach'
+  }
   if (toolName.startsWith('mcp_')) {
     return 'terminal'
   }

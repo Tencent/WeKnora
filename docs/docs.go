@@ -648,6 +648,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "带知识库归属的标签范围（JSON）",
+                        "name": "tag_scopes",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "返回数量上限（默认6）",
                         "name": "limit",
@@ -11077,6 +11083,468 @@ const docTemplate = `{
                 }
             }
         },
+        "/storage-backends": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List all storage backend instances for the current workspace, with credentials masked. The workspace default backend id is returned alongside the list.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "List storage backends",
+                "responses": {
+                    "200": {
+                        "description": "List of storage backends and default_storage_backend_id",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Register a new object/file storage instance for the current workspace. The configuration is validated and a connectivity test is run before the backend is persisted.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Create storage backend",
+                "parameters": [
+                    {
+                        "description": "Storage backend configuration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.storageBackendRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created storage backend",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request, validation, or connectivity test failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "A storage backend with this name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/test": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Test connectivity for the provided storage configuration without persisting it. Returns success=false with a sanitized error message on failure (the HTTP status stays 200).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Test storage backend with raw config",
+                "parameters": [
+                    {
+                        "description": "Storage backend configuration to test",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.storageBackendRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Connectivity test result (success, error)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or validation error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/types": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Return the storage provider types allowed by STORAGE_ALLOW_LIST for UI form generation (e.g. local, minio, cos, tos, s3, oss, ks3, obs).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "List allowed storage provider types",
+                "responses": {
+                    "200": {
+                        "description": "List of allowed storage provider types",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retrieve a single storage backend by ID for the current workspace. Credentials are masked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Get storage backend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Storage backend details",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Update a storage backend's mutable fields (name, credentials, status). Provider and physical location (endpoint, region, bucket, path prefix) are immutable; use storage migration to move data. Environment-sourced backends are read-only. Redacted secret placeholders preserve the stored credentials.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Update storage backend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated storage backend fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.storageBackendRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated storage backend",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Immutable field change, read-only backend, validation, or connectivity failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Soft-delete a storage backend. A backend that is the workspace default, still bound to knowledge bases, environment-sourced, or a legacy alias cannot be deleted.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Delete storage backend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deletion success",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Backend is default, bound, read-only, or legacy alias",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/{id}/default": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Mark a storage backend as the workspace default. Only an active backend can become the default. New knowledge bases without an explicit binding use the default.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Set default storage backend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Default set successfully",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Backend is not active",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/storage-backends/{id}/test": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Test connectivity of an existing saved storage backend using its stored credentials. Returns success=false with a sanitized error message on failure (the HTTP status stays 200).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "StorageBackend"
+                ],
+                "summary": "Test storage backend by ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Storage backend ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Connectivity test result (success, error)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Storage backend not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/system/admin/audit-log": {
             "get": {
                 "security": [
@@ -14387,6 +14855,12 @@ const docTemplate = `{
                 },
                 "secret_key": {
                     "type": "string"
+                },
+                "temp_bucket_name": {
+                    "type": "string"
+                },
+                "temp_region": {
+                    "type": "string"
                 }
             }
         },
@@ -14618,8 +15092,31 @@ const docTemplate = `{
                     "description": "ASR model ID for audio transcription (optional)",
                     "type": "string"
                 },
+                "attachment_image_understanding": {
+                    "description": "AttachmentImageUnderstanding enables VLM OCR fallback for image-only /\nscanned documents (PDF/PPT whose pages are images). Disabled by default\nbecause it materially increases parse latency; only triggers when the\nextracted text is below a threshold and a VLM model is configured.",
+                    "type": "boolean"
+                },
+                "attachment_ocr_max_pages": {
+                    "description": "AttachmentOCRMaxPages caps how many pages of a scanned / image-only\ndocument this agent sends to the VLM for OCR. 0 falls back to the global\ndefault (WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES). More pages means higher\ncoverage but slower parsing and more VLM cost.",
+                    "type": "integer"
+                },
+                "attachment_parse_wait_timeout_sec": {
+                    "description": "AttachmentParseWaitTimeoutSec bounds, in seconds, how long a chat turn\nwaits for this agent's still-parsing attachments before proceeding with\nonly the finished ones. 0 falls back to the global default\n(WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC).",
+                    "type": "integer"
+                },
                 "audio_upload_enabled": {
                     "description": "Whether audio upload (ASR transcription) is enabled for this agent (default: false)",
+                    "type": "boolean"
+                },
+                "chat_parser_engine_rules": {
+                    "description": "===== Chat Attachment Parsing Settings =====\nChatParserEngineRules selects parser engines for session-scoped chat\nattachments by file type. Takes precedence over the tenant-level\nParserEngineConfig.ChatParserEngineRules; an explicit per-request\nparser_engine still overrides both.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
+                    }
+                },
+                "citation_enabled": {
+                    "description": "Whether final answers include knowledge/web source citations. Nil defaults to true\nso agents saved before this option was introduced keep their existing behavior.",
                     "type": "boolean"
                 },
                 "context_template": {
@@ -15718,6 +16215,10 @@ const docTemplate = `{
                     "description": "ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)",
                     "type": "integer"
                 },
+                "storage_backend_id": {
+                    "description": "StorageBackendID binds this KB to one concrete storage instance. The\nlegacy provider field remains readable during migration only.",
+                    "type": "string"
+                },
                 "storage_config": {
                     "description": "Deprecated: legacy COS config column. Kept for backward compatibility with old data.",
                     "allOf": [
@@ -16341,7 +16842,7 @@ const docTemplate = `{
             ],
             "x-enum-comments": {
                 "MatchTypeDataAnalysis": "数据分析匹配类型",
-                "MatchTypeDirectLoad": "直接加载匹配类型",
+                "MatchTypeDirectLoad": "Deprecated: reserved to preserve serialized enum values",
                 "MatchTypeParentChunk": "父Chunk匹配类型",
                 "MatchTypeRelationChunk": "关系Chunk匹配类型",
                 "MatchTypeWebSearch": "网络搜索匹配类型"
@@ -16355,7 +16856,7 @@ const docTemplate = `{
                 "关系Chunk匹配类型",
                 "",
                 "网络搜索匹配类型",
-                "直接加载匹配类型",
+                "Deprecated: reserved to preserve serialized enum values",
                 "数据分析匹配类型"
             ],
             "x-enum-varnames": [
@@ -16531,6 +17032,10 @@ const docTemplate = `{
                     "description": "Extracted text content (for small text files)",
                     "type": "string"
                 },
+                "content_mode": {
+                    "description": "full or selected_chunks",
+                    "type": "string"
+                },
                 "file_name": {
                     "description": "Original filename",
                     "type": "string"
@@ -16543,6 +17048,10 @@ const docTemplate = `{
                     "description": "File extension (e.g., \".pdf\", \".docx\")",
                     "type": "string"
                 },
+                "id": {
+                    "description": "Temporary document ID for session-scoped uploads",
+                    "type": "string"
+                },
                 "is_truncated": {
                     "description": "Whether content was truncated",
                     "type": "boolean"
@@ -16551,9 +17060,17 @@ const docTemplate = `{
                     "description": "Total line count (for text files)",
                     "type": "integer"
                 },
-                "url": {
-                    "description": "Storage URL (provider://path)",
-                    "type": "string"
+                "selected_chunks": {
+                    "description": "Chunks included in this message prompt",
+                    "type": "integer"
+                },
+                "token_count": {
+                    "description": "Approximate tokens in the parsed document",
+                    "type": "integer"
+                },
+                "total_chunks": {
+                    "description": "Total parsed chunks",
+                    "type": "integer"
                 }
             }
         },
@@ -16978,6 +17495,13 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.ParserEngineConfig": {
             "type": "object",
             "properties": {
+                "chat_parser_engine_rules": {
+                    "description": "ChatParserEngineRules selects parser engines for session-scoped chat\ndocuments. Knowledge bases keep their own rules in ChunkingConfig.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
+                    }
+                },
                 "mineru_api_key": {
                     "description": "MinerU 云 API Key",
                     "type": "string"
@@ -17628,6 +18152,12 @@ const docTemplate = `{
                 "query_text": {
                     "type": "string"
                 },
+                "scope_tag_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "skip_context_enrichment": {
                     "description": "SkipContextEnrichment skips fetching parent, nearby, and relation chunks\nin processSearchResults. Used by the chat pipeline where context assembly\nis handled separately in the merge stage.",
                     "type": "boolean"
@@ -17885,6 +18415,50 @@ const docTemplate = `{
                 },
                 "mode": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.StorageBackendConfig": {
+            "type": "object",
+            "properties": {
+                "access_key_id": {
+                    "type": "string"
+                },
+                "app_id": {
+                    "type": "string"
+                },
+                "bucket_name": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "force_path_style": {
+                    "type": "boolean"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "path_prefix": {
+                    "type": "string"
+                },
+                "region": {
+                    "type": "string"
+                },
+                "secret_access_key": {
+                    "type": "string"
+                },
+                "temp_bucket_name": {
+                    "type": "string"
+                },
+                "temp_region": {
+                    "type": "string"
+                },
+                "use_ssl": {
+                    "type": "boolean"
+                },
+                "use_temp_bucket": {
+                    "type": "boolean"
                 }
             }
         },
@@ -18159,6 +18733,12 @@ const docTemplate = `{
                 },
                 "secret_key": {
                     "type": "string"
+                },
+                "temp_bucket_name": {
+                    "type": "string"
+                },
+                "temp_region": {
+                    "type": "string"
                 }
             }
         },
@@ -18196,6 +18776,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CredentialsConfig"
                         }
                     ]
+                },
+                "default_storage_backend_id": {
+                    "description": "DefaultStorageBackendID is the workspace default concrete storage instance.",
+                    "type": "string"
                 },
                 "deleted_at": {
                     "description": "Deletion time",
@@ -19993,6 +20577,9 @@ const docTemplate = `{
                         }
                     }
                 },
+                "storageBackendId": {
+                    "type": "string"
+                },
                 "storageProvider": {
                     "description": "存储引擎选择（\"local\" | \"minio\" | \"cos\"），影响文档上传与文档内图片存储，参数从全局设置读取",
                     "type": "string"
@@ -20516,7 +21103,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
-                    "description": "\"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\"",
+                    "description": "\"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\", \"obs\"",
                     "type": "string"
                 }
             }
@@ -20923,6 +21510,27 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.storageBackendRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "provider"
+            ],
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackendConfig"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.updateLastFAQImportResultDisplayStatusRequest": {
             "type": "object",
             "required": [
@@ -20991,6 +21599,13 @@ const docTemplate = `{
                 "agent_id": {
                     "description": "Selected custom agent ID (backend resolves shared agent and its workspace from share relation)",
                     "type": "string"
+                },
+                "attachment_ids": {
+                    "description": "Pre-uploaded session-scoped document IDs",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "attachment_uploads": {
                     "description": "Attached files (documents, audio, etc.)",

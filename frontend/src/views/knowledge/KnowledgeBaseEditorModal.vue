@@ -254,8 +254,10 @@
                 <!-- 存储引擎 -->
                 <div v-if="!isFAQ && formData && currentSection === 'storage'" class="section">
                   <KBStorageSettings
+                    :storage-backend-id="formData.storageBackendId"
                     :storage-provider="formData.storageProvider"
                     :has-files="mode === 'edit' && hasFiles"
+                    @update:storage-backend-id="handleStorageBackendUpdate"
                     @update:storage-provider="handleStorageProviderUpdate"
                   />
                 </div>
@@ -711,6 +713,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       languages: [] as string[],
       tableMetadataInstructions: ''
     },
+    storageBackendId: '' as string,
     storageProvider: '' as string,
     multimodalConfig: {
       enabled: false,
@@ -832,6 +835,7 @@ const loadKBData = async () => {
         languages: kb.chunking_config?.languages || [],
         tableMetadataInstructions: kb.chunking_config?.table_metadata_instructions || ''
       },
+      storageBackendId: (kb.storage_backend_id || '') as string,
       storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
         enabled: !!kb.vlm_config?.enabled,
@@ -1019,22 +1023,35 @@ const handleAddWikiModel = () => {
 
 const handleStorageProviderUpdate = (value: string) => {
   if (formData.value) {
-    formData.value.storageProvider = value || tenantDefaultStorageProvider.value || 'local'
+    formData.value.storageProvider = props.mode === 'create'
+      ? editorResources.resolveUsableStorageProvider(value || tenantDefaultStorageProvider.value)
+      : (value || tenantDefaultStorageProvider.value || 'local')
+  }
+}
+
+const handleStorageBackendUpdate = (value: string) => {
+  if (formData.value) {
+    formData.value.storageBackendId = value
   }
 }
 
 async function loadTenantDefaultStorageProvider(force = false) {
   try {
     await editorResources.ensureStorageEngine(force)
-    tenantDefaultStorageProvider.value = editorResources.storageConfig?.default_provider || 'local'
+    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider(
+      editorResources.storageConfig?.default_provider,
+    )
   } catch {
-    tenantDefaultStorageProvider.value = 'local'
+    tenantDefaultStorageProvider.value = editorResources.resolveUsableStorageProvider()
   }
 }
 
 /** Resolved storage provider for create payload (never silently default to local before tenant config loads). */
 function resolvedStorageProvider(): string {
   const explicit = formData.value?.storageProvider?.trim()
+  if (props.mode === 'create') {
+    return editorResources.resolveUsableStorageProvider(explicit || tenantDefaultStorageProvider.value)
+  }
   if (explicit) return explicit
   return tenantDefaultStorageProvider.value || 'local'
 }
@@ -1170,8 +1187,11 @@ const buildSubmitData = () => {
     language: formData.value.asrConfig?.language || ''
   }
 
-  // 存储引擎：仅传 provider，参数从全局设置读取
-  // Write to storage_provider_config (authoritative) + storage_config (legacy dual-write)
+  // storage_backend_id is authoritative. Keep provider projection for old clients
+  // and for rolling upgrades where a node has not picked up the new schema yet.
+  if (formData.value.storageBackendId) {
+    data.storage_backend_id = formData.value.storageBackendId
+  }
   const storageProvider = resolvedStorageProvider()
   data.storage_provider_config = {
     provider: storageProvider
@@ -1355,6 +1375,7 @@ const doSubmit = async () => {
         multimodal: {
           enabled: !!data.vlm_config?.enabled
         },
+        storageBackendId: formData.value?.storageBackendId || '',
         storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || 'local',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,

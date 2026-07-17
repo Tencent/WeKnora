@@ -470,13 +470,21 @@ export const useSettingsStore = defineStore("settings", {
       const selectedKBs = this.getSelectedKnowledgeBases();
       const selectedFiles = this.getSelectedFiles();
       const tags = this.settings.selectedTags || [];
-      const tagIds = [...new Set(tags.map((t) => t.id).filter(Boolean))];
-      const tagKbIds = [...new Set(tags.map((t) => t.kbId).filter(Boolean))];
-      const kbIds = [...new Set([...selectedKBs, ...tagKbIds])];
+      const tagScopes = Object.entries(tags.reduce<Record<string, string[]>>((scopes, tag) => {
+        if (!tag.id || !tag.kbId) return scopes;
+        (scopes[tag.kbId] ||= []).push(tag.id);
+        return scopes;
+      }, {})).map(([knowledge_base_id, ids]) => ({
+        knowledge_base_id,
+        tag_ids: [...new Set(ids)],
+      }));
       return {
-        knowledge_base_ids: kbIds.length > 0 ? kbIds : undefined,
+        // A tag's parent KB is only an ownership hint, not an explicit whole-KB
+        // selection. Keep it in tag_scopes so the backend cannot widen a tag to
+        // every document in that KB.
+        knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
         knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
-        tag_ids: tagIds.length > 0 ? tagIds : undefined,
+        tag_scopes: tagScopes.length > 0 ? tagScopes : undefined,
         limit,
       };
     },
@@ -485,6 +493,9 @@ export const useSettingsStore = defineStore("settings", {
     selectAgent(agentId: string, sourceTenantId?: string | null) {
       this.settings.selectedAgentId = agentId;
       this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
+      // 智能体配置只决定是否具备网络搜索能力，不替用户决定是否在本轮使用。
+      // 每次选择智能体都默认关闭，之后只能由用户从输入框主动开启。
+      this.settings.webSearchEnabled = false;
       // 根据智能体类型自动切换 Agent 模式
       if (agentId === BUILTIN_QUICK_ANSWER_ID) {
         this.settings.isAgentEnabled = false;

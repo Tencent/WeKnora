@@ -11,11 +11,30 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+const retrievedImageOutputRequirement = `
+
+## Retrieved Image Output Requirement
+The retrieved context for this turn contains Markdown images. Images attached to retrieved passages should be treated as relevant by default.
+- Unless the user explicitly requests text-only output, or every retrieved image is clearly unrelated to the answer, the final answer MUST include at least one relevant Markdown image copied from the retrieved context.
+- Copy the complete Markdown image syntax and its URL verbatim. Never invent, shorten, normalize, or replace the URL.
+- Use ASCII half-width parentheses in image Markdown exactly as ![alt](url). Never use full-width （ or ）.
+- Place each image immediately after the paragraph it supports, rather than collecting images at the end.
+- When multiple retrieved images support different sections of a multi-section answer, include them in their corresponding sections instead of stopping after the first image.
+- Before finishing, silently verify that the answer contains a Markdown image whenever this requirement applies.`
+
+func appendRetrievedImageOutputRequirement(systemPrompt, renderedContexts string) string {
+	if !searchutil.MarkdownImageRegex.MatchString(renderedContexts) {
+		return systemPrompt
+	}
+	return strings.TrimRight(systemPrompt, " \t\r\n") + retrievedImageOutputRequirement
+}
 
 // pipelineInfo logs pipeline info level entries.
 func pipelineInfo(ctx context.Context, stage, action string, fields map[string]interface{}) {
@@ -75,6 +94,7 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 		"language": chatManage.Language,
 		"contexts": chatManage.RenderedContexts,
 	})
+	systemPrompt = appendRetrievedImageOutputRequirement(systemPrompt, chatManage.RenderedContexts)
 
 	chatMessages := []chat.Message{
 		{Role: "system", Content: systemPrompt},
@@ -125,14 +145,18 @@ func loadAndProcessHistory(
 			h = &types.History{}
 		}
 		if message.Role == "user" {
-			if message.RenderedContent != "" {
-				h.Query = message.RenderedContent
-			} else {
-				h.Query = message.Content
-			}
+			// RenderedContent is a snapshot of the prompt/context format used by
+			// the original turn. Replaying it would mix legacy <context id="…">
+			// envelopes and old citation instructions into the current protocol.
+			// Historical references are carried separately in KnowledgeReferences
+			// and can be re-merged into this turn's freshly rendered context.
+			h.Query = message.Content
 			h.CreateAt = message.CreatedAt
-			if desc := extractImageCaptions(message.Images); desc != "" && message.RenderedContent == "" {
+			if desc := extractImageCaptions(message.Images); desc != "" {
 				h.Query += "\n\n[用户上传图片内容]\n" + desc
+			}
+			if len(message.Attachments) > 0 {
+				h.Query += message.Attachments.BuildPrompt()
 			}
 		} else {
 			h.Answer = regThinkTags.ReplaceAllString(message.Content, "")

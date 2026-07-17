@@ -10,8 +10,18 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func finalAnswerImageRequirement(hasRetrievedImage bool) string {
+	if !hasRetrievedImage {
+		return ""
+	}
+	return `
+5. Retrieved tool results contain Markdown images. Unless the user explicitly requested text-only output or every image is clearly unrelated, the final answer MUST include at least one relevant Markdown image copied verbatim from the tool results. Preserve its complete URL exactly. Use ASCII half-width parentheses exactly as ![alt](url) and never use full-width （ or ）. Place the image immediately after the paragraph it supports. When multiple images support different sections, distribute them across those sections instead of stopping after the first image.
+6. Before finishing, silently verify that the answer contains a Markdown image when requirement 5 applies.`
+}
 
 // streamFinalAnswerToEventBus streams the final answer generation through EventBus
 func (e *AgentEngine) streamFinalAnswerToEventBus(
@@ -41,12 +51,17 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 
 	// Add all tool call results as context
 	toolResultCount := 0
+	hasRetrievedImage := false
 	for stepIdx, step := range state.RoundSteps {
 		for toolIdx, toolCall := range step.ToolCalls {
 			toolResultCount++
+			if searchutil.MarkdownImageRegex.MatchString(toolCall.Result.Output) {
+				hasRetrievedImage = true
+			}
+			modelOutput := e.sourceRefs.ModelOutput(toolCall.Result)
 			messages = append(messages, chat.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, toolCall.Result.Output),
+				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, modelOutput),
 			})
 			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
 				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
@@ -56,6 +71,8 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	logger.Debugf(ctx, "[Agent][FinalAnswer] Built context: %d messages, %d tool results",
 		len(messages), toolResultCount)
 
+	imageRequirement := finalAnswerImageRequirement(hasRetrievedImage)
+
 	// Add final answer prompt
 	finalPrompt := fmt.Sprintf(`Based on the above tool call results, generate a complete answer for the user's question.
 
@@ -63,12 +80,12 @@ User question: %s
 
 Requirements:
 1. Answer based on the actually retrieved content
-2. Cite sources by document title or name; never expose chunk_id, knowledge_id, tool names, or other internal identifiers
-3. Organize the answer in a structured format
-4. If information is insufficient, honestly state so
-5. IMPORTANT: Respond in the same language as the user's question
+2. Organize the answer in a structured format
+3. If information is insufficient, honestly state so
+4. IMPORTANT: Respond in the same language as the user's question
+%s
 
-Now generate the final answer:`, query)
+Now generate the final answer:`, query, imageRequirement)
 
 	messages = append(messages, chat.Message{
 		Role:    "user",

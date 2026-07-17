@@ -164,8 +164,12 @@ func IsValidURL(url string) bool {
 		return false
 	}
 
-	// 检查协议， 只允许 http, https, local, minio, cos, tos, oss 协议
-	allowedProtocols := []string{"http://", "https://", "local://", "minio://", "cos://", "tos://", "oss://"}
+	// Internal resource references are resolved through authenticated file
+	// proxies; provider schemes remain supported for legacy stored content.
+	allowedProtocols := []string{
+		"http://", "https://", "resource://", "storage://", "local://", "minio://",
+		"cos://", "tos://", "s3://", "oss://", "ks3://", "obs://",
+	}
 	isAllowed := false
 	for _, protocol := range allowedProtocols {
 		if strings.HasPrefix(strings.ToLower(url), protocol) {
@@ -485,6 +489,9 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 func IsValidImageURL(url string) bool {
 	if !IsValidURL(url) {
 		return false
+	}
+	if strings.HasPrefix(strings.ToLower(url), "resource://") {
+		return true
 	}
 
 	// 检查是否为图片文件

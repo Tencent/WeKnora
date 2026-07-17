@@ -115,6 +115,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
+	types.ConnectorTypeLark: {
+		Type:         types.ConnectorTypeLark,
+		Name:         "Lark",
+		Description:  "Sync documents, wikis, and content from Lark (Feishu international)",
+		Priority:     0,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 	types.ConnectorTypeNotion: {
 		Type:         types.ConnectorTypeNotion,
 		Name:         "Notion",

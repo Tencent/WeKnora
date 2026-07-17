@@ -29,10 +29,10 @@ const (
 
 var webFetchTool = BaseTool{
 	name: ToolWebFetch,
-	description: `Fetch detailed web content from previously discovered URLs and analyze it with an LLM.
+	description: `Fetch detailed web content from previously discovered short wN web page IDs and analyze it with an LLM.
 
 ## Usage
-- Receive one or more {url, prompt} combinations
+- Receive one or more {url: "wN", prompt} combinations; the field name stays url, but its value is the short page ID
 - Fetch web page content and convert to Markdown text
 - Use prompt to call small model for analysis and summary (if model is available)
 - Return summary result and original content fragment
@@ -45,12 +45,12 @@ var webFetchTool = BaseTool{
 
 // WebFetchInput defines the input parameters for web fetch tool
 type WebFetchInput struct {
-	Items []WebFetchItem `json:"items" jsonschema:"Batch fetch tasks, each containing a url and prompt"`
+	Items []WebFetchItem `json:"items" jsonschema:"Batch fetch tasks, each containing a short wN web page ID and prompt"`
 }
 
 // WebFetchItem represents a single web fetch task
 type WebFetchItem struct {
-	URL    string `json:"url" jsonschema:"URL of the web page to fetch, should come from web_search results"`
+	URL    string `json:"url" jsonschema:"Short wN web page ID from web_search results"`
 	Prompt string `json:"prompt" jsonschema:"Prompt for analyzing the fetched web page content"`
 }
 

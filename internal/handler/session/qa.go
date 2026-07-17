@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,7 +47,9 @@ type qaRequestContext struct {
 	images                []ImageAttachment        // Uploaded images with analysis text
 	userMessageID         string                   // Created user message ID (populated after createUserMessage)
 	channel               string                   // Source channel: "web", "api", "im", etc.
-	attachments           types.MessageAttachments // Processed file attachments
+	attachments           types.MessageAttachments // Processed base64 file attachments (legacy inline uploads)
+	attachmentIDs         []string                 // Pre-uploaded session-scoped document IDs, resolved after SSE starts
+	attachmentMetas       types.MessageAttachments // Metadata-only view of attachmentIDs for the persisted user message
 	suggestionAttribution *types.SuggestionAttribution
 
 	// Snapshot of the request fields needed to persist the input-bar state
@@ -246,6 +251,41 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		logger.Infof(ctx, "[%s] all attachments processed", logPrefix)
 	}
 
+	// Pre-uploaded documents may still be parsing. Only fetch their metadata
+	// here (fast, available even while processing) to validate agent file-type
+	// limits and to record the attachments on the persisted user message. The
+	// heavy content selection happens after the SSE stream is up, so the send
+	// is not blocked while parsing finishes (see resolveTemporaryAttachments).
+	var attachmentIDs []string
+	var attachmentMetas types.MessageAttachments
+	if len(request.AttachmentIDs) > 0 {
+		normalizedIDs, normErr := normalizeTemporaryAttachmentIDs(request.AttachmentIDs)
+		if normErr != nil {
+			return nil, nil, errors.NewBadRequestError(normErr.Error())
+		}
+		tenantID := session.TenantID
+		attachmentMetas = make(types.MessageAttachments, 0, len(normalizedIDs))
+		for _, id := range normalizedIDs {
+			doc, getErr := h.temporaryDocuments.Get(ctx, tenantID, sessionID, id)
+			if getErr != nil || doc == nil {
+				return nil, nil, errors.NewBadRequestError(
+					fmt.Sprintf("attachment %s was not found in this session", secutils.SanitizeForLog(id)))
+			}
+			if customAgent != nil && len(customAgent.Config.SupportedFileTypes) > 0 {
+				ext := strings.TrimPrefix(strings.ToLower(doc.FileType), ".")
+				if !containsFileType(customAgent.Config.SupportedFileTypes, ext) {
+					return nil, nil, errors.NewBadRequestError(
+						fmt.Sprintf("file type %s is not supported by this agent", ext))
+				}
+			}
+			attachmentMetas = append(attachmentMetas, types.MessageAttachment{
+				ID: doc.ID, URL: doc.ResourceRef, FileName: doc.FileName,
+				FileType: doc.FileType, FileSize: doc.FileSize,
+			})
+		}
+		attachmentIDs = normalizedIDs
+	}
+
 	// Resolve enable_memory:
 	//   1. Explicit value in request → honour it. Used by embedded mode
 	//      (force false) and by older clients still sending the literal bool.
@@ -274,6 +314,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		secutils.SanitizeForLogArray(kbIDs),
 		secutils.SanitizeForLogArray(knowledgeIDs),
 		secutils.SanitizeForLogArray(tagIDs),
+		tagScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
 		secutils.SanitizeForLogArray(skillNames),
 		request.WebSearchEnabled,
@@ -314,6 +355,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		images:                request.Images,
 		channel:               request.Channel,
 		attachments:           processedAttachments,
+		attachmentIDs:         attachmentIDs,
+		attachmentMetas:       attachmentMetas,
 		suggestionAttribution: request.SuggestionAttribution,
 		reqAgentEnabled:       request.AgentEnabled,
 		reqAgentID:            request.AgentID,
@@ -330,6 +373,7 @@ func buildMessageExecutionContext(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagIDs []string,
+	tagScopes []types.TagScope,
 	mcpServiceIDs []string,
 	skillNames []string,
 	webSearchEnabled bool,
@@ -343,6 +387,7 @@ func buildMessageExecutionContext(
 		KnowledgeBaseIDs: knowledgeBaseIDs,
 		KnowledgeIDs:     knowledgeIDs,
 		TagIDs:           tagIDs,
+		TagScopes:        cloneTagScopes(tagScopes),
 		MCPServiceIDs:    mcpServiceIDs,
 		SkillNames:       skillNames,
 		WebSearchEnabled: webSearchEnabled,
@@ -376,12 +421,14 @@ func buildMessageExecutionContext(
 		KnowledgeBaseIDs    []string                        `json:"knowledge_base_ids,omitempty"`
 		KnowledgeIDs        []string                        `json:"knowledge_ids,omitempty"`
 		TagIDs              []string                        `json:"tag_ids,omitempty"`
+		TagScopes           []types.TagScope                `json:"tag_scopes,omitempty"`
 		ModelID             string                          `json:"model_id,omitempty"`
 	}{
 		QuestionSuggestions: snapshot.QuestionSuggestions,
 		KnowledgeBaseIDs:    knowledgeBaseIDs,
 		KnowledgeIDs:        knowledgeIDs,
 		TagIDs:              tagIDs,
+		TagScopes:           snapshot.TagScopes,
 		ModelID:             modelID,
 	}
 	if encoded, err := json.Marshal(hashInput); err == nil {
@@ -390,6 +437,23 @@ func buildMessageExecutionContext(
 	}
 
 	return snapshot, agent.ID, agentTenantID, modelID
+}
+
+func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]types.TagScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" || len(scope.TagIDs) == 0 {
+			continue
+		}
+		cloned = append(cloned, types.TagScope{
+			KnowledgeBaseID: scope.KnowledgeBaseID,
+			TagIDs:          append([]string(nil), scope.TagIDs...),
+		})
+	}
+	return cloned
 }
 
 // resolveEnableMemory decides whether the memory pipeline runs for this
@@ -781,8 +845,13 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		}
 	}
 
-	// Create user message
-	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), reqCtx.attachments, reqCtx.channel, reqCtx.suggestionAttribution)
+	// Create user message. Include pre-uploaded document metadata so history
+	// reload shows the attachments even though their content is selected later.
+	userMessageAttachments := reqCtx.attachments
+	if len(reqCtx.attachmentMetas) > 0 {
+		userMessageAttachments = append(append(types.MessageAttachments{}, reqCtx.attachments...), reqCtx.attachmentMetas...)
+	}
+	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), userMessageAttachments, reqCtx.channel, reqCtx.suggestionAttribution)
 	if err != nil {
 		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -881,6 +950,10 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}
 		}()
+
+		// Resolve pre-uploaded attachments (may still be parsing): waits with a
+		// timeline step so the send is not blocked, then injects content/images.
+		h.resolveTemporaryAttachments(streamCtx, reqCtx)
 
 		// Run VLM image analysis if applicable
 		h.runVLMAnalysisIfNeeded(streamCtx, reqCtx, mode)
@@ -993,6 +1066,242 @@ func (h *Handler) runVLMAnalysisIfNeeded(streamCtx *sseStreamContext, reqCtx *qa
 			Iteration:  iteration,
 		},
 	})
+}
+
+// defaultAttachmentParseWaitTimeout bounds how long a QA turn waits for
+// still-parsing attachments before proceeding with only the finished ones.
+// Large or scanned documents can exceed this; raise it via
+// WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC when needed.
+const defaultAttachmentParseWaitTimeout = 60 * time.Second
+
+// attachmentParseWaitTimeout returns the configured wait timeout, honoring the
+// WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC override (in seconds) and falling
+// back to the default when unset or invalid.
+func attachmentParseWaitTimeout() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC")); raw != "" {
+		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return defaultAttachmentParseWaitTimeout
+}
+
+// resolveTemporaryAttachments selects prompt content for pre-uploaded documents
+// after the SSE stream is live. When any attachment is still parsing it emits a
+// "attachment_parsing" timeline step and waits (bounded); unfinished attachments
+// are skipped rather than blocking or failing the whole turn.
+func (h *Handler) resolveTemporaryAttachments(streamCtx *sseStreamContext, reqCtx *qaRequestContext) {
+	if len(reqCtx.attachmentIDs) == 0 {
+		return
+	}
+	ctx := streamCtx.asyncCtx
+	sessionID := reqCtx.sessionID
+	// Prefer the session's tenant over gin.Context: this runs in an async
+	// goroutine after the HTTP handler may have returned.
+	tenantID := reqCtx.session.TenantID
+
+	start := time.Now()
+	var toolCallID string
+	if h.hasPendingAttachments(ctx, tenantID, sessionID, reqCtx.attachmentIDs) {
+		toolCallID = uuid.New().String()
+		streamCtx.eventBus.Emit(ctx, event.Event{
+			Type:      event.EventAgentToolCall,
+			SessionID: sessionID,
+			Data: event.AgentToolCallData{
+				ToolCallID: toolCallID,
+				ToolName:   "attachment_parsing",
+				Iteration:  0,
+			},
+		})
+		waitTimeout := attachmentParseWaitTimeout()
+		if reqCtx.customAgent != nil && reqCtx.customAgent.Config.AttachmentParseWaitTimeoutSec > 0 {
+			waitTimeout = time.Duration(reqCtx.customAgent.Config.AttachmentParseWaitTimeoutSec) * time.Second
+		}
+		h.waitForAttachments(ctx, tenantID, sessionID, reqCtx.attachmentIDs, waitTimeout)
+	}
+
+	readyIDs, skipped := h.partitionReadyAttachments(ctx, tenantID, sessionID, reqCtx.attachmentIDs)
+
+	var temporaryResult *types.TemporaryDocumentPromptResult
+	var resolveErr error
+	if len(readyIDs) > 0 {
+		temporaryResult, resolveErr = h.temporaryDocuments.ResolveForPrompt(ctx, tenantID, sessionID, readyIDs, reqCtx.query)
+	}
+
+	if toolCallID != "" {
+		output := fmt.Sprintf("已解析 %d 个附件", len(readyIDs))
+		if skipped > 0 {
+			output += fmt.Sprintf("，%d 个未完成已跳过", skipped)
+		}
+		success := resolveErr == nil
+		if resolveErr != nil {
+			output = fmt.Sprintf("附件解析失败: %v", resolveErr)
+		}
+		streamCtx.eventBus.Emit(ctx, event.Event{
+			Type:      event.EventAgentToolResult,
+			SessionID: sessionID,
+			Data: event.AgentToolResultData{
+				ToolCallID: toolCallID,
+				ToolName:   "attachment_parsing",
+				Output:     output,
+				Success:    success,
+				Duration:   time.Since(start).Milliseconds(),
+				Iteration:  0,
+				Data: map[string]interface{}{
+					"display_type":  "attachment_parsing",
+					"parsed_count":  len(readyIDs),
+					"skipped_count": skipped,
+				},
+			},
+		})
+	}
+	if resolveErr != nil || temporaryResult == nil {
+		if resolveErr != nil {
+			logger.Warnf(ctx, "temporary attachment resolution failed for session %s: %v", sessionID, resolveErr)
+		}
+		return
+	}
+
+	attachments := temporaryResult.Attachments
+	if reqCtx.customAgent != nil && len(reqCtx.customAgent.Config.SupportedFileTypes) > 0 {
+		filtered := attachments[:0]
+		for _, att := range attachments {
+			ext := strings.TrimPrefix(strings.ToLower(att.FileType), ".")
+			if containsFileType(reqCtx.customAgent.Config.SupportedFileTypes, ext) {
+				filtered = append(filtered, att)
+			}
+		}
+		attachments = filtered
+	}
+	reqCtx.attachments = append(reqCtx.attachments, attachments...)
+	// Persist the freshly selected content back onto the stored user message.
+	// The message was created with metadata-only attachment entries (content is
+	// selected here, after the SSE stream is live), so without this write a
+	// later Agent-mode turn rebuilds history from the Attachments column and
+	// sees empty attachments (see buildUserHistoryMessage in agent_history.go).
+	h.persistResolvedAttachmentContent(ctx, reqCtx, attachments)
+	if reqCtx.customAgent != nil && reqCtx.customAgent.Config.ImageUploadEnabled {
+		for _, imageURL := range temporaryResult.ImageURLs {
+			reqCtx.images = append(reqCtx.images, ImageAttachment{URL: imageURL})
+		}
+	}
+}
+
+// persistResolvedAttachmentContent writes the parsed content of pre-uploaded
+// attachments back onto the stored user message so multi-turn history can
+// replay it. Entries are matched by their temporary-document ID; only those
+// present on the message are enriched. Failures are logged but never bubble up
+// — losing the write only degrades follow-up context, it must not fail the turn.
+func (h *Handler) persistResolvedAttachmentContent(
+	ctx context.Context, reqCtx *qaRequestContext, resolved types.MessageAttachments,
+) {
+	if reqCtx.userMessageID == "" || len(resolved) == 0 {
+		return
+	}
+	// Detach from the request/stream lifetime and pin the session tenant so a
+	// user-triggered stop (which cancels asyncCtx) does not drop the write.
+	updateCtx := context.WithValue(
+		context.WithoutCancel(ctx), types.TenantIDContextKey, reqCtx.session.TenantID,
+	)
+	msg, err := h.messageService.GetMessage(updateCtx, reqCtx.sessionID, reqCtx.userMessageID)
+	if err != nil || msg == nil {
+		logger.Warnf(updateCtx, "persist attachment content: load user message %s failed: %v",
+			reqCtx.userMessageID, err)
+		return
+	}
+	byID := make(map[string]types.MessageAttachment, len(resolved))
+	for _, att := range resolved {
+		if att.ID != "" {
+			byID[att.ID] = att
+		}
+	}
+	changed := false
+	for i := range msg.Attachments {
+		if msg.Attachments[i].ID == "" {
+			continue
+		}
+		if enriched, ok := byID[msg.Attachments[i].ID]; ok {
+			msg.Attachments[i] = enriched
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	if err := h.messageService.UpdateMessage(updateCtx, msg); err != nil {
+		logger.Warnf(updateCtx, "persist attachment content: update user message %s failed: %v",
+			reqCtx.userMessageID, err)
+	}
+}
+
+// normalizeTemporaryAttachmentIDs rejects oversized ID lists before any DB
+// lookup, then returns a deduplicated, order-preserving list of non-empty IDs.
+func normalizeTemporaryAttachmentIDs(ids []string) ([]string, error) {
+	if len(ids) > types.MaxTemporaryAttachmentsPerMessage {
+		return nil, fmt.Errorf("a message can use at most %d attachments", types.MaxTemporaryAttachmentsPerMessage)
+	}
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// hasPendingAttachments reports whether any of the given documents is still
+// uploading or being parsed.
+func (h *Handler) hasPendingAttachments(ctx context.Context, tenantID uint64, sessionID string, ids []string) bool {
+	for _, id := range ids {
+		doc, err := h.temporaryDocuments.Get(ctx, tenantID, sessionID, id)
+		if err != nil || doc == nil {
+			continue
+		}
+		if doc.Status == types.TemporaryDocumentStatusUploaded ||
+			doc.Status == types.TemporaryDocumentStatusProcessing {
+			return true
+		}
+	}
+	return false
+}
+
+// waitForAttachments polls until no attachment is pending or the timeout / ctx
+// cancellation fires.
+func (h *Handler) waitForAttachments(ctx context.Context, tenantID uint64, sessionID string, ids []string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if !h.hasPendingAttachments(ctx, tenantID, sessionID, ids) || time.Now().After(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// partitionReadyAttachments splits the ids into ready ones and a count of those
+// skipped (missing, failed, or still parsing after the wait).
+func (h *Handler) partitionReadyAttachments(ctx context.Context, tenantID uint64, sessionID string, ids []string) (ready []string, skipped int) {
+	for _, id := range ids {
+		doc, err := h.temporaryDocuments.Get(ctx, tenantID, sessionID, id)
+		if err != nil || doc == nil || doc.Status != types.TemporaryDocumentStatusReady {
+			skipped++
+			continue
+		}
+		ready = append(ready, id)
+	}
+	return ready, skipped
 }
 
 // persistLastRequestState records the input-bar state the user just sent so

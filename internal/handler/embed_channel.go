@@ -715,6 +715,7 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 	if !ch.AllowFileUpload {
 		delete(payload, "images")
 		delete(payload, "attachment_uploads")
+		delete(payload, "attachment_ids")
 	}
 	payload["mcp_service_ids"] = []string{}
 	if agentMode {

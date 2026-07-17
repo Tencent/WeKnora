@@ -20,7 +20,7 @@ var grepChunksTool = BaseTool{
 	name: ToolGrepChunks,
 	description: `Search knowledge base chunk content with a single POSIX regular expression, applied directly in the database (PostgreSQL ~* / MySQL/SQLite REGEXP, case-insensitive). Behaves like ` + "`grep -E -i`" + `.
 Pack multiple concepts into ONE regex using ` + "`|`" + ` alternation — do not call this tool repeatedly for synonyms.
-Returns matching chunks with hit counts and a <match_snippet> around the first match (each tagged with its knowledge_id and chunk_id).
+Returns matching chunks with a short cN chunk source ID, a parent dN document ID, and a <match> snippet around the first match.
 Examples:
 - Alternation (RECOMMENDED): "stardust|skyvault|psionic" (matches any of the words)
 - Multiple terms in order: "psionic.*engine" (matches both words in order)
@@ -30,8 +30,8 @@ IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ in
 Use this to locate candidate chunks by exact identifiers, error codes, product names, or recurring terms.
 
 ## Deep read after grep:
-- **FAQ hit** (chunk type faq): call list_knowledge_chunks with **faq_id** from the grep result (NOT the parent knowledge_id).
-- **Document hit**: call list_knowledge_chunks with **knowledge_id**, or get_document_info with **knowledge_ids**.`,
+- **FAQ hit** (chunk type faq): call list_knowledge_chunks with **faq_id=cN** from the grep result (NOT the parent dN document ID).
+- **Document hit**: call list_knowledge_chunks with **knowledge_id=dN**, or get_document_info with **knowledge_ids=[dN]**.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {

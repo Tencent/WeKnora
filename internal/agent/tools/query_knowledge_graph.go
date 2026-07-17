@@ -37,7 +37,7 @@ Explores relationships between entities in knowledge bases that have graph extra
 - Need exact document content → use knowledge_search
 
 ## Parameters
-- **knowledge_base_ids** (required): Array of knowledge base IDs (1-10). Only KBs with graph extraction configured will be effective.
+- **knowledge_base_ids** (required): Array of short bN knowledge base IDs (1-10). Only KBs with graph extraction configured will be effective.
 - **query** (required): Query content - can be entity name, relationship query, or concept search.
 
 ## Graph Configuration
@@ -61,7 +61,7 @@ If KB is not configured with graph, tool will return regular search results.
 
 // QueryKnowledgeGraphInput defines the input parameters for query knowledge graph tool
 type QueryKnowledgeGraphInput struct {
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of knowledge base IDs to query"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of short bN knowledge base IDs to query"`
 	Query            string   `json:"query" jsonschema:"Query content (entity name or query text)"`
 }
 
@@ -299,14 +299,17 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		output += fmt.Sprintf("  🆔 chunk_id: %s\n\n", result.ID)
 
 		formattedResults = append(formattedResults, map[string]interface{}{
-			"result_index":    i + 1,
-			"chunk_id":        result.ID,
-			"content":         result.Content,
-			"score":           result.Score,
-			"relevance_level": relevanceLevel,
-			"knowledge_id":    result.KnowledgeID,
-			"knowledge_title": result.KnowledgeTitle,
-			"match_type":      FormatMatchType(result.MatchType),
+			"result_index":      i + 1,
+			"chunk_id":          result.ID,
+			"chunk_index":       result.ChunkIndex,
+			"chunk_type":        result.ChunkType,
+			"content":           result.Content,
+			"score":             result.Score,
+			"relevance_level":   relevanceLevel,
+			"knowledge_id":      result.KnowledgeID,
+			"knowledge_base_id": result.KnowledgeBaseID,
+			"knowledge_title":   result.KnowledgeTitle,
+			"match_type":        FormatMatchType(result.MatchType),
 		})
 	}
 

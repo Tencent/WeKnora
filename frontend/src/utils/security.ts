@@ -12,7 +12,20 @@ import {
 } from './markdownDomPurify.ts';
 
 const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-const PROVIDER_FILE_SCHEME_RE = /^(local|minio|cos|tos|s3|oss|ks3|obs):\/\/\S+$/i;
+const PROVIDER_SCHEME_PATTERN = 'resource|local|minio|cos|tos|s3|oss|ks3|obs';
+const PROVIDER_FILE_SCHEME_RE = new RegExp(`^(${PROVIDER_SCHEME_PATTERN}):\\/\\/\\S+$`, 'i');
+const STORAGE_BACKEND_FILE_SCHEME_RE = new RegExp(
+  `^storage:\\/\\/[0-9A-Za-z_-]+\\/(${PROVIDER_SCHEME_PATTERN}):\\/\\/\\S+$`,
+  'i',
+);
+const PROVIDER_IMG_SRC_RE = new RegExp(
+  `<img\\b([^>]*?)\\ssrc=(["'])(${PROVIDER_SCHEME_PATTERN}):(?:\\/\\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\\2([^>]*)>`,
+  'gi',
+);
+const STORAGE_BACKEND_IMG_SRC_RE = new RegExp(
+  `<img\\b([^>]*?)\\ssrc=(["'])storage:\\/\\/([0-9A-Za-z_-]+)\\/(${PROVIDER_SCHEME_PATTERN}):(?:\\/\\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\\2([^>]*)>`,
+  'gi',
+);
 
 type SecurityHooks = {
   beforeSanitizeElements: NodeHook;
@@ -120,30 +133,50 @@ export function sanitizeMarkdownHTML(html: string): string {
   }
 }
 
+function buildProtectedImageTag(
+  before: string,
+  quote: string,
+  protectedSrc: string,
+  after: string,
+): string {
+  // A definitive 404 should not leave a skeleton behind. Streaming
+  // re-renders call this function repeatedly, so remember the missing
+  // source until the explicit end-of-stream retry clears the cache.
+  if (protectedFileMissingSources.has(protectedSrc)) {
+    return '';
+  }
+  // Reuse the already-hydrated blob if we have one, so repeated re-renders
+  // (typewriter streaming) keep the same stable image instead of flashing
+  // back to the placeholder every frame.
+  const cachedBlobURL = protectedFileBlobBySource.get(protectedSrc);
+  if (cachedBlobURL) {
+    return `<img${before} src=${quote}${cachedBlobURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
+  }
+  // Not hydrated yet: render the 1x1 placeholder but tag it so CSS can give
+  // it a stable skeleton box. Otherwise width:auto/height:auto collapse the
+  // 1x1 gif to a ~1px line that violently jumps to full size once loaded.
+  return `<img${before} src=${quote}${PROVIDER_IMAGE_PLACEHOLDER}${quote} data-protected-src=${quote}${protectedSrc}${quote} data-img-loading=${quote}1${quote}${after}>`;
+}
+
 export function protectProviderImageSrcInHTML(html: string): string {
   if (!html) return html;
-  return html.replace(
-    /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos|s3|oss|ks3|obs):(?:\/\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\2([^>]*)>/gi,
+  const withProviderImages = html.replace(
+    PROVIDER_IMG_SRC_RE,
     (_m, before, quote, provider, restPathRaw, after) => {
       const restPath = decodeProviderURL(restPathRaw);
-      const protectedSrc = `${provider}://${restPath}`;
-      // A definitive 404 should not leave a skeleton behind. Streaming
-      // re-renders call this function repeatedly, so remember the missing
-      // source until the explicit end-of-stream retry clears the cache.
-      if (protectedFileMissingSources.has(protectedSrc)) {
-        return '';
-      }
-      // Reuse the already-hydrated blob if we have one, so repeated re-renders
-      // (typewriter streaming) keep the same stable image instead of flashing
-      // back to the placeholder every frame.
-      const cachedBlobURL = protectedFileBlobBySource.get(protectedSrc);
-      if (cachedBlobURL) {
-        return `<img${before} src=${quote}${cachedBlobURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
-      }
-      // Not hydrated yet: render the 1x1 placeholder but tag it so CSS can give
-      // it a stable skeleton box. Otherwise width:auto/height:auto collapse the
-      // 1x1 gif to a ~1px line that violently jumps to full size once loaded.
-      return `<img${before} src=${quote}${PROVIDER_IMAGE_PLACEHOLDER}${quote} data-protected-src=${quote}${protectedSrc}${quote} data-img-loading=${quote}1${quote}${after}>`;
+      return buildProtectedImageTag(before, quote, `${provider}://${restPath}`, after);
+    },
+  );
+  return withProviderImages.replace(
+    STORAGE_BACKEND_IMG_SRC_RE,
+    (_m, before, quote, backendID, provider, restPathRaw, after) => {
+      const restPath = decodeProviderURL(restPathRaw);
+      return buildProtectedImageTag(
+        before,
+        quote,
+        `storage://${backendID}/${provider}://${restPath}`,
+        after,
+      );
     },
   );
 }
@@ -158,7 +191,8 @@ function decodeProviderURL(raw: string): string {
 }
 
 function isProviderFileURL(url: string): boolean {
-  return PROVIDER_FILE_SCHEME_RE.test(url.trim());
+  const trimmed = url.trim();
+  return PROVIDER_FILE_SCHEME_RE.test(trimmed) || STORAGE_BACKEND_FILE_SCHEME_RE.test(trimmed);
 }
 
 function providerSourceFromImageSrc(src: string): string | null {
@@ -465,7 +499,7 @@ export async function hydrateProtectedFileImages(
   }
 
   const images = root.querySelectorAll<HTMLImageElement>(
-    'img[data-protected-src], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
+    'img[data-protected-src], img[src^="resource://"], img[src^="storage://"], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
   );
   if (!images.length) {
     return;

@@ -71,19 +71,11 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		return ErrGetRerankModel.WithError(err)
 	}
 
-	// Prepare passages for reranking (excluding DirectLoad results)
+	// Prepare passages for reranking.
 	var passages []string
 	var candidatesToRerank []*types.SearchResult
-	var directLoadResults []*types.SearchResult
 
 	for _, result := range chatManage.SearchResult {
-		if result.MatchType == types.MatchTypeDirectLoad {
-			directLoadResults = append(directLoadResults, result)
-			pipelineInfo(ctx, "Rerank", "direct_load_skip", map[string]interface{}{
-				"chunk_id": result.ID,
-			})
-			continue
-		}
 		passage := getEnrichedPassage(ctx, result)
 		if strings.TrimSpace(passage) == "" {
 			pipelineInfo(ctx, "Rerank", "empty_passage_skip", map[string]interface{}{
@@ -99,15 +91,14 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	rerankCtx, rerankSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "rerank",
 		Input: map[string]interface{}{
-			"query":             chatManage.RewriteQuery,
-			"candidate_count":   len(candidatesToRerank),
-			"direct_load_count": len(directLoadResults),
-			"rerank_model_id":   chatManage.RerankModelID,
-			"threshold":         chatManage.RerankThreshold,
-			"rerank_top_k":      chatManage.RerankTopK,
-			"faq_priority":      chatManage.FAQPriorityEnabled,
-			"faq_score_boost":   chatManage.FAQScoreBoost,
-			"passages_preview":  passagesPreview,
+			"query":            chatManage.RewriteQuery,
+			"candidate_count":  len(candidatesToRerank),
+			"rerank_model_id":  chatManage.RerankModelID,
+			"threshold":        chatManage.RerankThreshold,
+			"rerank_top_k":     chatManage.RerankTopK,
+			"faq_priority":     chatManage.FAQPriorityEnabled,
+			"faq_score_boost":  chatManage.FAQScoreBoost,
+			"passages_preview": passagesPreview,
 		},
 		Metadata: map[string]interface{}{
 			"session_id": chatManage.SessionID,
@@ -123,7 +114,6 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Rerank", "build_passages", map[string]interface{}{
 		"total_cnt":     len(chatManage.SearchResult),
 		"candidate_cnt": len(candidatesToRerank),
-		"direct_cnt":    len(directLoadResults),
 	})
 
 	var rerankResp []rerank.RankResult
@@ -144,7 +134,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 				"error":         rerankErr.Error(),
 				"candidate_cnt": len(candidatesToRerank),
 			})
-			chatManage.SearchResult = append(directLoadResults, candidatesToRerank...)
+			chatManage.SearchResult = candidatesToRerank
 			spanOutput = map[string]interface{}{
 				"stage":           "api_error_fallback",
 				"candidate_count": len(candidatesToRerank),
@@ -176,7 +166,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 					"error":         rerankErr.Error(),
 					"candidate_cnt": len(candidatesToRerank),
 				})
-				chatManage.SearchResult = append(directLoadResults, candidatesToRerank...)
+				chatManage.SearchResult = candidatesToRerank
 				spanOutput = map[string]interface{}{
 					"stage":              "api_error_fallback",
 					"candidate_count":    len(candidatesToRerank),
@@ -198,7 +188,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	for i := range chatManage.SearchResult {
 		chatManage.SearchResult[i].Metadata = ensureMetadata(chatManage.SearchResult[i].Metadata)
 	}
-	reranked := make([]*types.SearchResult, 0, len(rerankResp)+len(directLoadResults))
+	reranked := make([]*types.SearchResult, 0, len(rerankResp))
 
 	// Process reranked results
 	for _, rr := range rerankResp {
@@ -230,16 +220,6 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		reranked = append(reranked, sr)
 	}
 
-	// Process direct load results (bypass rerank model, assume high relevance)
-	for _, sr := range directLoadResults {
-		base := sr.Score
-		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
-		modelScore := 1.0
-		sr.Metadata["model_score"] = fmt.Sprintf("%.4f", modelScore)
-		// Assign high model score for direct load items
-		sr.Score = compositeScore(sr, modelScore, base)
-		reranked = append(reranked, sr)
-	}
 	final := applyMMR(ctx, reranked, chatManage, min(len(reranked), max(1, chatManage.RerankTopK)), 0.7)
 	chatManage.RerankResult = final
 
@@ -261,7 +241,6 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		spanOutput = buildRerankSpanOutput(
 			candidatesToRerank,
 			passages,
-			directLoadResults,
 			rawRerankResp,
 			reranked,
 			nil,
@@ -274,7 +253,6 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	spanOutput = buildRerankSpanOutput(
 		candidatesToRerank,
 		passages,
-		directLoadResults,
 		rawRerankResp,
 		reranked,
 		chatManage.RerankResult,
@@ -290,7 +268,6 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 func buildRerankSpanOutput(
 	candidates []*types.SearchResult,
 	passages []string,
-	directLoad []*types.SearchResult,
 	modelScores []rerank.RankResult,
 	composite []*types.SearchResult,
 	final []*types.SearchResult,
@@ -319,7 +296,6 @@ func buildRerankSpanOutput(
 
 	out := map[string]interface{}{
 		"candidate_count":    len(candidates),
-		"direct_load_count":  len(directLoad),
 		"model_result_count": len(modelScores),
 		"composite_count":    len(composite),
 		"final_count":        len(final),
@@ -415,7 +391,7 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	// still has a reasonable score, keep it as a safety net. Skip fallback entirely
 	// when the best score is too low — forcing irrelevant results is worse than
 	// returning nothing and letting the caller handle the empty-result case.
-	const fallbackMinScore = 0.15
+	fallbackMinScore := rerankFallbackMinScore(chatManage.SearchTargets)
 	if len(rankFilter) == 0 && len(rerankResp) > 0 && rerankResp[0].RelevanceScore >= fallbackMinScore {
 		rankFilter = rerankResp[:1]
 		pipelineInfo(ctx, "Rerank", "fallback_top1", map[string]interface{}{
@@ -432,6 +408,16 @@ func (p *PluginRerank) rerank(ctx context.Context,
 	}
 
 	return rankFilter, nil
+}
+
+func rerankFallbackMinScore(searchTargets types.SearchTargets) float64 {
+	if searchTargets.HasRecallThresholdOverride() {
+		// The user explicitly constrained this turn to a tag/document scope.
+		// Preserve its best candidate instead of letting a global rerank
+		// threshold erase the entire authoritative scope.
+		return 0
+	}
+	return 0.15
 }
 
 // ensureMetadata ensures the metadata is not nil

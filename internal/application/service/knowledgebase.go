@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -26,21 +27,22 @@ var ErrInvalidTenantID = errors.New("invalid tenant ID")
 
 // knowledgeBaseService implements the knowledge base service interface
 type knowledgeBaseService struct {
-	repo           interfaces.KnowledgeBaseRepository
-	kgRepo         interfaces.KnowledgeRepository
-	chunkRepo      interfaces.ChunkRepository
-	shareRepo      interfaces.KBShareRepository
-	kbShareService interfaces.KBShareService
-	modelService   interfaces.ModelService
-	retrieveEngine interfaces.RetrieveEngineRegistry
-	ownership      retriever.TenantStoreOwnership
-	tenantRepo     interfaces.TenantRepository
-	fileSvc        interfaces.FileService
-	graphEngine    interfaces.RetrieveGraphRepository
-	asynqClient    interfaces.TaskEnqueuer
-	dsRepo         interfaces.DataSourceRepository
-	syncLogRepo    interfaces.SyncLogRepository
-	dsScheduler    *datasource.Scheduler
+	repo            interfaces.KnowledgeBaseRepository
+	kgRepo          interfaces.KnowledgeRepository
+	chunkRepo       interfaces.ChunkRepository
+	shareRepo       interfaces.KBShareRepository
+	kbShareService  interfaces.KBShareService
+	modelService    interfaces.ModelService
+	retrieveEngine  interfaces.RetrieveEngineRegistry
+	ownership       retriever.TenantStoreOwnership
+	tenantRepo      interfaces.TenantRepository
+	fileSvc         interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
+	graphEngine     interfaces.RetrieveGraphRepository
+	asynqClient     interfaces.TaskEnqueuer
+	dsRepo          interfaces.DataSourceRepository
+	syncLogRepo     interfaces.SyncLogRepository
+	dsScheduler     *datasource.Scheduler
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -54,6 +56,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	ownership retriever.TenantStoreOwnership,
 	tenantRepo interfaces.TenantRepository,
 	fileSvc interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
 	graphEngine interfaces.RetrieveGraphRepository,
 	asynqClient interfaces.TaskEnqueuer,
 	dsRepo interfaces.DataSourceRepository,
@@ -61,21 +64,22 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	dsScheduler *datasource.Scheduler,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
-		repo:           repo,
-		kgRepo:         kgRepo,
-		chunkRepo:      chunkRepo,
-		shareRepo:      shareRepo,
-		kbShareService: kbShareService,
-		modelService:   modelService,
-		retrieveEngine: retrieveEngine,
-		ownership:      ownership,
-		tenantRepo:     tenantRepo,
-		fileSvc:        fileSvc,
-		graphEngine:    graphEngine,
-		asynqClient:    asynqClient,
-		dsRepo:         dsRepo,
-		syncLogRepo:    syncLogRepo,
-		dsScheduler:    dsScheduler,
+		repo:            repo,
+		kgRepo:          kgRepo,
+		chunkRepo:       chunkRepo,
+		shareRepo:       shareRepo,
+		kbShareService:  kbShareService,
+		modelService:    modelService,
+		retrieveEngine:  retrieveEngine,
+		ownership:       ownership,
+		tenantRepo:      tenantRepo,
+		fileSvc:         fileSvc,
+		storageResolver: storageResolver,
+		graphEngine:     graphEngine,
+		asynqClient:     asynqClient,
+		dsRepo:          dsRepo,
+		syncLogRepo:     syncLogRepo,
+		dsScheduler:     dsScheduler,
 	}
 }
 
@@ -118,6 +122,9 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	}
 	kb.EnsureDefaults()
 	applyTenantDefaultStorageProvider(ctx, kb)
+	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
+		return nil, err
+	}
 
 	// Fold empty-string vector_store_id into nil so this path and the
 	// retrieve-engine factory's pre-condition share a single representation.
@@ -149,6 +156,37 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	return kb, nil
 }
 
+func (s *knowledgeBaseService) applyAndValidateStorageBackend(ctx context.Context, kb *types.KnowledgeBase) error {
+	if s.storageResolver == nil || kb == nil {
+		return nil
+	}
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		return apperrors.NewBadRequestError("workspace context missing")
+	}
+	id := ""
+	if kb.StorageBackendID != nil {
+		id = strings.TrimSpace(*kb.StorageBackendID)
+	}
+	provider := kb.GetStorageProvider()
+	// A newly created KB without an explicit instance follows the concrete
+	// tenant default. The legacy provider is only a fallback for workspaces
+	// that have not been migrated yet.
+	if id == "" && tenant.DefaultStorageBackendID != nil && strings.TrimSpace(*tenant.DefaultStorageBackendID) != "" {
+		provider = ""
+	}
+	backend, err := s.storageResolver.ResolveBackend(ctx, tenant, id, provider)
+	if err != nil {
+		return apperrors.NewBadRequestError("storage backend is unavailable").WithDetails(err.Error())
+	}
+	if backend == nil {
+		return nil
+	}
+	kb.StorageBackendID = &backend.ID
+	kb.SetStorageProvider(backend.Provider)
+	return nil
+}
+
 // applyTenantDefaultStorageProvider fills an empty KB storage provider from the
 // tenant's global default (Settings → Storage engine). Frontend should send the
 // same value; this keeps API clients and legacy UIs consistent.
@@ -157,11 +195,15 @@ func applyTenantDefaultStorageProvider(ctx context.Context, kb *types.KnowledgeB
 		return
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	provider := "local"
+	provider := ""
 	if tenant != nil && tenant.StorageEngineConfig != nil {
-		if p := strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider)); p != "" {
-			provider = p
-		}
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+	if provider == "" || !storageallowlist.IsAllowed(provider) {
+		provider = storageallowlist.FirstAllowed()
+	}
+	if provider == "" {
+		return
 	}
 	kb.SetStorageProvider(provider)
 }
@@ -973,22 +1015,19 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 					"cross-store cloning is not yet supported")
 		}
 
-		// Defense 3: storage backend must match — only meaningful when the
-		// tenant has a StorageEngineConfig. Without it, resolveFileService
-		// ignores per-KB provider pins and routes ALL KBs to the global
-		// storage service, so a clone can never span two real backends and
-		// the pins must NOT be used to reject (that would be a false positive).
-		// When a tenant config exists, pins are honored, so compare effective
-		// providers and reject a genuine cross-backend clone up front (it would
-		// otherwise fail mid-clone with ErrCrossBackendCopy).
-		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil && tenant.StorageEngineConfig != nil {
-			tenantDefault := tenant.StorageEngineConfig.DefaultProvider
-			srcProvider := sourceKB.EffectiveStorageProvider(tenantDefault)
-			dstProvider := targetKB.EffectiveStorageProvider(tenantDefault)
-			if srcProvider != "" && dstProvider != "" && srcProvider != dstProvider {
-				return nil, nil, apperrors.NewBadRequestError(fmt.Sprintf(
-					"source and target knowledge bases use different storage backends (%s vs %s); "+
-						"cross-storage-backend cloning is not supported", srcProvider, dstProvider))
+		// Defense 3: the concrete storage instance must match. Comparing only
+		// provider names would incorrectly allow COS-A -> COS-B clones.
+		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
+			defaultID, defaultProvider := "", ""
+			if tenant.DefaultStorageBackendID != nil {
+				defaultID = *tenant.DefaultStorageBackendID
+			}
+			if tenant.StorageEngineConfig != nil {
+				defaultProvider = tenant.StorageEngineConfig.DefaultProvider
+			}
+			if !sourceKB.SharesStorageBackendWith(targetKB, defaultID, defaultProvider) {
+				return nil, nil, apperrors.NewBadRequestError(
+					"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported")
 			}
 		}
 	} else {
@@ -1011,6 +1050,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			SummaryModelID:        sourceKB.SummaryModelID,
 			VLMConfig:             sourceKB.VLMConfig,
 			StorageProviderConfig: sourceKB.StorageProviderConfig,
+			StorageBackendID:      sourceKB.StorageBackendID,
 			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
 			VectorStoreID:         sourceKB.VectorStoreID,
