@@ -3307,43 +3307,14 @@ async function createNewSession(value: string): Promise<void> {
   margin: 0 16px 0 4px;
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
+@media (max-width: 959px) {
   .answers-input {
-    transform: translateX(-329px);
+    width: 100%;
+    box-sizing: border-box;
   }
 
   :deep(.t-textarea__inner) {
-    width: 654px !important;
-  }
-}
-
-@media (max-width: 1045px) {
-  .answers-input {
-    transform: translateX(-250px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 500px !important;
-  }
-}
-
-@media (max-width: 750px) {
-  .answers-input {
-    transform: translateX(-182px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 340px !important;
-  }
-}
-
-@media (max-width: 600px) {
-  .answers-input {
-    transform: translateX(-164px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 300px !important;
+    width: 100% !important;
   }
 }
 

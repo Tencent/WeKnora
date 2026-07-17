@@ -2753,6 +2753,7 @@ const getImgSrc = (url: string) => {
   position: relative;
   width: 100%;
   max-width: 800px;
+  box-sizing: border-box;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
   border: 1px solid var(--td-component-stroke, #dcdcdc);
@@ -2950,6 +2951,34 @@ const getImgSrc = (url: string) => {
     font-size: 16px;
     font-weight: 400;
     line-height: 24px;
+  }
+}
+
+@media (max-width: 959px) {
+  .rich-input-container {
+    max-width: none;
+  }
+
+  :deep(.t-textarea__inner) {
+    min-height: 96px !important;
+    max-height: 160px !important;
+    padding: 10px 12px 48px 12px;
+  }
+
+  .control-bar {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    gap: 4px;
+  }
+
+  .control-left {
+    gap: 4px;
+  }
+
+  .control-btn {
+    padding-left: 6px;
+    padding-right: 6px;
   }
 }
 

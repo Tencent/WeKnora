@@ -1015,8 +1015,9 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     align-items: center;
+    width: 100%;
     max-width: calc(100vw - 260px);
-    min-width: 400px;
+    min-width: 0;
 
     &.is-sidebar-collapsed {
         max-width: calc(100vw - 60px);
@@ -1069,6 +1070,20 @@ onBeforeRouteUpdate((to, from, next) => {
         width: 100% !important;
         min-height: 48px !important;
         padding: 10px 14px 48px 14px;
+    }
+
+    @media (max-width: 959px) {
+        padding: 12px;
+        max-width: 100%;
+        align-items: stretch;
+
+        &.is-sidebar-collapsed {
+            max-width: 100%;
+        }
+
+        &.is-embedded {
+            padding: 0;
+        }
     }
 }
 
