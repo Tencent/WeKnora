@@ -66,10 +66,14 @@ function onClick() {
     <div class="kf-row" @click="onClick">
       <span
         class="kf-toggle"
-        :class="{ 'kf-toggle--leaf': !node.hasChildren && !node.expanded }"
+        :class="{ 'kf-toggle--leaf': !node.hasChildren }"
         @click.stop="emit('toggle', node)"
       >
-        <t-icon :name="node.expanded ? 'chevron-down' : (node.hasChildren ? 'chevron-right' : 'folder')" />
+        <t-icon :name="node.expanded ? 'chevron-down' : 'chevron-right'" />
+      </span>
+
+      <span class="kf-folder-icon">
+        <t-icon name="folder" />
       </span>
 
       <input
@@ -152,9 +156,21 @@ function onClick() {
     color: var(--td-text-color-placeholder);
     font-size: 14px;
 
-    &--leaf .t-icon {
-      color: var(--td-text-color-placeholder);
+    &--leaf {
+      opacity: 0;
+      pointer-events: none;
     }
+  }
+
+  .kf-folder-icon {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    color: var(--td-text-color-secondary);
+    font-size: 16px;
   }
 
   .kf-name {
@@ -196,6 +212,9 @@ function onClick() {
   .kf-name {
     color: var(--td-brand-color);
     font-weight: 500;
+  }
+  .kf-folder-icon {
+    color: var(--td-brand-color);
   }
   .kf-actions {
     opacity: 1;

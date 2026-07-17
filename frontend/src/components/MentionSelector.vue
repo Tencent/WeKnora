@@ -115,7 +115,42 @@
         >
           {{ group.label }}
         </div>
-        <div class="mention-group" :data-group-type="group.type">
+
+        <!-- 文件夹按知识库分组：非搜索态渲染为可展开折叠的多级树 -->
+        <div
+          v-if="group.type.startsWith('folder:') && !isFlatMode"
+          class="mention-group folder-tree-group"
+          :data-group-type="group.type"
+        >
+          <div
+            v-for="(item, index) in group.items"
+            :key="`${item.type}:${item.id}`"
+            class="mention-item folder-tree-item"
+            :class="{ active: group.offset + index === activeIndex, 'is-leaf': !item.hasChildren }"
+            :style="{ '--folder-depth': item.depth || 0 }"
+            @click="handleFolderTreeSelect(item)"
+            @mouseenter="$emit('update:activeIndex', group.offset + index)"
+          >
+            <span
+              class="folder-tree-toggle"
+              :class="{ 'is-leaf': !item.hasChildren }"
+              @click.stop="toggleFolder(item.id)"
+            >
+              <t-icon :name="isFolderExpanded(item.id) ? 'chevron-down' : 'chevron-right'" />
+            </span>
+            <div class="icon-wrap">
+              <div class="icon folder-icon">
+                <t-icon name="folder" />
+              </div>
+            </div>
+            <div class="item-main">
+              <span class="name">{{ item.name }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 其他分组 / 搜索态平铺 -->
+        <div v-else class="mention-group" :data-group-type="group.type">
         <t-popup
           v-for="(item, index) in group.items"
           :key="`${item.type}:${item.id}`"
@@ -296,11 +331,65 @@ const detailCache = ref<Record<string, DetailState>>({});
 const isScrolling = ref(false);
 const currentGroupType = ref<MentionItemType | null>(null);
 const groupActiveIndex = ref(0);
+// 文件夹树展开状态：默认展开所有有子节点的节点，便于一眼看到多级层级
+const folderExpandedIds = ref<Set<string>>(new Set());
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 onBeforeUnmount(() => {
   if (scrollTimer) clearTimeout(scrollTimer);
 });
+
+// 文件夹树：仅初始化一次展开状态，默认展开所有有子节点的节点
+let folderTreeInitDone = false;
+watch(() => props.items, (items) => {
+  if (folderTreeInitDone || items.length === 0) return;
+  const folderItems = items.filter(i => i.type === 'folder' && i.hasChildren);
+  folderExpandedIds.value = new Set(folderItems.map(f => f.id));
+  folderTreeInitDone = true;
+}, { immediate: true });
+
+// 把某个知识库下的扁平 folder 列表按 parent_id 组织成树，并按展开状态返回可见节点（前序遍历）
+function buildFolderTreeNodes(items: MentionItem[], expandedIds: Set<string>): MentionItem[] {
+  const childrenMap = new Map<string, MentionItem[]>();
+  for (const item of items) {
+    const parentId = item.parentId || '';
+    if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
+    childrenMap.get(parentId)!.push(item);
+  }
+  for (const children of childrenMap.values()) {
+    children.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  }
+  const result: MentionItem[] = [];
+  function walk(parentId: string) {
+    const children = childrenMap.get(parentId) || [];
+    for (const child of children) {
+      result.push(child);
+      if (expandedIds.has(child.id) && child.hasChildren) {
+        walk(child.id);
+      }
+    }
+  }
+  walk('');
+  return result;
+}
+
+function isFolderExpanded(folderId: string) {
+  return folderExpandedIds.value.has(folderId);
+}
+
+function toggleFolder(folderId: string) {
+  const next = new Set(folderExpandedIds.value);
+  if (next.has(folderId)) {
+    next.delete(folderId);
+  } else {
+    next.add(folderId);
+  }
+  folderExpandedIds.value = next;
+}
+
+function handleFolderTreeSelect(item: MentionItem) {
+  emit('select', item);
+}
 
 // 共享智能体上下文：用于请求知识库/知识详情时带 agent_id，后端据此校验权限
 const agentIdForDetail = computed(() => {
@@ -312,19 +401,47 @@ const agentIdForDetail = computed(() => {
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
 
-const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
-  { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
-  { type: 'tag', label: '标签', icon: 'tag' },
-  { type: 'mcp', label: 'MCP', icon: 'tools' },
-  { type: 'skill', label: 'Skills', icon: 'bookmark' },
-  { type: 'folder', label: '文件夹', icon: 'folder-open' },
-  { type: 'file', label: t('common.file'), icon: 'file' },
-]);
+const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => {
+  const base: Array<{ type: MentionItemType; label: string; icon: string }> = [
+    { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
+    { type: 'tag', label: '标签', icon: 'tag' },
+    { type: 'mcp', label: 'MCP', icon: 'tools' },
+    { type: 'skill', label: 'Skills', icon: 'bookmark' },
+    { type: 'file', label: t('common.file'), icon: 'file' },
+  ];
+  // 文件夹按所属知识库拆分成多个分组，形成「知识库 → 其下文件夹」的层级，
+  // 避免多个知识库的同名文件夹平铺在一起无法区分。
+  const folderItems = props.items.filter(item => item.type === 'folder');
+  const kbOrder: string[] = [];
+  const kbNameById = new Map<string, string>();
+  for (const f of folderItems) {
+    if (f.kbId && !kbNameById.has(f.kbId)) {
+      kbNameById.set(f.kbId, f.kbName || '');
+      kbOrder.push(f.kbId);
+    }
+  }
+  const folderDefs = kbOrder.map(kbId => ({
+    type: `folder:${kbId}` as MentionItemType,
+    label: kbNameById.get(kbId) || '文件夹',
+    icon: 'folder-open',
+  }));
+  // folder 分组插入在 skill 与 file 之间
+  return [base[0], base[1], base[2], base[3], ...folderDefs, base[4]];
+});
 
 const mentionGroups = computed(() => {
   let offset = 0;
   return mentionGroupDefs.value.map(def => {
-    const items = props.items.filter(item => item.type === def.type);
+    let items: MentionItem[];
+    if (def.type.startsWith('folder:')) {
+      const kbFolders = props.items.filter(item => item.type === 'folder' && item.kbId === def.type.slice('folder:'.length));
+      // 搜索态仍平铺；非搜索态按 parent_id 渲染成可展开树
+      items = isFlatMode.value
+        ? kbFolders
+        : buildFolderTreeNodes(kbFolders, folderExpandedIds.value);
+    } else {
+      items = props.items.filter(item => item.type === def.type);
+    }
     const loadedCount = items.length;
     const count = props.groupCounts?.[def.type] ?? loadedCount;
     const group = { ...def, items, offset, count, loadedCount };
@@ -805,6 +922,45 @@ const scrollToItem = (index: number) => {
   white-space: nowrap;
   font-size: var(--td-font-size-mark-small, 12px);
   color: var(--td-text-color-secondary, #999);
+}
+
+.folder-tree-group {
+  padding: 2px 0 5px;
+}
+
+.folder-tree-item {
+  padding-left: calc(6px + var(--folder-depth, 0) * 16px);
+}
+
+.folder-tree-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--td-text-color-placeholder, #999);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.folder-tree-toggle:hover {
+  color: var(--td-text-color-primary, #333);
+}
+
+.folder-tree-toggle.is-leaf {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.folder-tree-item .folder-icon {
+  color: var(--td-text-color-secondary, #666);
+}
+
+.folder-tree-item.active .folder-icon,
+.folder-tree-item.active .folder-tree-toggle {
+  color: var(--td-brand-color);
 }
 
 .empty {

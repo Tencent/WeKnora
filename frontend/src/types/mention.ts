@@ -1,4 +1,4 @@
-export type MentionItemType = 'kb' | 'file' | 'tag' | 'mcp' | 'skill' | 'folder';
+export type MentionItemType = 'kb' | 'file' | 'tag' | 'mcp' | 'skill' | 'folder' | `folder:${string}`;
 
 export interface MentionItem {
   id: string;
@@ -15,6 +15,10 @@ export interface MentionItem {
   serviceName?: string;
   skillName?: string;
   isAgentConfigured?: boolean;
+  // folder tree fields
+  parentId?: string;
+  depth?: number;
+  hasChildren?: boolean;
 }
 
 export interface MentionRequestItem {

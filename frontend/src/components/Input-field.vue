@@ -1343,7 +1343,16 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         try {
           const res: any = await listAllKnowledgeFolders(kb.id);
           const payload = res?.data ?? res;
-          const list = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload) ? payload : []);
+          // Backend returns { parent_id: '', folders: [...] } directly.
+          const list = Array.isArray(payload?.data?.folders)
+            ? payload.data.folders
+            : Array.isArray(payload?.folders)
+              ? payload.folders
+              : Array.isArray(payload?.data)
+                ? payload.data
+                : Array.isArray(payload)
+                  ? payload
+                  : [];
           return list.map((folder: any) => ({
             id: folder.id,
             name: folder.name,
@@ -1352,6 +1361,10 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
             kbName: kb.name,
             // path 便于同名文件夹区分展示
             description: folder.path || '',
+            // 树形层级需要以下字段
+            parentId: folder.parent_id || '',
+            depth: typeof folder.depth === 'number' ? folder.depth : 0,
+            hasChildren: !!folder.has_children,
           }));
         } catch {
           return [];
