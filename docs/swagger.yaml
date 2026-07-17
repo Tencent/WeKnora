@@ -3821,6 +3821,7 @@ definitions:
     - baidu
     - searxng
     - keenable
+    - zhipu
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBing
@@ -3831,6 +3832,7 @@ definitions:
     - WebSearchProviderTypeBaidu
     - WebSearchProviderTypeSearxng
     - WebSearchProviderTypeKeenable
+    - WebSearchProviderTypeZhipu
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       content_instructions:

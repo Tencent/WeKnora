@@ -1562,6 +1562,18 @@ export default {
     basicInfo: "Basic Information",
     credentials: "Credentials",
     setAsDefaultDesc: "This provider will be used by default when an agent doesn't specify one",
+    configFields: {
+      searchEngine: 'Search engine',
+      searchEngineDesc: 'Select the Zhipu search engine and per-request price tier.',
+      searchStd: 'Standard · ¥0.01/request',
+      searchPro: 'Pro · ¥0.03/request',
+      searchSogou: 'Sogou · ¥0.05/request',
+      searchQuark: 'Quark · ¥0.05/request',
+      contentSize: 'Content size',
+      contentSizeDesc: 'Medium returns concise summaries; high returns more context.',
+      contentMedium: 'Medium',
+      contentHigh: 'High',
+    },
     // Search behavior
     searchBehaviorTitle: 'Search Behavior',
     defaultProviderLabel: 'Default Provider',

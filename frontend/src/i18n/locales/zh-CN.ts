@@ -1435,6 +1435,18 @@ export default {
     basicInfo: "基础信息",
     credentials: "凭证信息",
     setAsDefaultDesc: "当智能体没有指定特定的搜索引擎时，将默认使用此配置",
+    configFields: {
+      searchEngine: "搜索引擎",
+      searchEngineDesc: "选择智谱搜索引擎及对应的单次调用价格档位。",
+      searchStd: "基础版 · ¥0.01/次",
+      searchPro: "高级版 · ¥0.03/次",
+      searchSogou: "搜狗 · ¥0.05/次",
+      searchQuark: "夸克 · ¥0.05/次",
+      contentSize: "摘要长度",
+      contentSizeDesc: "中等返回精简摘要；详细返回更多上下文。",
+      contentMedium: "中等",
+      contentHigh: "详细",
+    },
     // Search behavior
     searchBehaviorTitle: "搜索行为配置",
     defaultProviderLabel: "默认搜索引擎",
