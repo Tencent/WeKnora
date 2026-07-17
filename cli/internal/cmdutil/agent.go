@@ -7,7 +7,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// VisibleAgentLister enumerates current-tenant and shared-space agents.
+// VisibleAgentLister enumerates current-workspace and shared-space agents.
 type VisibleAgentLister interface {
 	ListAgents(ctx context.Context) ([]sdk.Agent, error)
 	ListSharedAgents(ctx context.Context) ([]sdk.SharedAgentInfo, error)
@@ -26,7 +26,7 @@ type VisibleAgent struct {
 	DisabledByMe   bool       `json:"disabled_by_me,omitempty"`
 }
 
-// ListVisibleAgents combines current-tenant and shared-space agents. Owned
+// ListVisibleAgents combines current-workspace and shared-space agents. Owned
 // rows win if the same ID is ever returned by both endpoints.
 func ListVisibleAgents(
 	ctx context.Context, lister VisibleAgentLister, includeOwned, includeShared bool,

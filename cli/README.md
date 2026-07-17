@@ -224,7 +224,7 @@ against the whole envelope, so reach into list items with `.data[]`:
 ```bash
 weknora kb list --format json                              # {"ok":true,"data":[{"id":"kb_x",…}],"meta":{"count":1,…}}
 weknora kb list --shared --format json                     # shared-space KBs only
-weknora kb list --owned --format json                      # current-tenant KBs only
+weknora kb list --owned --format json                      # current-workspace KBs only
 weknora agent list --shared --format json                  # shared-space agents only
 weknora kb view kb_x --format json                         # {"ok":true,"data":{"id":"kb_x","name":"Eng",…}}
 weknora kb list --format json --jq '.data[] | {id, name}'  # project listed fields out of each item
@@ -232,7 +232,7 @@ weknora kb list --format json --jq '.data[].id'            # ids only
 weknora kb list --format json --jq '.meta.count'           # number returned
 ```
 
-`kb list` combines current-tenant and shared-space KBs by default. Shared rows
+`kb list` combines current-workspace and shared-space KBs by default. Shared rows
 carry `is_shared:true` plus `organization_id`, `org_name`, `permission`, and
 `source_tenant_id`; `--owned` and `--shared` are mutually exclusive filters.
 `agent list` follows the same source-selection and metadata rules.

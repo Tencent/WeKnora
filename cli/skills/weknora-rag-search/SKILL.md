@@ -45,7 +45,7 @@ one wastes turns or returns the wrong shape. Use the decision table.
   If none resolves it's exit 1 (`local.kb_id_required`); a bad name is exit 1
   (`local.kb_not_found`). Resolve names with `weknora kb list` / `search kb`;
   both include shared-space KBs. If the same name exists in multiple visible
-  tenants, pass the UUID shown by `kb list`.
+  workspaces, pass the UUID shown by `kb list`.
   (`search kb` / `search sessions` take no `--kb`.)
 - `chat` / `session ask` return one buffered JSON envelope with answer
   events by default. Add `--reference` for indexed citations and `--verbose`

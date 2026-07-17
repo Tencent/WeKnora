@@ -65,12 +65,12 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.Owned, "owned", false, "Only show agents in the current tenant")
+	cmd.Flags().BoolVar(&opts.Owned, "owned", false, "Only show agents in the current workspace")
 	cmd.Flags().BoolVar(&opts.Shared, "shared", false, "Only show agents received through shared spaces")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmdutil.AddFormatFlag(cmd, agentListFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:  "List current-tenant and shared-space agents visible to the active profile. Use --owned or --shared to restrict the source.",
+		UsedFor:  "List current-workspace and shared-space agents visible to the active profile. Use --owned or --shared to restrict the source.",
 		Examples: []string{"weknora agent list --format json", "weknora agent list --shared --format json"},
 		Output:   "envelope.data is an array of Agent objects; is_shared identifies shared rows and shared rows include org_name, permission, and source_tenant_id",
 	})
@@ -135,7 +135,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 
 	if len(items) == 0 {
 		if opts.Owned {
-			fmt.Fprintln(iostreams.IO.Out, "(no current-tenant agents)")
+			fmt.Fprintln(iostreams.IO.Out, "(no current-workspace agents)")
 			return nil
 		}
 		if opts.Shared {

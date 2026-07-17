@@ -153,7 +153,7 @@ type kbListOutput struct {
 func addKBList(server *mcpsdk.Server, svc knowledgeBaseService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "kb_list",
-		Description: "List all current-tenant and shared-space knowledge bases visible to the active WeKnora profile. No arguments. Shared items carry is_shared=true plus org_name, permission, and source_tenant_id.",
+		Description: "List all current-workspace and shared-space knowledge bases visible to the active WeKnora profile. No arguments. Shared items carry is_shared=true plus org_name, permission, and source_tenant_id.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "List Knowledge Bases",
 			DestructiveHint: bptr(false),
@@ -526,7 +526,7 @@ type agentListOutput struct {
 func addAgentList(server *mcpsdk.Server, svc agentService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "agent_list",
-		Description: "List current-tenant and shared-space agents visible to the active profile. Shared items carry is_shared=true plus org_name, permission, and source_tenant_id; use an id with session_ask.",
+		Description: "List current-workspace and shared-space agents visible to the active profile. Shared items carry is_shared=true plus org_name, permission, and source_tenant_id; use an id with session_ask.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "List Custom Agents",
 			DestructiveHint: bptr(false),

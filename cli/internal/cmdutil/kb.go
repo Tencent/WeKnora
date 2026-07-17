@@ -33,7 +33,7 @@ type SharedKBLister interface {
 	ListSharedKnowledgeBases(ctx context.Context) ([]sdk.SharedKnowledgeBaseInfo, error)
 }
 
-// VisibleKBLister can enumerate both current-tenant and cross-tenant shared
+// VisibleKBLister can enumerate both current-workspace and cross-tenant shared
 // knowledge bases. The production SDK client implements this interface.
 type VisibleKBLister interface {
 	KBLister
@@ -86,7 +86,7 @@ func (kb *VisibleKnowledgeBase) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ListVisibleKnowledgeBases combines current-tenant and shared-space KBs.
+// ListVisibleKnowledgeBases combines current-workspace and shared-space KBs.
 // Callers choose which sources to include so `kb list --owned` and `--shared`
 // avoid unnecessary requests. Owned rows win defensively if an API ever
 // returns the same KB from both endpoints.
