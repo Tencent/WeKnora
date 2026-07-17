@@ -154,8 +154,13 @@ func (s *sessionService) KnowledgeQA(
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
-	// Determine pipeline based on knowledge bases availability and web search setting
-	hasKB := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
+	// Determine pipeline based on knowledge bases availability and web search setting.
+	// searchTargets is the authoritative signal: it already folds in explicit KB/file
+	// selections, @mentioned folders (expanded to their subtree's knowledge IDs) and
+	// tag scopes. Gating on the top-level knowledgeBaseIDs/knowledgeIDs alone would
+	// mislabel a folder-only or tag-only request (both empty at the top level) as a
+	// pure-chat request, skipping retrieval entirely and letting the model hallucinate.
+	hasKB := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0 || len(searchTargets) > 0
 	needsRAG := hasKB || req.WebSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
 
