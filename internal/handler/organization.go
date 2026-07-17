@@ -1303,6 +1303,7 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
 		return
 	}
+	sharedKBs = filterSharedKnowledgeBasesForAPIKeyScope(ctx, sharedKBs)
 
 	// Each row goes through sharedKBRow so the embedded KnowledgeBase
 	// payload runs SharedStoreDisplay() before serialization. This is
@@ -1320,6 +1321,22 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 		"data":    rows,
 		"total":   len(rows),
 	})
+}
+
+func filterSharedKnowledgeBasesForAPIKeyScope(
+	ctx context.Context, sharedKBs []*types.SharedKnowledgeBaseInfo,
+) []*types.SharedKnowledgeBaseInfo {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
+		return sharedKBs
+	}
+	filtered := make([]*types.SharedKnowledgeBaseInfo, 0, len(sharedKBs))
+	for _, info := range sharedKBs {
+		if info != nil && info.KnowledgeBase != nil && scope.AllowsKnowledgeBase(info.KnowledgeBase.ID) {
+			filtered = append(filtered, info)
+		}
+	}
+	return filtered
 }
 
 // ShareAgent shares an agent to an organization
