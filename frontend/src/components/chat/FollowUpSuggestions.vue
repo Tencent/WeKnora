@@ -66,8 +66,10 @@ const dismiss = () => {
 @import (reference) '../css/suggested-questions.less';
 
 .follow-ups {
-  max-width: 760px;
-  margin: -4px 0 28px 46px;
+  width: 100%;
+  max-width: 600px;
+  margin: -4px 0 28px;
+  margin-right: auto;
   padding: 12px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 12px;
@@ -139,7 +141,7 @@ const dismiss = () => {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .follow-up-card-enter-active {
-  transform-origin: 24px 0;
+  transform-origin: left top;
   transition:
     opacity .22s ease .04s,
     transform .28s cubic-bezier(.22, .61, .36, 1) .04s,

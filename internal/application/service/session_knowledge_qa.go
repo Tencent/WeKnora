@@ -1189,10 +1189,12 @@ func (s *sessionService) consumeFallbackStream(
 }
 
 // emitKnowledgeReferencesEvent streams retrieved chunks to the client as a
-// `references` SSE event. Must run before CHAT_COMPLETION_STREAM so citations
-// arrive while the connection is still open (complete closes the stream).
+// `references` SSE event. These references drive the retrieval-results UI and
+// remain available even when inline citations in the model answer are disabled.
+// Must run before CHAT_COMPLETION_STREAM so the event arrives while the
+// connection is still open (complete closes the stream).
 func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatManage) {
-	if chatManage == nil || !chatManage.CitationsEnabled() || chatManage.EventBus == nil || len(chatManage.MergeResult) == 0 {
+	if chatManage == nil || chatManage.EventBus == nil || len(chatManage.MergeResult) == 0 {
 		return
 	}
 	logger.Infof(ctx, "Emitting references event with %d results (pre-answer)", len(chatManage.MergeResult))

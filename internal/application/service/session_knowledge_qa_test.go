@@ -52,29 +52,32 @@ type stubModelService struct {
 	modelsByID map[string]*types.Model
 }
 
-func TestEmitKnowledgeReferencesEventHonorsCitationSetting(t *testing.T) {
+func TestEmitKnowledgeReferencesEventIgnoresCitationOutputSetting(t *testing.T) {
 	bus := event.NewEventBus()
-	emitted := 0
-	bus.On(event.EventAgentReferences, func(context.Context, event.Event) error {
-		emitted++
+	var emitted []event.Event
+	bus.On(event.EventAgentReferences, func(_ context.Context, evt event.Event) error {
+		emitted = append(emitted, evt)
 		return nil
 	})
 	disabled := false
+	result := &types.SearchResult{ID: "chunk-1", KnowledgeTitle: "Doc"}
 	cm := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{CitationEnabled: &disabled},
 		PipelineState: types.PipelineState{
-			MergeResult: []*types.SearchResult{{ID: "chunk-1"}},
+			MergeResult: []*types.SearchResult{result},
 		},
 		PipelineContext: types.PipelineContext{EventBus: bus.AsEventBusInterface()},
 	}
 
 	emitKnowledgeReferencesEvent(context.Background(), cm)
-	require.Zero(t, emitted)
+	require.Len(t, emitted, 1)
+	require.Equal(t, event.EventAgentReferences, emitted[0].Type)
+	require.Equal(t, []*types.SearchResult{result}, emitted[0].Data.(event.AgentReferencesData).References)
 
 	enabled := true
 	cm.CitationEnabled = &enabled
 	emitKnowledgeReferencesEvent(context.Background(), cm)
-	require.Equal(t, 1, emitted)
+	require.Len(t, emitted, 2)
 }
 
 func (s *stubModelService) CreateModel(context.Context, *types.Model) error {
