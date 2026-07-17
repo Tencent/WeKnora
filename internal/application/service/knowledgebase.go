@@ -797,16 +797,25 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			// Group knowledge by embedding model and type
 			type groupKey struct {
 				EmbeddingModelID string
+				TenantID         uint64
 				Type             string
 			}
 			embeddingGroups := make(map[groupKey][]string)
 			for _, knowledge := range knowledgeList {
-				key := groupKey{EmbeddingModelID: knowledge.EmbeddingModelID, Type: knowledge.Type}
+				key := groupKey{
+					EmbeddingModelID: knowledge.EmbeddingModelID,
+					TenantID:         knowledge.TenantID,
+					Type:             knowledge.Type,
+				}
 				embeddingGroups[key] = append(embeddingGroups[key], knowledge.ID)
 			}
 
 			for key, knowledgeGroup := range embeddingGroups {
-				embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, key.EmbeddingModelID)
+				if strings.TrimSpace(key.EmbeddingModelID) == "" {
+					logger.Infof(ctx, "Skipping vector store cleanup for %d knowledge entries without embedding model", len(knowledgeGroup))
+					continue
+				}
+				embeddingModel, err := getEmbeddingModelForTenant(ctx, s.modelService, key.EmbeddingModelID, key.TenantID)
 				if err != nil {
 					logger.Warnf(ctx, "Failed to get embedding model %s: %v", key.EmbeddingModelID, err)
 					continue

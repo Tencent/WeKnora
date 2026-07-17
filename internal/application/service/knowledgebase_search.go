@@ -6,7 +6,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -22,14 +21,7 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		return nil, err
 	}
 
-	currentTenantID := types.MustTenantIDFromContext(ctx)
-	var embeddingModel embedding.Embedder
-
-	if kb.TenantID != currentTenantID {
-		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
-	} else {
-		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
-	}
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
 	if err != nil {
 		logger.Errorf(ctx, "GetQueryEmbedding: failed to get embedding model %s: %v", kb.EmbeddingModelID, err)
 		return nil, err
@@ -322,7 +314,6 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	params types.SearchParams,
 	matchCount int,
 ) ([]types.RetrieveParams, error) {
-	currentTenantID := types.MustTenantIDFromContext(ctx)
 	var retrieveParams []types.RetrieveParams
 
 	// Partition the group's KBs by index routing. A KB that does not have
@@ -354,7 +345,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		(len(faqVectorKBIDs) > 0 || len(docVectorKBIDs) > 0) {
 		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
 
-		queryEmbedding, err := s.resolveQueryEmbedding(ctx, primary, params, currentTenantID)
+		queryEmbedding, err := s.resolveQueryEmbedding(ctx, primary, params)
 		if err != nil {
 			return nil, err
 		}
@@ -415,7 +406,6 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 	ctx context.Context,
 	kb *types.KnowledgeBase,
 	params types.SearchParams,
-	currentTenantID uint64,
 ) ([]float32, error) {
 	if len(params.QueryEmbedding) > 0 {
 		logger.Infof(ctx, "Using pre-computed query embedding, vector length: %d", len(params.QueryEmbedding))
@@ -424,14 +414,7 @@ func (s *knowledgeBaseService) resolveQueryEmbedding(
 
 	logger.Infof(ctx, "Getting embedding model, model ID: %s", kb.EmbeddingModelID)
 
-	var embeddingModel embedding.Embedder
-	var err error
-	if kb.TenantID != currentTenantID {
-		logger.Infof(ctx, "Cross-tenant knowledge base detected, using source tenant's embedding model. KB tenant: %d, current tenant: %d", kb.TenantID, currentTenantID)
-		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
-	} else {
-		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
-	}
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error: %v", kb.EmbeddingModelID, err)
 		return nil, err

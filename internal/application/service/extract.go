@@ -514,13 +514,6 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		return nil, err
 	}
 
-	// 获取嵌入模型（用于向量化）
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, payload.EmbeddingModel)
-	if err != nil {
-		logger.Errorf(ctx, "failed to get embedding model: %v", err)
-		return nil, err
-	}
-
 	// Load the KB to discover its VectorStoreID binding so the factory can
 	// route to the bound store (or fall back to tenant engines if unbound).
 	kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
@@ -528,6 +521,14 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		logger.Errorf(ctx, "failed to get knowledge base for vector store lookup: %v", err)
 		return nil, err
 	}
+
+	// 获取嵌入模型（用于向量化）
+	embeddingModel, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get embedding model: %v", err)
+		return nil, err
+	}
+
 	var vectorStoreID *string
 	if kb != nil {
 		vectorStoreID = kb.VectorStoreID

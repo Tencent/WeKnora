@@ -177,7 +177,7 @@ func (s *wikiIngestService) selectRelevantFolders(
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
 	}
 
-	embedder, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	embedder, err := getEmbeddingModelForKB(ctx, s.modelService, kb)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: taxonomy plan embed model unavailable, feeding all folders: %v", err)
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)

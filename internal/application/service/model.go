@@ -468,7 +468,16 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	logger.Infof(ctx, "Getting cross-tenant embedding model: %s, source: %s, tenant: %d", model.Name, model.Source, tenantID)
 
-	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
+	credentialCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+	credentialCtx = context.WithValue(credentialCtx, types.TenantInfoContextKey, (*types.Tenant)(nil))
+	if s.tenantService != nil {
+		if tenant, tenantErr := s.tenantService.GetTenantByID(credentialCtx, tenantID); tenantErr == nil && tenant != nil {
+			credentialCtx = context.WithValue(credentialCtx, types.TenantInfoContextKey, tenant)
+		} else if tenantErr != nil {
+			logger.Warnf(ctx, "Failed to load tenant %d for cross-tenant model credentials: %v", tenantID, tenantErr)
+		}
+	}
+	appID, appSecret := s.resolveWeKnoraCloudCredentials(credentialCtx, &model.Parameters)
 
 	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
 	if err != nil {
