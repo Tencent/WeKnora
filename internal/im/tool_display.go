@@ -38,6 +38,7 @@ var imToolNameLabels = map[string]string{
 	"list_knowledge_chunks":   "查看知识分块",
 	"get_related_documents":   "查找相关文档",
 	"get_document_content":    "获取文档内容",
+	"wiki_navigate":           "Wiki 浏览",
 	"wiki_search":             "Wiki 搜索",
 	"wiki_read_page":          "Wiki 阅读",
 	"wiki_read_source_doc":    "精读源文档",
@@ -306,7 +307,7 @@ func imAgentToolTitle(step IMToolStep) string {
 		switch step.ToolName {
 		case "image_analysis":
 			return "正在查看图片内容..."
-		case "wiki_search", "wiki_read_page":
+		case "wiki_navigate", "wiki_search", "wiki_read_page":
 			return imLocalizedToolName(step.ToolName) + "..."
 		default:
 			return fmt.Sprintf("正在调用 %s...", imLocalizedToolName(step.ToolName))
@@ -314,7 +315,7 @@ func imAgentToolTitle(step IMToolStep) string {
 	}
 
 	toolName := step.ToolName
-	isSearchTool := toolName == "search_knowledge" || toolName == "knowledge_search" || toolName == "wiki_search"
+	isSearchTool := toolName == "search_knowledge" || toolName == "knowledge_search" || toolName == "wiki_navigate" || toolName == "wiki_search"
 	if isSearchTool {
 		base := imToolStatusDescription(step)
 		query := imGetQueryText(step.Arguments)
@@ -367,7 +368,7 @@ func imToolStatusDescription(step IMToolStep) string {
 			return "检索知识库"
 		}
 		return "检索知识库失败"
-	case "wiki_search", "wiki_read_page":
+	case "wiki_navigate", "wiki_search", "wiki_read_page":
 		name := imLocalizedToolName(toolName)
 		if success {
 			return name

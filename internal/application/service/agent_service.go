@@ -481,6 +481,7 @@ func (s *agentService) registerTools(
 			tools.ToolDataAnalysis:        true,
 			tools.ToolDataSchema:          true,
 			// Wiki tools also require at least one KB in scope.
+			tools.ToolWikiNavigate:      true,
 			tools.ToolWikiReadPage:      true,
 			tools.ToolWikiSearch:        true,
 			tools.ToolWikiReadSourceDoc: true,
@@ -528,6 +529,7 @@ func (s *agentService) registerTools(
 		tools.ToolDatabaseQuery:       true,
 	}
 	allWikiToolSet := map[string]bool{
+		tools.ToolWikiNavigate:      true,
 		tools.ToolWikiReadPage:      true,
 		tools.ToolWikiSearch:        true,
 		tools.ToolWikiReadSourceDoc: true,
@@ -633,6 +635,8 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered data_schema tool")
 
 		// Wiki tools — only registered when wiki KBs are detected
+		case tools.ToolWikiNavigate:
+			toolToRegister = tools.NewWikiNavigateTool(s.wikiPageService, s.knowledgeService, wikiScopes)
 		case tools.ToolWikiReadPage:
 			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, s.knowledgeService, wikiScopes)
 		case tools.ToolWikiSearch:

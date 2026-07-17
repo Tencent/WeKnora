@@ -58,6 +58,7 @@ export const TOOL_CAPABILITY_REQUIREMENTS: Record<string, ToolRequirement> = {
 
   // ---- Wiki (operates on wiki pages referenced by the wiki machinery;
   //      arbitrary user-picked file IDs aren't meaningful here) ----
+  wiki_navigate:       { allOf: ['wiki'] },
   wiki_search:          { allOf: ['wiki'] },
   wiki_read_page:       { allOf: ['wiki'] },
   wiki_read_source_doc: { allOf: ['wiki'] },

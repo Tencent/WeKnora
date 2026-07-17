@@ -5291,6 +5291,8 @@ export default {
       requiresRagKb: '(требуется база знаний с включённым векторным/ключевым индексом)',
       requiresWikiKb: '(требуется база знаний с включённой Wiki)',
       // Wiki чтение
+      wikiNavigate: 'Навигация по Wiki',
+      wikiNavigateDesc: 'Просмотр индекса, категорий и ссылок Wiki для поиска страниц',
       wikiSearch: 'Поиск по Wiki',
       wikiSearchDesc: 'Поиск страниц Wiki по ключевым словам / семантике',
       wikiReadPage: 'Читать страницу Wiki',

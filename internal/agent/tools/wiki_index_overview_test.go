@@ -48,7 +48,7 @@ func TestRenderIndexOverviewForAgent_IncludesIntroAndTruncationHint(t *testing.T
 	// renders; the dash + summary portion is elided.
 	assertContains(t, got, "[[concept/emb|Embedding]]")
 	// Exploration hint.
-	assertContains(t, got, "wiki_search")
+	assertContains(t, got, "wiki_navigate")
 }
 
 // TestRenderIndexOverviewForAgent_EmptyKB explains to the model that the

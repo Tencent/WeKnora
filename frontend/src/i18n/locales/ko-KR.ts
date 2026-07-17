@@ -5872,6 +5872,8 @@ export default {
       requiresRagKb: '(벡터/키워드 인덱싱이 활성화된 지식베이스가 필요합니다)',
       requiresWikiKb: '(Wiki 기능이 활성화된 지식베이스가 필요합니다)',
       // Wiki 읽기
+      wikiNavigate: 'Wiki 탐색',
+      wikiNavigateDesc: 'Wiki 인덱스, 카테고리, 링크를 훑어 후보 페이지를 찾습니다',
       wikiSearch: 'Wiki 검색',
       wikiSearchDesc: 'Wiki 지식베이스에서 키워드/의미 기반 검색',
       wikiReadPage: 'Wiki 페이지 읽기',

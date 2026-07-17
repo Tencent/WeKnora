@@ -168,6 +168,7 @@ builtin_agents:
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
       allowed_tools:
+        - "wiki_navigate"
         - "wiki_search"
         - "wiki_read_page"
         - "wiki_read_source_doc"
@@ -232,4 +233,3 @@ builtin_agents:
       vector_threshold: 0.5
       rerank_top_k: 10
       rerank_threshold: 0.3
-

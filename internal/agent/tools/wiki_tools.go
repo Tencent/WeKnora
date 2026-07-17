@@ -15,7 +15,7 @@ import (
 // wikiIndexAgentTopK is the per-type cap applied when synthesizing the
 // index overview for wiki_read_page('index'). The agent uses the overview
 // to get a sense of the wiki's shape; any deeper exploration should go
-// through wiki_search. Keeping the cap small bounds the content envelope
+// through wiki_navigate. Keeping the cap small bounds the content envelope
 // served to the LLM, which is the main reason this synthesis exists.
 const wikiIndexAgentTopK = 20
 
@@ -84,7 +84,7 @@ func renderIndexOverviewForAgent(resp *types.WikiIndexResponse) string {
 	if nonEmpty == 0 {
 		sb.WriteString("\n*No wiki pages yet. Upload documents to get started.*\n")
 	} else {
-		sb.WriteString("\n_To explore more pages under any category, use wiki_search with a query, or read a specific slug directly._\n")
+		sb.WriteString("\n_To explore more pages under any category, use wiki_navigate with a query, or read a specific slug directly._\n")
 	}
 	return sb.String()
 }
@@ -415,7 +415,7 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		// the directory is assembled on demand. Surface a bounded
 		// top-K overview so the agent still sees the wiki's shape
 		// without overflowing its context window — the explicit hint
-		// steers the model to wiki_search for deeper exploration.
+		// steers the model to wiki_navigate for deeper exploration.
 		contentBody := page.Content
 		if page.PageType == types.WikiPageTypeIndex {
 			if overview, err := t.wikiService.GetIndexView(ctx, kbID, nil, wikiIndexAgentTopK, ""); err == nil && overview != nil {
