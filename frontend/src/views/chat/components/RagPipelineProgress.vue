@@ -623,7 +623,7 @@ watch(thinkingExpanded, (expanded) => {
     font-weight: 400;
     color: var(--td-text-color-secondary);
     word-break: break-word;
-    max-width: min(680px, 100%);
+    max-width: min(820px, 100%);
   }
 }
 
