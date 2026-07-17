@@ -1194,9 +1194,6 @@ export default {
       title: '파서 엔진',
       description: '문서 파서 엔진 상태 및 구성. 이 설정은 서버 환경변수보다 우선 적용됩니다. 비워두면 환경변수 기본값을 사용합니다.',
       // Section / label keys for the redesigned drawer
-	  chatPolicyTitle: '채팅 첨부 파일 파서 정책',
-	  chatPolicyDescription: '파일 형식별 채팅 첨부 파서를 공간 기본값으로 지정합니다. 개별 에이전트에서 덮어쓸 수 있습니다.',
-	  chatPolicySaved: '채팅 첨부 파일 파서 정책을 저장했습니다',
       supportedFileTypes: '지원 형식',
       statusSection: '상태',
       configSection: '구성',
