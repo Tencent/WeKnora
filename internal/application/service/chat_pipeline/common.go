@@ -145,25 +145,18 @@ func loadAndProcessHistory(
 			h = &types.History{}
 		}
 		if message.Role == "user" {
-			if message.RenderedContent != "" {
-				h.Query = message.RenderedContent
-			} else {
-				h.Query = message.Content
-			}
+			// RenderedContent is a snapshot of the prompt/context format used by
+			// the original turn. Replaying it would mix legacy <context id="…">
+			// envelopes and old citation instructions into the current protocol.
+			// Historical references are carried separately in KnowledgeReferences
+			// and can be re-merged into this turn's freshly rendered context.
+			h.Query = message.Content
 			h.CreateAt = message.CreatedAt
-			// When RenderedContent is absent (e.g. the pure-chat, non-RAG path
-			// and the search-nothing fallback path never persist it), replay the
-			// previous turn's image captions and attachment content from the
-			// stored message so the model retains a textual reference to them.
-			// When RenderedContent is present it already carries this
-			// augmentation, so we must not double-append.
-			if message.RenderedContent == "" {
-				if desc := extractImageCaptions(message.Images); desc != "" {
-					h.Query += "\n\n[用户上传图片内容]\n" + desc
-				}
-				if len(message.Attachments) > 0 {
-					h.Query += message.Attachments.BuildPrompt()
-				}
+			if desc := extractImageCaptions(message.Images); desc != "" {
+				h.Query += "\n\n[用户上传图片内容]\n" + desc
+			}
+			if len(message.Attachments) > 0 {
+				h.Query += message.Attachments.BuildPrompt()
 			}
 		} else {
 			h.Answer = regThinkTags.ReplaceAllString(message.Content, "")

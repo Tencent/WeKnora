@@ -79,3 +79,35 @@ func TestBuildFallbackMessages_AttachesImagesToUserTurn(t *testing.T) {
 	withVision := buildFallbackMessages(cm, "fallback")
 	assert.Equal(t, cm.Images, withVision[len(withVision)-1].Images)
 }
+
+func TestPrepareFallbackMessagesMigratesHistoricalCitations(t *testing.T) {
+	cm := &types.ChatManage{}
+	cm.Query = "follow-up"
+	cm.History = []*types.History{{
+		Query:  "previous",
+		Answer: `Previous <kb doc="Legacy" chunk_id="legacy-chunk" kb_id="legacy-kb" />`,
+	}}
+
+	messages, refs := prepareFallbackMessages(cm, "legacy fallback prompt")
+	require.Contains(t, messages[0].Content, "Source handling protocol")
+	require.Equal(t, `Previous <ref id="c1"/>`, messages[2].Content)
+	require.Equal(t,
+		`<kb doc="Legacy" chunk_id="legacy-chunk" kb_id="legacy-kb" />`,
+		refs.ExpandText(`<ref id="c1"/>`),
+	)
+}
+
+func TestPrepareFallbackMessagesSuppressesCitationsWhenDisabled(t *testing.T) {
+	disabled := false
+	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{CitationEnabled: &disabled}}
+	cm.Query = "follow-up"
+	cm.History = []*types.History{{
+		Query:  "previous",
+		Answer: `Previous <kb doc="Legacy" chunk_id="legacy-chunk" />`,
+	}}
+
+	messages, refs := prepareFallbackMessages(cm, "legacy fallback prompt")
+	require.Contains(t, messages[0].Content, "Source citations are disabled")
+	require.Equal(t, `Previous <ref id="c1"/>`, messages[2].Content)
+	require.Equal(t, "answer ", refs.ExpandText(`answer <ref id="c1"/>`))
+}

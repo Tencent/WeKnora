@@ -447,9 +447,9 @@ watch(
     transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 
     &:hover {
-      border-color: var(--td-brand-color);
-      background: var(--td-bg-color-container-hover);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      border-color: color-mix(in srgb, var(--td-text-color-primary) 10%, var(--td-component-stroke));
+      background: color-mix(in srgb, var(--td-text-color-primary) 4%, var(--td-bg-color-container));
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
     }
 
     &--skeleton {

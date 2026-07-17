@@ -85,9 +85,10 @@
                         <botmsg :content="session.content" :session="session" :session-id="session_id"
                             :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
-                            :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)">
+                            :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
+                            @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                         </botmsg>
-                        <FollowUpSuggestions v-if="!session.suggestionsDismissed"
+                        <FollowUpSuggestions v-if="session.answerFullyRendered && !session.suggestionsDismissed"
                             :suggestion-set="session.suggestionSet"
                             :loading="session.suggestionLoading"
                             :allow-regenerate="session.suggestionSet?.allow_regenerate"
@@ -330,6 +331,10 @@ const handleSuggestedQuestionClick = (question) => {
 };
 
 const resolveAssistantMessageId = (message) => message?.id || message?.assistant_message_id;
+
+const handleAnswerRenderComplete = (message, ready) => {
+    message.answerFullyRendered = Boolean(ready);
+};
 
 const loadFollowUpSuggestions = async (message, ensure = false, regenerate = false) => {
     const messageId = resolveAssistantMessageId(message);

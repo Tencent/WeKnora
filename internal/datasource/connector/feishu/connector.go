@@ -15,24 +15,28 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// Connector implements the datasource.Connector interface for Feishu.
-type Connector struct{}
+// Connector implements the datasource.Connector interface for Feishu and, with
+// the same code, for Lark: the two clouds expose an identical wiki/docx/drive
+// API surface. A Region picks the cloud — see region.go.
+type Connector struct {
+	region Region
+}
 
-// NewConnector creates a new Feishu connector.
-func NewConnector() *Connector {
-	return &Connector{}
+// NewConnector creates a connector for the given region (RegionFeishu or RegionLark).
+func NewConnector(region Region) *Connector {
+	return &Connector{region: region}
 }
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string {
-	return types.ConnectorTypeFeishu
+	return c.region.ConnectorType
 }
 
 const feishuWikiNodeResourceSeparator = ":"
 
 // Validate verifies that the Feishu configuration is valid by testing connectivity.
 func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
-	feishuConfig, err := parseFeishuConfig(config)
+	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return err
 	}
@@ -57,7 +61,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 func (c *Connector) ListResources(
 	ctx context.Context, config *types.DataSourceConfig, parentID string,
 ) ([]types.Resource, error) {
-	feishuConfig, err := parseFeishuConfig(config)
+	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +81,7 @@ func (c *Connector) ListResources(
 				Name:        space.Name,
 				Type:        "wiki_space",
 				Description: space.Description,
-				URL:         fmt.Sprintf("https://feishu.cn/wiki/%s", space.SpaceID),
+				URL:         c.region.wikiURL(space.SpaceID),
 				HasChildren: true,
 				Metadata: map[string]interface{}{
 					"visibility": space.Visibility,
@@ -97,7 +101,7 @@ func (c *Connector) ListResources(
 
 	resources := make([]types.Resource, 0, len(nodes))
 	for _, node := range nodes {
-		resources = append(resources, wikiNodeToResource(spaceID, node))
+		resources = append(resources, c.wikiNodeToResource(spaceID, node))
 	}
 	return resources, nil
 }
@@ -110,7 +114,7 @@ func (c *Connector) ListResources(
 func (c *Connector) ResolveResourceAncestors(
 	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string,
 ) ([]string, error) {
-	feishuConfig, err := parseFeishuConfig(config)
+	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +163,7 @@ func (c *Connector) ResolveResourceAncestors(
 
 // FetchAll performs a full sync of all documents from the specified wiki spaces.
 func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error) {
-	feishuConfig, err := parseFeishuConfig(config)
+	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +211,7 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 // FetchIncremental performs an incremental sync by comparing node edit times
 // against the previously recorded state.
 func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
-	feishuConfig, err := parseFeishuConfig(config)
+	feishuConfig, err := parseFeishuConfig(config, c.region)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -400,7 +404,7 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 			Content:          data,
 			ContentType:      "application/octet-stream",
 			FileName:         fileName,
-			URL:              fmt.Sprintf("https://feishu.cn/wiki/%s", node.NodeToken),
+			URL:              c.region.wikiURL(node.NodeToken),
 			UpdatedAt:        editTime,
 			SourceResourceID: resourceID,
 			Metadata:         baseMeta,
@@ -425,7 +429,7 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 			Content:          data,
 			ContentType:      "application/octet-stream",
 			FileName:         fileName,
-			URL:              fmt.Sprintf("https://feishu.cn/wiki/%s", node.NodeToken),
+			URL:              c.region.wikiURL(node.NodeToken),
 			UpdatedAt:        editTime,
 			SourceResourceID: resourceID,
 			Metadata:         baseMeta,
@@ -447,7 +451,7 @@ func parseWikiResourceID(resourceID string) (spaceID string, nodeToken string) {
 	return spaceID, nodeToken
 }
 
-func wikiNodeToResource(spaceID string, node wikiNode) types.Resource {
+func (c *Connector) wikiNodeToResource(spaceID string, node wikiNode) types.Resource {
 	parentID := spaceID
 	if node.ParentNodeID != "" {
 		parentID = makeWikiNodeResourceID(spaceID, node.ParentNodeID)
@@ -467,7 +471,7 @@ func wikiNodeToResource(spaceID string, node wikiNode) types.Resource {
 		ExternalID:  makeWikiNodeResourceID(spaceID, node.NodeToken),
 		Name:        name,
 		Type:        "wiki_node",
-		URL:         fmt.Sprintf("https://feishu.cn/wiki/%s", node.NodeToken),
+		URL:         c.region.wikiURL(node.NodeToken),
 		ParentID:    parentID,
 		HasChildren: node.HasChild,
 		ModifiedAt:  modifiedAt,
@@ -480,8 +484,13 @@ func wikiNodeToResource(spaceID string, node wikiNode) types.Resource {
 	}
 }
 
-// parseFeishuConfig extracts and validates Feishu-specific configuration.
-func parseFeishuConfig(config *types.DataSourceConfig) (*Config, error) {
+// parseFeishuConfig extracts and validates Feishu/Lark-specific configuration.
+//
+// base_url stays an explicit override so existing data sources that pointed a
+// "feishu" connector at open.larksuite.com keep working; when it is unset the
+// region's own host is filled in, making the resolved Config.BaseURL concrete
+// for everything downstream.
+func parseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
@@ -493,11 +502,15 @@ func parseFeishuConfig(config *types.DataSourceConfig) (*Config, error) {
 
 	var feishuConfig Config
 	if err := json.Unmarshal(credBytes, &feishuConfig); err != nil {
-		return nil, fmt.Errorf("parse feishu credentials: %w", err)
+		return nil, fmt.Errorf("parse %s credentials: %w", region.ConnectorType, err)
 	}
 
 	if feishuConfig.AppID == "" || feishuConfig.AppSecret == "" {
-		return nil, fmt.Errorf("feishu app_id and app_secret are required")
+		return nil, fmt.Errorf("%s app_id and app_secret are required", region.ConnectorType)
+	}
+
+	if feishuConfig.BaseURL == "" {
+		feishuConfig.BaseURL = region.OpenBaseURL
 	}
 
 	if err := datasource.ValidateConnectorBaseURL(feishuConfig.GetBaseURL()); err != nil {

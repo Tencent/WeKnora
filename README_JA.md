@@ -135,7 +135,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 | Embedding | Ollama / BGE / GTE / OpenAI 互換 API |
 | ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | オブジェクトストレージ | ローカル / MinIO / AWS S3 / 火山引擎 TOS / Alibaba Cloud OSS / 金山雲 KS3 |
-| IM 統合 | WeChat Work / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
+| IM 統合 | WeChat Work / Feishu / Lark / Slack / Telegram / DingTalk / Mattermost / WeChat |
 | ウェブ埋め込み | 埋め込み Widget でエージェントを公開、ドメイン許可リスト・レート制限・セキュアモード Token 交換 |
 | Web 検索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG |
 

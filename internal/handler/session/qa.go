@@ -314,6 +314,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		secutils.SanitizeForLogArray(kbIDs),
 		secutils.SanitizeForLogArray(knowledgeIDs),
 		secutils.SanitizeForLogArray(tagIDs),
+		tagScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
 		secutils.SanitizeForLogArray(skillNames),
 		request.WebSearchEnabled,
@@ -372,6 +373,7 @@ func buildMessageExecutionContext(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagIDs []string,
+	tagScopes []types.TagScope,
 	mcpServiceIDs []string,
 	skillNames []string,
 	webSearchEnabled bool,
@@ -385,6 +387,7 @@ func buildMessageExecutionContext(
 		KnowledgeBaseIDs: knowledgeBaseIDs,
 		KnowledgeIDs:     knowledgeIDs,
 		TagIDs:           tagIDs,
+		TagScopes:        cloneTagScopes(tagScopes),
 		MCPServiceIDs:    mcpServiceIDs,
 		SkillNames:       skillNames,
 		WebSearchEnabled: webSearchEnabled,
@@ -418,12 +421,14 @@ func buildMessageExecutionContext(
 		KnowledgeBaseIDs    []string                        `json:"knowledge_base_ids,omitempty"`
 		KnowledgeIDs        []string                        `json:"knowledge_ids,omitempty"`
 		TagIDs              []string                        `json:"tag_ids,omitempty"`
+		TagScopes           []types.TagScope                `json:"tag_scopes,omitempty"`
 		ModelID             string                          `json:"model_id,omitempty"`
 	}{
 		QuestionSuggestions: snapshot.QuestionSuggestions,
 		KnowledgeBaseIDs:    knowledgeBaseIDs,
 		KnowledgeIDs:        knowledgeIDs,
 		TagIDs:              tagIDs,
+		TagScopes:           snapshot.TagScopes,
 		ModelID:             modelID,
 	}
 	if encoded, err := json.Marshal(hashInput); err == nil {
@@ -432,6 +437,23 @@ func buildMessageExecutionContext(
 	}
 
 	return snapshot, agent.ID, agentTenantID, modelID
+}
+
+func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
+	if len(scopes) == 0 {
+		return nil
+	}
+	cloned := make([]types.TagScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" || len(scope.TagIDs) == 0 {
+			continue
+		}
+		cloned = append(cloned, types.TagScope{
+			KnowledgeBaseID: scope.KnowledgeBaseID,
+			TagIDs:          append([]string(nil), scope.TagIDs...),
+		})
+	}
+	return cloned
 }
 
 // resolveEnableMemory decides whether the memory pipeline runs for this

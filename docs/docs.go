@@ -648,6 +648,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "带知识库归属的标签范围（JSON）",
+                        "name": "tag_scopes",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "返回数量上限（默认6）",
                         "name": "limit",

@@ -5943,6 +5943,10 @@ paths:
         in: query
         name: knowledge_ids
         type: string
+      - description: 带知识库归属的标签范围（JSON）
+        in: query
+        name: tag_scopes
+        type: string
       - description: 返回数量上限（默认6）
         in: query
         name: limit

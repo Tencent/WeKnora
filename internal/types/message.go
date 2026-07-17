@@ -268,6 +268,7 @@ type MessageExecutionContext struct {
 	KnowledgeBaseIDs      []string                  `json:"knowledge_base_ids,omitempty"`
 	KnowledgeIDs          []string                  `json:"knowledge_ids,omitempty"`
 	TagIDs                []string                  `json:"tag_ids,omitempty"`
+	TagScopes             []TagScope                `json:"tag_scopes,omitempty"`
 	MCPServiceIDs         []string                  `json:"mcp_service_ids,omitempty"`
 	SkillNames            []string                  `json:"skill_names,omitempty"`
 	WebSearchEnabled      bool                      `json:"web_search_enabled"`

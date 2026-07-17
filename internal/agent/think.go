@@ -9,6 +9,7 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/llmresource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -38,6 +39,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 	llmCtx, llmCancel := context.WithTimeout(ctx, e.getLLMCallTimeout())
 	defer llmCancel()
 
+	messages = e.sourceRefs.EncodeMessages(messages)
 	messages = e.resourceRefs.EncodeMessages(messages)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
@@ -51,6 +53,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 	firstChunkTime := time.Time{}
 	answerDecoder := llmresource.NewStreamDecoder(e.resourceRefs)
 	thinkingDecoder := llmresource.NewStreamDecoder(e.resourceRefs)
+	answerRefExpander := llmreference.NewStreamExpander(e.sourceRefs)
+	thinkingRefExpander := llmreference.NewStreamExpander(e.sourceRefs)
 
 	for chunk := range stream {
 		chunkCount++
@@ -67,11 +71,12 @@ func (e *AgentEngine) streamLLMToEventBus(
 			continue
 		}
 		if chunk.ResponseType == types.ResponseTypeThinking {
-			chunk.Content = thinkingDecoder.Feed(chunk.Content)
+			chunk.Content = thinkingRefExpander.Feed(thinkingDecoder.Feed(chunk.Content))
 		} else {
-			chunk.Content = answerDecoder.Feed(chunk.Content)
+			chunk.Content = answerRefExpander.Feed(answerDecoder.Feed(chunk.Content))
 		}
 		e.resourceRefs.DecodeToolCalls(chunk.ToolCalls)
+		e.sourceRefs.DecodeToolCalls(chunk.ToolCalls)
 
 		if chunk.Content != "" {
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
@@ -100,12 +105,15 @@ func (e *AgentEngine) streamLLMToEventBus(
 			emitFunc(&chunk, result.Content)
 		}
 	}
-	result.Content += answerDecoder.Flush()
-	result.ReasoningContent += thinkingDecoder.Flush()
+	result.Content += answerRefExpander.Feed(answerDecoder.Flush())
+	result.Content += answerRefExpander.Flush()
+	result.ReasoningContent += thinkingRefExpander.Feed(thinkingDecoder.Flush())
+	result.ReasoningContent += thinkingRefExpander.Flush()
 	// Some providers stream tool-call argument fragments but expose the
 	// accumulated call in the final chunk. Decode once more after assembly so
 	// aliases split across provider chunks cannot leak into tool execution.
 	e.resourceRefs.DecodeToolCalls(result.ToolCalls)
+	e.sourceRefs.DecodeToolCalls(result.ToolCalls)
 	if orphans := e.resourceRefs.OrphanAliases(result.Content); len(orphans) > 0 {
 		logger.Warnf(ctx, "[Agent][Stream] Model emitted %d unresolvable resource alias(es): %v",
 			len(orphans), orphans)

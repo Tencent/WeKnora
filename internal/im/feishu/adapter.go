@@ -1,9 +1,12 @@
-// Package feishu implements the Feishu (飞书/Lark) IM adapter for WeKnora.
+// Package feishu implements the Feishu (飞书) IM adapter for WeKnora, and with
+// it the Lark adapter: Feishu and Lark are the same product on two isolated
+// clouds (open.feishu.cn and open.larksuite.com) sharing one API surface, so a
+// single implementation serves both. A Region picks the cloud — see region.go.
 //
-// Feishu bot flow:
+// Bot flow:
 // 1. User sends a message to the bot (direct or @mention in group)
-// 2. Feishu calls our event subscription URL with the message event
-// 3. We parse the event, run QA, then call Feishu API to send reply
+// 2. Feishu/Lark calls our event subscription URL with the message event
+// 3. We parse the event, run QA, then call the Open Platform API to send a reply
 // 4. For streaming: create a card, then use CardKit streaming update API
 //
 // Reference: https://open.feishu.cn/document/server-docs/im-v1/message/create
@@ -40,6 +43,7 @@ var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 // Adapter implements im.Adapter for Feishu/Lark.
 type Adapter struct {
+	region            Region
 	appID             string
 	appSecret         string
 	verificationToken string
@@ -51,15 +55,22 @@ type Adapter struct {
 	tokenExpAt time.Time
 }
 
-// NewAdapter creates a new Feishu adapter.
-func NewAdapter(appID, appSecret, verificationToken, encryptKey string) *Adapter {
+// NewAdapter creates a new adapter for the given region (RegionFeishu or RegionLark).
+func NewAdapter(region Region, appID, appSecret, verificationToken, encryptKey string) *Adapter {
 	startStreamReaper()
 	return &Adapter{
+		region:            region,
 		appID:             appID,
 		appSecret:         appSecret,
 		verificationToken: verificationToken,
 		encryptKey:        encryptKey,
 	}
+}
+
+// api builds an Open Platform API URL on this adapter's cloud. path is a format
+// string beginning with "/open-apis/"; args fill its verbs.
+func (a *Adapter) api(path string, args ...any) string {
+	return a.region.OpenBaseURL + fmt.Sprintf(path, args...)
 }
 
 // startStreamReaper starts a background goroutine (once) that periodically
@@ -102,7 +113,7 @@ func StopStreamReaper() {
 
 // Platform returns the platform identifier.
 func (a *Adapter) Platform() im.Platform {
-	return im.PlatformFeishu
+	return a.region.Platform
 }
 
 // VerifyCallback verifies the Feishu event callback by checking the verification token.
@@ -167,7 +178,7 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 	if err := json.Unmarshal(bodyBytes, &encryptedBody); err == nil && encryptedBody.Encrypt != "" {
 		decrypted, err := a.decrypt(encryptedBody.Encrypt)
 		if err != nil {
-			logger.Errorf(c.Request.Context(), "[Feishu] Failed to decrypt: %v", err)
+			logger.Errorf(c.Request.Context(), "[%s] Failed to decrypt: %v", a.region.Label, err)
 			return false
 		}
 		if err := json.Unmarshal(decrypted, &body); err != nil {
@@ -257,7 +268,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	// Check event type
 	if eventBody.Header == nil || eventBody.Header.EventType != "im.message.receive_v1" {
 		if eventBody.Header != nil {
-			logger.Infof(c.Request.Context(), "[Feishu] Ignoring event type: %s", eventBody.Header.EventType)
+			logger.Infof(c.Request.Context(), "[%s] Ignoring event type: %s", a.region.Label, eventBody.Header.EventType)
 		}
 		return nil, nil
 	}
@@ -312,7 +323,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		}
 
 		return &im.IncomingMessage{
-			Platform:    im.PlatformFeishu,
+			Platform:    a.region.Platform,
 			MessageType: im.MessageTypeText,
 			UserID:      openID,
 			ChatID:      chatID,
@@ -334,7 +345,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			return nil, nil
 		}
 		return &im.IncomingMessage{
-			Platform:    im.PlatformFeishu,
+			Platform:    a.region.Platform,
 			MessageType: im.MessageTypeFile,
 			UserID:      openID,
 			ChatID:      chatID,
@@ -356,7 +367,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			return nil, nil
 		}
 		return &im.IncomingMessage{
-			Platform:    im.PlatformFeishu,
+			Platform:    a.region.Platform,
 			MessageType: im.MessageTypeImage,
 			UserID:      openID,
 			ChatID:      chatID,
@@ -418,7 +429,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		}
 
 		return &im.IncomingMessage{
-			Platform:    im.PlatformFeishu,
+			Platform:    a.region.Platform,
 			MessageType: im.MessageTypeText,
 			UserID:      openID,
 			ChatID:      chatID,
@@ -429,7 +440,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		}, nil
 
 	default:
-		logger.Infof(c.Request.Context(), "[Feishu] Ignoring unsupported message type: %s", msg.MessageType)
+		logger.Infof(c.Request.Context(), "[%s] Ignoring unsupported message type: %s", a.region.Label, msg.MessageType)
 		return nil, nil
 	}
 }
@@ -514,20 +525,21 @@ func (a *Adapter) sendWithFallback(
 	// some event payloads omit it), skip straight to the fallback send API —
 	// the reply API needs a message_id in the path and can't work without one.
 	if incoming.MessageID != "" && feishuSafePathParam(incoming.MessageID) {
-		replyURL := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages/%s/reply", incoming.MessageID)
+		replyURL := a.api("/open-apis/im/v1/messages/%s/reply", incoming.MessageID)
 		code, msg, err := a.postFeishuMessage(ctx, accessToken, replyURL, replyPayload)
 		switch {
 		case err != nil:
 			// Network/transport error — try the fallback since send-message is
 			// a different endpoint that might succeed.
-			logger.Warnf(ctx, "[Feishu] reply API transport error (will try fallback): %v", err)
+			logger.Warnf(ctx, "[%s] reply API transport error (will try fallback): %v", a.region.Label, err)
 		case code == 0:
 			return nil
 		case !fallbackEligibleErrorCodes[code]:
-			return fmt.Errorf("feishu reply api error: code=%d msg=%s", code, msg)
+			return fmt.Errorf("%s reply api error: code=%d msg=%s", a.region.Label, code, msg)
 		default:
 			// Fallback-eligible: retry via plain send-message API.
-			logger.Warnf(ctx, "[Feishu] reply API returned code=%d msg=%s, falling back to send-message API", code, msg)
+			logger.Warnf(ctx, "[%s] reply API returned code=%d msg=%s, falling back to send-message API",
+				a.region.Label, code, msg)
 		}
 	} else if incoming.MessageID != "" {
 		// message_id present but contains unsafe characters — refuse rather
@@ -535,17 +547,19 @@ func (a *Adapter) sendWithFallback(
 		// id suggests a tampered payload.
 		return fmt.Errorf("invalid message_id for reply API: %q", incoming.MessageID)
 	} else {
-		logger.Warnf(ctx, "[Feishu] incoming message has no message_id; replying via send-message API (will not attach to thread)")
+		logger.Warnf(ctx,
+			"[%s] incoming message has no message_id; replying via send-message API (will not attach to thread)",
+			a.region.Label)
 	}
 
 	// Fallback: plain send-message API.
-	fallbackURL := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=%s", receiveIDType)
+	fallbackURL := a.api("/open-apis/im/v1/messages?receive_id_type=%s", receiveIDType)
 	code, msg, err := a.postFeishuMessage(ctx, accessToken, fallbackURL, fallbackPayload)
 	if err != nil {
 		return fmt.Errorf("send message (fallback): %w", err)
 	}
 	if code != 0 {
-		return fmt.Errorf("feishu send api error: code=%d msg=%s", code, msg)
+		return fmt.Errorf("%s send api error: code=%d msg=%s", a.region.Label, code, msg)
 	}
 	return nil
 }
@@ -616,7 +630,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		resourceType = "image"
 	}
 
-	apiURL := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages/%s/resources/%s?type=%s",
+	apiURL := a.api("/open-apis/im/v1/messages/%s/resources/%s?type=%s",
 		msg.MessageID, msg.FileKey, resourceType)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
@@ -700,12 +714,14 @@ func (s *feishuStreamState) nextSeq() int {
 }
 
 // buildStreamingCardJSON builds a Card JSON 2.0 with streaming_mode enabled.
-func buildStreamingCardJSON() string {
+// The placeholder text follows the region so Lark users see English rather than
+// the Chinese wording Feishu users expect.
+func buildStreamingCardJSON(region Region) string {
 	card := map[string]interface{}{
 		"schema": "2.0",
 		"config": map[string]interface{}{
 			"streaming_mode": true,
-			"summary":        map[string]string{"content": "正在思考..."},
+			"summary":        map[string]string{"content": region.ThinkingText},
 		},
 		"header": map[string]interface{}{
 			"template": "blue",
@@ -715,7 +731,7 @@ func buildStreamingCardJSON() string {
 			"elements": []map[string]interface{}{
 				{
 					"tag":        "markdown",
-					"content":    "💭 正在思考...",
+					"content":    "💭 " + region.ThinkingText,
 					"text_size":  "normal",
 					"element_id": streamingElementID,
 				},
@@ -734,7 +750,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	}
 
 	// 1. Create card entity via CardKit API
-	cardJSON := buildStreamingCardJSON()
+	cardJSON := buildStreamingCardJSON(a.region)
 	cardID, err := a.cardkitCreate(ctx, accessToken, cardJSON)
 	if err != nil {
 		return "", fmt.Errorf("create card: %w", err)
@@ -750,7 +766,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	feishuStreams[cardID] = &feishuStreamState{createdAt: time.Now()}
 	feishuStreamsMu.Unlock()
 
-	logger.Infof(ctx, "[Feishu] Streaming started: card_id=%s", cardID)
+	logger.Infof(ctx, "[%s] Streaming started: card_id=%s", a.region.Label, cardID)
 	return cardID, nil
 }
 
@@ -820,10 +836,10 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 
 	// Turn off streaming_mode to remove loading indicator
 	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, seq); err != nil {
-		logger.Warnf(ctx, "[Feishu] Failed to disable streaming_mode: %v", err)
+		logger.Warnf(ctx, "[%s] Failed to disable streaming_mode: %v", a.region.Label, err)
 	}
 
-	logger.Infof(ctx, "[Feishu] Streaming ended: card_id=%s", streamID)
+	logger.Infof(ctx, "[%s] Streaming ended: card_id=%s", a.region.Label, streamID)
 	return nil
 }
 
@@ -838,7 +854,7 @@ func (a *Adapter) cardkitCreate(ctx context.Context, accessToken, cardJSON strin
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://open.feishu.cn/open-apis/cardkit/v1/cards", bytes.NewReader(payload))
+		a.api("/open-apis/cardkit/v1/cards"), bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
@@ -915,8 +931,7 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 		"sequence": sequence,
 	})
 
-	apiURL := fmt.Sprintf("https://open.feishu.cn/open-apis/cardkit/v1/cards/%s/elements/%s/content",
-		cardID, elementID)
+	apiURL := a.api("/open-apis/cardkit/v1/cards/%s/elements/%s/content", cardID, elementID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, apiURL, bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -991,10 +1006,10 @@ func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, conten
 		alt, rawURL := sub[1], sub[2]
 		imgKey, err := a.imageKeyForURL(ctx, accessToken, rawURL)
 		if err != nil || imgKey == "" {
-			logger.Warnf(ctx, "[Feishu] image upload failed, degrading to link: url=%s err=%v", rawURL, err)
+			logger.Warnf(ctx, "[%s] image upload failed, degrading to link: url=%s err=%v", a.region.Label, rawURL, err)
 			label := alt
 			if label == "" {
-				label = "图片"
+				label = a.region.ImageFallbackLabel
 			}
 			return fmt.Sprintf("[%s](%s)", label, rawURL)
 		}
@@ -1005,7 +1020,10 @@ func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, conten
 // imageKeyForURL returns a Feishu image_key for the given URL, uploading it if
 // not already cached.
 func (a *Adapter) imageKeyForURL(ctx context.Context, accessToken, rawURL string) (string, error) {
-	key := imageCacheKey(rawURL)
+	// image_keys are issued per app on a single cloud. Scope the cache by app so
+	// a key uploaded by a Feishu app is never handed to a Lark app (or to another
+	// tenant's app), which would fail the card update with code=200570.
+	key := a.appID + "\x00" + imageCacheKey(rawURL)
 
 	feishuImageKeyMu.Lock()
 	if v, ok := feishuImageKeyCache[key]; ok {
@@ -1074,7 +1092,7 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://open.feishu.cn/open-apis/im/v1/images", &body)
+		a.api("/open-apis/im/v1/images"), &body)
 	if err != nil {
 		return "", err
 	}
@@ -1117,7 +1135,7 @@ func (a *Adapter) cardkitSetStreaming(ctx context.Context, accessToken, cardID s
 		"sequence": sequence,
 	})
 
-	apiURL := fmt.Sprintf("https://open.feishu.cn/open-apis/cardkit/v1/cards/%s/settings", cardID)
+	apiURL := a.api("/open-apis/cardkit/v1/cards/%s/settings", cardID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, apiURL, bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -1160,7 +1178,7 @@ func (a *Adapter) getTenantAccessToken(ctx context.Context) (string, error) {
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+		a.api("/open-apis/auth/v3/tenant_access_token/internal"),
 		bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)

@@ -39,3 +39,18 @@ func TestEnsureDefaults_ThinkingPreservesTrue(t *testing.T) {
 		t.Fatal("EnsureDefaults must not overwrite an explicit Thinking=true")
 	}
 }
+
+func TestEnsureDefaults_CitationsDefaultEnabledAndPreserveFalse(t *testing.T) {
+	legacy := &CustomAgent{Config: CustomAgentConfig{}}
+	legacy.EnsureDefaults()
+	if legacy.Config.CitationEnabled == nil || !*legacy.Config.CitationEnabled {
+		t.Fatal("legacy agents must default citation output to enabled")
+	}
+
+	disabled := false
+	explicit := &CustomAgent{Config: CustomAgentConfig{CitationEnabled: &disabled}}
+	explicit.EnsureDefaults()
+	if explicit.Config.CitationEnabled == nil || *explicit.Config.CitationEnabled {
+		t.Fatal("EnsureDefaults must preserve explicit citation_enabled=false")
+	}
+}

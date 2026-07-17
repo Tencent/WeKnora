@@ -41,7 +41,7 @@ var webSearchTool = BaseTool{
 **Parameters**:
 - query (required): Search query string
 
-**Returns**: Web search results with title, URL, snippet, and content (up to %d results)
+**Returns**: Web search results with title, short wN page ID, snippet, and content (up to %d results)
 
 ## Examples
 
@@ -62,8 +62,8 @@ var webSearchTool = BaseTool{
 - Results are automatically compressed using RAG to extract relevant content
 - Search results are stored in a temporary knowledge base for the session
 - Use this tool when knowledge bases don't have the information you need
-- Results include URL, title, snippet, and content snippet (may be truncated)
-- **CRITICAL**: If content is truncated or you need full details, use **web_fetch** to fetch complete page content
+- Results include a short wN page ID, title, snippet, and content snippet (may be truncated)
+- **CRITICAL**: If content is truncated or you need full details, pass that wN value to **web_fetch** to fetch complete page content
 - Maximum %d results will be returned per search`,
 	schema: utils.GenerateSchema[WebSearchInput](),
 }

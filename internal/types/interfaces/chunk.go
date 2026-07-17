@@ -99,9 +99,9 @@ type ChunkRepository interface {
 	FAQChunkDiff(ctx context.Context, srcTenantID uint64, srcKBID string, dstTenantID uint64, dstKBID string) (chunksToAdd []string, chunksToDelete []string, err error)
 
 	// ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.
-	// Filter by kbIDs and/or knowledgeIDs. At least one of them must be non-empty.
+	// Filter by explicitly selected kbIDs, knowledgeIDs, and/or FAQ tagIDs.
 	// Returns up to `limit` chunks sorted by updated_at descending.
-	ListRecommendedFAQChunks(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, limit int) ([]*types.Chunk, error)
+	ListRecommendedFAQChunks(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, tagIDs []string, limit int) ([]*types.Chunk, error)
 
 	// ListRecentDocumentChunksWithQuestions lists recent document chunks that have generated questions.
 	// Filter by kbIDs and/or knowledgeIDs. At least one of them must be non-empty.

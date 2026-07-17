@@ -46,6 +46,7 @@ export interface CustomAgentConfig {
   temperature?: number;
   max_completion_tokens?: number;   // 最大生成token数（普通模式）
   thinking?: boolean;                      // 是否启用思考模式（支持扩展思考的模型）
+  citation_enabled?: boolean;        // 是否在最终回答中输出知识库/网页来源引用（默认开启）
 
   // ===== Agent模式设置 =====
   max_iterations?: number;          // 最大迭代次数
@@ -294,7 +295,8 @@ export interface IMChannel {
   id: string;
   tenant_id?: number;
   agent_id: string;
-  platform: 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat' | 'qqbot';
+  // 'lark' is Feishu's international edition; it shares Feishu's credentials and modes.
+  platform: 'wecom' | 'feishu' | 'lark' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat' | 'qqbot';
   name: string;
   enabled: boolean;
   mode: 'webhook' | 'websocket' | 'longpoll';
@@ -361,12 +363,17 @@ export interface SuggestedQuestion {
 // 根据智能体关联的知识库范围返回推荐问题，用于前端对话面板快捷提问
 export function getSuggestedQuestions(
   agentId: string,
-  params?: { knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; limit?: number }
+  params?: {
+    knowledge_base_ids?: string[];
+    knowledge_ids?: string[];
+    tag_scopes?: Array<{ knowledge_base_id: string; tag_ids: string[] }>;
+    limit?: number;
+  }
 ) {
   const query = new URLSearchParams();
   if (params?.knowledge_base_ids?.length) query.set('knowledge_base_ids', params.knowledge_base_ids.join(','));
   if (params?.knowledge_ids?.length) query.set('knowledge_ids', params.knowledge_ids.join(','));
-  if (params?.tag_ids?.length) query.set('tag_ids', params.tag_ids.join(','));
+  if (params?.tag_scopes?.length) query.set('tag_scopes', JSON.stringify(params.tag_scopes));
   if (params?.limit) query.set('limit', String(params.limit));
   const qs = query.toString();
   return get<{ data: { questions: SuggestedQuestion[] } }>(`/api/v1/agents/${agentId}/suggested-questions${qs ? '?' + qs : ''}`);

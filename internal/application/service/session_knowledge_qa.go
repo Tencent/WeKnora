@@ -10,6 +10,7 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -157,8 +158,11 @@ func (s *sessionService) KnowledgeQA(
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
-	// Determine pipeline based on knowledge bases availability and web search setting
-	hasKB := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
+	// Determine pipeline based on the effective knowledge retrieval scope and
+	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
+	// empty but produce SearchTargets, so the unified targets must participate in
+	// this decision or the request is incorrectly downgraded to pure chat.
+	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
 	needsRAG := hasKB || req.WebSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
 
@@ -540,10 +544,11 @@ func (s *sessionService) buildSearchTargets(
 				kbTenant = tenantID // fallback
 			}
 			targets = append(targets, &types.SearchTarget{
-				Type:            types.SearchTargetTypeKnowledge,
-				KnowledgeBaseID: kbID,
-				TenantID:        kbTenant,
-				KnowledgeIDs:    kidList,
+				Type:                    types.SearchTargetTypeKnowledge,
+				KnowledgeBaseID:         kbID,
+				TenantID:                kbTenant,
+				KnowledgeIDs:            kidList,
+				DisableRecallThresholds: true,
 			})
 		}
 	}
@@ -573,25 +578,28 @@ func (s *sessionService) buildSearchTargets(
 				continue
 			}
 			targets = append(targets, &types.SearchTarget{
-				Type:              types.SearchTargetTypeKnowledge,
-				KnowledgeBaseID:   kbID,
-				TenantID:          kbTenant,
-				KnowledgeIDs:      tagKnowledgeIDs,
-				DisableDirectLoad: true,
+				Type:                    types.SearchTargetTypeKnowledge,
+				KnowledgeBaseID:         kbID,
+				TenantID:                kbTenant,
+				KnowledgeIDs:            tagKnowledgeIDs,
+				ScopeTagIDs:             append([]string(nil), tagIDs...),
+				DisableRecallThresholds: true,
 			})
 			continue
 		}
 
 		target := &types.SearchTarget{
-			Type:            types.SearchTargetTypeKnowledgeBase,
-			KnowledgeBaseID: kbID,
-			TenantID:        kbTenant,
-			TagIDs:          append([]string(nil), tagIDs...),
+			Type:                    types.SearchTargetTypeKnowledgeBase,
+			KnowledgeBaseID:         kbID,
+			TenantID:                kbTenant,
+			TagIDs:                  append([]string(nil), tagIDs...),
+			ScopeTagIDs:             append([]string(nil), tagIDs...),
+			DisableRecallThresholds: true,
 		}
 		if len(explicitKnowledgeIDs) > 0 {
 			target.Type = types.SearchTargetTypeKnowledge
 			target.KnowledgeIDs = explicitKnowledgeIDs
-			target.DisableDirectLoad = true
+			target.DisableRecallThresholds = true
 		}
 		targets = append(targets, target)
 	}
@@ -971,7 +979,8 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Start streaming response
-	responseChan, err := chatModel.ChatStream(ctx, buildFallbackMessages(chatManage, promptContent), opt)
+	fallbackMessages, sourceRefs := prepareFallbackMessages(chatManage, promptContent)
+	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)
 		s.handleFixedFallback(ctx, chatManage)
@@ -985,7 +994,22 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Start goroutine to consume stream and emit events
-	go s.consumeFallbackStream(ctx, chatManage, responseChan)
+	go s.consumeFallbackStream(ctx, chatManage, responseChan, sourceRefs)
+}
+
+func prepareFallbackMessages(
+	chatManage *types.ChatManage,
+	promptContent string,
+) ([]chat.Message, *llmreference.Registry) {
+	messages := buildFallbackMessages(chatManage, promptContent)
+	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
+	refs := llmreference.NewRegistry(citationsEnabled)
+	if len(messages) > 0 && messages[0].Role == "system" {
+		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + llmreference.ProtocolPrompt(citationsEnabled)
+	} else {
+		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(llmreference.ProtocolPrompt(citationsEnabled))}}, messages...)
+	}
+	return refs.EncodeMessages(messages), refs
 }
 
 func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) []chat.Message {
@@ -1118,15 +1142,21 @@ func (s *sessionService) consumeFallbackStream(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	responseChan <-chan types.StreamResponse,
+	sourceRefs *llmreference.Registry,
 ) {
 	fallbackID := generateEventID("fallback")
 	eventBus := chatManage.EventBus
 	var finalContent string
 	streamCompleted := false
+	refExpander := llmreference.NewStreamExpander(sourceRefs)
 
 	for response := range responseChan {
 		// Emit event for each answer chunk
 		if response.ResponseType == types.ResponseTypeAnswer {
+			response.Content = refExpander.Feed(response.Content)
+			if response.Done {
+				response.Content += refExpander.Flush()
+			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
 				ID:        fallbackID,
@@ -1159,8 +1189,10 @@ func (s *sessionService) consumeFallbackStream(
 }
 
 // emitKnowledgeReferencesEvent streams retrieved chunks to the client as a
-// `references` SSE event. Must run before CHAT_COMPLETION_STREAM so citations
-// arrive while the connection is still open (complete closes the stream).
+// `references` SSE event. These references drive the retrieval-results UI and
+// remain available even when inline citations in the model answer are disabled.
+// Must run before CHAT_COMPLETION_STREAM so the event arrives while the
+// connection is still open (complete closes the stream).
 func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatManage) {
 	if chatManage == nil || chatManage.EventBus == nil || len(chatManage.MergeResult) == 0 {
 		return
@@ -1182,6 +1214,9 @@ func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatMan
 func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *types.ChatManage, content string) {
 	if chatManage.EventBus == nil {
 		return
+	}
+	if !chatManage.CitationsEnabled() {
+		content = llmreference.NewRegistry(false).ExpandText(content)
 	}
 
 	fallbackID := generateEventID("fallback")

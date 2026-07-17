@@ -486,7 +486,7 @@ import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
-import type { KnowledgeReferenceLike } from '@/utils/referenceSources';
+import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -783,6 +783,10 @@ const props = defineProps<{
   followUpLoading?: boolean;
 }>();
 
+const emit = defineEmits<{
+  (event: 'render-complete-change', ready: boolean): void;
+}>();
+
 const embedAuthProps = computed(() => ({
   embeddedMode: props.embeddedMode,
   embedChannelId: props.embedChannelId,
@@ -810,11 +814,29 @@ const {
 
 const referencesDrawer = useChatReferencesDrawer();
 
+const getReferencesForDrawer = (
+  refsOverride?: KnowledgeReferenceLike[] | null,
+): KnowledgeReferenceLike[] => {
+  const messageReferences = refsOverride?.length
+    ? refsOverride
+    : props.session?.knowledge_references;
+  if (messageReferences?.length) return messageReferences;
+
+  // Agent answers can already contain citation tags before the aggregated
+  // knowledge_references event is emitted (and some restored conversations do
+  // not have that aggregate at all). The completed retrieval tool events still
+  // carry the same source data, so use them to keep citation clicks in the
+  // references drawer instead of falling through to KB-page navigation.
+  return (props.session?.agentEventStream || []).flatMap((event) =>
+    getToolReferenceItems(event),
+  );
+};
+
 const openReferencesDrawer = (
-  highlight?: { url?: string; chunkId?: string },
+  highlight?: ReferenceHighlightTarget,
   refsOverride?: KnowledgeReferenceLike[] | null,
 ) => {
-  const refs = refsOverride?.length ? refsOverride : props.session?.knowledge_references
+  const refs = getReferencesForDrawer(refsOverride)
   if (!referencesDrawer || !refs?.length) return false
   referencesDrawer.open({
     references: refs,
@@ -884,7 +906,7 @@ const formatToolResultContent = (value: unknown): string => {
 
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
-const getToolReferenceItems = (event: any): KnowledgeReferenceLike[] => {
+function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   if (!event || event.pending) return [];
   const toolName = event.tool_name;
   const toolData = event.tool_data;
@@ -966,8 +988,10 @@ const getToolReferenceItems = (event: any): KnowledgeReferenceLike[] => {
         .filter((group) => group.knowledge_id || group.title)
         .map((group, index) => ({
           id: group.knowledge_id || group.key,
+          chunk_ids: group.chunks.map((chunk) => chunk.chunk_id).filter(Boolean),
           knowledge_id: group.knowledge_id,
           knowledge_title: group.title,
+          knowledge_base_id: group.knowledge_base_id,
           chunk_index: index + 1,
           chunk_type: group.is_faq ? 'faq' : undefined,
           content: group.chunks.map((chunk) => chunk.content).filter(Boolean).slice(0, 3).join('\n\n') || group.match_snippet || '',
@@ -1016,7 +1040,7 @@ const getToolReferenceItems = (event: any): KnowledgeReferenceLike[] => {
   }
 
   return [];
-};
+}
 
 const canOpenToolReferences = (event: any): boolean => getToolReferenceItems(event).length > 0;
 
@@ -1258,6 +1282,7 @@ const answerFullyRendered = computed(
   () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
+  emit('render-complete-change', ready);
   if (!ready) return;
   // Clear before this reactive update renders, so a source that returned 404
   // mid-stream gets one real final-attempt <img> node instead of remaining
@@ -1266,7 +1291,7 @@ watch(answerFullyRendered, (ready) => {
   nextTick(async () => {
     await hydrateProtectedFileImages(rootElement.value);
   });
-});
+}, { immediate: true });
 
 // Whether any currently visible step is actively pending (a running tool, or a
 // blocking approval/OAuth prompt). A pending step shimmers on its own, so we
@@ -1928,9 +1953,13 @@ const onRootClick = (e: Event) => {
       resolveCitationChunkId(
         rawChunkId,
         { doc: title, kbId },
-        props.session?.knowledge_references,
+        getReferencesForDrawer(),
       ) || rawChunkId;
-    if (openReferencesDrawer({ chunkId })) {
+    if (openReferencesDrawer({
+      chunkId,
+      documentTitle: title,
+      knowledgeBaseId: kbId,
+    })) {
       return;
     }
     if (kbId) {
@@ -2000,9 +2029,13 @@ const onRootKeydown = (e: KeyboardEvent) => {
         resolveCitationChunkId(
           rawChunkId,
           { doc: title, kbId },
-          props.session?.knowledge_references,
+          getReferencesForDrawer(),
         ) || rawChunkId;
-      if (openReferencesDrawer({ chunkId })) {
+      if (openReferencesDrawer({
+        chunkId,
+        documentTitle: title,
+        knowledgeBaseId: kbId,
+      })) {
         return;
       }
       if (kbId) {
@@ -2095,7 +2128,7 @@ const renderAgentMarkdown = (
     escapeMarkdown,
     sanitizeHtml: sanitizeMarkdownHTML,
     streaming: !isConversationDone.value,
-    knowledgeReferences: props.session?.knowledge_references,
+    knowledgeReferences: getReferencesForDrawer(),
     cachedMermaidSvgHtml: streamingMermaidSvgCache.value,
     prepareMarkdown: prepareAgentMarkdown,
     injectCachedMermaidSvg,
