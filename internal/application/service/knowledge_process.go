@@ -730,6 +730,22 @@ const imageDominatedTextThreshold = 200
 // chunk's raw content (which would just be a bare image reference).
 var errInsufficientSummaryContent = errors.New("insufficient text content for summary generation")
 
+const (
+	summaryArtifactStage                = "chat.summary"
+	summaryArtifactKeyVersion    uint16 = 1
+	summaryPromptVersion                = "summary-prompt-v1"
+	summaryCanonicalizerVersion         = "summary-completion-v1"
+	questionArtifactStage               = "chat.questions"
+	questionArtifactKeyVersion   uint16 = 1
+	questionPromptVersion               = "questions-prompt-v1"
+	questionCanonicalizerVersion        = "questions-parser-v1"
+)
+
+func stableSummaryChunkID(knowledgeID string) string {
+	id, _ := types.NewChunkIDAllocator(knowledgeID).Next(types.ChunkTypeSummary, "")
+	return id
+}
+
 // checkSufficientSummaryContent returns errInsufficientSummaryContent if the
 // given content does not carry enough real text (after stripping image markup)
 // for an LLM summary call, and logs a warning at the call site. Returns nil
@@ -751,11 +767,11 @@ func checkSufficientSummaryContent(ctx context.Context, knowledgeID, content str
 
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
-	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
-) (string, error) {
+	summaryModel chat.Chat, modelRevision string, knowledge *types.Knowledge, chunks []*types.Chunk,
+) (string, bool, error) {
 	// Get knowledge info from the first chunk
 	if len(chunks) == 0 {
-		return "", fmt.Errorf("no chunks provided for summary generation")
+		return "", false, fmt.Errorf("no chunks provided for summary generation")
 	}
 
 	// Determine max input chars from config
@@ -824,7 +840,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// hallucinate a scanner manual instead of admitting the document had no
 	// extractable text.
 	if err := checkSufficientSummaryContent(ctx, knowledge.ID, chunkContents); err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	// Pass the raw chunk text to the LLM with no filename / file-type framing.
@@ -841,7 +857,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		"language": types.LanguageNameFromContext(ctx),
 	})
 	thinking := false
-	summary, err := summaryModel.Chat(ctx, []chat.Message{
+	messages := []chat.Message{
 		{
 			Role:    "system",
 			Content: summaryPrompt,
@@ -850,17 +866,50 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 			Role:    "user",
 			Content: contentWithMetadata,
 		},
-	}, &chat.ChatOptions{
+	}
+	options := &chat.ChatOptions{
 		Temperature: 0.3,
 		MaxTokens:   maxTokens,
 		Thinking:    &thinking,
+	}
+	store := s.artifactStore
+	if strings.TrimSpace(modelRevision) == "" {
+		store = nil
+	}
+	summary, hit, _, err := completeChatArtifact(ctx, store, chatArtifactRequest{
+		tenantID:             knowledge.TenantID,
+		stage:                summaryArtifactStage,
+		keyVersion:           summaryArtifactKeyVersion,
+		model:                summaryModel,
+		modelRevision:        modelRevision,
+		messages:             messages,
+		options:              options,
+		promptVersion:        summaryPromptVersion,
+		canonicalizerVersion: summaryCanonicalizerVersion,
 	})
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
-		return "", err
+		return "", false, err
 	}
-	logger.GetLogger(ctx).WithField("summary", summary.Content).Infof("GetSummary success")
-	return summary.Content, nil
+	logger.GetLogger(ctx).WithField("summary", summary).Infof("GetSummary success")
+	return summary, hit, nil
+}
+
+func (s *knowledgeService) resolveChatArtifactRevision(ctx context.Context, modelID string) string {
+	if s.artifactStore == nil {
+		return ""
+	}
+	model, err := s.modelService.GetModelByID(ctx, modelID)
+	if err != nil {
+		logger.Warnf(ctx, "Chat artifact cache disabled for model %s: failed to load model revision: %v", modelID, err)
+		return ""
+	}
+	revision, err := chatArtifactModelRevision(model)
+	if err != nil {
+		logger.Warnf(ctx, "Chat artifact cache disabled for model %s: %v", modelID, err)
+		return ""
+	}
+	return revision
 }
 
 // sampleLongContent returns content that fits within maxChars.
@@ -1062,7 +1111,9 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 
 	// Generate summary
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	modelRevision := s.resolveChatArtifactRevision(ctx, kb.SummaryModelID)
+	summary, summaryCacheHit, err := s.getSummary(ctx, chatModel, modelRevision, knowledge, textChunks)
+	summaryOut["summary_cache_hit"] = summaryCacheHit
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -1072,6 +1123,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// (deadline exceeded vs unexpected EOF vs 5xx, etc.).
 		summaryOut["error"] = previewText(err.Error(), 500)
 		summaryOut["error_type"] = fmt.Sprintf("%T", err)
+		if isChatArtifactPipelineError(err) {
+			markSummaryFailed()
+			summaryErr = err
+			return fmt.Errorf("summary artifact pipeline failed: %w", err)
+		}
 		// For the insufficient-content case (scanned PDF without OCR, etc.)
 		// we deliberately do NOT fall back to the first chunk's raw content,
 		// since that chunk is typically just a bare markdown image reference
@@ -1134,12 +1190,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// unreliable signal (e.g. "MX5280.pdf" for a scanned legal letter)
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
+		summaryContent := fmt.Sprintf("# Summary\n%s", summary)
 		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              stableSummaryChunkID(knowledge.ID),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# Summary\n%s", summary),
+			Content:         summaryContent,
+			ContentHash:     types.ChunkContentHash(summaryContent),
 			ChunkIndex:      maxChunkIndex + 1,
 			IsEnabled:       true,
 			CreatedAt:       time.Now(),
@@ -1150,11 +1208,26 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			ParentChunkID:   textChunks[0].ID,
 		}
 
-		// Save summary chunk
-		if err := s.chunkService.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
-			logger.Errorf(ctx, "Failed to create summary chunk: %v", err)
-			summaryErr = err
-			return fmt.Errorf("failed to create summary chunk: %w", err)
+		// Reuse the deterministic row when a downstream failure retries this task.
+		existingSummary, getErr := s.chunkRepo.GetChunkByID(ctx, knowledge.TenantID, summaryChunk.ID)
+		if getErr == nil {
+			summaryChunk.SeqID = existingSummary.SeqID
+			summaryChunk.CreatedAt = existingSummary.CreatedAt
+			if err := s.chunkService.UpdateChunk(ctx, summaryChunk); err != nil {
+				logger.Errorf(ctx, "Failed to update summary chunk: %v", err)
+				summaryErr = err
+				return fmt.Errorf("failed to update summary chunk: %w", err)
+			}
+		} else if errors.Is(getErr, ErrChunkNotFound) {
+			if err := s.chunkService.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
+				logger.Errorf(ctx, "Failed to create summary chunk: %v", err)
+				summaryErr = err
+				return fmt.Errorf("failed to create summary chunk: %w", err)
+			}
+		} else {
+			logger.Errorf(ctx, "Failed to inspect summary chunk: %v", getErr)
+			summaryErr = getErr
+			return fmt.Errorf("failed to inspect summary chunk: %w", getErr)
 		}
 
 		// Index summary chunk
@@ -1240,6 +1313,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	llmCallSuccess := 0
 	llmCallFailed := 0
 	llmCallEmpty := 0
+	questionCacheHits := 0
 	generatedQuestionsTotal := 0
 	chunkMetadataSetFailed := 0
 	chunkUpdateFailed := 0
@@ -1277,7 +1351,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	defer func() {
 		logger.Infof(
 			ctx,
-			"Question generation stats: knowledge=%s kb=%s retry=%d/%d status=%s elapsed=%s chunks(total=%d,text=%d,empty_text=%d) llm(attempt=%d,success=%d,empty=%d,failed=%d) generated_questions=%d chunk_update_failed=%d metadata_set_failed=%d index(prepared=%d,attempted=%v,succeeded=%v)",
+			"Question generation stats: knowledge=%s kb=%s retry=%d/%d status=%s elapsed=%s chunks(total=%d,text=%d,empty_text=%d) llm(attempt=%d,success=%d,empty=%d,failed=%d) cache_hits=%d generated_questions=%d chunk_update_failed=%d metadata_set_failed=%d index(prepared=%d,attempted=%v,succeeded=%v)",
 			payload.KnowledgeID,
 			payload.KnowledgeBaseID,
 			retryCount,
@@ -1291,6 +1365,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			llmCallSuccess,
 			llmCallEmpty,
 			llmCallFailed,
+			questionCacheHits,
 			generatedQuestionsTotal,
 			chunkUpdateFailed,
 			chunkMetadataSetFailed,
@@ -1308,6 +1383,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 				"llm_success":            llmCallSuccess,
 				"llm_empty":              llmCallEmpty,
 				"llm_failed":             llmCallFailed,
+				"question_cache_hits":    questionCacheHits,
 				"questions_generated":    generatedQuestionsTotal,
 				"chunk_update_failed":    chunkUpdateFailed,
 				"metadata_set_failed":    chunkMetadataSetFailed,
@@ -1442,6 +1518,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 	resolvedModelID = kb.SummaryModelID
+	modelRevision := s.resolveChatArtifactRevision(ctx, kb.SummaryModelID)
 
 	// Initialize embedding model and retrieval engine
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
@@ -1496,6 +1573,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 
 	// Generate questions for each chunk with context
 	var indexInfoList []*types.IndexInfo
+	var questionUpdates []generatedQuestionUpdate
 	for i, chunk := range textChunks {
 		if strings.TrimSpace(chunk.Content) == "" {
 			emptyContentChunks++
@@ -1511,63 +1589,53 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 			nextContent = enrichContent(textChunks[i+1])
 		}
 
-		llmCallAttempts++
-		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
+		questions, cacheHit, providerCalled, err := s.generateQuestionsWithContext(ctx, chatModel, modelRevision, enrichContent(chunk), prevContent, nextContent,
 			knowledge.Title, questionCount, customInstructions)
+		if providerCalled {
+			llmCallAttempts++
+		}
 		if err != nil {
-			llmCallFailed++
+			if isChatArtifactPipelineError(err) {
+				if providerCalled {
+					llmCallSuccess++
+				}
+				exitStatus = "question_artifact_failed"
+				qErr = err
+				logger.Errorf(ctx, "Question artifact pipeline failed for chunk %s: %v", chunk.ID, err)
+				return fmt.Errorf("question artifact pipeline failed for chunk %s: %w", chunk.ID, err)
+			}
+			if providerCalled {
+				llmCallFailed++
+			}
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
 			continue
 		}
+		if cacheHit {
+			questionCacheHits++
+		}
 
 		if len(questions) == 0 {
-			llmCallEmpty++
+			if providerCalled {
+				llmCallEmpty++
+			}
 			continue
 		}
-		llmCallSuccess++
+		if providerCalled {
+			llmCallSuccess++
+		}
 		generatedQuestionsTotal += len(questions)
 		if sampleQuestion == "" && len(questions) > 0 {
 			sampleQuestion = previewText(questions[0], 200)
 		}
 
-		// Update chunk metadata with unique IDs for each question
-		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
-		for j, question := range questions {
-			questionID := fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j))
-			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       questionID,
-				Question: question,
-			}
-		}
-		meta := &types.DocumentChunkMetadata{
-			GeneratedQuestions: generatedQuestions,
-		}
-		if err := chunk.SetDocumentMetadata(meta); err != nil {
+		update, entries, err := prepareGeneratedQuestionUpdate(chunk, knowledge, questions)
+		if err != nil {
 			chunkMetadataSetFailed++
-			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
+			logger.Warnf(ctx, "Failed to prepare generated questions for chunk %s: %v", chunk.ID, err)
 			continue
 		}
-
-		// Update chunk in database
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-			chunkUpdateFailed++
-			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
-			continue
-		}
-
-		// Create index entries for generated questions
-		for _, gq := range generatedQuestions {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, gq.ID)
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         gq.Question,
-				SourceID:        sourceID,
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				IsEnabled:       true,
-			})
-		}
+		questionUpdates = append(questionUpdates, update)
+		indexInfoList = append(indexInfoList, entries...)
 		logger.Debugf(ctx, "Generated %d questions for chunk %s", len(questions), chunk.ID)
 	}
 	indexEntriesPrepared = len(indexInfoList)
@@ -1582,6 +1650,12 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		}
 		indexBatchSucceeded = true
 		logger.Infof(ctx, "Successfully indexed %d generated questions for knowledge: %s", len(indexInfoList), payload.KnowledgeID)
+	}
+	if err := s.applyGeneratedQuestionUpdates(ctx, retrieveEngine, embeddingModel, kb, questionUpdates); err != nil {
+		exitStatus = "update_questions_failed"
+		chunkUpdateFailed++
+		logger.Errorf(ctx, "Failed to publish generated questions: %v", err)
+		return fmt.Errorf("failed to publish generated questions: %w", err)
 	}
 
 	return nil
@@ -1611,6 +1685,8 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	chunksProcessed := 0
 	emptyChunks := 0
 	llmCallFailed := 0
+	chunkMetadataSetFailed := 0
+	questionCacheHits := 0
 	generatedQuestionsTotal := 0
 	indexEntriesPrepared := 0
 	indexBatchSucceeded := false
@@ -1638,8 +1714,9 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}()
 	defer func() {
 		logger.Infof(ctx,
-			"Question generation (batch) stats: knowledge=%s batch=%d chunks(in_batch=%d,processed=%d,empty=%d) llm_failed=%d retry=%d/%d status=%s elapsed=%s generated_questions=%d index(entries=%d,succeeded=%v)",
+			"Question generation (batch) stats: knowledge=%s batch=%d chunks(in_batch=%d,processed=%d,empty=%d) llm_failed=%d metadata_set_failed=%d cache_hits=%d retry=%d/%d status=%s elapsed=%s generated_questions=%d index(entries=%d,succeeded=%v)",
 			payload.KnowledgeID, payload.BatchIndex, chunksInBatch, chunksProcessed, emptyChunks, llmCallFailed,
+			chunkMetadataSetFailed, questionCacheHits,
 			retryCount, maxRetry, exitStatus, time.Since(taskStartedAt).Round(time.Millisecond),
 			generatedQuestionsTotal, indexEntriesPrepared, indexBatchSucceeded,
 		)
@@ -1651,6 +1728,8 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 				"chunks_processed":       chunksProcessed,
 				"empty_chunks":           emptyChunks,
 				"llm_failed":             llmCallFailed,
+				"metadata_set_failed":    chunkMetadataSetFailed,
+				"question_cache_hits":    questionCacheHits,
 				"questions_generated":    generatedQuestionsTotal,
 				"index_entries_prepared": indexEntriesPrepared,
 				"index_batch_succeeded":  indexBatchSucceeded,
@@ -1744,6 +1823,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 	resolvedModelID = kb.SummaryModelID
+	modelRevision := s.resolveChatArtifactRevision(ctx, kb.SummaryModelID)
 
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	if err != nil {
@@ -1836,19 +1916,31 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}
 
 	var indexInfoList []*types.IndexInfo
+	var questionUpdates []generatedQuestionUpdate
 	for i, chunk := range batchChunks {
 		if chunk == nil || strings.TrimSpace(chunk.Content) == "" {
 			emptyChunks++
 			continue
 		}
 
-		questions, gerr := s.generateQuestionsWithContext(
-			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
+		questions, cacheHit, providerCalled, gerr := s.generateQuestionsWithContext(
+			ctx, chatModel, modelRevision, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
 			customInstructions)
 		if gerr != nil {
-			llmCallFailed++
+			if isChatArtifactPipelineError(gerr) {
+				exitStatus = "question_artifact_failed"
+				qErr = gerr
+				logger.Errorf(ctx, "Question artifact pipeline failed for chunk %s: %v", chunk.ID, gerr)
+				return fmt.Errorf("question artifact pipeline failed for chunk %s: %w", chunk.ID, gerr)
+			}
+			if providerCalled {
+				llmCallFailed++
+			}
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, gerr)
 			continue
+		}
+		if cacheHit {
+			questionCacheHits++
 		}
 		if len(questions) == 0 {
 			continue
@@ -1859,33 +1951,14 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			sampleQuestion = previewText(questions[0], 200)
 		}
 
-		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
-		for j, question := range questions {
-			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j)),
-				Question: question,
-			}
-		}
-		meta := &types.DocumentChunkMetadata{GeneratedQuestions: generatedQuestions}
-		if err := chunk.SetDocumentMetadata(meta); err != nil {
-			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
+		update, entries, err := prepareGeneratedQuestionUpdate(chunk, knowledge, questions)
+		if err != nil {
+			chunkMetadataSetFailed++
+			logger.Warnf(ctx, "Failed to prepare generated questions for chunk %s: %v", chunk.ID, err)
 			continue
 		}
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
-			continue
-		}
-		for _, gq := range generatedQuestions {
-			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         gq.Question,
-				SourceID:        fmt.Sprintf("%s-%s", chunk.ID, gq.ID),
-				SourceType:      types.ChunkSourceType,
-				ChunkID:         chunk.ID,
-				KnowledgeID:     knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID,
-				IsEnabled:       true,
-			})
-		}
+		questionUpdates = append(questionUpdates, update)
+		indexInfoList = append(indexInfoList, entries...)
 	}
 
 	indexEntriesPrepared = len(indexInfoList)
@@ -1900,21 +1973,27 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		logger.Infof(ctx, "Indexed %d generated questions for knowledge=%s batch=%d",
 			len(indexInfoList), payload.KnowledgeID, payload.BatchIndex)
 	}
+	if err := s.applyGeneratedQuestionUpdates(ctx, retrieveEngine, embeddingModel, kb, questionUpdates); err != nil {
+		exitStatus = "update_questions_failed"
+		qErr = err
+		logger.Errorf(ctx, "Failed to publish generated questions for batch %d: %v", payload.BatchIndex, err)
+		return fmt.Errorf("failed to publish generated questions: %w", err)
+	}
 	return nil
 }
 
 // generateQuestionsWithContext generates questions for a chunk with surrounding context
 func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
-	chatModel chat.Chat, content, prevContent, nextContent, docName string, questionCount int,
+	chatModel chat.Chat, modelRevision, content, prevContent, nextContent, docName string, questionCount int,
 	customInstructions string,
-) ([]string, error) {
+) ([]string, bool, bool, error) {
 	if content == "" || questionCount <= 0 {
-		return nil, nil
+		return nil, false, false, nil
 	}
 
 	prompt := strings.TrimSpace(s.config.Conversation.GenerateQuestionsPrompt)
 	if prompt == "" {
-		return nil, fmt.Errorf("generate questions prompt not configured")
+		return nil, false, false, fmt.Errorf("generate questions prompt not configured")
 	}
 
 	// Build context section
@@ -1941,39 +2020,41 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "question_generation")
 
 	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
+	messages := []chat.Message{
 		{
 			Role:    "user",
 			Content: prompt,
 		},
-	}, &chat.ChatOptions{
+	}
+	options := &chat.ChatOptions{
 		Temperature: 0.7,
 		MaxTokens:   512,
 		Thinking:    &thinking,
+	}
+	store := s.artifactStore
+	if strings.TrimSpace(modelRevision) == "" {
+		store = nil
+	}
+	completion, hit, providerCalled, err := completeChatArtifact(ctx, store, chatArtifactRequest{
+		tenantID:             types.MustTenantIDFromContext(ctx),
+		stage:                questionArtifactStage,
+		keyVersion:           questionArtifactKeyVersion,
+		model:                chatModel,
+		modelRevision:        modelRevision,
+		messages:             messages,
+		options:              options,
+		promptVersion:        questionPromptVersion,
+		canonicalizerVersion: questionCanonicalizerVersion,
+		valuePolicy:          generatedQuestionArtifactPolicy(questionCount),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate questions: %w", err)
+		return nil, false, providerCalled, fmt.Errorf("failed to generate questions: %w", err)
 	}
-
-	// Parse response
-	lines := strings.Split(response.Content, "\n")
-	questions := make([]string, 0, questionCount)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		line = strings.TrimLeft(line, "0123456789.-*) ")
-		line = strings.TrimSpace(line)
-		if line != "" && len(line) > 5 {
-			questions = append(questions, line)
-			if len(questions) >= questionCount {
-				break
-			}
-		}
+	questions, err := decodeGeneratedQuestionArtifact(completion)
+	if err != nil {
+		return nil, false, providerCalled, fmt.Errorf("decode generated question artifact: %w", err)
 	}
-
-	return questions, nil
+	return questions, hit, providerCalled, nil
 }
 
 // ReparseKnowledge schedules asynchronous reparsing. Manual knowledge retains its

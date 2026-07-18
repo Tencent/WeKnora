@@ -4,7 +4,19 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type summaryArtifactChunkRepo struct{ interfaces.ChunkRepository }
+
+func (summaryArtifactChunkRepo) ListChunksByParentIDs(context.Context, uint64, []string) ([]*types.Chunk, error) {
+	return nil, nil
+}
 
 // TestCheckSufficientSummaryContent verifies the gate that prevents getSummary
 // from calling the LLM (and ProcessSummaryGeneration from creating a summary
@@ -41,8 +53,8 @@ func TestCheckSufficientSummaryContent(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "scanned PDF with empty <image> wrapper rejected",
-			content: `<image url="x"><image_original>![a](x)</image_original></image>`,
+			name:      "scanned PDF with empty <image> wrapper rejected",
+			content:   `<image url="x"><image_original>![a](x)</image_original></image>`,
 			wantError: true,
 		},
 		{
@@ -102,4 +114,68 @@ func TestCheckSufficientSummaryContent_ThresholdOverride(t *testing.T) {
 	if !errors.Is(err, errInsufficientSummaryContent) {
 		t.Fatalf("tightened threshold: expected errInsufficientSummaryContent, got %v", err)
 	}
+}
+
+func TestGetSummaryReusesSuccessfulChatArtifact(t *testing.T) {
+	store := newChatArtifactFakeStore()
+	model := &chatArtifactFakeModel{
+		modelID:   "summary-model",
+		modelName: "summary-model",
+		response:  &types.ChatResponse{Content: "cached summary"},
+	}
+	svc := &knowledgeService{
+		config: &config.Config{Conversation: &config.ConversationConfig{
+			GenerateSummaryPrompt: "Summarize in {{language}}.",
+		}},
+		chunkRepo:     summaryArtifactChunkRepo{},
+		artifactStore: store,
+	}
+	ctx := context.WithValue(context.Background(), types.LanguageContextKey, "en")
+	knowledge := &types.Knowledge{ID: "knowledge-1", TenantID: 7}
+	chunks := []*types.Chunk{{ID: "chunk-1", Content: "This document contains enough useful text.", StartAt: 0}}
+
+	first, firstHit, err := svc.getSummary(ctx, model, "revision-1", knowledge, chunks)
+	require.NoError(t, err)
+	second, secondHit, err := svc.getSummary(ctx, model, "revision-1", knowledge, chunks)
+	require.NoError(t, err)
+
+	assert.Equal(t, "cached summary", first)
+	assert.Equal(t, first, second)
+	assert.False(t, firstHit)
+	assert.True(t, secondHit)
+	assert.Equal(t, 1, model.calls)
+	assert.Equal(t, 1, store.putCalls)
+}
+
+func TestGetSummaryBypassesArtifactWithoutSafeModelRevision(t *testing.T) {
+	store := newChatArtifactFakeStore()
+	model := &chatArtifactFakeModel{
+		modelID:   "summary-model",
+		modelName: "summary-model",
+		response:  &types.ChatResponse{Content: "fresh summary"},
+	}
+	svc := &knowledgeService{
+		config: &config.Config{Conversation: &config.ConversationConfig{
+			GenerateSummaryPrompt: "Summarize.",
+		}},
+		chunkRepo:     summaryArtifactChunkRepo{},
+		artifactStore: store,
+	}
+	knowledge := &types.Knowledge{ID: "knowledge-1", TenantID: 7}
+	chunks := []*types.Chunk{{ID: "chunk-1", Content: "This document contains enough useful text.", StartAt: 0}}
+
+	_, hit, err := svc.getSummary(context.Background(), model, "", knowledge, chunks)
+	require.NoError(t, err)
+	assert.False(t, hit)
+	assert.Equal(t, 1, model.calls)
+	assert.Zero(t, store.getCalls)
+	assert.Zero(t, store.putCalls)
+}
+
+func TestStableSummaryChunkIDIgnoresCompletionVariance(t *testing.T) {
+	first := stableSummaryChunkID("knowledge-1")
+	second := stableSummaryChunkID("knowledge-1")
+	assert.Equal(t, first, second)
+	assert.NotEmpty(t, first)
+	assert.NotEqual(t, first, stableSummaryChunkID("knowledge-2"))
 }

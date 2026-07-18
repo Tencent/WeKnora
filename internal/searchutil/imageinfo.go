@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -56,10 +57,7 @@ func CollectImageInfoByChunkIDs(
 			aggMap[targetID] = agg
 		}
 		for _, info := range infos {
-			key := info.URL
-			if key == "" {
-				key = info.OriginalURL
-			}
+			key := imageInfoKey(info)
 			if key == "" {
 				continue
 			}
@@ -67,13 +65,7 @@ func CollectImageInfoByChunkIDs(
 			if !exists {
 				agg.byURL[key] = info
 			} else {
-				if info.OCRText != "" {
-					existing.OCRText = info.OCRText
-				}
-				if info.Caption != "" {
-					existing.Caption = info.Caption
-				}
-				agg.byURL[key] = existing
+				agg.byURL[key] = mergeImageInfo(existing, info)
 			}
 		}
 	}
@@ -110,11 +102,7 @@ func CollectImageInfoByChunkIDs(
 		if len(agg.byURL) == 0 {
 			continue
 		}
-		merged := make([]types.ImageInfo, 0, len(agg.byURL))
-		for _, info := range agg.byURL {
-			merged = append(merged, info)
-		}
-		data, err := json.Marshal(merged)
+		data, err := json.Marshal(sortedImageInfos(agg.byURL))
 		if err != nil {
 			continue
 		}
@@ -167,32 +155,70 @@ func MergeImageInfoJSON(perChunk map[string]string) string {
 	if len(perChunk) == 0 {
 		return ""
 	}
-	seen := make(map[string]bool)
-	var all []types.ImageInfo
+	byURL := make(map[string]types.ImageInfo)
 	for _, raw := range perChunk {
 		var infos []types.ImageInfo
 		if err := json.Unmarshal([]byte(raw), &infos); err != nil {
 			continue
 		}
 		for _, info := range infos {
-			key := info.URL
+			key := imageInfoKey(info)
 			if key == "" {
-				key = info.OriginalURL
+				continue
 			}
-			if key != "" && !seen[key] {
-				seen[key] = true
-				all = append(all, info)
+			if existing, ok := byURL[key]; ok {
+				byURL[key] = mergeImageInfo(existing, info)
+			} else {
+				byURL[key] = info
 			}
 		}
 	}
-	if len(all) == 0 {
+	if len(byURL) == 0 {
 		return ""
 	}
-	data, err := json.Marshal(all)
+	data, err := json.Marshal(sortedImageInfos(byURL))
 	if err != nil {
 		return ""
 	}
 	return string(data)
+}
+
+func imageInfoKey(info types.ImageInfo) string {
+	if info.URL != "" {
+		return info.URL
+	}
+	return info.OriginalURL
+}
+
+func mergeImageInfo(left, right types.ImageInfo) types.ImageInfo {
+	left.URL = stableNonEmptyString(left.URL, right.URL)
+	left.OriginalURL = stableNonEmptyString(left.OriginalURL, right.OriginalURL)
+	left.StartPos = min(left.StartPos, right.StartPos)
+	left.EndPos = min(left.EndPos, right.EndPos)
+	left.Caption = stableNonEmptyString(left.Caption, right.Caption)
+	left.OCRText = stableNonEmptyString(left.OCRText, right.OCRText)
+	return left
+}
+
+func stableNonEmptyString(left, right string) string {
+	if len(right) > len(left) || (len(right) == len(left) && right != "" && right < left) {
+		return right
+	}
+	return left
+}
+
+func sortedImageInfos(byURL map[string]types.ImageInfo) []types.ImageInfo {
+	keys := make([]string, 0, len(byURL))
+	for key := range byURL {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	infos := make([]types.ImageInfo, 0, len(keys))
+	for _, key := range keys {
+		infos = append(infos, byURL[key])
+	}
+	return infos
 }
 
 // EnrichContentWithImageInfo embeds image info as XML tags into text content.
