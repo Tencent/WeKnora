@@ -146,9 +146,15 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 			continue
 		}
 
-		// Process lines with data: prefix
+		// Process lines with data: prefix. Multiple data lines in one event
+		// are joined with newlines per the SSE spec.
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = strings.TrimSpace(line[5:]) // Remove "data:" prefix
+			payload := strings.TrimSpace(line[5:])
+			if dataBuffer == "" {
+				dataBuffer = payload
+			} else {
+				dataBuffer += "\n" + payload
+			}
 		}
 	}
 

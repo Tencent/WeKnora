@@ -337,7 +337,12 @@ func (c *Client) KnowledgeQAStream(
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			payload := strings.TrimSpace(line[5:])
+			if dataBuffer == "" {
+				dataBuffer = payload
+			} else {
+				dataBuffer += "\n" + payload
+			}
 		}
 	}
 
@@ -411,7 +416,12 @@ func (c *Client) ContinueStream(
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			payload := strings.TrimSpace(line[5:])
+			if dataBuffer == "" {
+				dataBuffer = payload
+			} else {
+				dataBuffer += "\n" + payload
+			}
 		}
 	}
 
