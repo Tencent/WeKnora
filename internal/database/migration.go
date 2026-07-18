@@ -4,12 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	gomysql "github.com/go-sql-driver/mysql"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -103,10 +107,7 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
-		migrationsPath = "file://migrations/sqlite"
-	}
+	migrationsPath := migrationPathForDSN(dsn)
 
 	var m *migrate.Migrate
 	if opts.SQLiteDBPath != "" {
@@ -257,6 +258,17 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	return nil
 }
 
+func migrationPathForDSN(dsn string) string {
+	switch {
+	case strings.HasPrefix(dsn, "mysql://"):
+		return "file://migrations/mysql"
+	case strings.HasPrefix(dsn, "sqlite3://"):
+		return "file://migrations/sqlite"
+	default:
+		return "file://migrations/versioned"
+	}
+}
+
 // recoverFromDirtyState attempts to recover from a dirty migration state
 // by forcing to the previous version and allowing the migration to be retried
 func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion uint) error {
@@ -300,16 +312,11 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
-	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-	)
-
-	migrationsPath := "file://migrations/versioned"
+	dbURL, err := migrationURLFromEnv()
+	if err != nil {
+		return 0, false, err
+	}
+	migrationsPath := migrationPathForDSN(dbURL)
 
 	m, err := migrate.New(migrationsPath, dbURL)
 	if err != nil {
@@ -323,4 +330,47 @@ func GetMigrationVersion() (uint, bool, error) {
 	}
 
 	return version, dirty, nil
+}
+
+func migrationURLFromEnv() (string, error) {
+	driver := strings.ToLower(strings.TrimSpace(os.Getenv("DB_DRIVER")))
+	host := strings.TrimSpace(os.Getenv("DB_HOST"))
+	port := strings.TrimSpace(os.Getenv("DB_PORT"))
+	user := os.Getenv("DB_USER")
+	password := os.Getenv("DB_PASSWORD")
+	databaseName := os.Getenv("DB_NAME")
+
+	switch driver {
+	case "postgres":
+		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+			host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+		}
+		dbURL := &url.URL{
+			Scheme: "postgres",
+			User:   url.UserPassword(user, password),
+			Host:   net.JoinHostPort(host, port),
+			Path:   "/" + databaseName,
+		}
+		query := dbURL.Query()
+		query.Set("sslmode", "disable")
+		dbURL.RawQuery = query.Encode()
+		return dbURL.String(), nil
+	case "mysql":
+		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+			host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+		}
+		mysqlConfig := gomysql.NewConfig()
+		mysqlConfig.User = user
+		mysqlConfig.Passwd = password
+		mysqlConfig.Net = "tcp"
+		mysqlConfig.Addr = net.JoinHostPort(host, port)
+		mysqlConfig.DBName = databaseName
+		mysqlConfig.Collation = "utf8mb4_unicode_ci"
+		mysqlConfig.ParseTime = true
+		mysqlConfig.MultiStatements = true
+		mysqlConfig.Params = map[string]string{"charset": "utf8mb4"}
+		return "mysql://" + mysqlConfig.FormatDSN(), nil
+	default:
+		return "", fmt.Errorf("migration version lookup does not support DB_DRIVER=%q", driver)
+	}
 }

@@ -115,7 +115,7 @@ func (r *DataSourceRepository) Delete(ctx context.Context, id string) error {
 	if err := r.db.WithContext(ctx).
 		Model(&types.DataSource{}).
 		Where("id = ?", id).
-		Update("deleted_at", gorm.Expr("NOW()")).Error; err != nil {
+		Update("deleted_at", time.Now().UTC()).Error; err != nil {
 		return err
 	}
 	return nil
@@ -299,9 +299,9 @@ func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, retentionDays in
 	if retentionDays <= 0 {
 		retentionDays = 30
 	}
-	// Delete logs older than the retention period
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
 	if err := r.db.WithContext(ctx).
-		Where("started_at < NOW() - INTERVAL ? DAY", retentionDays).
+		Where("started_at < ?", cutoff).
 		Delete(&types.SyncLog{}).Error; err != nil {
 		return err
 	}

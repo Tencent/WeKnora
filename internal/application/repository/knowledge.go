@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -491,7 +492,6 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 // Only returns documents from document-type knowledge bases (excludes FAQ)
 // Returns (results, hasMore, error)
 // FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
-// Uses Postgres jsonb operator: metadata->>'key' = 'value'.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,
 	tenantID uint64,
@@ -500,10 +500,20 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
-		First(&knowledge).Error
+		Where("metadata IS NOT NULL")
+	encodedKey, _ := json.Marshal(key) // encoding a Go string cannot fail
+	jsonPath := "$." + string(encodedKey)
+	switch r.db.Dialector.Name() {
+	case "mysql":
+		query = query.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, ?)) = ?", jsonPath, value)
+	case "sqlite":
+		query = query.Where("json_extract(metadata, ?) = ?", jsonPath, value)
+	default:
+		query = query.Where("metadata->>? = ?", key, value)
+	}
+	err := query.First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

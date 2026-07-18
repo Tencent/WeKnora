@@ -41,6 +41,9 @@ func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPe
 		// driver-level default handling.
 		op.Payload = []byte("{}")
 	}
+	if op.EnqueuedAt.IsZero() {
+		op.EnqueuedAt = time.Now().UTC()
+	}
 	return r.db.WithContext(ctx).Create(op).Error
 }
 
@@ -93,7 +96,7 @@ func (r *taskPendingOpsRepository) PeekBatch(
 // (claimed_at < staleBefore), AND the key has no fresh claim. The whole thing
 // runs in one transaction:
 //
-//   - Postgres: we lock the ANCHOR row (earliest eligible id) of each
+//   - PostgreSQL/MySQL: we lock the ANCHOR row (earliest eligible id) of each
 //     candidate dedup_key with FOR UPDATE SKIP LOCKED. Because the anchor
 //     uniquely represents its key, SKIP LOCKED hands concurrent claimers
 //     DISJOINT key sets — a key whose anchor is already locked by another
@@ -125,7 +128,7 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 		//    Keys with a fresh claim are excluded WHOLESALE so a late sibling
 		//    of an in-flight document never gets claimed on its own.
 		var keys []string
-		if tx.Dialector.Name() == "postgres" {
+		if dialect := tx.Dialector.Name(); dialect == "postgres" || dialect == "mysql" {
 			// Lock the anchor (earliest eligible) row of each key with SKIP
 			// LOCKED so concurrent claimers get disjoint KEY sets, then map
 			// the locked anchors back to their dedup_keys. The NOT IN subquery
@@ -229,18 +232,39 @@ func (r *taskPendingOpsRepository) DeleteByIDs(ctx context.Context, ids []int64)
 }
 
 // IncrFailCount atomically bumps fail_count for one row and returns the
-// new value. We use UPDATE ... RETURNING so the read+write happens in
-// one round trip and races between concurrent IncrFailCount callers
-// resolve to monotonic counts.
+// new value. PostgreSQL supports UPDATE ... RETURNING directly. MySQL and
+// SQLite perform the atomic increment and read it back in one transaction.
 //
 // A missing row returns (0, nil): the caller's ID may have been removed
 // by a concurrent DeleteByIDs (e.g. dead-letter path), which is benign.
 func (r *taskPendingOpsRepository) IncrFailCount(ctx context.Context, id int64) (int, error) {
 	var newCount int
-	err := r.db.WithContext(ctx).Raw(
-		`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
-		id,
-	).Scan(&newCount).Error
+	if r.db.Dialector.Name() == "postgres" {
+		err := r.db.WithContext(ctx).Raw(
+			`UPDATE task_pending_ops SET fail_count = fail_count + 1 WHERE id = ? RETURNING fail_count`,
+			id,
+		).Scan(&newCount).Error
+		if err != nil {
+			return 0, err
+		}
+		return newCount, nil
+	}
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&types.TaskPendingOp{}).
+			Where("id = ?", id).
+			UpdateColumn("fail_count", gorm.Expr("fail_count + 1"))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		return tx.Model(&types.TaskPendingOp{}).
+			Select("fail_count").
+			Where("id = ?", id).
+			Scan(&newCount).Error
+	})
 	if err != nil {
 		return 0, err
 	}

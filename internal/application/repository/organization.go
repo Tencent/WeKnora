@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -89,9 +90,12 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 	var orgs []*types.Organization
 	q := r.db.WithContext(ctx).Where("searchable = ?", true)
 	if query != "" {
-		pattern := "%" + query + "%"
+		pattern := "%" + strings.ToLower(query) + "%"
 		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
-		q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		q = q.Where(
+			"LOWER(name) LIKE ? OR LOWER(COALESCE(description, '')) LIKE ? OR LOWER(id) LIKE ?",
+			pattern, pattern, pattern,
+		)
 	}
 	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
 	if err != nil {
@@ -334,7 +338,7 @@ func (r *organizationRepository) UpdateJoinRequestStatus(ctx context.Context, id
 		Updates(map[string]interface{}{
 			"status":         status,
 			"reviewed_by":    reviewedBy,
-			"reviewed_at":    gorm.Expr("NOW()"),
+			"reviewed_at":    time.Now().UTC(),
 			"review_message": reviewMessage,
 		}).Error
 }

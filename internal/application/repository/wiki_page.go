@@ -29,10 +29,17 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	if r.db == nil || r.db.Dialector == nil {
+		return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
 	}
-	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	switch r.db.Dialector.Name() {
+	case "mysql":
+		return "CASE WHEN COALESCE(JSON_LENGTH(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	case "sqlite":
+		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	default:
+		return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	}
 }
 
 // Create inserts a new wiki page record
@@ -165,12 +172,26 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		like := "%" + strings.ToLower(escapeLikePattern(req.Query)) + "%"
+		switch r.db.Dialector.Name() {
+		case "postgres":
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query,
+				"%"+escapeLikePattern(req.Query)+"%",
+			)
+		case "mysql":
+			query = query.Where(
+				"(MATCH(title, content) AGAINST (? IN NATURAL LANGUAGE MODE) OR LOWER(title) LIKE ? OR LOWER(content) LIKE ? OR LOWER(CAST(aliases AS CHAR)) LIKE ?)",
+				req.Query,
+				like, like, like,
+			)
+		default:
+			query = query.Where(
+				"(LOWER(title) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\' OR LOWER(CAST(aliases AS TEXT)) LIKE ? ESCAPE '\\')",
+				like, like, like,
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -186,9 +207,12 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	}
 	if wantPath := types.CleanWikiCategoryPath(req.CategoryPath); len(wantPath) > 0 {
 		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
-			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+			switch r.db.Dialector.Name() {
+			case "postgres":
 				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
-			} else {
+			case "mysql":
+				query = query.Where("category_path = CAST(? AS JSON)", string(encoded))
+			default:
 				query = query.Where("category_path = ?", string(encoded))
 			}
 		}
@@ -332,13 +356,11 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 	// with %…% to match anywhere in the serialized JSON array.
 	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
+	predicate, args := r.sourceRefPredicate(sourceKnowledgeID, string(needle), likePattern)
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ?", kbID).
+		Where(predicate, args...).
 		Find(&pages).Error; err != nil {
 		return nil, err
 	}
@@ -369,14 +391,12 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 	}
 	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
+	predicate, args := r.sourceRefPredicate(sourceKnowledgeID, string(needle), likePattern)
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
-			kbID,
-			string(needle),
-			likePattern,
-		).
+		Where("knowledge_base_id = ?", kbID).
+		Where(predicate, args...).
 		Pluck("slug", &slugs).Error; err != nil {
 		return nil, err
 	}
@@ -621,10 +641,8 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		return nil, nil
 	}
 
-	// Build a JSONB containment-OR with one needle per knowledge id,
-	// plus a single text-LIKE OR over the legacy prefix forms. The
-	// containment branches each get their own GIN index probe; the
-	// LIKE branch falls back to the text fulltext GIN.
+	// Build a dialect-specific JSON containment OR with one needle per
+	// knowledge id, plus text-LIKE predicates for the legacy prefix form.
 	type row struct {
 		Content    string            `gorm:"column:content"`
 		SourceRefs types.StringArray `gorm:"column:source_refs"`
@@ -649,9 +667,6 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
-		args = append(args, string(needle))
-
 		prefix, err := json.Marshal(kid + "|")
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid prefix: %w", err)
@@ -660,8 +675,13 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
-		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
+		predicate, predicateArgs := r.sourceRefPredicate(
+			kid,
+			string(needle),
+			"%"+escapeLikePattern(prefixStr)+"%",
+		)
+		clauses = append(clauses, predicate)
+		args = append(args, predicateArgs...)
 	}
 	if len(clauses) == 0 {
 		return nil, nil
@@ -957,8 +977,27 @@ func escapeLikePattern(s string) string {
 	return replacer.Replace(s)
 }
 
-// Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
-// The query is interpreted as a PostgreSQL regular expression (via ~*).
+// sourceRefPredicate returns a JSON-array membership predicate plus support
+// for the legacy "knowledgeID|title" representation.
+func (r *wikiPageRepository) sourceRefPredicate(
+	sourceKnowledgeID string,
+	jsonArrayNeedle string,
+	legacyLikePattern string,
+) (string, []interface{}) {
+	switch r.db.Dialector.Name() {
+	case "mysql":
+		return "(JSON_CONTAINS(source_refs, ?) OR CAST(source_refs AS CHAR) LIKE ?)",
+			[]interface{}{jsonArrayNeedle, legacyLikePattern}
+	case "sqlite":
+		return "(EXISTS (SELECT 1 FROM json_each(source_refs) WHERE value = ?) OR CAST(source_refs AS TEXT) LIKE ? ESCAPE '\\')",
+			[]interface{}{sourceKnowledgeID, legacyLikePattern}
+	default:
+		return "(source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+			[]interface{}{jsonArrayNeedle, legacyLikePattern}
+	}
+}
+
+// Search performs case-insensitive regex search on wiki pages within a knowledge base.
 //
 // Results are ranked by where the query hit, highest-relevance first:
 //
@@ -980,21 +1019,28 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
-	// CASE expression is evaluated per-row during SELECT; we order by the
-	// alias so the DB only computes the rank once. Parameterized four
-	// times with the same regex to avoid coupling to GORM's positional
-	// arg rewriting quirks.
+	matchExpr := func(column string) string { return column + " ~* ?" }
+	if r.db.Dialector.Name() == "mysql" {
+		matchExpr = func(column string) string {
+			return "REGEXP_LIKE(COALESCE(" + column + ", ''), ?, 'i')"
+		}
+	} else if r.db.Dialector.Name() == "sqlite" {
+		matchExpr = func(column string) string { return column + " REGEXP ('(?i)' || ?)" }
+	}
 	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
+		"WHEN " + matchExpr("title") + " THEN 4 " +
+		"WHEN " + matchExpr("slug") + " THEN 3 " +
+		"WHEN " + matchExpr("summary") + " THEN 2 " +
+		"WHEN " + matchExpr("content") + " THEN 1 " +
 		"ELSE 0 END AS match_rank"
+	whereExpr := "knowledge_base_id = ? AND (" +
+		matchExpr("title") + " OR " + matchExpr("content") + " OR " +
+		matchExpr("summary") + " OR " + matchExpr("slug") + ")"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
 		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
+		Where(whereExpr,
 			kbID, query, query, query, query).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").

@@ -214,6 +214,9 @@ helm install weknora ./helm \
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
+| `database.driver` | Business database driver (`postgres` or `mysql`) | `postgres` |
+| `database.host` | Business database service hostname | `postgres` |
+| `database.port` | Business database service port | `5432` |
 | `secrets.dbUser` | Database username | `postgres` |
 | `secrets.dbPassword` | Database password | `""` (required) |
 | `secrets.dbName` | Database name | `weknora` |

@@ -48,6 +48,17 @@ serviceAccount:
   automountServiceAccountToken: false
 
 # -----------------------------------------------------------------------------
+# Business Database
+# -----------------------------------------------------------------------------
+database:
+  # -- Business database driver: postgres or mysql
+  driver: postgres
+  # -- Database service hostname. For an external MySQL instance, set its DNS name.
+  host: postgres
+  # -- Database service port
+  port: 5432
+
+# -----------------------------------------------------------------------------
 # App (Backend API Server)
 # -----------------------------------------------------------------------------
 app:
@@ -88,7 +99,8 @@ app:
   # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
   env:
     GIN_MODE: release
-    # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
+    # -- Retrieval driver. With database.driver=mysql, use an external vector
+    # store such as qdrant; the postgres retriever is not compatible.
     RETRIEVE_DRIVER: postgres
     # -- Storage type: local, minio, cos, tos, s3
     STORAGE_TYPE: local

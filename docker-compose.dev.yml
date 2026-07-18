@@ -23,6 +23,37 @@ services:
     restart: unless-stopped
     stop_grace_period: 1m
 
+  # Optional MySQL 8 business database. MySQL does not provide vector search
+  # for WeKnora; start Qdrant (or another supported external retriever) too.
+  # Example: docker compose -f docker-compose.dev.yml --profile mysql --profile qdrant up -d mysql qdrant redis
+  mysql:
+    image: mysql:8.4
+    container_name: WeKnora-mysql-dev
+    profiles:
+      - mysql
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-WeKnora}
+      MYSQL_USER: ${DB_USER:-weknora}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-weknora123}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-weknora-root-123}
+      TZ: ${TZ:-Asia/Shanghai}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data-dev:/var/lib/mysql
+    networks:
+      - WeKnora-network-dev
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis-dev
@@ -521,6 +552,7 @@ networks:
 
 volumes:
   postgres-data-dev:
+  mysql-data-dev:
   redis_data_dev:
   minio_data_dev:
   neo4j-data-dev:
