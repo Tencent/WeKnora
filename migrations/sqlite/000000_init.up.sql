@@ -704,7 +704,6 @@ CREATE TABLE IF NOT EXISTS embed_channels (
     show_suggested_questions INTEGER NOT NULL DEFAULT 1,
     widget_position VARCHAR(32) NOT NULL DEFAULT 'bottom-right',
     allow_web_search INTEGER NOT NULL DEFAULT 0,
-    allow_memory INTEGER NOT NULL DEFAULT 0,
     allow_file_upload INTEGER NOT NULL DEFAULT 0,
     default_locale VARCHAR(16) NOT NULL DEFAULT '',
     webhook_url VARCHAR(512) NOT NULL DEFAULT '',

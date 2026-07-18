@@ -71,7 +71,6 @@ type embedChannelRequest struct {
 	ShowSuggestedQuestions *bool    `json:"show_suggested_questions"`
 	WidgetPosition         string   `json:"widget_position"`
 	AllowWebSearch         *bool    `json:"allow_web_search"`
-	AllowMemory            *bool    `json:"allow_memory"`
 	AllowFileUpload        *bool    `json:"allow_file_upload"`
 	DefaultLocale          *string  `json:"default_locale"`
 	WebhookURL             *string  `json:"webhook_url"`
@@ -152,10 +151,6 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	if req.AllowWebSearch != nil {
 		allowWebSearch = *req.AllowWebSearch
 	}
-	allowMemory := false
-	if req.AllowMemory != nil {
-		allowMemory = *req.AllowMemory
-	}
 	allowFileUpload := false
 	if req.AllowFileUpload != nil {
 		allowFileUpload = *req.AllowFileUpload
@@ -173,7 +168,6 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 		ShowSuggestedQuestions: showSuggested,
 		WidgetPosition:         req.WidgetPosition,
 		AllowWebSearch:         allowWebSearch,
-		AllowMemory:            allowMemory,
 		AllowFileUpload:        allowFileUpload,
 		DefaultLocale:          types.NormalizeEmbedDefaultLocale(stringOrEmpty(req.DefaultLocale)),
 	})
@@ -255,7 +249,7 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	if req.AgentID != nil {
 		update.AgentID = strings.TrimSpace(*req.AgentID)
 	}
-	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowMemory, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
+	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
 	if err != nil {
 		writeEmbedMgmtError(c, err)
 		return
@@ -710,8 +704,6 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 	}
 	// Channel allow_web_search only exposes the visitor toggle; the client must opt in.
 	payload["web_search_enabled"] = ch.AllowWebSearch && clientWebSearch
-	// Embed memory UI is disabled for now; always off regardless of channel flag.
-	payload["enable_memory"] = false
 	if !ch.AllowFileUpload {
 		delete(payload, "images")
 		delete(payload, "attachment_uploads")
@@ -796,7 +788,6 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"show_suggested_questions": ch.ShowSuggestedQuestions,
 		"widget_position":          ch.WidgetPosition,
 		"allow_web_search":         ch.AllowWebSearch,
-		"allow_memory":             ch.AllowMemory,
 		"allow_file_upload":        ch.AllowFileUpload,
 		"default_locale":           ch.DefaultLocale,
 		"webhook_url":              ch.WebhookURL,

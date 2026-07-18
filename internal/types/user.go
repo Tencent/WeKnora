@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// UserPreferences holds per-user UI/feature preferences persisted server-side
+// UserPreferences holds per-user preferences persisted server-side
 // so they sync across devices/browsers. Fields are pointers so we can
 // distinguish "client didn't send this key" (leave existing value alone)
 // from "client explicitly set false" — the partial-update merge in
@@ -22,11 +22,6 @@ import (
 //
 // No DB DDL is required — preferences is a single jsonb column.
 type UserPreferences struct {
-	// EnableMemory mirrors the "开启记忆功能" switch in General Settings.
-	// nil  = preference never set (treat as feature default = false)
-	// *false / *true = user explicitly set the toggle.
-	EnableMemory *bool `json:"enable_memory,omitempty"`
-
 	// LastActiveTenantID remembers the last workspace the user actively
 	// switched into, so a fresh login (new device, cleared browser, new
 	// refresh token) lands them back in that workspace instead of always
@@ -95,7 +90,7 @@ type User struct {
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
 	// Whether the user is a system administrator (independent of workspace roles)
 	IsSystemAdmin bool `json:"is_system_admin" gorm:"default:false;index"`
-	// Per-user UI/feature preferences (memory toggle, future knobs).
+	// Per-user UI/feature preferences.
 	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
 	// driver.Valuer / sql.Scanner methods on UserPreferences.
 	Preferences UserPreferences `json:"preferences" gorm:"type:jsonb;not null;default:'{}'"`

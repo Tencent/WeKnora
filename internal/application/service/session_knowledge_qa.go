@@ -27,11 +27,10 @@ func (s *sessionService) KnowledgeQA(
 ) error {
 	logger.Infof(
 		ctx,
-		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v, enableMemory: %v",
+		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",
 		req.Session.ID,
 		req.Query,
 		req.WebSearchEnabled,
-		req.EnableMemory,
 	)
 
 	// Span the request setup (KB / model resolution, search target building,
@@ -103,15 +102,11 @@ func (s *sessionService) KnowledgeQA(
 		len(searchTargets),
 	)
 
-	// Scope memory and pipeline attribution to the same owner as the session.
-	userID := types.SessionOwnerIDFromContext(ctx)
-
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{
 			Query:                   req.Query,
 			SessionID:               req.Session.ID,
-			UserID:                  userID,
-			EnableMemory:            req.EnableMemory,
+			UserID:                  types.SessionOwnerIDFromContext(ctx),
 			MaxRounds:               s.cfg.Conversation.MaxRounds,
 			KnowledgeBaseIDs:        knowledgeBaseIDs,
 			KnowledgeIDs:            knowledgeIDs,
@@ -184,9 +179,7 @@ func (s *sessionService) KnowledgeQA(
 
 		pipeline = types.NewPipelineBuilder().
 			AddIf(hasHistory, types.LOAD_HISTORY).
-			AddIf(chatManage.EnableMemory, types.MEMORY_RETRIEVAL).
 			Add(types.CHAT_COMPLETION_STREAM).
-			AddIf(chatManage.EnableMemory, types.MEMORY_STORAGE).
 			Build()
 	} else {
 		// RAG — dynamically assemble based on feature flags.

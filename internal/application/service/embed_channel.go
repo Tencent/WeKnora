@@ -85,7 +85,6 @@ func (s *embedChannelService) Create(
 		ShowSuggestedQuestions: req.ShowSuggestedQuestions,
 		WidgetPosition:         types.NormalizeEmbedWidgetPosition(req.WidgetPosition),
 		AllowWebSearch:         req.AllowWebSearch,
-		AllowMemory:            req.AllowMemory,
 		AllowFileUpload:        req.AllowFileUpload,
 		DefaultLocale:          types.NormalizeEmbedDefaultLocale(req.DefaultLocale),
 	}
@@ -119,7 +118,7 @@ func (s *embedChannelService) ListByTenant(
 
 func (s *embedChannelService) Update(
 	ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel,
-	enabled *bool, showSuggested *bool, allowWebSearch *bool, allowMemory *bool, allowFileUpload *bool,
+	enabled *bool, showSuggested *bool, allowWebSearch *bool, allowFileUpload *bool,
 	defaultLocale *string, webhookURL *string, webhookSecret *string,
 ) (*types.EmbedChannel, error) {
 	ch, err := s.getOwned(ctx, tenantID, id)
@@ -138,9 +137,6 @@ func (s *embedChannelService) Update(
 	}
 	if allowWebSearch != nil {
 		ch.AllowWebSearch = *allowWebSearch
-	}
-	if allowMemory != nil {
-		ch.AllowMemory = *allowMemory
 	}
 	if allowFileUpload != nil {
 		ch.AllowFileUpload = *allowFileUpload
@@ -262,7 +258,6 @@ func (s *embedChannelService) PublicConfig(ctx context.Context, ch *types.EmbedC
 		AllowedOrigins:          ch.AllowedOriginsList(),
 		WidgetPosition:          types.NormalizeEmbedWidgetPosition(ch.WidgetPosition),
 		AllowWebSearch:          ch.AllowWebSearch,
-		AllowMemory:             ch.AllowMemory,
 		AllowFileUpload:         ch.AllowFileUpload,
 		AgentWebSearchEnabled:   agentWebSearchEnabled,
 		AgentImageUploadEnabled: agentImageUploadEnabled,

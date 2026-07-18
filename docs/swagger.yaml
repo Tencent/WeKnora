@@ -3608,7 +3608,7 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserPreferences'
         description: |-
-          Per-user UI/feature preferences (memory toggle, future knobs).
+          Per-user UI/feature preferences.
           Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
           driver.Valuer / sql.Scanner methods on UserPreferences.
       tenant:
@@ -3652,12 +3652,6 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.UserPreferences:
     properties:
-      enable_memory:
-        description: |-
-          EnableMemory mirrors the "开启记忆功能" switch in General Settings.
-          nil  = preference never set (treat as feature default = false)
-          *false / *true = user explicitly set the toggle.
-        type: boolean
       last_active_tenant_id:
         description: |-
           LastActiveTenantID remembers the last workspace the user actively
@@ -5435,8 +5429,6 @@ definitions:
     type: object
   internal_handler.updateMyPreferencesRequest:
     properties:
-      enable_memory:
-        type: boolean
       last_active_tenant_id:
         description: |-
           LastActiveTenantID lets the SPA persist "after a fresh login,
@@ -5482,20 +5474,6 @@ definitions:
         type: string
       disable_title:
         description: Whether to disable auto title generation
-        type: boolean
-      enable_memory:
-        description: |-
-          EnableMemory is the per-request override for the memory feature.
-          Pointer + omitempty so the request can distinguish three states:
-            nil   = client did not specify; backend falls back to the calling
-                    user's persisted preference (user.preferences.enable_memory),
-                    defaulting to false if that's also unset. This is the path
-                    used by the normal logged-in chat UI now that the toggle is
-                    stored server-side per user.
-            *true / *false = explicit override. Embedded mode forces *false so a
-                    user's personal memory setting doesn't leak into a widget
-                    context; older clients that still send a literal bool also
-                    land here (back-compat).
         type: boolean
       images:
         description: Attached images for multimodal chat
