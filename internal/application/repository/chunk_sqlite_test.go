@@ -95,6 +95,36 @@ func TestCreateChunks_SQLite_SeqIDContinuesFromExisting(t *testing.T) {
 	}
 }
 
+func TestUpsertChunksPreservesStableIdentityAndUserFields(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	chunk := makeChunk("kb-1", "knowledge-1", types.ChunkTypeText)
+	chunk.ID = "111f15f1-cbb5-5da7-9a97-4da6fd01eec7"
+	chunk.Content = "original"
+	chunk.TagID = "user-tag"
+	chunk.Flags = 7
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+	originalSeqID := chunk.SeqID
+
+	replacement := makeChunk("kb-1", "knowledge-1", types.ChunkTypeText)
+	replacement.ID = chunk.ID
+	replacement.Content = "updated"
+	replacement.ChunkIndex = 3
+	replacement.ContentHash = "hash-v2"
+	require.NoError(t, repo.UpsertChunks(ctx, []*types.Chunk{replacement}))
+
+	got, err := repo.GetChunkByID(ctx, 1, chunk.ID)
+	require.NoError(t, err)
+	assert.Equal(t, originalSeqID, got.SeqID)
+	assert.Equal(t, "updated", got.Content)
+	assert.Equal(t, 3, got.ChunkIndex)
+	assert.Equal(t, "hash-v2", got.ContentHash)
+	assert.Equal(t, "user-tag", got.TagID)
+	assert.Equal(t, types.ChunkFlags(7), got.Flags)
+}
+
 func TestCreateChunks_SQLite_SeqIDUniqueAcrossKBs(t *testing.T) {
 	db := setupChunkTestDB(t)
 	repo := NewChunkRepository(db)

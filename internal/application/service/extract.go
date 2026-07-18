@@ -167,7 +167,8 @@ type ChunkExtractService struct {
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
-	spanTracker SpanTracker
+	spanTracker   SpanTracker
+	artifactCache *ArtifactCache
 }
 
 // NewChunkExtractService creates a new chunk extract service
@@ -179,6 +180,7 @@ func NewChunkExtractService(
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	spanTracker SpanTracker,
+	artifactCache *ArtifactCache,
 ) interfaces.TaskHandler {
 	return &ChunkExtractService{
 		template:          config.ExtractManager.ExtractGraph,
@@ -188,6 +190,7 @@ func NewChunkExtractService(
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
 		spanTracker:       spanTracker,
+		artifactCache:     artifactCache,
 	}
 }
 
@@ -329,12 +332,30 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
+	templateFingerprint, err := fingerprintJSON(template)
 	if err != nil {
 		handleErr = err
 		return err
 	}
+	var cachedGraph types.GraphData
+	cacheHit, err := s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+		TenantID:          p.TenantID,
+		Kind:              types.ProcessingArtifactGraphExtract,
+		InputHash:         hashBytes([]byte(canonicalizeArtifactText(chunk.Content))),
+		ModelFingerprint:  hashFingerprint(chatModel.GetModelID(), chatModel.GetModelName()),
+		PromptFingerprint: templateFingerprint,
+		ConfigFingerprint: hashFingerprint(types.LanguageNameFromContext(ctx)),
+		SchemaVersion:     "graph-extract-v1",
+	}, &cachedGraph, func() (any, error) {
+		extractor := chatpipeline.NewExtractor(chatModel, template)
+		return extractor.Extract(ctx, chunk.Content)
+	})
+	if err != nil {
+		handleErr = err
+		return err
+	}
+	graph := &cachedGraph
+	graphOut["cache_hit"] = cacheHit
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {
@@ -406,6 +427,7 @@ type DataTableSummaryService struct {
 	ownership            retriever.TenantStoreOwnership
 	sqlDB                *sql.DB
 	storageResolver      interfaces.StorageBackendResolver
+	artifactCache        *ArtifactCache
 }
 
 // NewDataTableSummaryService creates a new DataTableSummaryService
@@ -420,6 +442,7 @@ func NewDataTableSummaryService(
 	ownership retriever.TenantStoreOwnership,
 	sqlDB *sql.DB,
 	storageResolver interfaces.StorageBackendResolver,
+	artifactCache *ArtifactCache,
 ) interfaces.TaskHandler {
 	return &DataTableSummaryService{
 		modelService:         modelService,
@@ -432,6 +455,7 @@ func NewDataTableSummaryService(
 		ownership:            ownership,
 		sqlDB:                sqlDB,
 		storageResolver:      storageResolver,
+		artifactCache:        artifactCache,
 	}
 }
 
@@ -520,6 +544,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		logger.Errorf(ctx, "failed to get embedding model: %v", err)
 		return nil, err
 	}
+	embeddingModel = wrapIngestionEmbedder(s.artifactCache, payload.TenantID, embeddingModel)
 
 	// Load the KB to discover its VectorStoreID binding so the factory can
 	// route to the bound store (or fall back to tenant engines if unbound).
@@ -667,7 +692,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 
 	// 表格摘要chunk
 	summaryChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              stableDerivedID(resources.knowledge.ID, "table_summary"),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
@@ -676,12 +701,13 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 		IsEnabled:       true,
 		ChunkType:       types.ChunkTypeTableSummary,
 		Status:          int(types.ChunkStatusStored),
+		ContentHash:     hashBytes([]byte(canonicalizeArtifactText(tableDescription))),
 	}
 	chunks = append(chunks, summaryChunk)
 
 	// 列描述chunk（所有列的描述合并为一个chunk）
 	columnChunk := &types.Chunk{
-		ID:              uuid.New().String(),
+		ID:              stableDerivedID(resources.knowledge.ID, "table_column"),
 		TenantID:        resources.knowledge.TenantID,
 		KnowledgeID:     resources.knowledge.ID,
 		KnowledgeBaseID: resources.knowledge.KnowledgeBaseID,
@@ -691,6 +717,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 		ChunkType:       types.ChunkTypeTableColumn,
 		ParentChunkID:   summaryChunk.ID,
 		Status:          int(types.ChunkStatusStored),
+		ContentHash:     hashBytes([]byte(canonicalizeArtifactText(columnDescription))),
 	}
 	chunks = append(chunks, columnChunk)
 
@@ -723,7 +750,7 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	}
 
 	// 保存到数据库
-	if err := s.chunkService.CreateChunks(ctx, chunks); err != nil {
+	if err := s.chunkService.UpsertChunks(ctx, chunks); err != nil {
 		logger.Errorf(ctx, "failed to create chunks: %v", err)
 		return err
 	}
@@ -798,19 +825,35 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "table_metadata")
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
 
-	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "user", Content: prompt},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   512,
-		Thinking:    &thinking,
+	var cached summaryArtifact
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	_, err := s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+		TenantID:          tenantID,
+		Kind:              types.ProcessingArtifactSummary,
+		InputHash:         hashBytes([]byte(prompt)),
+		ModelFingerprint:  hashFingerprint(chatModel.GetModelID(), chatModel.GetModelName()),
+		PromptFingerprint: hashBytes([]byte(prompt)),
+		ConfigFingerprint: hashFingerprint("temperature=0.3", "max_tokens=512", "table_summary"),
+		SchemaVersion:     "table-summary-v1",
+	}, &cached, func() (any, error) {
+		thinking := false
+		response, chatErr := chatModel.Chat(ctx, []chat.Message{
+			{Role: "user", Content: prompt},
+		}, &chat.ChatOptions{
+			Temperature: 0.3,
+			MaxTokens:   512,
+			Thinking:    &thinking,
+		})
+		if chatErr != nil {
+			return nil, chatErr
+		}
+		return summaryArtifact{Content: response.Content}, nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate table description: %w", err)
 	}
 
-	return fmt.Sprintf("# Table Summary\n\nTable name: %s\n\n%s", tableName, response.Content), nil
+	return fmt.Sprintf("# Table Summary\n\nTable name: %s\n\n%s", tableName, cached.Content), nil
 }
 
 // generateColumnDescriptions generates descriptions for each column in batch
@@ -822,20 +865,35 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "table_metadata")
 	// logger.Debugf(ctx, "generateColumnDescriptions prompt: %s", prompt)
 
-	// Call LLM once for all columns
-	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "user", Content: prompt},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   2048,
-		Thinking:    &thinking,
+	var cached summaryArtifact
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	_, err := s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+		TenantID:          tenantID,
+		Kind:              types.ProcessingArtifactSummary,
+		InputHash:         hashBytes([]byte(prompt)),
+		ModelFingerprint:  hashFingerprint(chatModel.GetModelID(), chatModel.GetModelName()),
+		PromptFingerprint: hashBytes([]byte(prompt)),
+		ConfigFingerprint: hashFingerprint("temperature=0.3", "max_tokens=2048", "table_columns"),
+		SchemaVersion:     "table-columns-v1",
+	}, &cached, func() (any, error) {
+		thinking := false
+		response, chatErr := chatModel.Chat(ctx, []chat.Message{
+			{Role: "user", Content: prompt},
+		}, &chat.ChatOptions{
+			Temperature: 0.3,
+			MaxTokens:   2048,
+			Thinking:    &thinking,
+		})
+		if chatErr != nil {
+			return nil, chatErr
+		}
+		return summaryArtifact{Content: response.Content}, nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate column descriptions: %w", err)
 	}
 
-	return fmt.Sprintf("# Table Column Information\n\nTable name: %s\n\n%s", tableName, response.Content), nil
+	return fmt.Sprintf("# Table Column Information\n\nTable name: %s\n\n%s", tableName, cached.Content), nil
 }
 
 // buildSampleDataDescription builds a formatted sample data description

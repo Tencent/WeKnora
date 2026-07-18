@@ -16,6 +16,8 @@ type ChunkImageInfo struct {
 type ChunkRepository interface {
 	// CreateChunks creates chunks
 	CreateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// UpsertChunks inserts new chunks and refreshes deterministic-ID chunks.
+	UpsertChunks(ctx context.Context, chunks []*types.Chunk) error
 	// GetChunkByID gets a chunk by id
 	GetChunkByID(ctx context.Context, tenantID uint64, id string) (*types.Chunk, error)
 	// GetChunkByIDOnly gets a chunk by id without tenant filter (for permission resolution)
@@ -30,6 +32,8 @@ type ChunkRepository interface {
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListAllChunksByKnowledgeID lists every active chunk type for reconciliation.
+	ListAllChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagID is non-empty, results are filtered by tag_id.
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
@@ -113,6 +117,8 @@ type ChunkRepository interface {
 type ChunkService interface {
 	// CreateChunks creates chunks
 	CreateChunks(ctx context.Context, chunks []*types.Chunk) error
+	// UpsertChunks inserts or refreshes chunks with deterministic IDs.
+	UpsertChunks(ctx context.Context, chunks []*types.Chunk) error
 	// GetChunkByID gets a chunk by id (uses tenant from context)
 	GetChunkByID(ctx context.Context, id string) (*types.Chunk, error)
 	// GetChunkByIDOnly gets a chunk by id without tenant filter (for permission resolution)

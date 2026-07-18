@@ -321,7 +321,8 @@ type wikiIngestService struct {
 	// id at run-time (LatestAttempt) rather than carrying it in the
 	// asynq payload, which is per-KB and would otherwise be ambiguous
 	// for the 5-docs-per-batch fan-out.
-	spanTracker SpanTracker
+	spanTracker   SpanTracker
+	artifactCache *ArtifactCache
 	// liteLocks provides per-KB mutual exclusion in Lite mode (no Redis).
 	// Keys are kbID strings; values are unused (presence = locked).
 	liteLocks sync.Map
@@ -345,6 +346,7 @@ func NewWikiIngestService(
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
+	artifactCache *ArtifactCache,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
 		wikiService:    wikiService,
@@ -359,6 +361,7 @@ func NewWikiIngestService(
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
 		spanTracker:    spanTracker,
+		artifactCache:  artifactCache,
 	}
 	return svc
 }
@@ -2144,7 +2147,13 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		len(candidatePages), len(entities)+len(concepts))
 
 	var existingBuf strings.Builder
-	for _, p := range candidatePages {
+	candidateSlugs := make([]string, 0, len(candidatePages))
+	for slug := range candidatePages {
+		candidateSlugs = append(candidateSlugs, slug)
+	}
+	sort.Strings(candidateSlugs)
+	for _, slug := range candidateSlugs {
+		p := candidatePages[slug]
 		writeDedupItemXML(&existingBuf, p.Slug, p.Title, p.PageType, []string(p.Aliases))
 	}
 	if existingBuf.Len() == 0 {
@@ -2159,22 +2168,31 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		writeDedupItemXML(&newBuf, item.Slug, item.Name, "concept", item.Aliases)
 	}
 
-	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
+	promptData := map[string]string{
 		"NewItems":      newBuf.String(),
 		"ExistingPages": existingBuf.String(),
-	})
+	}
+	var dedupeResult wikiDedupeArtifact
+	_, err := s.getOrComputeWikiArtifact(
+		ctx, types.ProcessingArtifactWikiDedup, chatModel,
+		agent.WikiDeduplicationPrompt, promptData, "wiki-dedup-v1", &dedupeResult,
+		func() (any, error) {
+			dedupeJSON, generateErr := s.generateWithTemplate(
+				ctx, chatModel, agent.WikiDeduplicationPrompt, promptData,
+			)
+			if generateErr != nil {
+				return nil, generateErr
+			}
+			dedupeJSON = cleanLLMJSON(dedupeJSON)
+			var computed wikiDedupeArtifact
+			if parseErr := json.Unmarshal([]byte(dedupeJSON), &computed); parseErr != nil {
+				return nil, fmt.Errorf("parse dedup JSON: %w", parseErr)
+			}
+			return computed, nil
+		},
+	)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: deduplication LLM call failed: %v", err)
-		return entities, concepts
-	}
-
-	dedupeJSON = cleanLLMJSON(dedupeJSON)
-
-	var dedupeResult struct {
-		Merges map[string]string `json:"merges"`
-	}
-	if err := json.Unmarshal([]byte(dedupeJSON), &dedupeResult); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse dedup JSON: %v\nRaw: %s", err, dedupeJSON)
 		return entities, concepts
 	}
 
@@ -2300,6 +2318,43 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 		}
 	}
 	return "", fmt.Errorf("LLM call failed after %d attempts: %w", wikiLLMMaxAttempts, lastErr)
+}
+
+type wikiTextArtifact struct {
+	Content string `json:"content"`
+}
+
+type wikiDedupeArtifact struct {
+	Merges map[string]string `json:"merges"`
+}
+
+// getOrComputeWikiArtifact caches only per-document/per-batch map work. Reduce
+// prompts intentionally never call this helper because their output depends
+// on the current contributions from other documents.
+func (s *wikiIngestService) getOrComputeWikiArtifact(
+	ctx context.Context,
+	kind types.ProcessingArtifactKind,
+	chatModel chat.Chat,
+	promptTpl string,
+	data map[string]string,
+	schemaVersion string,
+	result any,
+	compute func() (any, error),
+) (bool, error) {
+	inputFingerprint, err := fingerprintJSON(data)
+	if err != nil {
+		return false, err
+	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	return s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+		TenantID:          tenantID,
+		Kind:              kind,
+		InputHash:         inputFingerprint,
+		ModelFingerprint:  hashFingerprint(chatModel.GetModelID(), chatModel.GetModelName()),
+		PromptFingerprint: hashBytes([]byte(promptTpl)),
+		ConfigFingerprint: hashFingerprint("temperature=0.3", fmt.Sprintf("attempts=%d", wikiLLMMaxAttempts)),
+		SchemaVersion:     schemaVersion,
+	}, result, compute)
 }
 
 // isTransientLLMError reports whether an error from the chat provider

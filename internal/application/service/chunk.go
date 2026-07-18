@@ -79,6 +79,16 @@ func (s *chunkService) CreateChunks(ctx context.Context, chunks []*types.Chunk) 
 	return nil
 }
 
+func (s *chunkService) UpsertChunks(ctx context.Context, chunks []*types.Chunk) error {
+	err := s.chunkRepository.UpsertChunks(ctx, chunks)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_count": len(chunks)})
+		return err
+	}
+	logger.Infof(ctx, "Upserted %d chunks successfully", len(chunks))
+	return nil
+}
+
 // GetChunkByID retrieves a chunk by its ID
 // This method fetches a specific chunk using its ID and validates tenant access
 // Parameters:

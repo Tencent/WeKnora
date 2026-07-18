@@ -928,3 +928,32 @@ CREATE TABLE IF NOT EXISTS temporary_documents (
 CREATE INDEX IF NOT EXISTS idx_temporary_documents_scope ON temporary_documents(tenant_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_temporary_documents_status ON temporary_documents(status);
 CREATE INDEX IF NOT EXISTS idx_temporary_documents_expires ON temporary_documents(expires_at);
+
+CREATE TABLE IF NOT EXISTS processing_artifacts (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    kind VARCHAR(32) NOT NULL,
+    cache_key VARCHAR(64) NOT NULL,
+    input_hash VARCHAR(64) NOT NULL DEFAULT '',
+    model_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
+    prompt_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
+    config_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
+    schema_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+    status VARCHAR(16) NOT NULL,
+    result_json TEXT,
+    result_size INTEGER NOT NULL DEFAULT 0,
+    error_detail TEXT NOT NULL DEFAULT '',
+    lease_owner VARCHAR(64) NOT NULL DEFAULT '',
+    lease_expires_at DATETIME,
+    hit_count INTEGER NOT NULL DEFAULT 0,
+    last_accessed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_processing_artifacts_cache_key
+    ON processing_artifacts(tenant_id, kind, cache_key);
+CREATE INDEX IF NOT EXISTS idx_processing_artifacts_lease
+    ON processing_artifacts(status, lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_processing_artifacts_accessed
+    ON processing_artifacts(last_accessed_at);

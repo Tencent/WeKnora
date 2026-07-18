@@ -75,7 +75,8 @@ type knowledgeService struct {
 	// pipeline. Best-effort: a nil tracker (test harness) is safely
 	// handled because the public surface is the SpanTracker interface,
 	// which has a no-op fallback. See knowledge_span_tracker.go.
-	spanTracker SpanTracker
+	spanTracker   SpanTracker
+	artifactCache *ArtifactCache
 }
 
 const (
@@ -111,6 +112,7 @@ func NewKnowledgeService(
 	wikiService interfaces.WikiPageService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	spanTracker SpanTracker,
+	artifactCache *ArtifactCache,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -138,6 +140,7 @@ func NewKnowledgeService(
 		wikiService:     wikiService,
 		taskPendingRepo: taskPendingRepo,
 		spanTracker:     spanTracker,
+		artifactCache:   artifactCache,
 	}, nil
 }
 

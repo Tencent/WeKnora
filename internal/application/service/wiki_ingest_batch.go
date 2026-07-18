@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1230,6 +1231,7 @@ func (s *wikiIngestService) mapOneDocument(
 	for slug := range slugItems {
 		summaryExtractedPages = append(summaryExtractedPages, slug)
 	}
+	sort.Strings(summaryExtractedPages)
 	// Wiki summary slug is derived from the knowledge ID rather than the
 	// docTitle (which is typically the upload filename). Filename-based slugs
 	// like "summary/mx5280-pdf" expose the filename in cross-link contexts
@@ -1279,13 +1281,28 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
+		promptData := map[string]string{
 			"Content":            content,
 			"Language":           lang,
 			"ExtractedSlugs":     slugListing,
 			"CustomInstructions": batchCtx.ContentInstructions,
 			"InstructionScope":   "wiki_content",
-		})
+		}
+		var cachedSummary wikiTextArtifact
+		_, summaryErr = s.getOrComputeWikiArtifact(
+			ctx, types.ProcessingArtifactWikiSummary, chatModel,
+			agent.WikiSummaryPrompt, promptData, "wiki-summary-v1", &cachedSummary,
+			func() (any, error) {
+				generated, generateErr := s.generateWithTemplate(
+					ctx, chatModel, agent.WikiSummaryPrompt, promptData,
+				)
+				if generateErr != nil {
+					return nil, generateErr
+				}
+				return wikiTextArtifact{Content: generated}, nil
+			},
+		)
+		summaryContent = cachedSummary.Content
 		if summaryErr != nil {
 			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
 		} else {

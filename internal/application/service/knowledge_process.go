@@ -164,6 +164,11 @@ type ProcessChunksOptions struct {
 	Metadata     map[string]string
 }
 
+type imageResolutionArtifact struct {
+	MarkdownContent string                  `json:"markdown_content"`
+	StoredImages    []docparser.StoredImage `json:"stored_images"`
+}
+
 // finalizeIndexedKnowledgeState makes a document retrievable as soon as chunks
 // and indexes are persisted (enable_status=enabled), but it deliberately does
 // NOT mark the row completed when enrichment is still expected. Whenever the
@@ -283,40 +288,35 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
 			return
 		}
+		embeddingModel = wrapIngestionEmbedder(s.artifactCache, knowledge.TenantID, embeddingModel)
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
 
-	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
-	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
-
-	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
-		// 不返回错误，继续处理（可能没有旧数据）
+	// Read the previous materialization before producing the new chunk set. We
+	// keep it live until the replacement has been written, then remove only IDs
+	// that are absent from the new content-addressed set.
+	existingChunks, err := s.chunkService.GetRepository().ListAllChunksByKnowledgeID(
+		ctx, knowledge.TenantID, knowledge.ID,
+	)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list existing chunks for reconciliation: %v", err)
+		return
 	}
+	previousStorageSize := knowledge.StorageSize
 
-	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
-	if err == nil && embeddingModel != nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
-			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
-			// 不返回错误，继续处理（可能没有旧数据）
-		} else {
-			logger.Infof(ctx, "Successfully deleted existing index data for knowledge: %s", knowledge.ID)
+	var retrieveEngine *retriever.CompositeRetrieveEngine
+	if embeddingModel != nil {
+		retrieveEngine, err = retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID,
+		)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to create retrieve engine for chunk processing: %v", err)
+			return
 		}
 	}
-
-	// 删除知识图谱数据（如果存在）
-	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing graph data (may not exist): %v", err)
-		// 不返回错误，继续处理
-	}
-
-	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
+	logger.Infof(ctx, "Reconciling %d existing chunks for knowledge %s", len(existingChunks), knowledge.ID)
 
 	// ========== DocReader 解析结果日志 ==========
 	logger.Infof(ctx, "[DocReader] ========== 解析结果概览 ==========")
@@ -369,6 +369,20 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Create chunk objects from proto chunks
 	maxSeq := 0
+	chunkOccurrences := make(map[string]int)
+	nextStableChunkIdentity := func(chunkType, content string) (string, string) {
+		canonical := canonicalizeArtifactText(content)
+		contentHash := hashBytes([]byte(canonical))
+		occurrenceKey := chunkType + "\x00" + contentHash
+		occurrence := chunkOccurrences[occurrenceKey]
+		chunkOccurrences[occurrenceKey] = occurrence + 1
+		return stableChunkID(stableChunkIdentity{
+			KnowledgeID: knowledge.ID,
+			ChunkType:   chunkType,
+			Content:     canonical,
+			Occurrence:  occurrence,
+		}), contentHash
+	}
 
 	// 统计图片相关的子Chunk数量，用于扩展insertChunks的容量
 	imageChunkCount := 0
@@ -388,8 +402,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if hasParentChild {
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
+			chunkID, contentHash := nextStableChunkIdentity(types.ChunkTypeParentText, pc.Content)
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              chunkID,
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -401,6 +416,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				StartAt:         pc.Start,
 				EndAt:           pc.End,
 				ChunkType:       types.ChunkTypeParentText,
+				ContentHash:     contentHash,
 			}
 		}
 		// Set prev/next links for parent chunks
@@ -427,8 +443,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 
 		// 创建主文本Chunk
+		chunkID, contentHash := nextStableChunkIdentity(types.ChunkTypeText, chunkData.Content)
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              chunkID,
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -441,6 +458,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			StartAt:         int(chunkData.Start),
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
+			ContentHash:     contentHash,
 		}
 
 		// Wire up ParentChunkID for child chunks
@@ -491,10 +509,35 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
+	desiredChunkIDs := make(map[string]struct{}, len(insertChunks))
+	for _, chunk := range insertChunks {
+		desiredChunkIDs[chunk.ID] = struct{}{}
+	}
+	existingChunkIDs := make([]string, 0, len(existingChunks))
+	existingChunkSet := make(map[string]struct{}, len(existingChunks))
+	staleChunkIDs := make([]string, 0)
+	previousImageInfo := make([]string, 0)
+	for _, chunk := range existingChunks {
+		existingChunkSet[chunk.ID] = struct{}{}
+		if chunk.ImageInfo != "" {
+			previousImageInfo = append(previousImageInfo, chunk.ImageInfo)
+		}
+		// Table metadata is produced and indexed by its own task, which may run
+		// concurrently with document parsing. Preserve that materialization to
+		// avoid deleting a freshly updated table summary in the race window.
+		if chunk.ChunkType == types.ChunkTypeTableSummary || chunk.ChunkType == types.ChunkTypeTableColumn {
+			continue
+		}
+		existingChunkIDs = append(existingChunkIDs, chunk.ID)
+		if _, keep := desiredChunkIDs[chunk.ID]; !keep {
+			staleChunkIDs = append(staleChunkIDs, chunk.ID)
+		}
+	}
+
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
-	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
+	if err := s.chunkService.UpsertChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
@@ -509,6 +552,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 	s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_written":   len(insertChunks),
+		"chunks_removed":   len(staleChunkIDs),
 		"total_text_chars": totalChunkChars,
 	})
 
@@ -562,7 +606,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				return
 			}
 			// Check if there's enough storage quota available
-			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
+			storageDelta := totalStorageSize - previousStorageSize
+			if tenantInfo.StorageUsed+storageDelta > tenantInfo.StorageQuota {
 				knowledge.ParseStatus = types.ParseStatusFailed
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
@@ -584,6 +629,18 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return
 		}
 
+		// Remove materializations for all prior chunk IDs immediately before
+		// writing the replacement set. Question/summary vectors use the owning
+		// chunk ID, so this also prevents stale derived vectors. The numerical
+		// embeddings themselves are reused by cachedIngestionEmbedder.
+		if len(existingChunkIDs) > 0 {
+			if deleteErr := retrieveEngine.DeleteByChunkIDList(
+				ctx, existingChunkIDs, embeddingModel.GetDimensions(), knowledge.Type,
+			); deleteErr != nil {
+				logger.Warnf(ctx, "Failed to delete previous chunk materializations: %v", deleteErr)
+			}
+		}
+
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
 		if err != nil {
 			knowledge.ParseStatus = types.ParseStatusFailed
@@ -591,9 +648,17 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
 
-			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-				logger.Errorf(ctx, "Delete chunks failed: %v", err)
+			// Preserve the previous chunk rows so a failed reparse does not erase
+			// stable references. Only chunks introduced by this attempt are rolled
+			// back; the next retry can rebuild vectors from cached embeddings.
+			newChunkIDs := make([]string, 0)
+			for id := range desiredChunkIDs {
+				if _, existed := existingChunkSet[id]; !existed {
+					newChunkIDs = append(newChunkIDs, id)
+				}
+			}
+			if err := s.chunkService.DeleteChunks(ctx, newChunkIDs); err != nil {
+				logger.Errorf(ctx, "Delete newly introduced chunks failed: %v", err)
 			}
 
 			// delete index
@@ -637,6 +702,36 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
 		s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
+	}
+
+	// The new base chunks are now durable (and indexed when configured), so it
+	// is safe to retire chunks that disappeared. Derived summary/image chunks
+	// are recreated by post-processing from their cached artifacts.
+	if len(staleChunkIDs) > 0 {
+		if err := s.chunkService.DeleteChunks(ctx, staleChunkIDs); err != nil {
+			logger.Warnf(ctx, "Failed to delete stale chunks after reconciliation: %v", err)
+		}
+	}
+	if len(previousImageInfo) > 0 {
+		activeImageURLs := make(map[string]struct{}, len(options.StoredImages))
+		for _, image := range options.StoredImages {
+			activeImageURLs[image.ServingURL] = struct{}{}
+		}
+		obsoleteImageURLs := make([]string, 0)
+		for _, imageURL := range collectImageURLs(ctx, previousImageInfo) {
+			if _, active := activeImageURLs[imageURL]; !active {
+				obsoleteImageURLs = append(obsoleteImageURLs, imageURL)
+			}
+		}
+		deleteExtractedImages(ctx, s.resolveFileService(ctx, kb), obsoleteImageURLs)
+	}
+
+	// Graph storage is stateful and has no per-chunk delete contract. Rebuild
+	// its materialization after the chunk swap; extraction calls themselves are
+	// content-addressed and therefore cache hits for unchanged chunks.
+	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
+		logger.Warnf(ctx, "Failed to clear graph before cached replay: %v", err)
 	}
 
 	// Check if this document has extracted images that will be processed asynchronously
@@ -693,8 +788,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Update tenant's storage usage
-	tenantInfo.StorageUsed += totalStorageSize
-	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, totalStorageSize); err != nil {
+	storageDelta := totalStorageSize - previousStorageSize
+	tenantInfo.StorageUsed += storageDelta
+	if tenantInfo.StorageUsed < 0 {
+		tenantInfo.StorageUsed = 0
+	}
+	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageDelta); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
 	}
 	logger.GetLogger(ctx).Infof("processChunks successfully")
@@ -717,6 +816,14 @@ const imageDominatedTextThreshold = 200
 // mark the knowledge's summary as failed instead of falling back to the first
 // chunk's raw content (which would just be a bare image reference).
 var errInsufficientSummaryContent = errors.New("insufficient text content for summary generation")
+
+type summaryArtifact struct {
+	Content string `json:"content"`
+}
+
+type questionsArtifact struct {
+	Questions []string `json:"questions"`
+}
 
 // checkSufficientSummaryContent returns errInsufficientSummaryContent if the
 // given content does not carry enough real text (after stripping image markup)
@@ -828,26 +935,44 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryPrompt := types.RenderPromptPlaceholders(s.config.Conversation.GenerateSummaryPrompt, types.PlaceholderValues{
 		"language": types.LanguageNameFromContext(ctx),
 	})
-	thinking := false
-	summary, err := summaryModel.Chat(ctx, []chat.Message{
-		{
-			Role:    "system",
-			Content: summaryPrompt,
-		},
-		{
-			Role:    "user",
-			Content: contentWithMetadata,
-		},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   maxTokens,
-		Thinking:    &thinking,
+	var summary summaryArtifact
+	cacheHit, err := s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+		TenantID:          knowledge.TenantID,
+		Kind:              types.ProcessingArtifactSummary,
+		InputHash:         hashBytes([]byte(canonicalizeArtifactText(contentWithMetadata))),
+		ModelFingerprint:  hashFingerprint(summaryModel.GetModelID(), summaryModel.GetModelName()),
+		PromptFingerprint: hashBytes([]byte(summaryPrompt)),
+		ConfigFingerprint: hashFingerprint("temperature=0.3", fmt.Sprintf("max_tokens=%d", maxTokens)),
+		SchemaVersion:     "summary-v1",
+	}, &summary, func() (any, error) {
+		thinking := false
+		response, chatErr := summaryModel.Chat(ctx, []chat.Message{
+			{
+				Role:    "system",
+				Content: summaryPrompt,
+			},
+			{
+				Role:    "user",
+				Content: contentWithMetadata,
+			},
+		}, &chat.ChatOptions{
+			Temperature: 0.3,
+			MaxTokens:   maxTokens,
+			Thinking:    &thinking,
+		})
+		if chatErr != nil {
+			return nil, chatErr
+		}
+		return summaryArtifact{Content: response.Content}, nil
 	})
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
 		return "", err
 	}
-	logger.GetLogger(ctx).WithField("summary", summary.Content).Infof("GetSummary success")
+	logger.GetLogger(ctx).
+		WithField("summary", summary.Content).
+		WithField("cache_hit", cacheHit).
+		Infof("GetSummary success")
 	return summary.Content, nil
 }
 
@@ -1123,7 +1248,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// and surfacing them in retrieved RAG context can re-introduce the
 		// hallucination vector this branch is meant to close.
 		summaryChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              stableDerivedID(knowledge.ID, "summary"),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
@@ -1136,10 +1261,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			EndAt:           0,
 			ChunkType:       types.ChunkTypeSummary,
 			ParentChunkID:   textChunks[0].ID,
+			ContentHash:     hashBytes([]byte(canonicalizeArtifactText(summary))),
 		}
 
 		// Save summary chunk
-		if err := s.chunkService.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
+		if err := s.chunkService.UpsertChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
 			logger.Errorf(ctx, "Failed to create summary chunk: %v", err)
 			summaryErr = err
 			return fmt.Errorf("failed to create summary chunk: %w", err)
@@ -1168,6 +1294,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			summaryErr = err
 			return fmt.Errorf("failed to get embedding model: %w", err)
 		}
+		embeddingModel = wrapIngestionEmbedder(s.artifactCache, payload.TenantID, embeddingModel)
 
 		indexInfo := []*types.IndexInfo{{
 			Content:         summaryChunk.Content,
@@ -1438,6 +1565,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = wrapIngestionEmbedder(s.artifactCache, payload.TenantID, embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -1520,8 +1648,12 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 
 		// Update chunk metadata with unique IDs for each question
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
+		questionOccurrences := make(map[string]int)
 		for j, question := range questions {
-			questionID := fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j))
+			questionHash := hashBytes([]byte(canonicalizeArtifactText(question)))
+			occurrence := questionOccurrences[questionHash]
+			questionOccurrences[questionHash] = occurrence + 1
+			questionID := stableDerivedID(chunk.ID, "question", questionHash, fmt.Sprintf("%d", occurrence))
 			generatedQuestions[j] = types.GeneratedQuestion{
 				ID:       questionID,
 				Question: question,
@@ -1739,6 +1871,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 		return fmt.Errorf("failed to get embedding model: %w", err)
 	}
+	embeddingModel = wrapIngestionEmbedder(s.artifactCache, payload.TenantID, embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -1848,9 +1981,13 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))
+		questionOccurrences := make(map[string]int)
 		for j, question := range questions {
+			questionHash := hashBytes([]byte(canonicalizeArtifactText(question)))
+			occurrence := questionOccurrences[questionHash]
+			questionOccurrences[questionHash] = occurrence + 1
 			generatedQuestions[j] = types.GeneratedQuestion{
-				ID:       fmt.Sprintf("q%d", time.Now().UnixNano()+int64(j)),
+				ID:       stableDerivedID(chunk.ID, "question", questionHash, fmt.Sprintf("%d", occurrence)),
 				Question: question,
 			}
 		}
@@ -1928,44 +2065,58 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	})
 	prompt = types.AppendCustomPromptInstructions(prompt, customInstructions, "question_generation")
 
-	thinking := false
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{
-			Role:    "user",
-			Content: prompt,
-		},
-	}, &chat.ChatOptions{
-		Temperature: 0.7,
-		MaxTokens:   512,
-		Thinking:    &thinking,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate questions: %w", err)
-	}
-
-	// Parse response
-	lines := strings.Split(response.Content, "\n")
-	questions := make([]string, 0, questionCount)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	var cached questionsArtifact
+	_, err := s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+		TenantID:          tenantID,
+		Kind:              types.ProcessingArtifactQuestion,
+		InputHash:         hashBytes([]byte(prompt)),
+		ModelFingerprint:  hashFingerprint(chatModel.GetModelID(), chatModel.GetModelName()),
+		PromptFingerprint: hashBytes([]byte(prompt)),
+		ConfigFingerprint: hashFingerprint("temperature=0.7", "max_tokens=512", fmt.Sprintf("count=%d", questionCount)),
+		SchemaVersion:     "question-v1",
+	}, &cached, func() (any, error) {
+		thinking := false
+		response, chatErr := chatModel.Chat(ctx, []chat.Message{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		}, &chat.ChatOptions{
+			Temperature: 0.7,
+			MaxTokens:   512,
+			Thinking:    &thinking,
+		})
+		if chatErr != nil {
+			return nil, fmt.Errorf("failed to generate questions: %w", chatErr)
 		}
-		line = strings.TrimLeft(line, "0123456789.-*) ")
-		line = strings.TrimSpace(line)
-		if line != "" && len(line) > 5 {
-			questions = append(questions, line)
-			if len(questions) >= questionCount {
-				break
+
+		lines := strings.Split(response.Content, "\n")
+		questions := make([]string, 0, questionCount)
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			line = strings.TrimLeft(line, "0123456789.-*) ")
+			line = strings.TrimSpace(line)
+			if line != "" && len(line) > 5 {
+				questions = append(questions, line)
+				if len(questions) >= questionCount {
+					break
+				}
 			}
 		}
+		return questionsArtifact{Questions: questions}, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	return questions, nil
+	return cached.Questions, nil
 }
 
-// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
-// This method reuses the logic from UpdateManualKnowledge for resource cleanup and async parsing.
+// ReparseKnowledge schedules an incremental, content-addressed reparse. Existing
+// chunks remain available until processChunks has materialized their replacement.
 func (s *knowledgeService) ReparseKnowledge(
 	ctx context.Context,
 	knowledgeID string,
@@ -2070,14 +2221,9 @@ func (s *knowledgeService) ReparseKnowledge(
 		return existing, nil
 	}
 
-	// For non-manual knowledge, cleanup synchronously then enqueue document processing
-	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
-		return nil, err
-	}
+	// Keep the current chunks/vectors live while the worker parses and computes
+	// the replacement set. processChunks performs the final diff/reconciliation.
+	logger.Infof(ctx, "Scheduling incremental reparse for knowledge: %s", knowledgeID)
 
 	// Step 2: Update knowledge status and metadata
 	existing.ParseStatus = "pending"
@@ -2376,6 +2522,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 	if err != nil {
 		return err
 	}
+	embeddingModel = wrapIngestionEmbedder(s.artifactCache, types.MustTenantIDFromContext(ctx), embeddingModel)
 
 	// Initialize composite retrieve engine from tenant configuration
 	indexInfo := make([]*types.IndexInfo, 0, len(chunks))
@@ -2501,7 +2648,10 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new caption chunk if it doesn't exist and we have caption data
 	if !hasCaptionChunk && image.Caption != "" {
 		captionChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: stableDerivedID(
+				chunk.KnowledgeID, "image", chunk.ID,
+				hashBytes([]byte(image.OriginalURL)), "caption",
+			),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
@@ -2509,6 +2659,7 @@ func (s *knowledgeService) UpdateImageInfo(
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   chunk.ID,
 			ImageInfo:       imageInfo,
+			ContentHash:     hashBytes([]byte(canonicalizeArtifactText(image.Caption))),
 		}
 		addChunk = append(addChunk, captionChunk)
 		logger.Infof(ctx, "Created new caption chunk ID: %s for image URL: %s", captionChunk.ID, image.OriginalURL)
@@ -2517,7 +2668,10 @@ func (s *knowledgeService) UpdateImageInfo(
 	// Create a new OCR chunk if it doesn't exist and we have OCR data
 	if !hasOCRChunk && image.OCRText != "" {
 		ocrChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: stableDerivedID(
+				chunk.KnowledgeID, "image", chunk.ID,
+				hashBytes([]byte(image.OriginalURL)), "ocr",
+			),
 			TenantID:        tenantID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
@@ -2525,6 +2679,7 @@ func (s *knowledgeService) UpdateImageInfo(
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   chunk.ID,
 			ImageInfo:       imageInfo,
+			ContentHash:     hashBytes([]byte(canonicalizeArtifactText(image.OCRText))),
 		}
 		addChunk = append(addChunk, ocrChunk)
 		logger.Infof(ctx, "Created new OCR chunk ID: %s for image URL: %s", ocrChunk.ID, image.OriginalURL)
@@ -2532,7 +2687,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	logger.Infof(ctx, "Updated %d chunks out of %d total chunks", len(updateChunk), len(chunkChildren)+1)
 
 	if len(addChunk) > 0 {
-		err := s.chunkService.CreateChunks(ctx, addChunk)
+		err := s.chunkService.UpsertChunks(ctx, addChunk)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"add_chunk_size": len(addChunk),
@@ -2581,7 +2736,7 @@ func (s *knowledgeService) UpdateImageInfo(
 }
 
 // ProcessManualUpdate handles Asynq manual knowledge update tasks.
-// It performs cleanup of old indexes/chunks (when NeedCleanup is true) and re-indexes the content.
+// It re-indexes content and lets processChunks reconcile old/new artifacts.
 func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Task) error {
 	var payload types.ManualProcessPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -2660,19 +2815,8 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	}
 	ctx = withAttempt(ctx, attempt)
 
-	// Cleanup old resources (indexes, chunks, graph) for update operations
-	if payload.NeedCleanup {
-		if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"knowledge_id": payload.KnowledgeID,
-			})
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = fmt.Sprintf("failed to cleanup old resources: %v", err)
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return nil
-		}
-	}
+	// NeedCleanup is retained in the payload for wire compatibility. Cleanup is
+	// now deferred to processChunks' diff so unchanged chunk IDs stay stable.
 
 	// Run manual processing (image resolution + chunking + embedding) synchronously within the worker
 	s.triggerManualProcessing(ctx, kb, knowledge, payload.Content, true)
@@ -3013,26 +3157,57 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if s.imageResolver != nil && convertResult != nil {
 		fileSvc := s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
-		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(ctx, convertResult, fileSvc, tenantID)
-		if resolveErr != nil {
-			logger.Warnf(ctx, "Image resolution partially failed: %v", resolveErr)
+		parsedFingerprint, fingerprintErr := fingerprintJSON(convertResult)
+		if fingerprintErr != nil {
+			return fingerprintErr
 		}
-		if updatedMarkdown != "" {
-			convertResult.MarkdownContent = updatedMarkdown
+		backendID := ""
+		if kb.StorageBackendID != nil {
+			backendID = *kb.StorageBackendID
 		}
-		storedImages = images
+		var resolved imageResolutionArtifact
+		imageCacheHit, resolveErr := s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+			TenantID:          tenantID,
+			Kind:              types.ProcessingArtifactImageResolve,
+			InputHash:         parsedFingerprint,
+			ConfigFingerprint: hashFingerprint(kb.ID, backendID, kb.StorageConfig.Provider, kb.StorageConfig.BucketName, kb.StorageConfig.PathPrefix),
+			SchemaVersion:     "image-resolve-v1",
+		}, &resolved, func() (any, error) {
+			updatedMarkdown, images, inlineErr := s.imageResolver.ResolveAndStore(
+				ctx, convertResult, fileSvc, tenantID,
+			)
+			if inlineErr != nil {
+				logger.Warnf(ctx, "Image resolution partially failed: %v", inlineErr)
+			}
+			if updatedMarkdown == "" {
+				updatedMarkdown = convertResult.MarkdownContent
+			}
 
-		// Resolve remote http(s) images (e.g. markdown external URLs) → download + upload to storage.
-		// ResolveAndStore handles inline bytes and base64; ResolveRemoteImages handles http/https URLs.
-		updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(ctx, convertResult.MarkdownContent, fileSvc, tenantID)
-		if remoteErr != nil {
-			logger.Warnf(ctx, "Remote image resolution partially failed: %v", remoteErr)
+			// Freeze the resolved resource references with the parsed snapshot.
+			// This prevents random object names from changing chunk identities on
+			// every reparse and avoids uploading identical image bytes again.
+			updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(
+				ctx, updatedMarkdown, fileSvc, tenantID,
+			)
+			if remoteErr != nil {
+				logger.Warnf(ctx, "Remote image resolution partially failed: %v", remoteErr)
+			}
+			if len(remoteImages) > 0 {
+				logger.Infof(ctx, "Resolved %d remote images for knowledge %s", len(remoteImages), knowledge.ID)
+				updatedMarkdown = updatedContent
+				images = append(images, remoteImages...)
+			}
+			return imageResolutionArtifact{
+				MarkdownContent: updatedMarkdown,
+				StoredImages:    images,
+			}, nil
+		})
+		if resolveErr != nil {
+			return fmt.Errorf("resolve document images: %w", resolveErr)
 		}
-		if len(remoteImages) > 0 {
-			logger.Infof(ctx, "Resolved %d remote images for knowledge %s", len(remoteImages), knowledge.ID)
-			convertResult.MarkdownContent = updatedContent
-			storedImages = append(storedImages, remoteImages...)
-		}
+		convertResult.MarkdownContent = resolved.MarkdownContent
+		storedImages = resolved.StoredImages
+		logger.Infof(ctx, "Image resolution cache_hit=%v for knowledge %s", imageCacheHit, knowledge.ID)
 
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
@@ -3186,7 +3361,44 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
-	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
+	var result *types.ReadResult
+	parserCacheHit := false
+	var err error
+	if !isURL {
+		overridesFingerprint, fingerprintErr := fingerprintJSON(mergedOverrides)
+		if fingerprintErr != nil {
+			return nil, fingerprintErr
+		}
+		var cachedResult types.ReadResult
+		parserCacheHit, err = s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+			TenantID:          knowledge.TenantID,
+			Kind:              types.ProcessingArtifactParser,
+			InputHash:         hashBytes(req.FileContent),
+			ModelFingerprint:  hashFingerprint(parserEngine),
+			PromptFingerprint: "",
+			ConfigFingerprint: hashFingerprint(fileType, knowledge.Title, overridesFingerprint),
+			SchemaVersion:     "parser-v1",
+		}, &cachedResult, func() (any, error) {
+			parsed, readErr := s.callDocReaderWithTimeout(ctx, reader, req)
+			if readErr != nil {
+				return nil, readErr
+			}
+			// Parser-level failures are transient/provider responses rather than
+			// reusable parsing artifacts and must never poison the cache.
+			if parsed == nil {
+				return nil, errors.New("document reader returned nil result")
+			}
+			if parsed.Error != "" {
+				return nil, fmt.Errorf("parser returned error: %s", parsed.Error)
+			}
+			return parsed, nil
+		})
+		if err == nil {
+			result = &cachedResult
+		}
+	} else {
+		result, err = s.callDocReaderWithTimeout(ctx, reader, req)
+	}
 	if err != nil {
 		// Distinguish DocReader timeout (a knowable user-facing
 		// failure) from generic read errors so the UI can suggest
@@ -3214,6 +3426,7 @@ func (s *knowledgeService) convert(
 		"text_length":  len(result.MarkdownContent),
 		"images_found": len(result.ImageRefs),
 		"is_audio":     result.IsAudio,
+		"cache_hit":    parserCacheHit,
 	}
 	if pages := result.Metadata["pages"]; pages != "" {
 		docOutput["pages"] = pages

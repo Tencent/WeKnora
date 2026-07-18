@@ -79,10 +79,15 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	var prevSlugsText string
 	if len(oldPageSlugs) > 0 {
 		var sb strings.Builder
+		oldSlugs := make([]string, 0, len(oldPageSlugs))
 		for slug := range oldPageSlugs {
 			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
 				continue
 			}
+			oldSlugs = append(oldSlugs, slug)
+		}
+		sort.Strings(oldSlugs)
+		for _, slug := range oldSlugs {
 			fmt.Fprintf(&sb, "- %s\n", slug)
 		}
 		prevSlugsText = sb.String()
@@ -92,7 +97,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
+	promptData := map[string]string{
 		"Content":             content,
 		"Language":            lang,
 		"PreviousSlugs":       prevSlugsText,
@@ -100,17 +105,27 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
 		"CustomInstructions":  batchCtx.ExtractionInstructions,
 		"InstructionScope":    "wiki_extraction",
-	})
+	}
+	var result combinedExtraction
+	_, err := s.getOrComputeWikiArtifact(
+		ctx, types.ProcessingArtifactWikiExtract, chatModel,
+		agent.WikiCandidateSlugPrompt, promptData, "wiki-candidates-v1", &result,
+		func() (any, error) {
+			raw, generateErr := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, promptData)
+			if generateErr != nil {
+				return nil, generateErr
+			}
+			raw = cleanLLMJSON(raw)
+			var parsed combinedExtraction
+			if parseErr := json.Unmarshal([]byte(raw), &parsed); parseErr != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", parseErr, raw)
+				return nil, fmt.Errorf("parse candidate slug JSON: %w", parseErr)
+			}
+			return parsed, nil
+		},
+	)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
-	}
-
-	raw = cleanLLMJSON(raw)
-
-	var result combinedExtraction
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", err, raw)
-		return nil, nil, nil, fmt.Errorf("parse candidate slug JSON: %w", err)
 	}
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
@@ -302,21 +317,33 @@ func (s *wikiIngestService) classifyChunkCitations(
 		batchIdx := bi
 		eg.Go(func() error {
 			chunksXML := renderChunksXML(batch)
-			raw, err := s.generateWithTemplate(ectx, chatModel, agent.WikiChunkCitationPrompt, map[string]string{
+			promptData := map[string]string{
 				"CandidateSlugs": candidatesXML,
 				"ChunksXML":      chunksXML,
 				"Language":       lang,
-			})
+			}
+			var parsed citationBatchResult
+			_, err := s.getOrComputeWikiArtifact(
+				ectx, types.ProcessingArtifactWikiClassify, chatModel,
+				agent.WikiChunkCitationPrompt, promptData, "wiki-citations-v1", &parsed,
+				func() (any, error) {
+					raw, generateErr := s.generateWithTemplate(
+						ectx, chatModel, agent.WikiChunkCitationPrompt, promptData,
+					)
+					if generateErr != nil {
+						return nil, generateErr
+					}
+					raw = cleanLLMJSON(raw)
+					var computed citationBatchResult
+					if parseErr := json.Unmarshal([]byte(raw), &computed); parseErr != nil {
+						return nil, fmt.Errorf("parse citation JSON: %w", parseErr)
+					}
+					return computed, nil
+				},
+			)
 			if err != nil {
 				logger.Warnf(ectx, "wiki ingest: citation batch %d failed: %v", batchIdx, err)
 				return nil // don't abort peer batches
-			}
-			raw = cleanLLMJSON(raw)
-
-			var parsed citationBatchResult
-			if jerr := json.Unmarshal([]byte(raw), &parsed); jerr != nil {
-				logger.Warnf(ectx, "wiki ingest: citation batch %d parse failed: %v\nRaw: %s", batchIdx, jerr, raw)
-				return nil
 			}
 
 			// Translate aliases → real chunk UUIDs; drop unknown aliases.

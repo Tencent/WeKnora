@@ -19,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -87,7 +86,12 @@ type ImageMultimodalService struct {
 
 	// spanTracker records this image's subspan under the parent attempt's
 	// multimodal stage. nil-safe — falls back to no-op via tracker().
-	spanTracker SpanTracker
+	spanTracker   SpanTracker
+	artifactCache *ArtifactCache
+}
+
+type vlmTextArtifact struct {
+	Text string `json:"text"`
 }
 
 func NewImageMultimodalService(
@@ -105,6 +109,7 @@ func NewImageMultimodalService(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 	spanTracker SpanTracker,
+	artifactCache *ArtifactCache,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:    chunkService,
@@ -121,6 +126,7 @@ func NewImageMultimodalService(
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
 		spanTracker:     spanTracker,
+		artifactCache:   artifactCache,
 	}
 }
 
@@ -251,11 +257,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 	imgOut["image_bytes"] = len(imgBytes)
+	imageHash := hashBytes(imgBytes)
+	imgOut["image_hash"] = imageHash
 
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
 		OriginalURL: payload.ImageURL,
 	}
+	vlmModelFingerprint := hashFingerprint(vlmModel.GetModelID(), vlmModel.GetModelName())
 
 	if payload.EnableOCR {
 		prompt := vlmOCRPrompt
@@ -267,13 +276,28 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			imgOut["ocr_prompt"] = "default"
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
-
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		var ocrArtifact vlmTextArtifact
+		ocrHit, ocrErr := s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+			TenantID:          payload.TenantID,
+			Kind:              types.ProcessingArtifactVLMOCR,
+			InputHash:         imageHash,
+			ModelFingerprint:  vlmModelFingerprint,
+			PromptFingerprint: hashBytes([]byte(prompt)),
+			ConfigFingerprint: hashFingerprint(payload.ImageSourceType),
+			SchemaVersion:     "vlm-ocr-v1",
+		}, &ocrArtifact, func() (any, error) {
+			text, err := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+			if err != nil {
+				return nil, err
+			}
+			return vlmTextArtifact{Text: sanitizeOCRText(text)}, nil
+		})
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
-			ocrText = sanitizeOCRText(ocrText)
+			ocrText := ocrArtifact.Text
+			imgOut["ocr_cache_hit"] = ocrHit
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
 				imgOut["ocr_chars"] = len([]rune(ocrText))
@@ -286,14 +310,33 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+	if payload.EnableCaption {
+		captionPrompt := buildVLMCaptionPrompt(ctx, vlmCfg)
+		var captionArtifact vlmTextArtifact
+		captionHit, capErr := s.artifactCache.GetOrComputeJSON(ctx, ArtifactCacheSpec{
+			TenantID:          payload.TenantID,
+			Kind:              types.ProcessingArtifactVLMCaption,
+			InputHash:         imageHash,
+			ModelFingerprint:  vlmModelFingerprint,
+			PromptFingerprint: hashBytes([]byte(captionPrompt)),
+			ConfigFingerprint: hashFingerprint(payload.Language),
+			SchemaVersion:     "vlm-caption-v1",
+		}, &captionArtifact, func() (any, error) {
+			text, err := vlmModel.Predict(ctx, [][]byte{imgBytes}, captionPrompt)
+			if err != nil {
+				return nil, err
+			}
+			return vlmTextArtifact{Text: strings.TrimSpace(text)}, nil
+		})
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+			imgOut["caption_error"] = capErr.Error()
+		} else if captionArtifact.Text != "" {
+			imageInfo.Caption = captionArtifact.Text
+			imgOut["caption_cache_hit"] = captionHit
+			imgOut["caption_chars"] = len([]rune(captionArtifact.Text))
+			imgOut["caption_preview"] = previewText(captionArtifact.Text, 200)
+		}
 	}
 
 	// Build child chunks for OCR and caption results
@@ -302,7 +345,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.OCRText != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: stableDerivedID(
+				payload.KnowledgeID, "image", payload.ChunkID, imageHash, "ocr",
+			),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -312,6 +357,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			IsEnabled:       true,
 			Flags:           types.ChunkFlagRecommended,
 			ImageInfo:       string(imageInfoJSON),
+			ContentHash:     hashBytes([]byte(canonicalizeArtifactText(imageInfo.OCRText))),
 			CreatedAt:       time.Now(),
 			UpdatedAt:       time.Now(),
 		})
@@ -319,7 +365,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	if imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID: stableDerivedID(
+				payload.KnowledgeID, "image", payload.ChunkID, imageHash, "caption",
+			),
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
@@ -329,6 +377,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			IsEnabled:       true,
 			Flags:           types.ChunkFlagRecommended,
 			ImageInfo:       string(imageInfoJSON),
+			ContentHash:     hashBytes([]byte(canonicalizeArtifactText(imageInfo.Caption))),
 			CreatedAt:       time.Now(),
 			UpdatedAt:       time.Now(),
 		})
@@ -342,7 +391,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Persist chunks
-	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
+	if err := s.chunkService.UpsertChunks(ctx, newChunks); err != nil {
 		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
 		return handleErr
 	}
@@ -458,6 +507,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: %v", err)
 		return
 	}
+	embeddingModel = wrapIngestionEmbedder(s.artifactCache, payload.TenantID, embeddingModel)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {

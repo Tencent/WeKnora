@@ -16,6 +16,7 @@ DROP TABLE IF EXISTS auth_tokens;
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS tenant_members;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS processing_artifacts;
 DROP TABLE IF EXISTS chunks;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS temporary_documents;
