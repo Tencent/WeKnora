@@ -196,6 +196,151 @@ func finalizeIndexedKnowledgeState(
 	knowledge.UpdatedAt = now
 }
 
+type stableChunkIDAllocator struct {
+	knowledgeID       string
+	chunkingConfigKey string
+	occurrences       map[string]int
+}
+
+func newStableChunkIDAllocator(knowledgeID, chunkingConfigKey string) *stableChunkIDAllocator {
+	return &stableChunkIDAllocator{
+		knowledgeID:       knowledgeID,
+		chunkingConfigKey: chunkingConfigKey,
+		occurrences:       make(map[string]int),
+	}
+}
+
+func (a *stableChunkIDAllocator) next(chunkType types.ChunkType, content string) (string, string) {
+	contentHash := types.StableContentHash(content)
+	occurrenceKey := string(chunkType) + "\x00" + contentHash
+	occurrence := a.occurrences[occurrenceKey]
+	a.occurrences[occurrenceKey] = occurrence + 1
+	return types.StableChunkID(types.StableChunkIDSpec{
+		KnowledgeID:       a.knowledgeID,
+		ChunkType:         chunkType,
+		Content:           content,
+		Occurrence:        occurrence,
+		ChunkingConfigKey: a.chunkingConfigKey,
+	}), contentHash
+}
+
+func (s *knowledgeService) replaceKnowledgeProcessChunks(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	desiredChunks []*types.Chunk,
+) error {
+	existingChunks, err := s.listKnowledgeProcessChunks(ctx, knowledge)
+	if err != nil {
+		return err
+	}
+
+	existingByID := make(map[string]*types.Chunk, len(existingChunks))
+	for _, chunk := range existingChunks {
+		existingByID[chunk.ID] = chunk
+	}
+
+	desiredByID := make(map[string]*types.Chunk, len(desiredChunks))
+	var chunksToCreate []*types.Chunk
+	var chunksToUpdate []*types.Chunk
+	for _, desired := range desiredChunks {
+		desiredByID[desired.ID] = desired
+		if existing, ok := existingByID[desired.ID]; ok {
+			desired.SeqID = existing.SeqID
+			desired.CreatedAt = existing.CreatedAt
+			if processChunkChanged(existing, desired) {
+				chunksToUpdate = append(chunksToUpdate, desired)
+			}
+			continue
+		}
+		chunksToCreate = append(chunksToCreate, desired)
+	}
+
+	var chunkIDsToDelete []string
+	for _, existing := range existingChunks {
+		if _, ok := desiredByID[existing.ID]; !ok {
+			chunkIDsToDelete = append(chunkIDsToDelete, existing.ID)
+		}
+	}
+
+	if len(chunksToCreate) > 0 {
+		if err := s.chunkService.CreateChunks(ctx, chunksToCreate); err != nil {
+			return err
+		}
+	}
+	for _, chunk := range chunksToUpdate {
+		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+			return err
+		}
+	}
+	if len(chunkIDsToDelete) > 0 {
+		if err := s.chunkService.DeleteChunks(ctx, chunkIDsToDelete); err != nil {
+			return err
+		}
+	}
+
+	logger.Infof(ctx, "Reconciled process chunks for knowledge %s: created=%d updated=%d deleted=%d unchanged=%d",
+		knowledge.ID,
+		len(chunksToCreate),
+		len(chunksToUpdate),
+		len(chunkIDsToDelete),
+		len(desiredChunks)-len(chunksToCreate)-len(chunksToUpdate),
+	)
+	return nil
+}
+
+func (s *knowledgeService) listKnowledgeProcessChunks(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+) ([]*types.Chunk, error) {
+	chunkTypes := []types.ChunkType{types.ChunkTypeText, types.ChunkTypeParentText}
+	page := &types.Pagination{Page: 1, PageSize: 1000}
+	var all []*types.Chunk
+	for {
+		chunks, total, err := s.chunkRepo.ListPagedChunksByKnowledgeID(
+			ctx,
+			knowledge.TenantID,
+			knowledge.ID,
+			page,
+			chunkTypes,
+			"",
+			"",
+			"",
+			"asc",
+			knowledge.Type,
+		)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, chunks...)
+		if int64(len(all)) >= total || len(chunks) == 0 {
+			return all, nil
+		}
+		page.Page++
+	}
+}
+
+func processChunkChanged(existing, desired *types.Chunk) bool {
+	return existing.TenantID != desired.TenantID ||
+		existing.KnowledgeID != desired.KnowledgeID ||
+		existing.KnowledgeBaseID != desired.KnowledgeBaseID ||
+		existing.Content != desired.Content ||
+		existing.ContentHash != desired.ContentHash ||
+		existing.ChunkIndex != desired.ChunkIndex ||
+		existing.IsEnabled != desired.IsEnabled ||
+		existing.Flags != desired.Flags ||
+		existing.Status != desired.Status ||
+		existing.StartAt != desired.StartAt ||
+		existing.EndAt != desired.EndAt ||
+		existing.PreChunkID != desired.PreChunkID ||
+		existing.NextChunkID != desired.NextChunkID ||
+		existing.ChunkType != desired.ChunkType ||
+		existing.ParentChunkID != desired.ParentChunkID ||
+		string(existing.RelationChunks) != string(desired.RelationChunks) ||
+		string(existing.IndirectRelationChunks) != string(desired.IndirectRelationChunks) ||
+		string(existing.Metadata) != string(desired.Metadata) ||
+		existing.ImageInfo != desired.ImageInfo
+}
+
 // buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
 // Defaults mirror chunker.DefaultChunkSize / DefaultChunkOverlap so behavior is
 // identical whether callers come through this path or invoke the chunker
@@ -281,14 +426,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping embedding model", kb.ID)
 	}
 
-	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
-	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
-
-	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
-		// 不返回错误，继续处理（可能没有旧数据）
-	}
+	logger.Infof(ctx, "Reconciling chunks and index data for knowledge: %s", knowledge.ID)
 
 	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
@@ -310,7 +448,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// 不返回错误，继续处理
 	}
 
-	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
+	logger.Infof(ctx, "Index cleanup completed, starting to process chunks")
 
 	// ========== DocReader 解析结果日志 ==========
 	logger.Infof(ctx, "[DocReader] ========== 解析结果概览 ==========")
@@ -379,15 +517,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// === Parent-Child Chunking: create parent chunks first ===
 	hasParentChild := len(options.ParentChunks) > 0
 	var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
+	chunkingConfigKey := types.StableChunkingConfigKey(kb.ChunkingConfig)
+	chunkIDAllocator := newStableChunkIDAllocator(knowledge.ID, chunkingConfigKey)
 	if hasParentChild {
 		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
 		for i, pc := range options.ParentChunks {
+			chunkID, contentHash := chunkIDAllocator.next(types.ChunkTypeParentText, pc.Content)
 			parentDBChunks[i] = &types.Chunk{
-				ID:              uuid.New().String(),
+				ID:              chunkID,
 				TenantID:        knowledge.TenantID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
 				Content:         pc.Content,
+				ContentHash:     contentHash,
 				ChunkIndex:      pc.Seq,
 				IsEnabled:       true,
 				CreatedAt:       time.Now(),
@@ -421,12 +563,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 
 		// 创建主文本Chunk
+		chunkID, contentHash := chunkIDAllocator.next(types.ChunkTypeText, chunkData.Content)
 		textChunk := &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              chunkID,
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
 			Content:         chunkData.Content,
+			ContentHash:     contentHash,
 			ContextHeader:   chunkData.ContextHeader,
 			ChunkIndex:      int(chunkData.Seq),
 			IsEnabled:       true,
@@ -488,13 +632,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
-	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
+	if err := s.replaceKnowledgeProcessChunks(ctx, knowledge, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
-			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
+			werrors.ErrCodeChunkingFailed, "replace chunks failed", err)
 		return
 	}
 	totalChunkChars := 0

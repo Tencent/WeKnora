@@ -14,6 +14,7 @@ type capturingEmbedder struct {
 	embedding.Embedder
 	text       string
 	batchTexts []string
+	batchCalls int
 }
 
 func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -21,11 +22,8 @@ func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, 
 	return []float32{1}, nil
 }
 
-func (e *capturingEmbedder) BatchEmbedWithPool(
-	ctx context.Context,
-	model embedding.Embedder,
-	texts []string,
-) ([][]float32, error) {
+func (e *capturingEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+	e.batchCalls++
 	e.batchTexts = append([]string(nil), texts...)
 	embeddings := make([][]float32, len(texts))
 	for i := range texts {
@@ -33,6 +31,18 @@ func (e *capturingEmbedder) BatchEmbedWithPool(
 	}
 	return embeddings, nil
 }
+
+func (e *capturingEmbedder) BatchEmbedWithPool(
+	ctx context.Context,
+	model embedding.Embedder,
+	texts []string,
+) ([][]float32, error) {
+	return e.BatchEmbed(ctx, texts)
+}
+
+func (e *capturingEmbedder) GetModelName() string { return "test-embedder" }
+func (e *capturingEmbedder) GetDimensions() int   { return 1 }
+func (e *capturingEmbedder) GetModelID() string   { return "model-1" }
 
 type saveOnlyRepository struct {
 	interfaces.RetrieveEngineRepository
@@ -104,6 +114,26 @@ func TestBatchIndexTruncatesOversizedEmbeddingInput(t *testing.T) {
 	}
 	if got := len([]rune(embedder.batchTexts[0])); got > safetyMaxChars {
 		t.Fatalf("embedding input length = %d, want <= %d", got, safetyMaxChars)
+	}
+}
+
+func TestBatchIndexUsesTenantScopedEmbeddingCache(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(99))
+	embedder := &capturingEmbedder{}
+	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &saveOnlyRepository{}}
+	indexInfo := []*types.IndexInfo{{
+		Content:  "repeat me",
+		SourceID: "source-1",
+	}}
+
+	if err := service.BatchIndex(ctx, embedder, indexInfo, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		t.Fatalf("first BatchIndex returned error: %v", err)
+	}
+	if err := service.BatchIndex(ctx, embedder, indexInfo, []types.RetrieverType{types.VectorRetrieverType}); err != nil {
+		t.Fatalf("second BatchIndex returned error: %v", err)
+	}
+	if embedder.batchCalls != 1 {
+		t.Fatalf("BatchEmbedWithPool calls = %d, want 1", embedder.batchCalls)
 	}
 }
 

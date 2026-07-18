@@ -37,6 +37,8 @@ var embeddingImagePayloadPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)data:[a-z0-9.+/-]+;base64,[a-z0-9+/=]{200,}`),
 }
 
+var processEmbeddingCache = embedding.NewMemoryEmbeddingCache()
+
 // KeywordsVectorHybridRetrieveEngineService implements a hybrid retrieval engine
 // that supports both keyword-based and vector-based retrieval
 type KeywordsVectorHybridRetrieveEngineService struct {
@@ -72,7 +74,8 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		cached := embedderForCacheScope(ctx, embedder)
+		embedding, err := cached.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
 		if err != nil {
 			return err
 		}
@@ -130,12 +133,13 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 // embedding result on success or the last error if every attempt failed.
 func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string) ([][]float32, error) {
 	delay := embedRetryBaseDelay
+	cached := embedderForCacheScope(ctx, embedder)
 	var (
 		embeddings [][]float32
 		err        error
 	)
 	for attempt := 0; attempt < embedRetryAttempts; attempt++ {
-		embeddings, err = embedder.BatchEmbedWithPool(ctx, embedder, contentList)
+		embeddings, err = cached.BatchEmbedWithPool(ctx, cached, contentList)
 		if err == nil {
 			return embeddings, nil
 		}
@@ -150,6 +154,17 @@ func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, con
 		}
 	}
 	return embeddings, err
+}
+
+func embedderForCacheScope(ctx context.Context, embedder embedding.Embedder) embedding.Embedder {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return embedder
+	}
+	if _, alreadyCached := embedder.(*embedding.CachedEmbedder); alreadyCached {
+		return embedder
+	}
+	return embedding.NewCachedEmbedder(embedder, processEmbeddingCache, embedding.CacheScope{TenantID: tenantID})
 }
 
 // sanitizeForEmbedding caps content length at safetyMaxChars characters so

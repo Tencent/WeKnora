@@ -51,7 +51,23 @@ const (
 
 	// WeightScaleFactor Weight scaling factor to normalize weights to 1-10 range
 	WeightScaleFactor = 9.0
+
+	graphEntityPromptVersion = "v1"
 )
+
+type graphEntityCacheKey struct {
+	TenantID      uint64
+	ModelID       string
+	ModelName     string
+	PromptVersion string
+	PromptHash    string
+	ContentHash   string
+}
+
+var processGraphEntityCache = struct {
+	sync.RWMutex
+	data map[graphEntityCacheKey][]*types.Entity
+}{data: make(map[graphEntityCacheKey][]*types.Entity)}
 
 // ChunkRelation represents a relationship between two Chunks
 type ChunkRelation struct {
@@ -94,6 +110,58 @@ func (b *graphBuilder) renderGraphExtractionPrompt(ctx context.Context, template
 	})
 }
 
+func (b *graphBuilder) graphEntityCacheKey(
+	ctx context.Context,
+	chunk *types.Chunk,
+	systemPrompt string,
+) graphEntityCacheKey {
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	return graphEntityCacheKey{
+		TenantID:      tenantID,
+		ModelID:       b.chatModel.GetModelID(),
+		ModelName:     b.chatModel.GetModelName(),
+		PromptVersion: graphEntityPromptVersion,
+		PromptHash:    stableStringHash(systemPrompt),
+		ContentHash:   types.StableContentHash(chunk.Content),
+	}
+}
+
+func loadGraphEntityCache(key graphEntityCacheKey) ([]*types.Entity, bool) {
+	if key.ContentHash == "" {
+		return nil, false
+	}
+	processGraphEntityCache.RLock()
+	entities, ok := processGraphEntityCache.data[key]
+	processGraphEntityCache.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	return cloneEntities(entities), true
+}
+
+func storeGraphEntityCache(key graphEntityCacheKey, entities []*types.Entity) {
+	if key.ContentHash == "" {
+		return
+	}
+	processGraphEntityCache.Lock()
+	processGraphEntityCache.data[key] = cloneEntities(entities)
+	processGraphEntityCache.Unlock()
+}
+
+func cloneEntities(entities []*types.Entity) []*types.Entity {
+	out := make([]*types.Entity, 0, len(entities))
+	for _, entity := range entities {
+		if entity == nil {
+			out = append(out, nil)
+			continue
+		}
+		cloned := *entity
+		cloned.ChunkIDs = append([]string(nil), entity.ChunkIDs...)
+		out = append(out, &cloned)
+	}
+	return out
+}
+
 // extractEntities extracts entities from text chunks
 // It uses LLM to analyze text content and identify relevant entities
 func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) ([]*types.Entity, error) {
@@ -107,10 +175,11 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 
 	// Create prompt for entity extraction
 	thinking := false
+	systemPrompt := b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractEntitiesPrompt)
 	messages := []chat.Message{
 		{
 			Role:    "system",
-			Content: b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractEntitiesPrompt),
+			Content: systemPrompt,
 		},
 		{
 			Role:    "user",
@@ -118,22 +187,29 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 		},
 	}
 
-	// Call LLM to extract entities
-	log.Debug("Calling LLM to extract entities")
-	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
-		Temperature: DefaultLLMTemperature,
-		Thinking:    &thinking,
-	})
-	if err != nil {
-		log.WithError(err).Error("Failed to extract entities from chunk")
-		return nil, fmt.Errorf("LLM entity extraction failed: %w", err)
-	}
-
-	// Parse JSON response
 	var extractedEntities []*types.Entity
-	if err := common.ParseLLMJsonResponse(resp.Content, &extractedEntities); err != nil {
-		log.WithError(err).Errorf("Failed to parse entity extraction response, rsp content: %s", resp.Content)
-		return nil, fmt.Errorf("failed to parse entity extraction response: %w", err)
+	cacheKey := b.graphEntityCacheKey(ctx, chunk, systemPrompt)
+	if cached, ok := loadGraphEntityCache(cacheKey); ok {
+		extractedEntities = cached
+		log.Debug("Graph entity extraction cache hit")
+	} else {
+		// Call LLM to extract entities
+		log.Debug("Calling LLM to extract entities")
+		resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
+			Temperature: DefaultLLMTemperature,
+			Thinking:    &thinking,
+		})
+		if err != nil {
+			log.WithError(err).Error("Failed to extract entities from chunk")
+			return nil, fmt.Errorf("LLM entity extraction failed: %w", err)
+		}
+
+		// Parse JSON response
+		if err := common.ParseLLMJsonResponse(resp.Content, &extractedEntities); err != nil {
+			log.WithError(err).Errorf("Failed to parse entity extraction response, rsp content: %s", resp.Content)
+			return nil, fmt.Errorf("failed to parse entity extraction response: %w", err)
+		}
+		storeGraphEntityCache(cacheKey, extractedEntities)
 	}
 	log.Infof("Extracted %d entities from chunk", len(extractedEntities))
 

@@ -818,6 +818,7 @@ func (s *wikiIngestService) mapOneDocument(
 		content = string([]rune(content)[:maxContentForWiki])
 	}
 	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_len(raw=%d,truncated=%d)", knowledgeID, len(chunks), rawRuneCount, len([]rune(content)))
+	mapChatModel := newWikiMapCachedChat(chatModel, payload.TenantID, knowledgeID, payload.KnowledgeBaseID, content)
 
 	// Refuse to run LLM-based extraction when the document carries no real
 	// text — e.g. a scanned PDF whose pages were converted to images but where
@@ -868,11 +869,11 @@ func (s *wikiIngestService) mapOneDocument(
 		"content_chars": utf8.RuneCountInString(content),
 		"old_pages":     len(oldPageSlugs),
 	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, mapChatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
 		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, mapChatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
 			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
@@ -942,7 +943,7 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
+		summaryContent, summaryErr = s.generateWithTemplate(ctx, mapChatModel, agent.WikiSummaryPrompt, map[string]string{
 			"Content":        content,
 			"Language":       lang,
 			"ExtractedSlugs": slugListing,
@@ -968,7 +969,7 @@ func (s *wikiIngestService) mapOneDocument(
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
+		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, mapChatModel, candidatesXML, chunks, lang, batchCtx)
 		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
 			"cited_slugs":      len(citations),
 			"new_slugs":        len(newSlugs),

@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
@@ -18,7 +21,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 )
@@ -49,6 +51,26 @@ const (
 		"</instructions>"
 	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image in Chinese"
 )
+
+const (
+	vlmOCRPromptVersion     = "v1"
+	vlmCaptionPromptVersion = "v1"
+)
+
+type vlmCacheKey struct {
+	TenantID      uint64
+	ModelID       string
+	ModelName     string
+	PromptKind    string
+	PromptVersion string
+	PromptHash    string
+	ImageHash     string
+}
+
+var processVLMCache = struct {
+	sync.RWMutex
+	data map[vlmCacheKey]string
+}{data: make(map[vlmCacheKey]string)}
 
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
@@ -228,6 +250,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 	imgOut["image_bytes"] = len(imgBytes)
+	imageHash := stableBytesHash(imgBytes)
 
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
@@ -244,7 +267,20 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			imgOut["ocr_prompt"] = "default"
 		}
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrPromptKind := "ocr_default"
+		if payload.ImageSourceType == "scanned_pdf" {
+			ocrPromptKind = "ocr_scanned_pdf"
+		}
+		ocrText, ocrErr := cachedVLMPredict(
+			ctx,
+			payload.TenantID,
+			vlmModel,
+			imgBytes,
+			imageHash,
+			prompt,
+			ocrPromptKind,
+			vlmOCRPromptVersion,
+		)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
@@ -262,7 +298,16 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+	caption, capErr := cachedVLMPredict(
+		ctx,
+		payload.TenantID,
+		vlmModel,
+		imgBytes,
+		imageHash,
+		vlmCaptionPrompt,
+		"caption",
+		vlmCaptionPromptVersion,
+	)
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
@@ -277,12 +322,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	var newChunks []*types.Chunk
 
 	if imageInfo.OCRText != "" {
+		chunkID, contentHash := stableImageChunkIdentity(payload, types.ChunkTypeImageOCR, imageInfo.OCRText, imageHash)
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              chunkID,
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
 			Content:         imageInfo.OCRText,
+			ContentHash:     contentHash,
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   payload.ChunkID,
 			IsEnabled:       true,
@@ -294,12 +341,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	if imageInfo.Caption != "" {
+		chunkID, contentHash := stableImageChunkIdentity(payload, types.ChunkTypeImageCaption, imageInfo.Caption, imageHash)
 		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
+			ID:              chunkID,
 			TenantID:        payload.TenantID,
 			KnowledgeID:     payload.KnowledgeID,
 			KnowledgeBaseID: payload.KnowledgeBaseID,
 			Content:         imageInfo.Caption,
+			ContentHash:     contentHash,
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   payload.ChunkID,
 			IsEnabled:       true,
@@ -318,12 +367,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Persist chunks
-	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
-		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
+	if err := s.replaceImageChildChunks(ctx, payload, imageInfo, newChunks); err != nil {
+		handleErr = fmt.Errorf("replace multimodal chunks: %w", err)
 		return handleErr
 	}
 	for _, c := range newChunks {
-		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
+		logger.Infof(ctx, "[ImageMultimodal] Reconciled %s chunk %s for image %s, len=%d",
 			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
 	}
 
@@ -339,6 +388,149 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// all images are processed before triggering summary/question generation.
 	// Deferred finalize handles the parent knowledge counter.
 	return nil
+}
+
+func cachedVLMPredict(
+	ctx context.Context,
+	tenantID uint64,
+	model vlm.VLM,
+	imgBytes []byte,
+	imageHash string,
+	prompt string,
+	promptKind string,
+	promptVersion string,
+) (string, error) {
+	key := vlmCacheKey{
+		TenantID:      tenantID,
+		ModelID:       model.GetModelID(),
+		ModelName:     model.GetModelName(),
+		PromptKind:    promptKind,
+		PromptVersion: promptVersion,
+		PromptHash:    stableStringHash(prompt),
+		ImageHash:     imageHash,
+	}
+
+	processVLMCache.RLock()
+	result, ok := processVLMCache.data[key]
+	processVLMCache.RUnlock()
+	if ok {
+		return result, nil
+	}
+
+	result, err := model.Predict(ctx, [][]byte{imgBytes}, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	processVLMCache.Lock()
+	processVLMCache.data[key] = result
+	processVLMCache.Unlock()
+	return result, nil
+}
+
+func stableImageChunkIdentity(
+	payload types.ImageMultimodalPayload,
+	chunkType types.ChunkType,
+	content string,
+	imageHash string,
+) (string, string) {
+	return types.StableChunkID(types.StableChunkIDSpec{
+		KnowledgeID:       payload.KnowledgeID,
+		ChunkType:         chunkType,
+		Content:           imageHash + "\n" + content,
+		Occurrence:        payload.ImageIndex,
+		ChunkingConfigKey: "image-child:" + payload.ChunkID,
+	}), types.StableContentHash(content)
+}
+
+func (s *ImageMultimodalService) replaceImageChildChunks(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+	imageInfo types.ImageInfo,
+	desiredChunks []*types.Chunk,
+) error {
+	existingChildren, err := s.chunkService.ListChunkByParentID(ctx, payload.TenantID, payload.ChunkID)
+	if err != nil {
+		return err
+	}
+
+	existingByID := make(map[string]*types.Chunk)
+	for _, chunk := range existingChildren {
+		if !isImageResultChunk(chunk.ChunkType) || !chunkBelongsToImage(chunk, imageInfo, payload.ImageURL) {
+			continue
+		}
+		existingByID[chunk.ID] = chunk
+	}
+
+	desiredByID := make(map[string]*types.Chunk, len(desiredChunks))
+	var chunksToCreate []*types.Chunk
+	var chunksToUpdate []*types.Chunk
+	for _, desired := range desiredChunks {
+		desiredByID[desired.ID] = desired
+		if existing, ok := existingByID[desired.ID]; ok {
+			desired.SeqID = existing.SeqID
+			desired.CreatedAt = existing.CreatedAt
+			if processChunkChanged(existing, desired) {
+				chunksToUpdate = append(chunksToUpdate, desired)
+			}
+			continue
+		}
+		chunksToCreate = append(chunksToCreate, desired)
+	}
+
+	var chunkIDsToDelete []string
+	for _, existing := range existingByID {
+		if _, ok := desiredByID[existing.ID]; !ok {
+			chunkIDsToDelete = append(chunkIDsToDelete, existing.ID)
+		}
+	}
+
+	if len(chunksToCreate) > 0 {
+		if err := s.chunkService.CreateChunks(ctx, chunksToCreate); err != nil {
+			return err
+		}
+	}
+	for _, chunk := range chunksToUpdate {
+		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+			return err
+		}
+	}
+	if len(chunkIDsToDelete) > 0 {
+		if err := s.chunkService.DeleteChunks(ctx, chunkIDsToDelete); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func isImageResultChunk(chunkType types.ChunkType) bool {
+	return chunkType == types.ChunkTypeImageOCR || chunkType == types.ChunkTypeImageCaption
+}
+
+func chunkBelongsToImage(chunk *types.Chunk, imageInfo types.ImageInfo, payloadImageURL string) bool {
+	var infos []types.ImageInfo
+	if err := json.Unmarshal([]byte(chunk.ImageInfo), &infos); err != nil {
+		return false
+	}
+	for _, info := range infos {
+		if info.URL != "" && (info.URL == imageInfo.URL || info.URL == payloadImageURL) {
+			return true
+		}
+		if info.OriginalURL != "" && info.OriginalURL == imageInfo.OriginalURL {
+			return true
+		}
+	}
+	return false
+}
+
+func stableBytesHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func stableStringHash(data string) string {
+	return stableBytesHash([]byte(data))
 }
 
 // isFinalAsynqAttempt reports whether the current task context belongs to the
