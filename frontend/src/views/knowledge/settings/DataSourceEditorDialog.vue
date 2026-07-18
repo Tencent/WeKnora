@@ -415,6 +415,21 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com/',
+    permissionDocUrl: 'https://open.dingtalk.com/',
+    permissionPageUrl: 'https://open.dingtalk.com/',
+    requiredPermissions: [
+      'Storage.File.Read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.dingtalkAppKey', placeholder: 'dingxxxxxxxx' },
+      { key: 'client_secret', labelKey: 'datasource.field.dingtalkAppSecret', placeholder: '', secret: true },
+      { key: 'operator_union_id', labelKey: 'datasource.field.operatorUnionId', placeholder: 'unionxxxxxxxx', hintKey: 'datasource.field.operatorUnionIdHint' },
+    ],
+  },
+  {
     type: 'rss',
     available: true,
     docUrl: '',
