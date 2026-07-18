@@ -37,7 +37,7 @@ const { t } = useI18n();
             <t-button theme="default" variant="outline" size="small"
               :disabled="count === 0 || deleteLoading || reparseLoading" :loading="reparseLoading" @click.stop>
               <template #icon><t-icon name="refresh" size="14px" /></template>
-              {{ t('knowledgeBase.rebuildDocument') }}
+              {{ t('knowledgeBase.batchRebuildKnowledge') }}
             </t-button>
           </t-popconfirm>
 

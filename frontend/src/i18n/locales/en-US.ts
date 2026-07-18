@@ -624,6 +624,7 @@ export default {
     selectAll: 'Select all',
     selectedCount: '{count} selected',
     clearSelection: 'Deselect all',
+    batchRebuildKnowledge: 'Batch rebuild knowledge',
     batchDelete: 'Delete selected',
     batchDeleteConfirmation: 'Confirm Batch Delete',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',
