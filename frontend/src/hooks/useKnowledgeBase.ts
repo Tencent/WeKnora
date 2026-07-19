@@ -165,7 +165,10 @@ export default function (knowledgeBaseId?: string) {
     const uiStore = useUIStore();
     const tagIdsToUpload = uiStore.selectedTagIds.length > 0 ? [...uiStore.selectedTagIds] : undefined;
 
-    uploadKnowledgeFile(currentKbId, { file, tag_ids: tagIdsToUpload })
+    const uploadData: any = { file, tag_ids: tagIdsToUpload };
+    if (knowledgeFolderFilter.value) uploadData.folder_id = knowledgeFolderFilter.value;
+
+    uploadKnowledgeFile(currentKbId, uploadData)
       .then((result: any) => {
         if (result.success) {
           MessagePlugin.info(t('knowledgeBase.uploadSuccess'));

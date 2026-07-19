@@ -202,11 +202,15 @@ export function uploadKnowledgeFile(
 
 // 从URL创建知识
 // data.tag_ids: 可选，指定知识所属的多个标签 ID
+// folder_id: 可选，指定目标文件夹
 export function createKnowledgeFromURL(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
+  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides; folder_id?: string },
 ) {
-  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
+  const query = new URLSearchParams();
+  if (data.folder_id) query.append('folder_id', data.folder_id);
+  const qs = query.toString();
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url${qs ? '?' + qs : ''}`, data);
 }
 
 // 手工创建知识

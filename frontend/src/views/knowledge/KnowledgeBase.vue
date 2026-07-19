@@ -1424,6 +1424,7 @@ const executeUploadBatch = async (
         tag_ids?: string[]
         fileName?: string
         process_config?: KnowledgeProcessOverrides
+        folder_id?: string
       } = { file, tag_ids: tagIdsToUpload };
 
       const fileName = getFolderUploadFileName(file);
@@ -1431,6 +1432,7 @@ const executeUploadBatch = async (
       if (options.processConfig) {
         uploadData.process_config = options.processConfig;
       }
+      if (folderFilter.value) uploadData.folder_id = folderFilter.value;
 
       const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
@@ -1486,6 +1488,7 @@ const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOve
       url,
       tag_ids: tagIdsToUpload,
       process_config: processConfig,
+      folder_id: folderFilter.value || undefined,
     });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
       detail: { kbId: targetKbId },

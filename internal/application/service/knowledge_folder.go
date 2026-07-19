@@ -335,7 +335,6 @@ func (s *knowledgeService) SetKnowledgeFolder(
 	if err := s.repo.UpdateKnowledgeFolder(ctx, knowledgeID, folderID); err != nil {
 		return nil, fmt.Errorf("set knowledge folder: %w", err)
 	}
-	fid := folderID
-	k.FolderID = &fid
+	k.FolderID = folderID
 	return k, nil
 }

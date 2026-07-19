@@ -119,8 +119,8 @@ type Knowledge struct {
 	TenantID uint64 `json:"tenant_id"`
 	// ID of the knowledge base
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	// FolderID is the folder this knowledge lives in (nil/empty = root level).
-	FolderID *string `json:"folder_id" gorm:"column:folder_id;type:varchar(36)"`
+	// FolderID is the folder this knowledge lives in ("" = root level).
+	FolderID string `json:"folder_id" gorm:"column:folder_id;type:varchar(36);not null;default:''"`
 	// Tags holds the tags associated with this knowledge (populated on query, not persisted directly).
 	Tags []*KnowledgeTag `json:"tags"               gorm:"-"`
 	// Type of the knowledge

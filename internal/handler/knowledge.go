@@ -403,6 +403,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	tagIDs := parseCommaSeparatedTagIDs(c.PostForm("tag_ids"))
 
 	channel := c.PostForm("channel")
+	folderID := strings.TrimSpace(c.PostForm("folder_id"))
 
 	// Create knowledge entry from the file
 	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
@@ -418,6 +419,17 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+
+	// If the upload was scoped to a folder, move the knowledge into it.
+	if folderID != "" {
+		moved, moveErr := h.kgService.SetKnowledgeFolder(ctx, kbID, knowledge.ID, folderID)
+		if moveErr != nil {
+			logger.Warnf(ctx, "Created knowledge %s but failed to move into folder %s: %v", knowledge.ID, folderID, moveErr)
+			c.Error(errors.NewInternalServerError(fmt.Sprintf("文件已上传，但移动到文件夹失败: %v", moveErr)))
+			return
+		}
+		knowledge = moved
 	}
 
 	logger.Infof(
@@ -516,6 +528,18 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+
+	// If the import was scoped to a folder, move the knowledge into it.
+	folderID := strings.TrimSpace(c.Query("folder_id"))
+	if folderID != "" {
+		moved, moveErr := h.kgService.SetKnowledgeFolder(ctx, kbID, knowledge.ID, folderID)
+		if moveErr != nil {
+			logger.Warnf(ctx, "Created URL knowledge %s but failed to move into folder %s: %v", knowledge.ID, folderID, moveErr)
+			c.Error(errors.NewInternalServerError(fmt.Sprintf("URL 已导入，但移动到文件夹失败: %v", moveErr)))
+			return
+		}
+		knowledge = moved
 	}
 
 	logger.Infof(
