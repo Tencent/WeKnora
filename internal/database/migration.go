@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -104,7 +106,9 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	logger.Infof(ctx, "Starting database migration...")
 
 	migrationsPath := "file://migrations/versioned"
-	if strings.HasPrefix(dsn, "sqlite3://") {
+	if strings.HasPrefix(dsn, "mysql://") {
+		migrationsPath = "file://migrations/mysql"
+	} else if strings.HasPrefix(dsn, "sqlite3://") {
 		migrationsPath = "file://migrations/sqlite"
 	}
 
@@ -300,16 +304,37 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
-	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_NAME"),
-	)
+	var dbURL string
+	var migrationsPath string
 
-	migrationsPath := "file://migrations/versioned"
+	driver := os.Getenv("DB_DRIVER")
+	switch driver {
+	case "mysql":
+		dbPassword := os.Getenv("DB_PASSWORD")
+		encodedPassword := url.QueryEscape(dbPassword)
+		dbURL = fmt.Sprintf(
+			"mysql://%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
+			os.Getenv("DB_USER"),
+			encodedPassword,
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+		migrationsPath = "file://migrations/mysql"
+	case "sqlite":
+		migrationsPath = "file://migrations/sqlite"
+		dbURL = "sqlite3://" + os.Getenv("DB_PATH")
+	default:
+		dbURL = fmt.Sprintf(
+			"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			os.Getenv("DB_USER"),
+			os.Getenv("DB_PASSWORD"),
+			os.Getenv("DB_HOST"),
+			os.Getenv("DB_PORT"),
+			os.Getenv("DB_NAME"),
+		)
+		migrationsPath = "file://migrations/versioned"
+	}
 
 	m, err := migrate.New(migrationsPath, dbURL)
 	if err != nil {

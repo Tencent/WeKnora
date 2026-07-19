@@ -29,10 +29,18 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 }
 
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
-	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
-		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	dbName := ""
+	if r.db != nil && r.db.Dialector != nil {
+		dbName = r.db.Dialector.Name()
 	}
-	return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	switch dbName {
+	case "mysql":
+		return "CASE WHEN COALESCE(JSON_LENGTH(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	case "sqlite":
+		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	default:
+		return "CASE WHEN COALESCE(jsonb_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
+	}
 }
 
 // Create inserts a new wiki page record
@@ -165,12 +173,20 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		query = query.Where("status = ?", req.Status)
 	}
 	if req.Query != "" {
-		// Use PostgreSQL full-text search + ILIKE for aliases
-		query = query.Where(
-			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
-			req.Query,
-			"%"+req.Query+"%",
-		)
+		if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+			query = query.Where(
+				"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
+				req.Query,
+				"%"+req.Query+"%",
+			)
+		} else {
+			query = query.Where(
+				"(LOWER(COALESCE(title, '')) LIKE LOWER(?) OR LOWER(COALESCE(content, '')) LIKE LOWER(?) OR LOWER(COALESCE(aliases, '')) LIKE LOWER(?))",
+				"%"+req.Query+"%",
+				"%"+req.Query+"%",
+				"%"+req.Query+"%",
+			)
+		}
 	}
 	// Directory filters are pushed to SQL so the DB does the counting and
 	// pagination instead of loading every page of the type into memory. `depth`
@@ -306,6 +322,17 @@ func (r *wikiPageRepository) ListByTypeLight(
 	return entries, total, nil
 }
 
+// dialectSourceRefsCondition returns a dialect-appropriate WHERE clause for
+// matching source_refs JSON array containment. For PostgreSQL it uses the
+// @> operator and ::text for LIKE; for MySQL/SQLite it uses JSON_CONTAINS
+// and bare column for LIKE.
+func (r *wikiPageRepository) dialectSourceRefsCondition(dbName string) (containmentExpr string, likeExpr string) {
+	if dbName == "postgres" {
+		return "source_refs @> ?::jsonb", "source_refs::text LIKE ?"
+	}
+	return "JSON_CONTAINS(source_refs, ?)", "source_refs LIKE ?"
+}
+
 // ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
 // Handles both old format ("knowledgeID") and new format ("knowledgeID|title") in source_refs JSON array.
 func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {
@@ -333,8 +360,9 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
 	var pages []*types.WikiPage
+	containmentExpr, likeExpr := r.dialectSourceRefsCondition(r.db.Dialector.Name())
 	if err := r.db.WithContext(ctx).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+containmentExpr+" OR "+likeExpr+")",
 			kbID,
 			string(needle),
 			likePattern,
@@ -369,10 +397,11 @@ func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID stri
 	}
 	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
 
+	containmentExpr, likeExpr := r.dialectSourceRefsCondition(r.db.Dialector.Name())
 	var slugs []string
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
-		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+		Where("knowledge_base_id = ? AND ("+containmentExpr+" OR "+likeExpr+")",
 			kbID,
 			string(needle),
 			likePattern,
@@ -649,7 +678,8 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
 		}
-		clauses = append(clauses, "source_refs @> ?::jsonb")
+		containmentExpr, likeExpr := r.dialectSourceRefsCondition(r.db.Dialector.Name())
+		clauses = append(clauses, containmentExpr)
 		args = append(args, string(needle))
 
 		prefix, err := json.Marshal(kid + "|")
@@ -660,7 +690,7 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
 			prefixStr = prefixStr[:len(prefixStr)-1]
 		}
-		clauses = append(clauses, "source_refs::text LIKE ?")
+		clauses = append(clauses, likeExpr)
 		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
 	}
 	if len(clauses) == 0 {
@@ -984,17 +1014,21 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 	// alias so the DB only computes the rank once. Parameterized four
 	// times with the same regex to avoid coupling to GORM's positional
 	// arg rewriting quirks.
+	regexOp := "~*"
+	if r.db.Dialector.Name() != "postgres" {
+		regexOp = "REGEXP"
+	}
 	rankExpr := "CASE " +
-		"WHEN title ~* ? THEN 4 " +
-		"WHEN slug ~* ? THEN 3 " +
-		"WHEN summary ~* ? THEN 2 " +
-		"WHEN content ~* ? THEN 1 " +
+		"WHEN title " + regexOp + " ? THEN 4 " +
+		"WHEN slug " + regexOp + " ? THEN 3 " +
+		"WHEN summary " + regexOp + " ? THEN 2 " +
+		"WHEN content " + regexOp + " ? THEN 1 " +
 		"ELSE 0 END AS match_rank"
 
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
 		Select("*, "+rankExpr, query, query, query, query).
-		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
+		Where("knowledge_base_id = ? AND (title "+regexOp+" ? OR content "+regexOp+" ? OR summary "+regexOp+" ? OR slug "+regexOp+" ?)",
 			kbID, query, query, query, query).
 		Where("status != ?", "archived").
 		Order("match_rank DESC, updated_at DESC").
@@ -1034,7 +1068,7 @@ func (r *wikiPageRepository) CountOrphans(ctx context.Context, kbID string) (int
 	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", kbID).
-		Where("(in_links IS NULL OR in_links = '[]'::JSONB)").
+		Where("(in_links IS NULL OR in_links = ?)", "[]").
 		// Exclude index and log pages as they are naturally root pages
 		Where("page_type NOT IN ?", []string{types.WikiPageTypeIndex, types.WikiPageTypeLog}).
 		Count(&count).Error; err != nil {

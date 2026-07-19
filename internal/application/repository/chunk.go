@@ -377,7 +377,12 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
+	dialectName := r.db.Dialector.Name()
+	isPostgres := dialectName == "postgres"
+	nowFunc := "NOW()"
+	if dialectName == "sqlite" {
+		nowFunc = "datetime('now')"
+	}
 
 	var sql string
 	if isPostgres {
@@ -388,7 +393,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = (CASE %s END)::integer,
 				status = (CASE %s END)::integer,
-				updated_at = NOW()
+				updated_at = %s
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -396,6 +401,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(tagIDCases, " "),
 			strings.Join(flagsCases, " "),
 			strings.Join(statusCases, " "),
+			nowFunc,
 			strings.Join(inPlaceholders, ","),
 		)
 	} else {
@@ -406,7 +412,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = CASE %s END,
 				status = CASE %s END,
-				updated_at = datetime('now')
+				updated_at = %s
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -414,6 +420,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(tagIDCases, " "),
 			strings.Join(flagsCases, " "),
 			strings.Join(statusCases, " "),
+			nowFunc,
 			strings.Join(inPlaceholders, ","),
 		)
 	}

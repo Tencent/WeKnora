@@ -167,8 +167,12 @@ func (r *messageRepository) SearchMessagesByKeyword(
 		Select("messages.*, sessions.title as session_title").
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
 		Where("sessions.tenant_id = ?", tenantID).
-		Where("messages.deleted_at IS NULL").
-		Where("messages.content ILIKE ?", "%"+escapeLikeKeyword(keyword)+"%")
+		Where("messages.deleted_at IS NULL")
+	if r.db.Dialector.Name() == "postgres" {
+		query = query.Where("messages.content ILIKE ?", "%"+escapeLikeKeyword(keyword)+"%")
+	} else {
+		query = query.Where("LOWER(messages.content) LIKE LOWER(?)", "%"+escapeLikeKeyword(keyword)+"%")
+	}
 
 	if len(sessionIDs) > 0 {
 		query = query.Where("messages.session_id IN ?", sessionIDs)
