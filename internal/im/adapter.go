@@ -11,8 +11,11 @@ import (
 type Platform string
 
 const (
-	PlatformWeCom      Platform = "wecom"
-	PlatformFeishu     Platform = "feishu"
+	PlatformWeCom  Platform = "wecom"
+	PlatformFeishu Platform = "feishu"
+	// PlatformLark is Feishu's international edition (open.larksuite.com).
+	// It shares the Feishu adapter; only the API host and tenant differ.
+	PlatformLark       Platform = "lark"
 	PlatformSlack      Platform = "slack"
 	PlatformTelegram   Platform = "telegram"
 	PlatformDingtalk   Platform = "dingtalk"
@@ -67,7 +70,7 @@ type IncomingMessage struct {
 	// ThreadID is the platform-specific thread identifier.
 	// - Slack: thread_ts (top-level message uses its own timestamp)
 	// - Mattermost: root_id, or post_id if top-level
-	// - Feishu: root_id, or message_id if top-level
+	// - Feishu/Lark: root_id, or message_id if top-level
 	// - Telegram: message_thread_id (Forum Topics only)
 	// Empty for platforms without thread support (WeCom, DingTalk).
 	// In thread mode, top-level messages use their own ID as ThreadID,

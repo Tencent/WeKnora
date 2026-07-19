@@ -1,6 +1,6 @@
 {
   "name": "knowledage-base",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
-    "test": "node --test"
+    "test": "tsx --test"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
@@ -19,7 +19,7 @@
     "@vue-office/pptx": "^1.0.1",
     "axios": "^1.16.0",
     "docx-preview": "^0.3.7",
-    "dompurify": "^3.4.2",
+    "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.45",
     "marked": "^17.0.5",
@@ -48,8 +48,9 @@
     "less": "^4.6.4",
     "less-loader": "^12.3.2",
     "npm-run-all2": "^8.0.4",
+    "tsx": "^4.23.1",
     "typescript": "~6.0.3",
-    "vite": "^7.2.2",
+    "vite": "^7.3.5",
     "vue-tsc": "^3.2.8"
   },
   "overrides": {

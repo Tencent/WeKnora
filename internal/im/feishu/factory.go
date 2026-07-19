@@ -8,14 +8,17 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 )
 
-// NewFactory returns an im.AdapterFactory for Feishu (Lark) channels.
+// NewFactory returns an im.AdapterFactory for channels on the given region's
+// cloud — RegionFeishu for 飞书, RegionLark for Lark. Both use the same
+// credentials and modes; only the API host and tenant differ.
+//
 // The HTTP adapter is always created (needed for SendReply in both modes);
 // "websocket" mode additionally runs a long-connection event stream.
-func NewFactory() im.AdapterFactory {
+func NewFactory(region Region) im.AdapterFactory {
 	return func(factoryCtx context.Context, channel *im.IMChannel, msgHandler func(context.Context, *im.IncomingMessage) error) (im.Adapter, context.CancelFunc, error) {
 		creds, err := im.ParseCredentials(channel.Credentials)
 		if err != nil {
-			return nil, nil, fmt.Errorf("parse feishu credentials: %w", err)
+			return nil, nil, fmt.Errorf("parse %s credentials: %w", region.Platform, err)
 		}
 
 		appID := im.GetString(creds, "app_id")
@@ -24,7 +27,7 @@ func NewFactory() im.AdapterFactory {
 		encryptKey := im.GetString(creds, "encrypt_key")
 
 		// Always create the HTTP adapter (needed for SendReply in both modes)
-		adapter := NewAdapter(appID, appSecret, verificationToken, encryptKey)
+		adapter := NewAdapter(region, appID, appSecret, verificationToken, encryptKey)
 
 		mode := im.ResolveMode(channel, "websocket")
 
@@ -33,12 +36,13 @@ func NewFactory() im.AdapterFactory {
 			return adapter, nil, nil
 
 		case "websocket":
-			client := NewLongConnClient(appID, appSecret, msgHandler)
+			client := NewLongConnClient(region, appID, appSecret, msgHandler)
 
 			wsCtx, wsCancel := context.WithCancel(context.Background())
 			go func() {
 				if err := client.Start(wsCtx); err != nil && wsCtx.Err() == nil {
-					logger.Errorf(context.Background(), "[IM] Feishu long connection stopped for channel %s: %v", channel.ID, err)
+					logger.Errorf(context.Background(), "[IM] %s long connection stopped for channel %s: %v",
+						region.Label, channel.ID, err)
 				}
 			}()
 
@@ -54,7 +58,7 @@ func NewFactory() im.AdapterFactory {
 			return adapter, stop, nil
 
 		default:
-			return nil, nil, fmt.Errorf("unknown Feishu mode: %s", mode)
+			return nil, nil, fmt.Errorf("unknown %s mode: %s", region.Platform, mode)
 		}
 	}
 }

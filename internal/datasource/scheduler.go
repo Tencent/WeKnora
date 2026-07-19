@@ -177,7 +177,9 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 	taskID := fmt.Sprintf("dssync:%s:%s", dataSourceID, time.Now().UTC().Truncate(time.Minute).Format("200601021504"))
 
 	_, err = s.taskEnqueuer.Enqueue(task,
-		asynq.Queue("low"),
+		asynq.Queue(types.QueueSync),
+		asynq.MaxRetry(5),
+		asynq.Timeout(2*time.Hour),
 		asynq.TaskID(taskID),
 	)
 	if err != nil {

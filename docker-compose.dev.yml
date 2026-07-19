@@ -247,6 +247,7 @@ services:
     volumes:
       - docreader-tmp-dev:/tmp/docreader
     environment:
+      - TZ=${TZ:-Asia/Shanghai}
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
       - DOCREADER_PDF_FORCE_SCANNED=${DOCREADER_PDF_FORCE_SCANNED:-false}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}

@@ -115,6 +115,19 @@ func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.Knowledge
 
 func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.KnowledgeBase) *types.DocParserStorageConfig {
 	provider := kb.GetStorageProvider()
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	backendID := ""
+	if kb.StorageBackendID != nil {
+		backendID = *kb.StorageBackendID
+	}
+	if s.storageResolver != nil && tenant != nil {
+		if backend, err := s.storageResolver.ResolveBackend(ctx, tenant, backendID, provider); err == nil && backend != nil {
+			provider = backend.Provider
+			tenantCopy := *tenant
+			tenantCopy.StorageEngineConfig = backend.ToStorageEngineConfig()
+			tenant = &tenantCopy
+		}
+	}
 	if provider == "" {
 		provider = "local"
 	}
@@ -131,7 +144,7 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 		hasKBFull = sc.SecretID != "" && sc.BucketName != ""
 	case "minio":
 		hasKBFull = sc.BucketName != ""
-	case "local", "tos", "s3", "oss", "ks3":
+	case "local", "tos", "s3", "oss", "ks3", "obs":
 		hasKBFull = false
 	}
 
@@ -153,7 +166,6 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 	var out types.DocParserStorageConfig
 	out.Provider = strings.ToUpper(provider)
 
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if tenant != nil && tenant.StorageEngineConfig != nil {
 		sec := tenant.StorageEngineConfig
 		if sec.DefaultProvider != "" && provider == "" {
@@ -228,6 +240,15 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 				out.BucketName = sec.KS3.BucketName
 				out.PathPrefix = sec.KS3.PathPrefix
 			}
+		case "obs":
+			if sec.OBS != nil {
+				out.Endpoint = sec.OBS.Endpoint
+				out.Region = sec.OBS.Region
+				out.AccessKeyID = sec.OBS.AccessKey
+				out.SecretAccessKey = sec.OBS.SecretKey
+				out.BucketName = sec.OBS.BucketName
+				out.PathPrefix = sec.OBS.PathPrefix
+			}
 		}
 	}
 
@@ -248,6 +269,21 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 	provider := kb.GetStorageProvider()
 
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	backendID := ""
+	if kb.StorageBackendID != nil {
+		backendID = strings.TrimSpace(*kb.StorageBackendID)
+	}
+	if s.storageResolver != nil && tenant != nil {
+		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+		svc, resolvedProvider, err := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
+		if err == nil && svc != nil {
+			logger.Infof(ctx, "[storage] resolveFileService selected instance: kb=%s backend=%s provider=%s", kb.ID, backendID, resolvedProvider)
+			return svc
+		}
+		if err != nil {
+			logger.Errorf(ctx, "Failed to resolve storage backend for kb=%s: %v", kb.ID, err)
+		}
+	}
 	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
 		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
 	}
@@ -274,6 +310,18 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 // the provider inferred from the file path. This protects historical data when
 // tenant/KB config changes but files were stored under the old provider.
 func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *types.KnowledgeBase, filePath string) interfaces.FileService {
+	if backendID, inner, ok := types.ParseStorageBackendPath(filePath); ok && s.storageResolver != nil {
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		if tenant != nil {
+			provider := types.ParseProviderScheme(inner)
+			baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+			if resolved, _, err := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir); err == nil {
+				return resolved
+			} else {
+				logger.Warnf(ctx, "[storage] failed to resolve backend from file path: backend=%s err=%v", backendID, err)
+			}
+		}
+	}
 	svc := s.resolveFileService(ctx, kb)
 	if filePath == "" {
 		return svc

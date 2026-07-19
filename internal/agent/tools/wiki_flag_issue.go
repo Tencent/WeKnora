@@ -42,7 +42,7 @@ This will log an issue for human review or automated maintenance.`,
     "suspected_knowledge_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Optional list of knowledge_ids (from the <sources> block) that you suspect are causing the pollution or error."
+      "description": "Optional list of short dN document IDs from the <sources> block that you suspect are causing the pollution or error."
     }
   },
   "required": ["slug", "issue_type", "description"]
@@ -72,7 +72,7 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 	if len(t.kbIDs) == 0 {
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for issue tracking"}, nil
 	}
-	
+
 	// Default to first KB ID if multiple (normally there's only one in this context)
 	kbID := t.kbIDs[0]
 

@@ -49,7 +49,7 @@ type invitationLookupRequest struct {
 
 // LookupInvitationByToken godoc
 // @Summary      解析共享邀请链接 token
-// @Description  根据邀请链接中的 token 返回邀请上下文（租户名 / 角色 / 过期时间），
+// @Description  根据邀请链接中的 token 返回邀请上下文（空间名 / 角色 / 过期时间），
 // @Description  供注册页展示。无认证；token 无效或被撤销返回 410。
 // @Description  使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。
 // @Tags         认证
@@ -107,7 +107,7 @@ func (h *AuthHandler) LookupInvitationByToken(c *gin.Context) {
 // RegisterByInvite godoc
 // @Summary      使用共享链接注册
 // @Description  通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。
-// @Description  注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应租户。
+// @Description  注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应空间。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -170,9 +170,10 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	}
 
 	user, err := h.userService.Register(ctx, &types.RegisterRequest{
-		Username: req.Username,
-		Email:    req.Email,
-		Password: req.Password,
+		Username:           req.Username,
+		Email:              req.Email,
+		Password:           req.Password,
+		TenantProvisioning: types.TenantProvisioningTenantless,
 	})
 	if err != nil {
 		logger.Errorf(ctx, "register-by-invite: user create failed for %s: %v",
@@ -181,10 +182,26 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 		return
 	}
 
+	// The invited tenant becomes the user's initial/default tenant. No
+	user.TenantID = inv.TenantID
+	if err := h.userService.UpdateUser(ctx, user); err != nil {
+		logger.Errorf(ctx, "register-by-invite: failed to set home tenant for user %s: %v", user.ID, err)
+		_ = h.userService.DeleteUser(ctx, user.ID)
+		c.Error(apperrors.NewInternalServerError("failed to finalise invited account").WithDetails(err.Error()))
+		return
+	}
+
 	if _, err := h.invitationSvc.AcceptByToken(ctx, req.Token, user.ID); err != nil {
-		// Race: link was revoked between Lookup and Accept. The user
-		// account is created either way — they can still log in.
+		// Race: link was revoked between Lookup and Accept. Keep the new
+		// account, but restore it to tenantless so it does not point at a
+		// tenant for which no membership was created. If even that repair
+		// fails, remove the half-provisioned identity.
 		logger.Errorf(ctx, "register-by-invite: accept failed for user %s: %v", user.ID, err)
+		user.TenantID = 0
+		if rollbackErr := h.userService.UpdateUser(ctx, user); rollbackErr != nil {
+			logger.Errorf(ctx, "register-by-invite: failed to restore tenantless user %s: %v", user.ID, rollbackErr)
+			_ = h.userService.DeleteUser(ctx, user.ID)
+		}
 		c.Error(&apperrors.AppError{
 			Code:     apperrors.ErrNotFound,
 			Message:  "invitation link is no longer valid; please log in to your new account",

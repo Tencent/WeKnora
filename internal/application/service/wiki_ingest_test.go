@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -355,3 +357,133 @@ func (m *templateCaptureChatModel) ChatStream(
 
 func (m *templateCaptureChatModel) GetModelName() string { return "capture" }
 func (m *templateCaptureChatModel) GetModelID() string   { return "capture" }
+
+func TestWikiIngestCleanupContextDetachedFromCancelledParent(t *testing.T) {
+	parent := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(42))
+	ctx, cancel := context.WithCancel(parent)
+	cancel()
+
+	cleanupCtx, cleanupCancel := wikiIngestCleanupContext(ctx)
+	defer cleanupCancel()
+
+	repo := &wikiPendingRepoForCleanupTest{}
+	svc := &wikiIngestService{pendingRepo: repo}
+	if err := svc.trimPendingList(cleanupCtx, []int64{7}); err != nil {
+		t.Fatalf("trimPendingList() error = %v", err)
+	}
+	if repo.deleteCtxErr != nil {
+		t.Fatalf("cleanup context should be detached from parent cancellation, got %v", repo.deleteCtxErr)
+	}
+	if got := cleanupCtx.Value(types.TenantIDContextKey); got != uint64(42) {
+		t.Fatalf("cleanup context lost tenant value: %v", got)
+	}
+}
+
+func TestTrimPendingListReturnsDeleteError(t *testing.T) {
+	wantErr := errors.New("delete failed")
+	repo := &wikiPendingRepoForCleanupTest{deleteErr: wantErr}
+	svc := &wikiIngestService{pendingRepo: repo}
+
+	err := svc.trimPendingList(context.Background(), []int64{1, 2, 3})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("trimPendingList() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestRequeueFailedOpsReturnsReleaseError(t *testing.T) {
+	wantErr := errors.New("release failed")
+	repo := &wikiPendingRepoForCleanupTest{incrCount: 1, releaseErr: wantErr}
+	svc := &wikiIngestService{pendingRepo: repo}
+
+	err := svc.requeueFailedOps(context.Background(), WikiIngestPayload{}, []WikiPendingOp{{
+		Op:          WikiOpIngest,
+		KnowledgeID: "k1",
+		DocTitle:    "doc",
+		dbID:        99,
+	}})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("requeueFailedOps() error = %v, want %v", err, wantErr)
+	}
+}
+
+type wikiPendingRepoForCleanupTest struct {
+	deleteErr     error
+	releaseErr    error
+	incrErr       error
+	incrCount     int
+	deleteCtxErr  error
+	releaseCtxErr error
+	incrCtxErr    error
+}
+
+func (r *wikiPendingRepoForCleanupTest) Enqueue(context.Context, *types.TaskPendingOp) error {
+	return nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) PeekBatch(
+	context.Context,
+	string,
+	string,
+	string,
+	int,
+) ([]*types.TaskPendingOp, error) {
+	return nil, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) ClaimBatch(
+	context.Context,
+	string,
+	string,
+	string,
+	int,
+	time.Time,
+) ([]*types.TaskPendingOp, error) {
+	return nil, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) ReleaseByIDs(ctx context.Context, _ []int64) error {
+	r.releaseCtxErr = ctx.Err()
+	if r.releaseErr != nil {
+		return r.releaseErr
+	}
+	return nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) DeleteByIDs(ctx context.Context, _ []int64) error {
+	r.deleteCtxErr = ctx.Err()
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
+	return nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) IncrFailCount(ctx context.Context, _ int64) (int, error) {
+	r.incrCtxErr = ctx.Err()
+	if r.incrErr != nil {
+		return 0, r.incrErr
+	}
+	if r.incrCount == 0 {
+		r.incrCount = 1
+	}
+	return r.incrCount, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) PendingCount(
+	context.Context,
+	string,
+	string,
+	string,
+) (int64, error) {
+	return 0, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) DeleteByDedupKey(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+	string,
+) error {
+	return nil
+}

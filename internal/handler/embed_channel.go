@@ -30,6 +30,7 @@ type EmbedChannelHandler struct {
 	sessionService    interfaces.SessionService
 	sessionHandler    *session.Handler
 	messageHandler    *MessageHandler
+	suggestionHandler *MessageSuggestionHandler
 	mcpOAuthHandler   *MCPOAuthHandler
 	mcpServiceHandler *MCPServiceHandler
 	redis             *redis.Client
@@ -40,6 +41,7 @@ func NewEmbedChannelHandler(
 	sessionService interfaces.SessionService,
 	sessionHandler *session.Handler,
 	messageHandler *MessageHandler,
+	suggestionHandler *MessageSuggestionHandler,
 	mcpOAuthHandler *MCPOAuthHandler,
 	mcpServiceHandler *MCPServiceHandler,
 	redisClient *redis.Client,
@@ -49,6 +51,7 @@ func NewEmbedChannelHandler(
 		sessionService:    sessionService,
 		sessionHandler:    sessionHandler,
 		messageHandler:    messageHandler,
+		suggestionHandler: suggestionHandler,
 		mcpOAuthHandler:   mcpOAuthHandler,
 		mcpServiceHandler: mcpServiceHandler,
 		redis:             redisClient,
@@ -68,7 +71,6 @@ type embedChannelRequest struct {
 	ShowSuggestedQuestions *bool    `json:"show_suggested_questions"`
 	WidgetPosition         string   `json:"widget_position"`
 	AllowWebSearch         *bool    `json:"allow_web_search"`
-	AllowMemory            *bool    `json:"allow_memory"`
 	AllowFileUpload        *bool    `json:"allow_file_upload"`
 	DefaultLocale          *string  `json:"default_locale"`
 	WebhookURL             *string  `json:"webhook_url"`
@@ -149,10 +151,6 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	if req.AllowWebSearch != nil {
 		allowWebSearch = *req.AllowWebSearch
 	}
-	allowMemory := false
-	if req.AllowMemory != nil {
-		allowMemory = *req.AllowMemory
-	}
 	allowFileUpload := false
 	if req.AllowFileUpload != nil {
 		allowFileUpload = *req.AllowFileUpload
@@ -170,7 +168,6 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 		ShowSuggestedQuestions: showSuggested,
 		WidgetPosition:         req.WidgetPosition,
 		AllowWebSearch:         allowWebSearch,
-		AllowMemory:            allowMemory,
 		AllowFileUpload:        allowFileUpload,
 		DefaultLocale:          types.NormalizeEmbedDefaultLocale(stringOrEmpty(req.DefaultLocale)),
 	})
@@ -252,7 +249,7 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	if req.AgentID != nil {
 		update.AgentID = strings.TrimSpace(*req.AgentID)
 	}
-	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowMemory, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
+	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
 	if err != nil {
 		writeEmbedMgmtError(c, err)
 		return
@@ -462,6 +459,45 @@ func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 	h.sessionHandler.StopSession(c)
 }
 
+func (h *EmbedChannelHandler) EmbedEnsureMessageSuggestions(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	ch, _ := middleware.EmbedChannelFromContext(c.Request.Context())
+	if ch == nil || !ch.ShowSuggestedQuestions || h.suggestionHandler == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"status": "suppressed", "suppression_reason": "channel_disabled", "questions": []any{},
+		}})
+		return
+	}
+	h.suggestionHandler.Ensure(c)
+}
+
+func (h *EmbedChannelHandler) EmbedGetMessageSuggestions(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	ch, _ := middleware.EmbedChannelFromContext(c.Request.Context())
+	if ch == nil || !ch.ShowSuggestedQuestions || h.suggestionHandler == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"status": "suppressed", "suppression_reason": "channel_disabled", "questions": []any{},
+		}})
+		return
+	}
+	h.suggestionHandler.Get(c)
+}
+
+func (h *EmbedChannelHandler) EmbedRecordSuggestionEvent(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.suggestionHandler == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "suggestion service unavailable"})
+		return
+	}
+	h.suggestionHandler.RecordEvent(c)
+}
+
 func (h *EmbedChannelHandler) EmbedResolveMCPOAuth(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
@@ -668,11 +704,10 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 	}
 	// Channel allow_web_search only exposes the visitor toggle; the client must opt in.
 	payload["web_search_enabled"] = ch.AllowWebSearch && clientWebSearch
-	// Embed memory UI is disabled for now; always off regardless of channel flag.
-	payload["enable_memory"] = false
 	if !ch.AllowFileUpload {
 		delete(payload, "images")
 		delete(payload, "attachment_uploads")
+		delete(payload, "attachment_ids")
 	}
 	payload["mcp_service_ids"] = []string{}
 	if agentMode {
@@ -753,7 +788,6 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"show_suggested_questions": ch.ShowSuggestedQuestions,
 		"widget_position":          ch.WidgetPosition,
 		"allow_web_search":         ch.AllowWebSearch,
-		"allow_memory":             ch.AllowMemory,
 		"allow_file_upload":        ch.AllowFileUpload,
 		"default_locale":           ch.DefaultLocale,
 		"webhook_url":              ch.WebhookURL,

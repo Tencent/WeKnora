@@ -22,7 +22,7 @@ const { t } = useI18n();
 const authStore = useAuthStore();
 
 // canDeleteGeneratedQuestion 对应后端 DELETE /chunks/by-id/:id/questions
-// 的 OwnedChunkKBOrAdminFromChunkID 守卫——KB 创建者或租户 Admin+
+// 的 OwnedChunkKBOrAdminFromChunkID 守卫——KB 创建者或空间 Admin+
 // 才允许删除。父组件 KnowledgeBase.vue 通过 :canEditKB 把 KB 级权限
 // 传下来（包含 KB creator / Admin / 组织分享 editor 三种来源），未
 // 传时按更严格的 Admin 兜底，避免 Viewer 看到一个会 403 的入口。
@@ -84,7 +84,7 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status", "kbId"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 const hasTimelineSpans = ref(false);
@@ -618,7 +618,7 @@ const runMarkdownPostRenderPipeline = async () => {
   if (!renderRoot) {
     return;
   }
-  await hydrateProtectedFileImages(renderRoot);
+  await hydrateProtectedFileImages(renderRoot, undefined, props.kbId);
   const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
   if (images) {
     images.forEach(async item => {

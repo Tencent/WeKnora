@@ -109,6 +109,8 @@ export interface KBModelConfigRequest {
     vlm_config?: {
         enabled: boolean
         model_id?: string
+        description_language?: string
+        custom_instructions?: string
     }
     asr_config?: {
         enabled: boolean
@@ -134,11 +136,13 @@ export interface KBModelConfigRequest {
         tokenLimit?: number
         // Language hints for heuristic patterns. Empty array = auto-detect.
         languages?: string[]
+        tableMetadataInstructions?: string
     }
     multimodal: {
         enabled: boolean
     }
     /** 存储引擎选择："local" | "minio" | "cos" | "obs" 等，影响文档上传与文档内图片存储 */
+    storageBackendId?: string
     storageProvider?: string
     nodeExtract: {
         enabled: boolean
@@ -146,10 +150,12 @@ export interface KBModelConfigRequest {
         tags: string[]
         nodes: Node[]
         relations: Relation[]
+        customInstructions?: string
     }
     questionGeneration?: {
         enabled: boolean
         questionCount: number
+        customInstructions?: string
     }
 }
 
@@ -459,7 +465,7 @@ export function testMultimodalFunction(testData: {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
-        // 跨租户访问请求头：直接附，避免 short-circuit "selectedTenantId
+        // 跨空间访问请求头：直接附，避免 short-circuit "selectedTenantId
         // === defaultTenantId 时不附" 在某些边角下让 header 静默丢失。
         // 与 utils/request.ts、api/chat/streame.ts 行为一致。
         const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');

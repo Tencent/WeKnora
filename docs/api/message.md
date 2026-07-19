@@ -239,7 +239,7 @@ curl --location 'http://localhost:8080/api/v1/messages/search' \
 
 ## GET `/messages/chat-history-stats` - 获取聊天历史知识库统计
 
-获取当前租户的聊天历史知识库索引统计信息。
+获取当前空间的聊天历史知识库索引统计信息。
 
 **请求**:
 

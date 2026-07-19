@@ -58,15 +58,24 @@ test('tool rows use line icon names instead of legacy asset masks', () => {
   assert.doesNotMatch(source, /getToolIcon\(event\.tool_name\)/)
 })
 
-test('rag mode delegates pre-answer loading to pipeline and keeps dots while answer streams', () => {
-  assert.match(source, /if \(props\.ragMode\) return hasAnswerStarted\.value/)
+test('rag mode delegates pre-answer loading to pipeline and adds no row after answer starts', () => {
+  assert.match(source, /if \(props\.ragMode \|\| hasAnswerStarted\.value\) return false/)
   assert.match(source, /v-if="!ragMode \|\| displayEvents\.length > 0 \|\| showAgentActivityIndicator"/)
+  assert.doesNotMatch(source, /ChatActivityIndicator/)
 })
 
 test('rag mode keeps model thinking out of the answer stream component', () => {
-  assert.match(source, /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer'/)
+  const displayEventsBlock = source.slice(
+    source.indexOf('const displayEvents = computed'),
+    source.indexOf('// Get unique key for event'),
+  )
+  assert.match(displayEventsBlock, /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer'/)
   assert.doesNotMatch(
-    source,
+    displayEventsBlock,
+    /attachment_parsing/,
+  )
+  assert.doesNotMatch(
+    displayEventsBlock,
     /if \(props\.ragMode\)\s*\{[\s\S]*e\.type === 'answer' \|\| e\.type === 'thinking'/,
   )
 })
@@ -82,9 +91,12 @@ test('pending tool rows do not render an extra axis dot', () => {
   assert.doesNotMatch(source, /&\.action-pending\s*\{[\s\S]*&::after/)
 })
 
-test('agent mode keeps gray timeline dots for the full turn', () => {
+test('agent mode shows a native placeholder before answer whenever nothing is pending', () => {
   assert.match(source, /if \(isConversationDone\.value\) return false/)
-  assert.match(source, /if \(props\.ragMode\) return false/)
-  assert.match(source, /return true;\s*\}\);/)
+  assert.match(source, /return !hasPendingStreamingActivity\.value/)
+  assert.match(source, /const hasPendingStreamingActivity = computed/)
+  assert.match(source, /event\.type === 'tool_approval_required' \|\| event\.type === 'mcp_oauth_required'/)
+  assert.match(source, /class="action-card action-pending"/)
+  assert.match(source, /t\('chat\.thinkingAlt'\)/)
   assert.match(source, /chat-timeline-loading\.less/)
 })

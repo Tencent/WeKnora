@@ -102,10 +102,17 @@
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
                 <div class="action-card" :class="{
                   'action-pending': event.pending,
-                  'action-error': event.success === false
-                }">
-                  <div class="action-header" @click="handleActionHeaderClick(event)"
-                    :class="{ 'no-results': !hasResults(event) }">
+                  'action-error': event.success === false,
+                  'reference-trigger': canOpenToolReferences(event)
+                }"
+                  :role="canOpenToolReferences(event) ? 'button' : undefined"
+                  :tabindex="canOpenToolReferences(event) ? 0 : undefined"
+                  @click="handleActionCardClick(event)"
+                  @keydown.enter="handleActionCardClick(event)"
+                  @keydown.space.prevent="handleActionCardClick(event)"
+                >
+                  <div class="action-header" @click.stop="handleActionHeaderClick(event)"
+                    :class="{ 'no-results': !hasActionResult(event) }">
                     <div class="action-title">
                       <t-icon v-if="event.tool_name" class="action-title-icon"
                         :name="getToolIconName(event.tool_name)" />
@@ -153,7 +160,12 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
-                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)"
+                  <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
+                    class="search-results-summary-fixed attachment-parsing-summary">
+                    <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
+                  </div>
+
+                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
                     <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
@@ -282,7 +294,8 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
-              <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
+              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
+                class="answer-toolbar">
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -298,6 +311,13 @@
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
+                <transition name="follow-up-toolbar-loading">
+                  <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
+                    aria-live="polite">
+                    <t-icon name="lightbulb" />
+                    <span class="answer-toolbar__follow-up-label">{{ t('chat.followUpQuestionsLoading') }}</span>
+                  </span>
+                </transition>
               </div>
             </div>
 
@@ -305,10 +325,17 @@
             <div v-else-if="event.type === 'tool_call'" class="tool-event">
               <div class="action-card" :class="{
                 'action-pending': event.pending,
-                'action-error': event.success === false
-              }">
-                <div class="action-header" @click="handleActionHeaderClick(event)"
-                  :class="{ 'no-results': !hasResults(event) }">
+                'action-error': event.success === false,
+                'reference-trigger': canOpenToolReferences(event)
+              }"
+                :role="canOpenToolReferences(event) ? 'button' : undefined"
+                :tabindex="canOpenToolReferences(event) ? 0 : undefined"
+                @click="handleActionCardClick(event)"
+                @keydown.enter="handleActionCardClick(event)"
+                @keydown.space.prevent="handleActionCardClick(event)"
+              >
+                <div class="action-header" @click.stop="handleActionHeaderClick(event)"
+                  :class="{ 'no-results': !hasActionResult(event) }">
                   <div class="action-title">
                     <t-icon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
                     <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
@@ -357,7 +384,12 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
-                <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)"
+                <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
+                  class="search-results-summary-fixed attachment-parsing-summary">
+                  <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
+                </div>
+
+                <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                   class="action-details">
                   <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
@@ -387,11 +419,12 @@
       <div v-if="showAgentActivityIndicator" class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch"></div>
         <div class="tree-child-content">
-          <div class="loading-indicator">
-            <div class="loading-typing">
-              <span></span>
-              <span></span>
-              <span></span>
+          <div class="action-card action-pending">
+            <div class="action-header no-results">
+              <div class="action-title">
+                <t-icon class="action-title-icon" name="lightbulb" />
+                <span class="action-name">{{ t('chat.thinkingAlt') }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -420,7 +453,13 @@
               || 1
           }) }}</span>
         </div>
-        <t-link theme="primary" hover="color" @click="navigateToWikiGraph">
+        <t-link
+          theme="primary"
+          hover="color"
+          :href="wikiGraphHref"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           <template #prefixIcon><t-icon name="chart-bubble" /></template>
           {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
         </t-link>
@@ -442,9 +481,13 @@ import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import { countGrepDocuments } from '@/utils/grepResultsGroup';
+import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
+import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
+import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
+import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
+import { resolveCitationChunkId } from '@/utils/citationMarkdown';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -507,6 +550,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   todo_write: 'agentStream.tools.todoWrite',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
+  attachment_parsing: 'agentStream.tools.attachmentParsing',
   image_analysis: 'agentStream.tools.imageAnalysis',
   query_understand: 'agentStream.tools.queryUnderstand',
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
@@ -673,15 +717,17 @@ const openWikiDrawer = async (kbId: string, slug: string) => {
   }
 };
 
-const navigateToWikiGraph = () => {
-  if (currentWikiKbId.value && wikiDrawerPage.value?.slug) {
-    wikiDrawerVisible.value = false;
-    try {
-      router.push(`/platform/knowledge-bases/${currentWikiKbId.value}?tab=graph&slug=${encodeURIComponent(wikiDrawerPage.value.slug)}`);
-    } catch (error) {
-      console.error('Failed to navigate to wiki graph:', error);
-    }
-  }
+const wikiGraphHref = computed(() => {
+  if (!currentWikiKbId.value || !wikiDrawerPage.value?.slug) return '';
+  return router.resolve({
+    path: `/platform/knowledge-bases/${currentWikiKbId.value}`,
+    query: { tab: 'graph', slug: wikiDrawerPage.value.slug },
+  }).href;
+});
+
+const openRouteInNewTab = (path: string) => {
+  const href = router.resolve(path).href;
+  window.open(href, '_blank', 'noopener,noreferrer');
 };
 
 const handleWikiDrawerClick = (e: MouseEvent) => {
@@ -733,6 +779,11 @@ const props = defineProps<{
   embedSessionSig?: string;
   embedVisitorId?: string;
   ragMode?: boolean;
+  followUpLoading?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (event: 'render-complete-change', ready: boolean): void;
 }>();
 
 const embedAuthProps = computed(() => ({
@@ -757,7 +808,252 @@ const {
   getKnowledgeReferences: () => props.session?.knowledge_references,
   embedChannelId: () => (props.embeddedMode ? props.embedChannelId : undefined),
   embedToken: () => (props.embeddedMode ? props.embedToken : undefined),
+  sessionId: () => props.sessionId,
 });
+
+const referencesDrawer = useChatReferencesDrawer();
+
+const getReferencesForDrawer = (
+  refsOverride?: KnowledgeReferenceLike[] | null,
+): KnowledgeReferenceLike[] => {
+  const messageReferences = refsOverride?.length
+    ? refsOverride
+    : props.session?.knowledge_references;
+  if (messageReferences?.length) return messageReferences;
+
+  // Agent answers can already contain citation tags before the aggregated
+  // knowledge_references event is emitted (and some restored conversations do
+  // not have that aggregate at all). The completed retrieval tool events still
+  // carry the same source data, so use them to keep citation clicks in the
+  // references drawer instead of falling through to KB-page navigation.
+  return (props.session?.agentEventStream || []).flatMap((event) =>
+    getToolReferenceItems(event),
+  );
+};
+
+const openReferencesDrawer = (
+  highlight?: ReferenceHighlightTarget,
+  refsOverride?: KnowledgeReferenceLike[] | null,
+) => {
+  const refs = getReferencesForDrawer(refsOverride)
+  if (!referencesDrawer || !refs?.length) return false
+  referencesDrawer.open({
+    references: refs,
+    highlight: highlight || null,
+    messageId: props.session?.id,
+  })
+  return true
+}
+
+const mergeDocumentReferences = (refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] => {
+  const merged = new Map<string, KnowledgeReferenceLike & { contentParts?: string[] }>();
+
+  for (const ref of refs) {
+    if (ref.chunk_type === 'web_search') continue;
+    const key = ref.knowledge_id || ref.knowledge_title || ref.id;
+    if (!key) continue;
+
+    const existing = merged.get(key);
+    const content = String(ref.content || '').trim();
+    if (!existing) {
+      merged.set(key, {
+        ...ref,
+        id: ref.knowledge_id || ref.id || key,
+        content,
+        contentParts: content ? [content] : [],
+      });
+      continue;
+    }
+
+    if (content && !existing.contentParts?.includes(content)) {
+      existing.contentParts = [...(existing.contentParts || []), content];
+      existing.content = existing.contentParts.slice(0, 3).join('\n\n');
+    }
+  }
+
+  return Array.from(merged.values()).map(({ contentParts, ...ref }) => ref);
+};
+
+const cleanToolOutputContent = (output: unknown): string => {
+  const raw = typeof output === 'string' ? output : '';
+  return raw
+    .replace(/<\/?knowledge_chunks[^>]*>/gi, '')
+    .replace(/<\/?chunk[^>]*>/gi, '')
+    .trim();
+};
+
+const getToolKnowledgeBaseId = (toolData: any): string | undefined => {
+  if (typeof toolData?.knowledge_base_id === 'string' && toolData.knowledge_base_id) {
+    return toolData.knowledge_base_id;
+  }
+  const kbIds = Array.isArray(toolData?.knowledge_base_ids) ? toolData.knowledge_base_ids : [];
+  if (kbIds.length === 1 && typeof kbIds[0] === 'string' && kbIds[0]) {
+    return kbIds[0];
+  }
+  return undefined;
+};
+
+const formatToolResultContent = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim();
+  if (value == null) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
+const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
+
+function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
+  if (!event || event.pending) return [];
+  const toolName = event.tool_name;
+  const toolData = event.tool_data;
+
+  if (isMcpTool(toolName)) {
+    const output = formatToolResultContent(event.output) || formatToolResultContent(toolData);
+    if (!output) return [];
+    return [{
+      id: event.tool_call_id || toolName,
+      chunk_type: 'tool_result',
+      knowledge_title: getToolTitle(event),
+      content: output,
+      metadata: {
+        title: getToolTitle(event),
+        source: getLocalizedToolName(toolName),
+        tool: String(toolName || ''),
+      },
+    }];
+  }
+
+  if (!toolData) return [];
+
+  if (toolName === 'web_search') {
+    const results = Array.isArray(toolData.results) ? toolData.results : [];
+    return results
+      .filter((item: any) => item?.url)
+      .map((item: any, index: number) => ({
+        id: item.url,
+        chunk_type: 'web_search',
+        knowledge_title: item.title || item.source || item.url,
+        content: item.snippet || item.content || '',
+        metadata: {
+          url: item.url,
+          title: item.title || '',
+          snippet: item.snippet || item.content || '',
+        },
+        chunk_index: item.result_index ?? index + 1,
+      }));
+  }
+
+  if (toolName === 'web_fetch') {
+    const results = Array.isArray(toolData.results) ? toolData.results : [];
+    return results
+      .filter((item: any) => item?.url)
+      .map((item: any, index: number) => ({
+        id: item.url,
+        chunk_type: 'web_search',
+        knowledge_title: item.url,
+        content: item.summary || item.raw_content || '',
+        metadata: {
+          url: item.url,
+          title: item.url,
+          snippet: item.summary || item.raw_content || '',
+        },
+        chunk_index: index + 1,
+      }));
+  }
+
+  if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
+    const results = Array.isArray(toolData.results) ? toolData.results : [];
+    const fallbackKnowledgeBaseId = getToolKnowledgeBaseId(toolData);
+    return mergeDocumentReferences(results
+      .filter((item: any) => item?.chunk_id || item?.knowledge_id)
+      .map((item: any, index: number) => ({
+        id: item.chunk_id || `${item.knowledge_id}-${item.result_index ?? index + 1}`,
+        knowledge_id: item.knowledge_id,
+        knowledge_title: item.faq_standard_question || item.knowledge_title,
+        knowledge_base_id: item.knowledge_base_id || fallbackKnowledgeBaseId,
+        chunk_index: item.result_index ?? index + 1,
+        chunk_type: item.chunk_type,
+        content: item.content || '',
+      })));
+  }
+
+  if (toolName === 'grep_chunks') {
+    const chunkResults = Array.isArray(toolData.chunk_results) ? toolData.chunk_results : [];
+    if (chunkResults.length) {
+      return groupGrepChunkResults(chunkResults)
+        .filter((group) => group.knowledge_id || group.title)
+        .map((group, index) => ({
+          id: group.knowledge_id || group.key,
+          chunk_ids: group.chunks.map((chunk) => chunk.chunk_id).filter(Boolean),
+          knowledge_id: group.knowledge_id,
+          knowledge_title: group.title,
+          knowledge_base_id: group.knowledge_base_id,
+          chunk_index: index + 1,
+          chunk_type: group.is_faq ? 'faq' : undefined,
+          content: group.chunks.map((chunk) => chunk.content).filter(Boolean).slice(0, 3).join('\n\n') || group.match_snippet || '',
+        }));
+    }
+
+    const knowledgeResults = Array.isArray(toolData.knowledge_results) ? toolData.knowledge_results : [];
+    return mergeDocumentReferences(knowledgeResults
+      .filter((item: any) => item?.knowledge_id)
+      .map((item: any, index: number) => ({
+        id: item.knowledge_id,
+        knowledge_id: item.knowledge_id,
+        knowledge_title: item.faq_question || item.knowledge_title,
+        knowledge_base_id: item.knowledge_base_id,
+        chunk_index: index + 1,
+        content: item.match_snippet || '',
+      })));
+  }
+
+  if (toolName === 'list_knowledge_chunks') {
+    const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
+    if (chunks.length) {
+      return mergeDocumentReferences(chunks
+        .filter((item: any) => item?.content)
+        .map((item: any, index: number) => ({
+          id: item.chunk_id || item.id || `${toolData.knowledge_id || 'doc'}-${index + 1}`,
+          knowledge_id: item.knowledge_id || toolData.knowledge_id,
+          knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id,
+          knowledge_base_id: item.knowledge_base_id || toolData.knowledge_base_id,
+          chunk_index: item.chunk_index ?? item.index ?? index + 1,
+          chunk_type: item.chunk_type || (toolData.faq_question ? 'faq' : undefined),
+          content: item.content || '',
+        })));
+    }
+
+    const output = cleanToolOutputContent(event.output);
+    if (!output) return [];
+    return [{
+      id: toolData.faq_id || toolData.knowledge_id || event.tool_call_id,
+      knowledge_id: toolData.knowledge_id,
+      knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id || getToolDescription(event),
+      knowledge_base_id: toolData.knowledge_base_id,
+      chunk_type: toolData.faq_question ? 'faq' : undefined,
+      content: output,
+    }];
+  }
+
+  return [];
+}
+
+const canOpenToolReferences = (event: any): boolean => getToolReferenceItems(event).length > 0;
+
+const openToolReferences = (event: any): boolean => {
+  const refs = getToolReferenceItems(event);
+  if (!referencesDrawer || !refs.length) return false;
+  referencesDrawer.toggle({
+    references: refs,
+    highlight: null,
+    messageId: props.session?.id,
+    sourceKey: `tool:${props.session?.id || 'session'}:${event.tool_call_id || event.event_id || event.tool_name || 'references'}`,
+  });
+  return true;
+};
 
 configureMarkedForChatMarkdown();
 
@@ -985,6 +1281,7 @@ const answerFullyRendered = computed(
   () => isConversationDone.value && typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
 watch(answerFullyRendered, (ready) => {
+  emit('render-complete-change', ready);
   if (!ready) return;
   // Clear before this reactive update renders, so a source that returned 404
   // mid-stream gets one real final-attempt <img> node instead of remaining
@@ -993,13 +1290,29 @@ watch(answerFullyRendered, (ready) => {
   nextTick(async () => {
     await hydrateProtectedFileImages(rootElement.value);
   });
+}, { immediate: true });
+
+// Whether any currently visible step is actively pending (a running tool, or a
+// blocking approval/OAuth prompt). A pending step shimmers on its own, so we
+// don't stack a placeholder on top of it.
+const hasPendingStreamingActivity = computed(() => {
+  return displayEvents.value.some((event: any) => {
+    if (!event) return false;
+    if (event.pending === true) return true;
+    return event.type === 'tool_approval_required' || event.type === 'mcp_oauth_required';
+  });
 });
 
-// Agent: dots until the turn completes. RAG: pipeline dots before answer; answer stream dots after.
+// Before any answer text appears, keep a native timeline placeholder whenever
+// nothing is currently pending. This covers both the initial wait (no events
+// yet) and the gap between rounds — the previous tool finished but the model
+// has not emitted the next step/answer — which would otherwise show a static,
+// feedback-less timeline. Once a real pending step exists it carries its own
+// shimmer, and once answer text starts the stream itself is enough feedback.
 const showAgentActivityIndicator = computed(() => {
   if (isConversationDone.value) return false;
-  if (props.ragMode) return hasAnswerStarted.value;
-  return true;
+  if (props.ragMode || hasAnswerStarted.value) return false;
+  return !hasPendingStreamingActivity.value;
 });
 
 const isStreamingTimelineEvent = (event: any): boolean => {
@@ -1370,15 +1683,15 @@ const displayEvents = computed(() => {
 
   const result = buildFullEventList(stream);
 
-  // Quick-answer RAG: pipeline steps and model thinking live in RagPipelineProgress;
-  // here we only render the final answer stream.
+  // Quick-answer RAG: pipeline steps (including attachment prep) live in
+  // RagPipelineProgress; this component only renders the answer stream.
   if (props.ragMode) {
     return result.filter((e: any) => e.type === 'answer');
   }
 
   // While the conversation is still running, keep the same lightweight tool-log
   // surface as the completed tree. Raw thinking narration is noisy during
-  // streaming; the active state is represented by the compact activity dots.
+  // streaming; real tool rows carry their own pending state.
   if (!isConversationDone.value) {
     return result.filter((e: any) => {
       if (e.type === 'thinking') return false;
@@ -1462,14 +1775,39 @@ const toggleEvent = (eventId: string) => {
 };
 
 const handleActionHeaderClick = (event: any) => {
-  if (hasResults(event) && event.tool_call_id) {
+  if (canOpenToolReferences(event)) {
+    openToolReferences(event);
+    return;
+  }
+  if (hasExpandableResults(event) && event.tool_call_id) {
     toggleEvent(event.tool_call_id);
   }
+};
+
+const handleActionCardClick = (event: any) => {
+  if (!canOpenToolReferences(event)) return;
+  openToolReferences(event);
 };
 
 const isEventExpanded = (eventId: string): boolean => {
   return expandedEvents.value.has(eventId);
 };
+
+const isReferenceDrawerTool = (toolName?: string | null): boolean =>
+  isMcpTool(toolName) ||
+  toolName === 'search_knowledge' ||
+  toolName === 'knowledge_search' ||
+  toolName === 'web_search' ||
+  toolName === 'web_fetch' ||
+  toolName === 'grep_chunks' ||
+  toolName === 'list_knowledge_chunks';
+
+const hasExpandableResults = (event: any): boolean => {
+  if (isReferenceDrawerTool(event?.tool_name)) return false;
+  return hasResults(event);
+};
+
+const hasActionResult = (event: any): boolean => canOpenToolReferences(event) || hasExpandableResults(event);
 
 // Check if search/grep tools have results
 const hasResults = (event: any): boolean => {
@@ -1501,6 +1839,11 @@ const hasResults = (event: any): boolean => {
     return false;
   }
 
+  // Attachment parsing and image analysis: compact inline status only
+  if (toolName === 'attachment_parsing' || toolName === 'image_analysis') {
+    return false;
+  }
+
   // For other tools, always allow expansion
   return true;
 };
@@ -1508,6 +1851,9 @@ const hasResults = (event: any): boolean => {
 // Delegated handlers for span-based citation clicks/keyboard
 const handleCitationActivate = (el: HTMLElement) => {
   const url = el.getAttribute('data-url');
+  if (url && openReferencesDrawer({ url })) {
+    return;
+  }
   if (!url) return;
   try {
     // @ts-ignore: Wails runtime check
@@ -1594,16 +1940,30 @@ const onRootClick = (e: Event) => {
     return;
   }
 
-  // Handle KB citation clicks -> navigate to KB detail page
+  // Handle KB citation clicks -> open references drawer when available
   const kbEl = target.closest?.('.citation-kb') as HTMLElement | null;
-  if (kbEl && kbEl.getAttribute('data-kb-id')) {
+  if (kbEl && kbEl.getAttribute('data-chunk-id')) {
     e.preventDefault();
     e.stopPropagation();
-    const kbId = kbEl.getAttribute('data-kb-id');
+    const rawChunkId = kbEl.getAttribute('data-chunk-id') || '';
+    const title = kbEl.getAttribute('data-doc') || '';
+    const kbId = kbEl.getAttribute('data-kb-id') || '';
+    const chunkId =
+      resolveCitationChunkId(
+        rawChunkId,
+        { doc: title, kbId },
+        getReferencesForDrawer(),
+      ) || rawChunkId;
+    if (openReferencesDrawer({
+      chunkId,
+      documentTitle: title,
+      knowledgeBaseId: kbId,
+    })) {
+      return;
+    }
     if (kbId) {
       try {
-        // Navigate to knowledge base detail page
-        router.push(`/platform/knowledge-bases/${kbId}`);
+        openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
       } catch (error) {
         console.error('Failed to navigate to knowledge base:', error);
       }
@@ -1661,10 +2021,25 @@ const onRootKeydown = (e: KeyboardEvent) => {
   if (kbEl) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      const kbId = kbEl.getAttribute('data-kb-id');
+      const rawChunkId = kbEl.getAttribute('data-chunk-id') || '';
+      const title = kbEl.getAttribute('data-doc') || '';
+      const kbId = kbEl.getAttribute('data-kb-id') || '';
+      const chunkId =
+        resolveCitationChunkId(
+          rawChunkId,
+          { doc: title, kbId },
+          getReferencesForDrawer(),
+        ) || rawChunkId;
+      if (openReferencesDrawer({
+        chunkId,
+        documentTitle: title,
+        knowledgeBaseId: kbId,
+      })) {
+        return;
+      }
       if (kbId) {
         try {
-          router.push(`/platform/knowledge-bases/${kbId}`);
+          openRouteInNewTab(`/platform/knowledge-bases/${kbId}`);
         } catch (error) {
           console.error('Failed to navigate to knowledge base:', error);
         }
@@ -1752,7 +2127,7 @@ const renderAgentMarkdown = (
     escapeMarkdown,
     sanitizeHtml: sanitizeMarkdownHTML,
     streaming: !isConversationDone.value,
-    knowledgeReferences: props.session?.knowledge_references,
+    knowledgeReferences: getReferencesForDrawer(),
     cachedMermaidSvgHtml: streamingMermaidSvgCache.value,
     prepareMarkdown: prepareAgentMarkdown,
     injectCachedMermaidSvg,
@@ -1966,11 +2341,18 @@ const getKnowledgeChunksSummary = (toolData: any): string => {
   return getKnowledgeChunksSummaryHtml(t, toolData);
 };
 
+const getAttachmentParsingSummary = (event: any): string => {
+  return getAttachmentParsingSummaryHtml(t, event);
+};
+
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
+    }
+    if (event.tool_name === 'attachment_parsing') {
+      return t('agentStream.toolStatus.attachmentParsing');
     }
     if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
@@ -2081,6 +2463,9 @@ const getToolDescription = (event: any): string => {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
     }
+    if (event.tool_name === 'attachment_parsing') {
+      return t('agentStream.toolStatus.attachmentParsing');
+    }
     if (event.tool_name === 'query_understand') {
       return t('agentStream.toolStatus.queryUnderstanding');
     }
@@ -2110,6 +2495,8 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.updateTodos') : t('agentStream.toolStatus.updateTodosFailed');
   } else if (toolName === 'image_analysis') {
     return success ? t('agentStream.toolStatus.imageAnalysisDone') : t('agentStream.toolStatus.imageAnalysisFailed');
+  } else if (toolName === 'attachment_parsing') {
+    return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
   } else {
@@ -2240,13 +2627,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   &.is-embedded {
     margin-bottom: 0;
-
-    .loading-indicator {
-      height: 41px;
-      padding: 0 0 0 4px;
-      margin-top: 0;
-      animation: none;
-    }
   }
 }
 
@@ -2289,6 +2669,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
   &.event-answer {
     // answer 事件无特殊左侧装饰
   }
+}
+
+// While streaming, the last timeline step is `tree-child-last` (margin-bottom: 0)
+// and the answer streams in directly beneath it. Give the answer breathing room
+// so it does not collide with the final tool row.
+.event-item.tree-child + .event-item.event-answer {
+  margin-top: 16px;
 }
 
 // ============ Tree View ============
@@ -2440,6 +2827,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
     &:hover {
       background: transparent;
+    }
+
+    &.reference-trigger {
+      cursor: pointer;
+
+      &:hover {
+        .action-name,
+        .results-summary-text {
+          color: var(--td-text-color-primary);
+        }
+      }
     }
 
     &.action-error {
@@ -2630,32 +3028,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
-// Loading 动画关键帧
-@keyframes dotBounce {
-
-  0%,
-  80%,
-  100% {
-    transform: scale(1);
-    opacity: 0.6;
-  }
-
-  40% {
-    transform: scale(1.3);
-    opacity: 1;
-  }
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes pulse {
 
   0%,
@@ -2667,32 +3039,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   50% {
     transform: scale(1.5);
     opacity: 0.3;
-  }
-}
-
-@keyframes typingBounce {
-
-  0%,
-  60%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  30% {
-    transform: translate3d(0, -5px, 0);
-  }
-}
-
-@keyframes wave {
-
-  0%,
-  40%,
-  100% {
-    transform: scaleY(0.4);
-  }
-
-  20% {
-    transform: scaleY(1);
   }
 }
 
@@ -2779,6 +3125,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 
 .search-results-summary-fixed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   padding: 2px 0 0 0;
   background: transparent;
   border-top: 0;
@@ -2965,121 +3315,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
     overflow-x: auto;
     border: 1px solid var(--td-component-stroke);
     line-height: 1.5;
-  }
-}
-
-.loading-indicator {
-  display: flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0;
-  margin-top: 0;
-  position: relative;
-  animation: fadeInUp 0.3s ease-out;
-
-  // 方案1: 三个跳动的圆点
-  .loading-dots {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-
-    span {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--td-brand-color);
-      animation: dotBounce 1.4s ease-in-out infinite;
-
-      &:nth-child(1) {
-        animation-delay: -0.32s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: -0.16s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0s;
-      }
-    }
-  }
-
-  // 打字机效果
-  .loading-typing {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    span {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: var(--td-text-color-placeholder);
-      animation: typingBounce 1.4s ease-in-out infinite;
-      // Composite each dot so the bounce stays smooth and ghost-free while the
-      // streaming answer relayouts every token.
-      will-change: transform;
-      backface-visibility: hidden;
-
-      &:nth-child(1) {
-        animation-delay: 0s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: 0.2s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0.4s;
-      }
-    }
-  }
-
-  // 方案5: 波浪线
-  .loading-wave {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-
-    span {
-      width: 3px;
-      height: 16px;
-      background: var(--td-brand-color);
-      border-radius: 2px;
-      animation: wave 1.2s ease-in-out infinite;
-
-      &:nth-child(1) {
-        animation-delay: 0s;
-      }
-
-      &:nth-child(2) {
-        animation-delay: 0.1s;
-      }
-
-      &:nth-child(3) {
-        animation-delay: 0.2s;
-      }
-
-      &:nth-child(4) {
-        animation-delay: 0.3s;
-      }
-
-      &:nth-child(5) {
-        animation-delay: 0.4s;
-      }
-    }
-  }
-
-  .botanswer_loading_gif {
-    width: 24px;
-    height: 18px;
-    margin-left: 0;
-  }
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
   }
 }
 

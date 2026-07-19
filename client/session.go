@@ -449,10 +449,12 @@ func (c *Client) StopSession(ctx context.Context, sessionID string, messageID st
 
 // SearchKnowledgeRequest knowledge search request
 type SearchKnowledgeRequest struct {
-	Query            string   `json:"query"`                        // Query content
-	KnowledgeBaseID  string   `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
-	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
+	Query            string          `json:"query"`                        // Query content
+	KnowledgeBaseID  string          `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
+	KnowledgeBaseIDs []string        `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
+	KnowledgeIDs     []string        `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
+	TagIDs           []string        `json:"tag_ids,omitempty"`            // Tag IDs for filtering within a single KB
+	MentionedItems   []MentionedItem `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
 }
 
 // SearchKnowledgeResponse search results response

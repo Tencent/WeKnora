@@ -318,10 +318,10 @@ Now apply the instructions above to the chunks and output ONLY the JSON.`
 // WikiPageModifyPrompt updates an existing wiki page with new additions and removes stale/deleted information in a single pass.
 const WikiPageModifyPrompt = `You are a wiki editor tasked with updating an existing wiki page. You must process a set of NEW information to add, AND/OR a set of deleted documents whose exclusive contributions must be REMOVED.
 
-### STRICT CITATION & MERGE RULES (CRITICAL):
-1. **Preserve Citations:** When merging new information with existing content, you MUST strictly preserve all existing inline chunk citations (e.g., [c003]). 
-2. **Mandatory Tracing:** Any newly added factual claim, entity, or numerical data MUST be followed by an inline citation to the appropriate new source chunk (e.g., [c003]). 
-3. **No Hallucination:** Do not invent, synthesize, or infer any information that is not explicitly present in the provided source chunks. If the new chunks clearly and directly supersede or contradict existing content, update the main text to reflect the newer cited information AND add a brief "Contradictions / Updates" section summarizing the change. If the conflict is ambiguous, unresolved, or not directly supported by the provided chunks, do not overwrite the existing content; instead, add only a "Contradictions / Updates" section describing the conflict with citations.
+### SOURCE GROUNDING & MERGE RULES (CRITICAL):
+1. **No Inline Chunk IDs:** Chunk aliases such as [c003] are internal processing metadata. NEVER output them in the page body or summary, and remove any legacy inline chunk aliases from existing content while editing. Source associations are stored separately by the system.
+2. **Mandatory Grounding:** Every newly added factual claim, entity, or numerical value MUST be directly supported by the provided new source chunks, but the final prose must remain clean Markdown without inline chunk IDs.
+3. **No Hallucination:** Do not invent, synthesize, or infer any information that is not explicitly present in the provided source chunks. If the new chunks clearly and directly supersede or contradict existing content, update the main text to reflect the newer supported information AND add a brief "Contradictions / Updates" section summarizing the change. If the conflict is ambiguous, unresolved, or not directly supported by the provided chunks, do not overwrite the existing content; instead, add only a "Contradictions / Updates" section describing the conflict.
 
 <page_metadata>
   <slug>{{.PageSlug}}</slug>

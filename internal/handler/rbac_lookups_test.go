@@ -103,7 +103,7 @@ func TestKBCreatorLookup_MissingTenantContext(t *testing.T) {
 	}}
 	_, err := h.KBCreatorLookup(c)
 	if err == nil {
-		t.Fatalf("expected error when tenant context missing")
+		t.Fatalf("expected error when workspace context missing")
 	}
 	if errors.Is(err, middleware.ErrResourceNotFound) {
 		t.Fatalf("missing tenant must not be reported as not-found: %v", err)
@@ -279,7 +279,7 @@ func TestKBCreatorLookupFromKnowledgeID_MissingTenantContext(t *testing.T) {
 	}}
 	_, err := h.KBCreatorLookupFromKnowledgeID(c)
 	if err == nil {
-		t.Fatalf("expected error when tenant context missing")
+		t.Fatalf("expected error when workspace context missing")
 	}
 	if errors.Is(err, middleware.ErrResourceNotFound) {
 		t.Fatalf("missing tenant must not be reported as not-found: %v", err)

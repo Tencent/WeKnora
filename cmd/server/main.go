@@ -19,7 +19,7 @@
 // @securityDefinitions.apikey ApiKeyAuth
 // @in header
 // @name X-API-Key
-// @description 租户身份认证：输入 sk- 开头的 API Key
+// @description 空间身份认证：输入 sk- 开头的 API Key
 package main
 
 import (

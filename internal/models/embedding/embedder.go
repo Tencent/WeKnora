@@ -50,7 +50,10 @@ type Config struct {
 	SupportsDimensionOverride bool              `json:"supports_dimension_override"`
 	ModelID                   string            `json:"model_id"`
 	Provider                  string            `json:"provider"`
-	ExtraConfig               map[string]string `json:"extra_config"`
+	// MaxConcurrency caps concurrent background calls to this model; 0 falls
+	// back to the process-wide default (see limiter.GateN).
+	MaxConcurrency int               `json:"max_concurrency"`
+	ExtraConfig    map[string]string `json:"extra_config"`
 	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 	CustomHeaders map[string]string `json:"custom_headers"`
 	AppID         string
@@ -74,6 +77,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 		SupportsDimensionOverride: m.Parameters.EmbeddingParameters.SupportsDimensionOverride,
 		TruncatePromptTokens:      m.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:                  m.Parameters.Provider,
+		MaxConcurrency:            m.Parameters.MaxConcurrency,
 		ExtraConfig:               m.Parameters.ExtraConfig,
 		CustomHeaders:             m.Parameters.CustomHeaders,
 		AppID:                     appID,
@@ -90,6 +94,10 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	if setter, ok := e.(interface{ SetSupportsDimensionOverride(bool) }); ok {
 		setter.SetSupportsDimensionOverride(config.SupportsDimensionOverride)
 	}
+	// Innermost: gate the real provider round-trips (including the per-sub-batch
+	// pool callbacks) before debug/langfuse wrap for logging/tracing. See
+	// concurrencyEmbedder for why this sits below the observability decorators.
+	e = wrapEmbeddingConcurrency(e, config.MaxConcurrency)
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}
 	}

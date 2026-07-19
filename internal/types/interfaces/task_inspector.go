@@ -1,6 +1,10 @@
 package interfaces
 
-import "context"
+import (
+	"context"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
 
 // TaskInspector abstracts queue inspection / cancellation against the
 // task backend. It is best-effort: implementations may scan a finite
@@ -39,4 +43,44 @@ type TaskInspector interface {
 	// always returns false — inline executors never queue, so the
 	// span/updated_at checks remain authoritative there.
 	HasQueuedTasksForKnowledge(ctx context.Context, knowledgeID string) (bool, error)
+
+	// QueueStats returns a read-only depth snapshot for every queue this
+	// application enqueues into, for the System Admin runtime dashboard.
+	//
+	// The `supported` bool reports whether queue inspection is available
+	// on the current backend: true in asynq/Redis mode, false in Lite
+	// mode (no Redis) where tasks run inline and no queue exists. Callers
+	// use it to render an "unavailable in this deployment" state rather
+	// than an empty table.
+	//
+	// Best-effort: a per-queue backend error is logged and that queue is
+	// surfaced as a zeroed row (so the full lane set stays visible) rather
+	// than failing the whole call.
+	QueueStats(ctx context.Context) (stats []types.QueueStat, supported bool, err error)
+
+	// WorkerServerStats returns live asynq server heartbeats across all
+	// replicas. The runtime dashboard uses them to aggregate actual cluster
+	// capacity and busy workers for each configured pool.
+	WorkerServerStats(ctx context.Context) (stats []types.WorkerServerStat, supported bool, err error)
+}
+
+// RuntimeTaskInspector is the optional operator surface implemented by queue
+// backends that retain inspectable task state. It is separate from
+// TaskInspector so Lite mode and light-weight tests do not need to implement
+// queue mutations.
+type RuntimeTaskInspector interface {
+	ListRuntimeTasks(
+		ctx context.Context,
+		queue string,
+		state types.RuntimeTaskState,
+		cursor string,
+		pageSize int,
+	) (page types.RuntimeTaskPage, supported bool, err error)
+	GetRuntimeTask(ctx context.Context, queue, taskID string) (task *types.RuntimeTaskInfo, supported bool, err error)
+	RunRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)
+	DeleteRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)
+	// ForceDeleteRuntimeTask removes a queue record without checking the
+	// operator-facing AllowedActions. Used when the business row is already
+	// gone but a retry/pending task survived (orphan cleanup).
+	ForceDeleteRuntimeTask(ctx context.Context, queue, taskID string) (supported bool, err error)
 }

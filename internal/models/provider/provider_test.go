@@ -38,6 +38,7 @@ func TestDetectProvider(t *testing.T) {
 		{"https://api.openai.com/v1", ProviderOpenAI},
 		{"https://api.anthropic.com/v1", ProviderAnthropic},
 		{"https://openrouter.ai/api/v1", ProviderOpenRouter},
+		{"https://router.requesty.ai/v1", ProviderRequesty},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
 		{"https://api.deepseek.com/v1", ProviderDeepSeek},
@@ -216,6 +217,38 @@ func TestZhipuProviderValidation(t *testing.T) {
 		assert.Equal(t, ProviderZhipu, info.Name)
 		assert.Equal(t, ZhipuChatBaseURL, info.GetDefaultURL(types.ModelTypeKnowledgeQA))
 		assert.Equal(t, ZhipuEmbeddingBaseURL, info.GetDefaultURL(types.ModelTypeEmbedding))
+	})
+}
+
+func TestRequestyProviderValidation(t *testing.T) {
+	p := &RequestyProvider{}
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &Config{
+			APIKey:    "test-key",
+			ModelName: "openai/gpt-4o-mini",
+		}
+		err := p.ValidateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		config := &Config{
+			ModelName: "openai/gpt-4o-mini",
+		}
+		err := p.ValidateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API key")
+	})
+
+	t.Run("info", func(t *testing.T) {
+		info := p.Info()
+		assert.Equal(t, ProviderRequesty, info.Name)
+		assert.Equal(t, "Requesty", info.DisplayName)
+		assert.Equal(t, RequestyBaseURL, info.GetDefaultURL(types.ModelTypeKnowledgeQA))
+		assert.Equal(t, RequestyBaseURL, info.GetDefaultURL(types.ModelTypeEmbedding))
+		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
+		assert.True(t, info.RequiresAuth)
 	})
 }
 

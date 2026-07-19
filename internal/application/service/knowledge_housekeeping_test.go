@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     attempt         INTEGER     NOT NULL DEFAULT 1,
     span_id         VARCHAR(64) NOT NULL,
     parent_span_id  VARCHAR(64),
-    name            VARCHAR(64) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
     kind            VARCHAR(16) NOT NULL,
     status          VARCHAR(16) NOT NULL,
     input           TEXT,
@@ -120,6 +120,18 @@ func (f fakeTaskInspector) HasQueuedTasksForKnowledge(
 	return f.queued[knowledgeID], nil
 }
 
+func (f fakeTaskInspector) QueueStats(
+	_ context.Context,
+) ([]types.QueueStat, bool, error) {
+	return nil, false, nil
+}
+
+func (f fakeTaskInspector) WorkerServerStats(
+	_ context.Context,
+) ([]types.WorkerServerStat, bool, error) {
+	return nil, false, nil
+}
+
 func newHousekeepingSvcForTest(db *gorm.DB) *HousekeepingService {
 	return newHousekeepingSvcWithInspector(db, fakeTaskInspector{})
 }
@@ -151,6 +163,40 @@ func TestHousekeeping_RecoversAbandoned(t *testing.T) {
 	).Row().Scan(&status, &errMsg))
 	assert.Equal(t, types.ParseStatusFailed, status)
 	assert.Contains(t, errMsg, "stuck in processing")
+}
+
+func TestHousekeeping_RecoversPendingTaskMissingFromQueue(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcForTest(db)
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-pending-orphan", types.ParseStatusPending, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-pending-orphan",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusFailed, status,
+		"a stale pending row with no queue task must not remain pending forever")
+}
+
+func TestHousekeeping_PreservesPendingTaskStillQueued(t *testing.T) {
+	db := setupHousekeepingDB(t)
+	svc := newHousekeepingSvcWithInspector(db, fakeTaskInspector{
+		queued: map[string]bool{"kid-pending-queued": true},
+	})
+	stale := time.Now().Add(-3 * time.Hour)
+	insertKnowledge(t, db, "kid-pending-queued", types.ParseStatusPending, stale)
+
+	svc.runSweep(context.Background())
+
+	var status string
+	require.NoError(t, db.Raw(
+		`SELECT parse_status FROM knowledges WHERE id = ?`, "kid-pending-queued",
+	).Row().Scan(&status))
+	assert.Equal(t, types.ParseStatusPending, status,
+		"backlogged pending work remains owned by the durable queue")
 }
 
 // TestHousekeeping_NoFalseKill_ActiveSpan is the regression test for

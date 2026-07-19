@@ -17,7 +17,6 @@ export interface EmbedChannel {
   show_suggested_questions?: boolean
   widget_position?: WidgetPosition
   allow_web_search?: boolean
-  allow_memory?: boolean
   allow_file_upload?: boolean
   default_locale?: string
   webhook_url?: string
@@ -42,7 +41,6 @@ export interface EmbedChannelPublicConfig {
   show_suggested_questions?: boolean
   widget_position?: WidgetPosition
   allow_web_search?: boolean
-  allow_memory?: boolean
   allow_file_upload?: boolean
   agent_web_search_enabled?: boolean
   agent_image_upload_enabled?: boolean
@@ -170,6 +168,20 @@ export interface SuggestedQuestion {
   source?: string
 }
 
+export interface EmbedMessageSuggestionItem {
+  id: string
+  text: string
+  category?: string
+  source: string
+}
+
+export interface EmbedMessageSuggestionSet {
+  id: string
+  status: 'generating' | 'ready' | 'suppressed' | 'failed'
+  allow_regenerate: boolean
+  questions: EmbedMessageSuggestionItem[]
+}
+
 export async function getEmbedChunkById(channelId: string, token: string, chunkId: string) {
   return get<{ success: boolean; data: { content?: string } }>(
     `/api/v1/embed/${channelId}/chunks/${chunkId}`,
@@ -181,6 +193,53 @@ export async function getEmbedSuggestedQuestions(channelId: string, token: strin
   return get<{ success: boolean; data: { questions: SuggestedQuestion[] } }>(
     `/api/v1/embed/${channelId}/suggested-questions?limit=${limit}`,
     { headers: { Authorization: `Embed ${token}` } },
+  )
+}
+
+export async function ensureEmbedMessageSuggestions(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  messageId: string,
+  sessionSig: string,
+  visitorId: string,
+  regenerate = false,
+) {
+  return post<{ success: boolean; data: EmbedMessageSuggestionSet }>(
+    `/api/v1/embed/${channelId}/sessions/${sessionId}/messages/${messageId}/suggestions`,
+    { regenerate },
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+}
+
+export async function getEmbedMessageSuggestions(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  messageId: string,
+  sessionSig: string,
+  visitorId: string,
+) {
+  return get<{ success: boolean; data: EmbedMessageSuggestionSet }>(
+    `/api/v1/embed/${channelId}/sessions/${sessionId}/messages/${messageId}/suggestions`,
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+}
+
+export async function recordEmbedMessageSuggestionEvent(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  sessionSig: string,
+  visitorId: string,
+  suggestionSetId: string,
+  eventType: 'impression' | 'click' | 'dismiss',
+  questionId = '',
+) {
+  return post(
+    `/api/v1/embed/${channelId}/sessions/${sessionId}/suggestion-events`,
+    { suggestion_set_id: suggestionSetId, question_id: questionId, event_type: eventType },
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
   )
 }
 

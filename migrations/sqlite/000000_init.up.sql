@@ -4,7 +4,6 @@ CREATE TABLE IF NOT EXISTS tenants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    api_key VARCHAR(256) NOT NULL,
     retriever_engines TEXT NOT NULL DEFAULT '[]',
     status VARCHAR(50) DEFAULT 'active',
     business VARCHAR(255) NOT NULL,
@@ -16,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     web_search_config TEXT DEFAULT NULL,
     parser_engine_config TEXT DEFAULT NULL,
     storage_engine_config TEXT DEFAULT NULL,
+    default_storage_backend_id VARCHAR(36),
     credentials TEXT DEFAULT NULL,
     chat_history_config TEXT,
     retrieval_config TEXT,
@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS tenants (
     deleted_at DATETIME
 );
 
-CREATE INDEX IF NOT EXISTS idx_tenants_api_key ON tenants(api_key);
 CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
 
 CREATE TABLE IF NOT EXISTS models (
@@ -71,6 +70,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     pinned_at DATETIME NULL,
     asr_config TEXT,
     vector_store_id VARCHAR(36),
+    storage_backend_id VARCHAR(36),
     creator_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_id ON knowledge_bases(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_vector_store
     ON knowledge_bases(tenant_id, vector_store_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_storage_backend
+    ON knowledge_bases(tenant_id, storage_backend_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_creator
     ON knowledge_bases(tenant_id, creator_id);
 
@@ -168,6 +170,10 @@ CREATE TABLE IF NOT EXISTS messages (
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     is_fallback BOOLEAN NOT NULL DEFAULT 0,
     channel VARCHAR(50) NOT NULL DEFAULT '',
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    execution_context TEXT NOT NULL DEFAULT '{}',
     agent_duration_ms INTEGER DEFAULT 0,
     knowledge_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -177,6 +183,56 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_knowledge_id ON messages(knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_messages_agent_id ON messages(agent_id);
+
+CREATE TABLE IF NOT EXISTS message_suggestion_sets (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    assistant_message_id VARCHAR(36) NOT NULL,
+    agent_id VARCHAR(36) NOT NULL DEFAULT '',
+    agent_tenant_id INTEGER NOT NULL DEFAULT 0,
+    placement VARCHAR(32) NOT NULL,
+    config_hash VARCHAR(64) NOT NULL,
+    locale VARCHAR(16) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL,
+    allow_regenerate BOOLEAN NOT NULL DEFAULT 0,
+    suppression_reason VARCHAR(64) NOT NULL DEFAULT '',
+    questions TEXT NOT NULL DEFAULT '[]',
+    model_id VARCHAR(64) NOT NULL DEFAULT '',
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    error_code VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until DATETIME,
+    generated_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_suggestion_sets_cache_key
+    ON message_suggestion_sets(tenant_id, assistant_message_id, placement, config_hash, locale);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_sets_session
+    ON message_suggestion_sets(tenant_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_sets_status
+    ON message_suggestion_sets(status, lease_until);
+
+CREATE TABLE IF NOT EXISTS message_suggestion_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    suggestion_set_id VARCHAR(36) NOT NULL,
+    question_id VARCHAR(64) NOT NULL DEFAULT '',
+    event_type VARCHAR(32) NOT NULL,
+    actor_id VARCHAR(512) NOT NULL DEFAULT '',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (suggestion_set_id) REFERENCES message_suggestion_sets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_set
+    ON message_suggestion_events(suggestion_set_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_session
+    ON message_suggestion_events(tenant_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_message_suggestion_events_type
+    ON message_suggestion_events(event_type, created_at);
 
 CREATE TABLE IF NOT EXISTS chunks (
     id VARCHAR(36) PRIMARY KEY,
@@ -648,7 +704,6 @@ CREATE TABLE IF NOT EXISTS embed_channels (
     show_suggested_questions INTEGER NOT NULL DEFAULT 1,
     widget_position VARCHAR(32) NOT NULL DEFAULT 'bottom-right',
     allow_web_search INTEGER NOT NULL DEFAULT 0,
-    allow_memory INTEGER NOT NULL DEFAULT 0,
     allow_file_upload INTEGER NOT NULL DEFAULT 0,
     default_locale VARCHAR(16) NOT NULL DEFAULT '',
     webhook_url VARCHAR(512) NOT NULL DEFAULT '',
@@ -751,3 +806,125 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_stores_name_tenant
 CREATE INDEX IF NOT EXISTS idx_vector_stores_tenant_id ON vector_stores(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_engine_type ON vector_stores(engine_type);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_deleted_at ON vector_stores(deleted_at);
+
+CREATE TABLE IF NOT EXISTS storage_backends (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    config TEXT NOT NULL DEFAULT '{}',
+    source VARCHAR(16) NOT NULL DEFAULT 'user',
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    legacy_alias BOOLEAN NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_backends_name_tenant
+    ON storage_backends(tenant_id, name) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_backends_legacy_alias
+    ON storage_backends(tenant_id, provider) WHERE deleted_at IS NULL AND legacy_alias = 1;
+CREATE INDEX IF NOT EXISTS idx_storage_backends_tenant ON storage_backends(tenant_id);
+
+CREATE TABLE IF NOT EXISTS resources (
+    id VARCHAR(36) PRIMARY KEY,
+    handle VARCHAR(22) NOT NULL UNIQUE,
+    tenant_id INTEGER NOT NULL,
+    storage_backend_id VARCHAR(36),
+    provider VARCHAR(32) NOT NULL,
+    physical_path TEXT NOT NULL,
+    location_hash VARCHAR(64) NOT NULL,
+    kind VARCHAR(32) NOT NULL DEFAULT 'file',
+    mime_type VARCHAR(255) NOT NULL DEFAULT '',
+    original_name VARCHAR(1024) NOT NULL DEFAULT '',
+    size INTEGER NOT NULL DEFAULT 0,
+    content_hash VARCHAR(64) NOT NULL DEFAULT '',
+    lifecycle VARCHAR(16) NOT NULL DEFAULT 'persistent',
+    expires_at DATETIME,
+    state VARCHAR(16) NOT NULL DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resources_tenant_location
+    ON resources(tenant_id, location_hash) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_resources_tenant ON resources(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_resources_backend ON resources(storage_backend_id);
+
+CREATE TABLE IF NOT EXISTS resource_bindings (
+    id VARCHAR(36) PRIMARY KEY,
+    resource_id VARCHAR(36) NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    tenant_id INTEGER NOT NULL,
+    owner_type VARCHAR(32) NOT NULL,
+    owner_id VARCHAR(64) NOT NULL,
+    relation VARCHAR(32) NOT NULL DEFAULT 'attachment',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_bindings_unique
+    ON resource_bindings(resource_id, owner_type, owner_id, relation);
+CREATE INDEX IF NOT EXISTS idx_resource_bindings_owner
+    ON resource_bindings(tenant_id, owner_type, owner_id);
+
+CREATE TABLE IF NOT EXISTS resource_access_grants (
+    id VARCHAR(36) PRIMARY KEY,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    resource_id VARCHAR(36) NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    access_scope VARCHAR(16) NOT NULL DEFAULT 'read',
+    expires_at DATETIME NOT NULL,
+    revoked_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_resource_access_grants_resource
+    ON resource_access_grants(resource_id);
+CREATE INDEX IF NOT EXISTS idx_resource_access_grants_expires
+    ON resource_access_grants(expires_at);
+
+CREATE TABLE IF NOT EXISTS tenant_api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    api_key TEXT NOT NULL DEFAULT '',
+    full_access BOOLEAN NOT NULL DEFAULT 0,
+    knowledge_base_ids TEXT NOT NULL DEFAULT '[]',
+    capabilities TEXT NOT NULL DEFAULT '[]',
+    last_used_at DATETIME,
+    expires_at DATETIME,
+    revoked_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_tenant ON tenant_api_keys(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_api_keys_revoked_at ON tenant_api_keys(revoked_at);
+
+CREATE TABLE IF NOT EXISTS temporary_documents (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    session_id VARCHAR(36) NOT NULL,
+    resource_ref TEXT NOT NULL,
+    file_name VARCHAR(1024) NOT NULL,
+    file_type VARCHAR(32) NOT NULL,
+    mime_type VARCHAR(255) NOT NULL DEFAULT '',
+    file_size INTEGER NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'uploaded',
+    content TEXT NOT NULL DEFAULT '',
+    chunks TEXT NOT NULL DEFAULT '[]',
+    image_refs TEXT NOT NULL DEFAULT '[]',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    processing_options TEXT NOT NULL DEFAULT '{}',
+    token_count INTEGER NOT NULL DEFAULT 0,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT NOT NULL DEFAULT '',
+    expires_at DATETIME NOT NULL,
+    started_at DATETIME,
+    ready_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_temporary_documents_scope ON temporary_documents(tenant_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_temporary_documents_status ON temporary_documents(status);
+CREATE INDEX IF NOT EXISTS idx_temporary_documents_expires ON temporary_documents(expires_at);

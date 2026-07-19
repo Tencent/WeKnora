@@ -8,6 +8,28 @@ import { get, post, put, del } from "../../utils/request";
 // 'custom'       : 完全自定义（不应用预设）
 export type AgentType = 'rag-qa' | 'wiki-qa' | 'hybrid-rag-wiki' | 'data-analysis' | 'custom';
 
+export interface QuestionSuggestionConfig {
+  starters: {
+    enabled: boolean;
+    mode: 'curated' | 'knowledge' | 'hybrid';
+    items: string[];
+    count: number;
+  };
+  follow_ups: {
+    enabled: boolean;
+    mode: 'generated' | 'knowledge' | 'hybrid';
+    count: number;
+    model_id?: string;
+    additional_instruction?: string;
+    categories: Array<'clarify' | 'deepen' | 'action'>;
+    max_context_turns: number;
+    suppress_on_fallback: boolean;
+    suppress_when_answer_asks_question: boolean;
+    knowledge_fallback: boolean;
+    allow_regenerate: boolean;
+  };
+}
+
 export interface CustomAgentConfig {
   // ===== 基础设置 =====
   agent_mode?: 'quick-answer' | 'smart-reasoning';  // 运行模式：quick-answer=RAG模式, smart-reasoning=ReAct Agent模式
@@ -24,6 +46,7 @@ export interface CustomAgentConfig {
   temperature?: number;
   max_completion_tokens?: number;   // 最大生成token数（普通模式）
   thinking?: boolean;                      // 是否启用思考模式（支持扩展思考的模型）
+  citation_enabled?: boolean;        // 是否在最终回答中输出知识库/网页来源引用（默认开启）
 
   // ===== Agent模式设置 =====
   max_iterations?: number;          // 最大迭代次数
@@ -57,6 +80,16 @@ export interface CustomAgentConfig {
   image_storage_provider?: string;   // 图片存储提供商
   audio_upload_enabled?: boolean;    // 是否启用音频上传/ASR转录（默认: false）
   asr_model_id?: string;            // ASR模型ID（音频转录用）
+  // 附件图片理解 / 扫描件 OCR 开关（默认: false，开启会增加解析耗时）
+  attachment_image_understanding?: boolean;
+  // 扫描件 OCR 最大页数（0 = 使用全局默认 WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES）
+  attachment_ocr_max_pages?: number;
+  // 单轮问答等待附件解析完成的最长时间（秒，0 = 使用全局默认 WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC）
+  attachment_parse_wait_timeout_sec?: number;
+
+  // ===== 聊天附件解析引擎策略 =====
+  // 按文件类型选择解析引擎；优先级：请求 parser_engine > 智能体规则 > 租户规则 > auto
+  chat_parser_engine_rules?: { file_types: string[]; engine: string }[];
 
   // ===== 文件类型限制 =====
   // 支持的文件类型（如 ["csv", "xlsx", "xls"]）
@@ -92,7 +125,7 @@ export interface CustomAgentConfig {
 
   // ===== 已废弃字段（保留兼容）=====
   welcome_message?: string;
-  suggested_prompts?: string[];
+  question_suggestions?: QuestionSuggestionConfig;
 }
 
 // 智能体
@@ -141,7 +174,7 @@ export const BUILTIN_AGENT_NORMAL_ID = BUILTIN_QUICK_ANSWER_ID;
 export const BUILTIN_AGENT_AGENT_ID = BUILTIN_SMART_REASONING_ID;
 
 // 获取智能体列表（包括内置智能体）
-// disabled_own_agent_ids: 当前租户在对话下拉中停用的「我的」智能体 ID，仅影响本租户
+// disabled_own_agent_ids: 当前空间在对话下拉中停用的「我的」智能体 ID，仅影响本空间
 export function listAgents(params?: {
   /**
    * Optional creator filter; mirrors listKnowledgeBases. Built-in agents
@@ -262,7 +295,8 @@ export interface IMChannel {
   id: string;
   tenant_id?: number;
   agent_id: string;
-  platform: 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat' | 'qqbot';
+  // 'lark' is Feishu's international edition; it shares Feishu's credentials and modes.
+  platform: 'wecom' | 'feishu' | 'lark' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat' | 'qqbot';
   name: string;
   enabled: boolean;
   mode: 'webhook' | 'websocket' | 'longpoll';
@@ -329,12 +363,17 @@ export interface SuggestedQuestion {
 // 根据智能体关联的知识库范围返回推荐问题，用于前端对话面板快捷提问
 export function getSuggestedQuestions(
   agentId: string,
-  params?: { knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; limit?: number }
+  params?: {
+    knowledge_base_ids?: string[];
+    knowledge_ids?: string[];
+    tag_scopes?: Array<{ knowledge_base_id: string; tag_ids: string[] }>;
+    limit?: number;
+  }
 ) {
   const query = new URLSearchParams();
   if (params?.knowledge_base_ids?.length) query.set('knowledge_base_ids', params.knowledge_base_ids.join(','));
   if (params?.knowledge_ids?.length) query.set('knowledge_ids', params.knowledge_ids.join(','));
-  if (params?.tag_ids?.length) query.set('tag_ids', params.tag_ids.join(','));
+  if (params?.tag_scopes?.length) query.set('tag_scopes', JSON.stringify(params.tag_scopes));
   if (params?.limit) query.set('limit', String(params.limit));
   const qs = query.toString();
   return get<{ data: { questions: SuggestedQuestion[] } }>(`/api/v1/agents/${agentId}/suggested-questions${qs ? '?' + qs : ''}`);

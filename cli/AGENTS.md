@@ -36,10 +36,12 @@ fields are `omitempty` — they only appear when populated:
 ```
 
 `data` is omitted on mutation-only success (no payload). `meta` carries list
-counters (`count`, `has_more`, `total_count`) and batch successes/failures, and is omitted
-when empty. `meta.next_cursor` and `meta.request_id` are
+counters (`count`, `has_more`) and batch successes/failures, and is omitted
+when empty. `meta.next_cursor`, `meta.total_count`, and `meta.request_id` are
 reserved — not currently populated; planned for v0.8 when the SDK exposes
-pagination cursors and response headers. `profile` echoes the
+pagination cursors and response headers. `_notice` is reserved — open-map
+infrastructure is in place for deprecation / version_skew / security notices;
+the field is omitted until a producer is wired in v0.8. `profile` echoes the
 resolved profile name and is omitted when no profile is configured.
 
 ### Stderr (error path)
@@ -53,51 +55,52 @@ Errors emit an error envelope on stderr (`--format json`) or prose
   "error": {
     "type": "auth.unauthenticated",
     "message": "fetch current user: HTTP error 401",
-    "exit_code": 3,
     "hint": "run `weknora auth login`",
-    "retry_argv": ["weknora", "auth", "login"],
+    "retry_command": "weknora auth login --host https://kb.example.com",
     "retry_after_seconds": 0,
     "risk": {"level": "destructive", "action": "noun.verb"},
     "detail": {}
-  }
+  },
+  "_notice": {}
 }
 ```
 
 `type` is the typed code (see [Error code reference](#error-code-reference)
-below). `hint` is prose; `retry_argv` is the suggested next command as a JSON
-array of argv tokens — exec it directly (no shell-splitting or quoting needed).
-For non-destructive errors agents may execute it; on exit-10
-(`input.confirmation_required`) it is informational only — the human must
-approve the destructive write explicitly. See "Exit-10 anti-patterns" for
-details.
-`exit_code` embeds the process exit code (§2) so a single JSON read is
-authoritative without observing `$?` — it also disambiguates the two
-`input.invalid_argument` cases (a cobra parse error is exit 2, a typed-value
-error is exit 5). `retry_after_seconds` mirrors HTTP `Retry-After`. `risk` tags
-high-risk writes. `detail` carries structured per-error context (e.g.
-`unknown_subcommand`'s `available[]` list).
+below). `hint` is prose; `retry_command` is the suggested next argv (single
+shell-escaped string). For non-destructive errors agents may execute it; on
+exit-10 (`input.confirmation_required`) it is informational only — the human
+must approve the destructive write explicitly. See "Exit-10 anti-patterns" for
+details. Note: tokens in `retry_command` are built via `fmt.Sprintf` with
+user-supplied IDs unquoted — callers that auto-execute must shell-quote each
+token (emitting as a JSON array is planned for v0.8).
+`retry_after_seconds` mirrors HTTP `Retry-After`. `risk` tags high-risk writes.
+`detail` carries structured per-error context (e.g. `unknown_subcommand`'s
+`available[]` list).
 
-### Buffered JSON and NDJSON streams (chat / session ask)
+### NDJSON event stream (chat / session ask)
 
-`--format json` (the default) buffers the SSE stream and emits one normal
-success envelope whose `data.events` contains answer events by default.
-`--reference` adds `kb_id` / `chunk_id` / `parent_chunk_id` indexes;
-`--verbose` adds reasoning, tool, metadata, and lifecycle events. `--format
-text` renders the same projection live.
-`--format ndjson` is the raw event/debug surface: the CLI injects exactly one
-`init` event at the head and passes all subsequent SDK events through verbatim:
+`--format json` and `--format ndjson` both produce one JSON event per line —
+no envelope wrapping. The CLI injects exactly one event (`init`) at the head;
+all subsequent events pass through verbatim from the SDK:
 
 ```
-{"type":"init","session_id":"...","kb_id":"...","profile":"..."}   // chat: kb_id ; session ask: agent_id instead
-{"response_type":"thinking","content":"..."}
-{"response_type":"answer","content":"Hello"}
-{"response_type":"tool_call","tool_calls":[...]}
-{"response_type":"complete","done":true}
+{"type":"init","session_id":"...","kb_id":"...","profile":"...","agent_id":"..."}
+{"type":"thinking","content":"..."}
+{"type":"answer","content":"Hello"}
+{"type":"tool_call","name":"...","input":{}}
+{"type":"complete","done":true}
 ```
 
-MCP `chat` / `session_ask` return the same `events` shape and accept
-`reference` / `verbose` booleans. NDJSON ignores both presentation flags and
-always stays raw.
+For prose rendering, pass `--format text`.
+
+### `_notice` evolution policy
+
+`_notice` is an open map. New keys are **additive non-breaking**; agents MUST
+ignore unknown keys. v0.7 reserves three keys: `deprecation` / `version_skew` /
+`security`. New keys follow snake_case convention. The `_notice` field is
+currently always empty — producer wiring is planned for v0.8 when the SDK
+exposes version metadata. The wire infrastructure is in place so adding a
+producer in v0.8 will not change the envelope shape.
 
 ### CLI vs server SDK contract boundary
 
@@ -156,19 +159,19 @@ is or isn't aligned with.
 | **WeKnora** | DELETE triggers exit-10 (`input.confirmation_required`); user bypasses with `-y/--yes` |
 | **Rationale** | DELETE is irreversible. Most raw-API CLI commands rely on restricted credentials for safety, but self-hosted deployments may not have restricted-credential infrastructure available. Defensive default because agents are common consumers. |
 
-### 3. `retry_argv` distinct from `hint`
+### 3. `retry_command` distinct from `hint`
 
 | | |
 |---|---|
-| **WeKnora** | two separate fields: `retry_argv` (suggested next command as a JSON argv array, directly-executable for non-destructive errors; informational only on exit-10) + `hint` (prose) |
-| **Rationale** | Agents don't regex-extract argv from prose — known fragility. An argv array is exec-ready with no shell-splitting or quoting. Trade-off: one extra envelope field. On exit-10, the user must approve the destructive write; agents surface `retry_argv` for human review, not auto-execution. |
+| **WeKnora** | two separate fields: `retry_command` (suggested next argv, directly-executable for non-destructive errors; informational only on exit-10) + `hint` (prose) |
+| **Rationale** | Agents don't regex-extract argv from prose — known fragility. Trade-off: one extra envelope field. On exit-10, the user must approve the destructive write; agents surface `retry_command` for human review, not auto-execution. |
 
 ### 4. NDJSON event stream has no envelope wrapping
 
 | | |
 |---|---|
-| **WeKnora** | `chat` / `session ask --format ndjson` emit bare `{type:...}` per line; default JSON buffers a bounded answer-event projection into one envelope |
-| **Rationale** | This matches established practice across NDJSON-emitting CLIs and webhook protocols. Each complete line can be decoded and dispatched as it arrives; the buffered envelope is reserved for normal JSON mode. |
+| **WeKnora** | streaming commands (`chat`, `session ask`) emit bare `{type:...}` per line; no envelope |
+| **Rationale** | This matches established practice across NDJSON-emitting CLIs and webhook protocols. A streaming envelope requires unwrap before dispatch — net burden with no benefit. |
 
 ### 5. No `schema_version` field in payload
 
@@ -214,7 +217,7 @@ Key packages:
 - `internal/iostreams/` — global IO singleton + TTY detection + `SetForTest` swap
 - `internal/secrets/` — `Store` interface; `KeyringStore` primary, `FileStore` 0600 fallback, `MemStore` for tests
 - `internal/prompt/` — `TTYPrompter` (password no-echo) + `AgentPrompter` (non-TTY no-prompt sentinel)
-- `internal/sse/` — `Projector` for chat / session ask bounded output; `Accumulator` remains for legacy/tests
+- `internal/sse/` — `Accumulator` for chat / session ask SSE streams
 - `internal/mcp/` — curated 10-tool stdio MCP server (wired by `cmd/mcp/serve.go`); see [MCP tool surface](#mcp-tool-surface) for the curation rationale and inventory
 - `client/` (parent module) — generated SDK
 
@@ -411,6 +414,9 @@ Agents parse the first colon to extract the typed code. The exit code class (see
 | `local.upload_file_not_found` | 1 | no | verify the path is correct and readable |
 | `local.user_aborted` | 1 | no (user said no) | no action taken; pass `-y/--yes` to skip the confirmation prompt |
 | `internal.error` | 1 | no | catch-all for an untyped error that reached the top (a bug or unmapped dependency error); a recurring one is a classification gap worth reporting |
+| `mcp.readonly_mode` | 1 | no | MCP tool surface is read-only; mutations not exposed in this mode |
+| `mcp.schema_unknown_command` | 1 | no | (no canonical hint) |
+| `mcp.tool_not_allowed` | 1 | no | MCP tool not in the curated allowlist |
 
 <!-- ERROR_REFERENCE_END -->
 
@@ -429,7 +435,7 @@ For common retry patterns, AI agents can hardcode:
 
 Exit code 10 (`input.confirmation_required`) marks a destructive write where the
 CLI refused to proceed without explicit user approval. The retry envelope includes
-`retry_argv` showing the exact argv that would proceed. AI agents must NEVER
+`retry_command` showing the exact argv that would proceed. AI agents must NEVER
 auto-retry this exit code — every exit 10 is a user-in-the-loop decision.
 
 **Don't do these:**
@@ -437,7 +443,7 @@ auto-retry this exit code — every exit 10 is a user-in-the-loop decision.
 1. **Auto-add `-y/--yes` and retry.** The flag exists for the user, not the agent.
    Surface the exit-10 envelope to the user verbatim and wait for explicit go-ahead.
 
-2. **Parse the retry_argv and run it.** The retry_argv is *informational* --
+2. **Parse the retry_command and run it.** The retry_command is *informational* --
    showing what *would* execute. Running it without user input collapses two steps
    the user is supposed to see.
 
@@ -456,7 +462,7 @@ auto-retry this exit code — every exit 10 is a user-in-the-loop decision.
 
 ## Stream recovery
 
-The `weknora session resume <session-id> --message <msg-id>` command resumes an SSE event stream for an existing assistant message. Use cases: network-blip recovery, long-running agent invocation polling, completed-stream inspection.
+The `weknora session continue-stream <session-id> --message <msg-id>` command resumes an SSE event stream for an existing assistant message. Use cases: network-blip recovery, long-running agent invocation polling, completed-stream inspection.
 
 ### Server semantics: replay-from-0, not cursor-resume
 
@@ -465,7 +471,7 @@ The server **replays all stored events from the start** of the assistant message
 ### Agent contract
 
 1. **Dedupe by message_id** (or maintain a per-message event hash set). Naively processing all received events causes duplicate side effects (re-running tool calls, re-rendering answers).
-2. **Get the assistant `message_id` from `weknora message list --session <id>`** (a live stream's `assistant_message_id` is not resumable once the message persists). `session resume` then injects `{"type":"init", "session_id":"...", "message_id":"...", "profile":"..."}` as the first NDJSON line.
+2. **Capture message_id from the init event** of the original `chat` or `session ask` invocation — the CLI injects `{"event":"init", "session_id":"...", "message_id":"..."}` as the first NDJSON line.
 3. **Handle `local.sse_stream_aborted` typed error**: server-side buffer expired (TTL exceeded) or process restarted (memory mode). The message is no longer recoverable; restart the original query.
 
 ### Server-side buffer TTL
@@ -475,11 +481,11 @@ The server **replays all stored events from the start** of the assistant message
 | `STREAM_MANAGER_TYPE=redis` | **1 hour** (server-side; not configurable from the CLI) |
 | `STREAM_MANAGER_TYPE=memory` (default) | **Process lifetime** (server restart = data loss; no explicit cleanup logic) |
 
-After TTL, `weknora session resume` returns the typed error `local.sse_stream_aborted`, which maps to exit code 1 per the Error code reference.
+After TTL, `weknora session continue-stream` returns the typed error `local.sse_stream_aborted`, which maps to exit code 1 per the Error code reference.
 
 ## Dry-run contract
 
-The `--dry-run` flag is available on every mutation cobra command (`kb create/update/delete`, `agent create/update/delete`, `doc create/upload/fetch/delete`, `chunk delete`, `session delete`, `auth refresh/logout`, `link/unlink`, `profile add/remove`) and on `weknora api` (POST/PUT/PATCH/DELETE only; GET rejected with FlagError exit 2).
+The `--dry-run` flag is available on every mutation cobra command (`kb create/edit/delete`, `agent create/edit/delete`, `doc create/upload/fetch/delete`, `chunk delete`, `session delete`, `auth refresh/logout`, `link/unlink`, `profile add/remove`) and on `weknora api` (POST/PUT/PATCH/DELETE only; GET rejected with FlagError exit 2).
 
 ### Envelope shape on dry-run
 
@@ -507,8 +513,8 @@ The dry-run path is **offline** — no SDK calls, no Factory.Client() init, no R
 | `--dry-run` + `-y` | Equivalent to single `--dry-run`; `-y` is no-op (dry-run early-exits before ConfirmDestructive) |
 | `--dry-run` + `api -X GET` (or default GET) | FlagError exit 2: "--dry-run requires explicit -X POST/PUT/PATCH/DELETE; default GET is read-only with no side effect to preview" |
 | `--dry-run` + `--jq <expr>` | jq applied to envelope output normally |
-| `--dry-run` + `kb update my-kb` | plan.args contains user raw input (NOT ResolveKB-resolved); agent verifies kb name correctness |
-| `--dry-run` + fetch-then-update (`kb update / agent update`) | plan.args contains user-explicit fields ONLY; agent infers server-side fetch-then-update preserves unmentioned fields |
+| `--dry-run` + `kb edit my-kb` | plan.args contains user raw input (NOT ResolveKB-resolved); agent verifies kb name correctness |
+| `--dry-run` + fetch-then-update (`kb edit / agent edit`) | plan.args contains user-explicit fields ONLY; agent infers server-side fetch-then-update preserves unmentioned fields |
 | `--dry-run` + body containing secrets (`--input` payload) | **plan.body echoes the full body to stdout** so the agent can verify what would be sent; avoid piping secret-bearing bodies through dry-run for inspection |
 
 ### Streaming commands explicitly excluded
@@ -523,7 +529,7 @@ echo '{"query":"...","kb":"..."}' | weknora api -X POST /api/v1/sessions/<id>/ag
 
 Agents see the same `risk.action` string (in the form `noun.verb`) on three independent surfaces:
 
-1. **Error envelope** — `envelope.error.risk.action` on an exit-10 confirmation-required error, so the agent can decide whether to escalate to the user. 11 unique values: `kb.delete`, `kb.update`, `agent.delete`, `agent.update`, `doc.delete`, `doc.delete_all`, `session.delete`, `chunk.delete`, `profile.remove`, `auth.logout`, `api.delete`.
+1. **Error envelope** — `envelope.error.risk.action` on an exit-10 confirmation-required error, so the agent can decide whether to escalate to the user. 11 unique values: `kb.delete`, `kb.edit`, `agent.delete`, `agent.edit`, `doc.delete`, `doc.delete_all`, `session.delete`, `chunk.delete`, `profile.remove`, `auth.logout`, `api.delete`.
 
 2. **Help text** — a `Risk: <action> (destructive)` line prepended to the top of `--help` output on the 9 destructive cobra commands. `weknora api` is intentionally excluded: it is a generic HTTP passthrough whose risk depends on the method, so a static Risk: line would mislead for non-DELETE methods.
 
@@ -533,7 +539,7 @@ The three surfaces do not auto-sync: each is wired separately so agents that onl
 
 ## MCP Tool Surface
 
-WeKnora's MCP server exposes a curated 10-tool surface where most tools are read-only but `chat` and `session_ask` create conversation/message records. Many MCP servers in the wild ship write / mutation operations on by default and rely on credential-scope or sandbox restrictions for safety. WeKnora opts for curation instead: the server side doesn't yet enforce per-token scope, so an agent holding a user's token has full write access. Until server-side scope ships, the CLI keeps mutation tools out of the MCP surface as a belt-and-braces second line of defense. When server scope arrives this stance can loosen.
+WeKnora's MCP server exposes a curated read-only tool surface. Many MCP servers in the wild ship write / mutation operations on by default and rely on credential-scope or sandbox restrictions for safety. WeKnora opts for curation instead: the server side doesn't yet enforce per-token scope, so an agent holding a user's token has full write access. Until server-side scope ships, the CLI keeps mutation tools out of the MCP surface as a belt-and-braces second line of defense. When server scope arrives this stance can loosen.
 
 The curated 10 tools (`cli/internal/mcp/tools.go`):
 
@@ -548,7 +554,7 @@ The curated 10 tools (`cli/internal/mcp/tools.go`):
 | `search_chunks` | hybrid (vector + keyword) retrieval |
 | `chat` | stream a RAG answer; auto-creates a session if absent |
 | `agent_list` | list custom agents |
-| `session_ask` | run a query through a custom agent (`session ask --agent`) |
+| `agent_invoke` | run a query through a custom agent |
 
 Adding a tool is a deliberate API expansion — the AI-agent-callable surface is the reason this CLI ships an MCP server, not its CLI command list, so the registration list in `registerTools` is maintained by hand.
 
@@ -573,7 +579,7 @@ Required-input idioms in this codebase:
 
 - Positional required: `cobra.ExactArgs(N)` or `cobra.MinimumNArgs(1)`
 - Flag required: `cmd.MarkFlagRequired("flag")`
-- Custom required (e.g., `agent update` needs at-least-one-edit-flag): RunE-level validation that returns `input.invalid_argument`
+- Custom required (e.g., `agent edit` needs at-least-one-edit-flag): RunE-level validation that returns `input.invalid_argument`
 - Mutex: `cmd.MarkFlagsMutuallyExclusive("a", "b")`
 
 Reasons hard-required-flags is the v0.5+ default:

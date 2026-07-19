@@ -11,6 +11,7 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/llmreference"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -374,9 +375,57 @@ func commonStringPrefix(a, b string) string {
 // (runtime_context + must_use + query). Used by Execute and finalize paths only;
 // not written to rendered_content / history.
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
+	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	runtimeCtx = e.sourceRefs.CompactKnownText(runtimeCtx)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
+}
+
+// registerRuntimeReferences makes bound KBs, pinned documents and recent
+// chunks addressable without exposing their durable IDs to the model.
+func (e *AgentEngine) registerRuntimeReferences() {
+	if e == nil || e.sourceRefs == nil {
+		return
+	}
+	for _, kb := range e.knowledgeBasesInfo {
+		if kb == nil {
+			continue
+		}
+		e.sourceRefs.RegisterKnowledgeBase(kb.ID)
+		for _, doc := range kb.RecentDocs {
+			e.sourceRefs.RegisterDocument(doc.KnowledgeID)
+			if doc.ChunkID != "" {
+				title := doc.Title
+				if title == "" {
+					title = doc.FileName
+				}
+				e.sourceRefs.RegisterChunk(llmreference.ChunkReference{
+					ChunkID:         doc.ChunkID,
+					KnowledgeID:     doc.KnowledgeID,
+					KnowledgeBaseID: firstNonEmptyAgent(doc.KnowledgeBaseID, kb.ID),
+					DocumentTitle:   title,
+					ChunkType:       doc.Type,
+				})
+			}
+		}
+	}
+	for _, doc := range e.selectedDocs {
+		if doc == nil {
+			continue
+		}
+		e.sourceRefs.RegisterDocument(doc.KnowledgeID)
+		e.sourceRefs.RegisterKnowledgeBase(doc.KnowledgeBaseID)
+	}
+}
+
+func firstNonEmptyAgent(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func composeUserTurnContent(parts ...string) string {
@@ -424,6 +473,13 @@ func (e *AgentEngine) appendToolResults(
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
+	if stepContainsMarkdownImage(step) {
+		// Keep the requirement at system priority even when a custom Agent prompt
+		// replaces the built-in template. Appending it once, when image-bearing
+		// evidence first appears, also avoids burdening text-only turns.
+		messages = appendAgentRetrievedImageRequirement(messages)
+	}
+
 	// Add assistant message with tool calls (if any)
 	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
 		assistantMsg := chat.Message{
@@ -456,10 +512,7 @@ func (e *AgentEngine) appendToolResults(
 
 	// Add tool result messages (role: "tool", following OpenAI format)
 	for _, toolCall := range step.ToolCalls {
-		resultContent := toolCall.Result.Output
-		if !toolCall.Result.Success {
-			resultContent = fmt.Sprintf("Error: %s", toolCall.Result.Error)
-		}
+		resultContent := e.sourceRefs.ModelOutput(toolCall.Result)
 
 		toolMsg := chat.Message{
 			Role:       "tool",
@@ -549,13 +602,13 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 		}
 	}
 
-	// Build user message with per-turn scope envelopes (current turn only).
-	// Historical user messages in llmContext stay as bare Content from the DB.
-	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
-	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
+	// Build the current user message through the same registration path used by
+	// final synthesis. Calling buildRuntimeContextBlock directly here would put
+	// durable bound-KB/document IDs into the first model request before the
+	// request-local source registry had seen them.
 	userMsg := chat.Message{
 		Role:    "user",
-		Content: composeUserTurnContent(runtimeCtx, mustUse, currentQuery),
+		Content: e.RenderUserTurnContent(sessionID, currentQuery),
 		Images:  imageURLs,
 	}
 	messages = append(messages, userMsg)

@@ -468,9 +468,10 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	langfuse.InjectTracing(ctx, payload)
 
 	payloadJSON, _ := json.Marshal(payload)
-	task := asynq.NewTask(types.TypeDataSourceSync, payloadJSON)
+	task := asynq.NewTask(types.TypeDataSourceSync, payloadJSON,
+		asynq.Queue(types.QueueSync), asynq.MaxRetry(5), asynq.Timeout(2*time.Hour))
 
-	_, err = s.taskEnqueuer.Enqueue(task, asynq.Queue("default"))
+	_, err = s.taskEnqueuer.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue sync task: %v", err)
 		syncLog.Status = types.SyncLogStatusFailed

@@ -131,6 +131,25 @@ func IsMCPOAuthNonInteractive(ctx context.Context) bool {
 	return v
 }
 
+// WithBackgroundTask marks ctx as originating from an asynq background worker
+// (document parse / summary / question / graph / multimodal enrichment). The
+// chat concurrency governor throttles only background LLM traffic, so this flag
+// determines whether the per-model concurrency limit applies. See
+// BackgroundTaskContextKey.
+func WithBackgroundTask(ctx context.Context) context.Context {
+	return context.WithValue(ctx, BackgroundTaskContextKey, true)
+}
+
+// IsBackgroundTask reports whether ctx was marked as a background worker task
+// (see WithBackgroundTask). Returns false for interactive / HTTP request paths.
+func IsBackgroundTask(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(BackgroundTaskContextKey).(bool)
+	return v
+}
+
 // LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").
 // Returns ("zh-CN", false) when the key is absent.
 func LanguageFromContext(ctx context.Context) (string, bool) {

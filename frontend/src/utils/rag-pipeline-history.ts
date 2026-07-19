@@ -1,11 +1,35 @@
 export const RAG_PIPELINE_TOOL_NAMES = new Set(['query_understand', 'knowledge_search'])
 
+/** Tools rendered on the quick-answer timeline (includes pre-RAG attachment prep). */
+export const RAG_TIMELINE_TOOL_NAMES = new Set([
+  ...RAG_PIPELINE_TOOL_NAMES,
+  'attachment_parsing',
+  'image_analysis',
+])
+
+type RagHistoryReference = {
+  chunk_type?: string
+  knowledge_id?: string
+  knowledge_title?: string
+}
+
+function inferRetrievalSearchSource(refs: RagHistoryReference[]): 'knowledge' | 'web' | 'mixed' {
+  let docCount = 0
+  let webCount = 0
+  for (const ref of refs) {
+    if (ref.chunk_type === 'web_search') {
+      webCount++
+    } else {
+      docCount++
+    }
+  }
+  if (docCount > 0 && webCount > 0) return 'mixed'
+  if (webCount > 0) return 'web'
+  return 'knowledge'
+}
+
 type RagHistoryMessage = {
-  knowledge_references?: Array<{
-    chunk_type?: string
-    knowledge_id?: string
-    knowledge_title?: string
-  }>
+  knowledge_references?: RagHistoryReference[]
   agentEventStream?: Array<Record<string, unknown>>
 }
 
@@ -24,13 +48,28 @@ export function synthesizeRagPipelineToolEvents(
   item: RagHistoryMessage,
 ): Array<Record<string, unknown>> {
   const refs = item.knowledge_references ?? []
+  // Only rebuild retrieval steps when citations prove a search actually ran.
+  // Content-only turns (e.g. attachment Q&A with no KB hits) must not get a
+  // fake "knowledge_search" row on history reload.
+  if (refs.length === 0) {
+    return []
+  }
+
   const kbCounts: Record<string, number> = {}
+  let docCount = 0
+  let webCount = 0
 
   for (const ref of refs) {
-    if (ref.chunk_type === 'web_search') continue
+    if (ref.chunk_type === 'web_search') {
+      webCount++
+      continue
+    }
+    docCount++
     const key = ref.knowledge_id || ref.knowledge_title || 'document'
     kbCounts[key] = (kbCounts[key] || 0) + 1
   }
+
+  const searchSource = inferRetrievalSearchSource(refs)
 
   const events: Array<Record<string, unknown>> = [
     {
@@ -46,8 +85,12 @@ export function synthesizeRagPipelineToolEvents(
       tool_name: 'knowledge_search',
       pending: false,
       success: true,
+      arguments: { search_source: searchSource },
       tool_data: {
         count: refs.length,
+        doc_count: docCount,
+        web_count: webCount,
+        search_source: searchSource,
         kb_counts: kbCounts,
         results: refs,
       },

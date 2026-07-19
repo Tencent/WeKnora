@@ -35,7 +35,7 @@
             <!-- 右侧内容区域 -->
             <div class="settings-content">
               <div class="content-wrapper">
-                <!-- 组织管理员但租户角色不足，给出只读提示 -->
+                <!-- 组织管理员但空间角色不足，给出只读提示 -->
                 <div v-if="showTenantRoleHint" class="tenant-role-hint">
                   <t-icon name="info-circle" size="16px" />
                   <span>{{ $t('organization.rbac.needTenantAdminTip') }}</span>
@@ -641,7 +641,7 @@
       </div>
     </t-dialog>
 
-    <!-- 添加成员弹窗（按租户邀请） -->
+    <!-- 添加成员弹窗（按空间邀请） -->
     <t-dialog v-model:visible="showAddMemberDialog" :header="$t('organization.addMember.dialogTitle')"
       :confirm-btn="{ content: $t('organization.addMember.confirmBtn'), loading: addMemberSubmitting, disabled: selectedTenantId == null }"
       :cancel-btn="$t('common.cancel')" @confirm="handleAddMember" @close="resetAddMemberDialog" width="420px">
@@ -746,8 +746,8 @@ const upgradeForm = ref({
   message: ''
 })
 
-// 添加成员（按租户邀请）相关状态。Plan 3 之后，邀请实际上是把
-// 一整个租户拉进空间；这里的「搜索结果」是租户候选列表，每条带一个
+// 添加成员（按空间邀请）相关状态。Plan 3 之后，邀请实际上是把
+// 一整个空间拉进空间；这里的「搜索结果」是空间候选列表，每条带一个
 // 代表用户用于展示。`selectedTenantId` 是真正提交给后端的 tenant_id。
 const showAddMemberDialog = ref(false)
 const addMemberSubmitting = ref(false)
@@ -793,9 +793,9 @@ function clearAvatarEmoji() {
 const isCreateMode = computed(() => props.mode === 'create')
 const isEditMode = computed(() => props.mode === 'edit' || props.mode === 'create')
 // 后端组织相关变更接口（保存设置、邀请、搜索用户、改/删成员、审核加入申请、
-// 升级申请、刷新邀请码、移除共享等）在路由层都要求当前租户角色 ≥ admin（见
-// internal/router/router.go 的 RegisterOrganizationRoutes）。跨租户超管可绕过。
-// 因此前端任何"管理类"入口必须同时满足：组织内是 admin/owner ∩ 当前租户 admin+。
+// 升级申请、刷新邀请码、移除共享等）在路由层都要求当前空间角色 ≥ admin（见
+// internal/router/router.go 的 RegisterOrganizationRoutes）。跨空间超管可绕过。
+// 因此前端任何"管理类"入口必须同时满足：组织内是 admin/owner ∩ 当前空间 admin+。
 const hasTenantAdmin = computed(
   () => authStore.hasRole('admin') || authStore.canAccessAllTenants
 )
@@ -805,14 +805,14 @@ const isAdmin = computed(() => {
   return !!orgAdmin && hasTenantAdmin.value
 })
 
-// 当用户在组织内是 admin/owner 但当前租户角色不足时，展示只读提示
+// 当用户在组织内是 admin/owner 但当前空间角色不足时，展示只读提示
 const showTenantRoleHint = computed(() => {
   if (isCreateMode.value) return !hasTenantAdmin.value
   const orgAdmin = orgInfo.value?.my_role === 'admin' || orgInfo.value?.is_owner
   return !!orgAdmin && !hasTenantAdmin.value
 })
 
-// 是否可以申请权限升级（非管理员成员可申请；后端也要求租户 admin+）
+// 是否可以申请权限升级（非管理员成员可申请；后端也要求空间 admin+）
 const canRequestUpgrade = computed(() => {
   if (isCreateMode.value || !props.orgId) return false
   const myRole = orgInfo.value?.my_role
@@ -840,9 +840,9 @@ const addMemberRoleOptions = computed(() => [
   { label: t('organization.role.admin'), value: 'admin' },
 ])
 
-// 租户搜索结果选项。主标签展示租户名，括号里附带代表用户名（不再展示
-// 邮箱、不带"代表："前缀，避免冗长和译文别扭）；租户名缺失时回退到
-// 代表用户名 / 租户 ID。
+// 空间搜索结果选项。主标签展示空间名，括号里附带代表用户名（不再展示
+// 邮箱、不带"代表："前缀，避免冗长和译文别扭）；空间名缺失时回退到
+// 代表用户名 / 空间 ID。
 const tenantSearchOptions = computed(() =>
   tenantSearchResults.value.map((c) => {
     const tenantLabel = c.tenant_name || c.representative_username || `tenant#${c.tenant_id}`
@@ -908,16 +908,16 @@ const filteredMembers = computed(() => {
   )
 })
 
-// 成员行的主标题：优先展示「租户名」，回退到代表用户名 / 租户 ID。Plan 3
-// 之后每一行成员都对应一个租户，UI 必须先于代表用户呈现租户身份，
+// 成员行的主标题：优先展示「空间名」，回退到代表用户名 / 空间 ID。Plan 3
+// 之后每一行成员都对应一个空间，UI 必须先于代表用户呈现空间身份，
 // 否则用户会误以为这是按"人"加进来的。
 const memberPrimaryLabel = (m: OrganizationMember): string => {
   return m.tenant_name || m.username || `tenant#${m.tenant_id}`
 }
 
-// 副标题：主标题展示的是租户名时，副标题展示代表用户名；如果主标题已经
+// 副标题：主标题展示的是空间名时，副标题展示代表用户名；如果主标题已经
 // 是用户名（无 tenant_name 时的回退），副标题留空，避免重复信息。
-// 邮箱在租户成员列表里没什么用（不是邀请人需要联系的对象），不展示。
+// 邮箱在空间成员列表里没什么用（不是邀请人需要联系的对象），不展示。
 const memberSecondaryLabel = (m: OrganizationMember): string => {
   if (m.tenant_name && m.username) {
     return m.username
@@ -1218,7 +1218,7 @@ const handleSubmitUpgrade = async () => {
   }
 }
 
-// 添加成员：搜索租户（按租户名 / 用户名 / 邮箱模糊匹配，按 tenant_id 去重）
+// 添加成员：搜索空间（按空间名 / 用户名 / 邮箱模糊匹配，按 tenant_id 去重）
 let tenantSearchTimer: ReturnType<typeof setTimeout> | null = null
 const handleTenantSearch = (query: string) => {
   if (tenantSearchTimer) {
@@ -1244,7 +1244,7 @@ const handleTenantSearch = (query: string) => {
   }, 300)
 }
 
-// 添加成员：把选中的租户拉入空间。后端要求 tenant_id；representative_user_id
+// 添加成员：把选中的空间拉入空间。后端要求 tenant_id；representative_user_id
 // 仅做展示/审计用，所以把搜索结果中代表用户也一并带上。
 const handleAddMember = async () => {
   if (!props.orgId || selectedTenantId.value == null) return

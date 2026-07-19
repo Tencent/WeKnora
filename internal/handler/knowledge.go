@@ -95,6 +95,7 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.K
 }
 
 // validateKnowledgeBaseAccessWithKBID validates access to the given knowledge base ID (e.g. from query or body).
+// Enforces per-API-key KB scope before tenant/share/agent resolution.
 // Returns the knowledge base, kbID, effective tenant ID, permission, and error.
 func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, kbID string) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
 	ctx := c.Request.Context()
@@ -108,6 +109,9 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, k
 	kbID = secutils.SanitizeForLog(kbID)
 	if kbID == "" {
 		return nil, "", 0, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
+	}
+	if err := requireTenantAPIKeyKnowledgeBase(ctx, kbID); err != nil {
+		return nil, kbID, 0, "", err
 	}
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -162,6 +166,9 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 	knowledge, err := h.kgService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil {
 		return nil, ctx, errors.NewNotFoundError("Knowledge not found")
+	}
+	if err := requireTenantAPIKeyKnowledgeBase(ctx, knowledge.KnowledgeBaseID); err != nil {
+		return nil, ctx, err
 	}
 
 	// Owner: knowledge belongs to caller's tenant
@@ -249,7 +256,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 	task := asynq.NewTask(types.TypeKnowledgeListDelete, payloadBytes,
-		asynq.Queue("low"), asynq.MaxRetry(3))
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		return "", fmt.Errorf("enqueue task: %w", err)
@@ -273,7 +280,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 		return "", fmt.Errorf("marshal payload: %w", err)
 	}
 	task := asynq.NewTask(types.TypeKnowledgeListReparse, payloadBytes,
-		asynq.Queue("low"), asynq.MaxRetry(3))
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		return "", fmt.Errorf("enqueue task: %w", err)
@@ -673,16 +680,18 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	rows := []types.KnowledgeProcessingSpan{}
 	currentAttempt := 0
+	latestAttempt := 0
 	if h.spanRepo != nil {
-		if requestedAttempt == 0 {
-			latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
-			if lerr != nil {
-				logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
-			} else {
-				currentAttempt = latest
-			}
+		latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
+		if lerr != nil {
+			logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
 		} else {
+			latestAttempt = latest
+		}
+		if requestedAttempt > 0 {
 			currentAttempt = requestedAttempt
+		} else {
+			currentAttempt = latestAttempt
 		}
 		if currentAttempt > 0 {
 			rows, err = h.spanRepo.ListByAttempt(ctx, knowledge.ID, currentAttempt)
@@ -706,23 +715,66 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 	resp := gin.H{
 		"knowledge_id":    knowledge.ID,
+		"attempt":         currentAttempt,
+		"latest_attempt":  latestAttempt,
 		"parse_status":    knowledge.ParseStatus,
 		"current_attempt": currentAttempt,
 		"current_stage":   currentStageName,
 		"trace":           tree,
 	}
-	if lastErr != nil {
-		resp["last_error"] = gin.H{
-			"stage":       lastErr.Name,
-			"code":        lastErr.ErrorCode,
-			"message":     lastErr.ErrorMessage,
-			"finished_at": lastErr.FinishedAt,
-		}
+	if lastError := knowledgeSpansLastError(
+		currentAttempt,
+		latestAttempt,
+		knowledge.ParseStatus,
+		knowledge.ErrorMessage,
+		knowledge.UpdatedAt,
+		lastErr,
+	); lastError != nil {
+		resp["last_error"] = lastError
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    resp,
 	})
+}
+
+// knowledgeSpansLastError builds the last_error payload for GetKnowledgeSpans.
+// Span failures win when present; otherwise a failed knowledge row without a
+// matching span error (recovery / dead-letter paths) surfaces ErrorMessage.
+func knowledgeSpansLastError(
+	currentAttempt, latestAttempt int,
+	parseStatus, knowledgeErrorMessage string,
+	knowledgeUpdatedAt time.Time,
+	spanFailure *types.KnowledgeProcessingSpan,
+) gin.H {
+	if spanFailure != nil {
+		return gin.H{
+			"stage":         spanFailure.Name,
+			"code":          spanFailure.ErrorCode,
+			"message":       spanFailure.ErrorMessage,
+			"name":          spanFailure.Name,
+			"error_code":    spanFailure.ErrorCode,
+			"error_message": spanFailure.ErrorMessage,
+			"finished_at":   spanFailure.FinishedAt,
+		}
+	}
+	if currentAttempt != latestAttempt || parseStatus != types.ParseStatusFailed || knowledgeErrorMessage == "" {
+		return nil
+	}
+	errorCode := "UNKNOWN"
+	if strings.EqualFold(strings.TrimSpace(knowledgeErrorMessage),
+		"Task interrupted due to application restart") {
+		errorCode = "SERVER_RESTART"
+	}
+	return gin.H{
+		"stage":         "knowledge_processing",
+		"code":          errorCode,
+		"message":       knowledgeErrorMessage,
+		"name":          "knowledge_processing",
+		"error_code":    errorCode,
+		"error_message": knowledgeErrorMessage,
+		"finished_at":   knowledgeUpdatedAt,
+	}
 }
 
 // buildSpanTree assembles a flat list of span rows into a parent-child
@@ -1002,7 +1054,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	effectiveTenantID, _ := effCtx.Value(types.TenantIDContextKey).(uint64)
 	if effectiveTenantID == 0 {
 		logger.Error(ctx, "Effective tenant ID missing after access validation")
-		c.Error(errors.NewInternalServerError("tenant context unavailable"))
+		c.Error(errors.NewInternalServerError("workspace context unavailable"))
 		return
 	}
 
@@ -1341,13 +1393,13 @@ type GetKnowledgeBatchRequest struct {
 
 // GetKnowledgeBatch godoc
 // @Summary      批量获取知识
-// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属租户查询（用于刷新后恢复共享知识库下的文件）
+// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的空间解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属空间查询（用于刷新后恢复共享知识库下的文件）
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
 // @Param        ids       query     []string  true   "知识ID列表"
 // @Param        kb_id     query     string   false  "可选，知识库ID（用于共享知识库时指定范围）"
-// @Param        agent_id  query     string   false  "可选，共享智能体ID（用于按智能体租户批量拉取文件详情）"
+// @Param        agent_id  query     string   false  "可选，共享智能体ID（用于按智能体空间批量拉取文件详情）"
 // @Success      200       {object}  map[string]interface{}  "知识列表"
 // @Failure      400       {object}  errors.AppError        "请求参数错误"
 // @Security     Bearer
@@ -1440,9 +1492,8 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		knowledges, err = h.kgService.GetKnowledgeBatchWithSharedAccess(ctx, effectiveTenantID, req.IDs)
 	}
 
-	// Build the effective allowed-KB set from both scopeKBID and agentAllowedKBIDs.
-	// scopeKBID (from explicit kb_id) restricts to a single KB;
-	// agentAllowedKBIDs (from shared agent) restricts to the agent's configured KBs.
+	// Build the effective allowed-KB set from explicit kb_id, shared agent
+	// scope, and per-API-key KB restrictions.
 	var allowedKBSet map[string]bool
 	if scopeKBID != "" {
 		allowedKBSet = map[string]bool{scopeKBID: true}
@@ -1452,14 +1503,11 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 			allowedKBSet[id] = true
 		}
 	}
-	if allowedKBSet != nil && len(knowledges) > 0 {
-		filtered := make([]*types.Knowledge, 0, len(knowledges))
-		for _, k := range knowledges {
-			if allowedKBSet[k.KnowledgeBaseID] {
-				filtered = append(filtered, k)
-			}
-		}
-		knowledges = filtered
+	if apiKeySet := tenantAPIKeyAllowedKBSet(ctx); apiKeySet != nil {
+		allowedKBSet = intersectKBAllowSet(allowedKBSet, apiKeySet)
+	}
+	if allowedKBSet != nil {
+		knowledges = filterKnowledgesByKBAllowSet(knowledges, allowedKBSet)
 	}
 
 	if err != nil {
@@ -1713,7 +1761,7 @@ type knowledgeTagBatchRequest struct {
 
 // UpdateKnowledgeTagBatch godoc
 // @Summary      批量更新知识标签
-// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的租户解析
+// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的空间解析
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1902,7 +1950,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		_ = userIDVal
 		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 		if currentTenantID == 0 {
-			c.Error(errors.NewUnauthorizedError("tenant ID not found"))
+			c.Error(errors.NewUnauthorizedError("workspace ID not found"))
 			return
 		}
 		callerTenantRole := types.TenantRoleFromContext(ctx)
@@ -1964,6 +2012,41 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 					"SearchKnowledge(agent=%s, mode=all): capability filter removed %d KBs",
 					agentID, removed)
 			}
+		}
+		scopes = filterKnowledgeSearchScopesForAPIKey(ctx, scopes)
+		if len(scopes) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success":  true,
+				"data":     []interface{}{},
+				"has_more": false,
+				"total":    0,
+			})
+			return
+		}
+		knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success":  true,
+			"data":     knowledges,
+			"has_more": hasMore,
+			"total":    total,
+		})
+		return
+	}
+
+	if scopes, restricted := tenantAPIKeySearchScopes(ctx); restricted {
+		if len(scopes) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success":  true,
+				"data":     []interface{}{},
+				"has_more": false,
+				"total":    0,
+			})
+			return
 		}
 		knowledges, hasMore, total, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 		if err != nil {
@@ -2046,6 +2129,10 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	if err := requireTenantAPIKeyKnowledgeBases(ctx, req.SourceKBID, req.TargetKBID); err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -2151,7 +2238,8 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 
 	// Enqueue move task
 	task := asynq.NewTask(types.TypeKnowledgeMove, payloadBytes,
-		asynq.TaskID(taskID), asynq.Queue("default"), asynq.MaxRetry(3))
+		asynq.TaskID(taskID), asynq.Queue(types.QueueMaintenance),
+		asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "MoveKnowledge: failed to enqueue task: %v", err)
@@ -2397,4 +2485,83 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 			"reparse_count": len(ids),
 		},
 	})
+}
+
+func requireTenantAPIKeyKnowledgeBase(ctx context.Context, kbID string) error {
+	return requireTenantAPIKeyKnowledgeBases(ctx, kbID)
+}
+
+func requireTenantAPIKeyKnowledgeBases(ctx context.Context, kbIDs ...string) error {
+	return types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbIDs...)
+}
+
+func tenantAPIKeyAllowedKBSet(ctx context.Context) map[string]bool {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
+		return nil
+	}
+	allowed := make(map[string]bool, len(scope.KnowledgeBaseIDs))
+	for _, id := range scope.KnowledgeBaseIDs {
+		allowed[id] = true
+	}
+	return allowed
+}
+
+func intersectKBAllowSet(base, restrict map[string]bool) map[string]bool {
+	if restrict == nil {
+		return base
+	}
+	if base == nil {
+		return restrict
+	}
+	out := make(map[string]bool)
+	for id := range base {
+		if restrict[id] {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func filterKnowledgesByKBAllowSet(knowledges []*types.Knowledge, allowed map[string]bool) []*types.Knowledge {
+	if allowed == nil {
+		return knowledges
+	}
+	filtered := make([]*types.Knowledge, 0, len(knowledges))
+	for _, k := range knowledges {
+		if k != nil && allowed[k.KnowledgeBaseID] {
+			filtered = append(filtered, k)
+		}
+	}
+	return filtered
+}
+
+func filterKnowledgeSearchScopesForAPIKey(ctx context.Context, scopes []types.KnowledgeSearchScope) []types.KnowledgeSearchScope {
+	allowed := tenantAPIKeyAllowedKBSet(ctx)
+	if allowed == nil {
+		return scopes
+	}
+	filtered := make([]types.KnowledgeSearchScope, 0, len(scopes))
+	for _, scope := range scopes {
+		if allowed[scope.KBID] {
+			filtered = append(filtered, scope)
+		}
+	}
+	return filtered
+}
+
+func tenantAPIKeySearchScopes(ctx context.Context) ([]types.KnowledgeSearchScope, bool) {
+	scope, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	if !ok || !scope.IsKnowledgeBaseRestricted() {
+		return nil, false
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return nil, true
+	}
+	scopes := make([]types.KnowledgeSearchScope, 0, len(scope.KnowledgeBaseIDs))
+	for _, kbID := range scope.KnowledgeBaseIDs {
+		scopes = append(scopes, types.KnowledgeSearchScope{TenantID: tenantID, KBID: kbID})
+	}
+	return scopes, true
 }

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/im"
@@ -13,9 +14,21 @@ import (
 
 // validIMPlatforms is the set of supported IM platforms.
 var validIMPlatforms = map[string]bool{
-	"wecom": true, "feishu": true, "slack": true, "telegram": true, "dingtalk": true, "mattermost": true,
-	"wechat": true, "qqbot": true,
+	"wecom": true, "feishu": true, "lark": true, "slack": true, "telegram": true, "dingtalk": true,
+	"mattermost": true, "wechat": true, "qqbot": true,
 }
+
+// invalidIMPlatformError is the 400 message listing the accepted platforms. It
+// is derived from validIMPlatforms so the two cannot drift apart as platforms
+// are added.
+var invalidIMPlatformError = func() string {
+	names := make([]string, 0, len(validIMPlatforms))
+	for p := range validIMPlatforms {
+		names = append(names, "'"+p+"'")
+	}
+	sort.Strings(names)
+	return "platform must be one of: " + strings.Join(names, ", ")
+}()
 
 // IMHandler handles IM platform callback requests and channel CRUD.
 type IMHandler struct {
@@ -60,7 +73,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	if !validIMPlatforms[req.Platform] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack', 'telegram', 'dingtalk', 'mattermost', 'wechat' or 'qqbot'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidIMPlatformError})
 		return
 	}
 

@@ -4,17 +4,9 @@ import (
 	"time"
 )
 
-// Langfuse ingestion API event envelope.
-// https://api.reference.langfuse.com/#tag/ingestion
-type ingestionEvent struct {
-	ID        string      `json:"id"`
-	Timestamp string      `json:"timestamp"`
-	Type      string      `json:"type"`
-	Body      interface{} `json:"body"`
-}
-
 // TokenUsage captures the input/output/total token counts reported by the
-// underlying model, in Langfuse's canonical schema.
+// underlying model, in Langfuse's canonical schema. Set as the value of the
+// langfuse.observation.usage_details span attribute (JSON-serialized).
 type TokenUsage struct {
 	Input  int    `json:"input,omitempty"`
 	Output int    `json:"output,omitempty"`
@@ -22,45 +14,46 @@ type TokenUsage struct {
 	Unit   string `json:"unit,omitempty"`
 }
 
-// traceBody mirrors the /api/public/ingestion trace-create body.
-type traceBody struct {
-	ID          string                 `json:"id"`
-	Timestamp   string                 `json:"timestamp,omitempty"`
-	Name        string                 `json:"name,omitempty"`
-	UserID      string                 `json:"userId,omitempty"`
-	SessionID   string                 `json:"sessionId,omitempty"`
-	Release     string                 `json:"release,omitempty"`
-	Environment string                 `json:"environment,omitempty"`
-	Input       interface{}            `json:"input,omitempty"`
-	Output      interface{}            `json:"output,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
-	Public      bool                   `json:"public,omitempty"`
-}
+// Langfuse / OpenTelemetry semantic-convention attribute keys mirrored from
+// the official langfuse-python v4 SDK (_client/attributes.py). These are set
+// as span attributes on the OTLP wire; LiteFuse (and Langfuse v3+) index
+// traces/generations off them.
+const (
+	attrObsType            = "langfuse.observation.type"
+	attrObsInput           = "langfuse.observation.input"
+	attrObsOutput          = "langfuse.observation.output"
+	attrObsMetadata        = "langfuse.observation.metadata"
+	attrObsModel           = "langfuse.observation.model.name"
+	attrObsModelParams     = "langfuse.observation.model.parameters"
+	attrObsUsageDetails    = "langfuse.observation.usage_details"
+	attrObsCompletionStart = "langfuse.observation.completion_start_time"
+	attrTraceName          = "langfuse.trace.name"
+	attrTraceInput         = "langfuse.trace.input"
+	attrTraceOutput        = "langfuse.trace.output"
+	attrTraceMetadata      = "langfuse.trace.metadata"
+	attrTraceTags          = "langfuse.trace.tags"
+	attrUserID             = "user.id"
+	attrSessionID          = "session.id"
+	attrEnvironment        = "langfuse.environment"
+	attrRelease            = "langfuse.release"
+	attrLangfusePubKey     = "langfuse.public.key"
 
-// observationBody is shared between span-create / generation-create /
-// span-update / generation-update events (different fields are populated
-// depending on the event type).
-type observationBody struct {
-	ID                  string                 `json:"id,omitempty"`
-	TraceID             string                 `json:"traceId,omitempty"`
-	ParentObservationID string                 `json:"parentObservationId,omitempty"`
-	Type                string                 `json:"type,omitempty"` // SPAN, GENERATION, EVENT
-	Name                string                 `json:"name,omitempty"`
-	StartTime           string                 `json:"startTime,omitempty"`
-	EndTime             string                 `json:"endTime,omitempty"`
-	Input               interface{}            `json:"input,omitempty"`
-	Output              interface{}            `json:"output,omitempty"`
-	Metadata            map[string]interface{} `json:"metadata,omitempty"`
-	Level               string                 `json:"level,omitempty"`         // DEFAULT | ERROR | WARNING
-	StatusMessage       string                 `json:"statusMessage,omitempty"` // free-form
+	// The LiteFuse/Langfuse v3 OTel gate keys the "events_full"
+	// direct-write path on the instrumentation scope name. langfuse-python
+	// v4 uses "langfuse-sdk"; LiteFuse's getSdkInfoFromResourceSpans only
+	// requires the scope name to contain "langfuse" for server-side SDK
+	// classification. The actual gate is the x-langfuse-ingestion-version:4
+	// HTTP header (see exporter.go).
+	langfuseScopeName    = "langfuse-sdk"
+	langfuseScopeVersion = "4.0.0"
+)
 
-	// Generation-specific fields
-	Model           string                 `json:"model,omitempty"`
-	ModelParameters map[string]interface{} `json:"modelParameters,omitempty"`
-	Usage           *TokenUsage            `json:"usage,omitempty"`
-	CompletionStart string                 `json:"completionStartTime,omitempty"`
-}
+// Observation types carried by the langfuse.observation.type attribute.
+const (
+	obsTypeTrace      = "trace"
+	obsTypeSpan       = "span"
+	obsTypeGeneration = "generation"
+)
 
 func isoTime(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")

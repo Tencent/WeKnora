@@ -98,6 +98,8 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		"PreviousSlugs":       prevSlugsText,
 		"Granularity":         string(granularity),
 		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
+		"CustomInstructions":  batchCtx.ExtractionInstructions,
+		"InstructionScope":    "wiki_extraction",
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)

@@ -41,8 +41,39 @@
             />
           </div>
         </div>
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.questionGeneration.instructionsLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.questionGeneration.instructionsDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-textarea
+              v-model="localQuestionGeneration.customInstructions"
+              :placeholder="$t('knowledgeEditor.advanced.questionGeneration.instructionsPlaceholder')"
+              :maxlength="4000"
+              :autosize="{ minRows: 3, maxRows: 8 }"
+              @change="handleQuestionGenerationChange"
+            />
+          </div>
+        </div>
       </div>
       </template>
+
+      <div class="setting-row setting-row-vertical">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.advanced.tableMetadataInstructions.label') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.advanced.tableMetadataInstructions.description') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-textarea
+            :model-value="tableMetadataInstructions"
+            :placeholder="$t('knowledgeEditor.advanced.tableMetadataInstructions.placeholder')"
+            :maxlength="4000"
+            :autosize="{ minRows: 3, maxRows: 8 }"
+            @change="(value: string) => emit('update:tableMetadataInstructions', value)"
+          />
+        </div>
+      </div>
 
     </div>
   </div>
@@ -54,6 +85,7 @@ import { ref, watch } from 'vue'
 interface QuestionGenerationConfig {
   enabled: boolean
   questionCount: number
+  customInstructions?: string
 }
 
 interface Props {
@@ -61,6 +93,7 @@ interface Props {
   ragEnabled?: boolean
   allModels?: any[]
   embedded?: boolean
+  tableMetadataInstructions?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -69,15 +102,18 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:questionGeneration': [value: QuestionGenerationConfig]
+  'update:tableMetadataInstructions': [value: string]
 }>()
 
 const localQuestionGeneration = ref<QuestionGenerationConfig>(
-  props.questionGeneration || { enabled: false, questionCount: 3 }
+  props.questionGeneration
+    ? { ...props.questionGeneration, customInstructions: props.questionGeneration.customInstructions || '' }
+    : { enabled: false, questionCount: 3, customInstructions: '' }
 )
 
 watch(() => props.questionGeneration, (newVal) => {
   if (newVal) {
-    localQuestionGeneration.value = { ...newVal }
+    localQuestionGeneration.value = { customInstructions: '', ...newVal }
   }
 }, { deep: true })
 
@@ -168,6 +204,23 @@ const handleQuestionGenerationChange = () => {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+}
+
+.setting-row-vertical {
+  flex-direction: column;
+  gap: 12px;
+
+  .setting-info,
+  .setting-control {
+    flex: none;
+    width: 100%;
+    max-width: none;
+    padding-right: 0;
+  }
+
+  .setting-control {
+    display: block;
+  }
 }
 
 .subsection {

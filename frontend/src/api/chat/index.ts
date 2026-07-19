@@ -26,6 +26,10 @@ export async function generateSessionsTitle(session_id: string, data: any) {
   return post(`/api/v1/sessions/${session_id}/generate_title`, data);
 }
 
+export async function updateSession(session_id: string, data: { title: string; description?: string }) {
+  return put(`/api/v1/sessions/${session_id}`, data);
+}
+
 export async function knowledgeChat(data: { session_id: string; query: string; }) {
   return postChat(`/api/v1/knowledge-chat/${data.session_id}`, { query: data.query, channel: "web" });
 }
