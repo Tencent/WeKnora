@@ -67,7 +67,7 @@ const dismiss = () => {
 
 .follow-ups {
   width: 100%;
-  max-width: 600px;
+  max-width: 720px;
   margin: -4px 0 28px;
   margin-right: auto;
   padding: 12px;

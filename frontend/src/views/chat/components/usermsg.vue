@@ -212,7 +212,7 @@ const closePreImg = () => {
 
 .user_msg {
     width: max-content;
-    max-width: min(76%, 680px);
+    max-width: min(76%, 820px);
     display: flex;
     padding: 8px 12px;
     flex-direction: column;

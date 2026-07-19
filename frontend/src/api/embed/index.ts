@@ -17,7 +17,6 @@ export interface EmbedChannel {
   show_suggested_questions?: boolean
   widget_position?: WidgetPosition
   allow_web_search?: boolean
-  allow_memory?: boolean
   allow_file_upload?: boolean
   default_locale?: string
   webhook_url?: string
@@ -42,7 +41,6 @@ export interface EmbedChannelPublicConfig {
   show_suggested_questions?: boolean
   widget_position?: WidgetPosition
   allow_web_search?: boolean
-  allow_memory?: boolean
   allow_file_upload?: boolean
   agent_web_search_enabled?: boolean
   agent_image_upload_enabled?: boolean

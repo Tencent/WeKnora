@@ -41,7 +41,6 @@ type qaRequestContext struct {
 	skillNames            []string
 	summaryModelID        string
 	webSearchEnabled      bool
-	enableMemory          bool // Whether memory feature is enabled
 	mentionedItems        types.MentionedItems
 	effectiveTenantID     uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
 	images                []ImageAttachment        // Uploaded images with analysis text
@@ -77,7 +76,6 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		ImageDescription:   imageDescription,
 		UserMessageID:      rc.userMessageID,
 		WebSearchEnabled:   rc.webSearchEnabled,
-		EnableMemory:       rc.enableMemory,
 		Attachments:        rc.attachments,
 	}
 }
@@ -286,17 +284,6 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		attachmentIDs = normalizedIDs
 	}
 
-	// Resolve enable_memory:
-	//   1. Explicit value in request → honour it. Used by embedded mode
-	//      (force false) and by older clients still sending the literal bool.
-	//   2. Not set → fall back to the calling user's stored preference.
-	//      The toggle is persisted server-side per user (see PUT
-	//      /auth/me/preferences); this is the canonical path for the
-	//      normal logged-in web UI now that it no longer sends the field.
-	//   3. No user / no preference → false. API-key-only callers never
-	//      had memory enabled in practice, keep that behaviour.
-	enableMemory := h.resolveEnableMemory(ctx, request.EnableMemory)
-
 	mentionScopes := tagScopesFromMentionedItems(request.MentionedItems)
 	requestTagIDs := dedupRequestStrings(request.TagIDs)
 	if err := validateUnscopedTagIDs(orphanTagIDsForScope(requestTagIDs, mentionScopes), secutils.SanitizeForLogArray(kbIDs)); err != nil {
@@ -349,7 +336,6 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:      request.WebSearchEnabled,
-		enableMemory:          enableMemory,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
 		effectiveTenantID:     effectiveTenantID,
 		images:                request.Images,
@@ -454,32 +440,6 @@ func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
 		})
 	}
 	return cloned
-}
-
-// resolveEnableMemory decides whether the memory pipeline runs for this
-// request. See the call-site comment in parseQARequest for the resolution
-// order. Lookup errors are logged but never propagate — a failure to read
-// the user's preference shouldn't break the chat request itself, we just
-// fall back to false (the safe default).
-func (h *Handler) resolveEnableMemory(ctx context.Context, override *bool) bool {
-	if override != nil {
-		return *override
-	}
-	if h.userService == nil {
-		return false
-	}
-	user, err := h.userService.GetCurrentUser(ctx)
-	if err != nil {
-		// API-key-only callers or revoked sessions land here; the chat
-		// request itself stays authorised via the middleware that already
-		// ran, we just have nobody to look preferences up for.
-		logger.Debugf(ctx, "enable_memory: no user in context, defaulting to false: %v", err)
-		return false
-	}
-	if user.Preferences.EnableMemory != nil {
-		return *user.Preferences.EnableMemory
-	}
-	return false
 }
 
 // resolveAgent resolves the custom agent by ID, trying shared agent first, then own agent.

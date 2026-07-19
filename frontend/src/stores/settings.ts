@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
-import { updateMyPreferences, type UserPreferences } from "@/api/auth";
 import { isAgentStreamAgentId } from "@/utils/agent-mode";
 import { loadAndReconcileSettings } from "@/stores/settingsStorage";
 
@@ -23,7 +22,6 @@ interface Settings {
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
   webSearchEnabled: boolean;  // 网络搜索是否启用
-  enableMemory: boolean;      // 是否开启记忆功能
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
   selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源空间 ID（用于后端 model/KB/MCP 解析）
@@ -100,7 +98,6 @@ const defaultSettings: Settings = {
     enabled: true
   },
   webSearchEnabled: false,  // 默认关闭网络搜索
-  enableMemory: false,       // 默认关闭记忆功能
   conversationModels: {
     summaryModelId: "",
     rerankModelId: "",
@@ -170,9 +167,6 @@ export const useSettingsStore = defineStore("settings", {
     // 网络搜索是否启用
     isWebSearchEnabled: (state) => state.settings.webSearchEnabled || false,
     
-    // 记忆功能是否启用
-    isMemoryEnabled: (state) => state.settings.enableMemory || false,
-
     // 是否自动检查并下载更新
     isAutoCheckUpdateEnabled: (state) => state.settings.autoCheckUpdate ?? true,
 
@@ -332,47 +326,6 @@ export const useSettingsStore = defineStore("settings", {
     toggleWebSearch(enabled: boolean) {
       this.settings.webSearchEnabled = enabled;
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-    },
-
-    // 启用/禁用记忆功能。
-    // 现在是"真用户级"开关：
-    //   - 本地缓存 (localStorage) 用作 UI 首屏 / 离线兜底；
-    //   - PUT /auth/me/preferences 是真正的持久化，跨设备/浏览器同步。
-    //
-    // 乐观更新：先翻本地状态让 UI 立刻响应，再异步写后端；失败则回滚 + throw
-    // 让调用方（GeneralSettings.vue 的 t-switch）可以提示并把开关复位。
-    async toggleMemory(enabled: boolean): Promise<void> {
-      const previous = !!this.settings.enableMemory;
-      this.settings.enableMemory = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-
-      try {
-        const resp = await updateMyPreferences({ enable_memory: enabled });
-        if (!resp.success) {
-          throw new Error(resp.message || "update failed");
-        }
-      } catch (err) {
-        // 回滚本地状态，让 UI 复位到旧值。
-        this.settings.enableMemory = previous;
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-        throw err;
-      }
-    },
-
-    // 从 /auth/me 或 /auth/login 返回的 user.preferences 同步到本地 settings。
-    // 调用方：authStore.setUser（每次登录 / 刷新 user / 切空间后都会触发）。
-    // 不写后端，纯本地状态 + localStorage 写入，避免把后端的值再原路 PUT 回去。
-    hydrateFromUserPreferences(prefs: UserPreferences | undefined | null) {
-      if (!prefs) return;
-      let changed = false;
-      if (typeof prefs.enable_memory === "boolean" &&
-          this.settings.enableMemory !== prefs.enable_memory) {
-        this.settings.enableMemory = prefs.enable_memory;
-        changed = true;
-      }
-      if (changed) {
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-      }
     },
 
     // 启用/禁用自动检查更新
