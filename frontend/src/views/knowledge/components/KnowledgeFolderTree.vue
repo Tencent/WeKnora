@@ -115,7 +115,12 @@ function removeNode(list: KnowledgeFolderTreeNodeData[], id: string): boolean {
     return true;
   }
   for (const n of list) {
-    if (removeNode(n.children, id)) return true;
+    if (removeNode(n.children, id)) {
+      // If the parent no longer has any visible children, clear its hasChildren flag
+      // so the delete action is no longer blocked as "not empty".
+      n.hasChildren = n.children.length > 0;
+      return true;
+    }
   }
   return false;
 }
