@@ -7,7 +7,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // systemSettingRepository implements interfaces.SystemSettingRepository
@@ -30,7 +29,8 @@ func NewSystemSettingRepository(db *gorm.DB) interfaces.SystemSettingRepository 
 // not an error. Real DB errors (connection lost, etc.) surface up.
 func (r *systemSettingRepository) Get(ctx context.Context, key string) (*types.SystemSetting, error) {
 	var s types.SystemSetting
-	err := r.db.WithContext(ctx).Where("key = ?", key).First(&s).Error
+	keyColumn := NewDialect(r.db).QuoteIdentifier("key")
+	err := r.db.WithContext(ctx).Where(keyColumn+" = ?", key).First(&s).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -44,24 +44,24 @@ func (r *systemSettingRepository) Get(ctx context.Context, key string) (*types.S
 // for stable management-UI rendering. No pagination — see type comment.
 func (r *systemSettingRepository) List(ctx context.Context) ([]*types.SystemSetting, error) {
 	var rows []*types.SystemSetting
-	err := r.db.WithContext(ctx).Order("category ASC, key ASC").Find(&rows).Error
+	keyColumn := NewDialect(r.db).QuoteIdentifier("key")
+	err := r.db.WithContext(ctx).Order("category ASC, " + keyColumn + " ASC").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
-// Upsert writes the row keyed by Key. We use ON CONFLICT (key) DO UPDATE
-// rather than the naive Save() because (a) the natural key is `key`, not
-// `id`, and (b) the seeded migration row already has an id; a Save with
-// id=0 would re-insert and trip the UNIQUE constraint. Updating only
-// the mutable columns prevents the migration's seeded id/created_at
-// from being overwritten.
+// Upsert writes the row keyed by Key. We use a dialect-aware database upsert
+// rather than the naive Save() because (a) the natural key is `key`, not `id`,
+// and (b) the seeded migration row already has an id; a Save with id=0 would
+// re-insert and trip the UNIQUE constraint. Updating only the mutable columns
+// prevents the migration's seeded id/created_at from being overwritten.
 func (r *systemSettingRepository) Upsert(ctx context.Context, s *types.SystemSetting) error {
 	return r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "key"}},
-			DoUpdates: clause.AssignmentColumns([]string{
+		Clauses(NewDialect(r.db).Upsert(
+			[]string{"key"},
+			[]string{
 				"value",
 				"value_type",
 				"category",
@@ -70,8 +70,8 @@ func (r *systemSettingRepository) Upsert(ctx context.Context, s *types.SystemSet
 				"requires_restart",
 				"last_modified_by",
 				"updated_at",
-			}),
-		}).
+			},
+		)).
 		Create(s).Error
 }
 
@@ -82,7 +82,8 @@ func (r *systemSettingRepository) Upsert(ctx context.Context, s *types.SystemSet
 // rather than translating to gorm.ErrRecordNotFound so the caller's
 // happy path is a single nil check on err.
 func (r *systemSettingRepository) Delete(ctx context.Context, key string) (bool, error) {
-	res := r.db.WithContext(ctx).Where("key = ?", key).Delete(&types.SystemSetting{})
+	keyColumn := NewDialect(r.db).QuoteIdentifier("key")
+	res := r.db.WithContext(ctx).Where(keyColumn+" = ?", key).Delete(&types.SystemSetting{})
 	if res.Error != nil {
 		return false, res.Error
 	}

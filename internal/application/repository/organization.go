@@ -90,8 +90,20 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 	q := r.db.WithContext(ctx).Where("searchable = ?", true)
 	if query != "" {
 		pattern := "%" + query + "%"
-		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
-		q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
+		dialect := NewDialect(r.db)
+		idLike := dialect.CaseInsensitiveLikeExpr(
+			SQLExpression{SQL: dialect.CastText("id")},
+			pattern,
+		)
+		args := []interface{}{pattern, pattern}
+		args = append(args, idLike.Args...)
+		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间。
+		q = q.Where(
+			dialect.CaseInsensitiveLike("name")+" OR "+
+				dialect.CaseInsensitiveLike("description")+" OR "+
+				idLike.SQL,
+			args...,
+		)
 	}
 	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
 	if err != nil {
@@ -334,7 +346,7 @@ func (r *organizationRepository) UpdateJoinRequestStatus(ctx context.Context, id
 		Updates(map[string]interface{}{
 			"status":         status,
 			"reviewed_by":    reviewedBy,
-			"reviewed_at":    gorm.Expr("NOW()"),
+			"reviewed_at":    time.Now().UTC(),
 			"review_message": reviewMessage,
 		}).Error
 }

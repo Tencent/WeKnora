@@ -4,6 +4,38 @@ SPDX-License-Identifier: MIT
 
 WeKnora Backend API Server Deployment and Service.
 */}}
+{{- $dbDriver := lower (default "postgres" .Values.database.driver) }}
+{{- if not (has $dbDriver (list "postgres" "mysql")) }}
+{{- fail (printf "database.driver must be postgres or mysql, got %q" .Values.database.driver) }}
+{{- end }}
+{{- $retrieveDriver := lower (trim (default "" .Values.app.env.RETRIEVE_DRIVER)) }}
+{{- if regexMatch "(^|,)[[:space:]]*mysql[[:space:]]*(,|$)" $retrieveDriver }}
+{{- fail "app.env.RETRIEVE_DRIVER=mysql is not supported" }}
+{{- end }}
+{{- if and (eq $dbDriver "mysql") (ne $retrieveDriver "qdrant") }}
+{{- fail (printf "database.driver=mysql requires app.env.RETRIEVE_DRIVER=qdrant, got %q" .Values.app.env.RETRIEVE_DRIVER) }}
+{{- end }}
+{{- if and (eq $dbDriver "mysql") .Values.database.managed (not .Values.mysql.enabled) }}
+{{- fail "mysql.enabled must be true when database.driver=mysql and database.managed=true" }}
+{{- end }}
+{{- if and (eq $dbDriver "postgres") .Values.database.managed (not .Values.postgresql.enabled) }}
+{{- fail "postgresql.enabled must be true when database.driver=postgres and database.managed=true" }}
+{{- end }}
+{{- if and (not .Values.database.managed) (not (trim (default "" .Values.database.host))) }}
+{{- fail "database.host is required when database.managed=false" }}
+{{- end }}
+{{- $dbHost := .Values.database.host }}
+{{- if not $dbHost }}
+  {{- $dbHost = $dbDriver }}
+{{- end }}
+{{- $dbPort := int (default 0 .Values.database.port) }}
+{{- if eq $dbPort 0 }}
+  {{- if eq $dbDriver "mysql" }}
+    {{- $dbPort = 3306 }}
+  {{- else }}
+    {{- $dbPort = 5432 }}
+  {{- end }}
+{{- end }}
 {{- if .Values.app.enabled }}
 apiVersion: apps/v1
 kind: Deployment
@@ -53,11 +85,11 @@ spec:
               value: {{ .Values.app.env.TZ | quote }}
             # Database configuration
             - name: DB_DRIVER
-              value: "postgres"
+              value: {{ $dbDriver | quote }}
             - name: DB_HOST
-              value: "postgres"
+              value: {{ $dbHost | quote }}
             - name: DB_PORT
-              value: "5432"
+              value: {{ $dbPort | quote }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
@@ -112,6 +144,14 @@ spec:
             # Retrieval & Storage
             - name: RETRIEVE_DRIVER
               value: {{ .Values.app.env.RETRIEVE_DRIVER | quote }}
+            {{- if .Values.qdrant.enabled }}
+            - name: QDRANT_HOST
+              value: qdrant
+            - name: QDRANT_PORT
+              value: "6334"
+            - name: QDRANT_USE_TLS
+              value: "false"
+            {{- end }}
             - name: STORAGE_TYPE
               value: {{ .Values.app.env.STORAGE_TYPE | quote }}
             - name: LOCAL_STORAGE_BASE_DIR

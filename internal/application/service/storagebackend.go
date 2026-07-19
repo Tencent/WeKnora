@@ -132,7 +132,7 @@ func (s *StorageBackendService) Delete(ctx context.Context, tenantID uint64, id 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" {
+		if supportsRowLock(tx) {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {
@@ -178,7 +178,7 @@ func (s *StorageBackendService) SetDefault(ctx context.Context, tenantID uint64,
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var backend types.StorageBackend
 		query := tx.Where("tenant_id = ? AND id = ?", tenantID, id)
-		if tx.Dialector.Name() == "postgres" {
+		if supportsRowLock(tx) {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&backend).Error; err != nil {
@@ -192,6 +192,18 @@ func (s *StorageBackendService) SetDefault(ctx context.Context, tenantID uint64,
 		}
 		return tx.Model(&types.Tenant{}).Where("id = ?", tenantID).Update("default_storage_backend_id", id).Error
 	})
+}
+
+func supportsRowLock(db *gorm.DB) bool {
+	if db == nil || db.Dialector == nil {
+		return false
+	}
+	switch db.Dialector.Name() {
+	case "postgres", "mysql":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *StorageBackendService) Test(ctx context.Context, backend *types.StorageBackend) error {

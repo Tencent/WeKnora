@@ -151,9 +151,8 @@ type WikiPageService interface {
 	// Used by rebuildIndexPage's first-time generation path.
 	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
 
-	// FindSimilarPages performs a pg_trgm similarity search over
-	// page titles. Used by the dedup pre-filter to surface candidate
-	// merge targets server-side.
+	// FindSimilarPages returns lightweight merge candidates using the best
+	// search primitive supported by the active business database.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
 	// ListDistinctCategoryPaths returns the existing wiki folder paths (split
@@ -296,10 +295,9 @@ type WikiPageRepository interface {
 	// LLM prompt size is bounded on large KBs.
 	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
 
-	// FindSimilarPages returns the top-k pages whose lowercase title
-	// is most similar to the query under pg_trgm. `pageTypes` empty
-	// defaults to entity+concept. Used by the dedup pre-filter to
-	// surface candidate merge targets server-side.
+	// FindSimilarPages returns the top-k pages most likely to match the query.
+	// `pageTypes` empty defaults to entity+concept. Used by the dedup
+	// pre-filter to surface candidate merge targets server-side.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
 	// ListDistinctCategoryPaths returns the materialized paths of existing

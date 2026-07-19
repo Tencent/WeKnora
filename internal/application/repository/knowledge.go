@@ -491,7 +491,6 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 // Only returns documents from document-type knowledge bases (excludes FAQ)
 // Returns (results, hasMore, error)
 // FindByMetadataKey finds a knowledge item by a key-value pair in the metadata JSON column.
-// Uses Postgres jsonb operator: metadata->>'key' = 'value'.
 func (r *knowledgeRepository) FindByMetadataKey(
 	ctx context.Context,
 	tenantID uint64,
@@ -500,9 +499,11 @@ func (r *knowledgeRepository) FindByMetadataKey(
 	value string,
 ) (*types.Knowledge, error) {
 	var knowledge types.Knowledge
+	metadataValue := NewDialect(r.db).JSONText("metadata", key)
+	args := append(metadataValue.Args, value)
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>? = ?", key, value).
+		Where(metadataValue.SQL+" = ?", args...).
 		First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

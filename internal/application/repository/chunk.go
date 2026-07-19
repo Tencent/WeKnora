@@ -185,39 +185,40 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 
 			// FAQ type: search based on searchField
 			// 根据数据库类型使用不同的 JSON 查询语法
-			isPostgres := db.Dialector.Name() == "postgres"
+			dialect := NewDialect(db)
 
 			switch searchField {
 			case "standard_question":
 				// Search only in standard_question field of metadata
-				if isPostgres {
-					db = db.Where("metadata->>'standard_question' ILIKE ?", like)
-				} else {
-					// MySQL: metadata->>'$.standard_question' (MySQL 5.7.13+)
-					// 也可以用 JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))
-					db = db.Where("metadata->>'$.standard_question' LIKE ?", like)
-				}
+				expr := dialect.CaseInsensitiveLikeExpr(
+					dialect.JSONText("metadata", "standard_question"),
+					like,
+				)
+				db = db.Where(expr.SQL, expr.Args...)
 			case "similar_questions":
 				// Search in similar_questions array of metadata
-				if isPostgres {
-					db = db.Where("(metadata->'similar_questions')::text ILIKE ?", like)
-				} else {
-					db = db.Where("JSON_EXTRACT(metadata, '$.similar_questions') LIKE ?", like)
-				}
+				expr := dialect.CaseInsensitiveLikeExpr(
+					dialect.JSONText("metadata", "similar_questions"),
+					like,
+				)
+				db = db.Where(expr.SQL, expr.Args...)
 			case "answers":
 				// Search in answers array of metadata
-				if isPostgres {
-					db = db.Where("(metadata->'answers')::text ILIKE ?", like)
-				} else {
-					db = db.Where("JSON_EXTRACT(metadata, '$.answers') LIKE ?", like)
-				}
+				expr := dialect.CaseInsensitiveLikeExpr(
+					dialect.JSONText("metadata", "answers"),
+					like,
+				)
+				db = db.Where(expr.SQL, expr.Args...)
 			default:
 				// Search in all fields (content and metadata)
-				if isPostgres {
-					db = db.Where("(content ILIKE ? OR metadata::text ILIKE ?)", like, like)
-				} else {
-					db = db.Where("(content LIKE ? OR CAST(metadata AS CHAR) LIKE ?)", like, like)
-				}
+				metadataExpr := dialect.CaseInsensitiveLikeExpr(
+					SQLExpression{SQL: dialect.CastText("metadata")},
+					like,
+				)
+				db = db.Where(
+					"("+dialect.CaseInsensitiveLike("content")+" OR "+metadataExpr.SQL+")",
+					append([]interface{}{like}, metadataExpr.Args...)...,
+				)
 			}
 		}
 		return db
@@ -335,6 +336,9 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 	var flagsArgs []interface{}
 	var statusArgs []interface{}
 
+	dialect := NewDialect(r.db)
+	isPostgres := dialect.IsPostgres()
+
 	for _, chunk := range chunks {
 		ids = append(ids, chunk.ID)
 		content := common.CleanInvalidUTF8(chunk.Content)
@@ -342,22 +346,30 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		contentCases = append(contentCases, "WHEN id = ? THEN ?")
 		contentArgs = append(contentArgs, chunk.ID, content)
 
-		// Convert bool to string for PostgreSQL compatibility
-		isEnabledStr := "false"
-		if chunk.IsEnabled {
-			isEnabledStr = "true"
+		isEnabledValue := interface{}(chunk.IsEnabled)
+		flagsValue := interface{}(chunk.Flags)
+		statusValue := interface{}(chunk.Status)
+		if isPostgres {
+			// PostgreSQL needs explicit text values here because the CASE
+			// placeholders are cast only after the expression is assembled.
+			isEnabledValue = "false"
+			if chunk.IsEnabled {
+				isEnabledValue = "true"
+			}
+			flagsValue = fmt.Sprintf("%d", chunk.Flags)
+			statusValue = fmt.Sprintf("%d", chunk.Status)
 		}
 		isEnabledCases = append(isEnabledCases, "WHEN id = ? THEN ?")
-		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledValue)
 
 		tagIDCases = append(tagIDCases, "WHEN id = ? THEN ?")
 		tagIDArgs = append(tagIDArgs, chunk.ID, chunk.TagID)
 
 		flagsCases = append(flagsCases, "WHEN id = ? THEN ?")
-		flagsArgs = append(flagsArgs, chunk.ID, fmt.Sprintf("%d", chunk.Flags))
+		flagsArgs = append(flagsArgs, chunk.ID, flagsValue)
 
 		statusCases = append(statusCases, "WHEN id = ? THEN ?")
-		statusArgs = append(statusArgs, chunk.ID, fmt.Sprintf("%d", chunk.Status))
+		statusArgs = append(statusArgs, chunk.ID, statusValue)
 	}
 
 	// Build IN clause placeholders
@@ -376,8 +388,6 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 	for _, id := range ids {
 		args = append(args, id)
 	}
-
-	isPostgres := r.db.Dialector.Name() == "postgres"
 
 	var sql string
 	if isPostgres {
@@ -406,7 +416,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = CASE %s END,
 				status = CASE %s END,
-				updated_at = datetime('now')
+				updated_at = %s
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -414,6 +424,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(tagIDCases, " "),
 			strings.Join(flagsCases, " "),
 			strings.Join(statusCases, " "),
+			dialect.CurrentTimestamp(),
 			strings.Join(inPlaceholders, ","),
 		)
 	}
@@ -665,7 +676,7 @@ func (r *chunkRepository) FindFAQChunkWithDuplicateQuestion(
 
 	switch r.db.Name() {
 	case "mysql":
-		// MySQL 5.7+: JSON_EXTRACT for standard_question, JSON_CONTAINS for similar_questions
+		// MySQL 8: JSON_EXTRACT for standard_question, JSON_CONTAINS for similar_questions.
 		parts := []string{
 			"JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question')) IN ?",
 		}
@@ -810,10 +821,7 @@ func (r *chunkRepository) UpdateChunkFlagsBatch(
 		inPlaceholders[i] = "?"
 	}
 
-	nowFunc := "NOW()"
-	if r.db.Dialector.Name() == "sqlite" {
-		nowFunc = "datetime('now')"
-	}
+	nowFunc := NewDialect(r.db).CurrentTimestamp()
 	sql := fmt.Sprintf(`
 	UPDATE chunks
     SET flags = (flags | (%s)) & ~(%s),
@@ -994,10 +1002,7 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 	}
 	query = query.Where("("+strings.Join(scopeClauses, " OR ")+")", scopeArgs...)
 
-	orderClause := "RANDOM()"
-	if r.db.Dialector.Name() == "mysql" {
-		orderClause = "RAND()"
-	}
+	orderClause := NewDialect(r.db).RandomOrder()
 
 	if err := query.
 		Order(orderClause).
@@ -1040,37 +1045,20 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 		baseQuery = baseQuery.Where("knowledge_base_id IN ?", kbIDs)
 	}
 
-	orderClause := "RANDOM()"
-	if r.db.Dialector.Name() == "mysql" {
-		orderClause = "RAND()"
-	}
+	dialect := NewDialect(r.db)
+	orderClause := dialect.RandomOrder()
 
 	// Query chunks that have non-empty generated_questions in metadata
-	switch r.db.Name() {
-	case "postgres":
-		if err := baseQuery.
-			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").
-			Order(orderClause).
-			Limit(limit).
-			Find(&chunks).Error; err != nil {
-			return nil, err
-		}
-	case "mysql":
-		if err := baseQuery.
-			Where("metadata IS NOT NULL AND JSON_LENGTH(JSON_EXTRACT(metadata, '$.generated_questions')) > 0").
-			Order(orderClause).
-			Limit(limit).
-			Find(&chunks).Error; err != nil {
-			return nil, err
-		}
-	default: // sqlite
-		if err := baseQuery.
-			Where("metadata IS NOT NULL AND json_array_length(json_extract(metadata, '$.generated_questions')) > 0").
-			Order(orderClause).
-			Limit(limit).
-			Find(&chunks).Error; err != nil {
-			return nil, err
-		}
+	generatedQuestionsLength := dialect.JSONLength("metadata", "generated_questions")
+	if err := baseQuery.
+		Where(
+			"metadata IS NOT NULL AND "+generatedQuestionsLength.SQL+" > 0",
+			generatedQuestionsLength.Args...,
+		).
+		Order(orderClause).
+		Limit(limit).
+		Find(&chunks).Error; err != nil {
+		return nil, err
 	}
 
 	return chunks, nil

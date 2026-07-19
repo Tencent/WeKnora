@@ -30,6 +30,22 @@ log_warning() {
 }
 
 # 选择可用的 Docker Compose 命令
+validate_database_retriever() {
+    local db_driver retrieve_driver
+    db_driver="$(printf '%s' "${DB_DRIVER:-postgres}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    retrieve_driver="$(printf '%s' "${RETRIEVE_DRIVER:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    case ",$retrieve_driver," in
+        *,mysql,*)
+            log_error "RETRIEVE_DRIVER=mysql is not supported"
+            return 1
+            ;;
+    esac
+    if [ "$db_driver" = "mysql" ] && [ "$retrieve_driver" != "qdrant" ]; then
+        log_error "DB_DRIVER=mysql requires RETRIEVE_DRIVER=qdrant"
+        return 1
+    fi
+}
+
 DOCKER_COMPOSE_BIN=""
 DOCKER_COMPOSE_SUBCMD=""
 
@@ -200,8 +216,53 @@ start_services() {
     shift  # 移除 "start" 命令本身
     # 默认启动基础设施（postgres / redis / docreader）+ langfuse，
     # 其余可选服务通过 --minio / --qdrant / --neo4j / --dex / --full 按需开启。
-    PROFILES="--profile langfuse"
-    ENABLED_SERVICES="langfuse"
+    db_driver="${DB_DRIVER:-postgres}"
+    db_driver=$(printf '%s' "$db_driver" | tr '[:upper:]' '[:lower:]')
+    if ! validate_database_retriever; then
+        return 1
+    fi
+    db_profile=""
+    db_scale_args=""
+    db_name="PostgreSQL"
+    db_default_port="5432"
+    case "$db_driver" in
+        postgres)
+            ;;
+        mysql)
+            db_profile="--profile mysql"
+            db_scale_args="--scale postgres=0"
+            db_name="MySQL"
+            db_default_port="3306"
+            ;;
+        *)
+            log_error "Unsupported DB_DRIVER: ${DB_DRIVER:-}"
+            return 1
+            ;;
+    esac
+    PROFILES="$db_profile"
+    ENABLED_SERVICES="$db_driver"
+    if [ "$db_driver" = "postgres" ]; then
+        PROFILES="$PROFILES --profile langfuse"
+        ENABLED_SERVICES="$ENABLED_SERVICES langfuse"
+    fi
+    IFS=',' read -ra retrieve_drivers <<< "${RETRIEVE_DRIVER:-}"
+    for retrieve_driver in "${retrieve_drivers[@]}"; do
+        retrieve_driver=$(printf '%s' "$retrieve_driver" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+        case "$retrieve_driver" in
+            qdrant|milvus|weaviate|opensearch)
+                if [[ "$ENABLED_SERVICES" != *"$retrieve_driver"* ]]; then
+                    PROFILES="$PROFILES --profile $retrieve_driver"
+                    ENABLED_SERVICES="$ENABLED_SERVICES $retrieve_driver"
+                fi
+                ;;
+            doris)
+                if [[ "$ENABLED_SERVICES" != *"doris"* ]]; then
+                    PROFILES="$PROFILES --profile doris"
+                    ENABLED_SERVICES="$ENABLED_SERVICES doris"
+                fi
+                ;;
+        esac
+    done
     while [ $# -gt 0 ]; do
         case "$1" in
             --minio)
@@ -221,8 +282,12 @@ start_services() {
                 ENABLED_SERVICES="$ENABLED_SERVICES dex"
                 ;;
             --langfuse)
-                PROFILES="$PROFILES --profile langfuse"
-                ENABLED_SERVICES="$ENABLED_SERVICES langfuse"
+                if [ "$db_driver" = "mysql" ]; then
+                    log_warning "Skipping local Langfuse because its profile depends on PostgreSQL."
+                else
+                    PROFILES="$PROFILES --profile langfuse"
+                    ENABLED_SERVICES="$ENABLED_SERVICES langfuse"
+                fi
                 ;;
             --no-langfuse)
                 PROFILES="${PROFILES//--profile langfuse/}"
@@ -234,8 +299,16 @@ start_services() {
                 fi
                 ;;
             --full)
-                PROFILES="--profile full"
-                ENABLED_SERVICES="minio qdrant neo4j dex"
+                if [ "$db_driver" = "postgres" ]; then
+                    PROFILES="$db_profile --profile full"
+                    ENABLED_SERVICES="$db_driver minio qdrant neo4j dex langfuse"
+                else
+                    # The full profile contains Langfuse, whose own metadata
+                    # database is PostgreSQL. Keep MySQL development mode free
+                    # of an implicit PostgreSQL dependency.
+                    PROFILES="$db_profile --profile searxng --profile minio --profile qdrant --profile opensearch --profile milvus --profile neo4j --profile dex"
+                    ENABLED_SERVICES="$db_driver searxng minio qdrant opensearch milvus neo4j dex"
+                fi
                 break
                 ;;
             *)
@@ -246,7 +319,7 @@ start_services() {
     done
 
     # 启动服务（odl-hybrid 单独 --build，避免每次重建 docreader）
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d $db_scale_args
     local compose_rc=$?
     if [ "$compose_rc" -eq 0 ] && [[ "$ENABLED_SERVICES" == *"odl-hybrid"* ]]; then
         log_info "构建/更新 odl-hybrid 镜像..."
@@ -263,7 +336,7 @@ start_services() {
         log_success "基础设施服务已启动"
         echo ""
         log_info "服务访问地址:"
-        echo "  - PostgreSQL:    localhost:5432"
+        echo "  - ${db_name}:    localhost:${DB_PORT:-$db_default_port}"
         echo "  - Redis:         localhost:6379"
         echo "  - DocReader:     localhost:50051"
         
@@ -356,7 +429,14 @@ check_remote_dev_connectivity() {
         return 0
     fi
 
+    local db_driver="${DB_DRIVER:-postgres}"
+    db_driver=$(printf '%s' "$db_driver" | tr '[:upper:]' '[:lower:]')
     local db_port="${DB_PORT:-5432}"
+    local db_name="PostgreSQL"
+    if [ "$db_driver" = "mysql" ]; then
+        db_port="${DB_PORT:-3306}"
+        db_name="MySQL"
+    fi
     local redis_port
     redis_port="${REDIS_ADDR#*:}"
     if [ "$redis_port" = "$REDIS_ADDR" ]; then
@@ -366,7 +446,7 @@ check_remote_dev_connectivity() {
 
     log_info "检查远程基础设施连通性 (${host})..."
     local failed=0
-    for spec in "PostgreSQL:${host}:${db_port}" "Redis:${host}:${redis_port}" "DocReader:${host}:${docreader_port}"; do
+    for spec in "${db_name}:${host}:${db_port}" "Redis:${host}:${redis_port}" "DocReader:${host}:${docreader_port}"; do
         local name="${spec%%:*}"
         local rest="${spec#*:}"
         local h="${rest%%:*}"
@@ -460,7 +540,14 @@ start_app() {
     fi
     
     log_info "环境变量已设置，启动应用..."
-    log_info "数据库地址: $DB_HOST:${DB_PORT:-5432}"
+    local db_default_port="5432"
+    if ! validate_database_retriever; then
+        return 1
+    fi
+    if [ "$(printf '%s' "${DB_DRIVER:-postgres}" | tr '[:upper:]' '[:lower:]')" = "mysql" ]; then
+        db_default_port="3306"
+    fi
+    log_info "数据库地址: $DB_HOST:${DB_PORT:-$db_default_port}"
     
     export CGO_CFLAGS="-Wno-deprecated-declarations -Wno-gnu-folding-constant"
     if [[ "$(uname)" == "Darwin" ]]; then

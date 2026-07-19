@@ -123,18 +123,14 @@ func (r *sessionRepository) GetPagedByTenantID(
 func (r *sessionRepository) QueryPaged(
 	ctx context.Context, q *types.SessionListQuery,
 ) ([]*types.SessionListItem, int64, error) {
-	// Dialect-aware bits so the same query works on Postgres and SQLite (Lite build).
-	isPostgres := r.db.Dialector.Name() == "postgres"
-	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?)"
-	if isPostgres {
-		titleLikeExpr = "s.title ILIKE ?"
-	}
+	dialect := NewDialect(r.db)
+	titleLikeExpr := dialect.CaseInsensitiveLike("s.title")
 	// SQLite (the driver used by Lite) does not support NULLS LAST; its default
 	// nulls ordering puts NULLs first for DESC, which is actually what we want
 	// for pinned_at (rows with pinned_at=NULL are never pinned, so they get
 	// filtered to the tail by the preceding is_pinned DESC anyway).
 	orderClause := "s.is_pinned DESC, s.pinned_at DESC NULLS LAST, s.updated_at DESC"
-	if !isPostgres {
+	if !dialect.IsPostgres() {
 		orderClause = "s.is_pinned DESC, s.pinned_at DESC, s.updated_at DESC"
 	}
 
