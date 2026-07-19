@@ -24,6 +24,7 @@ builtin_agents:
         description: "지식 베이스 RAG Q&A를 통한 빠르고 정확한 답변"
     config:
       agent_mode: "quick-answer"
+      model_id: "mock-llm"
       system_prompt_id: "default_kb"
       context_template_id: "default_context"
       temperature: 0.7
@@ -67,6 +68,7 @@ builtin_agents:
         description: "ReAct 추론 프레임워크, 다단계 사고 및 도구 호출 지원"
     config:
       agent_mode: "smart-reasoning"
+      model_id: "mock-llm"
       agent_type: "rag-qa"
       system_prompt: ""
       temperature: 0.7
