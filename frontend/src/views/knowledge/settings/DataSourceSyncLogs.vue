@@ -83,6 +83,7 @@ function statusColor(status: string) {
     case 'running': return 'var(--td-brand-color)'
     case 'failed': return 'var(--td-error-color)'
     case 'partial': return 'var(--td-warning-color)'
+    case 'canceled': return 'var(--td-text-color-disabled)'
     default: return 'var(--td-text-color-placeholder)'
   }
 }
