@@ -2036,6 +2036,26 @@ func (s *knowledgeService) ReparseKnowledge(
 	}
 
 	processOverrides, _ = existing.ProcessOverrides()
+	// Tenant parser settings may have changed after this knowledge was uploaded.
+	// Sync the current EasyScholar key before a rebuild so post-processing of
+	// existing documents can use the newly configured journal-rank provider.
+	if tenantOverrides := s.getParserEngineOverridesFromContext(ctx); tenantOverrides != nil {
+		if secretKey := strings.TrimSpace(tenantOverrides["easyscholar_secret_key"]); secretKey != "" {
+			if processOverrides == nil {
+				processOverrides = &types.KnowledgeProcessOverrides{}
+			}
+			if processOverrides.ParserEngineOverrides == nil {
+				processOverrides.ParserEngineOverrides = make(map[string]string)
+			}
+			processOverrides.ParserEngineOverrides["easyscholar_secret_key"] = secretKey
+			if err := existing.SetProcessOverrides(processOverrides); err != nil {
+				return nil, err
+			}
+			if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "metadata", existing.Metadata); err != nil {
+				return nil, err
+			}
+		}
+	}
 	reparseEff := ResolveProcessConfig(kb, processOverrides)
 
 	// Embedding and post-process rebuilds reuse persisted chunks. They must not
