@@ -32,6 +32,7 @@ export default {
     expandSidebar: "사이드바 펼치기",
     logoutSuccess: "로그아웃되었습니다",
     myChats: "내 대화",
+    apiChats: "API 세션",
     embedChats: "웹 임베드",
     embedChannelNamed: "웹 임베드 · {name}",
     groupBy: "그룹화",

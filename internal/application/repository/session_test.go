@@ -245,3 +245,49 @@ func TestSessionRepositoryQueryPagedSplitsWebAndEmbedSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{embed.ID}, listItemIDsForTest(embedItems))
 }
+
+func TestSessionRepositoryGetIMPlatform(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	ctx := context.Background()
+
+	imSession := createSessionForTest(t, db, 1, "alice")
+	require.NoError(t, db.Create(&testIMChannelSession{
+		ID: "ics-1", SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+	webSession := createSessionForTest(t, db, 1, "alice")
+
+	platform, err := repo.GetIMPlatform(ctx, 1, imSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "feishu", platform)
+
+	platform, err = repo.GetIMPlatform(ctx, 1, webSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "", platform)
+
+	// Cross-tenant lookup must not leak the mapping.
+	platform, err = repo.GetIMPlatform(ctx, 2, imSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "", platform)
+}
+
+func TestSessionRepositoryQueryPagedAPISourceReturnsAllTenantAPIKeySessions(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	ctx := context.Background()
+
+	// Two different API keys plus a web user and a cross-tenant API session.
+	key1 := createSessionForTest(t, db, 1, types.SessionOwnerAPITenantKeyPrefix+"1:10")
+	key2 := createSessionForTest(t, db, 1, types.SessionOwnerAPITenantKeyPrefix+"1:20")
+	_ = createSessionForTest(t, db, 1, "alice")
+	_ = createSessionForTest(t, db, 2, types.SessionOwnerAPITenantKeyPrefix+"2:30")
+
+	// The admin view clears UserID, so every API-key session in the tenant is
+	// returned regardless of which key created it.
+	items, total, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "", Source: types.SessionSourceAPI, Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.ElementsMatch(t, []string{key1.ID, key2.ID}, listItemIDsForTest(items))
+}

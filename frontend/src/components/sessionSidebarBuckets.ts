@@ -5,7 +5,7 @@ import type { SessionForGrouping } from './sessionGrouping'
 
 export const SIDEBAR_BUCKET_PAGE_SIZE = 30
 
-export type SidebarBucketKind = 'web' | 'im' | 'embed'
+export type SidebarBucketKind = 'web' | 'im' | 'embed' | 'api'
 
 export interface SidebarSessionBucket {
   key: string
@@ -60,12 +60,17 @@ export function applyBucketCountProbe(
 }
 
 export function isChannelBucket(bucket: SidebarSessionBucket): boolean {
-  return bucket.kind === 'im' || bucket.kind === 'embed'
+  return bucket.kind === 'im' || bucket.kind === 'embed' || bucket.kind === 'api'
 }
 
 export function isChannelBucketKey(key: string): boolean {
-  return key.startsWith('im:') || key.startsWith('embed:')
+  return key.startsWith('im:') || key.startsWith('embed:') || key === API_SESSION_BUCKET_KEY
 }
+
+// API_SESSION_BUCKET_KEY is the admin-only bucket that lists every API-key
+// session in the tenant. It is treated like a channel folder: probed for a
+// count first and only surfaced in the source filter when it has sessions.
+export const API_SESSION_BUCKET_KEY = 'api'
 
 export function buildBucketDefinitions(
   imPlatforms: string[],
@@ -74,7 +79,9 @@ export function buildBucketDefinitions(
     web: string
     imPlatform: (platform: string) => string
     embedChannel: (name: string) => string
+    api: string
   },
+  options: { includeApiBucket?: boolean } = {},
 ): BucketDefinition[] {
   const imDefs = imPlatforms.map((platform) => ({
     key: `im:${platform}`,
@@ -89,9 +96,20 @@ export function buildBucketDefinitions(
     label: labels.embedChannel(name || id.slice(0, 8)),
     kind: 'embed' as const,
   }))
+  const apiDefs: BucketDefinition[] = options.includeApiBucket
+    ? [
+        {
+          key: API_SESSION_BUCKET_KEY,
+          apiSource: API_SESSION_BUCKET_KEY,
+          label: labels.api,
+          kind: 'api' as const,
+        },
+      ]
+    : []
   return [
     ...imDefs,
     ...embedDefs,
+    ...apiDefs,
     {
       key: 'web',
       apiSource: 'web',

@@ -29,6 +29,7 @@ export default {
     expandSidebar: 'Развернуть боковую панель',
     logoutSuccess: 'Вы вышли из системы',
     myChats: 'Мои чаты',
+    apiChats: 'Сессии API',
     embedChats: 'Веб-встраивание',
     embedChannelNamed: 'Веб-встраивание · {name}',
     groupBy: 'Группировать',

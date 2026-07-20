@@ -140,3 +140,76 @@ func TestGetSessionIsScopedToAPIExternalUser(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tenantSession.ID, got.ID)
 }
+
+func TestGetSessionAllowsAdminToOpenAPIKeySessions(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	apiSession := &types.Session{
+		TenantID: 1,
+		UserID:   types.SessionOwnerAPITenantKeyPrefix + "1:10",
+		Title:    "api key session",
+	}
+	require.NoError(t, db.Create(apiSession).Error)
+	otherUserSession := &types.Session{
+		TenantID: 1,
+		UserID:   "bob",
+		Title:    "bob private session",
+	}
+	require.NoError(t, db.Create(otherUserSession).Error)
+
+	// A non-admin web user cannot open the API-key session.
+	viewerCtx := testSessionScopeContext(1, "alice")
+	_, err := svc.GetSession(viewerCtx, apiSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+
+	// An admin can open the API-key session.
+	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	got, err := svc.GetSession(adminCtx, apiSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, apiSession.ID, got.ID)
+
+	// The admin fallback is limited to API-key sessions; another user's
+	// personal session stays hidden.
+	_, err = svc.GetSession(adminCtx, otherUserSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+}
+
+func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	key1 := &types.Session{TenantID: 1, UserID: types.SessionOwnerAPITenantKeyPrefix + "1:10", Title: "key1"}
+	key2 := &types.Session{TenantID: 1, UserID: types.SessionOwnerAPITenantKeyPrefix + "1:20", Title: "key2"}
+	web := &types.Session{TenantID: 1, UserID: "alice", Title: "alice web"}
+	require.NoError(t, db.Create(key1).Error)
+	require.NoError(t, db.Create(key2).Error)
+	require.NoError(t, db.Create(web).Error)
+
+	// A non-admin (viewer) web user is rejected.
+	viewerCtx := testSessionScopeContext(1, "alice")
+	_, err := svc.ListSessions(viewerCtx, &types.SessionListQuery{Source: types.SessionSourceAPI})
+	require.Error(t, err)
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, apperrors.ErrForbidden, appErr.Code)
+
+	// An admin sees every API-key session in the tenant, not just their own.
+	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	result, err := svc.ListSessions(adminCtx, &types.SessionListQuery{Source: types.SessionSourceAPI})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, result.Total)
+}
+
+// testListSessionsIMChannelSession lets QueryPaged's LEFT JOIN resolve against a
+// real table in the in-memory SQLite database.
+type testListSessionsIMChannelSession struct {
+	ID          uint64 `gorm:"primaryKey;autoIncrement"`
+	SessionID   string `gorm:"column:session_id"`
+	Platform    string `gorm:"column:platform"`
+	ChatID      string `gorm:"column:chat_id"`
+	ThreadID    string `gorm:"column:thread_id"`
+	UserID      string `gorm:"column:user_id"`
+	AgentID     string `gorm:"column:agent_id"`
+	IMChannelID string `gorm:"column:im_channel_id"`
+}
+
+func (testListSessionsIMChannelSession) TableName() string { return "im_channel_sessions" }

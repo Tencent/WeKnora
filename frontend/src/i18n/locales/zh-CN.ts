@@ -32,6 +32,7 @@ export default {
     expandSidebar: "展开侧边栏",
     logoutSuccess: "已退出登录",
     myChats: "我的对话",
+    apiChats: "API 会话",
     embedChats: "网页嵌入",
     embedChannelNamed: "网页嵌入 · {name}",
     groupBy: "分组方式",

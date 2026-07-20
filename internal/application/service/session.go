@@ -22,6 +22,31 @@ func sessionUserIDFromContext(ctx context.Context) string {
 	return types.SessionOwnerIDFromContext(ctx)
 }
 
+// loadSessionForRead loads a session honoring the caller's per-user scope, with
+// an Admin+ fallback that additionally permits reading tenant API-key sessions
+// (owner id "api_tenant_key:<tenantID>:<keyID>"). This lets a tenant
+// Owner/admin open sessions created via API keys — which are otherwise isolated
+// per key — from the Web console, without exposing other users' personal
+// sessions. Write paths keep the strict scope and must not use this helper.
+func loadSessionForRead(
+	ctx context.Context,
+	repo interfaces.SessionRepository,
+	tenantID uint64,
+	ownerID, sessionID string,
+) (*types.Session, error) {
+	session, err := repo.Get(ctx, tenantID, ownerID, sessionID)
+	if err == nil || !stderrors.Is(err, apperrors.ErrSessionNotFound) {
+		return session, err
+	}
+	if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+		if s, e := repo.GetByID(ctx, tenantID, sessionID); e == nil &&
+			strings.HasPrefix(s.UserID, types.SessionOwnerAPITenantKeyPrefix) {
+			return s, nil
+		}
+	}
+	return nil, err
+}
+
 // generateEventID generates a unique event ID with type suffix for better traceability
 func generateEventID(suffix string) string {
 	return fmt.Sprintf("%s-%s", uuid.New().String()[:8], suffix)
@@ -120,13 +145,21 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 	logger.Infof(ctx, "Retrieving session, ID: %s, tenant ID: %d", id, tenantID)
 
 	// Get session from repository
-	session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
+	session, err := loadSessionForRead(ctx, s.sessionRepo, tenantID, userID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": id,
 			"tenant_id":  tenantID,
 		})
 		return nil, err
+	}
+
+	// Best-effort IM origin so the Web console can classify the session's
+	// folder on read; a lookup failure must not fail the detail request.
+	if platform, pErr := s.sessionRepo.GetIMPlatform(ctx, tenantID, session.ID); pErr == nil {
+		session.IMPlatform = platform
+	} else {
+		logger.Warnf(ctx, "Failed to resolve IM platform for session %s: %v", session.ID, pErr)
 	}
 
 	logger.Infof(ctx, "Session retrieved successfully, ID: %s, tenant ID: %d", session.ID, session.TenantID)
@@ -211,7 +244,18 @@ func (s *sessionService) ListSessions(
 		query = &types.SessionListQuery{}
 	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
-	if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
+	// The "api" source is a tenant-wide admin view over API-key sessions, which
+	// are otherwise isolated per key. Gate it behind Admin+ and drop the
+	// per-user owner scope so the caller sees every key's sessions; everyone
+	// else stays scoped to their own principal.
+	if strings.EqualFold(strings.TrimSpace(query.Source), types.SessionSourceAPI) {
+		if !types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+			return nil, apperrors.NewForbiddenError(
+				"listing API-key sessions requires tenant admin or owner role",
+			)
+		}
+		query.UserID = ""
+	} else if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
 		query.UserID = uid
 	}
 

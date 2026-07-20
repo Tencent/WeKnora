@@ -32,6 +32,7 @@ export default {
     expandSidebar: 'Expand Sidebar',
     logoutSuccess: 'Logged out successfully',
     myChats: 'My chats',
+    apiChats: 'API sessions',
     embedChats: 'Web embed',
     embedChannelNamed: 'Web embed · {name}',
     groupBy: 'Group by',
