@@ -11,8 +11,13 @@ import (
 type SessionService interface {
 	// CreateSession creates a session
 	CreateSession(ctx context.Context, session *types.Session) (*types.Session, error)
-	// GetSession gets a session
+	// GetSession gets a session, honoring the caller's per-user scope with an
+	// Admin+ read fallback for tenant API-key sessions. Use only for read paths.
 	GetSession(ctx context.Context, id string) (*types.Session, error)
+	// GetOwnedSession gets a session strictly within the caller's owner scope
+	// (no Admin+ API-key fallback). Write/mutation endpoints must use this so a
+	// tenant admin cannot alter API-key sessions they can only read.
+	GetOwnedSession(ctx context.Context, id string) (*types.Session, error)
 	// GetSessionByID loads a session by tenant and id without user scoping.
 	GetSessionByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error)
 	// SetSessionOwnerID assigns sessions.user_id for the given session row.

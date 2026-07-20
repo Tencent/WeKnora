@@ -166,6 +166,20 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 	return session, nil
 }
 
+// GetOwnedSession loads a session strictly within the caller's owner scope.
+// Unlike GetSession it does NOT apply the Admin+ API-key read fallback
+// (loadSessionForRead), so it is the correct check for write/mutation
+// endpoints: a tenant admin may open and read an API-key session, but must not
+// be able to modify it (title, attachments, streaming state, messages).
+func (s *sessionService) GetOwnedSession(ctx context.Context, id string) (*types.Session, error) {
+	if id == "" {
+		return nil, stderrors.New("session id is required")
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
+	return s.sessionRepo.Get(ctx, tenantID, userID, id)
+}
+
 // GetSessionByID loads a session by tenant and id without user scoping.
 func (s *sessionService) GetSessionByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error) {
 	if id == "" {

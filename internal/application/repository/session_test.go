@@ -246,6 +246,25 @@ func TestSessionRepositoryQueryPagedSplitsWebAndEmbedSessions(t *testing.T) {
 	require.Equal(t, []string{embed.ID}, listItemIDsForTest(embedItems))
 }
 
+// The "web" source is user chats only; tenant API-key sessions live in the
+// admin-only "api" bucket and must never leak into a tenant-wide web listing.
+// Legacy tenant-level rows (user_id "") must still show up in web.
+func TestSessionRepositoryQueryPagedWebExcludesAPIKeySessions(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	ctx := context.Background()
+
+	legacy := createSessionForTest(t, db, 1, "") // legacy tenant web row
+	_ = createSessionForTest(t, db, 1, types.SessionOwnerAPITenantKeyPrefix+"1:10")
+
+	items, _, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "", Source: "web", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{legacy.ID}, listItemIDsForTest(items),
+		"web must keep legacy tenant rows but exclude API-key sessions")
+}
+
 func TestSessionRepositoryGetIMPlatform(t *testing.T) {
 	repo, db := newSessionRepositoryForTest(t)
 	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))

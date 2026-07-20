@@ -195,10 +195,14 @@ func (r *sessionRepository) QueryPaged(
 			// and cleared the per-user scope for this source.
 			return db.Where("s.user_id LIKE ?", types.SessionOwnerAPITenantKeyPrefix+"%")
 		case "web":
-			// User web chats only — exclude embed-widget sessions (same IM-null row).
+			// User web chats only — exclude embed-widget sessions (same IM-null
+			// row) and tenant API-key sessions (surfaced only in the admin-only
+			// "api" bucket). The user_id NULL check keeps legacy tenant-level web
+			// rows visible, since "col NOT LIKE ?" is unknown (not true) for NULL.
 			return db.Where(
-				"ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?)",
-				embedPrefix+"%",
+				"ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?) "+
+					"AND (s.user_id IS NULL OR s.user_id NOT LIKE ?)",
+				embedPrefix+"%", types.SessionOwnerAPITenantKeyPrefix+"%",
 			)
 		case "embed":
 			return db.Where("ics.id IS NULL AND s.description LIKE ?", embedPrefix+"%")

@@ -173,6 +173,30 @@ func TestGetSessionAllowsAdminToOpenAPIKeySessions(t *testing.T) {
 	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
 }
 
+func TestGetOwnedSessionDeniesAdminOnAPIKeySessions(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	apiSession := &types.Session{
+		TenantID: 1,
+		UserID:   types.SessionOwnerAPITenantKeyPrefix + "1:10",
+		Title:    "api key session",
+	}
+	require.NoError(t, db.Create(apiSession).Error)
+
+	adminCtx := context.WithValue(
+		testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin,
+	)
+
+	// The read path lets an admin open the API-key session (folder navigation)...
+	got, err := svc.GetSession(adminCtx, apiSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, apiSession.ID, got.ID)
+
+	// ...but the strict owner scope used by write/mutation endpoints (title
+	// generation, attachments, stop, QA) denies it, so admins stay read-only.
+	_, err = svc.GetOwnedSession(adminCtx, apiSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+}
+
 func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 	svc, db := newTestSessionService(t)
 	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
