@@ -103,12 +103,10 @@
               <h3 class="engine-card__title">{{ $t('settings.parser.easyScholarCardTitle') }}</h3>
               <span
                 class="engine-card__status"
-                :class="easyScholarTested && easyScholarAvailable ? 'engine-card__status--on' : 'engine-card__status--err'"
+                :class="easyScholarAvailable ? 'engine-card__status--on' : 'engine-card__status--err'"
               >
                 <span class="engine-card__status-dot" />
-                {{ easyScholarTested
-                  ? (easyScholarAvailable ? $t('settings.parser.available') : $t('settings.parser.unavailable'))
-                  : $t('settings.parser.notTested') }}
+                {{ easyScholarAvailable ? $t('settings.parser.available') : $t('settings.parser.unavailable') }}
               </span>
             </div>
             <p class="engine-card__desc">{{ $t('settings.parser.easyScholarCardDesc') }}</p>
@@ -488,7 +486,6 @@ const checking = ref(false)
 const checkMessage = ref('')
 // EasyScholar follows the other parser cards: it is either available or
 // unavailable. An empty/unconfigured key is therefore unavailable too.
-const easyScholarTested = ref(true)
 const easyScholarAvailable = ref(false)
 
 const hasBuiltinEngine = computed(() => engines.value.some(e => e.Name === 'builtin'))
@@ -571,13 +568,6 @@ function openDrawer(engine: ParserEngineInfo) {
   drawerVisible.value = true
   saveMessage.value = ''
   checkMessage.value = ''
-  if (engine.Name === 'easyscholar') {
-    // Keep the server-reported status when reopening the drawer. A refresh
-    // must not make an already configured provider look untested.
-    if (!easyScholarTested.value) {
-      easyScholarAvailable.value = false
-    }
-  }
 }
 
 async function loadEngines() {
@@ -591,7 +581,6 @@ async function loadEngines() {
     if (res?.easyscholar_available !== undefined) {
       // Match the other parser cards: the provider check itself determines
       // the status, including the unconfigured case (shown as unavailable).
-      easyScholarTested.value = true
       easyScholarAvailable.value = res.easyscholar_available === true
     }
   } catch (e: any) {
@@ -686,7 +675,6 @@ async function onCheck() {
     }
 
     if (currentEngine.value?.Name === 'easyscholar') {
-      easyScholarTested.value = true
       easyScholarAvailable.value = res?.easyscholar_available === true
       checkMessage.value = easyScholarAvailable.value
         ? t('settings.parser.checkSuccess', '测试连接成功')
