@@ -619,8 +619,18 @@ async function loadConfig() {
       paddleocr_vl_cloud_use_seal_recognition: data?.paddleocr_vl_cloud_use_seal_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_seal_recognition ?? true,
       paddleocr_vl_cloud_use_chart_recognition: data?.paddleocr_vl_cloud_use_chart_recognition ?? DEFAULT_PARSER_CONFIG.paddleocr_vl_cloud_use_chart_recognition ?? false,
     }
+    // The engine-list endpoint does not include EasyScholar status. Reuse the
+    // real test endpoint after loading the persisted (masked) configuration;
+    // the backend preserves the stored secret when it receives the mask.
+    try {
+      const status = await checkParserEngines(buildConfigPayload())
+      easyScholarAvailable.value = status?.easyscholar_available === true
+    } catch {
+      easyScholarAvailable.value = false
+    }
   } catch {
     config.value = { ...DEFAULT_PARSER_CONFIG }
+    easyScholarAvailable.value = false
   }
 }
 
