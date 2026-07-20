@@ -126,6 +126,7 @@ func (s *sessionService) KnowledgeQA(
 			RewritePromptSystem:     s.cfg.Conversation.RewritePromptSystem,
 			RewritePromptUser:       s.cfg.Conversation.RewritePromptUser,
 			WebSearchEnabled:        req.WebSearchEnabled,
+			WebSearchMode:           defaultWebSearchMode(req.WebSearchEnabled),
 			WebSearchProviderID:     s.resolveWebSearchProviderID(ctx, req, retrievalTenantID),
 			WebSearchMaxResults:     s.resolveWebSearchMaxResults(ctx, req),
 			WebFetchEnabled:         s.resolveWebFetchEnabled(req),
@@ -149,53 +150,27 @@ func (s *sessionService) KnowledgeQA(
 		},
 	}
 
-	// Apply custom agent overrides (system prompt, temperature, retrieval params,
+	// Apply custom agent policy (user instructions, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
-	// Determine pipeline based on the effective knowledge retrieval scope and
-	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
-	// empty but produce SearchTargets, so the unified targets must participate in
-	// this decision or the request is incorrectly downgraded to pure chat.
+	// Query understanding now produces a retrieval plan after seeing semantic
+	// source requirements. Build one common pipeline and let the plan gate source
+	// stages instead of choosing RAG vs chat before classification.
 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
-	needsRAG := hasKB || req.WebSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
-
-	var pipeline []types.EventType
-	if !needsRAG {
-		// Pure chat — no retrieval needed.
-		userContent := req.Query
-		if req.ImageDescription != "" && !chatModelSupportsVision {
-			userContent += "\n\n[用户上传图片内容]\n" + req.ImageDescription
-		}
-		if req.QuotedContext != "" {
-			userContent += "\n\n" + req.QuotedContext
-		}
-		// Inject attachment content for pure-chat path (RAG path handles this in INTO_CHAT_MESSAGE).
-		if len(req.Attachments) > 0 {
-			userContent += req.Attachments.BuildPrompt()
-		}
-		chatManage.UserContent = userContent
-
-		pipeline = types.NewPipelineBuilder().
-			AddIf(hasHistory, types.LOAD_HISTORY).
-			Add(types.CHAT_COMPLETION_STREAM).
-			Build()
-	} else {
-		// RAG — dynamically assemble based on feature flags.
-		pipeline = types.NewPipelineBuilder().
-			AddIf(hasHistory, types.LOAD_HISTORY).
-			Add(types.QUERY_UNDERSTAND).
-			Add(types.CHUNK_SEARCH_PARALLEL).
-			Add(types.CHUNK_RERANK).
-			AddIf(req.WebSearchEnabled, types.WEB_FETCH).
-			Add(types.CHUNK_MERGE).
-			Add(types.FILTER_TOP_K).
-			AddIf(chatManage.DataAnalysisEnabled, types.DATA_ANALYSIS).
-			Add(types.INTO_CHAT_MESSAGE).
-			Add(types.CHAT_COMPLETION_STREAM).
-			Build()
-	}
+	pipeline := types.NewPipelineBuilder().
+		AddIf(hasHistory, types.LOAD_HISTORY).
+		Add(types.QUERY_UNDERSTAND).
+		Add(types.CHUNK_SEARCH_PARALLEL).
+		Add(types.CHUNK_RERANK).
+		Add(types.WEB_FETCH).
+		Add(types.CHUNK_MERGE).
+		Add(types.FILTER_TOP_K).
+		AddIf(chatManage.DataAnalysisEnabled, types.DATA_ANALYSIS).
+		Add(types.INTO_CHAT_MESSAGE).
+		Add(types.CHAT_COMPLETION_STREAM).
+		Build()
 
 	logger.Infof(ctx, "Assembled pipeline (%d stages), hasKB=%v, webSearch=%v, history=%v",
 		len(pipeline), hasKB, req.WebSearchEnabled, hasHistory)
@@ -223,6 +198,13 @@ func (s *sessionService) KnowledgeQA(
 
 	logger.Info(ctx, "Knowledge base question answering initiated")
 	return nil
+}
+
+func defaultWebSearchMode(enabled bool) types.WebSearchMode {
+	if enabled {
+		return types.WebSearchModeOnDemand
+	}
+	return types.WebSearchModeOff
 }
 
 // selectChatModelID selects the appropriate chat model ID with priority for Remote models

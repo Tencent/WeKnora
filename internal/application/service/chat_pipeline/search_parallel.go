@@ -90,11 +90,11 @@ func (p *PluginSearchParallel) ActivationEvents() []types.EventType {
 func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
-	// Intent-based skip: query-understand step determined KB retrieval is unnecessary
+	// Semantic routing determined that this response does not need retrieval.
 	if !chatManage.NeedsRetrieval() {
 		pipelineInfo(ctx, "SearchParallel", "skip", map[string]interface{}{
 			"session_id": chatManage.SessionID,
-			"reason":     "intent_no_search",
+			"reason":     "retrieval_plan_none",
 		})
 		return next()
 	}
@@ -108,6 +108,15 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 	// Deep-copy to avoid concurrent read/write on shared slice fields
 	chunkCM := chatManage.Clone()
 	chunkCM.SearchResult = nil
+	if chatManage.RetrievalPlan.Mode == types.RetrievalPlanKBThenWeb {
+		// For kb_then_web, run only the KB branches here. The on-demand web
+		// fallback is decided AFTER reranking (PluginWebFallback), based on how
+		// many KB candidates are actually relevant rather than raw recall count.
+		chunkCM.RetrievalPlan = types.RetrievalPlan{
+			Mode:       types.RetrievalPlanKBOnly,
+			ReasonCode: chatManage.RetrievalPlan.ReasonCode,
+		}
+	}
 	entityCM := chatManage.Clone()
 	entityCM.SearchResult = nil
 
@@ -131,6 +140,12 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		{
 			Name: "entity_search",
 			Run: func() *PluginError {
+				if !chatManage.RetrievalPlan.UsesKB() {
+					pipelineInfo(ctx, "SearchParallel", "entity_search_skip", map[string]interface{}{
+						"reason": "retrieval_plan_excludes_knowledge_base",
+					})
+					return nil
+				}
 				if len(chatManage.Entity) == 0 {
 					pipelineInfo(ctx, "SearchParallel", "entity_search_skip", map[string]interface{}{
 						"reason": "no_entities",
@@ -152,7 +167,9 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 
 	errs := RunParallel(tasks...)
 
-	// Merge results from both searches
+	// Merge results from both searches. For kb_then_web, the on-demand web
+	// fallback happens later in PluginWebFallback, after reranking reveals how
+	// many KB candidates are actually relevant.
 	chatManage.SearchResult = append(chunkCM.SearchResult, entityCM.SearchResult...)
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
 

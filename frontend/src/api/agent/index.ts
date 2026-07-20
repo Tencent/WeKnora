@@ -33,12 +33,13 @@ export interface QuestionSuggestionConfig {
 export interface CustomAgentConfig {
   // ===== 基础设置 =====
   agent_mode?: 'quick-answer' | 'smart-reasoning';  // 运行模式：quick-answer=RAG模式, smart-reasoning=ReAct Agent模式
-  // 智能推理模式下的类型预设，用于一键应用"系统提示词 + 工具 + KB 兼容性"组合
+  // 智能推理模式下的类型预设，用于一键应用受管协议、工具和 KB 兼容性组合
   // 仅在 agent_mode === 'smart-reasoning' 时生效；quick-answer 模式忽略
   agent_type?: AgentType;
-  system_prompt?: string;           // 统一系统提示词（使用 {{web_search_status}} 占位符动态控制行为）
-  system_prompt_id?: string;        // 引用的 prompt template ID（预设会填入此字段）
-  context_template?: string;        // 上下文模板（普通模式）
+  user_instructions?: string;       // 用户可编辑的角色、语气和业务规则
+  prompt_protocol_version?: number; // 系统托管 Prompt 协议版本
+  system_prompt_id?: string;        // 系统托管模板 ID
+  context_template_id?: string;     // 系统托管上下文模板 ID
 
   // ===== 模型设置 =====
   model_id?: string;
@@ -97,6 +98,7 @@ export interface CustomAgentConfig {
   supported_file_types?: string[];
 
   // ===== 网络搜索设置 =====
+  web_search_mode?: 'off' | 'on_demand' | 'always';
   web_search_enabled?: boolean;
   web_search_provider_id?: string;
   web_search_max_results?: number;
@@ -115,13 +117,8 @@ export interface CustomAgentConfig {
   // ===== 高级设置（主要用于普通模式）=====
   enable_query_expansion?: boolean; // 是否启用查询扩展
   enable_rewrite?: boolean;         // 是否启用问题改写
-  rewrite_prompt_system?: string;   // 改写系统提示词
-  rewrite_prompt_user?: string;     // 改写用户提示词模板
   fallback_strategy?: 'fixed' | 'model'; // 兜底策略
   fallback_response?: string;       // 固定兜底回复
-  fallback_prompt?: string;         // 兜底提示词（模型生成时）
-  // 意图提示词：非检索意图（问候、闲聊等）时覆盖主系统提示词
-  intent_prompts?: Record<string, string>;
 
   // ===== 已废弃字段（保留兼容）=====
   welcome_message?: string;
@@ -216,29 +213,6 @@ export function copyAgent(id: string) {
 // 判断是否为内置智能体（通过 agent.is_builtin 字段或 ID 前缀判断）
 export function isBuiltinAgent(agentId: string): boolean {
   return agentId.startsWith('builtin-');
-}
-
-// 占位符定义
-export interface PlaceholderDefinition {
-  name: string;
-  label: string;
-  description: string;
-}
-
-// 占位符响应
-export interface PlaceholdersResponse {
-  all: PlaceholderDefinition[];
-  system_prompt: PlaceholderDefinition[];
-  agent_system_prompt: PlaceholderDefinition[];
-  context_template: PlaceholderDefinition[];
-  rewrite_system_prompt: PlaceholderDefinition[];
-  rewrite_prompt: PlaceholderDefinition[];
-  fallback_prompt: PlaceholderDefinition[];
-}
-
-// 获取占位符定义
-export function getPlaceholders() {
-  return get<{ data: PlaceholdersResponse }>('/api/v1/agents/placeholders');
 }
 
 // ===== 智能体类型预设 =====

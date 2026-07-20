@@ -62,13 +62,13 @@ func (p *PluginSearch) ActivationEvents() []types.EventType {
 func (p *PluginSearch) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
-	// Check if we have search targets or web search enabled
+	// The retrieval plan, not source availability alone, controls execution.
 	hasKBTargets := types.HasKnowledgeRetrievalScope(
 		chatManage.SearchTargets,
 		chatManage.KnowledgeBaseIDs,
 		chatManage.KnowledgeIDs,
 	)
-	if !hasKBTargets && !chatManage.WebSearchEnabled {
+	if chatManage.RetrievalPlan.UsesKB() && !hasKBTargets && !chatManage.RetrievalPlan.UsesWeb() {
 		pipelineError(ctx, "Search", "kb_not_found", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 		})
@@ -81,55 +81,61 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		"search_targets": len(chatManage.SearchTargets),
 		"tenant_id":      chatManage.TenantID,
 		"web_enabled":    chatManage.WebSearchEnabled,
+		"plan_mode":      chatManage.RetrievalPlan.Mode,
+		"plan_reason":    chatManage.RetrievalPlan.ReasonCode,
 	})
 
-	// Run KB search and web search concurrently
+	// Execute the resolved source strategy. Explicit KB/Web plans never invoke
+	// the other source; on-demand mode falls back to web only after KB recall is
+	// insufficient.
 	pipelineInfo(ctx, "Search", "plan", map[string]interface{}{
 		"search_targets":    len(chatManage.SearchTargets),
 		"embedding_top_k":   chatManage.EmbeddingTopK,
 		"vector_threshold":  chatManage.VectorThreshold,
 		"keyword_threshold": chatManage.KeywordThreshold,
 	})
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	allResults := make([]*types.SearchResult, 0)
-
-	wg.Add(2)
-	// Goroutine 1: Knowledge base search using SearchTargets
-	go func() {
-		defer wg.Done()
-		kbResults := p.searchByTargets(ctx, chatManage)
-		if len(kbResults) > 0 {
-			mu.Lock()
-			allResults = append(allResults, kbResults...)
-			mu.Unlock()
-		}
-	}()
-
-	// Goroutine 2: Web search (if enabled)
-	go func() {
-		defer wg.Done()
-		webResults := p.searchWebIfEnabled(ctx, chatManage)
-		if len(webResults) > 0 {
-			mu.Lock()
-			allResults = append(allResults, webResults...)
-			mu.Unlock()
-		}
-	}()
-
-	wg.Wait()
-
-	chatManage.SearchResult = allResults
-
-	logSearchScoreSample(ctx, "result_score_before_normalize", chatManage.SearchResult)
-
-	// If recall is low, attempt query expansion with keyword-focused search
-	if chatManage.EnableQueryExpansion && len(chatManage.SearchResult) < max(1, chatManage.EmbeddingTopK) {
-		expResults := p.runQueryExpansion(ctx, chatManage)
-		if len(expResults) > 0 {
-			chatManage.SearchResult = append(chatManage.SearchResult, expResults...)
+	var kbResults, webResults []*types.SearchResult
+	searchKB := func() {
+		kbResults = p.searchByTargets(ctx, chatManage)
+		chatManage.SearchResult = kbResults
+		if chatManage.EnableQueryExpansion && len(kbResults) < max(1, chatManage.EmbeddingTopK) {
+			if expanded := p.runQueryExpansion(ctx, chatManage); len(expanded) > 0 {
+				kbResults = append(kbResults, expanded...)
+			}
 		}
 	}
+	searchWeb := func() {
+		webResults = p.searchWebIfEnabled(ctx, chatManage)
+	}
+
+	switch chatManage.RetrievalPlan.Mode {
+	case types.RetrievalPlanKBOnly:
+		searchKB()
+	case types.RetrievalPlanWebOnly:
+		searchWeb()
+	case types.RetrievalPlanParallel:
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); searchKB() }()
+		go func() { defer wg.Done(); searchWeb() }()
+		wg.Wait()
+	case types.RetrievalPlanKBThenWeb:
+		searchKB()
+		minQualified := minimumQualifiedKBResults(chatManage.EmbeddingTopK)
+		if shouldFallbackToWeb(len(kbResults), chatManage.EmbeddingTopK) {
+			pipelineInfo(ctx, "Search", "web_fallback", map[string]interface{}{
+				"kb_results":       len(kbResults),
+				"minimum_required": minQualified,
+			})
+			searchWeb()
+		}
+	default:
+		return next()
+	}
+
+	chatManage.SearchResult = append(kbResults, webResults...)
+
+	logSearchScoreSample(ctx, "result_score_before_normalize", chatManage.SearchResult)
 
 	logSearchScoreSample(ctx, "final_score", chatManage.SearchResult)
 
@@ -146,6 +152,14 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		"result_count": 0,
 	})
 	return ErrSearchNothing
+}
+
+func minimumQualifiedKBResults(embeddingTopK int) int {
+	return min(3, max(1, embeddingTopK))
+}
+
+func shouldFallbackToWeb(kbResultCount, embeddingTopK int) bool {
+	return kbResultCount < minimumQualifiedKBResults(embeddingTopK)
 }
 
 // getSearchResultFromHistory retrieves relevant knowledge references from chat history
@@ -520,7 +534,8 @@ func (p *PluginSearch) searchSingleTarget(
 
 // searchWebIfEnabled executes web search when enabled and returns converted results
 func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
-	if !chatManage.WebSearchEnabled || p.webSearchService == nil || p.tenantService == nil {
+	if !chatManage.RetrievalPlan.UsesWeb() || !chatManage.WebSearchEnabled ||
+		p.webSearchService == nil || p.tenantService == nil {
 		return nil
 	}
 	tenant, _ := types.TenantInfoFromContext(ctx)

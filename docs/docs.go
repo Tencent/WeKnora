@@ -268,38 +268,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/agents/placeholders": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "获取所有可用的提示词占位符定义，按字段类型分组",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "智能体"
-                ],
-                "summary": "获取占位符定义",
-                "responses": {
-                    "200": {
-                        "description": "占位符定义",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
         "/agents/type-presets": {
             "get": {
                 "security": [
@@ -310,7 +278,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "返回所有 smart-reasoning 下可用的智能体类型预设（RAG/Wiki/Hybrid/Custom），用于编辑器自动填充系统提示词、工具和 KB 兼容性",
+                "description": "返回所有 smart-reasoning 下可用的智能体类型预设（RAG/Wiki/Hybrid/Custom），用于选择受管协议、工具和 KB 兼容性",
                 "consumes": [
                     "application/json"
                 ],
@@ -12380,44 +12348,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/tenants/kv/prompt-templates": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "获取系统配置的提示词模板列表",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "空间管理"
-                ],
-                "summary": "获取提示词模板",
-                "responses": {
-                    "200": {
-                        "description": "提示词模板配置",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
-                        }
-                    }
-                }
-            }
-        },
         "/tenants/kv/web-search-config": {
             "get": {
                 "security": [
@@ -12466,7 +12396,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
+                "description": "获取空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）",
                 "consumes": [
                     "application/json"
                 ],
@@ -15078,7 +15008,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "agent_type": {
-                    "description": "AgentType is a preset category under smart-reasoning mode that pre-fills\nsystem prompt, allowed tools and recommended KB compatibility.\nValid values: \"rag-qa\", \"wiki-qa\", \"hybrid-rag-wiki\", \"custom\".\nEmpty / unknown values are treated as \"custom\" (no preset applied).\nIgnored for quick-answer mode.",
+                    "description": "AgentType is a preset category under smart-reasoning mode that pre-fills\nmanaged prompt reference, allowed tools and recommended KB compatibility.\nValid values: \"rag-qa\", \"wiki-qa\", \"hybrid-rag-wiki\", \"custom\".\nEmpty / unknown values are treated as \"custom\" (no preset applied).\nIgnored for quick-answer mode.",
                     "type": "string"
                 },
                 "allowed_tools": {
@@ -15119,12 +15049,8 @@ const docTemplate = `{
                     "description": "Whether final answers include knowledge/web source citations. Nil defaults to true\nso agents saved before this option was introduced keep their existing behavior.",
                     "type": "boolean"
                 },
-                "context_template": {
-                    "description": "Context template for normal mode (how to format retrieved chunks)",
-                    "type": "string"
-                },
                 "context_template_id": {
-                    "description": "ContextTemplateID references a template ID in prompt_templates/ YAML files.\nIf set and ContextTemplate is empty, the template content will be resolved at startup.",
+                    "description": "ContextTemplateID references a managed context envelope.",
                     "type": "string"
                 },
                 "data_analysis_enabled": {
@@ -15142,10 +15068,6 @@ const docTemplate = `{
                 "enable_rewrite": {
                     "description": "Whether to enable query rewrite for multi-turn conversations",
                     "type": "boolean"
-                },
-                "fallback_prompt": {
-                    "description": "Fallback prompt (when FallbackStrategy is \"model\")",
-                    "type": "string"
                 },
                 "fallback_response": {
                     "description": "Fixed fallback response (when FallbackStrategy is \"fixed\")",
@@ -15178,13 +15100,6 @@ const docTemplate = `{
                 "image_upload_enabled": {
                     "description": "===== Image Upload / Multimodal Settings =====\nWhether image upload is enabled for this agent (default: false)",
                     "type": "boolean"
-                },
-                "intent_prompts": {
-                    "description": "IntentPrompts holds per-intent system prompt overrides for non-retrieval\nintents (greeting, chitchat, etc.). Empty values fall back to templates\nunder config/prompt_templates/intent_prompts.yaml.",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
                 },
                 "kb_selection_mode": {
                     "description": "===== Knowledge Base Settings =====\nKnowledge base selection mode: \"all\" = all KBs, \"selected\" = specific KBs, \"none\" = no KB",
@@ -15236,8 +15151,12 @@ const docTemplate = `{
                     "description": "===== Multi-turn Conversation Settings =====\nWhether multi-turn conversation is enabled",
                     "type": "boolean"
                 },
+                "prompt_protocol_version": {
+                    "description": "PromptProtocolVersion identifies the system-managed prompt contract used\nby this agent. It is normalized to CurrentAgentPromptProtocolVersion.",
+                    "type": "integer"
+                },
                 "query_understand_model_id": {
-                    "description": "Dedicated chat model ID for the query-understanding (rewrite + intent) step.\nWhen empty, the main conversation ModelID is used as a fallback.",
+                    "description": "Dedicated chat model ID for the query-understanding and retrieval-routing step.\nWhen empty, the main conversation ModelID is used as a fallback.",
                     "type": "string"
                 },
                 "question_suggestions": {
@@ -15268,14 +15187,6 @@ const docTemplate = `{
                     "description": "Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)\nWhen true, knowledge base retrieval only happens if user explicitly mentions KB/files with @\nWhen false, knowledge base retrieval happens according to KBSelectionMode",
                     "type": "boolean"
                 },
-                "rewrite_prompt_system": {
-                    "description": "Rewrite prompt system message",
-                    "type": "string"
-                },
-                "rewrite_prompt_user": {
-                    "description": "Rewrite prompt user message template",
-                    "type": "string"
-                },
                 "selected_skills": {
                     "description": "Selected skill names (only used when SkillsSelectionMode is \"selected\")",
                     "type": "array",
@@ -15294,12 +15205,8 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
-                "system_prompt": {
-                    "description": "System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)",
-                    "type": "string"
-                },
                 "system_prompt_id": {
-                    "description": "SystemPromptID references a template ID in prompt_templates/ YAML files.\nIf set and SystemPrompt is empty, the template content will be resolved at startup.",
+                    "description": "SystemPromptID references a managed template in prompt_templates/.\nUsers do not edit the referenced protocol text directly.",
                     "type": "string"
                 },
                 "temperature": {
@@ -15309,6 +15216,10 @@ const docTemplate = `{
                 "thinking": {
                     "description": "Whether to enable thinking mode (for models that support extended thinking)",
                     "type": "boolean"
+                },
+                "user_instructions": {
+                    "description": "UserInstructions contains agent-specific role, tone, and business rules.\nRuntime protocols, tool rules, retrieval routing, and output schemas are\nsystem-managed and are never replaced by this field.",
+                    "type": "string"
                 },
                 "vector_threshold": {
                     "description": "Vector retrieval threshold",
@@ -15327,12 +15238,20 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "web_search_enabled": {
-                    "description": "===== Web Search Settings =====\nWhether web search is enabled",
+                    "description": "WebSearchEnabled is retained as a wire/storage compatibility capability\nflag. New routing code must use EffectiveWebSearchMode.",
                     "type": "boolean"
                 },
                 "web_search_max_results": {
                     "description": "Maximum web search results",
                     "type": "integer"
+                },
+                "web_search_mode": {
+                    "description": "===== Web Search Settings =====\nWebSearchMode is the authoritative quick-answer routing policy:\noff, on_demand, or always. Empty falls back to the legacy boolean.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchMode"
+                        }
+                    ]
                 },
                 "web_search_provider_id": {
                     "description": "WebSearchProviderID references a specific WebSearchProviderEntity.\nIf empty, the workspace's default provider (is_default=true) is used.",
@@ -19223,6 +19142,19 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WebSearchMode": {
+            "type": "string",
+            "enum": [
+                "off",
+                "on_demand",
+                "always"
+            ],
+            "x-enum-varnames": [
+                "WebSearchModeOff",
+                "WebSearchModeOnDemand",
+                "WebSearchModeAlways"
+            ]
         },
         "github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity": {
             "type": "object",

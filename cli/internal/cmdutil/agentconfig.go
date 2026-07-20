@@ -17,20 +17,20 @@ import (
 // keeping presence-tracking out-of-band from the value itself, which
 // pflag's Changed() facility supplies at the cobra layer.
 type AgentConfigFlags struct {
-	AgentMode          string
-	AgentModeSet       bool
-	SystemPrompt       string
-	SystemPromptSet    bool
-	ModelID            string
-	ModelIDSet         bool
-	RerankModelID      string
-	RerankModelIDSet   bool
-	Temperature        float64
-	TemperatureSet     bool
-	KBSelectionMode    string
-	KBSelectionModeSet bool
-	KnowledgeBases     []string
-	KnowledgeBasesSet  bool
+	AgentMode           string
+	AgentModeSet        bool
+	UserInstructions    string
+	UserInstructionsSet bool
+	ModelID             string
+	ModelIDSet          bool
+	RerankModelID       string
+	RerankModelIDSet    bool
+	Temperature         float64
+	TemperatureSet      bool
+	KBSelectionMode     string
+	KBSelectionModeSet  bool
+	KnowledgeBases      []string
+	KnowledgeBasesSet   bool
 }
 
 // LoadAgentConfig parses YAML or JSON from r into an AgentConfig. kind is
@@ -48,11 +48,14 @@ func LoadAgentConfig(r io.Reader, kind string) (*sdk.AgentConfig, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 	var cfg sdk.AgentConfig
+	var raw map[string]any
 	switch strings.ToLower(kind) {
 	case "yaml", "yml":
-		var raw map[string]any
 		if err := yaml.Unmarshal(body, &raw); err != nil {
 			return nil, fmt.Errorf("parse YAML config: %w", err)
+		}
+		if err := rejectManagedPromptFields(raw); err != nil {
+			return nil, err
 		}
 		jsBody, err := json.Marshal(raw)
 		if err != nil {
@@ -62,6 +65,12 @@ func LoadAgentConfig(r io.Reader, kind string) (*sdk.AgentConfig, error) {
 			return nil, fmt.Errorf("parse YAML config (via JSON): %w", err)
 		}
 	case "json":
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return nil, fmt.Errorf("parse JSON config: %w", err)
+		}
+		if err := rejectManagedPromptFields(raw); err != nil {
+			return nil, err
+		}
 		if err := json.Unmarshal(body, &cfg); err != nil {
 			return nil, fmt.Errorf("parse JSON config: %w", err)
 		}
@@ -69,6 +78,26 @@ func LoadAgentConfig(r io.Reader, kind string) (*sdk.AgentConfig, error) {
 		return nil, fmt.Errorf("unknown config format %q (want yaml or json)", kind)
 	}
 	return &cfg, nil
+}
+
+func rejectManagedPromptFields(raw map[string]any) error {
+	for _, field := range []string{
+		"system_prompt",
+		"context_template",
+		"rewrite_prompt_system",
+		"rewrite_prompt_user",
+		"fallback_prompt",
+		"intent_prompts",
+		"response_mode_prompts",
+	} {
+		if _, exists := raw[field]; exists {
+			return fmt.Errorf(
+				"config field %q is no longer editable; use user_instructions for role, tone, and business behavior while prompt protocols remain system-managed",
+				field,
+			)
+		}
+	}
+	return nil
 }
 
 // MergeAgentConfig returns base with hot-path flag overrides applied. Only
@@ -80,8 +109,8 @@ func MergeAgentConfig(base *sdk.AgentConfig, ov AgentConfigFlags) *sdk.AgentConf
 	if ov.AgentModeSet {
 		out.AgentMode = ov.AgentMode
 	}
-	if ov.SystemPromptSet {
-		out.SystemPrompt = ov.SystemPrompt
+	if ov.UserInstructionsSet {
+		out.UserInstructions = ov.UserInstructions
 	}
 	if ov.ModelIDSet {
 		out.ModelID = ov.ModelID
@@ -114,11 +143,8 @@ func GenerateAgentSkeleton(w io.Writer) error {
 # Operating mode: "quick-answer" or "smart-reasoning"
 agent_mode: ""
 
-# System prompt for the agent (also settable via --system-prompt[-file])
-system_prompt: ""
-
-# Optional template applied to retrieved context before model input
-context_template: ""
+# User instructions for the agent (also settable via --user-instructions[-file])
+user_instructions: ""
 
 # REQUIRED: LLM model id (server-side managed); also settable via --model
 model_id: ""
@@ -147,6 +173,7 @@ faq_direct_answer_threshold: 0.0
 faq_score_boost: 0.0
 
 # Web search
+web_search_mode: "off"     # "off" / "on_demand" / "always"; authoritative for quick-answer routing
 web_search_enabled: false
 web_search_max_results: 0
 
@@ -164,14 +191,11 @@ rerank_threshold: 0.0
 # Query understanding / rewrite
 enable_query_expansion: false
 enable_rewrite: false
-rewrite_prompt_system: ""
-rewrite_prompt_user: ""
 query_understand_model_id: ""
 
 # Fallback when retrieval / generation fails
 fallback_strategy: ""     # "fixed" or "model"
 fallback_response: ""
-fallback_prompt: ""
 `
 	_, err := io.WriteString(w, skeleton)
 	return err

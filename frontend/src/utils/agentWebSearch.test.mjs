@@ -50,6 +50,17 @@ test('isAgentWebSearchReady requires enabled flag and resolvable provider', () =
   );
 });
 
+test('isAgentWebSearchReady treats routing mode as authoritative', () => {
+  assert.equal(
+    isAgentWebSearchReady({ web_search_mode: 'on_demand', web_search_enabled: false }, providers),
+    true,
+  );
+  assert.equal(
+    isAgentWebSearchReady({ web_search_mode: 'off', web_search_enabled: true }, providers),
+    false,
+  );
+});
+
 test('isTenantWebSearchReady checks default provider only', () => {
   assert.equal(isTenantWebSearchReady(providers), true);
   assert.equal(

@@ -39,7 +39,7 @@ type PipelineRequest struct {
 	RewritePromptSystem  string `json:"rewrite_prompt_system"`
 	RewritePromptUser    string `json:"rewrite_prompt_user"`
 	// QueryUnderstandModelID, when set, overrides the chat model used for
-	// the query-understanding (rewrite + intent classification) stage only.
+	// the query-understanding (rewrite + response/evidence classification) stage only.
 	// Empty means fall back to ChatModelID.
 	QueryUnderstandModelID string `json:"query_understand_model_id,omitempty"`
 
@@ -61,18 +61,19 @@ type PipelineRequest struct {
 	// File attachments support
 	Attachments MessageAttachments `json:"-"`
 
-	// IntentPromptOverrides holds agent-level intent prompt overrides for the
-	// query-understanding stage. Empty values fall back to tenant/global defaults.
-	IntentPromptOverrides map[string]string `json:"-"`
+	// UserInstructions contains user-owned role, tone, and business behavior.
+	// It is appended after the managed answer protocol is rendered.
+	UserInstructions string `json:"-"`
 
 	// Misc request-scoped config
-	TenantID            uint64 `json:"-"`
-	WebSearchEnabled    bool   `json:"-"`
-	WebSearchProviderID string `json:"-"` // Resolved from agent config or tenant default
-	WebSearchMaxResults int    `json:"-"` // Resolved from agent config or tenant default
-	WebFetchEnabled     bool   `json:"-"` // Auto-fetch full page content for web search results after rerank
-	WebFetchTopN        int    `json:"-"` // Max pages to fetch (default 3)
-	Language            string `json:"-"`
+	TenantID            uint64        `json:"-"`
+	WebSearchEnabled    bool          `json:"-"`
+	WebSearchMode       WebSearchMode `json:"-"`
+	WebSearchProviderID string        `json:"-"` // Resolved from agent config or tenant default
+	WebSearchMaxResults int           `json:"-"` // Resolved from agent config or tenant default
+	WebFetchEnabled     bool          `json:"-"` // Auto-fetch full page content for web search results after rerank
+	WebFetchTopN        int           `json:"-"` // Max pages to fetch (default 3)
+	Language            string        `json:"-"`
 }
 
 // CitationsEnabled returns the effective citation setting for this request.
@@ -80,54 +81,101 @@ func (c *PipelineRequest) CitationsEnabled() bool {
 	return c == nil || c.CitationEnabled == nil || *c.CitationEnabled
 }
 
-// QueryIntent represents the classified intent of a user query.
-type QueryIntent string
+// ResponseMode describes how the assistant should respond. Retrieval source
+// selection deliberately does not live in this enum.
+type ResponseMode string
 
 const (
-	IntentKBSearch      QueryIntent = "kb_search"
-	IntentWebSearch     QueryIntent = "web_search"
-	IntentGreeting      QueryIntent = "greeting"
-	IntentChitchat      QueryIntent = "chitchat"
-	IntentFollowUp      QueryIntent = "follow_up"
-	IntentImageOnly     QueryIntent = "image_only"
-	IntentDocOnly       QueryIntent = "doc_only"
-	IntentSummarize     QueryIntent = "summarize"
-	IntentClarification QueryIntent = "clarification"
+	ResponseModeAnswer    ResponseMode = "answer"
+	ResponseModeGreeting  ResponseMode = "greeting"
+	ResponseModeChitchat  ResponseMode = "chitchat"
+	ResponseModeFollowUp  ResponseMode = "follow_up"
+	ResponseModeImageOnly ResponseMode = "image_only"
+	ResponseModeDocOnly   ResponseMode = "doc_only"
+	ResponseModeSummarize ResponseMode = "summarize"
 )
 
-// NeedsKBRetrieval returns true when the intent requires knowledge base search.
-// The zero value (empty string) is treated as needing retrieval for safety.
-// Note: IntentWebSearch is NOT included — use ChatManage.NeedsRetrieval()
-// which also considers the WebSearchEnabled flag.
-func (i QueryIntent) NeedsKBRetrieval() bool {
-	switch i {
-	case IntentKBSearch, IntentClarification, IntentSummarize, "":
-		return true
-	default:
-		return false
-	}
+type RetrievalNeed string
+
+const (
+	RetrievalNeedNone     RetrievalNeed = "none"
+	RetrievalNeedRequired RetrievalNeed = "required"
+)
+
+type SourceRequirement string
+
+const (
+	SourceRequirementAuto SourceRequirement = "auto"
+	SourceRequirementKB   SourceRequirement = "knowledge_base"
+	SourceRequirementWeb  SourceRequirement = "web"
+	SourceRequirementBoth SourceRequirement = "both"
+)
+
+type FreshnessRequirement string
+
+const (
+	FreshnessAny     FreshnessRequirement = "any"
+	FreshnessCurrent FreshnessRequirement = "current"
+)
+
+// QueryUnderstanding is the semantic result of query understanding. It says
+// what the user needs; RetrievalPlan says how the backend will execute it.
+type QueryUnderstanding struct {
+	ResponseMode      ResponseMode         `json:"response_mode"`
+	RetrievalNeed     RetrievalNeed        `json:"retrieval_need"`
+	SourceRequirement SourceRequirement    `json:"source_requirement"`
+	Freshness         FreshnessRequirement `json:"freshness"`
+}
+
+type RetrievalPlanMode string
+
+const (
+	RetrievalPlanNone      RetrievalPlanMode = "none"
+	RetrievalPlanKBOnly    RetrievalPlanMode = "kb_only"
+	RetrievalPlanWebOnly   RetrievalPlanMode = "web_only"
+	RetrievalPlanKBThenWeb RetrievalPlanMode = "kb_then_web"
+	RetrievalPlanParallel  RetrievalPlanMode = "parallel"
+)
+
+type RetrievalPlan struct {
+	Mode       RetrievalPlanMode `json:"mode"`
+	ReasonCode string            `json:"reason_code,omitempty"`
+}
+
+func (p RetrievalPlan) NeedsRetrieval() bool {
+	// An unresolved zero-value plan remains retrieval-safe until the planner runs.
+	return p.Mode == "" || p.Mode != RetrievalPlanNone
+}
+
+func (p RetrievalPlan) UsesKB() bool {
+	return p.Mode == "" || p.Mode == RetrievalPlanKBOnly || p.Mode == RetrievalPlanKBThenWeb || p.Mode == RetrievalPlanParallel
+}
+
+func (p RetrievalPlan) UsesWeb() bool {
+	return p.Mode == RetrievalPlanWebOnly || p.Mode == RetrievalPlanKBThenWeb || p.Mode == RetrievalPlanParallel
 }
 
 // PipelineState holds mutable intermediate data that plugins read and write
 // as the pipeline progresses.
 type PipelineState struct {
-	RewriteQuery string      `json:"rewrite_query,omitempty"`
-	Intent       QueryIntent `json:"intent,omitempty"`
-	History      []*History  `json:"history,omitempty"`
+	RewriteQuery  string             `json:"rewrite_query,omitempty"`
+	Understanding QueryUnderstanding `json:"understanding,omitempty"`
+	RetrievalPlan RetrievalPlan      `json:"retrieval_plan,omitempty"`
+	History       []*History         `json:"history,omitempty"`
 
-	SearchResult         []*SearchResult   `json:"-"`
-	RerankResult         []*SearchResult   `json:"-"`
-	MergeResult          []*SearchResult   `json:"-"`
-	Entity               []string          `json:"-"`
-	EntityKBIDs          []string          `json:"-"`
-	EntityKnowledge      map[string]string `json:"-"`
-	GraphResult          *GraphData        `json:"-"`
-	UserContent          string            `json:"-"`
-	RenderedContexts     string            `json:"-"`
-	ChatResponse         *ChatResponse     `json:"-"`
-	ImageDescription     string            `json:"-"`
-	QuotedContext        string            `json:"-"` // Quoted message text, injected at LLM prompt stage
-	SystemPromptOverride string            `json:"-"`
+	SearchResult          []*SearchResult   `json:"-"`
+	RerankResult          []*SearchResult   `json:"-"`
+	MergeResult           []*SearchResult   `json:"-"`
+	Entity                []string          `json:"-"`
+	EntityKBIDs           []string          `json:"-"`
+	EntityKnowledge       map[string]string `json:"-"`
+	GraphResult           *GraphData        `json:"-"`
+	UserContent           string            `json:"-"`
+	RenderedContexts      string            `json:"-"`
+	ChatResponse          *ChatResponse     `json:"-"`
+	ImageDescription      string            `json:"-"`
+	QuotedContext         string            `json:"-"` // Quoted message text, injected at LLM prompt stage
+	ManagedResponsePrompt string            `json:"-"`
 }
 
 // PipelineContext holds runtime context for the current pipeline execution.
@@ -146,15 +194,9 @@ type ChatManage struct {
 	PipelineContext
 }
 
-// NeedsRetrieval returns true when the current pipeline execution should
-// run the retrieval stages (search, rerank, merge, etc.).
-// For IntentWebSearch, retrieval is only needed if web search is enabled;
-// for all other intents it delegates to QueryIntent.NeedsKBRetrieval().
+// NeedsRetrieval is the single runtime gate for retrieval stages.
 func (c *ChatManage) NeedsRetrieval() bool {
-	if c.Intent == IntentWebSearch {
-		return c.WebSearchEnabled
-	}
-	return c.Intent.NeedsKBRetrieval()
+	return c.RetrievalPlan.NeedsRetrieval()
 }
 
 // Clone creates a deep copy of the ChatManage object.
@@ -235,23 +277,25 @@ func (c *ChatManage) Clone() *ChatManage {
 			Attachments:              append(MessageAttachments(nil), c.Attachments...),
 			TenantID:                 c.TenantID,
 			WebSearchEnabled:         c.WebSearchEnabled,
+			WebSearchMode:            c.WebSearchMode,
 			WebSearchProviderID:      c.WebSearchProviderID,
 			WebSearchMaxResults:      c.WebSearchMaxResults,
 			WebFetchEnabled:          c.WebFetchEnabled,
 			WebFetchTopN:             c.WebFetchTopN,
 			Language:                 c.Language,
-			IntentPromptOverrides:    maps.Clone(c.IntentPromptOverrides),
+			UserInstructions:         c.UserInstructions,
 		},
 		PipelineState: PipelineState{
-			RewriteQuery:         c.RewriteQuery,
-			Intent:               c.Intent,
-			ImageDescription:     c.ImageDescription,
-			QuotedContext:        c.QuotedContext,
-			SystemPromptOverride: c.SystemPromptOverride,
-			RenderedContexts:     c.RenderedContexts,
-			Entity:               entity,
-			EntityKBIDs:          entityKBIDs,
-			EntityKnowledge:      entityKnowledge,
+			RewriteQuery:          c.RewriteQuery,
+			Understanding:         c.Understanding,
+			RetrievalPlan:         c.RetrievalPlan,
+			ImageDescription:      c.ImageDescription,
+			QuotedContext:         c.QuotedContext,
+			ManagedResponsePrompt: c.ManagedResponsePrompt,
+			RenderedContexts:      c.RenderedContexts,
+			Entity:                entity,
+			EntityKBIDs:           entityKBIDs,
+			EntityKnowledge:       entityKnowledge,
 		},
 	}
 }

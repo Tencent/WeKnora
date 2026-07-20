@@ -124,9 +124,9 @@ type ConversationConfig struct {
 	ExtractRelationshipsPrompt string `yaml:"-" json:"extract_relationships_prompt"`
 	GenerateQuestionsPrompt    string `yaml:"-" json:"generate_questions_prompt"`
 
-	// IntentSystemPrompts maps intent values (e.g. "greeting", "chitchat") to
-	// system prompt text. Populated by backfill from IntentPrompts templates.
-	IntentSystemPrompts map[string]string `yaml:"-" json:"-"`
+	// ResponseModePrompts contains managed prompts for non-retrieval response
+	// modes and unavailable-source routing outcomes.
+	ResponseModePrompts map[string]string `yaml:"-" json:"-"`
 }
 
 // SummaryConfig 摘要配置
@@ -352,9 +352,9 @@ type PromptTemplate struct {
 type PromptTemplatesConfig struct {
 	SystemPrompt    []PromptTemplate `yaml:"system_prompt"    json:"system_prompt"`
 	ContextTemplate []PromptTemplate `yaml:"context_template" json:"context_template"`
-	// Rewrite 合并了前端可选模板和运行时默认模板，每个模板同时包含 content + user
+	// Rewrite contains system-managed query-rewrite protocol templates.
 	Rewrite []PromptTemplate `yaml:"rewrite" json:"rewrite"`
-	// Fallback 合并了固定回复模板和模型兜底 prompt（通过 mode:"model" 区分）
+	// Fallback contains fixed response defaults and managed model-fallback prompts.
 	Fallback []PromptTemplate `yaml:"fallback" json:"fallback"`
 
 	GenerateSessionTitle []PromptTemplate `yaml:"generate_session_title" json:"generate_session_title,omitempty"`
@@ -363,8 +363,7 @@ type PromptTemplatesConfig struct {
 	AgentSystemPrompt    []PromptTemplate `yaml:"agent_system_prompt"    json:"agent_system_prompt,omitempty"`
 	GraphExtraction      []PromptTemplate `yaml:"graph_extraction"       json:"graph_extraction,omitempty"`
 	GenerateQuestions    []PromptTemplate `yaml:"generate_questions"     json:"generate_questions,omitempty"`
-	// IntentPrompts holds per-intent system prompt overrides (template ID = intent value).
-	IntentPrompts []PromptTemplate `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
+	ResponseModePrompts  []PromptTemplate `yaml:"response_mode_prompts" json:"response_mode_prompts,omitempty"`
 }
 
 // DefaultTemplate returns the first template marked as default in the list,
@@ -394,42 +393,6 @@ func DefaultTemplateByMode(templates []PromptTemplate, mode string) *PromptTempl
 		}
 	}
 	return DefaultTemplate(templates)
-}
-
-// LocalizeTemplates returns a deep copy of the template list with Name and
-// Description replaced according to the given locale.  Fallback chain:
-//
-//	locale → primary language (e.g. "zh" from "zh-CN") → original Name/Description.
-//
-// The returned slice is safe to serialise directly; it never mutates the original.
-func LocalizeTemplates(templates []PromptTemplate, locale string) []PromptTemplate {
-	if len(templates) == 0 {
-		return templates
-	}
-	out := make([]PromptTemplate, len(templates))
-	copy(out, templates)
-	for i := range out {
-		if len(out[i].I18n) == 0 {
-			continue
-		}
-		// Try exact match first (e.g. "zh-CN"), then primary subtag (e.g. "zh")
-		l10n, ok := out[i].I18n[locale]
-		if !ok {
-			if idx := strings.IndexByte(locale, '-'); idx > 0 {
-				l10n, ok = out[i].I18n[locale[:idx]]
-			}
-		}
-		if !ok {
-			continue
-		}
-		if l10n.Name != "" {
-			out[i].Name = l10n.Name
-		}
-		if l10n.Description != "" {
-			out[i].Description = l10n.Description
-		}
-	}
-	return out
 }
 
 // ModelConfig 模型配置
@@ -568,8 +531,8 @@ func LoadConfig() (*Config, error) {
 	if cfg.PromptTemplates != nil {
 		resolveBuiltinAgentPromptIDs(cfg.PromptTemplates)
 		// Validate that every preset references an existing prompt template.
-		types.ResolveAgentTypePresetPromptRefs(func(id string) string {
-			if t := FindTemplateByID(cfg.PromptTemplates, id); t != nil {
+		types.ValidateAgentTypePresetPromptRefs(func(id string) string {
+			if t := FindPromptTemplateByID(cfg.PromptTemplates.AgentSystemPrompt, id); t != nil {
 				return t.Content
 			}
 			return ""
@@ -925,14 +888,14 @@ func backfillConversationDefaults(cfg *Config) {
 	conv := cfg.Conversation
 
 	if conv.FallbackPromptID != "" {
-		if t := FindTemplateByID(pt, conv.FallbackPromptID); t != nil {
+		if t := FindPromptTemplateByID(pt.Fallback, conv.FallbackPromptID); t != nil {
 			conv.FallbackPrompt = t.Content
 		} else {
 			fmt.Printf("Warning: fallback_prompt_id %q not found\n", conv.FallbackPromptID)
 		}
 	}
 	if conv.RewritePromptID != "" {
-		if t := FindTemplateByID(pt, conv.RewritePromptID); t != nil {
+		if t := FindPromptTemplateByID(pt.Rewrite, conv.RewritePromptID); t != nil {
 			conv.RewritePromptSystem = t.Content
 			conv.RewritePromptUser = t.User
 		} else {
@@ -940,35 +903,35 @@ func backfillConversationDefaults(cfg *Config) {
 		}
 	}
 	if conv.GenerateSessionTitlePromptID != "" {
-		if t := FindTemplateByID(pt, conv.GenerateSessionTitlePromptID); t != nil {
+		if t := FindPromptTemplateByID(pt.GenerateSessionTitle, conv.GenerateSessionTitlePromptID); t != nil {
 			conv.GenerateSessionTitlePrompt = t.Content
 		} else {
 			fmt.Printf("Warning: generate_session_title_prompt_id %q not found\n", conv.GenerateSessionTitlePromptID)
 		}
 	}
 	if conv.GenerateSummaryPromptID != "" {
-		if t := FindTemplateByID(pt, conv.GenerateSummaryPromptID); t != nil {
+		if t := FindPromptTemplateByID(pt.GenerateSummary, conv.GenerateSummaryPromptID); t != nil {
 			conv.GenerateSummaryPrompt = t.Content
 		} else {
 			fmt.Printf("Warning: generate_summary_prompt_id %q not found\n", conv.GenerateSummaryPromptID)
 		}
 	}
 	if conv.ExtractEntitiesPromptID != "" {
-		if t := FindTemplateByID(pt, conv.ExtractEntitiesPromptID); t != nil {
+		if t := FindPromptTemplateByID(pt.GraphExtraction, conv.ExtractEntitiesPromptID); t != nil {
 			conv.ExtractEntitiesPrompt = t.Content
 		} else {
 			fmt.Printf("Warning: extract_entities_prompt_id %q not found\n", conv.ExtractEntitiesPromptID)
 		}
 	}
 	if conv.ExtractRelationshipsPromptID != "" {
-		if t := FindTemplateByID(pt, conv.ExtractRelationshipsPromptID); t != nil {
+		if t := FindPromptTemplateByID(pt.GraphExtraction, conv.ExtractRelationshipsPromptID); t != nil {
 			conv.ExtractRelationshipsPrompt = t.Content
 		} else {
 			fmt.Printf("Warning: extract_relationships_prompt_id %q not found\n", conv.ExtractRelationshipsPromptID)
 		}
 	}
 	if conv.GenerateQuestionsPromptID != "" {
-		if t := FindTemplateByID(pt, conv.GenerateQuestionsPromptID); t != nil {
+		if t := FindPromptTemplateByID(pt.GenerateQuestions, conv.GenerateQuestionsPromptID); t != nil {
 			conv.GenerateQuestionsPrompt = t.Content
 		} else {
 			fmt.Printf("Warning: generate_questions_prompt_id %q not found\n", conv.GenerateQuestionsPromptID)
@@ -976,14 +939,14 @@ func backfillConversationDefaults(cfg *Config) {
 	}
 	if conv.Summary != nil {
 		if conv.Summary.PromptID != "" {
-			if t := FindTemplateByID(pt, conv.Summary.PromptID); t != nil {
+			if t := FindPromptTemplateByID(pt.SystemPrompt, conv.Summary.PromptID); t != nil {
 				conv.Summary.Prompt = t.Content
 			} else {
 				fmt.Printf("Warning: summary.prompt_id %q not found\n", conv.Summary.PromptID)
 			}
 		}
 		if conv.Summary.ContextTemplateID != "" {
-			if t := FindTemplateByID(pt, conv.Summary.ContextTemplateID); t != nil {
+			if t := FindPromptTemplateByID(pt.ContextTemplate, conv.Summary.ContextTemplateID); t != nil {
 				conv.Summary.ContextTemplate = t.Content
 			} else {
 				fmt.Printf("Warning: summary.context_template_id %q not found\n", conv.Summary.ContextTemplateID)
@@ -991,53 +954,46 @@ func backfillConversationDefaults(cfg *Config) {
 		}
 	}
 
-	// Build intent→system-prompt map from IntentPrompts templates.
-	// Template ID must equal the QueryIntent string value (e.g. "greeting").
-	if len(pt.IntentPrompts) > 0 {
-		conv.IntentSystemPrompts = make(map[string]string, len(pt.IntentPrompts))
-		for _, t := range pt.IntentPrompts {
+	// Build the response-mode/routing-outcome prompt map from the managed catalog.
+	if len(pt.ResponseModePrompts) > 0 {
+		conv.ResponseModePrompts = make(map[string]string, len(pt.ResponseModePrompts))
+		for _, t := range pt.ResponseModePrompts {
 			if t.ID != "" && t.Content != "" {
-				conv.IntentSystemPrompts[t.ID] = t.Content
+				conv.ResponseModePrompts[t.ID] = t.Content
 			}
 		}
 	}
 }
 
-// FindTemplateByID searches across all template lists for a template with the given ID.
-// It returns the template if found, or nil otherwise.
-func FindTemplateByID(pt *PromptTemplatesConfig, id string) *PromptTemplate {
-	if pt == nil || id == "" {
+// FindPromptTemplateByID searches one managed prompt surface. Runtime callers
+// use it so a reference cannot cross from an agent protocol into a rewrite,
+// fallback, or other prompt catalog.
+func FindPromptTemplateByID(templates []PromptTemplate, id string) *PromptTemplate {
+	if id == "" {
 		return nil
 	}
-	// Search all template collections
-	for _, list := range [][]PromptTemplate{
-		pt.SystemPrompt,
-		pt.ContextTemplate,
-		pt.Rewrite,
-		pt.Fallback,
-		pt.GenerateSessionTitle,
-		pt.GenerateSummary,
-		pt.KeywordsExtraction,
-		pt.AgentSystemPrompt,
-		pt.GraphExtraction,
-		pt.GenerateQuestions,
-		pt.IntentPrompts,
-	} {
-		for i := range list {
-			if list[i].ID == id {
-				return &list[i]
-			}
+	for i := range templates {
+		if templates[i].ID == id {
+			return &templates[i]
 		}
 	}
 	return nil
 }
 
-// resolveBuiltinAgentPromptIDs resolves system_prompt_id and context_template_id
-// references in builtin agent configs by looking up the actual content from
-// prompt template YAML files.
+// resolveBuiltinAgentPromptIDs validates managed prompt references. Protocol
+// text stays in the template registry and is resolved only at runtime.
 func resolveBuiltinAgentPromptIDs(pt *PromptTemplatesConfig) {
-	types.ResolveBuiltinAgentPromptRefs(func(id string) string {
-		if t := FindTemplateByID(pt, id); t != nil {
+	types.ValidateBuiltinAgentPromptRefs(func(agentMode, id string) string {
+		templates := pt.SystemPrompt
+		if agentMode == types.AgentModeSmartReasoning {
+			templates = pt.AgentSystemPrompt
+		}
+		if t := FindPromptTemplateByID(templates, id); t != nil {
+			return t.Content
+		}
+		return ""
+	}, func(id string) string {
+		if t := FindPromptTemplateByID(pt.ContextTemplate, id); t != nil {
 			return t.Content
 		}
 		return ""
@@ -1072,7 +1028,7 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 		"agent_system_prompt.yaml":    &config.AgentSystemPrompt,
 		"graph_extraction.yaml":       &config.GraphExtraction,
 		"generate_questions.yaml":     &config.GenerateQuestions,
-		"intent_prompts.yaml":         &config.IntentPrompts,
+		"response_mode_prompts.yaml":  &config.ResponseModePrompts,
 	}
 
 	// 加载每个模板文件

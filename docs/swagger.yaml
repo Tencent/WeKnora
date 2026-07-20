@@ -580,7 +580,7 @@ definitions:
       agent_type:
         description: |-
           AgentType is a preset category under smart-reasoning mode that pre-fills
-          system prompt, allowed tools and recommended KB compatibility.
+          managed prompt reference, allowed tools and recommended KB compatibility.
           Valid values: "rag-qa", "wiki-qa", "hybrid-rag-wiki", "custom".
           Empty / unknown values are treated as "custom" (no preset applied).
           Ignored for quick-answer mode.
@@ -633,13 +633,8 @@ definitions:
           Whether final answers include knowledge/web source citations. Nil defaults to true
           so agents saved before this option was introduced keep their existing behavior.
         type: boolean
-      context_template:
-        description: Context template for normal mode (how to format retrieved chunks)
-        type: string
       context_template_id:
-        description: |-
-          ContextTemplateID references a template ID in prompt_templates/ YAML files.
-          If set and ContextTemplate is empty, the template content will be resolved at startup.
+        description: ContextTemplateID references a managed context envelope.
         type: string
       data_analysis_enabled:
         description: |-
@@ -662,9 +657,6 @@ definitions:
       enable_rewrite:
         description: Whether to enable query rewrite for multi-turn conversations
         type: boolean
-      fallback_prompt:
-        description: Fallback prompt (when FallbackStrategy is "model")
-        type: string
       fallback_response:
         description: Fixed fallback response (when FallbackStrategy is "fixed")
         type: string
@@ -698,14 +690,6 @@ definitions:
           ===== Image Upload / Multimodal Settings =====
           Whether image upload is enabled for this agent (default: false)
         type: boolean
-      intent_prompts:
-        additionalProperties:
-          type: string
-        description: |-
-          IntentPrompts holds per-intent system prompt overrides for non-retrieval
-          intents (greeting, chitchat, etc.). Empty values fall back to templates
-          under config/prompt_templates/intent_prompts.yaml.
-        type: object
       kb_selection_mode:
         description: |-
           ===== Knowledge Base Settings =====
@@ -756,9 +740,14 @@ definitions:
           ===== Multi-turn Conversation Settings =====
           Whether multi-turn conversation is enabled
         type: boolean
+      prompt_protocol_version:
+        description: |-
+          PromptProtocolVersion identifies the system-managed prompt contract used
+          by this agent. It is normalized to CurrentAgentPromptProtocolVersion.
+        type: integer
       query_understand_model_id:
         description: |-
-          Dedicated chat model ID for the query-understanding (rewrite + intent) step.
+          Dedicated chat model ID for the query-understanding and retrieval-routing step.
           When empty, the main conversation ModelID is used as a fallback.
         type: string
       question_suggestions:
@@ -787,12 +776,6 @@ definitions:
           When true, knowledge base retrieval only happens if user explicitly mentions KB/files with @
           When false, knowledge base retrieval happens according to KBSelectionMode
         type: boolean
-      rewrite_prompt_system:
-        description: Rewrite prompt system message
-        type: string
-      rewrite_prompt_user:
-        description: Rewrite prompt user message template
-        type: string
       selected_skills:
         description: Selected skill names (only used when SkillsSelectionMode is "selected")
         items:
@@ -812,14 +795,10 @@ definitions:
         items:
           type: string
         type: array
-      system_prompt:
-        description: System prompt for the agent (unified prompt, uses web_search_status
-          placeholder for dynamic behavior)
-        type: string
       system_prompt_id:
         description: |-
-          SystemPromptID references a template ID in prompt_templates/ YAML files.
-          If set and SystemPrompt is empty, the template content will be resolved at startup.
+          SystemPromptID references a managed template in prompt_templates/.
+          Users do not edit the referenced protocol text directly.
         type: string
       temperature:
         description: Temperature for LLM (0-1)
@@ -828,6 +807,12 @@ definitions:
         description: Whether to enable thinking mode (for models that support extended
           thinking)
         type: boolean
+      user_instructions:
+        description: |-
+          UserInstructions contains agent-specific role, tone, and business rules.
+          Runtime protocols, tool rules, retrieval routing, and output schemas are
+          system-managed and are never replaced by this field.
+        type: string
       vector_threshold:
         description: Vector retrieval threshold
         type: number
@@ -844,12 +829,19 @@ definitions:
         type: integer
       web_search_enabled:
         description: |-
-          ===== Web Search Settings =====
-          Whether web search is enabled
+          WebSearchEnabled is retained as a wire/storage compatibility capability
+          flag. New routing code must use EffectiveWebSearchMode.
         type: boolean
       web_search_max_results:
         description: Maximum web search results
         type: integer
+      web_search_mode:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchMode'
+        description: |-
+          ===== Web Search Settings =====
+          WebSearchMode is the authoritative quick-answer routing policy:
+          off, on_demand, or always. Empty falls back to the legacy boolean.
       web_search_provider_id:
         description: |-
           WebSearchProviderID references a specific WebSearchProviderEntity.
@@ -3747,6 +3739,16 @@ definitions:
         description: 重排模型ID（用于RAG压缩）
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.WebSearchMode:
+    enum:
+    - "off"
+    - on_demand
+    - always
+    type: string
+    x-enum-varnames:
+    - WebSearchModeOff
+    - WebSearchModeOnDemand
+    - WebSearchModeAlways
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity:
     properties:
       created_at:
@@ -6017,30 +6019,11 @@ paths:
       summary: 获取推荐问题
       tags:
       - 智能体
-  /agents/placeholders:
-    get:
-      consumes:
-      - application/json
-      description: 获取所有可用的提示词占位符定义，按字段类型分组
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 占位符定义
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 获取占位符定义
-      tags:
-      - 智能体
   /agents/type-presets:
     get:
       consumes:
       - application/json
-      description: 返回所有 smart-reasoning 下可用的智能体类型预设（RAG/Wiki/Hybrid/Custom），用于编辑器自动填充系统提示词、工具和
+      description: 返回所有 smart-reasoning 下可用的智能体类型预设（RAG/Wiki/Hybrid/Custom），用于选择受管协议、工具和
         KB 兼容性
       produces:
       - application/json
@@ -14080,7 +14063,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取空间级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
+      description: 获取空间级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
       parameters:
       - description: 配置键名
         in: path
@@ -14137,29 +14120,6 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 更新空间KV配置
-      tags:
-      - 空间管理
-  /tenants/kv/prompt-templates:
-    get:
-      consumes:
-      - application/json
-      description: 获取系统配置的提示词模板列表
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 提示词模板配置
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 获取提示词模板
       tags:
       - 空间管理
   /tenants/kv/web-search-config:

@@ -73,9 +73,9 @@ func AllKBSelectionModes() []KBSelectionMode {
 type AgentConfig struct {
 	AgentMode                   string                    `json:"agent_mode"`
 	AgentType                   string                    `json:"agent_type,omitempty"`
-	SystemPrompt                string                    `json:"system_prompt"`
+	UserInstructions            string                    `json:"user_instructions,omitempty"`
+	PromptProtocolVersion       int                       `json:"prompt_protocol_version"`
 	SystemPromptID              string                    `json:"system_prompt_id,omitempty"`
-	ContextTemplate             string                    `json:"context_template"`
 	ContextTemplateID           string                    `json:"context_template_id,omitempty"`
 	ModelID                     string                    `json:"model_id"`
 	RerankModelID               string                    `json:"rerank_model_id"`
@@ -104,6 +104,7 @@ type AgentConfig struct {
 	FAQPriorityEnabled          bool                      `json:"faq_priority_enabled"`
 	FAQDirectAnswerThreshold    float64                   `json:"faq_direct_answer_threshold"`
 	FAQScoreBoost               float64                   `json:"faq_score_boost"`
+	WebSearchMode               string                    `json:"web_search_mode,omitempty"`
 	WebSearchEnabled            bool                      `json:"web_search_enabled"`
 	WebSearchMaxResults         int                       `json:"web_search_max_results"`
 	WebSearchProviderID         string                    `json:"web_search_provider_id,omitempty"`
@@ -118,12 +119,9 @@ type AgentConfig struct {
 	RerankThreshold             float64                   `json:"rerank_threshold"`
 	EnableQueryExpansion        bool                      `json:"enable_query_expansion"`
 	EnableRewrite               bool                      `json:"enable_rewrite"`
-	RewritePromptSystem         string                    `json:"rewrite_prompt_system"`
-	RewritePromptUser           string                    `json:"rewrite_prompt_user"`
 	QueryUnderstandModelID      string                    `json:"query_understand_model_id,omitempty"`
 	FallbackStrategy            string                    `json:"fallback_strategy"`
 	FallbackResponse            string                    `json:"fallback_response"`
-	FallbackPrompt              string                    `json:"fallback_prompt"`
 	QuestionSuggestions         *QuestionSuggestionConfig `json:"question_suggestions,omitempty"`
 }
 
@@ -181,12 +179,6 @@ type AgentResponse struct {
 type AgentListResponse struct {
 	Success bool    `json:"success"`
 	Data    []Agent `json:"data"`
-}
-
-// AgentPlaceholdersResponse represents the API response for placeholder definitions
-type AgentPlaceholdersResponse struct {
-	Success bool                       `json:"success"`
-	Data    map[string]json.RawMessage `json:"data"`
 }
 
 // CreateAgent creates a new custom agent
@@ -281,21 +273,6 @@ func (c *Client) CopyAgent(ctx context.Context, agentID string) (*Agent, error) 
 	}
 
 	return &response.Data, nil
-}
-
-// GetAgentPlaceholders retrieves all available prompt placeholder definitions
-func (c *Client) GetAgentPlaceholders(ctx context.Context) (map[string]json.RawMessage, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/agents/placeholders", nil, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response AgentPlaceholdersResponse
-	if err := parseResponse(resp, &response); err != nil {
-		return nil, err
-	}
-
-	return response.Data, nil
 }
 
 // SuggestedQuestion represents a suggested question for an agent

@@ -180,11 +180,8 @@ func (s *agentService) CreateAgentEngine(
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
 
-	// 4. Resolve system prompt template
-	systemPromptTemplate := ""
-	if config.UseCustomSystemPrompt || config.SystemPrompt != "" {
-		systemPromptTemplate = config.ResolveSystemPrompt(config.WebSearchEnabled)
-	}
+	// 4. Resolve the managed protocol selected by the custom-agent definition.
+	systemPromptTemplate := config.ManagedSystemPrompt
 
 	// 5. Create engine
 	engine := agent.NewAgentEngine(

@@ -39,11 +39,11 @@ const (
 )
 
 // AgentType constants for Smart-Reasoning agent presets.
-// These presets bundle a recommended system prompt template,
+// These presets bundle a recommended managed prompt template,
 // tool allowlist, KB compatibility hint, and other defaults so users
 // don't have to configure everything from scratch.
-// AgentTypeCustom means the user wants full control and we won't
-// auto-fill anything based on the preset.
+// AgentTypeCustom means no preset defaults are applied. The prompt protocol
+// remains system-managed in every type.
 const (
 	// AgentTypeRAGQA prefers vector/keyword chunk retrieval on document KBs.
 	AgentTypeRAGQA = "rag-qa"
@@ -98,20 +98,22 @@ type CustomAgentConfig struct {
 	// Agent mode: "quick-answer" for RAG mode, "smart-reasoning" for ReAct agent mode
 	AgentMode string `yaml:"agent_mode" json:"agent_mode"`
 	// AgentType is a preset category under smart-reasoning mode that pre-fills
-	// system prompt, allowed tools and recommended KB compatibility.
+	// managed prompt reference, allowed tools and recommended KB compatibility.
 	// Valid values: "rag-qa", "wiki-qa", "hybrid-rag-wiki", "custom".
 	// Empty / unknown values are treated as "custom" (no preset applied).
 	// Ignored for quick-answer mode.
 	AgentType string `yaml:"agent_type" json:"agent_type,omitempty"`
-	// System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)
-	SystemPrompt string `yaml:"system_prompt" json:"system_prompt"`
-	// SystemPromptID references a template ID in prompt_templates/ YAML files.
-	// If set and SystemPrompt is empty, the template content will be resolved at startup.
+	// UserInstructions contains agent-specific role, tone, and business rules.
+	// Runtime protocols, tool rules, retrieval routing, and output schemas are
+	// system-managed and are never replaced by this field.
+	UserInstructions string `yaml:"user_instructions" json:"user_instructions,omitempty"`
+	// PromptProtocolVersion identifies the system-managed prompt contract used
+	// by this agent. It is normalized to CurrentAgentPromptProtocolVersion.
+	PromptProtocolVersion int `yaml:"prompt_protocol_version" json:"prompt_protocol_version"`
+	// SystemPromptID references a managed template in prompt_templates/.
+	// Users do not edit the referenced protocol text directly.
 	SystemPromptID string `yaml:"system_prompt_id" json:"system_prompt_id,omitempty"`
-	// Context template for normal mode (how to format retrieved chunks)
-	ContextTemplate string `yaml:"context_template" json:"context_template"`
-	// ContextTemplateID references a template ID in prompt_templates/ YAML files.
-	// If set and ContextTemplate is empty, the template content will be resolved at startup.
+	// ContextTemplateID references a managed context envelope.
 	ContextTemplateID string `yaml:"context_template_id" json:"context_template_id,omitempty"`
 
 	// ===== Model Settings =====
@@ -219,7 +221,11 @@ type CustomAgentConfig struct {
 	FAQScoreBoost float64 `yaml:"faq_score_boost" json:"faq_score_boost"`
 
 	// ===== Web Search Settings =====
-	// Whether web search is enabled
+	// WebSearchMode is the authoritative quick-answer routing policy:
+	// off, on_demand, or always. Empty falls back to the legacy boolean.
+	WebSearchMode WebSearchMode `yaml:"web_search_mode" json:"web_search_mode,omitempty"`
+	// WebSearchEnabled is retained as a wire/storage compatibility capability
+	// flag. New routing code must use EffectiveWebSearchMode.
 	WebSearchEnabled bool `yaml:"web_search_enabled" json:"web_search_enabled"`
 	// Maximum web search results
 	WebSearchMaxResults int `yaml:"web_search_max_results" json:"web_search_max_results"`
@@ -254,29 +260,39 @@ type CustomAgentConfig struct {
 	EnableQueryExpansion bool `yaml:"enable_query_expansion" json:"enable_query_expansion"`
 	// Whether to enable query rewrite for multi-turn conversations
 	EnableRewrite bool `yaml:"enable_rewrite" json:"enable_rewrite"`
-	// Rewrite prompt system message
-	RewritePromptSystem string `yaml:"rewrite_prompt_system" json:"rewrite_prompt_system"`
-	// Rewrite prompt user message template
-	RewritePromptUser string `yaml:"rewrite_prompt_user" json:"rewrite_prompt_user"`
-	// Dedicated chat model ID for the query-understanding (rewrite + intent) step.
+	// Dedicated chat model ID for the query-understanding and retrieval-routing step.
 	// When empty, the main conversation ModelID is used as a fallback.
 	QueryUnderstandModelID string `yaml:"query_understand_model_id" json:"query_understand_model_id,omitempty"`
 	// Fallback strategy: "fixed" for fixed response, "model" for model generation
 	FallbackStrategy string `yaml:"fallback_strategy" json:"fallback_strategy"`
 	// Fixed fallback response (when FallbackStrategy is "fixed")
 	FallbackResponse string `yaml:"fallback_response" json:"fallback_response"`
-	// Fallback prompt (when FallbackStrategy is "model")
-	FallbackPrompt string `yaml:"fallback_prompt" json:"fallback_prompt"`
-	// IntentPrompts holds per-intent system prompt overrides for non-retrieval
-	// intents (greeting, chitchat, etc.). Empty values fall back to templates
-	// under config/prompt_templates/intent_prompts.yaml.
-	IntentPrompts map[string]string `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
 
 	// ===== Conversation Question Suggestions =====
 	// QuestionSuggestions owns both the static/knowledge-backed prompts shown
 	// before the first user turn and the contextual follow-up questions shown
 	// after a completed assistant answer.
 	QuestionSuggestions *QuestionSuggestionConfig `yaml:"question_suggestions,omitempty" json:"question_suggestions,omitempty"`
+}
+
+type WebSearchMode string
+
+const (
+	WebSearchModeOff      WebSearchMode = "off"
+	WebSearchModeOnDemand WebSearchMode = "on_demand"
+	WebSearchModeAlways   WebSearchMode = "always"
+)
+
+func (c CustomAgentConfig) EffectiveWebSearchMode() WebSearchMode {
+	switch c.WebSearchMode {
+	case WebSearchModeOff, WebSearchModeOnDemand, WebSearchModeAlways:
+		return c.WebSearchMode
+	default:
+		if c.WebSearchEnabled {
+			return WebSearchModeOnDemand
+		}
+		return WebSearchModeOff
+	}
 }
 
 const (
@@ -402,6 +418,21 @@ func oneOf(value string, allowed ...string) bool {
 	return false
 }
 
+// Validate checks user-authored agent policy fields. Protocol templates are
+// not part of this contract and are validated separately at application boot.
+func (c *CustomAgentConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if len([]rune(c.UserInstructions)) > MaxCustomPromptInstructionsLength {
+		return fmt.Errorf("user instructions exceeds %d characters", MaxCustomPromptInstructionsLength)
+	}
+	if c.QuestionSuggestions != nil {
+		return c.QuestionSuggestions.Validate()
+	}
+	return nil
+}
+
 // ResolveChatParserEngine returns the agent-configured parser engine for a
 // chat attachment file type, or "" when no rule matches. Mirrors the tenant
 // resolver in ParserEngineConfig.ResolveChatParserEngine.
@@ -452,6 +483,13 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a == nil {
 		return
 	}
+	// Normalize the legacy capability flag and the authoritative routing mode.
+	// Existing enabled agents migrate to on-demand rather than unconditional
+	// mixed-source retrieval.
+	a.Config.WebSearchMode = a.Config.EffectiveWebSearchMode()
+	a.Config.WebSearchEnabled = a.Config.WebSearchMode != WebSearchModeOff
+	a.Config.UserInstructions = strings.TrimSpace(a.Config.UserInstructions)
+	a.Config.PromptProtocolVersion = CurrentAgentPromptProtocolVersion
 	if a.Config.QuestionSuggestions == nil {
 		a.Config.QuestionSuggestions = &QuestionSuggestionConfig{
 			Starters: StarterSuggestionConfig{

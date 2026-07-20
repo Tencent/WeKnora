@@ -61,7 +61,7 @@ func TestAgentViewFields_TopLevelOnly(t *testing.T) {
 			t.Errorf("agentViewFields missing top-level key %q", want)
 		}
 	}
-	for _, dotted := range []string{"config.system_prompt", "config.model_id", "config.fallback_strategy"} {
+	for _, dotted := range []string{"config.user_instructions", "config.model_id", "config.fallback_strategy"} {
 		if slices.Contains(agentViewFields, dotted) {
 			t.Errorf("agentViewFields must not list dotted nested key %q (the --jq projection path handles nesting directly)", dotted)
 		}
@@ -77,22 +77,23 @@ func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 		ID:   "ag_abc",
 		Name: "Test",
 		Config: &sdk.AgentConfig{
-			AgentMode:          "smart-reasoning",
-			SystemPrompt:       "You help users.",
-			ModelID:            "model-x",
-			Temperature:        0.7,
-			KBSelectionMode:    "selected",
-			KnowledgeBases:     []string{"kb_a"},
-			FAQPriorityEnabled: true,
-			WebSearchEnabled:   false, // zero — omitted in text
-			FallbackStrategy:   "fixed",
-			FallbackResponse:   "I don't know.",
+			AgentMode:             "smart-reasoning",
+			UserInstructions:      "You help users.",
+			PromptProtocolVersion: 2,
+			ModelID:               "model-x",
+			Temperature:           0.7,
+			KBSelectionMode:       "selected",
+			KnowledgeBases:        []string{"kb_a"},
+			FAQPriorityEnabled:    true,
+			WebSearchEnabled:      false, // zero — omitted in text
+			FallbackStrategy:      "fixed",
+			FallbackResponse:      "I don't know.",
 		},
 	}
 	renderAgent(iostreams.IO.Out, ag)
 	body := out.String()
 	// Group labels appear:
-	for _, label := range []string{"Identity", "LLM", "KB attachment", "FAQ", "Fallback", "Templates"} {
+	for _, label := range []string{"Identity", "LLM", "KB attachment", "FAQ", "Fallback", "Prompt protocol", "User instructions"} {
 		if !strings.Contains(body, label) {
 			t.Errorf("missing group label %q in:\n%s", label, body)
 		}

@@ -101,30 +101,6 @@ type KnowledgeBaseInfo struct {
 	RecentDocs   []RecentDocInfo // Recently added documents (up to 10)
 }
 
-// PlaceholderDefinition defines a placeholder exposed to UI/configuration
-// Deprecated: Use types.PromptPlaceholder instead
-type PlaceholderDefinition struct {
-	Name        string `json:"name"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
-}
-
-// AvailablePlaceholders lists all supported prompt placeholders for UI hints
-// This returns agent mode specific placeholders
-func AvailablePlaceholders() []PlaceholderDefinition {
-	// Use centralized placeholder definitions from types package
-	placeholders := types.PlaceholdersByField(types.PromptFieldAgentSystemPrompt)
-	result := make([]PlaceholderDefinition, len(placeholders))
-	for i, p := range placeholders {
-		result[i] = PlaceholderDefinition{
-			Name:        p.Name,
-			Label:       p.Label,
-			Description: p.Description,
-		}
-	}
-	return result
-}
-
 // formatKnowledgeBaseList formats knowledge base information as XML for the prompt
 func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	if len(kbInfos) == 0 {

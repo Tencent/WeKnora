@@ -319,6 +319,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
+	// Registered before rerank so it wraps the CHUNK_RERANK stage and can decide
+	// the on-demand web fallback based on the rerank outcome.
+	must(container.Invoke(chatpipeline.NewPluginWebFallback))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
 	must(container.Invoke(chatpipeline.NewPluginWebFetch))
 	must(container.Invoke(chatpipeline.NewPluginMerge))

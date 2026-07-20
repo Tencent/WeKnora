@@ -516,10 +516,7 @@ curl --location 'http://localhost:8080/api/v1/tenants' \
 
 | key                    | 说明                          |
 | ---------------------- | ----------------------------- |
-| `agent-config`         | Agent 配置（最大迭代次数、温度、System Prompt、可用工具等） |
 | `web-search-config`    | 网页搜索配置                 |
-| `conversation-config`  | 普通模式会话/对话配置        |
-| `prompt-templates`     | 系统提示词模板（只读，按用户语言本地化） |
 | `parser-engine-config` | 解析引擎配置（如 MinerU）    |
 | `storage-engine-config`| 存储引擎配置（Local/MinIO/COS） |
 | `chat-history-config`  | 聊天历史索引配置             |
@@ -528,27 +525,21 @@ curl --location 'http://localhost:8080/api/v1/tenants' \
 **请求**:
 
 ```curl
-curl --location 'http://localhost:8080/api/v1/tenants/kv/agent-config' \
+curl --location 'http://localhost:8080/api/v1/tenants/kv/retrieval-config' \
 --header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json'
 ```
 
-**响应（以 `agent-config` 为例）**:
+**响应（以 `retrieval-config` 为例）**:
 
 ```json
 {
     "data": {
-        "max_iterations": 10,
-        "allowed_tools": ["knowledge_search", "web_search"],
-        "temperature": 0.3,
-        "system_prompt": "...",
-        "use_custom_system_prompt": false,
-        "available_tools": [
-            { "name": "knowledge_search", "label": "知识库检索", "description": "..." }
-        ],
-        "available_placeholders": [
-            { "name": "web_search_status", "label": "联网搜索状态", "description": "..." }
-        ]
+        "embedding_top_k": 10,
+        "keyword_threshold": 0.3,
+        "vector_threshold": 0.5,
+        "rerank_top_k": 5,
+        "rerank_threshold": 0.5
     },
     "success": true
 }
@@ -562,24 +553,26 @@ curl --location 'http://localhost:8080/api/v1/tenants/kv/agent-config' \
 
 ## PUT `/tenants/kv/:key` - 更新空间 KV 配置
 
-更新当前空间的 KV 配置项。**空间 ID 从认证上下文中获取**，请求体结构按 `key` 不同而异。`prompt-templates` 为只读，不支持 PUT。
+更新当前空间的 KV 配置项。**空间 ID 从认证上下文中获取**，请求体结构按 `key` 不同而异。
 
 **路径参数**:
 
 | 字段 | 类型   | 说明                          |
 | ---- | ------ | ----------------------------- |
-| key  | string | 配置键名（见 GET 接口的支持列表，`prompt-templates` 除外） |
+| key  | string | 配置键名（见 GET 接口的支持列表） |
 
-**请求（以 `agent-config` 为例）**:
+**请求（以 `retrieval-config` 为例）**:
 
 ```curl
-curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/agent-config' \
+curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/retrieval-config' \
 --header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{
-    "max_iterations": 20,
-    "temperature": 0.3,
-    "system_prompt": ""
+    "embedding_top_k": 20,
+    "keyword_threshold": 0.3,
+    "vector_threshold": 0.5,
+    "rerank_top_k": 10,
+    "rerank_threshold": 0.5
 }'
 ```
 
@@ -588,22 +581,20 @@ curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/agent-con
 ```json
 {
     "data": {
-        "max_iterations": 20,
-        "allowed_tools": ["knowledge_search", "web_search"],
-        "temperature": 0.3,
-        "system_prompt": "",
-        "use_custom_system_prompt": false
+        "embedding_top_k": 20,
+        "keyword_threshold": 0.3,
+        "vector_threshold": 0.5,
+        "rerank_top_k": 10,
+        "rerank_threshold": 0.5
     },
-    "message": "Agent configuration updated successfully",
+    "message": "检索配置更新成功",
     "success": true
 }
 ```
 
 **约束**:
 
-- `agent-config`: `max_iterations` 取值范围 `(0, 30]`；`temperature` 取值范围 `[0, 2]`。
 - `web-search-config`: `max_results` 取值范围 `[1, 50]`。
-- `conversation-config`: 包含多项阈值校验（如 `keyword_threshold` / `vector_threshold` ∈ `[0, 1]`，`rerank_threshold` ∈ `[-10, 10]`，`temperature` ∈ `[0, 2]`，`max_completion_tokens` ∈ `[1, 100000]` 等）。
 - `retrieval-config`: `embedding_top_k` / `rerank_top_k` ∈ `[0, 200]`；阈值范围同上。
 - `storage-engine-config`: `default_provider` 必须在 `STORAGE_ALLOW_LIST` 允许的列表内。
 - `chat-history-config`: 启用且设置了 `embedding_model_id` 而尚未关联知识库时，会自动创建一个隐藏知识库并将其 ID 写入配置。

@@ -6,82 +6,98 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-func TestApplyIntentPromptOverride_AgentOverrideWins(t *testing.T) {
-	cm := &types.ChatManage{
-		PipelineRequest: types.PipelineRequest{
-			IntentPromptOverrides: map[string]string{"chitchat": "agent prompt"},
-		},
-		PipelineState: types.PipelineState{Intent: types.IntentChitchat},
+func TestParseStructuredQueryOutput_NewSchema(t *testing.T) {
+	out, ok := parseStructuredQueryOutput(`{"rewrite_query":"最新法规","response_mode":"answer","retrieval_need":"required","source_requirement":"web","freshness":"current","image_description":""}`)
+	if !ok {
+		t.Fatal("expected valid structured output")
 	}
-	global := map[string]string{"chitchat": "global prompt"}
-
-	if !applyIntentPromptOverride(cm, global) {
-		t.Fatal("expected applied=true")
-	}
-	if cm.SystemPromptOverride != "agent prompt" {
-		t.Errorf("override: got %q, want %q", cm.SystemPromptOverride, "agent prompt")
+	if out.ResponseMode != types.ResponseModeAnswer || out.RetrievalNeed != types.RetrievalNeedRequired ||
+		out.SourceRequirement != types.SourceRequirementWeb || out.Freshness != types.FreshnessCurrent {
+		t.Fatalf("unexpected output: %+v", out)
 	}
 }
 
-func TestApplyIntentPromptOverride_PreservesAgentWhitespace(t *testing.T) {
-	// Agent-supplied prompts with surrounding whitespace must reach the model
-	// verbatim; trim is only used for emptiness detection.
-	raw := "  agent prompt with trailing newline\n"
-	cm := &types.ChatManage{
-		PipelineRequest: types.PipelineRequest{
-			IntentPromptOverrides: map[string]string{"chitchat": raw},
-		},
-		PipelineState: types.PipelineState{Intent: types.IntentChitchat},
+func TestParseStructuredQueryOutput_LegacyIntentMigration(t *testing.T) {
+	out, ok := parseStructuredQueryOutput(`{"rewrite_query":"最新新闻","intent":"web_search","image_description":""}`)
+	if !ok {
+		t.Fatal("expected legacy output to be accepted")
 	}
-
-	if !applyIntentPromptOverride(cm, nil) {
-		t.Fatal("expected applied=true")
-	}
-	if cm.SystemPromptOverride != raw {
-		t.Errorf("override: got %q, want %q", cm.SystemPromptOverride, raw)
+	if out.ResponseMode != types.ResponseModeAnswer || out.SourceRequirement != types.SourceRequirementWeb ||
+		out.Freshness != types.FreshnessCurrent {
+		t.Fatalf("unexpected legacy mapping: %+v", out)
 	}
 }
 
-func TestApplyIntentPromptOverride_BlankAgentFallsBackToGlobal(t *testing.T) {
-	cm := &types.ChatManage{
-		PipelineRequest: types.PipelineRequest{
-			IntentPromptOverrides: map[string]string{"chitchat": "   \n\t  "},
-		},
-		PipelineState: types.PipelineState{Intent: types.IntentChitchat},
-	}
-	global := map[string]string{"chitchat": "global prompt"}
-
-	if !applyIntentPromptOverride(cm, global) {
-		t.Fatal("expected applied=true")
-	}
-	if cm.SystemPromptOverride != "global prompt" {
-		t.Errorf("override: got %q, want %q", cm.SystemPromptOverride, "global prompt")
+func TestParseStructuredQueryOutput_RejectsUnknownEnums(t *testing.T) {
+	if _, ok := parseStructuredQueryOutput(`{"rewrite_query":"x","response_mode":"made_up","retrieval_need":"required","source_requirement":"auto","freshness":"any"}`); ok {
+		t.Fatal("expected unknown response mode to be rejected")
 	}
 }
 
-func TestApplyIntentPromptOverride_NoOverrideAndNoGlobal(t *testing.T) {
+func TestParseOutput_RoutingRunsWhenRewriteDisabled(t *testing.T) {
+	plugin := &PluginQueryUnderstand{}
 	cm := &types.ChatManage{
-		PipelineState: types.PipelineState{Intent: types.IntentChitchat},
+		PipelineRequest: types.PipelineRequest{Query: "原始问题", EnableRewrite: false},
+		PipelineState: types.PipelineState{
+			RewriteQuery:  "原始问题",
+			Understanding: types.DefaultQueryUnderstanding(),
+		},
+	}
+	plugin.parseOutput(cm, `{"rewrite_query":"改写问题","response_mode":"answer","retrieval_need":"required","source_requirement":"web","freshness":"current","image_description":""}`)
+	if cm.RewriteQuery != "原始问题" {
+		t.Fatalf("rewrite query = %q, want original query", cm.RewriteQuery)
+	}
+	if cm.Understanding.SourceRequirement != types.SourceRequirementWeb || cm.Understanding.Freshness != types.FreshnessCurrent {
+		t.Fatalf("routing classification was not applied: %+v", cm.Understanding)
+	}
+}
+
+func TestApplyManagedResponsePrompt_NoPromptAndNoGlobal(t *testing.T) {
+	cm := &types.ChatManage{
+		PipelineState: types.PipelineState{Understanding: types.QueryUnderstanding{ResponseMode: types.ResponseModeChitchat}},
 	}
 
-	if applyIntentPromptOverride(cm, nil) {
+	if applyManagedResponsePrompt(cm, nil) {
 		t.Fatal("expected applied=false")
 	}
-	if cm.SystemPromptOverride != "" {
-		t.Errorf("override should remain empty, got %q", cm.SystemPromptOverride)
+	if cm.ManagedResponsePrompt != "" {
+		t.Errorf("managed prompt should remain empty, got %q", cm.ManagedResponsePrompt)
 	}
 }
 
-func TestApplyIntentPromptOverride_GlobalOnly(t *testing.T) {
+func TestApplyManagedResponsePrompt_GlobalOnly(t *testing.T) {
 	cm := &types.ChatManage{
-		PipelineState: types.PipelineState{Intent: types.IntentGreeting},
+		PipelineState: types.PipelineState{Understanding: types.QueryUnderstanding{ResponseMode: types.ResponseModeGreeting}},
 	}
 	global := map[string]string{"greeting": "hi there"}
 
-	if !applyIntentPromptOverride(cm, global) {
+	if !applyManagedResponsePrompt(cm, global) {
 		t.Fatal("expected applied=true")
 	}
-	if cm.SystemPromptOverride != "hi there" {
-		t.Errorf("override: got %q, want %q", cm.SystemPromptOverride, "hi there")
+	if cm.ManagedResponsePrompt != "hi there" {
+		t.Errorf("managed prompt: got %q, want %q", cm.ManagedResponsePrompt, "hi there")
+	}
+}
+
+func TestApplyManagedResponsePrompt_RoutingOutcomeWins(t *testing.T) {
+	cm := &types.ChatManage{
+		PipelineState: types.PipelineState{
+			Understanding: types.QueryUnderstanding{ResponseMode: types.ResponseModeAnswer},
+			RetrievalPlan: types.RetrievalPlan{
+				Mode:       types.RetrievalPlanNone,
+				ReasonCode: types.RetrievalReasonKBUnavailable,
+			},
+		},
+	}
+	global := map[string]string{
+		"answer":                     "generic answer",
+		"knowledge_base_unavailable": "select a knowledge base",
+	}
+
+	if !applyManagedResponsePrompt(cm, global) {
+		t.Fatal("expected routing outcome prompt to be applied")
+	}
+	if cm.ManagedResponsePrompt != "select a knowledge base" {
+		t.Fatalf("managed prompt = %q", cm.ManagedResponsePrompt)
 	}
 }

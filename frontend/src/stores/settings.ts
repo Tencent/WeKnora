@@ -33,7 +33,6 @@ interface AgentConfig {
   maxIterations: number;
   temperature: number;
   allowedTools: string[];
-  system_prompt?: string;  // Unified system prompt (uses {{web_search_status}} placeholder)
 }
 
 interface ConversationModels {
@@ -79,7 +78,6 @@ const defaultSettings: Settings = {
     maxIterations: 5,
     temperature: 0.7,
     allowedTools: [],  // 默认为空，需要通过 API 从后端加载
-    system_prompt: "",
   },
   selectedKnowledgeBases: [],  // 默认为空数组
   selectedFiles: [], // 默认为空数组

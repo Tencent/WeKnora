@@ -1,6 +1,7 @@
 import type { WebSearchProviderEntity } from '@/api/web-search-provider';
 
 export type AgentWebSearchConfig = {
+  web_search_mode?: 'off' | 'on_demand' | 'always';
   web_search_enabled?: boolean;
   web_search_provider_id?: string;
 };
@@ -19,6 +20,7 @@ export function resolveAgentWebSearchProviderId(
 }
 
 export function isAgentWebSearchEnabled(config: AgentWebSearchConfig | undefined): boolean {
+  if (config?.web_search_mode) return config.web_search_mode !== 'off';
   return config?.web_search_enabled === true;
 }
 

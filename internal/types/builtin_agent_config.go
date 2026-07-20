@@ -23,11 +23,11 @@ type BuiltinAgentI18n struct {
 
 // BuiltinAgentEntry is one entry in the builtin_agents list in YAML.
 type BuiltinAgentEntry struct {
-	ID        string                       `yaml:"id"`
-	Avatar    string                       `yaml:"avatar"`
-	IsBuiltin bool                         `yaml:"is_builtin"`
-	I18n      map[string]BuiltinAgentI18n  `yaml:"i18n"`
-	Config    CustomAgentConfig            `yaml:"config"`
+	ID        string                      `yaml:"id"`
+	Avatar    string                      `yaml:"avatar"`
+	IsBuiltin bool                        `yaml:"is_builtin"`
+	I18n      map[string]BuiltinAgentI18n `yaml:"i18n"`
+	Config    CustomAgentConfig           `yaml:"config"`
 }
 
 // builtinAgentsFile is the top-level YAML structure.
@@ -202,14 +202,15 @@ func localeFromCtx(ctx context.Context) string {
 	return lang
 }
 
-// ResolveBuiltinAgentPromptRefs iterates over all builtin agent entries and
-// resolves system_prompt_id / context_template_id references by calling the
-// provided resolver function.  The resolver takes a template ID and returns
-// the template content string (empty string if not found).
+// ValidateBuiltinAgentPromptRefs verifies managed prompt references without
+// copying protocol text into persisted or API-facing agent configuration.
 //
 // This must be called after both LoadBuiltinAgentsConfig and prompt template
 // loading have completed.
-func ResolveBuiltinAgentPromptRefs(resolver func(id string) string) {
+func ValidateBuiltinAgentPromptRefs(
+	systemResolver func(agentMode, id string) string,
+	contextResolver func(id string) string,
+) {
 	builtinAgentEntriesMu.Lock()
 	defer builtinAgentEntriesMu.Unlock()
 
@@ -217,20 +218,14 @@ func ResolveBuiltinAgentPromptRefs(resolver func(id string) string) {
 		if entry == nil {
 			continue
 		}
-		// Resolve system_prompt_id → SystemPrompt
-		if entry.Config.SystemPromptID != "" && entry.Config.SystemPrompt == "" {
-			if content := resolver(entry.Config.SystemPromptID); content != "" {
-				entry.Config.SystemPrompt = content
-			} else {
+		if entry.Config.SystemPromptID != "" {
+			if content := systemResolver(entry.Config.AgentMode, entry.Config.SystemPromptID); content == "" {
 				fmt.Printf("Warning: builtin agent %q references system_prompt_id %q but template not found\n",
 					entry.ID, entry.Config.SystemPromptID)
 			}
 		}
-		// Resolve context_template_id → ContextTemplate
-		if entry.Config.ContextTemplateID != "" && entry.Config.ContextTemplate == "" {
-			if content := resolver(entry.Config.ContextTemplateID); content != "" {
-				entry.Config.ContextTemplate = content
-			} else {
+		if entry.Config.ContextTemplateID != "" {
+			if content := contextResolver(entry.Config.ContextTemplateID); content == "" {
 				fmt.Printf("Warning: builtin agent %q references context_template_id %q but template not found\n",
 					entry.ID, entry.Config.ContextTemplateID)
 			}

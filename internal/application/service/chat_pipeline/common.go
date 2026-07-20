@@ -82,18 +82,19 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 }
 
 // prepareMessagesWithHistory prepare complete messages including history.
-// When SystemPromptOverride is set (e.g. by intent-specific prompt logic),
-// it takes precedence over the default SummaryConfig.Prompt.
+// A managed response-mode prompt takes precedence over the normal managed
+// answer prompt.
 func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	base := chatManage.SummaryConfig.Prompt
-	if chatManage.SystemPromptOverride != "" {
-		base = chatManage.SystemPromptOverride
+	if chatManage.ManagedResponsePrompt != "" {
+		base = chatManage.ManagedResponsePrompt
 	}
 	systemPrompt := types.RenderPromptPlaceholders(base, types.PlaceholderValues{
 		"query":    chatManage.Query,
 		"language": chatManage.Language,
 		"contexts": chatManage.RenderedContexts,
 	})
+	systemPrompt = types.AppendCustomPromptInstructions(systemPrompt, chatManage.UserInstructions, "agent")
 	systemPrompt = appendRetrievedImageOutputRequirement(systemPrompt, chatManage.RenderedContexts)
 
 	chatMessages := []chat.Message{

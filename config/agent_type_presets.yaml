@@ -2,7 +2,7 @@
 #
 # When a user creates/edits a custom agent and picks "smart-reasoning" mode,
 # they can additionally pick an "agent type" from the list below. Each type
-# bundles a recommended system prompt template, tool allowlist, and KB
+# bundles a recommended managed prompt protocol, tool allowlist, and KB
 # compatibility rules so the user doesn't have to configure everything.
 #
 # A user can always override any auto-filled value — the preset only seeds

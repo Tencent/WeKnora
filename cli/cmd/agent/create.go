@@ -22,27 +22,27 @@ type CreateService interface {
 	UpdateAgent(ctx context.Context, id string, req *sdk.UpdateAgentRequest) (*sdk.Agent, error)
 }
 
-// CreateOptions captures flag state. SystemPromptReader and ConfigFileBody
-// are populated from --system-prompt-file and --config-file respectively
+// CreateOptions captures flag state. UserInstructionsReader and ConfigFileBody
+// are populated from --user-instructions-file and --config-file respectively
 // (or stdin when the value is "-"). The embedded flags struct tracks "was
 // set" bits so MergeAgentConfig can distinguish "user passed --foo zero"
 // from "user did not pass --foo".
 type CreateOptions struct {
-	Name               string
-	Model              string
-	Description        string
-	SystemPrompt       string
-	SystemPromptReader io.Reader
-	AgentMode          string
-	KBs                []string
-	KBSelectionMode    string
-	RerankModel        string
-	Temperature        float64
-	From               string
-	ConfigFileBody     io.Reader
-	ConfigFileKind     string // "yaml" or "json"
-	GenerateSkeleton   bool
-	DryRun             bool
+	Name                   string
+	Model                  string
+	Description            string
+	UserInstructions       string
+	UserInstructionsReader io.Reader
+	AgentMode              string
+	KBs                    []string
+	KBSelectionMode        string
+	RerankModel            string
+	Temperature            float64
+	From                   string
+	ConfigFileBody         io.Reader
+	ConfigFileKind         string // "yaml" or "json"
+	GenerateSkeleton       bool
+	DryRun                 bool
 
 	flags createFlagSet // populated in PreRunE for *Set bits
 }
@@ -50,16 +50,16 @@ type CreateOptions struct {
 // createFlagSet records which hot-path flags the user explicitly passed so
 // MergeAgentConfig knows which fields to overlay onto the base config.
 type createFlagSet struct {
-	agentModeSet       bool
-	systemPromptSet    bool
-	rerankModelSet     bool
-	temperatureSet     bool
-	kbSelectionModeSet bool
-	kbsSet             bool
+	agentModeSet        bool
+	userInstructionsSet bool
+	rerankModelSet      bool
+	temperatureSet      bool
+	kbSelectionModeSet  bool
+	kbsSet              bool
 }
 
 const agentCreateExample = `  weknora agent create "Support Bot" --model <model-id>
-  weknora agent create "Code Reviewer" --model <model-id> --system-prompt-file ./prompt.md --attach-kb kb_eng --attach-kb kb_arch
+  weknora agent create "Code Reviewer" --model <model-id> --user-instructions-file ./prompt.md --attach-kb kb_eng --attach-kb kb_arch
   weknora agent create "From Template" --model <model-id> --from ag_existing
   weknora agent create --generate-skeleton > my-agent.yaml
   weknora agent create "Tuned" --model <model-id> --config-file ./my-agent.yaml`
@@ -87,7 +87,7 @@ bad model), resource.not_found (--from <missing>), auth.unauthenticated.`
 // NewCmdCreate builds `weknora agent create <name> --model <id>`.
 func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	opts := &CreateOptions{}
-	var systemPromptFile, configFile string
+	var userInstructionsFile, configFile string
 
 	cmd := &cobra.Command{
 		Use:     "create <name>",
@@ -109,7 +109,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 				return cmdutil.NewFlagError(fmt.Errorf(`required flag(s) "model" not set`))
 			}
 			opts.flags.agentModeSet = cmd.Flags().Changed("agent-mode")
-			opts.flags.systemPromptSet = cmd.Flags().Changed("system-prompt") || cmd.Flags().Changed("system-prompt-file")
+			opts.flags.userInstructionsSet = cmd.Flags().Changed("user-instructions") || cmd.Flags().Changed("user-instructions-file")
 			opts.flags.rerankModelSet = cmd.Flags().Changed("rerank-model")
 			opts.flags.temperatureSet = cmd.Flags().Changed("temperature")
 			opts.flags.kbSelectionModeSet = cmd.Flags().Changed("kb-selection-mode")
@@ -129,12 +129,12 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 
-			if systemPromptFile != "" {
-				r, err := cmdutil.OpenInput(systemPromptFile)
+			if userInstructionsFile != "" {
+				r, err := cmdutil.OpenInput(userInstructionsFile)
 				if err != nil {
-					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file: %v", err))
+					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--user-instructions-file: %v", err))
 				}
-				opts.SystemPromptReader = r
+				opts.UserInstructionsReader = r
 			}
 			if configFile != "" {
 				r, kind, err := openConfigFile(configFile)
@@ -202,9 +202,9 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 
 	// Hot-path (8 flag names, 7 distinct config fields)
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Agent description")
-	cmd.Flags().StringVar(&opts.SystemPrompt, "system-prompt", "", "System prompt text (mutex with --system-prompt-file)")
-	cmd.Flags().StringVar(&systemPromptFile, "system-prompt-file", "", "Read system prompt from FILE, or '-' for stdin")
-	cmd.MarkFlagsMutuallyExclusive("system-prompt", "system-prompt-file")
+	cmd.Flags().StringVar(&opts.UserInstructions, "user-instructions", "", "User instructions text (mutex with --user-instructions-file)")
+	cmd.Flags().StringVar(&userInstructionsFile, "user-instructions-file", "", "Read user instructions from FILE, or '-' for stdin")
+	cmd.MarkFlagsMutuallyExclusive("user-instructions", "user-instructions-file")
 	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: "+strings.Join(agentModeValues, " | "))
 	cmd.Flags().StringSliceVar(&opts.KBs, "attach-kb", nil, "Attach a knowledge base id (repeatable); aligns with 'agent update --add-kb'")
 	cmd.Flags().StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: "+strings.Join(kbSelectionModeValues, " | "))
@@ -223,7 +223,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 		RequiredFlags: []string{"<name> (positional)", "--model"},
 		Examples: []string{
 			`weknora agent create "Support Bot" --model gpt-4o`,
-			`weknora agent create "Support Bot" --model gpt-4o --attach-kb kb_eng --system-prompt "You are a support assistant."`,
+			`weknora agent create "Support Bot" --model gpt-4o --attach-kb kb_eng --user-instructions "You are a support assistant."`,
 			`weknora agent create --generate-skeleton   # print a blank config to fill in (no --model needed)`,
 		},
 		Output: "envelope.data is the created Agent object with id, name, config",
@@ -248,19 +248,19 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		base = *parsed
 	}
 
-	// 2. Resolve system prompt (file/stdin > flag string)
-	if opts.SystemPromptReader != nil {
-		body, err := io.ReadAll(opts.SystemPromptReader)
+	// 2. Resolve user instructions (file/stdin > flag string)
+	if opts.UserInstructionsReader != nil {
+		body, err := io.ReadAll(opts.UserInstructionsReader)
 		if err != nil {
-			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file read: %v", err))
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--user-instructions-file read: %v", err))
 		}
-		opts.SystemPrompt = strings.TrimSpace(string(body))
+		opts.UserInstructions = strings.TrimSpace(string(body))
 	}
 
 	// 3. Either copy-then-update, or create from scratch. For --from we
 	// must seed `base` from the copied agent's existing config FIRST so
 	// MergeAgentConfig preserves source fields the user did not override
-	// (e.g. SystemPrompt, AgentMode, KB list). Without this seeding the
+	// (e.g. UserInstructions, AgentMode, KB list). Without this seeding the
 	// surgical overrides would ship UpdateAgent with the other 33 fields
 	// zeroed, clobbering source state.
 	if opts.From != "" {
@@ -342,7 +342,7 @@ func validateAgentModeFlags(agentMode, kbSelectionMode *string) error {
 func applyCreateOverrides(base *sdk.AgentConfig, opts *CreateOptions) *sdk.AgentConfig {
 	overrides := cmdutil.AgentConfigFlags{
 		AgentMode: opts.AgentMode, AgentModeSet: opts.flags.agentModeSet,
-		SystemPrompt: opts.SystemPrompt, SystemPromptSet: opts.flags.systemPromptSet,
+		UserInstructions: opts.UserInstructions, UserInstructionsSet: opts.flags.userInstructionsSet,
 		ModelID: opts.Model, ModelIDSet: true, // --model is required
 		RerankModelID: opts.RerankModel, RerankModelIDSet: opts.flags.rerankModelSet,
 		Temperature: opts.Temperature, TemperatureSet: opts.flags.temperatureSet,

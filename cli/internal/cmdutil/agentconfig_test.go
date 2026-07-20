@@ -51,6 +51,21 @@ func TestLoadConfigFile_BadJSON(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestLoadConfigFile_RejectsManagedPromptFields(t *testing.T) {
+	for name, body := range map[string]string{
+		"legacy system prompt": "system_prompt: legacy",
+		"rewrite protocol":     "rewrite_prompt_user: '{{query}}'",
+		"response mode":        "response_mode_prompts: {}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadAgentConfig(strings.NewReader(body), "yaml")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "no longer editable")
+			assert.Contains(t, err.Error(), "user_instructions")
+		})
+	}
+}
+
 func TestMergeAgentConfig_FlagsOverrideFile(t *testing.T) {
 	base := &sdk.AgentConfig{ModelID: "model-y"}
 	overrides := AgentConfigFlags{ModelIDSet: true, ModelID: "model-x"}
@@ -68,17 +83,17 @@ func TestMergeAgentConfig_UnsetFlagsPreserveBase(t *testing.T) {
 
 func TestMergeAgentConfig_EveryFieldOverlay(t *testing.T) {
 	base := &sdk.AgentConfig{
-		AgentMode:       "quick-answer",
-		SystemPrompt:    "old",
-		ModelID:         "model-y",
-		RerankModelID:   "rerank-old",
-		Temperature:     0.1,
-		KBSelectionMode: "all",
-		KnowledgeBases:  []string{"kb_old"},
+		AgentMode:        "quick-answer",
+		UserInstructions: "old",
+		ModelID:          "model-y",
+		RerankModelID:    "rerank-old",
+		Temperature:      0.1,
+		KBSelectionMode:  "all",
+		KnowledgeBases:   []string{"kb_old"},
 	}
 	overrides := AgentConfigFlags{
 		AgentMode: "smart-reasoning", AgentModeSet: true,
-		SystemPrompt: "new", SystemPromptSet: true,
+		UserInstructions: "new", UserInstructionsSet: true,
 		ModelID: "model-x", ModelIDSet: true,
 		RerankModelID: "rerank-new", RerankModelIDSet: true,
 		Temperature: 0.9, TemperatureSet: true,
@@ -87,7 +102,7 @@ func TestMergeAgentConfig_EveryFieldOverlay(t *testing.T) {
 	}
 	merged := MergeAgentConfig(base, overrides)
 	assert.Equal(t, "smart-reasoning", merged.AgentMode)
-	assert.Equal(t, "new", merged.SystemPrompt)
+	assert.Equal(t, "new", merged.UserInstructions)
 	assert.Equal(t, "model-x", merged.ModelID)
 	assert.Equal(t, "rerank-new", merged.RerankModelID)
 	assert.InDelta(t, 0.9, merged.Temperature, 0.001)
@@ -102,10 +117,9 @@ func TestGenerateSkeleton_EmitsAllFields(t *testing.T) {
 	for _, field := range []string{
 		"agent_mode:",
 		"model_id:",
-		"system_prompt:",
+		"user_instructions:",
 		"knowledge_bases:",
 		"fallback_strategy:",
-		"context_template:",
 		"max_completion_tokens:",
 		"embedding_top_k:",
 	} {

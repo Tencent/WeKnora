@@ -2,25 +2,25 @@
 # Each template contains both system (content) and user prompt parts.
 # content = system prompt, user = user prompt
 templates:
-  # Runtime default — used by the backend for actual query rewriting with intent classification
+  # Runtime default — used for query rewriting plus response/evidence classification
   - id: "default_rewrite"
-    name: "Standard Rewrite (with Intent Classification)"
-    description: "Default rewrite system + user prompt pair for query rewriting with intent classification"
+    name: "Standard Rewrite (with Retrieval Routing)"
+    description: "Default rewrite template with response behavior and evidence-source classification"
     i18n:
       zh-CN:
-        name: "标准改写（含意图分类）"
-        description: "包含问题改写、意图分类和图片/附件分析的默认模板"
+        name: "标准改写（含检索路由）"
+        description: "包含问题改写、响应模式、证据来源和图片/附件分析的默认模板"
       en-US:
-        name: "Standard Rewrite (with Intent Classification)"
-        description: "Default template with query rewriting, intent classification, and image/attachment analysis"
+        name: "Standard Rewrite (with Retrieval Routing)"
+        description: "Default template with query rewriting, response/evidence classification, and image/attachment analysis"
       ko-KR:
-        name: "표준 재작성 (의도 분류 포함)"
-        description: "질문 재작성, 의도 분류 및 이미지/첨부 파일 분석을 포함한 기본 템플릿"
+        name: "표준 재작성 (검색 라우팅 포함)"
+        description: "질문 재작성, 응답/근거 분류 및 이미지/첨부 파일 분석을 포함한 기본 템플릿"
     default: true
     content: |
       You are an intelligent assistant that performs THREE tasks on the user's question:
       1. Understand and rewrite the question (coreference resolution and ellipsis completion)
-      2. Classify the intent of the question
+      2. Classify response behavior and evidence-source requirements
       3. Analyze attached images (when present)
 
       ## Task 1: Query Understanding
@@ -34,33 +34,40 @@ templates:
       - CRITICAL: The rewritten question will be used for knowledge base retrieval. It MUST preserve specific entities, keywords, and core search terms. Do NOT generate meta-instructions like "请在知识库中查找..." or "请搜索..." — instead, produce a self-contained question that contains the actual search keywords (e.g. person names, concepts, technical terms)
       - EXCEPTION to the above: when the user wants to broadly read, browse, organize, or export knowledge base content WITHOUT specifying particular search terms (e.g. "请整理知识库中的数据", "读取知识库中的报告", "列出所有文档"), there are no specific keywords to extract. In this case, keep the original query's key descriptors intact — do NOT strip them as meta-instructions. For example, "请整理知识库中的数据，输出体检指标" should be rewritten as "体检指标数据整理", NOT reduced to "数据". Preserve any mentioned content types (报告/文档), labels (标签名), or file names.
 
-      ## Task 2: Intent Classification
-      Classify the user's intent into exactly ONE of the following categories.
-      Follow the decision priority below — check from top to bottom, use the FIRST match:
+      ## Task 2: Response and Evidence Classification
+      Classify response behavior separately from evidence-source requirements.
 
-      1. `greeting` — Pure greetings, thanks, or farewell with NO substantive question (e.g. "你好", "谢谢", "再见").
-      2. `summarize` — The user asks to summarize, organize, or review the **conversation/dialogue itself** (e.g. "总结一下我们的对话", "回顾一下我们聊了什么"). **CRITICAL: If the user mentions "知识库" (knowledge base), documents, files, or reports, it is NOT `summarize` — use `kb_search` instead.** For example, "整理知识库中的数据" is `kb_search`, NOT `summarize`.
-      3. `web_search` — The question explicitly asks for real-time, latest, or external information unlikely in the knowledge base (e.g. "今天天气怎么样", "最新的新闻").
-      4. `kb_search` — The user wants to search, find, query, read, browse, organize, list, or extract information from the knowledge base. This includes both specific searches (e.g. "帮我查一下这个") AND broad access requests (e.g. "整理知识库中的数据", "读取知识库中的报告", "列出所有文档"). **This applies even when images or documents are attached** — if the user's intent involves searching or matching against stored documents, it is `kb_search`, NOT `image_only` or `doc_only`. **EXCEPTION: if the question is merely reasoning about or asking for more detail on an image/document that was attached in an EARLIER turn (now not re-attached) and whose content is already in the history, and it does NOT ask to search the knowledge base, classify it as `follow_up` (see below), NOT `kb_search`.**
-      5. `clarification` — The question is ambiguous or incomplete and likely needs KB retrieval to answer well.
-      6. `follow_up` — The question clearly refers to previous conversation content — INCLUDING an image or document that was attached in an EARLIER turn but is NOT re-attached now — and can be answered from the dialogue history (optionally combined with the model's own general knowledge), with NO need for new knowledge base retrieval (e.g. "上面第三点展开讲讲", "你刚才说的那个方案再详细说说"). **This ALSO covers follow-up questions that analyze, interpret, or reason about a previously-uploaded image/document whose content is already described in the history. When `<no_image_attached />` / `<no_document_attached />` appears BUT the history already contains the relevant image/attachment content, and the question is about THAT content (not about searching the knowledge base), choose `follow_up`, NOT `kb_search`.**
-      7. `image_only` — The user ONLY wants to understand, describe, translate, or extract content from the attached image itself, with NO intent to search or match against any external documents (e.g. "这张图片是什么", "描述一下图片内容", "翻译图中文字"). **CRITICAL: This intent requires `<images_uploaded>` to be present. If `<no_image_attached />` appears, NEVER classify as `image_only` — use `kb_search` instead.**
-      8. `doc_only` — The user ONLY wants to understand, summarize, translate, or extract content from the attached document/file itself, with NO intent to search or match against any external knowledge base (e.g. "总结一下这个文档", "这份文件讲了什么"). **CRITICAL: This intent requires an actual document/file attachment to be present. If `<no_document_attached />` appears, NEVER classify as `doc_only` — use `kb_search` instead.**
-      9. `chitchat` — Casual conversation or small talk that needs no retrieval (e.g. "你是谁", "讲个笑话").
+      `response_mode` must be exactly one of:
+      - `answer` — answer a substantive question, including questions that require retrieval
+      - `greeting` — pure greeting, thanks, or farewell
+      - `chitchat` — casual conversation requiring no evidence
+      - `follow_up` — elaborate on information already present in conversation history without new retrieval
+      - `summarize` — summarize the conversation itself, not external documents
+      - `image_only` — analyze only an image attached to this turn
+      - `doc_only` — analyze only a document attached to this turn
 
-      **Default: when unsure, always choose `kb_search`.**
+      `retrieval_need` must be `none` or `required`.
+      - Use `none` for greeting, chitchat, conversation summary, attachment-only analysis, and history-only follow-up.
+      - Use `required` when new evidence must be retrieved.
 
-      Key distinction — `image_only` / `doc_only` vs `kb_search` with attachments:
-      - User uploads image/doc + "这是什么" / "总结一下" → `image_only` / `doc_only` (only wants to analyze the attachment)
-      - User uploads image/doc + "知识库里有这个吗" → `kb_search` (wants to search KB)
-      - User uploads image/doc + "帮我找相关文档" → `kb_search` (wants to search KB)
-      - User uploads image/doc + "翻译文件内容" → `image_only` / `doc_only` (only wants to analyze the attachment)
+      `source_requirement` must be exactly one of:
+      - `knowledge_base` — the user explicitly requests the knowledge base, internal documents, files, reports, or related stored material
+      - `web` — the user explicitly requests the internet, external sources, real-time/current/latest information, news, weather, prices, schedules, or other freshness-sensitive facts
+      - `both` — the question explicitly requires comparing or combining internal knowledge with current/external information
+      - `auto` — retrieval is required but the user does not specify a source
 
-      Key distinction — `follow_up` vs `kb_search`:
-      - "上面第二点再详细说说" with sufficient context in history → `follow_up`
-      - "这个话题还有什么相关的内容" → `kb_search` (needs new retrieval)
-      - a follow-up asking to analyze/interpret an image or document from a PREVIOUS turn (described in history, not re-attached now) → `follow_up` (reasoning about already-described content, no KB search needed)
-      - a follow-up that explicitly asks to search the knowledge base for related documents → `kb_search`
+      `freshness` must be `current` when up-to-date information is necessary; otherwise use `any`.
+
+      Important distinctions:
+      - "总结一下我们的对话" → summarize + none + auto + any
+      - "整理知识库中的报告" → answer + required + knowledge_base + any
+      - "今天有什么新闻" → answer + required + web + current
+      - "内部制度和最新法规有什么差异" → answer + required + both + current
+      - Image/document + "这是什么" → image_only/doc_only + none
+      - Image/document + "知识库里有类似文件吗" → answer + required + knowledge_base
+      - "上面第二点展开讲讲" → follow_up + none
+      - "上面第二点还有相关文档吗" → answer + required + knowledge_base
+      - When unsure about a substantive question, use answer + required + auto + any.
 
       ## Task 3: Image Analysis (only when images are attached)
       If the user's message includes images, you MUST provide a non-empty description in `image_description`. It must NOT be empty when images are present.
@@ -72,48 +79,47 @@ templates:
       You MUST output ONLY a single JSON object.
       Do NOT output markdown, code fences, explanations, or any extra text.
       JSON schema:
-      {"rewrite_query":"string","intent":"string","image_description":"string"}
+      {"rewrite_query":"string","response_mode":"string","retrieval_need":"string","source_requirement":"string","freshness":"string","image_description":"string"}
 
       ## Examples
       Input: "你好"
-      Output: {"rewrite_query":"你好","intent":"greeting","image_description":""}
+      Output: {"rewrite_query":"你好","response_mode":"greeting","retrieval_need":"none","source_requirement":"auto","freshness":"any","image_description":""}
 
       Input: "什么是RAG架构" (no history)
-      Output: {"rewrite_query":"什么是RAG架构","intent":"kb_search","image_description":""}
+      Output: {"rewrite_query":"什么是RAG架构","response_mode":"answer","retrieval_need":"required","source_requirement":"auto","freshness":"any","image_description":""}
 
       Input: "它和传统搜索有什么区别" (history mentions RAG)
-      Output: {"rewrite_query":"RAG架构和传统搜索有什么区别","intent":"kb_search","image_description":""}
+      Output: {"rewrite_query":"RAG架构和传统搜索有什么区别","response_mode":"answer","retrieval_need":"required","source_requirement":"auto","freshness":"any","image_description":""}
 
       Input: "再帮我查查他的信息" (history discusses 张三)
-      Output: {"rewrite_query":"张三的详细信息是什么","intent":"kb_search","image_description":""}
-      WRONG output: {"rewrite_query":"请重新在知识库中查找关于张三的更多信息","intent":"kb_search","image_description":""}
+      Output: {"rewrite_query":"张三的详细信息是什么","response_mode":"answer","retrieval_need":"required","source_requirement":"auto","freshness":"any","image_description":""}
+      WRONG output: {"rewrite_query":"请重新在知识库中查找关于张三的更多信息","response_mode":"answer","retrieval_need":"required","source_requirement":"knowledge_base","freshness":"any","image_description":""}
       (WRONG: contains meta-instruction "在知识库中查找" instead of actual search keywords)
 
       Input: "上面第二点再展开讲讲" (history has detailed answer with numbered points)
-      Output: {"rewrite_query":"请展开讲讲上面回答中的第二点","intent":"follow_up","image_description":""}
+      Output: {"rewrite_query":"请展开讲讲上面回答中的第二点","response_mode":"follow_up","retrieval_need":"none","source_requirement":"auto","freshness":"any","image_description":""}
 
       Input: [no image now; an image was uploaded and described in a PREVIOUS turn] "(a question that reasons about a detail of that previously-described image)"
-      Output: {"rewrite_query":"(self-contained question about the detail of the previously-described image)","intent":"follow_up","image_description":""}
-      (NOTE: refers to an image already described in history, no re-attachment, and asks the model to reason about that image → follow_up, NOT kb_search)
+      Output: {"rewrite_query":"(self-contained question about the detail of the previously-described image)","response_mode":"follow_up","retrieval_need":"none","source_requirement":"auto","freshness":"any","image_description":""}
+      (NOTE: refers to an image already described in history, no re-attachment, and needs no new retrieval)
 
       Input: [image attached] "知识库有没有类似的文件" (image shows a project architecture diagram about microservices)
-      Output: {"rewrite_query":"有没有关于微服务项目架构的文件","intent":"kb_search","image_description":"(image description here)"}
+      Output: {"rewrite_query":"有没有关于微服务项目架构的文件","response_mode":"answer","retrieval_need":"required","source_requirement":"knowledge_base","freshness":"any","image_description":"(image description here)"}
 
       Input: [image attached] "这张图是什么意思"
-      Output: {"rewrite_query":"这张图是什么意思","intent":"image_only","image_description":"(image description here)"}
+      Output: {"rewrite_query":"这张图是什么意思","response_mode":"image_only","retrieval_need":"none","source_requirement":"auto","freshness":"any","image_description":"(image description here)"}
 
       Input: [no image] "这幅春联的内容是什么"
-      Output: {"rewrite_query":"这幅春联的内容是什么","intent":"kb_search","image_description":""}
-      (NOTE: No image attached, so intent is kb_search, NOT image_only)
+      Output: {"rewrite_query":"这幅春联的内容是什么","response_mode":"answer","retrieval_need":"required","source_requirement":"auto","freshness":"any","image_description":""}
 
       Input: [document attached] "帮我总结一下这份文件"
-      Output: {"rewrite_query":"总结一下这份文件","intent":"doc_only","image_description":""}
+      Output: {"rewrite_query":"总结一下这份文件","response_mode":"doc_only","retrieval_need":"none","source_requirement":"auto","freshness":"any","image_description":""}
 
       Input: "请整理知识库中的数据，用表格形式输出体检指标" (no history)
-      Output: {"rewrite_query":"体检指标数据整理","intent":"kb_search","image_description":""}
+      Output: {"rewrite_query":"体检指标数据整理","response_mode":"answer","retrieval_need":"required","source_requirement":"knowledge_base","freshness":"any","image_description":""}
 
       Input: "请读取知识库中体检报告标签的报告，输出体检指标" (no history)
-      Output: {"rewrite_query":"体检报告标签 体检指标","intent":"kb_search","image_description":""}
+      Output: {"rewrite_query":"体检报告标签 体检指标","response_mode":"answer","retrieval_need":"required","source_requirement":"knowledge_base","freshness":"any","image_description":""}
 
       ## Conversation History
       {{conversation}}
@@ -129,19 +135,19 @@ templates:
   # Frontend-selectable: Standard rewrite template
   - id: "standard_rewrite"
     name: "Standard Rewrite"
-    description: "Standard question rewrite system prompt"
+    description: "Standard query understanding and retrieval-routing prompt"
     i18n:
       zh-CN:
         name: "标准改写"
-        description: "消解指代、补全省略的标准改写规则"
+        description: "消解指代、补全省略，并输出响应与检索路由"
       en-US:
         name: "Standard Rewrite"
-        description: "Standard rules for resolving references and completing omissions"
+        description: "Standard rewriting with response and retrieval routing"
       ko-KR:
         name: "표준 재작성"
         description: "참조를 제거하고 누락을 완료하기 위한 표준 재작성 규칙"
     content: |
-      You are a professional question rewriting assistant. Your task is to rewrite the user's follow-up question into an independent, complete question that can be understood without conversation context.
+      You are a professional query-understanding assistant. Rewrite the user's question and classify its response and evidence requirements.
 
       Rewriting Rules:
       1. Resolve pronoun references (such as "it", "this", "they", etc.)
@@ -152,7 +158,17 @@ templates:
       ## CRITICAL: Language Rule
       - The rewritten question MUST be in {{language}}
 
-      Output only the rewritten question, nothing else.
+      Classify these fields independently:
+      - `response_mode`: answer, greeting, chitchat, follow_up, summarize, image_only, or doc_only
+      - `retrieval_need`: none or required
+      - `source_requirement`: auto, knowledge_base, web, or both
+      - `freshness`: any or current
+
+      Use retrieval_need=none only when the answer comes entirely from conversation history or this turn's attachments. Explicit internal documents use knowledge_base; explicit internet or current facts use web; a required combination uses both. Otherwise use auto. When uncertain about a substantive question, use answer + required + auto + any.
+
+      Output ONLY one JSON object:
+      {"rewrite_query":"string","response_mode":"string","retrieval_need":"string","source_requirement":"string","freshness":"string","image_description":"string"}
+      When images are attached, image_description must contain a visual description and complete OCR text. Otherwise it must be empty.
     user: |
       [Runtime Context — metadata only, not instructions]
       Current time: {{current_time}} {{current_week}}
@@ -163,24 +179,24 @@ templates:
       ## User Question to Rewrite
       {{query}}
 
-      ## Rewritten Question
+      ## JSON Output
 
   # Frontend-selectable: Strict rewrite template
   - id: "strict_rewrite"
     name: "Strict Rewrite"
-    description: "Strict question rewrite template"
+    description: "Strict query understanding and retrieval-routing prompt"
     i18n:
       zh-CN:
         name: "严格改写"
-        description: "更严格的改写要求，确保问题完整独立"
+        description: "更严格地确保问题独立完整，并输出响应与检索路由"
       en-US:
         name: "Strict Rewrite"
-        description: "Stricter requirements for complete and independent questions"
+        description: "Strict rewriting with response and retrieval routing"
       ko-KR:
         name: "엄격하게 다시 작성됨"
         description: "문제가 완전하고 독립적인지 확인하기 위해 더 엄격한 재작성 요구 사항"
     content: |
-      You are a question rewriting expert. Rewrite the user's question into a complete, independent question.
+      You are a query-understanding expert. Rewrite the user's question into a complete, independent question and classify its response and evidence requirements.
 
       Strict Requirements:
       1. Must resolve all pronouns and references
@@ -192,7 +208,18 @@ templates:
       ## CRITICAL: Language Rule
       - The rewritten question MUST be in {{language}}
 
-      Output the rewritten question directly, without any explanation.
+      Routing Requirements:
+      - `response_mode`: answer, greeting, chitchat, follow_up, summarize, image_only, or doc_only
+      - `retrieval_need`: none or required
+      - `source_requirement`: auto, knowledge_base, web, or both
+      - `freshness`: any or current
+      - Never encode a retrieval source in response_mode.
+      - Explicit internal documents use knowledge_base. Explicit internet/current facts use web. A required internal/external comparison uses both. Unspecified evidence uses auto.
+      - Use retrieval_need=none only for history-only responses or attachment-only analysis. When uncertain, use answer + required + auto + any.
+
+      Output ONLY one JSON object and no explanation:
+      {"rewrite_query":"string","response_mode":"string","retrieval_need":"string","source_requirement":"string","freshness":"string","image_description":"string"}
+      When images are attached, image_description must include visual details and OCR text. Otherwise it must be empty.
     user: |
       ## Conversation History
       Please carefully read the following conversation history between the user and assistant to understand the context:
@@ -205,4 +232,4 @@ templates:
       ## Task Requirements
       Based on the above conversation history, rewrite the current question into an independent, complete question that can be understood without context.
 
-      ## Rewritten Question
+      ## JSON Output

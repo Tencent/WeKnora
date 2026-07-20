@@ -89,7 +89,6 @@ func TestAgentReadRoutesDeclareReadAgentsCapability(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodGet, "/api/v1/agents/placeholders"},
 		{http.MethodGet, "/api/v1/agents/type-presets"},
 		{http.MethodGet, "/api/v1/agents"},
 		{http.MethodGet, "/api/v1/agents/:id"},
