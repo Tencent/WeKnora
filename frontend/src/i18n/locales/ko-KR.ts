@@ -1297,6 +1297,8 @@ export default {
       easyScholarSecretKey: 'EasyScholar SecretKey',
       easyScholarSecretPlaceholder: 'EasyScholar SecretKey를 입력하세요',
       easyScholarHint: '후처리 중 저널 등급을 식별하는 데 사용됩니다. 비워 두면 서버 환경 변수를 사용합니다.',
+      easyScholarCardTitle: 'EasyScholar',
+      easyScholarCardDesc: '문서 후처리용 저널 등급 조회 서비스',
       vlmLabel: 'vlm (시각 언어 모델)',
       mineruHtmlLabel: 'MinerU-HTML (HTML 파싱)',
       serverUrl: '서버 URL',

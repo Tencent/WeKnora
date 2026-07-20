@@ -89,6 +89,26 @@
             <p class="engine-card__desc">{{ getEngineDisplayDesc(engine.Name, engine.Description) }}</p>
           </div>
         </button>
+
+        <!-- EasyScholar 放在解析引擎列表末尾，作为独立的后处理服务配置。 -->
+        <button
+          type="button"
+          class="engine-card engine-card--easyscholar"
+          :class="{ 'engine-card--active': drawerVisible && currentEngine?.Name === 'easyscholar' }"
+          @click="openDrawer({ Name: 'easyscholar', Description: '' } as any)"
+        >
+          <div class="engine-card__badge">E</div>
+          <div class="engine-card__body">
+            <div class="engine-card__header">
+              <h3 class="engine-card__title">{{ $t('settings.parser.easyScholarCardTitle') }}</h3>
+              <span class="engine-card__status engine-card__status--on">
+                <span class="engine-card__status-dot" />
+                {{ $t('settings.parser.available') }}
+              </span>
+            </div>
+            <p class="engine-card__desc">{{ $t('settings.parser.easyScholarCardDesc') }}</p>
+          </div>
+        </button>
       </div>
 
     </template>
@@ -223,8 +243,8 @@
           </template>
         </section>
 
-        <!-- EasyScholar 是后处理的期刊等级服务，配置在内置解析引擎抽屉中。 -->
-        <section v-if="currentEngine.Name === 'builtin'" class="setting-drawer__section">
+        <!-- EasyScholar 是后处理的期刊等级服务，属于解析引擎设置的通用配置。 -->
+        <section v-if="currentEngine.Name === 'easyscholar'" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.parser.easyScholarSection') }}</h4>
           <div class="form-item">
             <label class="form-label">{{ $t('settings.parser.easyScholarSecretKey') }}</label>
@@ -467,7 +487,10 @@ const hasBuiltinEngine = computed(() => engines.value.some(e => e.Name === 'buil
 const drawerVisible = ref(false)
 const currentEngine = ref<ParserEngineInfo | null>(null)
 const drawerTitle = computed(() => {
-  return currentEngine.value ? getEngineDisplayName(currentEngine.value.Name) : ''
+  if (!currentEngine.value) return ''
+  return currentEngine.value.Name === 'easyscholar'
+    ? t('settings.parser.easyScholarCardTitle')
+    : getEngineDisplayName(currentEngine.value.Name)
 })
 
 // SettingDrawer 头部图标走 #headerIcon 槽（首字母 monogram + per-engine
