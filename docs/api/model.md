@@ -25,7 +25,7 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `par
 | `openai`       | OpenAI                       | Chat, Embedding, Rerank, VLLM   |
 | `aliyun`       | 阿里云 DashScope             | Chat, Embedding, Rerank, VLLM   |
 | `zhipu`        | 智谱 BigModel                | Chat, Embedding, Rerank, VLLM   |
-| `volcengine`   | 火山引擎 Volcengine          | Chat, Embedding, VLLM           |
+| `volcengine`   | 火山引擎 Volcengine          | Chat, Embedding, Rerank, VLLM   |
 | `hunyuan`      | 腾讯混元 Hunyuan             | Chat, Embedding                 |
 | `deepseek`     | DeepSeek                     | Chat                            |
 | `minimax`      | MiniMax                      | Chat                            |
@@ -259,6 +259,29 @@ curl --location 'http://localhost:8080/api/v1/models' \
         "base_url": "https://api.jina.ai/v1",
         "api_key": "jina_your_api_key",
         "provider": "jina"
+    }
+}'
+```
+
+**远程 API 模型（火山引擎 VikingDB）**:
+
+火山 Rerank 使用 AK/SK 签名，不使用方舟 API Key。`api_key` 保存 Access Key ID，
+`app_secret` 保存 Secret Access Key；两项均按模型凭证加密存储。
+
+```curl
+curl --location 'http://localhost:8080/api/v1/models' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: your_api_key' \
+--data '{
+    "name": "doubao-seed-rerank",
+    "type": "Rerank",
+    "source": "remote",
+    "description": "火山引擎托管 Rerank 模型",
+    "parameters": {
+        "base_url": "https://api-knowledgebase.mlp.cn-beijing.volces.com",
+        "api_key": "your-volcengine-access-key-id",
+        "app_secret": "your-volcengine-secret-access-key",
+        "provider": "volcengine"
     }
 }'
 ```

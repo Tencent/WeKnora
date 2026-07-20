@@ -20611,7 +20611,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "appSecret": {
-                    "description": "AppSecret 用于 LKEAP Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。",
+                    "description": "AppSecret 用于 LKEAP / Volcengine Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。",
                     "type": "string"
                 },
                 "baseUrl": {
@@ -20848,7 +20848,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "appSecret": {
-                    "description": "AppSecret 用于 LKEAP Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。",
+                    "description": "AppSecret 用于 LKEAP / Volcengine Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。",
                     "type": "string"
                 },
                 "baseUrl": {

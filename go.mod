@@ -62,6 +62,7 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lkeap v1.3.103
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
 	github.com/tiktoken-go/tokenizer v0.7.0
+	github.com/volcengine/vikingdb-go-sdk v0.0.11
 	github.com/volcengine/ve-tos-golang-sdk/v2 v2.9.4
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/weaviate/weaviate v1.37.3
@@ -293,6 +294,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/vcaesar/cedar v0.20.2 // indirect
+	github.com/volcengine/volc-sdk-golang v1.0.252 // indirect
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect

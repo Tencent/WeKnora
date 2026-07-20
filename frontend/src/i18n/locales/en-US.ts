@@ -4180,6 +4180,14 @@ export default {
         rerankCredentialHint:
           'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.',
       },
+      volcengine: {
+        accessKeyLabel: 'Access Key ID',
+        accessKeyPlaceholder: 'Volcengine Access Key ID',
+        secretKeyLabel: 'Secret Access Key',
+        secretKeyPlaceholder: 'Volcengine Secret Access Key',
+        rerankCredentialHint:
+          'Rerank uses VikingDB AK/SK signing, not an Ark API key. Recommended model: doubao-seed-rerank.',
+      },
       customHeadersLabel: 'Custom Request Headers (optional)',
       customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored.',
       customHeadersAdd: 'Add Header',

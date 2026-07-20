@@ -3188,6 +3188,14 @@ export default {
         rerankCredentialHint:
           "Rerank 使用腾讯云 API 签名（非 OpenAI API Key）。请在云 API 密钥控制台创建 SecretId/SecretKey。",
       },
+      volcengine: {
+        accessKeyLabel: "Access Key ID",
+        accessKeyPlaceholder: "火山引擎访问密钥 Access Key ID",
+        secretKeyLabel: "Secret Access Key",
+        secretKeyPlaceholder: "火山引擎访问密钥 Secret Access Key",
+        rerankCredentialHint:
+          "Rerank 使用 VikingDB AK/SK 签名（非方舟 API Key），模型建议填写 doubao-seed-rerank。",
+      },
       customHeadersLabel: "自定义请求头（可选）",
       customHeadersDesc: "调用远程模型 API 时附加的 HTTP 请求头，常用于企业网关鉴权、链路追踪等场景；Authorization、Content-Type 等保留头会被自动忽略。",
       customHeadersAdd: "添加请求头",
