@@ -352,10 +352,18 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kRead := k.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
 		// Cross-knowledge endpoints (no :id) can't be gated on a single
-		// KB — they accept arbitrary knowledge IDs and the handler must
-		// fan out the access check itself. /batch and /search are read
-		// routes; /move and /batch-delete stay JWT Contributor-gated and are
-		// not declared for API keys.
+		// KB via the URL — they accept a kb_id (or source/target KB) in the
+		// body and the handler fans out the access check itself. /batch and
+		// /search are read routes (retrieve). /move, /batch-delete,
+		// /batch-reparse and /tags are content writes that each bound
+		// themselves to a single (or source+target) KB and enforce the API
+		// key's KB allow-list downstream — MoveKnowledge via
+		// requireTenantAPIKeyKnowledgeBases(source,target); the batch ops via
+		// validateKnowledgeBaseAccessWithKBID (requireTenantAPIKeyKnowledgeBase)
+		// plus a per-item "belongs to the authorized KB" check in the handler
+		// and service. They are therefore declared for API keys under the
+		// ingest capability, matching their single-document siblings
+		// (k.DELETE("/:id"), k.POST("/:id/reparse"), k.PUT("/:id")).
 		kRead.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
 		kRead.GET("/:id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledge)
 		kRead.GET("/:id/stages", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledgeSpans)
@@ -370,13 +378,15 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		kRead.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		kRead.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
-		// Batch / cross-KB write ops stay Contributor-gated for JWT and are
-		// NOT declared for API keys (default-deny): they fan out to arbitrary
-		// KBs with no single owning KB to bound a key's scope against.
-		kgrp.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
-		kgrp.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
-		kgrp.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
-		kgrp.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		// Batch / cross-KB content writes: JWT Contributor+, or an API key
+		// with the ingest capability (or full access). Each handler binds the
+		// operation to a single (move: source+target) KB and rejects any KB
+		// or knowledge id outside the key's allow-list, so a scoped ingest key
+		// can only touch KBs it is already permitted to write.
+		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
+		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
+		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
+		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
 	}
 }
 
@@ -1712,12 +1722,15 @@ func serveFilesWithResources(
 	resourceCatalog interfaces.ResourceCatalog,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving files from /files")
-	// /files sits outside the /api/v1 APIKeyGate; storage paths cannot be
-	// attributed to a key's KB allow-list, so API keys are denied outright
-	// (embed routes use their own /embed/.../files handler).
+	// /files sits outside the /api/v1 APIKeyGate, so it carries its own
+	// API-key guard. A KB-restricted key is denied (a raw storage path cannot
+	// be bounded to its allow-list); full-access keys and tenant-wide retrieve
+	// keys pass, since the handler still enforces same-tenant paths
+	// (ValidateStoragePathTenant). Embed routes use their own
+	// /embed/.../files handler.
 	r.GET(
 		"/files",
-		middleware.DenyAPIKeyPrincipal(),
+		middleware.AllowFileServeAPIKey(),
 		newFileServeHandler(globalFileService, storageResolver, resourceCatalog),
 	)
 }
@@ -1830,11 +1843,17 @@ func serveKBScopedFiles(
 	resourceCatalogs ...interfaces.ResourceCatalog,
 ) {
 	logger.Infof(context.Background(), "[Router] Serving KB-scoped files from /knowledge-bases/:id/files")
-	// API keys are denied outright (as on /files): a signed URL's tenant/KB
-	// scope cannot authorize serving an arbitrary file_path under the owner
-	// tenant, and this route deliberately crosses the caller's own tenant.
-	r.GET("/knowledge-bases/:id/files",
-		middleware.DenyAPIKeyPrincipal(),
+	// API-key access mirrors /files: KB-restricted keys are denied (an
+	// arbitrary file_path under the KB owner tenant cannot be bounded to a
+	// key's allow-list), while full-access and tenant-wide retrieve keys pass
+	// — KBAccessRead still confines them to KBs they may read (own /
+	// org-shared / agent-visible), exactly as it does for a JWT Viewer. The
+	// route is declared to the gate with the retrieve policy so it is reachable
+	// at all; AllowFileServeAPIKey then applies the stricter not-KB-restricted
+	// constraint.
+	g.apiKeyRoute(r, http.MethodGet, "/knowledge-bases/:id/files",
+		apiKeyRetrieve(apiKeyFullAccess()),
+		middleware.AllowFileServeAPIKey(),
 		g.Viewer(),
 		g.KBAccessRead("id"),
 		newKBScopedFileServeHandlerWithResources(

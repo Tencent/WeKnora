@@ -215,6 +215,74 @@ func TestDenyAPIKeyPrincipalAllowsJWT(t *testing.T) {
 	}
 }
 
+// runAllowFileServe mounts AllowFileServeAPIKey ahead of a handler and reports
+// whether the request reached the handler.
+func runAllowFileServe(t *testing.T, scope *types.TenantAPIKeyScope) (reached bool, status int) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		if scope != nil {
+			c.Request = c.Request.WithContext(types.WithTenantAPIKeyScope(c.Request.Context(), *scope))
+		}
+		c.Next()
+	})
+	engine.GET("/files", AllowFileServeAPIKey(), func(c *gin.Context) {
+		reached = true
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/files", nil))
+	return reached, w.Code
+}
+
+func TestAllowFileServeAPIKey(t *testing.T) {
+	cases := []struct {
+		name        string
+		scope       *types.TenantAPIKeyScope
+		wantReached bool
+	}{
+		{name: "jwt passes", scope: nil, wantReached: true},
+		{name: "full access passes", scope: &types.TenantAPIKeyScope{FullAccess: true}, wantReached: true},
+		{
+			name: "tenant-wide retrieve passes",
+			scope: &types.TenantAPIKeyScope{
+				Capabilities: types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+			},
+			wantReached: true,
+		},
+		{
+			name: "kb-restricted retrieve denied",
+			scope: &types.TenantAPIKeyScope{
+				KnowledgeBaseIDs: types.StringArray{"kb-1"},
+				Capabilities:     types.StringArray{string(types.APIKeyCapabilityRetrieve)},
+			},
+			wantReached: false,
+		},
+		{
+			name: "non-retrieve capability denied",
+			scope: &types.TenantAPIKeyScope{
+				Capabilities: types.StringArray{string(types.APIKeyCapabilityChat)},
+			},
+			wantReached: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reached, status := runAllowFileServe(t, tc.scope)
+			if reached != tc.wantReached {
+				t.Fatalf("reached=%v want %v (status=%d)", reached, tc.wantReached, status)
+			}
+			if tc.wantReached && status != http.StatusOK {
+				t.Fatalf("expected 200, got %d", status)
+			}
+			if !tc.wantReached && status != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d", status)
+			}
+		})
+	}
+}
+
 func TestNormalizeRoutePath(t *testing.T) {
 	cases := map[string]string{
 		"/api/v1//models": "/api/v1/models",

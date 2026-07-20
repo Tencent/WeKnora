@@ -314,6 +314,17 @@ func EvaluateOwnershipOrRole(
 	creatorID string,
 	lookupErr error,
 ) error {
+	// API-key principals are authorized solely by the APIKeyGate (route
+	// policy) plus the KB allow-list handlers enforce separately
+	// (requireTenantAPIKeyKnowledgeBase(s)). Ownership ("creator OR Admin+")
+	// is a human concept that never applies to a machine principal, so
+	// short-circuit here — exactly as RequireOwnershipOrRole does for the
+	// middleware form. Without this, a scoped key (synthesized as Viewer for
+	// legacy-guard compatibility) would be 403'd by the body-carried-KB
+	// ownership checks even though the gate + allow-list already admitted it.
+	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return nil
+	}
 	role := types.TenantRoleFromContext(ctx)
 	if role.HasPermission(min) {
 		return nil

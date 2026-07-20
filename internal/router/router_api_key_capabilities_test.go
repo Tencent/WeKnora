@@ -431,6 +431,39 @@ func TestChunkerPreviewRouteRequiresRetrieveOrIngestCapability(t *testing.T) {
 	}
 }
 
+// The batch / cross-KB content-write routes bind themselves to a single (or
+// source+target) KB and enforce the API key's KB allow-list downstream, so
+// they are reachable by an ingest-capable (or full-access) key — matching
+// their single-document siblings.
+func TestKnowledgeBatchWriteRoutesDeclareIngestCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+
+	RegisterKnowledgeRoutes(v1, &handler.KnowledgeHandler{}, g)
+
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/knowledge/move"},
+		{http.MethodPost, "/api/v1/knowledge/batch-delete"},
+		{http.MethodPost, "/api/v1/knowledge/batch-reparse"},
+		{http.MethodPut, "/api/v1/knowledge/tags"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
+			if !policy.RequireFullAccess {
+				t.Fatal("policy should require full access without a matching capability")
+			}
+			if !policyHasCapability(policy, types.APIKeyCapabilityIngest) {
+				t.Fatalf("policy capabilities = %#v, want ingest", policy.Capabilities)
+			}
+		})
+	}
+}
+
 func TestKBCloneProgressRouteRequiresRetrieveOrManageKbsCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
