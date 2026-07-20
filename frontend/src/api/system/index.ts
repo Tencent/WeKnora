@@ -132,6 +132,8 @@ export interface ParserEnginesResponse {
   /** 连接方式：grpc | http，由服务端环境/配置决定 */
   docreader_transport?: string
   connected?: boolean
+  easyscholar_available?: boolean
+  easyscholar_reason?: string
 }
 
 export function getParserEngines(): Promise<ParserEnginesResponse> {

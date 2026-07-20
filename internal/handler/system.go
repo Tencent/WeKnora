@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/database"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	"github.com/Tencent/WeKnora/internal/infrastructure/journalrank"
 	"github.com/Tencent/WeKnora/internal/logger"
 	modellimiter "github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/runtime"
@@ -514,7 +515,20 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
-	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
+	easyAvailable, easyReason := checkEasyScholar(c.Request.Context(), overrides["easyscholar_secret_key"])
+	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected, "easyscholar_available": easyAvailable, "easyscholar_reason": easyReason})
+}
+
+// checkEasyScholar performs a real, bounded provider lookup for the settings UI.
+// It deliberately returns only a boolean and a safe reason, never the key or
+// provider response body.
+func checkEasyScholar(ctx context.Context, secretKey string) (bool, string) {
+	client := journalrank.NewClient()
+	_, reason, err := client.EnrichWithSecretKey(ctx, secretKey, map[string]string{"journal": "Nature"}, "")
+	if err != nil {
+		return false, reason
+	}
+	return true, "连接成功"
 }
 
 func (h *SystemHandler) resolveDocReader(ctx context.Context, overrides map[string]string) (interfaces.DocumentReader, string, string) {

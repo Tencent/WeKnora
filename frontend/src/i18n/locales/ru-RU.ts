@@ -1347,6 +1347,7 @@ export default {
       easyScholarHint: 'Используется для определения рейтинга журнала при постобработке. Если оставить пустым, будет использована переменная окружения сервера.',
       easyScholarCardTitle: 'EasyScholar',
       easyScholarCardDesc: 'Сервис определения рейтинга журнала для постобработки документов',
+      notTested: 'Не проверено',
       vlmLabel: 'vlm (визуальная языковая модель)',
       mineruHtmlLabel: 'MinerU-HTML (HTML парсинг)',
       paddleocrVlEndpointPlaceholder: 'напр. http://your-paddleocr-vl:8080',

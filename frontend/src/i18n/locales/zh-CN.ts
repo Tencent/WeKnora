@@ -1307,6 +1307,7 @@ export default {
       easyScholarHint: "用于后处理识别文献期刊等级；留空时使用服务器环境变量配置。",
       easyScholarCardTitle: "EasyScholar",
       easyScholarCardDesc: "期刊等级查询与文献后处理服务",
+      notTested: "未测试",
       vlmLabel: "vlm（视觉语言模型）",
       mineruHtmlLabel: "MinerU-HTML（HTML 解析）",
       serverUrl: "服务器地址",

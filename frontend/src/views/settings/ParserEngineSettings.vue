@@ -101,9 +101,14 @@
           <div class="engine-card__body">
             <div class="engine-card__header">
               <h3 class="engine-card__title">{{ $t('settings.parser.easyScholarCardTitle') }}</h3>
-              <span class="engine-card__status engine-card__status--on">
+              <span
+                class="engine-card__status"
+                :class="easyScholarTested && easyScholarAvailable ? 'engine-card__status--on' : 'engine-card__status--err'"
+              >
                 <span class="engine-card__status-dot" />
-                {{ $t('settings.parser.available') }}
+                {{ easyScholarTested
+                  ? (easyScholarAvailable ? $t('settings.parser.available') : $t('settings.parser.unavailable'))
+                  : $t('settings.parser.notTested') }}
               </span>
             </div>
             <p class="engine-card__desc">{{ $t('settings.parser.easyScholarCardDesc') }}</p>
@@ -481,6 +486,8 @@ const saveMessage = ref('')
 const saveSuccess = ref(false)
 const checking = ref(false)
 const checkMessage = ref('')
+const easyScholarTested = ref(false)
+const easyScholarAvailable = ref(false)
 
 const hasBuiltinEngine = computed(() => engines.value.some(e => e.Name === 'builtin'))
 
@@ -502,7 +509,7 @@ const drawerTitle = computed(() => {
 // e.g. simple/markitdown there's nothing to validate beyond presence.
 const needsTestButton = computed(() => {
   if (!currentEngine.value) return false
-  return hasConfigFields(currentEngine.value.Name) || currentEngine.value.Name === 'builtin'
+  return hasConfigFields(currentEngine.value.Name) || currentEngine.value.Name === 'builtin' || currentEngine.value.Name === 'easyscholar'
 })
 
 /** 固定展示顺序，未列出的引擎排在末尾按名称排序 */
@@ -562,6 +569,10 @@ function openDrawer(engine: ParserEngineInfo) {
   drawerVisible.value = true
   saveMessage.value = ''
   checkMessage.value = ''
+  if (engine.Name === 'easyscholar') {
+    easyScholarTested.value = false
+    easyScholarAvailable.value = false
+  }
 }
 
 async function loadEngines() {
@@ -649,7 +660,7 @@ function buildConfigPayload(): ParserEngineConfig {
 }
 
 async function onCheck() {
-  if (!connected) {
+  if (currentEngine.value?.Name !== 'easyscholar' && !connected) {
     checkMessage.value = t('settings.parser.ensureDocreaderConnected')
     return
   }
@@ -661,6 +672,17 @@ async function onCheck() {
     engines.value = res?.data ?? []
     if (res?.connected !== undefined) {
       connected.value = res.connected
+    }
+
+    if (currentEngine.value?.Name === 'easyscholar') {
+      easyScholarTested.value = true
+      easyScholarAvailable.value = res?.easyscholar_available === true
+      checkMessage.value = easyScholarAvailable.value
+        ? t('settings.parser.checkSuccess', '测试连接成功')
+        : (res?.easyscholar_reason || t('settings.parser.checkFailed', '测试连接失败'))
+      saveSuccess.value = easyScholarAvailable.value
+      setTimeout(() => { checkMessage.value = '' }, 3000)
+      return
     }
 
     if (currentEngine.value) {

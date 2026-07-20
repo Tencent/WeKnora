@@ -1435,6 +1435,7 @@ export default {
       easyScholarHint: 'Used to identify journal rankings during post-processing. Leave empty to use the server environment variable.',
       easyScholarCardTitle: 'EasyScholar',
       easyScholarCardDesc: 'Journal ranking lookup for document post-processing',
+      notTested: 'Not tested',
       vlmLabel: 'vlm (Visual Language Model)',
       mineruHtmlLabel: 'MinerU-HTML (HTML Parsing)',
       serverUrl: 'Server URL',
