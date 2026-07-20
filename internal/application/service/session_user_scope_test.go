@@ -223,6 +223,75 @@ func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 	require.EqualValues(t, 2, result.Total)
 }
 
+func TestListSessionsIMSourceRequiresAdmin(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	viewerCtx := testSessionScopeContext(1, "alice")
+	_, err := svc.ListSessions(viewerCtx, &types.SessionListQuery{Source: "feishu"})
+	require.Error(t, err)
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, apperrors.ErrForbidden, appErr.Code)
+
+	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	result, err := svc.ListSessions(adminCtx, &types.SessionListQuery{Source: "feishu"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Total)
+}
+
+func TestListSessionsEmbedSourceRequiresAdmin(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	embed := &types.Session{
+		TenantID:    1,
+		Title:       "embed chat",
+		Description: types.EmbedSessionMarkerPrefix + "ch-1",
+		UserID:      types.PrincipalEmbedSession + ":1:ch-1:sess-1",
+	}
+	require.NoError(t, db.Create(embed).Error)
+
+	viewerCtx := testSessionScopeContext(1, "alice")
+	_, err := svc.ListSessions(viewerCtx, &types.SessionListQuery{Source: "embed:ch-1"})
+	require.Error(t, err)
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, apperrors.ErrForbidden, appErr.Code)
+
+	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	result, err := svc.ListSessions(adminCtx, &types.SessionListQuery{Source: "embed:ch-1"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Total)
+}
+
+func TestGetSessionDeniesViewerOnIMSession(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	imSession := &types.Session{TenantID: 1, Title: "feishu chat"}
+	require.NoError(t, db.Create(imSession).Error)
+	require.NoError(t, db.Create(&testListSessionsIMChannelSession{
+		SessionID: imSession.ID, Platform: "feishu",
+	}).Error)
+
+	viewerCtx := testSessionScopeContext(1, "alice")
+	_, err := svc.GetSession(viewerCtx, imSession.ID)
+	require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
+
+	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
+	got, err := svc.GetSession(adminCtx, imSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, imSession.ID, got.ID)
+	require.Equal(t, "feishu", got.IMPlatform)
+}
+
 // testListSessionsIMChannelSession lets QueryPaged's LEFT JOIN resolve against a
 // real table in the in-memory SQLite database.
 type testListSessionsIMChannelSession struct {

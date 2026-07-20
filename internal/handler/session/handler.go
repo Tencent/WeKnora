@@ -201,7 +201,7 @@ func (h *Handler) GetSession(c *gin.Context) {
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
 // @Param        keyword    query     string  false  "标题模糊搜索"
-// @Param        source     query     string  false  "来源过滤：web / embed / api（API Key 会话，需 Admin+）/ feishu / wechat / slack / ..."
+// @Param        source     query     string  false  "来源过滤：web / embed / api / feishu / wechat / slack / ...（api、embed、IM 渠道需 Admin+）"
 // @Param        agent_id   query     string  false  "按 Agent 过滤（仅对 IM 会话生效）"
 // @Success      200        {object}  map[string]interface{}  "会话列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"

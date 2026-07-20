@@ -12,7 +12,8 @@ type SessionService interface {
 	// CreateSession creates a session
 	CreateSession(ctx context.Context, session *types.Session) (*types.Session, error)
 	// GetSession gets a session, honoring the caller's per-user scope with an
-	// Admin+ read fallback for tenant API-key sessions. Use only for read paths.
+	// Admin+ read fallback for tenant channel sessions (API / IM / embed).
+	// Use only for read paths.
 	GetSession(ctx context.Context, id string) (*types.Session, error)
 	// GetOwnedSession gets a session strictly within the caller's owner scope
 	// (no Admin+ API-key fallback). Write/mutation endpoints must use this so a
@@ -41,6 +42,9 @@ type SessionService interface {
 	// ListSessions returns a page of sessions for the current tenant/user with
 	// search/source filters and pin-aware ordering. User scope is pulled from ctx.
 	ListSessions(ctx context.Context, query *types.SessionListQuery) (*types.PageResult, error)
+	// CountSessionsBySource returns the total for a source filter without the
+	// Admin+ gate applied by ListSessions (for aggregate stats endpoints).
+	CountSessionsBySource(ctx context.Context, query *types.SessionListQuery) (int64, error)
 	// SetSessionPinned pins or unpins the session for the current user scope.
 	// Returns the number of rows affected; 0 signals "not found" to the handler.
 	SetSessionPinned(ctx context.Context, sessionID string, pinned bool) (int64, error)

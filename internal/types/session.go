@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -139,12 +140,41 @@ func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
 // Owner/admin can observe API-key traffic that is otherwise isolated per key.
 const SessionSourceAPI = "api"
 
+// SessionSourceWeb is the source filter for a user's own Web-console chats.
+const SessionSourceWeb = "web"
+
+// SessionListSourceRequiresAdmin reports whether a session-list source filter
+// exposes tenant-wide channel traffic (API / IM / embed) in the Web console.
+func SessionListSourceRequiresAdmin(source string) bool {
+	src := strings.TrimSpace(source)
+	if src == "" || strings.EqualFold(src, SessionSourceWeb) {
+		return false
+	}
+	return true
+}
+
+// SessionRequiresAdminConsoleRead reports whether a session row is channel-
+// managed traffic that non-admin web users must not open from the console.
+func SessionRequiresAdminConsoleRead(s *Session, imPlatform string) bool {
+	if s == nil {
+		return false
+	}
+	if strings.HasPrefix(s.UserID, SessionOwnerAPITenantKeyPrefix) {
+		return true
+	}
+	if strings.HasPrefix(s.Description, EmbedSessionMarkerPrefix) ||
+		strings.HasPrefix(s.UserID, PrincipalEmbedSession+":") {
+		return true
+	}
+	return strings.TrimSpace(imPlatform) != ""
+}
+
 // SessionListQuery bundles the parameters for listing sessions.
 // UserID empty means "tenant-wide" (used by API-key callers / legacy rows).
 // Keyword matches title ILIKE '%keyword%'.
 // Source values: "web" (user chats, no IM/embed), "embed" / "embed:{channelID}",
 // "api" (all API-key sessions, Admin+ only), or an IM platform name
-// (e.g. "feishu", "wechat").
+// (e.g. "feishu", "wechat"). IM and embed sources are also Admin+ only.
 // AgentID currently only filters sessions that have an IM channel mapping.
 type SessionListQuery struct {
 	TenantID uint64

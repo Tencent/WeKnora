@@ -167,27 +167,26 @@
                     </template>
                 </div>
             </div>
-
-            <!-- 批量管理底部操作条 -->
-            <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
-                <div class="batch-footer-left">
-                    <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
-                        @change="toggleBatchSelectAll">
-                        {{ t('batchManage.selectAll') }}
-                    </t-checkbox>
-                </div>
-                <div class="batch-footer-right">
-                    <t-button size="small" variant="text" @click="exitBatchMode">
-                        {{ t('batchManage.cancel') }}
-                    </t-button>
-                    <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
-                        :loading="batchDeleting" @click="handleInlineBatchDelete">
-                        {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
-                    </t-button>
-                </div>
-            </div>
         </div>
 
+        <!-- 批量管理底部操作条：固定在侧栏底部、用户头像上方 -->
+        <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+            <div class="batch-footer-left">
+                <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
+                    @change="toggleBatchSelectAll">
+                    {{ t('batchManage.selectAll') }}
+                </t-checkbox>
+            </div>
+            <div class="batch-footer-right">
+                <t-button size="small" variant="text" @click="exitBatchMode">
+                    {{ t('batchManage.cancel') }}
+                </t-button>
+                <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
+                    :loading="batchDeleting" @click="handleInlineBatchDelete">
+                    {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
+                </t-button>
+            </div>
+        </div>
 
         <!-- 下半部分：用户菜单 -->
         <div class="menu_bottom">
@@ -748,7 +747,7 @@ const rebuildBucketDefinitions = () => buildBucketDefinitions(
         embedChannel: (name) => name,
         api: t('menu.apiChats'),
     },
-    { includeApiBucket: authStore.hasRole('admin') },
+    { includeAdminChannelBuckets: authStore.hasRole('admin') },
 );
 
 /** 首屏轻量探测各渠道是否有会话（page_size=1 只取 total），避免展示空文件夹 */
@@ -1705,9 +1704,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 }
 
 .batch-inline-footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
     flex-shrink: 0;
     display: flex;
     align-items: center;

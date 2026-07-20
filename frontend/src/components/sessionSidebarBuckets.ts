@@ -68,8 +68,8 @@ export function isChannelBucketKey(key: string): boolean {
 }
 
 // API_SESSION_BUCKET_KEY is the admin-only bucket that lists every API-key
-// session in the tenant. It is treated like a channel folder: probed for a
-// count first and only surfaced in the source filter when it has sessions.
+// session in the tenant. IM and embed folders are also admin-only; they are
+// probed for a count first and only surfaced when they have sessions.
 export const API_SESSION_BUCKET_KEY = 'api'
 
 export function buildBucketDefinitions(
@@ -81,22 +81,27 @@ export function buildBucketDefinitions(
     embedChannel: (name: string) => string
     api: string
   },
-  options: { includeApiBucket?: boolean } = {},
+  options: { includeAdminChannelBuckets?: boolean } = {},
 ): BucketDefinition[] {
-  const imDefs = imPlatforms.map((platform) => ({
-    key: `im:${platform}`,
-    apiSource: platform,
-    label: labels.imPlatform(platform),
-    kind: 'im' as const,
-    platform,
-  }))
-  const embedDefs = Object.entries(embedChannels).map(([id, name]) => ({
-    key: `embed:${id}`,
-    apiSource: `embed:${id}`,
-    label: labels.embedChannel(name || id.slice(0, 8)),
-    kind: 'embed' as const,
-  }))
-  const apiDefs: BucketDefinition[] = options.includeApiBucket
+  const includeChannels = options.includeAdminChannelBuckets ?? options.includeApiBucket ?? false
+  const imDefs = includeChannels
+    ? imPlatforms.map((platform) => ({
+        key: `im:${platform}`,
+        apiSource: platform,
+        label: labels.imPlatform(platform),
+        kind: 'im' as const,
+        platform,
+      }))
+    : []
+  const embedDefs = includeChannels
+    ? Object.entries(embedChannels).map(([id, name]) => ({
+        key: `embed:${id}`,
+        apiSource: `embed:${id}`,
+        label: labels.embedChannel(name || id.slice(0, 8)),
+        kind: 'embed' as const,
+      }))
+    : []
+  const apiDefs: BucketDefinition[] = includeChannels
     ? [
         {
           key: API_SESSION_BUCKET_KEY,
