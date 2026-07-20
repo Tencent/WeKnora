@@ -27,7 +27,7 @@ func (p *VolcengineProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderVolcengine,
 		DisplayName: "火山引擎 Volcengine",
-		Description: "doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.",
+		Description: "doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, doubao-seed-rerank, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: VolcengineChatBaseURL,
 			types.ModelTypeEmbedding:   VolcengineEmbeddingBaseURL,

@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/volcengine/vikingdb-go-sdk/knowledge"
 	knowledgemodel "github.com/volcengine/vikingdb-go-sdk/knowledge/model"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -20,6 +21,10 @@ const (
 	volcengineRerankDefaultRegion      = "cn-beijing"
 	volcengineRerankDefaultInstruction = "Whether the Document answers the Query or matches the content retrieval intent"
 	volcengineRerankMaxDocuments       = 50
+	// volcengineRerankMaxConcurrency bounds the number of in-flight batch
+	// requests when the candidate set exceeds volcengineRerankMaxDocuments, so a
+	// very large embedding_top_k cannot fan out into an unbounded burst of calls.
+	volcengineRerankMaxConcurrency = 4
 )
 
 // VolcengineReranker calls the managed Knowledge Service Rerank API with AK/SK signing.
@@ -27,6 +32,7 @@ type VolcengineReranker struct {
 	modelName   string
 	instruction string
 	modelID     string
+	endpoint    string
 	client      *knowledge.Client
 }
 
@@ -79,6 +85,7 @@ func NewVolcengineReranker(config *RerankerConfig) (*VolcengineReranker, error) 
 		modelName:   modelName,
 		instruction: instruction,
 		modelID:     config.ModelID,
+		endpoint:    baseURL,
 		client:      client,
 	}, nil
 }
@@ -89,14 +96,48 @@ func (r *VolcengineReranker) Rerank(
 	if len(documents) == 0 {
 		return []RankResult{}, nil
 	}
-	if len(documents) > volcengineRerankMaxDocuments {
-		return nil, fmt.Errorf(
-			"Volcengine rerank supports at most %d documents, got %d",
-			volcengineRerankMaxDocuments,
-			len(documents),
-		)
-	}
 
+	// The managed Knowledge Service Rerank API rejects requests carrying more
+	// than volcengineRerankMaxDocuments items. Upstream callers (chat pipeline,
+	// agent knowledge search, message search) feed in every retrieval candidate
+	// and do not cap the count per provider, so a large embedding_top_k or a
+	// multi-target search can exceed the limit. Each Data item is scored
+	// independently against the same (query, instruction) pair, so the scores
+	// are comparable across requests — we can split the documents into limit-
+	// sized batches, rerank them concurrently, and merge without losing any
+	// candidate (unlike truncation) or biasing the ranking.
+	results := make([]RankResult, len(documents))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(volcengineRerankMaxConcurrency)
+	for start := 0; start < len(documents); start += volcengineRerankMaxDocuments {
+		start := start
+		end := min(start+volcengineRerankMaxDocuments, len(documents))
+		g.Go(func() error {
+			scores, err := r.rerankBatch(gctx, query, documents[start:end])
+			if err != nil {
+				return err
+			}
+			for i, score := range scores {
+				results[start+i] = RankResult{
+					Index:          start + i,
+					Document:       DocumentInfo{Text: documents[start+i]},
+					RelevanceScore: score,
+				}
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// rerankBatch scores a single batch of documents (already sized within the API
+// limit) and returns the per-document relevance scores in input order.
+func (r *VolcengineReranker) rerankBatch(
+	ctx context.Context, query string, documents []string,
+) ([]float64, error) {
 	data := make([]knowledgemodel.RerankDataItem, len(documents))
 	for i := range documents {
 		data[i] = knowledgemodel.RerankDataItem{
@@ -113,7 +154,7 @@ func (r *VolcengineReranker) Rerank(
 	logger.Debugf(
 		ctx,
 		"%s",
-		buildRerankRequestDebug(r.modelName, VolcengineRerankBaseURL+volcengineRerankPath, query, documents),
+		buildRerankRequestDebug(r.modelName, r.endpoint+volcengineRerankPath, query, documents),
 	)
 	response, err := r.client.Rerank(ctx, request)
 	if err != nil {
@@ -132,16 +173,7 @@ func (r *VolcengineReranker) Rerank(
 			len(documents),
 		)
 	}
-
-	results := make([]RankResult, len(documents))
-	for i, score := range response.Data.Scores {
-		results[i] = RankResult{
-			Index:          i,
-			Document:       DocumentInfo{Text: documents[i]},
-			RelevanceScore: score,
-		}
-	}
-	return results, nil
+	return response.Data.Scores, nil
 }
 
 func (r *VolcengineReranker) GetModelName() string {

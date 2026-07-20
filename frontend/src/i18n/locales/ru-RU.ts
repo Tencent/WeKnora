@@ -2853,6 +2853,14 @@ export default {
       baseUrlPlaceholderAsr: 'например: https://api.openai.com/v1',
       apiKeyOptional: 'API Key (опционально)',
       apiKeyPlaceholder: 'Введите API Key',
+      volcengine: {
+        accessKeyLabel: 'Access Key ID',
+        accessKeyPlaceholder: 'Volcengine Access Key ID',
+        secretKeyLabel: 'Secret Access Key',
+        secretKeyPlaceholder: 'Volcengine Secret Access Key',
+        rerankCredentialHint:
+          'Rerank использует подпись VikingDB AK/SK, а не Ark API key. Рекомендуемая модель: doubao-seed-rerank.',
+      },
       customHeadersLabel: 'Пользовательские заголовки запроса (опционально)',
       customHeadersDesc: 'Дополнительные HTTP-заголовки, добавляемые к запросам к удалённому API модели (например, для авторизации корпоративного шлюза или трассировки). Зарезервированные заголовки, такие как Authorization / Content-Type, игнорируются.',
       customHeadersAdd: 'Добавить заголовок',

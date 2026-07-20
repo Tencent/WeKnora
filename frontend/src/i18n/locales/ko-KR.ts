@@ -3165,6 +3165,14 @@ export default {
       baseUrlPlaceholderAsr: "예: https://api.openai.com/v1",
       apiKeyOptional: "API 키 (선택)",
       apiKeyPlaceholder: "API 키 입력",
+      volcengine: {
+        accessKeyLabel: "Access Key ID",
+        accessKeyPlaceholder: "Volcengine Access Key ID",
+        secretKeyLabel: "Secret Access Key",
+        secretKeyPlaceholder: "Volcengine Secret Access Key",
+        rerankCredentialHint:
+          "Rerank은 Ark API 키가 아닌 VikingDB AK/SK 서명을 사용합니다. 권장 모델: doubao-seed-rerank.",
+      },
       customHeadersLabel: "사용자 정의 요청 헤더 (선택)",
       customHeadersDesc: "원격 모델 API 호출 시 추가되는 HTTP 헤더입니다. 기업 게이트웨이 인증이나 추적 등에 사용할 수 있으며, Authorization / Content-Type 같은 예약 헤더는 무시됩니다.",
       customHeadersAdd: "헤더 추가",
