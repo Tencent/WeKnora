@@ -101,6 +101,7 @@ export interface ParserEngineConfig {
   docreader_transport?: string
   mineru_endpoint?: string
   mineru_api_key?: string
+  easyscholar_secret_key?: string
   // MinerU 自建参数
   mineru_model?: string
   mineru_vlm_server_url?: string

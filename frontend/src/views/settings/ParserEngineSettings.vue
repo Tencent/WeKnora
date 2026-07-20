@@ -223,6 +223,23 @@
           </template>
         </section>
 
+        <!-- EasyScholar 是后处理的期刊等级服务，配置在内置解析引擎抽屉中。 -->
+        <section v-if="currentEngine.Name === 'builtin'" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.easyScholarSection') }}</h4>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.easyScholarSecretKey') }}</label>
+            <t-input
+              v-model="config.easyscholar_secret_key"
+              type="password"
+              :placeholder="$t('settings.parser.easyScholarSecretPlaceholder')"
+              clearable
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+            <p class="form-desc">{{ $t('settings.parser.easyScholarHint') }}</p>
+          </div>
+        </section>
+
         <!-- Section 3 — mineru 自建配置 -->
         <section v-if="currentEngine.Name === 'mineru'" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.parser.configSection', '配置') }}</h4>
@@ -410,6 +427,7 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   docreader_transport: 'grpc',
   mineru_endpoint: '',
   mineru_api_key: '',
+  easyscholar_secret_key: '',
   mineru_model: 'pipeline',
   mineru_vlm_server_url: '',
   mineru_enable_formula: true,
@@ -547,6 +565,7 @@ async function loadConfig() {
       docreader_transport: data?.docreader_transport ?? DEFAULT_PARSER_CONFIG.docreader_transport ?? 'grpc',
       mineru_endpoint: data?.mineru_endpoint ?? DEFAULT_PARSER_CONFIG.mineru_endpoint ?? '',
       mineru_api_key: data?.mineru_api_key ?? DEFAULT_PARSER_CONFIG.mineru_api_key ?? '',
+      easyscholar_secret_key: data?.easyscholar_secret_key ?? DEFAULT_PARSER_CONFIG.easyscholar_secret_key ?? '',
       mineru_model: data?.mineru_model ?? DEFAULT_PARSER_CONFIG.mineru_model ?? '',
       mineru_vlm_server_url: data?.mineru_vlm_server_url ?? DEFAULT_PARSER_CONFIG.mineru_vlm_server_url ?? '',
       mineru_enable_formula: data?.mineru_enable_formula ?? DEFAULT_PARSER_CONFIG.mineru_enable_formula ?? true,
@@ -584,6 +603,7 @@ function buildConfigPayload(): ParserEngineConfig {
     docreader_transport: (config.value.docreader_transport ?? 'grpc').trim() || 'grpc',
     mineru_endpoint: config.value.mineru_endpoint?.trim() ?? '',
     mineru_api_key: config.value.mineru_api_key?.trim() ?? '',
+    easyscholar_secret_key: config.value.easyscholar_secret_key?.trim() ?? '',
     mineru_model: config.value.mineru_model?.trim() ?? '',
     mineru_vlm_server_url: config.value.mineru_vlm_server_url?.trim() ?? '',
     mineru_enable_formula: config.value.mineru_enable_formula,

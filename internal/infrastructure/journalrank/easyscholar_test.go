@@ -70,6 +70,28 @@ func TestClientEnrichAndCache(t *testing.T) {
 	}
 }
 
+func TestClientEnrichWithSecretKeyUsesTenantKey(t *testing.T) {
+	var gotKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.URL.Query().Get("secretKey")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 200, "msg": "SUCCESS", "data": map[string]any{
+				"officialRank": map[string]any{"all": map[string]string{"sci": "Q2"}, "select": map[string]string{"sci": "Q2"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient()
+	c.secretKey = "environment-key"
+	c.rankURL = srv.URL
+	c.httpClient = srv.Client()
+	result, _, err := c.EnrichWithSecretKey(context.Background(), "tenant-key", map[string]string{"journal": "Nature"}, "")
+	if err != nil || result.Official["sci"] != "Q2" || gotKey != "tenant-key" {
+		t.Fatalf("tenant lookup = %+v, key=%q, err=%v", result, gotKey, err)
+	}
+}
+
 func TestClientEnrichNotConfigured(t *testing.T) {
 	c := NewClient()
 	c.secretKey = ""

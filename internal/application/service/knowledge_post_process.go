@@ -164,6 +164,10 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
+	journalSecretKey := ""
+	if processOverrides != nil {
+		journalSecretKey = processOverrides.ParserEngineOverrides["easyscholar_secret_key"]
+	}
 	postStages := payload.PostProcessStages
 	updateSummaryStatus := postProcessUpdatesSummaryStatus(postStages)
 	if len(postStages) == 0 {
@@ -194,7 +198,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	journalMatched, journalReason := false, "not_selected"
 	if hasPostStage(types.RebuildStageJournalRank) {
-		journalMatched, journalReason = s.enrichJournalRank(ctx, knowledge, textChunks, postSpan)
+		journalMatched, journalReason = s.enrichJournalRank(ctx, knowledge, textChunks, postSpan, journalSecretKey)
 	}
 	contentTypeMatched, contentTypeReason := false, "not_selected"
 	if hasPostStage(types.RebuildStageContentType) {
@@ -627,6 +631,7 @@ func (s *KnowledgePostProcessService) enrichJournalRank(
 	knowledge *types.Knowledge,
 	chunks []*types.Chunk,
 	parent *Span,
+	secretKey string,
 ) (bool, string) {
 	span := s.tracker().BeginSubSpan(ctx, parent, "postprocess.journal_rank", types.SpanKindSubSpan, nil)
 	if s.journalClient == nil {
@@ -651,7 +656,7 @@ func (s *KnowledgePostProcessService) enrichJournalRank(
 	}
 
 	metadata := knowledge.GetMetadata()
-	result, reason, err := s.journalClient.Enrich(ctx, metadata, b.String())
+	result, reason, err := s.journalClient.EnrichWithSecretKey(ctx, secretKey, metadata, b.String())
 	if err != nil {
 		if errors.Is(err, journalrank.ErrNotConfigured) || errors.Is(err, journalrank.ErrPublicationMissing) {
 			s.tracker().SkipSpan(ctx, span, reason)

@@ -62,7 +62,26 @@ func NewClient() *Client {
 // Enrich identifies a publication and looks up its ranking. The reason is
 // safe for logs and Trace output and never includes credentials.
 func (c *Client) Enrich(ctx context.Context, metadata map[string]string, text string) (*types.JournalRankMetadata, string, error) {
-	if c == nil || c.secretKey == "" {
+	if c == nil {
+		return nil, "not_configured", ErrNotConfigured
+	}
+	return c.enrich(ctx, c.secretKey, metadata, text)
+}
+
+// EnrichWithSecretKey performs a lookup with a tenant-specific key. An empty
+// key falls back to the process environment key for backwards compatibility.
+func (c *Client) EnrichWithSecretKey(ctx context.Context, secretKey string, metadata map[string]string, text string) (*types.JournalRankMetadata, string, error) {
+	if c == nil {
+		return nil, "not_configured", ErrNotConfigured
+	}
+	if strings.TrimSpace(secretKey) == "" {
+		secretKey = c.secretKey
+	}
+	return c.enrich(ctx, strings.TrimSpace(secretKey), metadata, text)
+}
+
+func (c *Client) enrich(ctx context.Context, secretKey string, metadata map[string]string, text string) (*types.JournalRankMetadata, string, error) {
+	if secretKey == "" {
 		return nil, "not_configured", ErrNotConfigured
 	}
 	publication, doi := ExtractPublication(metadata, text)
@@ -86,14 +105,16 @@ func (c *Client) Enrich(ctx context.Context, metadata map[string]string, text st
 	if publication == "" {
 		return nil, "publication_missing", ErrPublicationMissing
 	}
-	key := normalizePublication(publication)
+	// Include the key in the cache identity because custom EasyScholar ranks
+	// are user-specific and must not cross tenant boundaries.
+	key := normalizePublication(publication) + "\x00" + secretKey
 	if cached, ok := c.getCached(key); ok {
 		return cached, "cache_hit", nil
 	}
 	if err := c.limiter.Wait(ctx); err != nil {
 		return nil, "rate_limiter_cancelled", err
 	}
-	result, err := c.lookup(ctx, publication)
+	result, err := c.lookup(ctx, secretKey, publication)
 	if err != nil {
 		return nil, "lookup_failed", err
 	}
@@ -156,13 +177,13 @@ func normalizePublication(value string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
 }
 
-func (c *Client) lookup(ctx context.Context, publication string) (*types.JournalRankMetadata, error) {
+func (c *Client) lookup(ctx context.Context, secretKey, publication string) (*types.JournalRankMetadata, error) {
 	u, err := url.Parse(c.rankURL)
 	if err != nil {
 		return nil, err
 	}
 	q := u.Query()
-	q.Set("secretKey", c.secretKey)
+	q.Set("secretKey", secretKey)
 	q.Set("publicationName", publication)
 	u.RawQuery = q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

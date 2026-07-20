@@ -33,6 +33,9 @@ func ParserEngineConfigForResponse(cfg *ParserEngineConfig, maskSecrets bool) *P
 	if out.MinerUAPIKey != "" {
 		out.MinerUAPIKey = RedactedSecretPlaceholder
 	}
+	if out.EasyScholarSecretKey != "" {
+		out.EasyScholarSecretKey = RedactedSecretPlaceholder
+	}
 	if out.PaddleOCRVLCloudToken != "" {
 		out.PaddleOCRVLCloudToken = RedactedSecretPlaceholder
 	}
@@ -167,6 +170,7 @@ func MergeParserEngineConfigForUpdate(incoming, existing *ParserEngineConfig) *P
 		prev = *existing
 	}
 	out.MinerUAPIKey = PreserveIfRedacted(out.MinerUAPIKey, prev.MinerUAPIKey)
+	out.EasyScholarSecretKey = PreserveIfRedacted(out.EasyScholarSecretKey, prev.EasyScholarSecretKey)
 	out.PaddleOCRVLCloudToken = PreserveIfRedacted(out.PaddleOCRVLCloudToken, prev.PaddleOCRVLCloudToken)
 	// Chat attachment parser rules are configured per agent; preserve any legacy
 	// tenant-level rules when the settings UI omits this field on engine updates.
