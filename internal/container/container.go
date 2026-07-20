@@ -72,6 +72,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/wecom"
 	"github.com/Tencent/WeKnora/internal/im/yunzhijia"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	"github.com/Tencent/WeKnora/internal/infrastructure/journalrank"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -128,6 +129,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// External service clients
 	logger.Debugf(ctx, "[Container] Registering external service clients...")
 	must(container.Provide(initDocReaderClient))
+	must(container.Provide(journalrank.NewClient))
 	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))
@@ -1540,6 +1542,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("searxng", infra_web_search.NewSearxngProvider)
 	registry.Register("keenable", infra_web_search.NewKeenableProvider)
 	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
+	registry.Register("serpapi", infra_web_search.NewSerpAPIProvider)
 }
 
 // registerIMAdapterFactories registers adapter factories for each IM platform

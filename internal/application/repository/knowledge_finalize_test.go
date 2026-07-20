@@ -76,8 +76,8 @@ func insertProcessingKnowledge(t *testing.T, db *gorm.DB) string {
 	t.Helper()
 	id := uuid.New().String()
 	require.NoError(t, db.Exec(`
-		INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, parse_status, pending_subtasks_count)
-		VALUES (?, 1, ?, 'document', 'finalize-test', 'manual', 'processing', 0)
+		INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, title, source, parse_status, enable_status, pending_subtasks_count)
+		VALUES (?, 1, ?, 'document', 'finalize-test', 'manual', 'processing', 'disabled', 0)
 	`, id, uuid.New().String()).Error)
 	return id
 }
@@ -150,6 +150,9 @@ func TestFinalizeSubtask_Concurrent_ExactlyOnePromote(t *testing.T) {
 	status, count := reloadKnowledgeRow(t, db, id)
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	assert.Equal(t, 0, count)
+	var enableStatus string
+	require.NoError(t, db.Raw(`SELECT enable_status FROM knowledges WHERE id = ?`, id).Scan(&enableStatus).Error)
+	assert.Equal(t, "enabled", enableStatus)
 }
 
 // TestFinalizeSubtask_PartialDecrement_StaysFinalizing verifies the row

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -596,8 +597,21 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 		logger.Errorf(ctx, "Failed to get knowledge record: %v", err)
 		return err
 	}
-	// if need other fields update, please add here
-	if knowledge.Title != "" {
+	if knowledge.FileName != "" && record.Type == "file" {
+		baseName := strings.TrimSpace(knowledge.FileName)
+		if baseName == "" || len([]rune(baseName)) > 200 || strings.ContainsAny(baseName, `/\:*?"<>|`) {
+			return fmt.Errorf("invalid file name")
+		}
+		ext := filepath.Ext(record.FileName)
+		if ext != "" && strings.EqualFold(filepath.Ext(baseName), ext) {
+			baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
+		}
+		if strings.TrimSpace(baseName) == "" {
+			return fmt.Errorf("invalid file name")
+		}
+		record.FileName = baseName + ext
+		record.Title = record.FileName
+	} else if knowledge.Title != "" {
 		record.Title = knowledge.Title
 	}
 	if knowledge.Description != "" {
@@ -611,6 +625,69 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 	}
 	logger.Infof(ctx, "Knowledge updated successfully, ID: %s", knowledge.ID)
 	return nil
+}
+
+func (s *knowledgeService) UpdateKnowledgeContentType(
+	ctx context.Context,
+	knowledgeID string,
+	contentType types.KnowledgeContentType,
+) error {
+	if !contentType.IsValid() {
+		return fmt.Errorf("unsupported content type %q", contentType)
+	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		return err
+	}
+	if err := knowledge.SetContentClassification(types.ContentClassificationMetadata{
+		SchemaVersion: 1,
+		Type:          contentType,
+		Source:        "manual",
+		Confidence:    1,
+		MatchedAt:     time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+	return s.repo.UpdateKnowledgeColumn(ctx, knowledge.ID, "metadata", knowledge.Metadata)
+}
+
+func (s *knowledgeService) UpdateKnowledgeContentTypeBatch(
+	ctx context.Context,
+	authorizedKBID string,
+	knowledgeIDs []string,
+	contentType types.KnowledgeContentType,
+) error {
+	if !contentType.IsValid() {
+		return fmt.Errorf("unsupported content type %q", contentType)
+	}
+	if len(knowledgeIDs) == 0 {
+		return fmt.Errorf("knowledge IDs cannot be empty")
+	}
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+	if err != nil {
+		return err
+	}
+	if len(knowledgeList) != len(knowledgeIDs) {
+		return fmt.Errorf("one or more knowledge items were not found")
+	}
+	now := time.Now().UTC()
+	for _, knowledge := range knowledgeList {
+		if authorizedKBID != "" && knowledge.KnowledgeBaseID != authorizedKBID {
+			return fmt.Errorf("knowledge item does not belong to the authorized knowledge base")
+		}
+		if err := knowledge.SetContentClassification(types.ContentClassificationMetadata{
+			SchemaVersion: 1,
+			Type:          contentType,
+			Source:        "manual",
+			Confidence:    1,
+			MatchedAt:     now,
+		}); err != nil {
+			return err
+		}
+	}
+	return s.repo.UpdateKnowledgeBatch(ctx, knowledgeList)
 }
 
 // GetKnowledgeBatch retrieves multiple knowledge entries by their IDs

@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
+import JournalRankBadges from './JournalRankBadges.vue';
+import type { KnowledgeJournalMetadata } from '@/types/journalRank';
 
 interface Tag {
   id: string;
@@ -25,6 +27,7 @@ interface KnowledgeItem {
   description?: string;
   channel?: string;
   isMore?: boolean;
+  metadata?: KnowledgeJournalMetadata;
 }
 
 const props = defineProps<{
@@ -225,6 +228,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
       </div>
       <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
       <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
+      <div class="cell cell-journal" role="columnheader">{{ t('knowledgeBase.columnJournalRank') }}</div>
       <div class="cell cell-source" role="columnheader">{{ t('knowledgeBase.columnSource') }}</div>
       <div class="cell cell-size" role="columnheader">{{ t('knowledgeBase.columnSize') }}</div>
       <div class="cell cell-status" role="columnheader">{{ t('knowledgeBase.columnStatus') }}</div>
@@ -276,6 +280,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
           <span v-else class="row-tag-chips is-clickable" @click.stop="canEdit && emit('tag-edit', item)">
             <span class="row-tag-add">+ {{ t('knowledgeBase.tagLabel') }}</span>
           </span>
+        </div>
+
+        <div class="cell cell-journal">
+          <JournalRankBadges :rank="item.metadata?.journal_rank" :max-visible="3" compact />
+          <span v-if="!item.metadata?.journal_rank?.found" class="row-muted">--</span>
         </div>
 
         <div class="cell cell-source">
@@ -426,10 +435,11 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
   display: grid;
   grid-template-columns:
     44px // checkbox
-    minmax(260px, 2.6fr) // name
-    minmax(100px, 0.9fr) // tag
-    minmax(96px, 0.8fr) // source
-    96px // size
+    minmax(200px, 2.6fr) // name
+    minmax(80px, 0.9fr) // tag
+    minmax(140px, 1.25fr) // journal rank
+    minmax(86px, 0.8fr) // source
+    88px // size
     minmax(96px, 0.7fr) // status
     140px // updated_at
     48px; // actions

@@ -162,6 +162,12 @@ func TestSpanTracker_LookupStage_FindsAcrossProcesses(t *testing.T) {
 	found := tracker.LookupStage(ctx, "kid", attempt, types.StageMultimodal)
 	require.NotNil(t, found)
 	assert.Equal(t, mm.SpanID, found.SpanID, "LookupStage must return the same span row")
+	assert.Equal(t, types.SpanStatusRunning, found.Status)
+
+	tracker.SkipSpan(ctx, mm, "not_selected")
+	found = tracker.LookupStage(ctx, "kid", attempt, types.StageMultimodal)
+	require.NotNil(t, found)
+	assert.Equal(t, types.SpanStatusSkipped, found.Status, "LookupStage must preserve terminal state")
 
 	// A different stage must not be confused with multimodal.
 	other := tracker.LookupStage(ctx, "kid", attempt, types.StageEmbedding)

@@ -24,6 +24,7 @@ const (
 	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
 	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
 	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
+	WebSearchProviderTypeSerpAPI    WebSearchProviderType = "serpapi"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -274,6 +275,30 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					},
 				},
 			},
+		},
+		{
+			ID:             "serpapi",
+			Name:           "SerpApi",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "SerpApi search with selectable Google, Scholar, News, Bing, and other engines",
+			DocsURL:        "https://serpapi.com/search-api",
+			ConfigFields: []WebSearchProviderConfigField{{
+				Key: "engine", Label: "Search engine", LabelKey: "webSearchSettings.serpApiEngineLabel",
+				Type: "select", Default: "google", Description: "Select the SerpApi search engine.",
+				DescriptionKey: "webSearchSettings.serpApiEngineHelp",
+				Options: []WebSearchProviderConfigFieldOption{
+					{Label: "Google", LabelKey: "webSearchSettings.serpApiEngines.google", Value: "google"},
+					{Label: "Google News", LabelKey: "webSearchSettings.serpApiEngines.googleNews", Value: "google_news"},
+					{Label: "Google Scholar", LabelKey: "webSearchSettings.serpApiEngines.googleScholar", Value: "google_scholar"},
+					{Label: "Google Patents", LabelKey: "webSearchSettings.serpApiEngines.googlePatents", Value: "google_patents"},
+					{Label: "Bing", LabelKey: "webSearchSettings.serpApiEngines.bing", Value: "bing"},
+					{Label: "DuckDuckGo", LabelKey: "webSearchSettings.serpApiEngines.duckduckgo", Value: "duckduckgo"},
+					{Label: "Google Images", LabelKey: "webSearchSettings.serpApiEngines.googleImages", Value: "google_images"},
+					{Label: "Google Videos", LabelKey: "webSearchSettings.serpApiEngines.googleVideos", Value: "google_videos"},
+					{Label: "YouTube", LabelKey: "webSearchSettings.serpApiEngines.youtube", Value: "youtube"},
+				},
+			}},
 		},
 	}
 }

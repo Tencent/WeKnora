@@ -137,7 +137,8 @@ func isValidProviderType(provider types.WebSearchProviderType) bool {
 		types.WebSearchProviderTypeBaidu,
 		types.WebSearchProviderTypeSearxng,
 		types.WebSearchProviderTypeKeenable,
-		types.WebSearchProviderTypeZhipu:
+		types.WebSearchProviderTypeZhipu,
+		types.WebSearchProviderTypeSerpAPI:
 		return true
 	default:
 		return false
@@ -180,6 +181,13 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 		// No API key required (keyless by default; an optional key lifts the rate limit)
 	case types.WebSearchProviderTypeSearxng:
 		if err := infra_web_search.ValidateSearxngBaseURL(params.BaseURL); err != nil {
+			return err
+		}
+	case types.WebSearchProviderTypeSerpAPI:
+		if params.APIKey == "" {
+			return fmt.Errorf("API key is required for SerpApi provider")
+		}
+		if err := infra_web_search.ValidateSerpAPIEngine(params.ExtraConfig["engine"]); err != nil {
 			return err
 		}
 	}

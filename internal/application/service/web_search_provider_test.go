@@ -30,3 +30,22 @@ func TestIsValidProviderTypeIncludesZhipu(t *testing.T) {
 		t.Fatal("Zhipu provider type is not accepted")
 	}
 }
+
+func TestSerpAPIProviderValidation(t *testing.T) {
+	if !isValidProviderType(types.WebSearchProviderTypeSerpAPI) {
+		t.Fatal("serpapi should be a valid provider type")
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSerpAPI, types.WebSearchProviderParameters{}); err == nil {
+		t.Fatal("expected missing API key error")
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSerpAPI, types.WebSearchProviderParameters{
+		APIKey: "test", ExtraConfig: map[string]string{"engine": "unsupported"},
+	}); err == nil {
+		t.Fatal("expected unsupported engine error")
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSerpAPI, types.WebSearchProviderParameters{
+		APIKey: "test", ExtraConfig: map[string]string{"engine": "google_scholar"},
+	}); err != nil {
+		t.Fatalf("valid SerpApi parameters rejected: %v", err)
+	}
+}

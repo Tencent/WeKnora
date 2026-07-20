@@ -92,6 +92,10 @@ type KnowledgeService interface {
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
 	// UpdateKnowledge updates knowledge information.
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// UpdateKnowledgeContentType applies a user-selected content type to one knowledge item.
+	UpdateKnowledgeContentType(ctx context.Context, knowledgeID string, contentType types.KnowledgeContentType) error
+	// UpdateKnowledgeContentTypeBatch applies one content type to multiple items in the same knowledge base.
+	UpdateKnowledgeContentTypeBatch(ctx context.Context, authorizedKBID string, knowledgeIDs []string, contentType types.KnowledgeContentType) error
 	// UpdateManualKnowledge updates manual Markdown knowledge content.
 	UpdateManualKnowledge(
 		ctx context.Context,
@@ -105,6 +109,7 @@ type KnowledgeService interface {
 		ctx context.Context,
 		knowledgeID string,
 		processOverrides *types.KnowledgeProcessOverrides,
+		requestedStages ...[]string,
 	) (*types.Knowledge, error)
 	// CancelKnowledgeParse marks an in-progress parse as cancelled by the
 	// user. The knowledge row and any partially written chunks/index are

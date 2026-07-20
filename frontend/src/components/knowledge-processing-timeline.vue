@@ -8,6 +8,7 @@ import {
   knowledgeSpansPayloadHasTrace,
   type KnowledgeTraceNode,
 } from '@/utils/knowledgeTrace'
+import type { KnowledgeRebuildStage } from '@/api/knowledge-base/index'
 import { resolveTimelineHeaderStatus } from '@/utils/knowledgeProcessingStatus'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 
@@ -456,16 +457,42 @@ async function copySpan(node: SpanNode) {
   await copyValue(node)
 }
 
+const rebuildDialogVisible = ref(false)
+const rebuildMode = ref<'full' | 'partial'>('full')
+const rebuildStages = ref<KnowledgeRebuildStage[]>(['embedding', 'summary', 'questions', 'graph', 'wiki', 'journal_rank', 'content_type'])
+const rebuildLoading = ref(false)
+
+const canRebuild = computed(() => {
+  const status = data.value?.parse_status ?? props.parseStatus
+  return !!status && !isPolling(status) && status !== 'deleting'
+})
+
+function openRebuildDialog() {
+  rebuildMode.value = 'full'
+  rebuildStages.value = ['embedding', 'summary', 'questions', 'graph', 'wiki', 'journal_rank', 'content_type']
+  rebuildDialogVisible.value = true
+}
+
 async function onRetry() {
   if (!props.knowledgeId) return
+  if (rebuildMode.value === 'partial' && rebuildStages.value.length === 0) {
+    MessagePlugin.warning(t('knowledgeStages.rebuildSelectOne'))
+    return
+  }
+  rebuildLoading.value = true
   try {
-    await reparseKnowledge(props.knowledgeId)
+    const stages = rebuildMode.value === 'partial' ? rebuildStages.value : undefined
+    await reparseKnowledge(props.knowledgeId, stages ? { stages } : undefined)
+    rebuildDialogVisible.value = false
     selectedAttempt.value = undefined
     attemptStatuses.clear()
     selectedSpanId.value = null
     await fetchSpans()
-  } catch {
-    // ignore
+    MessagePlugin.success(t('knowledgeStages.rebuildSubmitted'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeStages.rebuildFailed'))
+  } finally {
+    rebuildLoading.value = false
   }
 }
 
@@ -1457,10 +1484,10 @@ const processConfigLines = computed<string[]>(() => {
                   <t-icon :name="cancelling ? 'loading' : 'close-circle'" size="15px" />
                 </button>
               </t-popconfirm>
-              <t-button v-if="data?.parse_status === 'failed'" size="small" theme="primary" variant="outline"
-                @click="onRetry">
+              <t-button v-if="canRebuild" size="small" theme="primary" variant="outline"
+                :loading="rebuildLoading" @click="openRebuildDialog">
                 <t-icon name="refresh" size="14px" />
-                <span style="margin-left: 4px">{{ t('knowledgeStages.retry') }}</span>
+                <span style="margin-left: 4px">{{ t('knowledgeStages.rebuild') }}</span>
               </t-button>
               <button v-if="showClose" type="button" class="kp-icon-btn" :aria-label="t('knowledgeStages.close')"
                 :title="t('knowledgeStages.close')" @click="emit('close')">
@@ -1468,6 +1495,26 @@ const processConfigLines = computed<string[]>(() => {
               </button>
             </div>
           </div>
+
+          <t-dialog v-model:visible="rebuildDialogVisible" :header="t('knowledgeStages.rebuildDialogTitle')"
+            :confirm-btn="{ content: t('knowledgeStages.rebuildSubmit'), loading: rebuildLoading }"
+            :cancel-btn="{ content: t('common.cancel') }" width="460px" @confirm="onRetry">
+            <div class="kp-rebuild-dialog">
+              <t-radio-group v-model="rebuildMode" variant="default-filled">
+                <t-radio value="full">{{ t('knowledgeStages.rebuildFull') }}</t-radio>
+                <t-radio value="partial">{{ t('knowledgeStages.rebuildPartial') }}</t-radio>
+              </t-radio-group>
+              <t-checkbox-group v-if="rebuildMode === 'partial'" v-model="rebuildStages" class="kp-rebuild-options">
+                <t-checkbox value="embedding">{{ t('knowledgeStages.stageEmbedding') }}</t-checkbox>
+                <t-checkbox value="summary">{{ t('knowledgeStages.stageSummary') }}</t-checkbox>
+                <t-checkbox value="questions">{{ t('knowledgeStages.stageQuestions') }}</t-checkbox>
+                <t-checkbox value="graph">{{ t('knowledgeStages.stageGraph') }}</t-checkbox>
+                <t-checkbox value="wiki">{{ t('knowledgeStages.stageWiki') }}</t-checkbox>
+                <t-checkbox value="journal_rank">{{ t('knowledgeStages.stageJournalRank') }}</t-checkbox>
+                <t-checkbox value="content_type">{{ t('knowledgeStages.stageContentType') }}</t-checkbox>
+              </t-checkbox-group>
+            </div>
+          </t-dialog>
 
           <p v-if="headMetaParts.length > 0" class="kp-head-meta">
             <template v-for="(part, idx) in headMetaParts" :key="idx">
@@ -1832,6 +1879,19 @@ const processConfigLines = computed<string[]>(() => {
 </template>
 
 <style scoped lang="less">
+.kp-rebuild-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kp-rebuild-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  width: 100%;
+}
+
 .kp-timeline {
   font-family: var(--app-font-family);
   font-size: 13px;
