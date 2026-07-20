@@ -202,7 +202,7 @@ const formatMetadataValue = (value: unknown) => {
   .status-pill {
     font-size: 11px;
     color: var(--td-brand-color);
-    border: 1px solid rgba(7, 192, 95, 0.3);
+    border: 1px solid color-mix(in srgb, var(--td-brand-color) 30%, transparent);
     border-radius: 10px;
     padding: 2px 8px;
     line-height: 1.4;

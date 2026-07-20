@@ -15,7 +15,7 @@
 @card-hover-border: var(--td-brand-color);
 @card-radius: 6px;
 @card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-@card-shadow-hover: 0 2px 6px rgba(7, 192, 95, 0.08);
+@card-shadow-hover: 0 2px 6px color-mix(in srgb, var(--td-brand-color) 8%, transparent);
 
 // Animation timing
 @transition-time: 0.2s;
@@ -37,7 +37,7 @@
   line-height: 1.4;
 
   &.high {
-    background-color: rgba(0, 168, 112, 0.12);
+    background-color: var(--td-success-color-light);
     color: @relevance-high;
   }
 
@@ -99,7 +99,7 @@
   transition: background-color 0.15s ease;
 
   &:hover {
-    background: rgba(7, 192, 95, 0.04);
+    background: var(--td-brand-color-light);
   }
   
   * {
@@ -193,8 +193,8 @@
 
 // Statistics card (for KB counts, etc.)
 .stats-card {
-  background: rgba(7, 192, 95, 0.04);
-  border: 1px solid rgba(7, 192, 95, 0.15);
+  background: var(--td-brand-color-light);
+  border: 1px solid var(--td-brand-color-3);
   border-radius: @card-radius;
   padding: 10px 12px;
   margin-bottom: 10px;
@@ -283,7 +283,7 @@
   &:hover {
     border-color: @card-hover-border;
     color: @card-hover-border;
-    background: rgba(7, 192, 95, 0.04);
+    background: var(--td-brand-color-light);
   }
 }
 
