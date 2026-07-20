@@ -677,6 +677,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			Language:        lang,
 			Attempt:         attemptFromCtx(ctx),
 		}
+		if overrides := s.getParserEngineOverridesFromContext(ctx); overrides != nil {
+			postProcessPayload.EasyScholarSecretKey = strings.TrimSpace(overrides["easyscholar_secret_key"])
+		}
 		langfuse.InjectTracing(ctx, &postProcessPayload)
 		payloadBytes, err := json.Marshal(postProcessPayload)
 		if err == nil {
@@ -2855,6 +2858,9 @@ func (s *knowledgeService) processPartialRebuild(ctx context.Context, payload ty
 			Attempt:           attempt,
 			PostProcessStages: plan.PostProcessStages,
 		}
+		if overrides := s.getParserEngineOverridesFromContext(ctx); overrides != nil {
+			postPayload.EasyScholarSecretKey = strings.TrimSpace(overrides["easyscholar_secret_key"])
+		}
 		langfuse.InjectTracing(ctx, &postPayload)
 		payloadBytes, marshalErr := json.Marshal(postPayload)
 		if marshalErr != nil {
@@ -3583,6 +3589,12 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			EnableOCR:       true,
 			EnableCaption:   true,
 			Language:        lang,
+			EasyScholarSecretKey: func() string {
+				if overrides := s.getParserEngineOverridesFromContext(ctx); overrides != nil {
+					return strings.TrimSpace(overrides["easyscholar_secret_key"])
+				}
+				return ""
+			}(),
 			ImageSourceType: metadata["image_source_type"],
 			Attempt:         attempt,
 			ImageIndex:      idx,

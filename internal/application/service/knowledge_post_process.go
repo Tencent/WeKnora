@@ -164,9 +164,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
-	journalSecretKey := ""
+	journalSecretKey := strings.TrimSpace(payload.EasyScholarSecretKey)
 	if processOverrides != nil {
-		journalSecretKey = processOverrides.ParserEngineOverrides["easyscholar_secret_key"]
+		if journalSecretKey == "" {
+			journalSecretKey = strings.TrimSpace(processOverrides.ParserEngineOverrides["easyscholar_secret_key"])
+		}
 	}
 	postStages := payload.PostProcessStages
 	updateSummaryStatus := postProcessUpdatesSummaryStatus(postStages)

@@ -470,6 +470,9 @@ type ImageMultimodalPayload struct {
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
 	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
+	// EasyScholarSecretKey is propagated only through internal queue payloads;
+	// it is never exposed by API responses or logs.
+	EasyScholarSecretKey string `json:"easyscholar_secret_key,omitempty"`
 	ImageSourceType string `json:"image_source_type,omitempty"` // Source type of the image (e.g., "scanned_pdf")
 	// Attempt links this image task back to the parent ProcessDocument
 	// attempt so the worker can record its image[i] subspan under the
@@ -488,6 +491,9 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeID       string   `json:"knowledge_id"`
 	KnowledgeBaseID   string   `json:"knowledge_base_id"`
 	Language          string   `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
+	// EasyScholarSecretKey is propagated only through internal queue payloads;
+	// it is never exposed by API responses or logs.
+	EasyScholarSecretKey string   `json:"easyscholar_secret_key,omitempty"`
 	Attempt           int      `json:"attempt,omitempty"`
 	PostProcessStages []string `json:"postprocess_stages,omitempty"`
 }

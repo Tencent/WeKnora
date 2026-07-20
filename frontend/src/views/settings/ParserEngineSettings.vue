@@ -486,7 +486,9 @@ const saveMessage = ref('')
 const saveSuccess = ref(false)
 const checking = ref(false)
 const checkMessage = ref('')
-const easyScholarTested = ref(false)
+// EasyScholar follows the other parser cards: it is either available or
+// unavailable. An empty/unconfigured key is therefore unavailable too.
+const easyScholarTested = ref(true)
 const easyScholarAvailable = ref(false)
 
 const hasBuiltinEngine = computed(() => engines.value.some(e => e.Name === 'builtin'))
@@ -570,8 +572,11 @@ function openDrawer(engine: ParserEngineInfo) {
   saveMessage.value = ''
   checkMessage.value = ''
   if (engine.Name === 'easyscholar') {
-    easyScholarTested.value = false
-    easyScholarAvailable.value = false
+    // Keep the server-reported status when reopening the drawer. A refresh
+    // must not make an already configured provider look untested.
+    if (!easyScholarTested.value) {
+      easyScholarAvailable.value = false
+    }
   }
 }
 
@@ -583,6 +588,12 @@ async function loadEngines() {
     const transport = (res?.docreader_transport ?? 'grpc').toLowerCase()
     docreaderTransport.value = transport === 'http' ? 'http' : 'grpc'
     connected.value = res?.connected ?? (engines.value.length > 0)
+    if (res?.easyscholar_available !== undefined) {
+      // Match the other parser cards: the provider check itself determines
+      // the status, including the unconfigured case (shown as unavailable).
+      easyScholarTested.value = true
+      easyScholarAvailable.value = res.easyscholar_available === true
+    }
   } catch (e: any) {
     error.value = e?.message || t('settings.parser.loadFailed')
     engines.value = []
