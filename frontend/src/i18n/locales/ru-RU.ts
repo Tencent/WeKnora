@@ -3386,6 +3386,7 @@ export default {
       loadMore: 'Загрузить ещё (осталось {remaining})',
       filterAll: 'Все типы',
       newFolder: 'Новый каталог',
+      folder: 'Папка',
       newRootFolder: 'Новый каталог',
       newSubfolder: 'Новый подкаталог',
       folderActions: 'Действия с каталогом',
@@ -3865,6 +3866,7 @@ export default {
     sourcesCount: '{count} источников',
     pleaseEnterContent: 'Пожалуйста, введите содержимое!',
     pleaseUploadKnowledgeBase: 'Пожалуйста, сначала загрузите базу знаний!',
+    noKnowledgeBase: 'Нет доступных баз знаний',
     replyingPleaseWait: 'Идёт ответ, пожалуйста, попробуйте позже!',
     createSessionFailed: 'Не удалось создать сеанс',
     createSessionError: 'Ошибка создания сеанса',
@@ -6564,4 +6566,11 @@ export default {
       },
     },
   },
-}
+  knowledge: {
+    folder: {
+      searchPlaceholder: 'Поиск папок',
+      empty: 'Нет папок',
+      pickerHint: 'Нажмите на папку, чтобы включить её в область вопроса',
+    },
+  },
+};

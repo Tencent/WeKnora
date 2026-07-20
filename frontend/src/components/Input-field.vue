@@ -14,6 +14,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
+import FolderTreePicker from './FolderTreePicker.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 import { type ModelConfig } from '@/api/model';
@@ -447,6 +448,10 @@ const isModelLockedByAgent = computed(() => {
   return false;
 });
 
+// 文件夹浏览面板（专用按钮，独立于 @ 下拉）
+const showFolderPicker = ref(false);
+const folderButtonRef = ref<HTMLElement | null>(null);
+
 // Mention related state
 const showMention = ref(false);
 const mentionQuery = ref("");
@@ -594,6 +599,10 @@ const selectedFolderItems = computed<MentionItem[]>(() => {
     isAgentConfigured: false,
   }));
 });
+
+// 文件夹浏览面板用的数据：展示所有可用知识库，而非仅当前已选中的知识库
+const pickerKbs = computed(() => knowledgeBases.value.map((kb: any) => ({ id: kb.id, name: kb.name })));
+const selectedFolderIds = computed(() => selectedFolderItems.value.map((f) => f.id));
 
 // 合并所有选中项（用于输入框内显示）
 // 现在智能体配置的知识库也在 store 中，统一从 selectedKbs 获取
@@ -1644,6 +1653,7 @@ const triggerMention = () => {
   // 关闭其他选择器
   showAgentModeSelector.value = false;
   showModelSelector.value = false;
+  showFolderPicker.value = false;
 
   textarea.focus();
 
@@ -1745,6 +1755,23 @@ const onMentionSelect = (item: any) => {
   showMention.value = false;
 };
 
+// 文件夹浏览面板：选中文件夹即加入提问范围（与 @ 文件夹同一逻辑）
+const onFolderPickerSelect = (item: { id: string; name: string; kbId?: string; kbName?: string }) => {
+  if (item.kbId) {
+    settingsStore.addFolder({ id: item.id, kbId: item.kbId, name: item.name });
+  }
+};
+
+// 文件夹浏览面板显隐：打开时关闭其它选择器
+const onFolderPickerVisible = (v: boolean) => {
+  showFolderPicker.value = v;
+  if (v) {
+    showMention.value = false;
+    showAgentModeSelector.value = false;
+    showModelSelector.value = false;
+  }
+};
+
 const removeFile = (id: string) => {
   settingsStore.removeFile(id);
   delete fileIdToKbId.value[id];
@@ -1760,6 +1787,7 @@ const toggleModelSelector = () => {
   // 互斥：关闭其他
   showMention.value = false;
   showAgentModeSelector.value = false;
+  showFolderPicker.value = false;
 
   showModelSelector.value = !showModelSelector.value;
   if (showModelSelector.value) {
@@ -2103,6 +2131,7 @@ const toggleAgentModeSelector = () => {
   // 互斥
   showMention.value = false;
   showModelSelector.value = false;
+  showFolderPicker.value = false;
 
   showAgentModeSelector.value = !showAgentModeSelector.value;
   if (showAgentModeSelector.value) {
@@ -2694,6 +2723,35 @@ defineExpose({
             </div>
           </t-tooltip>
 
+          <!-- 📁 文件夹浏览按钮（独立于 @ 下拉的层级选择器） -->
+          <t-popup
+            v-model="showFolderPicker"
+            trigger="click"
+            placement="top-left"
+            :disabled="isMentionDisabled || pickerKbs.length === 0"
+            :overlay-style="{ padding: '0', boxShadow: '0 4px 16px rgba(0,0,0,0.12)' }"
+            @visible-change="onFolderPickerVisible"
+          >
+            <div
+              ref="folderButtonRef"
+              class="control-btn folder-btn"
+              :class="{
+                'active': showFolderPicker || selectedFolderItems.length > 0,
+                'disabled': isMentionDisabled || pickerKbs.length === 0
+              }"
+            >
+              <t-icon name="folder" class="control-icon" />
+              <span v-if="selectedFolderItems.length > 0" class="folder-count">{{ selectedFolderItems.length }}</span>
+            </div>
+            <template #content>
+              <FolderTreePicker
+                :kbs="pickerKbs"
+                :selected-folder-ids="selectedFolderIds"
+                @select="onFolderPickerSelect"
+              />
+            </template>
+          </t-popup>
+
           <!-- 模型显示 -->
           <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
             :disabled="!isModelLockedByAgent">
@@ -3146,6 +3204,44 @@ const getImgSrc = (url: string) => {
 }
 
 .kb-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti, #fff);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 15px;
+  border: 2px solid var(--td-bg-color-container);
+  border-radius: var(--td-radius-round, 999px);
+  box-sizing: content-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.folder-btn {
+  height: 28px;
+  width: 30px;
+  padding: 0;
+  min-width: 30px;
+  position: relative;
+
+  &.active {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+    box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer-hover);
+    }
+  }
+}
+
+.folder-count {
   position: absolute;
   top: -5px;
   right: -5px;

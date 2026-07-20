@@ -38,74 +38,74 @@
       <!-- Knowledge Bases Group -->
       <div v-if="(isFlatMode || currentGroupType === 'kb') && kbItems.length > 0" class="mention-group" data-group-type="kb">
         <t-popup
-          v-for="(item, index) in kbItems"
-          :key="item.id"
-          placement="right-start"
-          trigger="hover"
-          :show-arrow="false"
-          :delay="[320, 80]"
-          :disabled="isScrolling"
-          :overlay-class-name="'mention-detail-popup'"
-          :overlay-inner-class-name="'mention-detail-popup-wrap'"
-          @visible-change="(v: boolean) => v && fetchKbDetail(item)"
-        >
-          <div
-            class="mention-item"
-            :class="{ active: index === activeIndex }"
-            @click="$emit('select', item)"
-            @mouseenter="$emit('update:activeIndex', index)"
+            v-for="(item, index) in kbItems"
+            :key="item.id"
+            placement="right-start"
+            trigger="hover"
+            :show-arrow="false"
+            :delay="[320, 80]"
+            :disabled="isScrolling"
+            :overlay-class-name="'mention-detail-popup'"
+            :overlay-inner-class-name="'mention-detail-popup-wrap'"
+            @visible-change="(v: boolean) => v && fetchKbDetail(item)"
           >
-            <div class="icon-wrap">
-              <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
-                <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
+            <div
+              class="mention-item"
+              :class="{ active: index === activeIndex }"
+              @click="$emit('select', item)"
+              @mouseenter="$emit('update:activeIndex', index)"
+            >
+              <div class="icon-wrap">
+                <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
+                  <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'root-list'" />
+                </div>
+              </div>
+              <div class="item-main">
+                <span class="name">{{ item.name }}</span>
+                <span class="count">{{ item.count || 0 }}</span>
               </div>
             </div>
-            <div class="item-main">
-              <span class="name">{{ item.name }}</span>
-              <span class="count">{{ item.count || 0 }}</span>
-            </div>
-          </div>
-          <template #content>
-            <div class="mention-detail-content">
-              <template v-if="detailCache[item.id]?.loading">
-                <div class="detail-loading"><t-loading size="small" /></div>
-              </template>
-              <template v-else-if="detailCache[item.id]?.error">
-                <div class="detail-error">{{ detailCache[item.id].error }}</div>
-              </template>
-              <template v-else-if="detailCache[item.id]?.data">
-                <div class="detail-header">
-                  <span class="detail-name">{{ detailCache[item.id].data.name }}</span>
-                  <span class="detail-type-badge" :class="detailCache[item.id].data.type === 'faq' ? 'faq' : 'doc'">
-                    {{ detailCache[item.id].data.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument') }}
-                  </span>
-                </div>
-                <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
-                <div class="detail-meta">
-                  <span v-if="detailCache[item.id].data.type === 'faq'">
-                    {{ $t('mentionDetail.faqCount', { count: detailCache[item.id].data.chunk_count ?? detailCache[item.id].data.count ?? 0 }) }}
-                  </span>
-                  <span v-else>
-                    {{ $t('mentionDetail.kbCount', { count: detailCache[item.id].data.knowledge_count ?? detailCache[item.id].data.count ?? 0 }) }}
-                  </span>
-                  <span v-if="detailCache[item.id].data.org_name || item.orgName" class="detail-org">
-                    <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
-                    <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
-                    <span
-                      class="detail-value clickable"
-                      @click.stop="handleOrgClick(detailCache[item.id].data.org_name || item.orgName)"
-                    >
-                      {{ detailCache[item.id].data.org_name || item.orgName }}
+            <template #content>
+              <div class="mention-detail-content">
+                <template v-if="detailCache[item.id]?.loading">
+                  <div class="detail-loading"><t-loading size="small" /></div>
+                </template>
+                <template v-else-if="detailCache[item.id]?.error">
+                  <div class="detail-error">{{ detailCache[item.id].error }}</div>
+                </template>
+                <template v-else-if="detailCache[item.id]?.data">
+                  <div class="detail-header">
+                    <span class="detail-name">{{ detailCache[item.id].data.name }}</span>
+                    <span class="detail-type-badge" :class="detailCache[item.id].data.type === 'faq' ? 'faq' : 'doc'">
+                      {{ detailCache[item.id].data.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument') }}
                     </span>
-                  </span>
-                  <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
-                    {{ $t('mentionDetail.readOnlyFromAgent') }}
-                  </span>
-                </div>
-              </template>
-            </div>
-          </template>
-        </t-popup>
+                  </div>
+                  <p v-if="detailCache[item.id].data.description" class="detail-desc">{{ detailCache[item.id].data.description }}</p>
+                  <div class="detail-meta">
+                    <span v-if="detailCache[item.id].data.type === 'faq'">
+                      {{ $t('mentionDetail.faqCount', { count: detailCache[item.id].data.chunk_count ?? detailCache[item.id].data.count ?? 0 }) }}
+                    </span>
+                    <span v-else>
+                      {{ $t('mentionDetail.kbCount', { count: detailCache[item.id].data.knowledge_count ?? detailCache[item.id].data.count ?? 0 }) }}
+                    </span>
+                    <span v-if="detailCache[item.id].data.org_name || item.orgName" class="detail-org">
+                      <img src="@/assets/img/organization-green.svg" class="detail-icon-img" alt="" aria-hidden="true" />
+                      <span class="detail-label">{{ $t('mentionDetail.belongsToOrg') }}</span>
+                      <span
+                        class="detail-value clickable"
+                        @click.stop="handleOrgClick(detailCache[item.id].data.org_name || item.orgName)"
+                      >
+                        {{ detailCache[item.id].data.org_name || item.orgName }}
+                      </span>
+                    </span>
+                    <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
+                      {{ $t('mentionDetail.readOnlyFromAgent') }}
+                    </span>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </t-popup>
       </div>
 
       <template v-for="group in activeExtraGroups" :key="group.type">
@@ -407,43 +407,31 @@ const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; 
     { type: 'tag', label: '标签', icon: 'tag' },
     { type: 'mcp', label: 'MCP', icon: 'tools' },
     { type: 'skill', label: 'Skills', icon: 'bookmark' },
+    // 文件夹不占顶层分类入口：分组态（浏览）下隐藏，仅在搜索（平铺）态作为独立区块出现，
+    // 方便按名检索文件夹。层级浏览由输入框的专用文件夹按钮（FolderTreePicker）承担。
+    { type: 'folder', label: t('common.folder') || '文件夹', icon: 'folder-open' },
     { type: 'file', label: t('common.file'), icon: 'file' },
   ];
-  // 文件夹按所属知识库拆分成多个分组，形成「知识库 → 其下文件夹」的层级，
-  // 避免多个知识库的同名文件夹平铺在一起无法区分。
-  const folderItems = props.items.filter(item => item.type === 'folder');
-  const kbOrder: string[] = [];
-  const kbNameById = new Map<string, string>();
-  for (const f of folderItems) {
-    if (f.kbId && !kbNameById.has(f.kbId)) {
-      kbNameById.set(f.kbId, f.kbName || '');
-      kbOrder.push(f.kbId);
-    }
-  }
-  const folderDefs = kbOrder.map(kbId => ({
-    type: `folder:${kbId}` as MentionItemType,
-    label: kbNameById.get(kbId) || '文件夹',
-    icon: 'folder-open',
-  }));
-  // folder 分组插入在 skill 与 file 之间
-  return [base[0], base[1], base[2], base[3], ...folderDefs, base[4]];
+  return base;
 });
 
 const mentionGroups = computed(() => {
   let offset = 0;
   return mentionGroupDefs.value.map(def => {
     let items: MentionItem[];
-    if (def.type.startsWith('folder:')) {
-      const kbFolders = props.items.filter(item => item.type === 'folder' && item.kbId === def.type.slice('folder:'.length));
-      // 搜索态仍平铺；非搜索态按 parent_id 渲染成可展开树
-      items = isFlatMode.value
-        ? kbFolders
-        : buildFolderTreeNodes(kbFolders, folderExpandedIds.value);
+    let count: number;
+    if (def.type === 'folder') {
+      // 文件夹：仅在搜索（平铺）态作为独立区块出现
+      items = props.items.filter(i => i.type === 'folder');
+      count = props.groupCounts?.[def.type] ?? items.length;
+    } else if (def.type === 'kb') {
+      items = kbItems.value;
+      count = props.groupCounts?.[def.type] ?? kbItems.value.length;
     } else {
-      items = props.items.filter(item => item.type === def.type);
+      items = props.items.filter(i => i.type === def.type);
+      count = props.groupCounts?.[def.type] ?? items.length;
     }
     const loadedCount = items.length;
-    const count = props.groupCounts?.[def.type] ?? loadedCount;
     const group = { ...def, items, offset, count, loadedCount };
     offset += items.length;
     return group;
@@ -461,7 +449,8 @@ const formatGroupCount = (group: { type: MentionItemType; count: number; loadedC
 };
 
 const groupTabs = computed(() => mentionGroups.value.filter(group => group.count > 0));
-const groupRows = computed(() => groupTabs.value);
+// 顶层入口：分组态下隐藏「文件夹」（它嵌套在知识库内）；搜索态全部显示
+const groupRows = computed(() => groupTabs.value.filter(g => isFlatMode.value || g.type !== 'folder'));
 const isFlatMode = computed(() => (props.query ?? '').trim().length > 0);
 const currentGroup = computed(() => mentionGroups.value.find(group => group.type === currentGroupType.value));
 const extraGroups = computed(() => mentionGroups.value.filter(group =>
@@ -501,7 +490,7 @@ const leaveGroup = () => {
 };
 
 const updateActiveGroupFromIndex = (index: number) => {
-  const group = groupTabs.value.find(item => index >= item.offset && index < item.offset + item.count);
+  const group = groupTabs.value.find(item => index >= item.offset && index < item.offset + item.items.length);
   if (group) currentGroupType.value = group.type;
 };
 
@@ -528,7 +517,7 @@ const moveActive = (delta: number) => {
   const group = currentGroup.value;
   if (!group) return;
   const currentLocalIndex = props.activeIndex - group.offset;
-  const nextLocalIndex = Math.min(group.count - 1, Math.max(0, currentLocalIndex + delta));
+  const nextLocalIndex = Math.min(group.items.length - 1, Math.max(0, currentLocalIndex + delta));
   emit('update:activeIndex', group.offset + nextLocalIndex);
   scrollToItem(nextLocalIndex);
 };

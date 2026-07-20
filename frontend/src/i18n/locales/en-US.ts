@@ -728,6 +728,7 @@ export default {
     moveToFolderRoot: 'Root (uncategorized)',
     folderMoved: 'Moved to folder',
     folderMoveFailed: 'Failed to move',
+    folder: 'Folder',
     newSubfolder: 'New subfolder',
     newFolderUnder: 'New subfolder under "{name}"',
     newRootFolder: 'New root folder',
@@ -3210,6 +3211,7 @@ export default {
     sourcesCount: '{count} sources',
     pleaseEnterContent: 'Please enter content!',
     pleaseUploadKnowledgeBase: 'Please upload knowledge base first!',
+    noKnowledgeBase: 'No knowledge base available',
     replyingPleaseWait: 'Replying, please try again later!',
     createSessionFailed: 'Failed to create session',
     createSessionError: 'Session creation error',
@@ -6877,4 +6879,11 @@ export default {
       generic: 'Something went wrong. Please try again.',
     },
   },
-}
+  knowledge: {
+    folder: {
+      searchPlaceholder: 'Search folders',
+      empty: 'No folders',
+      pickerHint: 'Click a folder to include it in the question scope',
+    },
+  },
+};

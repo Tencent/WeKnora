@@ -955,6 +955,7 @@ export default {
     sourcesCount: "{count}개 출처",
     pleaseEnterContent: "내용을 입력하세요!",
     pleaseUploadKnowledgeBase: "먼저 지식베이스를 업로드하세요!",
+    noKnowledgeBase: "사용 가능한 지식베이스 없음",
     replyingPleaseWait: "답변 중입니다. 잠시만 기다려주세요!",
     createSessionFailed: "세션 생성 실패",
     createSessionError: "세션 생성 오류",
@@ -3913,6 +3914,7 @@ export default {
       loadMore: "더 불러오기 ({remaining}개 남음)",
       filterAll: "전체 유형",
       newFolder: "새 디렉터리",
+      folder: "폴더",
       newRootFolder: "새 디렉터리",
       newSubfolder: "새 하위 디렉터리",
       folderActions: "디렉터리 작업",
@@ -6820,6 +6822,13 @@ export default {
       forbidden: "초대 대상자만 수락 또는 거절할 수 있습니다.",
       notFound: "초대를 찾을 수 없거나 이미 취소되었습니다.",
       generic: "작업에 실패했습니다. 다시 시도해 주세요.",
+    },
+  },
+  knowledge: {
+    folder: {
+      searchPlaceholder: "폴더 검색",
+      empty: "폴더 없음",
+      pickerHint: "질문 범위에 추가하려면 폴더를 클릭하세요",
     },
   },
 };

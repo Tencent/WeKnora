@@ -732,6 +732,7 @@ export default {
     moveToFolderRoot: "根目录（未分类）",
     folderMoved: "已移动到文件夹",
     folderMoveFailed: "移动到文件夹失败",
+    folder: "文件夹",
     newSubfolder: "新建子文件夹",
     newFolderUnder: "在“{name}”下新建子文件夹",
     newRootFolder: "新建根文件夹",
@@ -983,6 +984,7 @@ export default {
     sourcesCount: "{count} 个来源",
     pleaseEnterContent: "请输入内容！",
     pleaseUploadKnowledgeBase: "请先上传知识库！",
+    noKnowledgeBase: "暂无可用知识库",
     replyingPleaseWait: "正在回复，请稍后再试！",
     createSessionFailed: "创建会话失败",
     createSessionError: "创建会话出错",
@@ -6896,6 +6898,13 @@ export default {
       forbidden: "只有被邀请人本人可以接受或拒绝该邀请。",
       notFound: "邀请不存在或已被撤销。",
       generic: "操作失败，请稍后重试。",
+    },
+  },
+  knowledge: {
+    folder: {
+      searchPlaceholder: "搜索文件夹",
+      empty: "暂无文件夹",
+      pickerHint: "点击文件夹即可加入提问范围",
     },
   },
 };
