@@ -46,6 +46,7 @@ type knowledgeService struct {
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
 	repo            interfaces.KnowledgeRepository
+	dataSourceRepo  interfaces.DataSourceRepository
 	kbService       interfaces.KnowledgeBaseService
 	tenantRepo      interfaces.TenantRepository
 	tenantService   interfaces.TenantService
@@ -88,6 +89,7 @@ const (
 func NewKnowledgeService(
 	config *config.Config,
 	repo interfaces.KnowledgeRepository,
+	dataSourceRepo interfaces.DataSourceRepository,
 	documentReader interfaces.DocumentReader,
 	kbService interfaces.KnowledgeBaseService,
 	tenantRepo interfaces.TenantRepository,
@@ -115,6 +117,7 @@ func NewKnowledgeService(
 	return &knowledgeService{
 		config:          config,
 		repo:            repo,
+		dataSourceRepo:  dataSourceRepo,
 		kbService:       kbService,
 		tenantRepo:      tenantRepo,
 		tenantService:   tenantService,
