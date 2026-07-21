@@ -81,6 +81,23 @@ check_var "DB_USER"
 check_var "DB_PASSWORD"
 check_var "DB_NAME"
 
+case "$DB_DRIVER" in
+    postgres|mysql)
+        log_success "数据库驱动受支持: $DB_DRIVER"
+        ;;
+    *)
+        log_error "DB_DRIVER 必须是 postgres 或 mysql"
+        errors=$((errors + 1))
+        ;;
+esac
+
+if [ "$DB_DRIVER" = "mysql" ]; then
+    if printf '%s' ",${RETRIEVE_DRIVER}," | grep -Eq ',[[:space:]]*(postgres|mysql)[[:space:]]*,'; then
+        log_error "MySQL 仅作为业务数据库；RETRIEVE_DRIVER 请使用 qdrant、milvus、weaviate、elasticsearch、opensearch、doris 或 tencent_vectordb"
+        errors=$((errors + 1))
+    fi
+fi
+
 echo ""
 log_info "存储配置:"
 check_var "STORAGE_TYPE"

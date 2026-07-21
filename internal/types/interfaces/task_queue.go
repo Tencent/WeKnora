@@ -19,7 +19,7 @@ import (
 //     serialization out-of-band (e.g. an external Redis lock). This is the
 //     original primitive and is still used by single-process (Lite) mode.
 //   - ClaimBatch DOES take row locks (SELECT ... FOR UPDATE SKIP LOCKED on
-//     Postgres) and marks rows with claimed_at, so multiple concurrent
+//     PostgreSQL/MySQL) and marks rows with claimed_at, so multiple concurrent
 //     consumers of the same tuple pull DISJOINT rows without an external
 //     lock. This is what lets the wiki pipeline drop its exclusive per-KB
 //     batch lock and spread one KB's backlog across the whole worker pool.
@@ -42,8 +42,8 @@ type TaskPendingOpsRepository interface {
 	// several queued ops is never split across two concurrent batches.
 	// A row is eligible when it is unclaimed (claimed_at IS NULL) or its
 	// claim is stale (claimed_at < staleBefore) — the latter recovers rows
-	// abandoned by a crashed worker. On Postgres the per-key anchor row is
-	// locked with FOR UPDATE SKIP LOCKED so concurrent claimers take
+	// abandoned by a crashed worker. On PostgreSQL/MySQL the per-key anchor
+	// row is locked with FOR UPDATE SKIP LOCKED so concurrent claimers take
 	// disjoint key sets without blocking or double-claiming.
 	//
 	// Claimed rows are NOT removed: the consumer must DeleteByIDs on

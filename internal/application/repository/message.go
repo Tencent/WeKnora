@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -161,6 +162,10 @@ func (r *messageRepository) SearchMessagesByKeyword(
 	}
 
 	var results []*types.MessageWithSession
+	contentLikeExpr := "LOWER(messages.content) LIKE ?"
+	if r.db.Dialector.Name() == "sqlite" {
+		contentLikeExpr += " ESCAPE '\\'"
+	}
 
 	query := r.db.WithContext(ctx).
 		Table("messages").
@@ -168,7 +173,7 @@ func (r *messageRepository) SearchMessagesByKeyword(
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
 		Where("sessions.tenant_id = ?", tenantID).
 		Where("messages.deleted_at IS NULL").
-		Where("messages.content ILIKE ?", "%"+escapeLikeKeyword(keyword)+"%")
+		Where(contentLikeExpr, "%"+escapeLikeKeyword(strings.ToLower(keyword))+"%")
 
 	if len(sessionIDs) > 0 {
 		query = query.Where("messages.session_id IN ?", sessionIDs)

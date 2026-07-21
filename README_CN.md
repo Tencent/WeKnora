@@ -243,6 +243,8 @@ WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心
 
 产品规划与计划：[路线图 (Roadmap)](./docs/ROADMAP.md)
 
+使用 MySQL 存储业务数据：[MySQL 业务数据库配置](./docs/MySQL.md)
+
 ## 🧭 开发指南
 
 ### ⚡ 快速开发模式（推荐）

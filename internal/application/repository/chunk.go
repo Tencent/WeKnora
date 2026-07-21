@@ -183,40 +183,46 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 				return db
 			}
 
-			// FAQ type: search based on searchField
-			// 根据数据库类型使用不同的 JSON 查询语法
-			isPostgres := db.Dialector.Name() == "postgres"
+			// FAQ type: search based on searchField. JSON functions and text
+			// casts differ across the three supported SQL dialects.
+			dialect := db.Dialector.Name()
 
 			switch searchField {
 			case "standard_question":
 				// Search only in standard_question field of metadata
-				if isPostgres {
+				if dialect == "postgres" {
 					db = db.Where("metadata->>'standard_question' ILIKE ?", like)
+				} else if dialect == "mysql" {
+					db = db.Where("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question')) LIKE ?", like)
 				} else {
-					// MySQL: metadata->>'$.standard_question' (MySQL 5.7.13+)
-					// 也可以用 JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))
-					db = db.Where("metadata->>'$.standard_question' LIKE ?", like)
+					db = db.Where("json_extract(metadata, '$.standard_question') LIKE ?", like)
 				}
 			case "similar_questions":
 				// Search in similar_questions array of metadata
-				if isPostgres {
+				if dialect == "postgres" {
 					db = db.Where("(metadata->'similar_questions')::text ILIKE ?", like)
-				} else {
+				} else if dialect == "mysql" {
 					db = db.Where("JSON_EXTRACT(metadata, '$.similar_questions') LIKE ?", like)
+				} else {
+					db = db.Where("json_extract(metadata, '$.similar_questions') LIKE ?", like)
 				}
 			case "answers":
 				// Search in answers array of metadata
-				if isPostgres {
+				if dialect == "postgres" {
 					db = db.Where("(metadata->'answers')::text ILIKE ?", like)
-				} else {
+				} else if dialect == "mysql" {
 					db = db.Where("JSON_EXTRACT(metadata, '$.answers') LIKE ?", like)
+				} else {
+					db = db.Where("json_extract(metadata, '$.answers') LIKE ?", like)
 				}
 			default:
 				// Search in all fields (content and metadata)
-				if isPostgres {
+				if dialect == "postgres" {
 					db = db.Where("(content ILIKE ? OR metadata::text ILIKE ?)", like, like)
-				} else {
+				} else if dialect == "mysql" {
 					db = db.Where("(content LIKE ? OR CAST(metadata AS CHAR) LIKE ?)", like, like)
+				} else {
+					db = db.Where("(content LIKE ? OR CAST(metadata AS TEXT) LIKE ?)", like, like)
 				}
 			}
 		}
@@ -342,13 +348,8 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		contentCases = append(contentCases, "WHEN id = ? THEN ?")
 		contentArgs = append(contentArgs, chunk.ID, content)
 
-		// Convert bool to string for PostgreSQL compatibility
-		isEnabledStr := "false"
-		if chunk.IsEnabled {
-			isEnabledStr = "true"
-		}
 		isEnabledCases = append(isEnabledCases, "WHEN id = ? THEN ?")
-		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		isEnabledArgs = append(isEnabledArgs, chunk.ID, chunk.IsEnabled)
 
 		tagIDCases = append(tagIDCases, "WHEN id = ? THEN ?")
 		tagIDArgs = append(tagIDArgs, chunk.ID, chunk.TagID)
@@ -377,10 +378,10 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	isPostgres := r.db.Dialector.Name() == "postgres"
+	dialect := r.db.Dialector.Name()
 
 	var sql string
-	if isPostgres {
+	if dialect == "postgres" {
 		sql = fmt.Sprintf(`
 			UPDATE chunks SET
 				content = CASE %s END,
@@ -399,6 +400,10 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(inPlaceholders, ","),
 		)
 	} else {
+		nowExpr := "datetime('now')"
+		if dialect == "mysql" {
+			nowExpr = "NOW(6)"
+		}
 		sql = fmt.Sprintf(`
 			UPDATE chunks SET
 				content = CASE %s END,
@@ -406,7 +411,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = CASE %s END,
 				status = CASE %s END,
-				updated_at = datetime('now')
+				updated_at = %s
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -414,6 +419,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 			strings.Join(tagIDCases, " "),
 			strings.Join(flagsCases, " "),
 			strings.Join(statusCases, " "),
+			nowExpr,
 			strings.Join(inPlaceholders, ","),
 		)
 	}
